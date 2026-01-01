@@ -12,4 +12,3 @@ Response
 
 ## User
 
-New question from user

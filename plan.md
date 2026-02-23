@@ -96,13 +96,17 @@ agent-doc audit-docs
 - [x] Rename `submit` → `run` CLI command + all docs
 - [x] Skill installed in agent-loop, agent-doc, and corky workspaces
 - [x] AGENTS.md + CLAUDE.md symlink convention for agent-loop
+- [x] v0.1.0 released — GitHub Releases (5 targets)
+- [x] v0.1.1 released — GitHub Releases (5 targets) + crates.io
+- [x] Makefile publish targets (publish-crate, publish-pypi, publish)
 
 ## What's Next
 
 ### Immediate
 
-1. Tag v0.1.0 and release (CI, crates.io, PyPI, GitHub Releases)
-2. More test coverage — frontmatter parsing, diff computation, snapshot round-trip
+1. ~~Tag v0.1.0 and release~~ — Done (v0.1.0 + v0.1.1 released to GitHub + crates.io)
+2. Configure PyPI API token and publish (`make publish-pypi`)
+3. More test coverage — frontmatter parsing, diff computation, snapshot round-trip
 
 ### agent-doc
 
@@ -378,3 +382,56 @@ Set up...go ahead and fetch.
 ## User
 
 Let's have the publishing as a step. Perhaps in the Makefile for agent-doc and corky.
+
+## Assistant
+
+Added publish targets to both Makefiles (agent-doc and corky):
+
+```
+make publish-crate    # cargo publish (crates.io)
+make publish-pypi     # maturin publish --skip-existing (PyPI)
+make publish          # both
+```
+
+`--skip-existing` on the PyPI target means it won't fail if the version is already published (safe to re-run).
+
+**To publish agent-doc v0.1.0 now:**
+```sh
+cd agent-doc
+make publish-crate    # needs cargo login first if not already done
+make publish-pypi     # needs maturin + PyPI token configured
+```
+
+## User
+
+Commit and push the changes to agent-doc and corky Makefiles.
+
+Let's also run a release for agent-doc.
+
+## Assistant
+
+Done. Here's what happened:
+
+**Makefiles committed and pushed:**
+- agent-doc: `c0195f9` → rebased to `bbca13c` (remote had new mdbook workflow commit)
+- corky: `25ccc78`
+
+**v0.1.1 released:**
+
+| Channel | Status |
+|---------|--------|
+| GitHub Release | [v0.1.1](https://github.com/btakita/agent-doc/releases/tag/v0.1.1) — 5 binary targets |
+| crates.io | Published — `cargo install agent-doc` |
+| PyPI | Needs API token — username/password auth no longer supported |
+
+**PyPI setup needed:** PyPI requires an API token now. To configure:
+1. Create token at https://pypi.org/manage/account/token/
+2. Set `MATURIN_PYPI_TOKEN` env var, or create `~/.pypirc` with the token
+3. Then `make publish-pypi` will work
+
+**What's in v0.1.1 vs v0.1.0:**
+- `make publish-crate`, `make publish-pypi`, `make publish` Makefile targets
+- GitHub Actions mdBook deployment workflow
+
+## User
+

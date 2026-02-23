@@ -318,3 +318,33 @@ Proceed with 1-4. Make sure we squash the commits when merging into main.
 ## User
 
 Make sure that you use AGENTS.override.md and CLAUDE.local.md for the personal preferences.
+
+## Assistant
+
+All done. Here's what happened:
+
+**#6 — Plan.md static sections fixed:** Updated all remaining "submit" → "run" in Decisions table, modules list, CLI block, Completed section. Updated What's Next.
+
+**#7 — Committed:** AGENTS.md rename (canonical, CLAUDE.md → symlink), `.gitignore` updated with `AGENTS.override.md`, CLAUDE.local.md created with dogfooding note, submodules updated, SKILL.md + SPECS.md installed.
+
+**#8 — Squash merged:** 32 commits from `agent-doc-session` squashed into 1 commit on main:
+```
+c68e6e0 agent-doc session: audit-docs, submit→run rename, AGENTS.md convention
+```
+
+**#9 — CI verified:** All 4 workflows correct:
+- `ci.yml` — tests + clippy on push/PR
+- `release.yml` — 5-target binary builds on `v*` tag
+- `pypi.yml` — maturin wheels + sdist on release publish
+- `book.yml` — mdbook to GitHub Pages on main push
+
+**Pushed** main to origin.
+
+**Ready to release.** Next steps:
+1. `cd agent-doc && git tag v0.1.0 && git push --tags` — triggers release + pypi workflows
+2. Verify CI passes on GitHub
+3. `cargo publish` (if not automated) for crates.io
+
+## User
+
+Release it!

@@ -1,0 +1,13 @@
+.env
+.idea/
+*.iml
+.agent-doc/
+CLAUDE.local.md
+AGENTS.local.md
+plan.md
+research.md
+tmp/
+
+# Rust
+target/
+.bin/

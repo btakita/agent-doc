@@ -348,3 +348,33 @@ c68e6e0 agent-doc session: audit-docs, submit→run rename, AGENTS.md convention
 ## User
 
 Release it!
+
+## Assistant
+
+**v0.1.0 released!**
+
+Tagged `v0.1.0` and pushed. Release workflow completed — all 5 targets built successfully:
+
+| Target | Status |
+|--------|--------|
+| x86_64-unknown-linux-gnu | built (55s) |
+| aarch64-unknown-linux-gnu | built (1m45s) |
+| aarch64-apple-darwin | built (1m4s) |
+| x86_64-apple-darwin | built (46s) |
+| x86_64-pc-windows-msvc | built (2m15s) |
+
+GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.1.0
+
+**PyPI workflow didn't trigger** — GitHub blocks workflow-on-workflow triggers when the release is created by `github-actions[bot]` (anti-recursion protection). Two options:
+1. Manual: run the PyPI workflow from the Actions tab
+2. Fix: use a PAT in the release workflow's `GITHUB_TOKEN` so the `release: published` event triggers downstream workflows
+
+**crates.io** also needs manual `cargo publish` (no automation for that in CI).
+
+**Book/docs** failed because GitHub Pages isn't enabled yet — go to Settings > Pages > Source: GitHub Actions.
+
+Set up...go ahead and fetch.
+
+## User
+
+Let's have the publishing as a step. Perhaps in the Makefile for agent-doc and corky.

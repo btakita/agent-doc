@@ -1,0 +1,9 @@
+[book]
+title = "agent-doc"
+description = "Interactive document sessions with AI agents."
+authors = ["Brian Takita"]
+language = "en"
+src = "docs"
+
+[output.html]
+git-repository-url = "https://github.com/btakita/agent-doc"

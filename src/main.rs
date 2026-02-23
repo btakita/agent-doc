@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "agent-doc", about = "Interactive document sessions with AI agents")]
+#[command(name = "agent-doc", version, about = "Interactive document sessions with AI agents")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

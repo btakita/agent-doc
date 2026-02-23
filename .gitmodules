@@ -1,3 +1,6 @@
 [submodule "corky"]
 	path = corky
 	url = git@github.com:btakita/corky.git
+[submodule "agent-doc"]
+	path = agent-doc
+	url = git@github.com:btakita/agent-doc.git

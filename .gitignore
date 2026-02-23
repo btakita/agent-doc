@@ -4,6 +4,7 @@
 .claude-doc/
 CLAUDE.local.md
 AGENTS.local.md
+AGENTS.override.md
 plan.md
 research.md
 mail

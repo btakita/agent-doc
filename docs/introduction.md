@@ -11,7 +11,7 @@ Terminal prompts are ephemeral. You type, the agent responds, the context scroll
 ## How it works
 
 1. **You edit** a markdown document with `## User` / `## Assistant` blocks
-2. **You submit** via hotkey or CLI — agent-doc computes a diff since the last submit
+2. **You run** via hotkey or CLI — agent-doc computes a diff since the last run
 3. **The agent responds** — the response is appended as a new `## Assistant` block
 4. **Your editor reloads** — the document now contains the full conversation
 

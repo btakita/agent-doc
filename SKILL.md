@@ -1,4 +1,10 @@
-# agent-doc submit
+---
+description: Submit a session document to an AI agent and append the response
+user-invocable: true
+argument-hint: "<file>"
+---
+
+# agent-doc run
 
 Interactive document session — respond to user edits in a markdown document.
 
@@ -23,12 +29,12 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 - Read `<FILE>` to get current content
 - Read the snapshot at `.agent-doc/snapshots/<hash>.md` where `<hash>` is SHA256 of the canonical file path
-  - If no snapshot exists, treat this as the first submit (entire document is new)
+  - If no snapshot exists, treat this as the first run (entire document is new)
 
 ### 2. Compute the diff
 
 - Compare snapshot (previous state) against current content
-- The diff represents what the user changed since the last submit
+- The diff represents what the user changed since the last run
 - If no diff (content unchanged), tell the user nothing changed and stop
 
 ### 3. Respond
@@ -82,11 +88,11 @@ The body alternates `## User` and `## Assistant` blocks. Inline annotations (blo
 
 - Location: `.agent-doc/snapshots/` relative to CWD
 - Filename: `sha256(canonical_path) + ".md"`
-- Contains the full document content after the last submit
+- Contains the full document content after the last run
 
 ## Success Criteria
 
 - User sees streaming response in the Claude console
 - Document is updated with the response (user can see it in their editor)
 - User edits made during response are preserved (not overwritten)
-- Snapshot is updated for the next submit's diff computation
+- Snapshot is updated for the next run's diff computation

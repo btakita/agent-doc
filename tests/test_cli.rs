@@ -113,9 +113,9 @@ fn test_cli_audit_docs_reports_missing_tree_path() {
 }
 
 #[test]
-fn test_cli_submit_requires_file() {
+fn test_cli_run_requires_file() {
     let mut cmd = agent_doc_cmd();
-    cmd.arg("submit");
+    cmd.arg("run");
     cmd.assert().failure();
 }
 

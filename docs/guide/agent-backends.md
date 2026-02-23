@@ -11,8 +11,8 @@ claude -p --output-format json --permission-mode acceptEdits
 ```
 
 Session handling:
-- First submit: `--continue --fork-session` (inherits context from the most recent session)
-- Subsequent submits: `--resume <session_id>` (continues the specific session)
+- First run: `--continue --fork-session` (inherits context from the most recent session)
+- Subsequent runs: `--resume <session_id>` (continues the specific session)
 
 The backend removes the `CLAUDECODE` environment variable to prevent nested session conflicts.
 
@@ -55,5 +55,5 @@ model: gpt-4
 Or override per-invocation:
 
 ```sh
-agent-doc submit session.md --agent codex --model gpt-4
+agent-doc run session.md --agent codex --model gpt-4
 ```

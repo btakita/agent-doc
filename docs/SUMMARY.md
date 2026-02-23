@@ -12,7 +12,7 @@
 
 - [Commands](guide/commands.md)
 - [Document Format](guide/document-format.md)
-- [Submit Flow](guide/submit-flow.md)
+- [Run Flow](guide/submit-flow.md)
 - [Editor Integration](guide/editor-integration.md)
 - [Agent Backends](guide/agent-backends.md)
 

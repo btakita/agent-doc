@@ -33,7 +33,7 @@ Follow-up. You can also annotate inline:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `session` | no | (generated on first submit) | Session ID for continuity |
+| `session` | no | (generated on first run) | Session ID for continuity |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |
 | `branch` | no | (none) | Git branch for session commits |
@@ -48,17 +48,17 @@ Delimited by `---\n` at the start of the file and a closing `\n---\n`. If frontm
 
 ### Append mode
 
-Structured `## User` / `## Assistant` blocks. Each submit appends a new assistant response.
+Structured `## User` / `## Assistant` blocks. Each run appends a new assistant response.
 
 ### Inline mode
 
 Annotations anywhere — blockquotes, edits to previous responses, comments in the body. The diff captures what changed; the agent addresses inline edits alongside new `## User` content.
 
-Both modes work simultaneously because the submit sends a diff, not a parsed structure.
+Both modes work simultaneously because the run sends a diff, not a parsed structure.
 
 ## History rewriting
 
-Delete anything from the document. On next submit, the diff shows deletions and the agent sees the cleaned-up document as ground truth. This lets you:
+Delete anything from the document. On next run, the diff shows deletions and the agent sees the cleaned-up document as ground truth. This lets you:
 
 - Remove irrelevant exchanges
 - Consolidate scattered notes

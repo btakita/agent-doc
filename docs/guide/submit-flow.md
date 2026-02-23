@@ -1,4 +1,4 @@
-# Submit Flow
+# Run Flow
 
 ## Overview
 
@@ -13,8 +13,8 @@
 
 ## Step by step
 
-1. **Read document** and load snapshot (last-known state from previous submit)
-2. **Compute diff** — if empty, exit early (double-submit guard)
+1. **Read document** and load snapshot (last-known state from previous run)
+2. **Compute diff** — if empty, exit early (double-run guard)
 3. **Pre-commit** user's changes via `git add -f` + `git commit` (baseline for diff gutters)
 4. **Send** diff + full document to agent, resuming session if one exists
 5. **Build response** — original content + session ID update + `## Assistant` block + `## User` block
@@ -27,7 +27,7 @@
 
 - **Empty `session:`** — forks from the most recent agent session (inherits context)
 - **`session: <uuid>`** — resumes that specific session
-- **Delete `session:` value** — next submit starts fresh
+- **Delete `session:` value** — next run starts fresh
 
 ## Merge-safe writes
 
@@ -42,10 +42,10 @@ The merge uses `git merge-file -p --diff3`, which handles edge cases (whitespace
 
 | Flag | Behavior |
 |------|----------|
-| `-b` | Auto-create branch `agent-doc/<filename>` on first submit |
+| `-b` | Auto-create branch `agent-doc/<filename>` on first run |
 | (none) | Pre-commit user changes to current branch |
 | `--no-git` | Skip git entirely |
 
-The two-phase git flow (pre-commit user, no post-commit agent) means your editor shows green diff gutters for everything the agent added. On the next submit, those changes get committed as part of the pre-commit step.
+The two-phase git flow (pre-commit user, no post-commit agent) means your editor shows green diff gutters for everything the agent added. On the next run, those changes get committed as part of the pre-commit step.
 
 Cleanup: `agent-doc clean <file>` squashes all session commits into one.

@@ -2,17 +2,17 @@
 
 All commands are available through the `agent-doc` CLI.
 
-## submit
+## run
 
 ```
-agent-doc submit <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]
+agent-doc run <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]
 ```
 
 Diff, send to agent, append response. The core command.
 
 | Flag | Description |
 |------|-------------|
-| `-b` | Auto-create branch `agent-doc/<filename>` on first submit |
+| `-b` | Auto-create branch `agent-doc/<filename>` on first run |
 | `--agent NAME` | Override agent backend |
 | `--model MODEL` | Override model |
 | `--dry-run` | Preview diff and prompt size without sending |
@@ -41,7 +41,7 @@ Scaffold a new session document with YAML frontmatter and a `## User` block. Fai
 agent-doc diff <FILE>
 ```
 
-Preview the unified diff that would be sent on the next submit. Useful for checking what changed before committing to a submit.
+Preview the unified diff that would be sent on the next run. Useful for checking what changed before running.
 
 ## reset
 
@@ -49,7 +49,7 @@ Preview the unified diff that would be sent on the next submit. Useful for check
 agent-doc reset <FILE>
 ```
 
-Clear the session ID from frontmatter and delete the snapshot. The next submit starts a fresh session.
+Clear the session ID from frontmatter and delete the snapshot. The next run starts a fresh session.
 
 ## clean
 

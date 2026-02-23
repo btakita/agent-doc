@@ -22,8 +22,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Diff, send to agent, append response
-    Submit {
+    /// Run a session: diff, send to agent, append response
+    Run {
         /// Path to the session document
         file: PathBuf,
         /// Auto-create a branch for session commits
@@ -76,7 +76,7 @@ fn main() -> anyhow::Result<()> {
     let config = config::load()?;
 
     match cli.command {
-        Commands::Submit {
+        Commands::Run {
             file,
             branch,
             agent,

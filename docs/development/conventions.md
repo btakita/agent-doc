@@ -9,7 +9,7 @@
 - Use `serde_json` for agent response parsing
 - Use `std::process::Command` for git operations (not `git2`)
 - Use `toml + serde` for config file parsing
-- No async — sequential per-submit
+- No async — sequential per-run
 - Use `anyhow` for application errors
 
 ## Instruction files

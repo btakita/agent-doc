@@ -11,7 +11,7 @@ Interactive document sessions with AI agents.
 - Use `serde_json` for agent response parsing
 - Use `std::process::Command` for git operations (not `git2`)
 - Use `toml + serde` for config file parsing
-- No async — sequential per-submit
+- No async — sequential per-run
 - Use `anyhow` for application errors
 
 ## Module Layout
@@ -19,7 +19,7 @@ Interactive document sessions with AI agents.
 ```
 src/
   main.rs           # CLI entry point (clap derive)
-  submit.rs         # Core loop: diff, send, append, snapshot, git
+  submit.rs         # Core loop: diff, send, merge-safe write, snapshot, git
   init.rs           # Scaffold session document
   reset.rs          # Clear session + snapshot
   diff.rs           # Preview diff (dry run)
@@ -31,6 +31,7 @@ src/
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend
+  audit_docs.rs     # Audit instruction files (CLAUDE.md, AGENTS.md, SKILL.md)
 ```
 
 ## Agent Backend Contract

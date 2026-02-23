@@ -6,7 +6,7 @@
 ## 1. Overview
 
 agent-doc manages interactive document sessions between a human and an AI agent.
-The human edits a markdown document, submits diffs to the agent, and the agent's
+The human edits a markdown document, sends diffs to the agent, and the agent's
 response is appended. Session state is tracked via YAML frontmatter, snapshots,
 and git commits.
 
@@ -15,7 +15,7 @@ and git commits.
 ### 2.1 Session Document
 
 Frontmatter fields:
-- `session`: Agent session ID (set after first submit, used for `--resume`)
+- `session`: Agent session ID (set after first run, used for `--resume`)
 - `agent`: Agent backend name (overrides config default)
 - `model`: Model override (passed to agent backend)
 - `branch`: Reserved for branch tracking
@@ -34,8 +34,8 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
 
 ### 3.2 Lifecycle
 
-- **Save**: After successful submit, full content saved as snapshot
-- **Load**: On next submit, loaded as "previous" state for diff
+- **Save**: After successful run, full content saved as snapshot
+- **Load**: On next run, loaded as "previous" state for diff
 - **Delete**: On `reset`, snapshot removed
 - **Missing**: Diff treats previous as empty (entire doc is the diff)
 
@@ -72,13 +72,13 @@ Fields: `default_agent`, `[agents.{name}]` with `command`, `args`, `result_path`
 
 ## 7. Commands
 
-### 7.1 submit
+### 7.1 run
 
-`agent-doc submit <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
+`agent-doc run <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
 
 1. Compute diff → 2. Build prompt (diff + full doc) → 3. Branch if `-b` → 4. Send to agent → 5. Update session ID → 6. Append response → 7. Save snapshot → 8. `git add -f` + commit
 
-First submit prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
+First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
 
 ### 7.2 init
 

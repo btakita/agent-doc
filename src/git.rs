@@ -8,7 +8,7 @@ pub fn commit(file: &Path) -> Result<()> {
     let msg = format!("agent-doc: {}", timestamp);
 
     let status = Command::new("git")
-        .args(["add", &file.to_string_lossy()])
+        .args(["add", "-f", &file.to_string_lossy()])
         .status()?;
     if !status.success() {
         anyhow::bail!("git add failed");

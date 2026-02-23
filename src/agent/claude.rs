@@ -17,6 +17,8 @@ impl Claude {
                     "-p".to_string(),
                     "--output-format".to_string(),
                     "json".to_string(),
+                    "--permission-mode".to_string(),
+                    "acceptEdits".to_string(),
                 ]
             }),
         }
@@ -57,6 +59,7 @@ impl Agent for Claude {
 
         let output = Command::new(&self.command)
             .args(&args)
+            .env_remove("CLAUDECODE")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

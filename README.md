@@ -76,7 +76,7 @@ Both work simultaneously because the submit sends a diff, not a parsed structure
 ## Submit Flow
 
 ```
-┌──────────┐  hotkey  ┌────────────┐  diff + prompt  ┌───────┐
+┌──────────┐  hotkey ┌────────────┐  diff + prompt  ┌───────┐
 │  Editor  │ ──────> │ agent-doc  │ ──────────────> │ Agent │
 │          │         │            │ <────────────── │  API  │
 │  reload  │ <────── │ write+snap │                 └───────┘

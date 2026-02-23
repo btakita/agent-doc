@@ -1,4 +1,4 @@
-.PHONY: build release test clippy check precommit install install-hooks clean init-python wheel
+.PHONY: build release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi
 
 # Build debug binary
 build:
@@ -57,3 +57,14 @@ init-python:
 # Build wheel and install into venv for testing
 wheel:
 	.venv/bin/maturin develop --release
+
+# Publish to crates.io
+publish-crate:
+	cargo publish
+
+# Publish to PyPI
+publish-pypi:
+	.venv/bin/maturin publish --skip-existing
+
+# Publish to both crates.io and PyPI
+publish: publish-crate publish-pypi

@@ -1,0 +1,8 @@
+.env
+.idea/
+.claude-doc/
+CLAUDE.local.md
+AGENTS.local.md
+plan.md
+research.md
+tmp/

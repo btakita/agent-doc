@@ -2,6 +2,8 @@ pub mod claude;
 
 use anyhow::Result;
 
+use crate::config::AgentConfig;
+
 /// Response from an agent backend.
 pub struct AgentResponse {
     pub text: String,
@@ -20,9 +22,19 @@ pub trait Agent {
 }
 
 /// Resolve an agent backend by name.
-pub fn resolve(name: &str) -> Result<Box<dyn Agent>> {
+pub fn resolve(name: &str, config: Option<&AgentConfig>) -> Result<Box<dyn Agent>> {
+    let (cmd, args) = match config {
+        Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),
+        None => (None, None),
+    };
     match name {
-        "claude" => Ok(Box::new(claude::Claude)),
-        other => anyhow::bail!("Unknown agent backend: {}", other),
+        "claude" => Ok(Box::new(claude::Claude::new(cmd, args))),
+        other => {
+            if config.is_some() {
+                Ok(Box::new(claude::Claude::new(cmd, args)))
+            } else {
+                anyhow::bail!("Unknown agent backend: {}", other)
+            }
+        }
     }
 }

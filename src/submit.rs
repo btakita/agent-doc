@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::{agent, diff, frontmatter, git, snapshot};
+use crate::{agent, config::Config, diff, frontmatter, git, snapshot};
 
 pub fn run(
     file: &Path,
@@ -10,6 +10,7 @@ pub fn run(
     model: Option<&str>,
     dry_run: bool,
     no_git: bool,
+    config: &Config,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -30,8 +31,10 @@ pub fn run(
     // Resolve agent
     let agent_name = agent_name
         .or(fm.agent.as_deref())
+        .or(config.default_agent.as_deref())
         .unwrap_or("claude");
-    let backend = agent::resolve(agent_name)?;
+    let agent_config = config.agents.get(agent_name);
+    let backend = agent::resolve(agent_name, agent_config)?;
 
     // Build prompt
     let prompt = if fm.session.is_some() {

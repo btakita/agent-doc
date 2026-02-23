@@ -3,7 +3,25 @@ use std::process::Command;
 
 use super::{Agent, AgentResponse};
 
-pub struct Claude;
+pub struct Claude {
+    command: String,
+    base_args: Vec<String>,
+}
+
+impl Claude {
+    pub fn new(command: Option<String>, base_args: Option<Vec<String>>) -> Self {
+        Self {
+            command: command.unwrap_or_else(|| "claude".to_string()),
+            base_args: base_args.unwrap_or_else(|| {
+                vec![
+                    "-p".to_string(),
+                    "--output-format".to_string(),
+                    "json".to_string(),
+                ]
+            }),
+        }
+    }
+}
 
 impl Agent for Claude {
     fn send(
@@ -13,11 +31,7 @@ impl Agent for Claude {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse> {
-        let mut args = vec![
-            "-p".to_string(),
-            "--output-format".to_string(),
-            "json".to_string(),
-        ];
+        let mut args = self.base_args.clone();
 
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
@@ -41,7 +55,7 @@ impl Agent for Claude {
                 .to_string(),
         );
 
-        let output = Command::new("claude")
+        let output = Command::new(&self.command)
             .args(&args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

@@ -1,4 +1,5 @@
 mod agent;
+mod audit_docs;
 mod clean;
 mod config;
 mod diff;
@@ -66,10 +67,13 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Audit instruction files against the codebase
+    AuditDocs,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let config = config::load()?;
 
     match cli.command {
         Commands::Submit {
@@ -79,12 +83,13 @@ fn main() -> anyhow::Result<()> {
             model,
             dry_run,
             no_git,
-        } => submit::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git),
+        } => submit::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
         Commands::Init { file, title, agent } => {
-            init::run(&file, title.as_deref(), agent.as_deref())
+            init::run(&file, title.as_deref(), agent.as_deref(), &config)
         }
         Commands::Diff { file } => diff::run(&file),
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
+        Commands::AuditDocs => audit_docs::run(),
     }
 }

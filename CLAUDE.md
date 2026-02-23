@@ -16,6 +16,8 @@ Interactive document sessions with AI agents.
 
 ## Module Layout
 
+Use this layout when adding modules. Add new subcommands in their own file, wired through `main.rs`.
+
 ```
 src/
   main.rs           # CLI entry point (clap derive)

@@ -1,0 +1,3 @@
+[submodule "corky"]
+	path = corky
+	url = git@github.com:btakita/corky.git

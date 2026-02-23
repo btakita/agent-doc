@@ -1,8 +1,10 @@
 .env
 .idea/
+*.iml
 .claude-doc/
 CLAUDE.local.md
 AGENTS.local.md
 plan.md
 research.md
+mail
 tmp/

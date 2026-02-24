@@ -558,3 +558,28 @@ Build passes (`./gradlew buildPlugin` — BUILD SUCCESSFUL). Two ways to submit:
 Let's build & sign the plugin. I will test by installing the plugin.
 
 I will also submit this to JetBrains
+
+## Assistant
+
+### Built & Signed the Plugin
+
+**Signed artifact:** `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (9.3KB)
+
+**What was done:**
+1. Generated RSA 4096-bit key + self-signed X509 certificate (10-year validity, CN=Agent Doc Plugin Signing)
+   - Stored in `agent-doc-jetbrains/certificate/` (gitignored)
+   - Password saved to `agent-doc-jetbrains/.env` (gitignored)
+2. Ran `./gradlew signPlugin` — BUILD SUCCESSFUL
+3. Output: unsigned `.zip` (7.1KB) + signed `-signed.zip` (9.3KB)
+
+**To install for testing:**
+- IntelliJ/JetBrains IDE > Settings > Plugins > gear icon > Install Plugin from Disk > select `agent-doc-jetbrains-0.1.0-signed.zip`
+
+**To publish to JetBrains Marketplace:**
+1. First upload must be manual at plugins.jetbrains.com/plugin/add — upload the signed ZIP
+2. Get a Marketplace token from your JetBrains account profile
+3. Subsequent versions: `PUBLISH_TOKEN=<token> ./gradlew publishPlugin`
+
+## User
+
+I don't see the intention on this md file. Do I need to restart idea for the plugin to take effect or is there an issue?

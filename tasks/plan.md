@@ -186,3 +186,193 @@ For a one-key solution, a custom IntelliJ plugin (~50 lines of Kotlin) using `Te
 1. Does the crate need to be published to crates.io? If yes, let's find a name that is available.
 2. Create a submodule with the JetBrains plugin to use in this project. Kotlin is a good choice. I have a previous plugin for Python intentions. Source code is at ~/work/btakita/python-intentions. Claude Code was used to generate it.
 3. Let's figure out a way to support the hotkey for VSCode users. We can use the same approach as for JetBrains, but with a different terminal integration method.
+
+## Assistant
+
+### 1. Crate Publishing — Not Yet
+
+All 6 candidate names are available on crates.io. Recommended name: **`instruction-files`** — tool-agnostic, describes what it does.
+
+**Start unpublished** as a workspace member with `publish = false`:
+```toml
+# instruction-files/Cargo.toml
+[package]
+name = "instruction-files"
+version = "0.1.0"
+publish = false
+
+# agent-doc/Cargo.toml
+[dependencies]
+instruction-files = { path = "../instruction-files" }
+
+# corky/Cargo.toml
+[dependencies]
+instruction-files = { path = "../instruction-files" }
+```
+
+Publish later if external consumers want the audit/merge logic. The name is held by first-publish, so no rush.
+
+### 2. JetBrains Plugin — `agent-doc-intellij`
+
+Studied your `python-intentions` plugin at `~/work/btakita/python-intentions`. It uses IntelliJ Platform Gradle Plugin v2.11.0, Kotlin 1.9.25, JVM 17. Good template.
+
+Key difference: python-intentions uses **IntentionActions** (Alt+Enter on code). We need an **AnAction** (hotkey-triggered command that sends text to terminal).
+
+**Proposed structure:**
+```
+agent-doc-intellij/
+  build.gradle.kts
+  settings.gradle.kts
+  gradle.properties
+  src/main/
+    kotlin/com/github/btakita/agentdoc/
+      SubmitAction.kt          # The hotkey action
+    resources/META-INF/
+      plugin.xml
+```
+
+**Core action** (`SubmitAction.kt`):
+```kotlin
+class SubmitAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
+        val basePath = project.basePath ?: return
+        val relativePath = file.path.removePrefix("$basePath/")
+
+        // Find active terminal and send command
+        val terminalView = TerminalToolWindowManager
+            .getInstance(project)
+            .toolWindow
+            ?.contentManager
+            ?.selectedContent
+            ?.component as? JBTerminalWidget
+
+        terminalView?.terminalStarter
+            ?.sendString("/agent-doc $relativePath\n", false)
+    }
+
+    override fun update(e: AnActionEvent) {
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        e.presentation.isEnabledAndVisible = file?.extension == "md"
+    }
+}
+```
+
+**`plugin.xml`:**
+```xml
+<idea-plugin>
+    <id>com.github.btakita.agent-doc</id>
+    <name>Agent Doc</name>
+    <vendor url="https://github.com/btakita">btakita</vendor>
+    <description>Submit markdown documents to AI agents via agent-doc</description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <actions>
+        <action id="AgentDoc.Submit"
+                class="com.github.btakita.agentdoc.SubmitAction"
+                text="Submit to Agent Doc"
+                description="Send /agent-doc command to the active terminal">
+            <keyboard-shortcut first-keystroke="ctrl shift alt A" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
+```
+
+**`gradle.properties`:**
+```properties
+pluginGroup = com.github.btakita.agentdoc
+pluginName = agent-doc-intellij
+pluginVersion = 0.1.0
+platformType = IC
+platformVersion = 2024.1
+```
+
+**`build.gradle.kts`** — same pattern as python-intentions but targeting IntelliJ Community (IC) instead of PyCharm (PC), with `org.jetbrains.plugins.terminal` dependency instead of `PythonCore`.
+
+### 3. VSCode Extension — `agent-doc-vscode`
+
+Same approach: a proper extension (not just keybindings.json) so it can be distributed via the marketplace.
+
+**Proposed structure:**
+```
+agent-doc-vscode/
+  package.json
+  src/
+    extension.ts
+  tsconfig.json
+  .vscodeignore
+```
+
+**`package.json`:**
+```json
+{
+  "name": "agent-doc",
+  "displayName": "Agent Doc",
+  "description": "Submit markdown documents to AI agents via agent-doc",
+  "version": "0.1.0",
+  "publisher": "btakita",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "agentDoc.submit",
+      "title": "Agent Doc: Submit"
+    }],
+    "keybindings": [{
+      "command": "agentDoc.submit",
+      "key": "ctrl+shift+alt+a",
+      "when": "editorTextFocus && editorLangId == markdown"
+    }]
+  }
+}
+```
+
+**`src/extension.ts`:**
+```typescript
+import * as vscode from 'vscode';
+import * as path from 'path';
+
+export function activate(context: vscode.ExtensionContext) {
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.submit', () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) return;
+
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+            if (!workspaceFolder) return;
+
+            const relativePath = path.relative(
+                workspaceFolder.uri.fsPath,
+                editor.document.uri.fsPath
+            );
+
+            const terminal = vscode.window.activeTerminal
+                ?? vscode.window.createTerminal('agent-doc');
+            terminal.show();
+            terminal.sendText(`/agent-doc ${relativePath}`);
+        })
+    );
+}
+```
+
+### Summary — Three New Submodules
+
+| Submodule | Language | Purpose |
+|---|---|---|
+| `instruction-files/` | Rust | Shared crate for AGENTS.md/CLAUDE.md discovery, audit, 3-way merge |
+| `agent-doc-intellij/` | Kotlin | JetBrains plugin — hotkey sends `/agent-doc` to terminal |
+| `agent-doc-vscode/` | TypeScript | VSCode extension — hotkey sends `/agent-doc` to terminal |
+
+All three can be submodules of agent-loop. The IDE plugins are small (~50-100 lines of core logic each) and follow the same pattern: get relative file path, find terminal, send command.
+
+Ready to scaffold any or all of these.
+
+## User
+
+How can a crate be shared across multiple projects if it's not published to crates.io?

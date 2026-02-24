@@ -826,3 +826,32 @@ Want me to apply all fixes?
 ## User
 
 Yes
+
+## Assistant
+
+Applied all 13 fixes to `resume/BrianTakita.md`:
+
+**Grammatical (6):**
+- "syncs" → "propagates" (duplicate word)
+- "values & to manage" → "values & manage" (parallelism)
+- "best-practices" → "best practices" (hyphenation)
+- "Lead front end" → "Led front-end" (tense)
+- "real time" → "real-time" (compound adjective)
+- "new products, integration" → "integrations" (parallelism)
+
+**Prose (4):**
+- "Lead development and partnered in" → "Led development and partnered on"
+- "Heavy lifter" → "Key contributor"
+- "Manage...Uses" → "Manages...Uses" (consistent person)
+- "rearchitecturing" → "Re-architected the front end"
+
+**Style (3):**
+- "Rails App" → "Rails app"
+- "Financial Holdings company" → "financial holdings company"
+- "Develop corporate intranet" → "Developed" (past tense)
+
+PDF regenerated. Ready to commit and push to the resume repo.
+
+## User
+
+cleanup resume.md. commit. push.

@@ -85,3 +85,26 @@ PRs: agent-doc #2, corky #7 (both squash-merged to main, tagged, published).
 ## User
 
 What is the developer experience to upgrade the binary curl | sh...they would have to run the command again? What is typical for this sort of install? Is there an upgrade command that is often run?
+
+## Assistant
+
+Right now `corky upgrade` only tries `cargo install` and `pip install --upgrade` — it doesn't cover users who installed via `curl | sh` (GitHub Releases binary). Those users would have to re-run the curl script manually.
+
+**What's typical:**
+
+- **Self-update** (rustup, Homebrew, claude-code): `tool update` detects install method, downloads new binary in-place. Best UX.
+- **Idempotent re-run** (starship, nvm): `curl | sh` again overwrites the old binary. Simple but the user has to remember the URL.
+- **No self-update** (bat, ripgrep, fd): rely on package managers or manual download.
+
+The gap: `corky upgrade` should detect that the running binary lives at `~/.local/bin/corky` (or `/usr/local/bin/corky`) and download the new release from GitHub Releases directly — same logic as `install.sh`. Fallback chain becomes:
+
+1. **GitHub Releases** — if binary is at a known install path, download + replace (like `install.sh`)
+2. **`cargo install`** — if cargo is available
+3. **`pip install --upgrade`** — if pip is available
+4. **Manual instructions** — print the curl command
+
+This would make `corky upgrade` the single upgrade command regardless of install method. Want me to implement this?
+
+## User
+
+Yes. This will be for corky & agent-doc.

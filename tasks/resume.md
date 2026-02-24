@@ -380,3 +380,21 @@ The file is at `/home/brian/Documents/resume/BrianTakita.md` — edit it directl
 ## User
 
 Let's move BrianTakita.md into a resume repo. This repo will be a submodule of agent-loop.
+
+## Assistant
+
+Good idea — keeps the resume versioned and independent. Before I set this up, a few questions:
+
+1. **Repo visibility**: Public (recruiters can browse directly from GitHub) or private?
+2. **Repo name**: `btakita/resume`? Or something else?
+3. **Submodule path**: `resume/` in agent-loop?
+4. **Session doc**: Keep `tasks/resume.md` here in agent-loop (it's the agent-doc session, not the resume itself), or move it into the new repo?
+
+Once you confirm, I'll create the GitHub repo, initialize it, move `BrianTakita.md` in, and add it as a submodule.
+
+## User
+
+1. Public
+2. btakita/resume
+3. resume/
+4. keep tasks/resume.md here

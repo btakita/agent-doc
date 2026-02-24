@@ -575,3 +575,28 @@ For the Presence AI entry on LinkedIn, change the date from "Present" to "Februa
 ## User
 
 Thank you. Find the lucal PAT on my github. Give the lucas PAT push permission on the btakita/resume repo.
+
+## Assistant
+
+**Cannot manage PATs via API.** GitHub's REST API doesn't expose personal access token management — only the web UI does.
+
+### Steps to add `btakita/resume` to your PAT
+
+1. Go to **https://github.com/settings/tokens?type=beta** (fine-grained tokens page)
+2. Find the token named "lucas" (or "lucal")
+3. Click **Edit**
+4. Under **Repository access**, add `btakita/resume` to the selected repositories
+5. Under **Permissions → Repository permissions**, ensure **Contents** is set to **Read and write** (grants push)
+6. Click **Regenerate token**
+
+If it's a **classic PAT** (at https://github.com/settings/tokens), it already has access to all repos matching its scopes — no per-repo config needed. Only fine-grained PATs need per-repo setup.
+
+## User
+
+add a gh action to generate the pdf using pandoc, commit, and push to the branch
+
+Make a gh page with the pdf
+
+## User
+
+Add Makefile to build the resume pdf

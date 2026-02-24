@@ -512,3 +512,26 @@ The `platformType = IC` (IntelliJ Community) already makes it compatible with al
 
 Build and test the JetBrains plugin.
 Build the vscode extension and install deps (`npm install`) and compile (`npm run compile`).
+
+## Assistant
+
+### Build Results
+
+**JetBrains plugin** — built successfully (`./gradlew buildPlugin`, 12 tasks, ~33s)
+
+- Distributable ZIP: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+- Install via: Settings > Plugins > Install Plugin from Disk > select the .zip
+- Built with GraalVM CE JDK 24, targeting JVM 17 — no issues
+- Some Gradle deprecation warnings (Gradle 9.0 compatibility) — informational only
+
+**VSCode extension** — built successfully (`npm install` + `npm run compile`)
+
+- 303 npm packages installed
+- TypeScript compiled with zero errors, zero warnings
+- Output: `agent-doc-vscode/out/extension.js` (2.4KB)
+- 2 high-severity npm audit warnings in transitive deps (`@vscode/vsce` tooling) — does not affect runtime
+
+Both are ready for installation/testing. No source changes were needed.
+
+## User
+

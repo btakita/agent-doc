@@ -721,3 +721,74 @@ I'm currently using tmux with Kitty. I could also use ghostty as well. Not sure 
 Anyways, if I can somehow associate by session name with the tmux pane, then I can use tmux send-keys.
 
 What is the best way to approach this? A daemon that tracks the tmux panes? Where opening claude with a session associates the session with the pane?
+
+## Assistant
+
+### tmux send-keys — No Daemon Needed
+
+File-based pane tracking is sufficient. Three pieces:
+
+**1. Shell wrapper** — saves pane ID when starting Claude:
+```bash
+# Add to .zshrc/.bashrc
+claude-session() {
+  mkdir -p .agent-doc
+  echo "$TMUX_PANE" > .agent-doc/tmux-target
+  claude "$@"
+}
+```
+
+**2. Send commands** — read the file, `tmux send-keys`:
+```bash
+tmux send-keys -t "$(cat .agent-doc/tmux-target)" "/agent-doc tasks/plan.md" Enter
+```
+
+**3. JetBrains plugin** — `ProcessBuilder("tmux", "send-keys", ...)`:
+```kotlin
+val pane = File(project.basePath, ".agent-doc/tmux-target").readText().trim()
+ProcessBuilder("tmux", "send-keys", "-t", pane, "/agent-doc $relativePath", "Enter")
+    .directory(File(project.basePath))
+    .start()
+```
+
+**This completely bypasses IntelliJ's terminal.** Works with Kitty, Ghostty, any terminal emulator.
+
+### Tracking file design
+
+```
+.agent-doc/
+  tmux-target        # tmux pane ID (e.g., %42) — project-scoped
+  snapshots/         # existing snapshots
+```
+
+Each project has its own tracking file → multiple projects can have separate Claude sessions.
+
+### Kitty vs Ghostty
+
+For tmux users, terminal choice doesn't matter — `tmux send-keys` is terminal-agnostic. If you wanted to skip tmux:
+- **Kitty** has `kitty @ send-text` (remote control API)
+- **Ghostty** has no equivalent remote control yet
+
+**Recommend: stick with tmux** — it's the most portable approach.
+
+### Implementation plan
+
+1. Shell wrapper (`claude-session`) — minimal, add to dotfiles
+2. JetBrains plugin — rewrite `TerminalUtil` to use `tmux send-keys` via `ProcessBuilder`
+3. VSCode extension — same, via `child_process.exec`
+4. Optional: `agent-doc submit` CLI subcommand for terminal-only workflows
+
+Ready to implement any of these.
+
+## User
+
+We have `session: cf853a21-3aaf-4775-9cc8-0e789109f9dd` in the frontmatter.
+
+resume.md does not have session in the frontmatter. TODO: agent-doc should add frontmatter for any document it runs.
+
+So if we have claude code start, can we have a skill to auto-register in a known location?
+
+I want to support multiple sessions as well. So if the claude session is open, the agent-doc run should route to the correct pane.
+
+If the claude session is not open, a new pane should be opened in "primary" window running the other claude sessions.
+If there is no active "primary" window, then a new shell is spawned, ensuring tmux is running, with the claude session.

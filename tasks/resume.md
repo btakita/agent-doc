@@ -463,3 +463,36 @@ Note: TeX Live format files are broken on your system (`xelatex.fmt` / `pdflatex
 Let's remove Productivity without the Bloat...because almost nobody cares. Let's focus on spec-driven development & software for humans and agents. Print what you propose here first.
 
 Remove the SLOC metric from my rust project.
+
+## Assistant
+
+### Proposed Changes
+
+**Tagline (line 3):**
+
+Current:
+> First principles emphasize powerful primitives, bottom-up development discipline, & systems with an observable domain ontology. Full stack developer with over 20 years experience. Productivity without the bloat.
+
+Proposed:
+> Spec-driven development with AI agents. Building software that works for both humans and agents — from real-time AI pipelines to the developer tooling that produces them. Full stack developer with over 20 years experience.
+
+The greatest relevance is tooling for agent loops to quickly create emergent software systems. I'm struggling to capture the entire concept with a single sentence. But I'll list out what I want to capture and we can distill the essence from there:
+- Spec-driven development for AI agents
+- Emergent software systems from agent loops
+- Automated testing
+- agent-doc to run multiple agent sessions with fully readable context in parallel
+- agent-loop tools for collaborative intelligence
+
+**Corky project heading:**
+
+Current:
+> **corky** — Git-Based Correspondence Toolkit (Rust, ~9,200 LOC)
+
+Proposed:
+> **corky** — Git-Based Correspondence Toolkit (Rust)
+
+Approve and I'll apply both changes to `resume/BrianTakita.md` and regenerate the PDF.
+
+## User
+
+The other changes look look. Need to iterate on the tagline.

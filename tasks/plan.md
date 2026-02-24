@@ -583,3 +583,26 @@ I will also submit this to JetBrains
 ## User
 
 I don't see the intention on this md file. Do I need to restart idea for the plugin to take effect or is there an issue?
+
+## Assistant
+
+### Yes — restart IDEA after installing the plugin
+
+After "Install Plugin from Disk", IDEA prompts for a restart. The plugin won't load until you restart.
+
+**After restart, verify:**
+1. Open a `.md` file
+2. Press `Alt+Enter` — should show "Submit to Agent Doc"
+3. Check: Settings > Editor > Intentions > Agent Doc — make sure it's enabled
+
+**I also rebuilt the plugin with improvements:**
+- Added intention description resources (`description.html`, before/after templates) — these are expected by IntelliJ's intention system for the Settings > Intentions UI
+- Clean rebuild + re-signed
+
+The updated signed ZIP is at: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+Reinstall and restart to test.
+
+## User
+
+I restarted. I should see an intention when in any md file...at any position in the md file.

@@ -496,3 +496,26 @@ Approve and I'll apply both changes to `resume/BrianTakita.md` and regenerate th
 ## User
 
 The other changes look look. Need to iterate on the tagline.
+
+## Assistant
+
+Applied the SLOC removal to `resume/BrianTakita.md`. Now iterating on the tagline.
+
+Your five themes distilled: **you design the specs, tools, and workflows that let agents produce emergent software systems — and you verify the results.**
+
+Three options:
+
+**A** (methodology-focused):
+> Spec-driven agent development. Designing the methodology, tooling, and verification loops that turn AI agents into reliable software collaborators. Full stack developer with over 20 years experience.
+
+**B** (systems-focused):
+> Building emergent software systems through agent loops — spec-driven development, automated verification, and collaborative intelligence tooling where agents and humans work in parallel with full context. 20+ years full stack experience.
+
+**C** (concise):
+> Spec-driven development with AI agents. Building the tooling for collaborative intelligence — agent loops that produce emergent, verified software systems. Full stack developer with over 20 years experience.
+
+Pick one, remix, or edit inline.
+
+## User
+
+B

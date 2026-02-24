@@ -9,9 +9,11 @@ branch: null
 
 ## Status
 
-- **agent-doc**: v0.1.2 — crates.io + PyPI. 78 tests passing.
-- **corky**: v0.9.2 — crates.io + PyPI. 237 tests passing.
+- **agent-doc**: v0.1.3 — crates.io + PyPI. 88 tests passing.
+  - Upgrade check: crates.io query with 24h cache, startup warning, `agent-doc upgrade` subcommand
+- **corky**: v0.9.3 — crates.io + PyPI. 244 tests passing.
   - Contact sync v2: conversation-aware eligibility, explicit sharing, alias matching, 3-way merge via `.sync-state.json`
+  - Upgrade check: crates.io query with 24h cache, startup warning, `corky upgrade` subcommand
 
 ## Outstanding
 
@@ -62,3 +64,24 @@ squash merge PRs
 increment patch version
 push tag
 publish
+
+## Assistant
+
+Done. Both projects got upgrade check + auto-upgrade in parallel:
+
+**Implementation** (both `src/upgrade.rs`):
+- Startup: `warn_if_outdated()` queries crates.io API (`/api/v1/crates/{name}`) via `ureq`, 5s timeout, 24h file cache (`~/.cache/{name}/version-cache.json`). Prints yellow stderr warning if outdated. All errors silently swallowed.
+- `upgrade` subcommand: fresh version check, then tries `cargo install` -> `pip install --upgrade` -> manual instructions.
+- Version comparison: simple `X.Y.Z` tuple ordering.
+
+**Tests**: agent-doc 88 tests (10 new), corky 244 tests (7 new). Clippy clean.
+
+**Released**:
+- agent-doc v0.1.3 — crates.io + PyPI
+- corky v0.9.3 — crates.io + PyPI
+
+PRs: agent-doc #2, corky #7 (both squash-merged to main, tagged, published).
+
+## User
+
+

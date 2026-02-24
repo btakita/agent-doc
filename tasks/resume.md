@@ -303,3 +303,25 @@ The biggest lesson: when you use your own tools every day, the feedback loop is 
 ## User
 
 Does the linkedin api support creating posts?
+
+## Assistant
+
+Yes — unlike profile editing, LinkedIn's API **does** support creating posts.
+
+**Posts API**: `POST https://api.linkedin.com/v2/posts` ([docs](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api))
+- Scope needed: `w_member_social`
+- Supports: text posts, articles, link shares, image/video, mentions
+
+**Setup**:
+1. Create a LinkedIn Developer App at developer.linkedin.com
+2. Request `w_member_social` + `r_liteprofile` scopes
+3. OAuth 2.0 flow (browser redirect → auth code → access token)
+4. POST with your content
+
+The OAuth flow is the annoying part — browser redirect to authorize, then exchange for a token. Once you have the token, publishing is a single API call.
+
+Want me to draft a script to publish the post? Could be a small Python or Rust script, or even a `curl` one-liner once you have the token.
+
+## User
+
+How do I export my resume with my agent-doc and corky projects in the experience?

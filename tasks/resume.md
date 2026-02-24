@@ -761,3 +761,18 @@ PDF regenerated. Each project now has clear visual separation in the rendered ou
 ## User
 
 Give the Other contributions section some distinction...perhaps with itallics or no bold copy to distinguish from other jobs?
+
+## Assistant
+
+Switched the entire "Other contributions" section from **bold** to *italic* — both the heading and project names:
+
+- Featured projects (corky, agent-doc): **bold** headings with full bullet descriptions — same visual weight as job entries
+- Other contributions: *italic* names with one-liner descriptions — visually lighter, clearly secondary
+
+This creates a natural hierarchy: your eyes are drawn to the featured projects first, then the contributions list fills in the breadth.
+
+PDF regenerated.
+
+## User
+
+Add Python, Typescript, & Zig to my Top Skills. I have mostly vibe-coded Rust but I think it's a great fit with Claude. 

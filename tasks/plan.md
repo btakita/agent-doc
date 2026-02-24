@@ -49,84 +49,30 @@ branch: null
 
 ## User
 
-agent-doc & corky changes run in separate threads.
+### Personal Data
+Should I comingle by person communication with development in this repo?
+I'm mainly concerned about the artifacts of my development. Like I don't want my personal communication to be in the commit history. But I'm using commits to iterate on plan.md.
 
-create PR branch for agent-doc & corky.
-Provide auto-upgrade if possible. Otherwise warn user that an upgrade is available.
+Can we explore other options for separating personal communication from development artifacts?
+Would a sidecar git repo be a good solution?
 
-Write tests for new feature.
+### Topics
+I want to have topics that can be shared with collaborators. Communication can be assigned to topics as well via rules. A topic is a way of grouping. Other ways of groupings are labels and contacts.
 
-commit both
-push both
+A topic will have it's own AGENTS.md->CLAUDE.md/CLAUDE.local.md filespace. Other context files may be in there as well.
 
-squash merge PRs
+There needs to be a way to group topics with threads. Perhaps the frontmatter of the thread can contain the topic?
 
-increment patch version
-push tag
-publish
+If a topic is missing, then the topic can be auto-created with suggested after a pass through the emails.
 
-## Assistant
+Each thread implicitly has it's own topic as well. So there should be an easy way to add context to the thread. Perhaps a context file can be created for thread as needed? Two options I see:
 
-Done. Both projects got upgrade check + auto-upgrade in parallel:
+1. The filename can have a suffix like `.context.md`
+2. A subdirectory with the <thread basename>/AGENTS.md file can be created.
 
-**Implementation** (both `src/upgrade.rs`):
-- Startup: `warn_if_outdated()` queries crates.io API (`/api/v1/crates/{name}`) via `ureq`, 5s timeout, 24h file cache (`~/.cache/{name}/version-cache.json`). Prints yellow stderr warning if outdated. All errors silently swallowed.
-- `upgrade` subcommand: fresh version check, then tries `cargo install` -> `pip install --upgrade` -> manual instructions.
-- Version comparison: simple `X.Y.Z` tuple ordering.
+I suppose the latter is more flexible, but not as simple & convenient. How about we start off with `.context.md` for now 
 
-**Tests**: agent-doc 88 tests (10 new), corky 244 tests (7 new). Clippy clean.
+This also means collaborator threads, including topics, need to be synced across all collaborators.
 
-**Released**:
-- agent-doc v0.1.3 — crates.io + PyPI
-- corky v0.9.3 — crates.io + PyPI
-
-PRs: agent-doc #2, corky #7 (both squash-merged to main, tagged, published).
-
-## User
-
-What is the developer experience to upgrade the binary curl | sh...they would have to run the command again? What is typical for this sort of install? Is there an upgrade command that is often run?
-
-## Assistant
-
-Right now `corky upgrade` only tries `cargo install` and `pip install --upgrade` — it doesn't cover users who installed via `curl | sh` (GitHub Releases binary). Those users would have to re-run the curl script manually.
-
-**What's typical:**
-
-- **Self-update** (rustup, Homebrew, claude-code): `tool update` detects install method, downloads new binary in-place. Best UX.
-- **Idempotent re-run** (starship, nvm): `curl | sh` again overwrites the old binary. Simple but the user has to remember the URL.
-- **No self-update** (bat, ripgrep, fd): rely on package managers or manual download.
-
-The gap: `corky upgrade` should detect that the running binary lives at `~/.local/bin/corky` (or `/usr/local/bin/corky`) and download the new release from GitHub Releases directly — same logic as `install.sh`. Fallback chain becomes:
-
-1. **GitHub Releases** — if binary is at a known install path, download + replace (like `install.sh`)
-2. **`cargo install`** — if cargo is available
-3. **`pip install --upgrade`** — if pip is available
-4. **Manual instructions** — print the curl command
-
-This would make `corky upgrade` the single upgrade command regardless of install method. Want me to implement this?
-
-## User
-
-Yes. This will be for corky & agent-doc.
-
-## Assistant
-
-Done. Both `corky upgrade` and `agent-doc upgrade` now download prebuilt binaries from GitHub Releases as the primary upgrade strategy.
-
-**Upgrade fallback chain** (both projects):
-1. **GitHub Releases** — `try_github_release_upgrade()` detects platform via `cfg!()`, downloads `{name}-{target}.tar.gz` from releases, extracts via `tar`, atomically replaces the running binary
-2. **`cargo install`** — if available
-3. **`pip install --upgrade`** — if available
-4. **Manual instructions** — prints `curl | sh` URL, cargo, and pip commands
-
-**New helpers**: `detect_target()` (compile-time platform detection), `try_github_release_upgrade()` (download + extract + replace). 30s download timeout. Cross-filesystem fallback via copy if rename fails.
-
-**Released**:
-- agent-doc v0.1.4 — crates.io + PyPI (PR #3, squash-merged)
-- corky v0.9.4 — crates.io + PyPI (PR #8, squash-merged)
-
-Tests: agent-doc 90 (2 new), corky 216 (2 new). Clippy clean.
-
-## User
-
-
+### Context Routing with collaborators
+I need a way for context to be routed bi-directionally with collaborators. The existing solution on the contact of the 3 way merge of AGENTS.md is sufficient for topics. I mainly need this process to be a central part of the collaboration workflow. So topics, contacts, and threads would all share this.

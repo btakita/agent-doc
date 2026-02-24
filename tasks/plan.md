@@ -76,3 +76,96 @@ This also means collaborator threads, including topics, need to be synced across
 
 ### Context Routing with collaborators
 I need a way for context to be routed bi-directionally with collaborators. The existing solution on the contact of the 3 way merge of AGENTS.md is sufficient for topics. I mainly need this process to be a central part of the collaboration workflow. So topics, contacts, and threads would all share this.
+
+## Assistant
+
+### Personal Data — Separation Options
+
+Your concern is valid: `plan.md` commits are useful development artifacts, but personal communication shouldn't leak into git history. Currently `mail/` is gitignored (good), but session docs in `tasks/` do get committed.
+
+**Four options:**
+
+1. **Nested git repo inside `tasks/`** — Initialize `tasks/.git`, gitignore `tasks/` from parent. agent-doc commits stay local to the nested repo.
+   - Pro: Clean separation. Main repo stays code/specs only. Full session history preserved.
+   - Con: Two repos to manage locally.
+
+2. **Sidecar git repo** — e.g., `~/.agent-doc-sessions/agent-loop/` with symlinks or config pointing agent-doc there.
+   - Pro: Complete separation. Reusable across projects.
+   - Con: Cross-referencing between session docs and code becomes harder.
+
+3. **Branch-based isolation** — Session docs on a `sessions/plan` branch that never merges to main. agent-doc already has `branch:` frontmatter.
+   - Pro: One repo, clean main. History exists but is separate.
+   - Con: Branch switching friction. Stale branches.
+
+4. **Ephemeral commits with squash** — Commit for diff gutters, squash before pushing.
+   - Pro: Simplest change. Iteration history stays local.
+   - Con: Doesn't help if you push to a shared remote.
+
+**Recommendation:** Option 1 — nested git repo inside `tasks/`. Initialize once, main repo never sees it. agent-doc already does the commits; you get full session history without polluting the main commit log. If you later want to share session docs, you can push the nested repo independently.
+
+### Topics — Design Sketch
+
+Starting with `.context.md` is the right call. Here's how topics layer into corky's existing architecture:
+
+**Thread → Topic association:**
+Add `**Topic**: {topic-name}` to conversation frontmatter (alongside Labels, Accounts, Thread ID). Follows corky's existing metadata pattern — regex-parseable, accumulative.
+
+**Filesystem layout:**
+```
+mail/
+  topics/
+    {topic-slug}/
+      CLAUDE.md          # shared context (3-way merged with collaborators)
+      CLAUDE.local.md    # private context (never synced)
+  conversations/
+    {thread-slug}.md           # has **Topic**: foo in metadata
+    {thread-slug}.context.md   # per-thread context (simple start)
+```
+
+**Auto-creation:** During sync, if a thread's labels/sender match a topic rule that doesn't exist yet, create `topics/{slug}/CLAUDE.md` with a stub and flag as "suggested." A `corky topics suggest` command could do a batch pass and propose assignments.
+
+**Topic assignment rules** — extend `.corky.toml`:
+```toml
+[topics.project-alpha]
+labels = ["project-alpha", "alpha-dev"]
+contacts = ["alice", "bob"]
+
+[topics.hiring]
+labels = ["recruiting"]
+```
+
+**Graduation path:** `.context.md` → `{thread-slug}/CLAUDE.md` subdirectory when thread context grows. No code changes needed — just convention.
+
+### Context Routing with Collaborators
+
+The existing 3-way merge (FNV-1a content hash in `.sync-state.json`) is the right primitive. Topics extend it naturally:
+
+**What syncs per collaborator:**
+- `topics/{slug}/CLAUDE.md` — same merge strategy as contact CLAUDE.md files
+- `{thread-slug}.context.md` — syncs alongside its conversation (same eligibility: if thread syncs, context syncs)
+- `**Topic**` metadata on threads — accumulates like labels
+
+**State extension:**
+```json
+{
+  "contacts": { ... },
+  "topics": {
+    "project-alpha": {
+      "mailboxes": {
+        "alice": "fnv1a_hash_hex"
+      }
+    }
+  }
+}
+```
+
+Mirrors the `contacts` structure exactly. The unifying insight: topics, contacts, and threads all share the same sync primitive — content-hash-based 3-way merge with eligibility rules. The only difference is what triggers eligibility:
+- **Contacts**: conversation sender matching
+- **Topics**: label/contact rule matching
+- **Threads**: implicit (if the conversation syncs, its context syncs)
+
+This means the core merge machinery in `contact/sync.rs` can be generalized into a shared `context_sync` module that all three consume.
+
+## User
+
+The topics should be configurable in .corky.toml. Including sharing topics with collaborators.

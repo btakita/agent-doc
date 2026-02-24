@@ -606,3 +606,19 @@ Reinstall and restart to test.
 ## User
 
 I restarted. I should see an intention when in any md file...at any position in the md file.
+
+## Assistant
+
+### Fixed: Intention Now Registered with Markdown Language
+
+The intention wasn't showing because it wasn't associated with the Markdown language. Three changes:
+
+1. **`plugin.xml`** — Added `<depends>org.intellij.plugins.markdown</depends>` + `<language>Markdown</language>` to the intention registration
+2. **`SubmitIntention.kt`** — Switched from `IntentionAction` to `PsiElementBaseIntentionAction` (proper base class for language-aware intentions)
+3. **`build.gradle.kts`** — Added `bundledPlugin("org.intellij.plugins.markdown")` dependency (bundled in IDEA 2024.1+)
+
+Rebuilt and re-signed. Install and restart:
+`agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+

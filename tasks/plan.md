@@ -10,9 +10,8 @@ branch: null
 ## Status
 
 - **agent-doc**: v0.1.2 — crates.io + PyPI. 78 tests passing.
-- **corky**: v0.9.1 — crates.io + PyPI. 237 tests passing. Contact sync v2 complete (unreleased).
-  - Conversation-aware eligibility, explicit sharing, alias matching, 3-way merge via `.sync-state.json`
-  - 26 contact sync tests (19 eligibility + 7 three-way merge)
+- **corky**: v0.9.2 — crates.io + PyPI. 237 tests passing.
+  - Contact sync v2: conversation-aware eligibility, explicit sharing, alias matching, 3-way merge via `.sync-state.json`
 
 ## Outstanding
 
@@ -47,8 +46,3 @@ branch: null
 - **Workflow orchestration:** `CLAUDE.md`
 
 ## User
-
-Publish corky 0.9.1.
-Commit and push mailboxes.
-cleanup plan.md
-squash merge in agent-loop PR branch

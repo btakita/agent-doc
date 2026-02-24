@@ -879,3 +879,30 @@ Live at: https://btakita.github.io/resume/
 Need to get rid of ` | Docs`
 
 Should `Git-Native` and `Git-Based` be at the front of the description? In some ways it makes sense, as it is how workflow goes. But I wonder if it hides the other compelling features of these projects.
+
+## Assistant
+
+**`| Docs` removed** from the corky GitHub link line.
+
+On **"Git-Native/Git-Based" leading the descriptions** — you're right to question it. "Git-Based" is an implementation detail, not a benefit. It tells engineers *how* but not *why*.
+
+Alternatives that lead with the value proposition:
+
+**corky** (current: "Git-Based Correspondence Toolkit"):
+- A: "AI-Assisted Correspondence Toolkit" — leads with the agent angle
+- B: "Multi-Source Correspondence Toolkit" — leads with the unification story
+- C: "Correspondence Toolkit for Agent-Augmented Email" — leads with the workflow
+
+**agent-doc** (current: "Git-Native Document Sessions with AI Agents"):
+- A: "Persistent AI Document Sessions" — leads with the key differentiator (persistence)
+- B: "Document-as-Interface for AI Agents" — leads with the novel interaction model
+- C: "Interactive Document Sessions with AI Agents" — simple, clear
+
+**Recommendation:** corky → C, agent-doc → B. These lead with what makes each project unique rather than the plumbing. Git is still mentioned in the bullet descriptions where it matters.
+
+Pick options or edit inline.
+
+## User
+
+corky: B + C Multi-Source Correspondence Toolkit for Agent-Augmented Email (AI-Assisted is a current buzzword...but it's essentially a commodity. what matters is differentiates is workflow and architecture)
+agent-doc: how about "Document-as-Interface for Interactive Document Sessions with AI Agents + Collaborators"

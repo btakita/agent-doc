@@ -667,3 +667,22 @@ For now: keep one terminal tab dedicated to Claude Code, ensure it's selected, t
 Plugin only selects the terminal window. No text in the prompt.
 
 Hotkey invokes the action but there is no intention.
+
+## Assistant
+
+### Fixed: Terminal Text Not Sending
+
+The issue: IntelliJ 2024.1+ uses a "new terminal" (block-based) where `ShellTerminalWidget` isn't in the Swing component tree. The `findShellWidget()` traversal returned null, so no text was sent — only the terminal window was focused.
+
+**Rewrote `TerminalUtil.kt` with 3 fallback strategies:**
+1. `ShellTerminalWidget.executeCommand()` — classic JediTerm terminal
+2. `JBTerminalWidget.ttyConnector.write()` — works with both old and new terminal (direct PTY write)
+3. Deep component-tree search for any `JBTerminalWidget`
+
+Also added `invokeLater` inside the `activate` callback to ensure the terminal is fully focused before sending.
+
+Rebuilt and re-signed: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+
+Same behavior. I wonder if we should have a custom shell runner to start Claude code. That way we can have control over the behavior. Maybe it can embed the configured terminal for the environment in a blank pane?

@@ -106,3 +106,52 @@ I would like to link to these projects. I also want to mention that I am dog-foo
 Does the README.md for agent-doc and corky have a link to the mdbook site as well?
 Are there clear install instructions for both tools?
 
+## Assistant
+
+### Links & Docs Status
+
+**corky** — Good shape:
+- GitHub: https://github.com/btakita/corky
+- mdbook docs: https://btakita.github.io/corky (linked prominently in README)
+- Install: Clear — `pip install corky`, shell installer (`curl | sh`), or `cargo install --path .`
+
+**agent-doc** — Gaps to fill:
+- GitHub: https://github.com/btakita/agent-doc
+- mdbook docs: **None** — no docs site exists or is linked in the README
+- Install: Only `cargo install --path .` (from source). The README doesn't mention that it's on crates.io or PyPI, even though plan.md says it is. If it's published, the README should say `cargo install agent-doc` and/or `pip install agent-doc`.
+
+### Recommendations Before Linking on LinkedIn
+
+1. **agent-doc README install section** — update to show `cargo install agent-doc` (if published to crates.io) and `pip install agent-doc` (if published to PyPI). A visitor clicking through from LinkedIn should be able to install in one command.
+2. **agent-doc docs site** — optional but nice. For now the README is solid enough to stand alone.
+3. **Both repos**: Make sure the GitHub repos are public and the READMEs render well — that's what a recruiter or hiring manager will see.
+
+### Updated Copy-Paste with Links + Dog-Fooding
+
+---
+
+**corky** — Git-Based Correspondence Toolkit for Agent-Assisted Email (Rust)
+https://github.com/btakita/corky | Docs: https://btakita.github.io/corky
+
+- Built a git-native correspondence system that unifies email threads from multiple IMAP accounts (Gmail, Protonmail) into scoped markdown mailboxes, with per-topic and per-contact agent context that syncs across collaborators via 3-way merge
+- Designed multi-scope mailbox architecture where each collaborator receives only relevant threads and context, with bidirectional sync using content hashing (FNV-1a) and git-based conflict resolution for offline-first collaboration
+- Implemented crash-safe incremental IMAP sync with streaming merge, bulk import for Slack and Telegram archives, and label-based routing rules that fan out threads to multiple mailboxes
+- Dog-fooding daily for personal and professional correspondence across Gmail and Protonmail accounts
+
+**agent-doc** — Git-Native Document Sessions with AI Agents (Rust)
+https://github.com/btakita/agent-doc
+
+- Created a document-as-interface model for persistent AI conversations: edit a markdown file offline, submit diffs, agent responds inline — all tracked through git commits for full session history and branch-based workflows
+- Engineered write-safe concurrent editing via 3-way merge (snapshot + user edits + agent response), preventing data loss when human and agent edit simultaneously
+- Built agent-agnostic core with pluggable LLM backends, automatic pre-commit of user changes, and snapshot-based diffing so only changed content is sent to the agent
+- Dog-fooding as the primary interface for planning and iterating on both corky and agent-doc development — this resume session itself was conducted via agent-doc
+
+---
+
+The dog-fooding bullets are powerful because they demonstrate confidence in your own tools. The last line about *this resume being written via agent-doc* is a nice meta-touch.
+
+Ready for the Presence AI bullets and summary whenever you are.
+
+## User
+
+Create a post with corky and agent-doc. 100% dog-fooding...spec-driven development. Ported from a Python prototype to Rust in less than a day. 100% open source.

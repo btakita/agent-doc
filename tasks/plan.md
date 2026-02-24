@@ -437,3 +437,61 @@ This means `instruction-files` *will* end up on crates.io, but only when agent-d
 ## User
 
 I like the practical answer. Let's do it.
+
+## Assistant
+
+### Scaffolded All Three Projects
+
+**1. `instruction-files/`** — Shared Rust crate (45 tests passing, clippy clean)
+
+```
+instruction-files/
+  Cargo.toml          # publish = false, deps: anyhow, glob, regex, once_cell
+  src/
+    lib.rs            # run() entry point + re-exports
+    types.rs          # AuditConfig, Issue, is_agent_file()
+    discovery.rs      # find_root(), find_instruction_files()
+    audit.rs          # check_tree_paths, check_line_budget, check_staleness, check_actionable
+```
+
+Key design: `AuditConfig` has preset constructors:
+- `AuditConfig::agent_doc()` — broad root detection, includes CLAUDE.md, scans all source types
+- `AuditConfig::corky()` — Cargo.toml-only root, excludes CLAUDE.md, scans .rs only
+
+Both agent-doc and corky can replace their `audit_docs.rs` with:
+```rust
+instruction_files::run(&instruction_files::AuditConfig::agent_doc(), root_override)
+```
+
+**2. `agent-doc-intellij/`** — JetBrains plugin (Kotlin)
+
+- `SubmitAction` extends `AnAction`, sends `/agent-doc <relative-path>` to active terminal
+- Hotkey: `Ctrl+Shift+Alt+A` (configurable in Keymap)
+- Only enabled when editor has a `.md` file open
+- Uses `TerminalToolWindowManager` + `ShellTerminalWidget.executeCommand()`
+- Gradle wrapper copied from python-intentions
+
+**3. `agent-doc-vscode/`** — VSCode extension (TypeScript)
+
+- Registers `agentDoc.submit` command
+- Hotkey: `Ctrl+Shift+Alt+A` when editing markdown
+- Gets workspace-relative path, sends to active (or new) terminal
+- ~30 lines of core logic
+
+**4. Root Makefile updated**
+
+- `make check` now includes `check-shared` (instruction-files clippy + test)
+- `make publish` publishes instruction-files first, then agent-doc + corky
+- `make clean` cleans instruction-files too
+
+### Next Steps
+
+- [ ] Wire agent-doc to use `instruction-files` as path dependency (replace `audit_docs.rs`)
+- [ ] Wire corky to use `instruction-files` as path dependency (replace `audit_docs.rs`)
+- [ ] Build and test the JetBrains plugin (`./gradlew buildPlugin`)
+- [ ] Install VSCode extension deps (`npm install`) and compile (`npm run compile`)
+- [ ] Initialize git repos for the new projects (or add to agent-loop directly)
+
+## User
+
+Rename JetBrains plugin to `agent-doc-jetbrains/` since it can be used with different Jetbrains products.

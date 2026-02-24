@@ -686,3 +686,38 @@ Rebuilt and re-signed: `agent-doc-jetbrains/build/distributions/agent-doc-jetbra
 ## User
 
 Same behavior. I wonder if we should have a custom shell runner to start Claude code. That way we can have control over the behavior. Maybe it can embed the configured terminal for the environment in a blank pane?
+
+## Assistant
+
+### Completely Rewrote Terminal Integration
+
+The component-tree traversal was the wrong approach. IntelliJ 2024.1+ has a stable API: `TerminalToolWindowManager.createShellWidget()` + `TerminalWidget.sendCommandToExecute()`.
+
+**New approach — dedicated "Claude" terminal tab:**
+
+1. **First invocation** (hotkey/right-click on .md file):
+   - Creates a "Claude" tab in the Terminal tool window
+   - Starts `claude` via `sendCommandToExecute("claude")`
+   - Wait for Claude to finish starting, then invoke again
+
+2. **Subsequent invocations:**
+   - Reuses the existing "Claude" tab (stored per-project)
+   - Sends `/agent-doc <path>` via `sendCommandToExecute()`
+
+**Why this works:** `sendCommandToExecute()` is a method on the `TerminalWidget` interface — the stable public API. No Swing component-tree traversal needed. Commands queue until the shell is ready.
+
+Rebuilt and re-signed: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+**Workflow:**
+1. Press `Ctrl+Shift+Alt+A` on any `.md` file → "Claude" terminal tab appears, `claude` starts
+2. Wait for Claude's prompt
+3. Press hotkey again → `/agent-doc tasks/plan.md` is sent to Claude
+
+## User
+
+I want to use my own terminal instead of using the Jetbrains terminal.
+I'm currently using tmux with Kitty. I could also use ghostty as well. Not sure which is better.
+
+Anyways, if I can somehow associate by session name with the tmux pane, then I can use tmux send-keys.
+
+What is the best way to approach this? A daemon that tracks the tmux panes? Where opening claude with a session associates the session with the pane?

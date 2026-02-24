@@ -47,15 +47,15 @@ fn test_cli_audit_docs_subcommand() {
 }
 
 #[test]
-fn test_cli_audit_docs_in_tempdir_no_cargo_toml() {
+fn test_cli_audit_docs_in_tempdir_no_project_marker() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.arg("audit-docs");
-    // Should fail because no Cargo.toml found
+    // Should succeed with a warning, falling back to CWD
     cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("could not find Cargo.toml"));
+        .success()
+        .stderr(predicate::str::contains("no project root marker found"));
 }
 
 #[test]

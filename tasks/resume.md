@@ -710,3 +710,22 @@ Expand BDD to be Behavior Driven Development (BDD) — it's a common term.
 
 Add:
 - Access Query Analyzer: .NET Winforms query analyzer for MS Access
+
+## Assistant
+
+Applied all changes to `resume/BrianTakita.md` and regenerated PDF:
+
+1. **Date range**: "2024 – Present" → "2002 – Present"
+2. **BDD expanded**: "Ruby Behavior Driven Development (BDD) testing framework"
+3. **Access Query Analyzer added**: ".NET WinForms query analyzer for MS Access"
+4. **All other projects added**: RSpec, SvelteJS, RMemo/RelementJS, rappstack
+
+The Open Source section now has corky + agent-doc as featured projects with full bullets, followed by "Other contributions" with five one-liners showing 20+ years of breadth.
+
+PDF regenerated locally. Commit and push to the resume repo when ready.
+
+## User
+
+Add:
+lazily-py: Lazy evaluation with context caching in Python
+lazily-zig: Cross Platform & Thread-safe Lazy evaluation with context caching in Zig

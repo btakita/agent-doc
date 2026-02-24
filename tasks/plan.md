@@ -46,3 +46,19 @@ branch: null
 - **Workflow orchestration:** `CLAUDE.md`
 
 ## User
+
+agent-doc & corky changes run in separate threads.
+
+create PR branch for agent-doc & corky.
+Provide auto-upgrade if possible. Otherwise warn user that an upgrade is available.
+
+Write tests for new feature.
+
+commit both
+push both
+
+squash merge PRs
+
+increment patch version
+push tag
+publish

@@ -600,3 +600,42 @@ Make a gh page with the pdf
 ## User
 
 Add Makefile to build the resume pdf
+
+## Assistant
+
+Done. All three pieces implemented, committed, and pushed to `btakita/resume`:
+
+### 1. Makefile
+
+```makefile
+make pdf    # builds BrianTakita.pdf from .md + .css
+make clean  # removes generated PDF
+```
+
+Uses pandoc (md → html) + weasyprint (html → pdf) with `resume.css`. Tested locally — works.
+
+### 2. GitHub Action (`.github/workflows/build-pdf.yml`)
+
+- **Triggers**: push to `BrianTakita.md`, `resume.css`, or `Makefile` (plus manual `workflow_dispatch`)
+- **Build job**: installs pandoc + weasyprint, runs `make pdf`, commits and pushes the PDF
+- **Deploy job**: copies PDF + MD to GitHub Pages with a landing page
+
+### 3. GitHub Pages
+
+- **Enabled** at https://btakita.github.io/resume/
+- Landing page with **Download PDF** and **View Markdown** buttons
+- Auto-deploys on every push via the Action
+
+**Pushed**: `0e92c7f` — Makefile + workflow + resume.css + updated resume (Presence AI dates)
+
+The Action should be running now. Check status at: https://github.com/btakita/resume/actions
+
+## User
+
+Add a README explaining how this the workflow works, and how to use it.
+
+Also link to the pdf.
+
+Create a gh page with the pdf
+
+

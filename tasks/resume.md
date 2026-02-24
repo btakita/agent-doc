@@ -926,3 +926,18 @@ corky — Multi-Source Correspondence Toolkit for Agent-Augmented Collaboration
 (Rust) github.com/btakita/corky
 
 agent-doc — Document-as-Interface for Interactive Sessions with AI Agents (Rust) github.com/btakita/agent-doc
+
+## Assistant
+
+Applied your refinements:
+
+- **corky** — Multi-Source Correspondence Toolkit for Agent-Augmented Collaboration (Rust)
+- **agent-doc** — Document-as-Interface for Interactive Sessions with AI Agents (Rust)
+
+"Collaboration" is the right call — corky handles email, Telegram, Slack, and topics. It's a collaboration toolkit, not just an email client. Dropping "& Collaborators" from agent-doc tightens the headline.
+
+PDF regenerated. Commit and push when ready.
+
+## User
+
+commit, push, and cleanup this doc

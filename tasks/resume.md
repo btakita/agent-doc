@@ -435,3 +435,31 @@ Everything is live:
 ## User
 
 Generate the pdf
+
+## Assistant
+
+Done. Generated `resume/BrianTakita.pdf` using pandoc + weasyprint with custom CSS.
+
+**Pipeline**: `BrianTakita.md` → pandoc (HTML) → weasyprint (PDF) with `resume.css`
+
+**Files in resume repo:**
+- `BrianTakita.md` — source
+- `BrianTakita.pdf` — generated PDF
+- `resume.css` — print stylesheet
+
+**Fixes applied:**
+- Hidden pandoc's auto-generated title block via CSS (`header#title-block-header { display: none }`)
+- Contact info formatted with pipe separators on one line
+
+**To regenerate:**
+```sh
+pandoc resume/BrianTakita.md -o /tmp/resume.html --standalone --metadata title="Brian Takita" && weasyprint /tmp/resume.html resume/BrianTakita.pdf --stylesheet resume/resume.css
+```
+
+Note: TeX Live format files are broken on your system (`xelatex.fmt` / `pdflatex.fmt` missing). The weasyprint path works well as an alternative. If you want the LaTeX path, you'll need `texlive-core` reinstalled or format files regenerated.
+
+## User
+
+Let's remove Productivity without the Bloat...because almost nobody cares. Let's focus on spec-driven development & software for humans and agents. Print what you propose here first.
+
+Remove the SLOC metric from my rust project.

@@ -742,3 +742,22 @@ PDF regenerated. The "Other contributions" list now has 7 projects spanning Ruby
 ## User
 
 Other contributions should have each item on a separate line.
+
+## Assistant
+
+Done. Changed "Other contributions" from a tight bulleted list to individual paragraphs — each project is now its own block with a blank line between items:
+
+```
+**RSpec** — Core contributor to the Ruby Behavior Driven Development (BDD) testing framework
+
+**SvelteJS** — Contributor
+
+**RMemo/RelementJS** — Creator. Smallest & most composable reactive isomorphic component library in JavaScript
+...
+```
+
+PDF regenerated. Each project now has clear visual separation in the rendered output.
+
+## User
+
+Give the Other contributions section some distinction...perhaps with itallics or no bold copy to distinguish from other jobs?

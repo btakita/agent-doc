@@ -84,4 +84,4 @@ PRs: agent-doc #2, corky #7 (both squash-merged to main, tagged, published).
 
 ## User
 
-
+What is the developer experience to upgrade the binary curl | sh...they would have to run the command again? What is typical for this sort of install? Is there an upgrade command that is often run?

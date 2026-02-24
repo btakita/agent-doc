@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.1.2
+
+- **Language-agnostic audit-docs**: Replace Cargo.toml-only root detection with 3-pass strategy (project markers → .git → CWD fallback). Scan 28 file extensions across 6 source dirs instead of .rs only.
+- **--root CLI flag**: Override auto-detection of project root for audit-docs.
+- **Test coverage**: Add unit tests for frontmatter, snapshot, and diff modules.
+
 ## 0.1.0
 
 Initial release.

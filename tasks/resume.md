@@ -855,3 +855,27 @@ PDF regenerated. Ready to commit and push to the resume repo.
 ## User
 
 cleanup resume.md. commit. push.
+
+## Assistant
+
+Done. Committed and pushed both repos:
+
+**Resume repo** (`btakita/resume`):
+- `c5817a9` — open source projects, skills, proofread fixes
+- Pushed to `main`
+- GH Action will rebuild the PDF and deploy to Pages
+
+**Agent-loop repo** (`btakita/agent-loop`):
+- `ee4dd58` — updated resume submodule pointer, session docs, snapshots
+- Pushed 24 commits to `main` (catches up all session work)
+
+Live at: https://btakita.github.io/resume/
+
+## User
+
+> corky — Git-Based Correspondence Toolkit (Rust) github.com/btakita/corky |
+> Docs
+
+Need to get rid of ` | Docs`
+
+Should `Git-Native` and `Git-Based` be at the front of the description? In some ways it makes sense, as it is how workflow goes. But I wonder if it hides the other compelling features of these projects.

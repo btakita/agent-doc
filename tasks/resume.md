@@ -906,3 +906,23 @@ Pick options or edit inline.
 
 corky: B + C Multi-Source Correspondence Toolkit for Agent-Augmented Email (AI-Assisted is a current buzzword...but it's essentially a commodity. what matters is differentiates is workflow and architecture)
 agent-doc: how about "Document-as-Interface for Interactive Document Sessions with AI Agents + Collaborators"
+
+## Assistant
+
+Good reasoning on avoiding "AI-Assisted" — you're right, it's commodity language. What differentiates corky is the multi-source unification and agent-augmented workflow.
+
+Applied to `resume/BrianTakita.md`:
+
+- **corky** — Multi-Source Correspondence Toolkit for Agent-Augmented Email (Rust)
+- **agent-doc** — Document-as-Interface for Interactive Sessions with AI Agents & Collaborators (Rust)
+
+I used "&" instead of "+" for consistency with resume formatting, and shortened "Interactive Document Sessions" to "Interactive Sessions" since "Document-as-Interface" already establishes the document context.
+
+PDF regenerated. Ready to commit and push.
+
+## User
+
+corky — Multi-Source Correspondence Toolkit for Agent-Augmented Collaboration
+(Rust) github.com/btakita/corky
+
+agent-doc — Document-as-Interface for Interactive Sessions with AI Agents (Rust) github.com/btakita/agent-doc

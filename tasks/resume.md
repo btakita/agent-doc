@@ -266,3 +266,40 @@ The biggest lesson: when you use your own tools every day, the feedback loop is 
 ## User
 
 Iterate on draft
+
+## Assistant
+
+Your inline edit to corky's description is the right move — adding topics, contacts, Telegram, and Slack shows the breadth. The sentence got long and the ellipsis breaks the professional tone. Here's the tightened version:
+
+---
+
+**Building my own agent tooling — and eating my own dog food**
+
+I've been building two open-source Rust tools that address gaps I kept hitting in my own agentic development workflow:
+
+**corky** — a git-native correspondence toolkit that syncs topics, contacts, and threads from email (IMAP), Telegram, and Slack into scoped markdown mailboxes. Each collaborator gets only the threads and AI context relevant to them, with bidirectional sync via 3-way merge. I use it daily for my personal and professional correspondence.
+
+**agent-doc** — a document-as-interface for persistent AI conversations. Edit a markdown file offline, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back inline. Git tracks every exchange. I use it as my primary planning and iteration tool — including for writing this post.
+
+Corky started as a Python prototype. I ported it to Rust in under a day using spec-driven development: write a detailed spec first, let the agent implement against it, audit the output against the spec. The specs become living documents that evolve with the code.
+
+With agent-doc, I run multiple agent sessions in parallel across different task documents — each one a coherent, persistent conversation. When a session gets long, I compact it: reorganize, delete noise, keep the signal. The agent sees the cleaned-up document as ground truth on the next run.
+
+100% dog-fooding. 100% open source. 100% spec-driven development.
+
+corky: https://github.com/btakita/corky
+agent-doc: https://github.com/btakita/agent-doc
+
+The biggest lesson: when you use your own tools every day, the feedback loop is instant. Bugs become personal. Missing features become obvious. The quality bar rises because you're the first user who's annoyed by every rough edge.
+
+#OpenSource #Rust #AITooling #AgenticDevelopment #DeveloperTools
+
+---
+
+**What changed:**
+- Restructured corky line: "syncs topics, contacts, and threads from email (IMAP), Telegram, and Slack" — cleaner than the ellipsis version, lists three data types before three sources
+- Removed "all" from "all my personal" (your edit) — reads tighter
+
+## User
+
+Does the linkedin api support creating posts?

@@ -192,3 +192,44 @@ Want me to adjust the tone, length, or emphasis?
 ## User
 
 I like it. It's casual + professional. I added the part about compacting the agent doc. Please review and make it more presentable.
+
+## Assistant
+
+Your inline edits are solid — the corky-only Python origin is an important correction, and the compaction concept is a strong addition. I tightened the agent-doc paragraph and polished the flow. Here's the final version:
+
+---
+
+**Building my own agent tooling — and eating my own dog food**
+
+I've been building two open-source Rust tools that address gaps I kept hitting in my own agentic development workflow:
+
+**corky** — a git-native correspondence toolkit that syncs email threads from multiple IMAP accounts into scoped markdown mailboxes. Each collaborator gets only the threads and AI context relevant to them, with bidirectional sync via 3-way merge. I use it daily for all my personal and professional correspondence.
+
+**agent-doc** — a document-as-interface for persistent AI conversations. Edit a markdown file offline, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back inline. Git tracks every exchange. I use it as my primary planning and iteration tool — including for writing this post.
+
+Corky started as a Python prototype. I ported it to Rust in under a day using spec-driven development: write a detailed spec first, let the agent implement against it, audit the output against the spec. The specs become living documents that evolve with the code.
+
+With agent-doc, I run multiple agent sessions in parallel across different task documents — each one a coherent, persistent conversation. When a session gets long, I compact it: reorganize, delete noise, keep the signal. The agent sees the cleaned-up document as ground truth on the next run.
+
+100% dog-fooding. 100% open source. 100% spec-driven development.
+
+corky: https://github.com/btakita/corky
+agent-doc: https://github.com/btakita/agent-doc
+
+The biggest lesson: when you use your own tools every day, the feedback loop is instant. Bugs become personal. Missing features become obvious. The quality bar rises because you're the first user who's annoyed by every rough edge.
+
+#OpenSource #Rust #AITooling #AgenticDevelopment #DeveloperTools
+
+---
+
+**Changes from your edit:**
+- Tightened "I use task/plan.md and other task documents to run multiple agents in parallel" → "I run multiple agent sessions in parallel across different task documents"
+- Made the compaction description concrete: "reorganize, delete noise, keep the signal. The agent sees the cleaned-up document as ground truth on the next run."
+- Removed the ellipsis ("compacted"...) for cleaner flow
+- Kept your "100% spec-driven development" addition
+
+The post in the document body (lines 165-184) still has your raw edits. You can either copy from this polished version or I can update the post inline — let me know which you prefer.
+
+## User
+
+show me the current version  

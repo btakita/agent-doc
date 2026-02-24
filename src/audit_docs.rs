@@ -38,22 +38,55 @@ struct Issue {
     warning: bool,
 }
 
-/// Find the project root by walking up from CWD looking for Cargo.toml.
+/// Well-known project root marker files, in priority order.
+const PROJECT_MARKERS: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "setup.py",
+    "go.mod",
+    "Gemfile",
+    "pom.xml",
+    "build.gradle",
+    "CMakeLists.txt",
+    "Makefile",
+    "flake.nix",
+    "deno.json",
+    "composer.json",
+];
+
 fn find_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    // Pass 1: Look for project marker files
     let mut dir = cwd.as_path();
     loop {
-        if dir.join("Cargo.toml").exists() {
+        for marker in PROJECT_MARKERS {
+            if dir.join(marker).exists() {
+                return dir.to_path_buf();
+            }
+        }
+        match dir.parent() {
+            Some(p) if p != dir => dir = p,
+            _ => break,
+        }
+    }
+
+    // Pass 2: Look for .git directory
+    dir = cwd.as_path();
+    loop {
+        if dir.join(".git").exists() {
             return dir.to_path_buf();
         }
         match dir.parent() {
-            Some(p) => dir = p,
-            None => {
-                eprintln!("Error: could not find Cargo.toml");
-                std::process::exit(2);
-            }
+            Some(p) if p != dir => dir = p,
+            _ => break,
         }
     }
+
+    // Pass 3: Fall back to CWD
+    eprintln!("Warning: no project root marker found, using current directory");
+    cwd
 }
 
 fn find_instruction_files(root: &Path) -> Vec<PathBuf> {
@@ -226,27 +259,42 @@ fn check_line_budget(files: &[PathBuf], root: &Path) -> (Vec<Issue>, Vec<(String
     (issues, counts, total)
 }
 
-fn check_staleness(files: &[PathBuf], root: &Path) -> Vec<Issue> {
-    let src_dir = root.join("src");
-    if !src_dir.exists() {
-        return vec![];
-    }
+const SOURCE_DIRS: &[&str] = &["src", "lib", "app", "pkg", "cmd", "internal"];
 
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "rb", "java", "kt",
+    "c", "cpp", "h", "hpp", "cs", "swift", "zig", "hs", "ml", "ex",
+    "exs", "clj", "scala", "lua", "php", "sh", "bash", "zsh",
+];
+
+const SKIP_DIRS: &[&str] = &[
+    "node_modules", "target", "build", "dist", ".git", "__pycache__",
+    ".venv", "vendor", ".next", "out",
+];
+
+fn check_staleness(files: &[PathBuf], root: &Path) -> Vec<Issue> {
     let mut newest_mtime = std::time::SystemTime::UNIX_EPOCH;
     let mut newest_src = PathBuf::new();
 
-    fn scan_rs(dir: &Path, newest: &mut std::time::SystemTime, newest_path: &mut PathBuf) {
+    fn scan_sources(dir: &Path, newest: &mut std::time::SystemTime, newest_path: &mut PathBuf) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    scan_rs(&path, newest, newest_path);
-                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                    if let Ok(meta) = path.metadata() {
-                        if let Ok(mtime) = meta.modified() {
-                            if mtime > *newest {
-                                *newest = mtime;
-                                *newest_path = path;
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if SKIP_DIRS.contains(&name) {
+                            continue;
+                        }
+                    }
+                    scan_sources(&path, newest, newest_path);
+                } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if SOURCE_EXTENSIONS.contains(&ext) {
+                        if let Ok(meta) = path.metadata() {
+                            if let Ok(mtime) = meta.modified() {
+                                if mtime > *newest {
+                                    *newest = mtime;
+                                    *newest_path = path;
+                                }
                             }
                         }
                     }
@@ -255,7 +303,18 @@ fn check_staleness(files: &[PathBuf], root: &Path) -> Vec<Issue> {
         }
     }
 
-    scan_rs(&src_dir, &mut newest_mtime, &mut newest_src);
+    let mut found_any = false;
+    for source_dir in SOURCE_DIRS {
+        let dir = root.join(source_dir);
+        if dir.exists() {
+            found_any = true;
+            scan_sources(&dir, &mut newest_mtime, &mut newest_src);
+        }
+    }
+
+    if !found_any {
+        return vec![];
+    }
 
     let mut issues = Vec::new();
     for doc in files {
@@ -468,10 +527,13 @@ fn check_actionable(rel: &str, content: &str) -> Vec<Issue> {
     issues
 }
 
-pub fn run() -> Result<()> {
+pub fn run(root_override: Option<&Path>) -> Result<()> {
     println!("Auditing docs...\n");
 
-    let root = find_root();
+    let root = match root_override {
+        Some(p) => p.to_path_buf(),
+        None => find_root(),
+    };
     let files = find_instruction_files(&root);
     let mut issues: Vec<Issue> = Vec::new();
 

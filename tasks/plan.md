@@ -622,3 +622,6 @@ Rebuilt and re-signed. Install and restart:
 
 ## User
 
+I still don't see the intention. I also want to make sure that the correct claude interactive session is written to.
+
+Can this plugin in any way query the running claude session? Or does it need to manage starting the claude session?

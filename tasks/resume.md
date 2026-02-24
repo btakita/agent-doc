@@ -791,3 +791,38 @@ PDF regenerated.
 ## User
 
 Proofread the resume to find any grammatical error or any prose that is unclear/awkward.
+
+## Assistant
+
+### Grammatical Errors
+
+| Line | Issue | Current | Fix |
+|---|---|---|---|
+| 75 | Broken parallelism | "values & **to manage** exposure" | "values & **manage** exposure" (drop "to") |
+| 87 | Incorrect hyphenation | "Create **best-practices**" | "**best practices**" (no hyphen as noun) |
+| 102 | Wrong tense | "**Lead** front end development" | "**Led** front end development" |
+| 109 | Missing hyphen | "**real time** social interaction" | "**real-time** social interaction" |
+| 118 | Broken parallelism | "new products, **integration** with" | "new products, **integrations** with" |
+| 125 | Wrong tense + preposition | "**Lead** development and partnered **in**" | "**Led** development and partnered **on**" |
+
+### Awkward Prose
+
+| Line | Issue | Suggestion |
+|---|---|---|
+| 38 | "syncs" twice in one sentence | "...agent context that **propagates** across collaborators" |
+| 70 | Mixed person: "Manage...Uses" | Use consistent voice |
+| 97 | "rearchitecturing" | "re-architecture" or "Re-architected the front end" |
+| 125 | "partnered in" | "partnered on" |
+| 147 | "Heavy lifter" | "Key contributor" (more professional) |
+
+### Minor Style
+
+- Line 97: "Rails App" → "Rails app"
+- Line 92: "Financial Holdings company" → lowercase if not a proper name
+- Line 160: "Develop" → "Developed" for past-tense consistency
+
+Want me to apply all fixes?
+
+## User
+
+Yes

@@ -7,109 +7,16 @@ branch: null
 
 # Plan: agent-doc & agent-loop
 
-## Status: Active Development
+## Status
 
-Core CLI functional, installed user-wide, dog-fooding via plan.md sessions.
-
-## Decisions Made
-
-| Decision | Outcome |
-|----------|---------|
-| Tool name | `agent-doc` (not claude-doc — agent-agnostic) |
-| Workspace name | `agent-loop` (super project with submodules) |
-| Language | Rust (single binary, fast, portable) |
-| Standalone vs skill | Standalone CLI tool |
-| Session continuity | Fork from current session on first submit, resume on subsequent |
-| Diff strategy | Send diff + full doc on every submit (cheap insurance against compaction) |
-| Git integration | Pre-commit user, no post-commit agent (diff gutters), `-b` for branch, `clean` for squash |
-| Merge safety | 3-way merge via `git merge-file` if file edited during agent response |
-| Tool permissions | Terminal sidecar for MVP (interactive prompts in terminal) |
-| Document format | YAML frontmatter + `## User` / `## Assistant` blocks + inline annotations |
-| Frontends | CLI (`agent-doc submit`), Claude Code skill (`/agent-doc`), JetBrains External Tool |
-
-## Repo Structure
-
-```
-agent-loop/                          github.com/btakita/agent-loop (public)
-  agent-doc/                         github.com/btakita/agent-doc (public, submodule)
-  corky/                             github.com/btakita/corky (public, submodule)
-  mail -> ~/work/btakita/mail        private data, gitignored symlink
-```
-
-## agent-doc — What's Built
-
-Rust project at `~/work/btakita/agent-doc/`, compiles clean.
-
-### Modules implemented
-
-```
-src/
-  main.rs           # CLI (clap derive) — submit, init, diff, reset, clean, audit-docs
-  submit.rs         # Core loop: diff, send, merge-safe write, snapshot, pre-commit
-  init.rs           # Scaffold session document with frontmatter
-  reset.rs          # Clear session ID + delete snapshot
-  diff.rs           # Preview diff (dry run) using similar crate
-  clean.rs          # Squash agent-doc git commits
-  frontmatter.rs    # YAML frontmatter parse/write/set_session_id
-  snapshot.rs       # SHA256 path, load, save, delete
-  git.rs            # commit (git add -f), create_branch, squash_session
-  config.rs         # ~/.config/agent-doc/config.toml — wired into init/submit
-  audit_docs.rs     # Audit instruction files (CLAUDE.md, AGENTS.md, SKILL.md)
-  agent/
-    mod.rs          # Agent trait + config-aware resolve()
-    claude.rs       # Claude backend — -p --output-format json --permission-mode acceptEdits
-tests/
-  test_cli.rs       # CLI integration tests (11 tests)
-```
-
-### CLI
-
-```
-agent-doc submit <file> [-b] [--agent <name>] [--model <model>] [--dry-run] [--no-git]
-agent-doc init <file> [title] [--agent <name>]
-agent-doc diff <file>
-agent-doc reset <file>
-agent-doc clean <file>
-agent-doc audit-docs
-```
-
-## Completed
-
-- [x] Core CLI — submit, init, diff, reset, clean, audit-docs
-- [x] Config system — `~/.config/agent-doc/config.toml`, agent backends configurable
-- [x] Claude backend — `-p --output-format json --permission-mode acceptEdits`
-- [x] `CLAUDECODE` env var unset in claude backend (nested session guard)
-- [x] `git add -f` for gitignored session docs
-- [x] Merge-safe writes via `git merge-file` (3-way merge with conflict markers)
-- [x] Pre-commit user changes / no post-commit (diff gutter visibility)
-- [x] `--version` flag (clap derive from Cargo.toml)
-- [x] README.md diagram aligned
-- [x] Tests — 52 tests (41 unit + 11 CLI integration)
-- [x] User-wide install via `~/bin/agent-doc`
-- [x] SPECS.md for both agent-doc and agent-loop
-- [x] Dog-fooding via plan.md sessions
-- [x] mdbook documentation (docs/, book.toml, SUMMARY.md, full guide)
-- [x] Release infrastructure — CI, release (5-target matrix), PyPI, GitHub Pages workflows
-- [x] pyproject.toml (maturin), install.sh, VERSIONS.md
-- [x] Cargo.toml release profile (lto=fat, codegen-units=1, panic=abort, strip=true)
-- [x] SKILL.md — Claude Code skill for `/agent-doc` invocation
+v0.1.1 released. Core CLI functional. Dog-fooding via `/agent-doc plan.md`. 78 tests passing.
 
 ## What's Next
 
-### Immediate
-
-1. Install agent-doc skill in agent-loop, agent-doc, and corky workspaces
-2. Build, test, and release agent-doc binary
-3. Set up CLAUDE.md and CLAUDE.local.md for agent-loop workspace
-
 ### agent-doc
 
-1. More test coverage — frontmatter parsing, diff computation, snapshot round-trip
+1. Make `audit-docs` work outside Rust projects (currently requires Cargo.toml)
 2. Codex frontend skill (same pattern as Claude skill)
-
-### agent-loop
-
-1. Ensure `corky init` works from agent-loop root (mail/ symlink resolution)
 
 ### Future
 
@@ -119,166 +26,138 @@ agent-doc audit-docs
 - Multi-agent documents (sections routed to different agents)
 - Email transport for async human-agent loops (bridge with corky)
 
-## User
+## Reference
 
-
-Let's clean up this plan.md file. I want to see your realtime chain of thought in the Claude Code terminal.
-
-## Assistant
-
-Cleaned up plan.md:
-
-- **Updated Decisions table** — git integration row now says "Pre-commit user, no post-commit agent (diff gutters)", added Merge safety and Frontends rows
-- **Updated modules list** — `submit.rs` comment now mentions merge-safe writes
-- **Updated Completed** — added all recent work (merge-safe writes, pre-commit flow, --version, mdbook docs, release infrastructure, SKILL.md, Cargo.toml release profile)
-- **Updated What's Next** — added "Immediate" section (skill install, build/release, CLAUDE.md setup), trimmed editor docs (already done in mdbook)
-- **Trimmed conversation history** — removed ~300 lines of resolved User/Assistant exchanges, left a clean `## User` block for the next message
-
-**Still pending from last request:** The skill installation and build/commit need the `.claude/` directory permissions. Run this to unblock:
-
-```bash
-mkdir -p ~/work/btakita/agent-loop/.claude/skills/agent-doc
-mkdir -p ~/work/btakita/agent-loop/agent-doc/.claude/skills/agent-doc
-mkdir -p ~/work/btakita/agent-loop/corky/.claude/skills/agent-doc
-cp ~/work/btakita/agent-loop/agent-doc/SKILL.md ~/work/btakita/agent-loop/.claude/skills/agent-doc/
-cp ~/work/btakita/agent-loop/agent-doc/SKILL.md ~/work/btakita/agent-loop/agent-doc/.claude/skills/agent-doc/
-cp ~/work/btakita/agent-loop/agent-doc/SKILL.md ~/work/btakita/agent-loop/corky/.claude/skills/agent-doc/
-```
+- **Decisions & architecture:** `agent-doc/SPECS.md`
+- **Module layout & conventions:** `agent-doc/CLAUDE.md`
+- **Workspace structure:** `SPECS.md`
+- **Workflow orchestration:** `AGENTS.md`
 
 ## User
 
-Do I need to run plan.md from the Claude Code terminal to see realtime updates?
+Read https://x.com/heygurisingh/status/2025572300658287030 and look at the image in the tweet.
 
-## Assistant
+Please update our AGENTS.md with these instructions. I want the improve the experience for everyone.
 
-
-
-Right now, yes — `agent-doc submit plan.md` runs via `claude -p` (pipe mode), which is non-interactive. It sends the prompt, waits for the full response, then writes it to the file. No streaming to the terminal.
-
-There are two ways to get realtime feedback:
-
-**1. Claude Code terminal (current):** You type your edits in the editor, then switch to the Claude Code terminal and paste/type the file path. Claude processes it in the current interactive session — you see the streaming response in real-time, AND it writes back to the document. This is what the `/agent-doc` skill is designed for once installed.
-
-**2. Pipe mode with progress (current `agent-doc submit`):** You only see `eprintln!` status messages ("Submitting to claude...", "Merge successful"), not the actual response streaming. The response appears all at once when the file is written.
-
-**The skill (`/agent-doc plan.md`) is the solution** — it runs inside the interactive Claude Code session, so you get streaming AND file writes. But it requires the `.claude/skills/` directories to be created first.
-
-I also notice from the diff that the previous submit produced merge conflict markers (`<<<<<<< agent-response` / `||||||| original` / `>>>>>>> your-edits`). This means you edited the file while the agent was responding and the merge had a conflict in the same region. The cleanup you did (removing the markers and keeping your version) was the right fix — but it confirms the merge-safe flow is working as designed.
-
-**Bottom line:** Once you run the skill install commands, you can use `/agent-doc plan.md` in the Claude Code terminal for realtime streaming + document writes. No need for a separate terminal or External Tool.
-
-## User
-
-Rename agent-doc submit to agent-doc run.
-
-## Assistant
-
-Good call — `run` is shorter and more intuitive (mirrors `cargo run`, `npm run`).
-
-**Changes needed:**
-- `src/main.rs` — rename `Commands::Submit` to `Commands::Run` with `#[command(name = "run")]`, keep `submit` as a hidden alias
-- Docs: SKILL.md, README.md, SPECS.md, commands.md, plan.md — update `submit` → `run`
-- `submit.rs` stays as-is (internal module name, no user-facing impact)
-
-Ready to implement.
-
-## User
-
-Implement the `run` command. No need for backward compatibility...because I'm the only one using it.
-
-But I also want to submit this as a claude plugin so other people can use it.
-
-Does the crate need to be released to crates.io or pypi first?
-
-## Assistant
-
-Renamed `submit` → `run`. All 52 tests pass, release rebuilt. `agent-doc run plan.md` works now.
-
-**Distribution:** No, you don't need crates.io/PyPI to distribute as a Claude Code skill. The SKILL.md is self-contained. Users just need:
-
-1. The `agent-doc` binary on PATH
-2. SKILL.md in `.claude/skills/agent-doc/`
-
-For the **binary itself**, publishing makes install easy for others:
-- `cargo install agent-doc` — crates.io (Rust users)
-- `pip install agent-doc` — PyPI (everyone, via maturin binary wheels)
-- `curl | sh` — install.sh from GitHub Releases
-
-The GitHub Actions workflows already handle all three on tag push. Just: `git tag v0.1.0 && git push --tags`.
-
-## User
-
-audit docs. What else is outstanding?
-
-## Assistant
-
-**`agent-doc audit-docs` results** (run from agent-doc/):
-
-| File | Issue |
-|------|-------|
-| `CLAUDE.md:19-34` | Large code block (14 lines) without imperative context |
-| `.claude/skills/agent-doc/SKILL.md` | Stale — older than src/main.rs |
-| `CLAUDE.md` | Stale — older than src/main.rs |
-| `README.md` | Stale — older than src/main.rs |
-
-Line budget: 302/1000 ✓
-
-**Outstanding work:**
-
-| # | Item | Scope |
-|---|------|-------|
-| 1 | **Commit `submit` → `run` rename** — main.rs, test_cli.rs, SKILL.md unstaged | agent-doc |
-| 2 | **Update 60+ doc references from `submit` to `run`** — README.md, SPECS.md, SKILL.md, CLAUDE.md, VERSIONS.md, all mdbook docs, plan.md static sections | agent-doc |
-| 3 | **Update plan.md static sections** — CLI block, Frontends row, modules list still say "submit"; Completed missing "submit→run rename" | plan.md |
-| 4 | **Install skill in corky** — `.claude/skills/agent-doc/SKILL.md` not in corky workspace | corky |
-| 5 | **Update CLAUDE.md module layout** — missing `audit_docs.rs` | agent-doc |
-| 6 | **Push** — agent-loop 26 commits ahead, agent-doc 2 ahead | both |
-| 7 | **Tag v0.1.0** — release workflows ready, never triggered | agent-doc |
-| 8 | **CLAUDE.local.md for agent-loop** — listed as immediate, not created | agent-loop |
-
-**Recommendation:** Do #2 first (bulk `submit`→`run` across all docs), then #1 (commit everything), then #3 (update plan.md static sections), then #6 (push). Items 4, 7, 8 can wait.
-
-## User
-
-Do 2...then 1...then 3...then 6.
-
-Then 4.
- 
-agent-loop should be on a branch with the commits. with main branch reset to origin/main.
-
-Hold of on 7 & 8. Could you explain 8 a bit more?
+Is there anything else to do from plan.md? Please clear out anything that's been done. Move the info to the README.md, SPECS.md, etc.
 
 ## Assistant
 
 Done. Here's what happened:
 
-**#2 — Bulk `submit`→`run` rename:** Updated 60+ references across 17 files (README.md, SPECS.md, SKILL.md, CLAUDE.md, VERSIONS.md, all mdbook docs, both installed SKILL.md copies). Also added `audit_docs.rs` to CLAUDE.md module layout. All 52 tests pass.
+**AGENTS.md updated** with workflow orchestration from Boris Cherny's CLAUDE.md template (via the tweet). Added:
+- **Workflow Orchestration** — 6 sections: Plan Mode Default, Subagent Strategy, Self-Improvement Loop, Verification Before Done, Demand Elegance, Autonomous Bug Fixing
+- **Task Management** — 6-step flow: Plan First, Verify Plan, Track Progress, Explain Changes, Document Results, Capture Lessons
+- **Core Principles** — Simplicity First, No Laziness, Minimal Impact
+- **Conventions** — branch naming (`yyyymmdd/short-description`), `make check`, `make precommit`
 
-**#1 — Committed** in agent-doc: `dbc91f9 Rename submit → run across CLI and all docs` (17 files, +85 -78). Pushed to origin.
+Adapted to our conventions: uses auto memory instead of `tasks/lessons.md`, uses `plan.md` instead of `tasks/todo.md`, references our existing tooling.
 
-**#3 — Updated plan.md static sections:** CLI block, Frontends row, modules list, Completed (added rename + skill install), What's Next (removed completed items, added tag/release).
+**plan.md cleaned up** — removed ~130 lines:
+- Removed Decisions table (already in `agent-doc/SPECS.md`)
+- Removed Repo Structure block (already in `SPECS.md`)
+- Removed Modules/CLI blocks (already in `agent-doc/CLAUDE.md` and `agent-doc/SPECS.md`)
+- Removed 25-line Completed checklist (historical, info preserved in git)
+- Removed 6 struck-through Immediate items (all done)
+- Added Reference section pointing to the canonical locations
+- Trimmed conversation history
 
-**#6 — Branch + push:** Created `agent-doc-session` branch on agent-loop with all 27 commits, pushed to origin. Reset main to origin/main. Recovered plan.md, SPECS.md, SKILL.md from the branch into working tree.
-
-**#4 — Corky skill installed:** `corky/.claude/skills/agent-doc/SKILL.md` is in place.
-
----
-
-**Re: #8 — CLAUDE.local.md for agent-loop**
-
-`CLAUDE.local.md` is a gitignored personal override file. The convention (from corky) is:
-
-- `CLAUDE.md` — committed, shared instructions everyone sees
-- `CLAUDE.local.md` — gitignored, personal preferences that don't belong in the repo
-
-For agent-loop, you'd put things like:
-- Your local file paths (e.g. where `mail/` symlink points)
-- Personal agent preferences (preferred model, custom backends)
-- Local development notes (your system-specific build quirks)
-- Workflow preferences (e.g. "always use bun", "commit style")
-
-It's completely optional — you only need it when you have personal overrides that shouldn't be shared. The existing `CLAUDE.md` at the root is already minimal and works fine without a local override. I'd skip it unless you have something specific to put there.
+**Nothing else outstanding from plan.md.** The only remaining items are future work (agent-doc: audit-docs portability, Codex skill) and long-term features (streaming, notifications, multi-agent, email transport).
 
 ## User
 
+commit and push changes.
+
+subagents:
+1. Make `audit-docs` work outside Rust projects (currently requires Cargo.toml)
+2. Codex frontend skill (same pattern as Claude skill)
+3. corky: Telegram integration strategy. Support export/import. API integration would be nice.
+4. corky: Slack integration strategy. Support export/import. API integration would be nice.
+
+## Assistant
+
+Committed and pushed. All 4 research subagents completed. Here are the findings:
+
+### 1. audit-docs portability (agent-doc)
+
+**Problem**: `find_root()` hard-exits if no `Cargo.toml` found. `check_staleness()` only scans `.rs` files.
+
+**Plan** (3 changes to `agent-doc/src/audit_docs.rs`):
+
+1. **Replace `find_root()`** with multi-strategy root finder:
+   - Pass 1: Walk up from CWD looking for project markers (`Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`, `Gemfile`, `pom.xml`, `Makefile`, etc.)
+   - Pass 2: Walk up looking for `.git` directory
+   - Pass 3: Fall back to CWD with warning (no hard exit)
+   - Two-pass design avoids monorepo `.git` being chosen over a nested project's `Cargo.toml`
+
+2. **Replace `check_staleness()`** with language-agnostic scanner:
+   - Scan multiple source dirs: `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`
+   - Scan 25+ file extensions: `.rs`, `.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rb`, `.java`, etc.
+   - Skip: `node_modules/`, `target/`, `build/`, `dist/`, `.git/`, `__pycache__/`, `vendor/`
+
+3. **Add `--root` CLI flag** to override root detection when needed
+
+### 2. Codex frontend skill (agent-doc)
+
+**Problem**: agent-doc only has a Claude backend. Need a Codex backend following the same pattern.
+
+**Plan**:
+
+1. **Create `src/agent/codex.rs`** implementing the `Agent` trait:
+   - Non-interactive: `codex exec --json --full-auto -` (prompt via stdin)
+   - Session resume: `codex exec resume <session_id>` (vs Claude's `--resume`)
+   - Output: JSONL stream (vs Claude's single JSON blob)
+   - Extract `thread_id` from `thread.started` event, response text from `item.completed` events
+   - System prompt: Prepend instructions to user prompt (no `--append-system-prompt` equivalent)
+
+2. **Update `src/agent/mod.rs`**: Add `pub mod codex;` and `"codex"` match arm in `resolve()`
+
+3. **Update `CLAUDE.md`**: Add `codex.rs` to module layout diagram
+
+Key difference table:
+
+| Feature | Claude CLI | Codex CLI |
+|---------|-----------|-----------|
+| Non-interactive | `claude -p` | `codex exec` |
+| JSON output | single JSON blob | JSONL stream |
+| Session resume | `--resume <id>` | `codex exec resume <id>` |
+| Session fork | `--continue --fork` | not available in exec mode |
+| Response field | `.result` | `item.completed` events |
+| Session ID | `.session_id` | `thread.started.thread_id` |
+
+### 3. Telegram integration (corky)
+
+**Recommended crate**: `grammers` (MTProto user API -- full history access, unlike bot API)
+
+**Phased plan**:
+
+- **Phase 1: Offline import** (`corky sync telegram-import FILE`) -- parse Telegram Desktop JSON exports. Zero new deps. Thread ID: `tg:{chat_id}`. Reuses `merge_message_to_file()`.
+- **Phase 2: Live sync** via `grammers-client` -- connect with user auth, iterate dialogs, fetch history incrementally. Feature-gated: `[features] telegram = ["grammers-client", "grammers-session"]`. Sync state: per-chat `last_message_id`.
+- **Phase 3: Watch** -- extend `corky watch` to call `sync_telegram_account()`. Or use `client.next_update()` for real-time push.
+- **Phase 4: Send** -- extend `draft push` to detect `tg:` prefix in `**To**` field and send via grammers.
+
+Config: `[accounts.tg-personal] provider = "telegram"`, with `api_id`, `api_hash_cmd`, `phone`, optional `chats`/`chat_ids` filters.
+
+### 4. Slack integration (corky)
+
+**Recommended crate**: `slack-morphism` (full type-safe Web API + Socket Mode)
+
+**Phased plan**:
+
+- **Phase 1: Export/Import** (`corky slack import FILE.zip`) -- parse Slack workspace export ZIPs. Only needs `zip` crate. Thread ID: `slack:{channel_id}:{thread_ts}`. Groups messages by `thread_ts`. Subject = first line of parent message.
+- **Phase 2: API sync** via `slack-morphism` -- `conversations.history` + `conversations.replies`, incremental via `oldest` param. Feature-gated. Needs Slack mrkdwn-to-plain text conversion.
+- **Phase 3: Socket Mode** -- real-time push via WebSocket. Needs app-level token (`xapp-...`). No public HTTP endpoint needed.
+
+**Rate limit warning**: Slack imposed harsh limits in May 2025 -- non-Marketplace apps get 1 req/min on `conversations.history`. Mitigation: register as an internal app (retains Tier 3: ~50 req/min).
+
+Config: `[accounts.slack-work] provider = "slack"`, reuse `password_cmd` for bot token, `labels` for channel filter.
+
+### Both Telegram and Slack share the same architecture pattern:
+
+- Thread IDs namespaced with prefix (`tg:`, `slack:`) to avoid collisions with email
+- Feature-gated Cargo dependencies to keep default binary small
+- `merge_message_to_file()` reused for all dedup/routing/manifest infrastructure
+- Export/import first (validates data model), live sync second
+
+## User
 

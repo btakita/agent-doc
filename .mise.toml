@@ -1,0 +1,10 @@
+[env]
+_.file = [".env"]
+_.path = [".bin"]
+
+[tools]
+bun = "latest"
+python = "3.14"
+
+[settings]
+python.uv_venv_auto = true

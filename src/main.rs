@@ -9,6 +9,7 @@ mod init;
 mod reset;
 mod snapshot;
 mod submit;
+mod upgrade;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -73,10 +74,18 @@ enum Commands {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// Check for updates and upgrade to the latest version.
+    Upgrade,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Warn about newer versions on startup, but skip if running the upgrade command itself.
+    if !matches!(cli.command, Commands::Upgrade) {
+        upgrade::warn_if_outdated();
+    }
+
     let config = config::load()?;
 
     match cli.command {
@@ -95,5 +104,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
+        Commands::Upgrade => upgrade::run(),
     }
 }

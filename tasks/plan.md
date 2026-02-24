@@ -259,3 +259,40 @@ Create an Makefile automation to run make release on both agent-doc and corky. I
 
 Publish any pending releases.
 
+## Assistant
+
+### Root Makefile — Created
+
+Created `Makefile` at the agent-loop root with these targets:
+
+| Target | What it does |
+|---|---|
+| `make release` | Build release binaries for both agent-doc and corky (delegates to each submodule's `make release`) |
+| `make update` | `git pull --ff-only` + `make release` for both — one command to get latest and rebuild |
+| `make check` | Run clippy + tests for both |
+| `make precommit` | Full pre-commit checks for both |
+| `make publish` | Publish both to crates.io + PyPI |
+| `make clean` | Clean build artifacts for both |
+
+**Tested:** `make release` builds both successfully — agent-doc v0.1.4 and corky v0.9.4 binaries are now at `agent-doc/.bin/agent-doc` and `corky/.bin/corky`.
+
+**Usage to update your local copy:**
+
+```sh
+cd ~/work/btakita/agent-loop
+make update
+```
+
+This pulls the latest commits for both submodules and rebuilds. It also reminds you to `git add agent-doc corky && git commit` to pin the new submodule refs.
+
+### Pending Releases — None
+
+Both repos are at their latest tagged versions with no commits since:
+- **agent-doc**: v0.1.4 (latest tag matches HEAD)
+- **corky**: v0.9.4 (latest tag matches HEAD)
+
+Nothing to publish.
+
+## User
+
+Clean up plan.md

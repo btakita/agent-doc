@@ -536,3 +536,25 @@ Both are ready for installation/testing. No source changes were needed.
 ## User
 
 In the JetBrains plugin, add an intention when in a *.md file to run `/agent-doc` on the current file.
+
+## Assistant
+
+### Added IntentionAction to JetBrains Plugin
+
+Added `SubmitIntention` — appears in the **Alt+Enter** menu when editing any `.md` file. Shows "Submit to Agent Doc", sends `/agent-doc <relative-path>` to the active terminal.
+
+**Changes:**
+- **`TerminalUtil.kt`** (new) — extracted shared `relativePath()` and `sendToTerminal()` so both the hotkey action and the intention reuse them
+- **`SubmitIntention.kt`** (new) — implements `IntentionAction`, available when `file.extension == "md"`, `startInWriteAction = false` (no write lock needed)
+- **`SubmitAction.kt`** — simplified to delegate to `TerminalUtil`
+- **`plugin.xml`** — registered `<intentionAction>` under `<extensions>` with category "Agent Doc"
+
+Build passes (`./gradlew buildPlugin` — BUILD SUCCESSFUL). Two ways to submit:
+- **Hotkey**: `Ctrl+Shift+Alt+A` (SubmitAction)
+- **Intention**: `Alt+Enter` > "Submit to Agent Doc" (SubmitIntention)
+
+## User
+
+Let's build & sign the plugin. I will test by installing the plugin.
+
+I will also submit this to JetBrains

@@ -155,3 +155,40 @@ Ready for the Presence AI bullets and summary whenever you are.
 ## User
 
 Create a post with corky and agent-doc. 100% dog-fooding...spec-driven development. Ported from a Python prototype to Rust in less than a day. 100% open source.
+
+## Assistant
+
+### LinkedIn Post — Copy-Paste Ready
+
+---
+
+**Building my own agent tooling — and eating my own dog food**
+
+I've been building two open-source Rust tools that address gaps I kept hitting in my own agentic development workflow:
+
+**corky** — a git-native correspondence toolkit that syncs email threads from multiple IMAP accounts into scoped markdown mailboxes. Each collaborator gets only the threads and AI context relevant to them, with bidirectional sync via 3-way merge. I use it daily for all my personal and professional correspondence.
+
+**agent-doc** — a document-as-interface for persistent AI conversations. Edit a markdown file offline, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back inline. Git tracks every exchange. I use it as my primary planning and iteration tool — including for writing this post.
+
+Corky was started as a Python prototype. I ported Corky over to Rust in under a day using spec-driven development: write a detailed spec first, let the agent implement against it, audit the output against the spec. The specs become living documents that evolve with the code.
+
+With agent-doc, I use task/plan.md and other task documents to run multiple agents in parallel. While having the coherent session in the agent document itself. The nice thing about it is that it can be "compacted"...to organize the state of the session.
+
+100% dog-fooding. 100% open source. 100% spec-driven development.
+
+corky: https://github.com/btakita/corky
+agent-doc: https://github.com/btakita/agent-doc
+
+The biggest lesson: when you use your own tools every day, the feedback loop is instant. Bugs become personal. Missing features become obvious. The quality bar rises because you're the first user who's annoyed by every rough edge.
+
+#OpenSource #Rust #AITooling #AgenticDevelopment #DeveloperTools
+
+---
+
+The post hits your key themes: dog-fooding as quality signal, spec-driven development as methodology, Python-to-Rust speed as proof of the approach, and open source as commitment. The closing insight about dog-fooding creating an instant feedback loop gives it a takeaway that's useful to anyone, not just people interested in your specific tools.
+
+Want me to adjust the tone, length, or emphasis?
+
+## User
+
+I like it. It's casual + professional. I added the part about compacting the agent doc. Please review and make it more presentable.

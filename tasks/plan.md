@@ -212,7 +212,7 @@ instruction-files = { path = "../instruction-files" }
 
 Publish later if external consumers want the audit/merge logic. The name is held by first-publish, so no rush.
 
-### 2. JetBrains Plugin — `agent-doc-intellij`
+### 2. JetBrains Plugin — `agent-doc-jetbrains`
 
 Studied your `python-intentions` plugin at `~/work/btakita/python-intentions`. It uses IntelliJ Platform Gradle Plugin v2.11.0, Kotlin 1.9.25, JVM 17. Good template.
 
@@ -220,7 +220,7 @@ Key difference: python-intentions uses **IntentionActions** (Alt+Enter on code).
 
 **Proposed structure:**
 ```
-agent-doc-intellij/
+agent-doc-jetbrains/
   build.gradle.kts
   settings.gradle.kts
   gradle.properties
@@ -285,7 +285,7 @@ class SubmitAction : AnAction() {
 **`gradle.properties`:**
 ```properties
 pluginGroup = com.github.btakita.agentdoc
-pluginName = agent-doc-intellij
+pluginName = agent-doc-jetbrains
 pluginVersion = 0.1.0
 platformType = IC
 platformVersion = 2024.1
@@ -366,7 +366,7 @@ export function activate(context: vscode.ExtensionContext) {
 | Submodule | Language | Purpose |
 |---|---|---|
 | `instruction-files/` | Rust | Shared crate for AGENTS.md/CLAUDE.md discovery, audit, 3-way merge |
-| `agent-doc-intellij/` | Kotlin | JetBrains plugin — hotkey sends `/agent-doc` to terminal |
+| `agent-doc-jetbrains/` | Kotlin | JetBrains plugin — hotkey sends `/agent-doc` to terminal |
 | `agent-doc-vscode/` | TypeScript | VSCode extension — hotkey sends `/agent-doc` to terminal |
 
 All three can be submodules of agent-loop. The IDE plugins are small (~50-100 lines of core logic each) and follow the same pattern: get relative file path, find terminal, send command.
@@ -463,7 +463,7 @@ Both agent-doc and corky can replace their `audit_docs.rs` with:
 instruction_files::run(&instruction_files::AuditConfig::agent_doc(), root_override)
 ```
 
-**2. `agent-doc-intellij/`** — JetBrains plugin (Kotlin)
+**2. `agent-doc-jetbrains/`** — JetBrains plugin (Kotlin)
 
 - `SubmitAction` extends `AnAction`, sends `/agent-doc <relative-path>` to active terminal
 - Hotkey: `Ctrl+Shift+Alt+A` (configurable in Keymap)
@@ -495,3 +495,20 @@ instruction_files::run(&instruction_files::AuditConfig::agent_doc(), root_overri
 ## User
 
 Rename JetBrains plugin to `agent-doc-jetbrains/` since it can be used with different Jetbrains products.
+
+## Assistant
+
+Done. Renamed `agent-doc-intellij/` to `agent-doc-jetbrains/`.
+
+**Changes:**
+- `mv agent-doc-intellij/ agent-doc-jetbrains/` — directory renamed
+- `settings.gradle.kts`: `rootProject.name = "agent-doc-jetbrains"`
+- `gradle.properties`: `pluginName = agent-doc-jetbrains`
+- All references in plan.md updated
+
+The `platformType = IC` (IntelliJ Community) already makes it compatible with all JetBrains IDEs — IntelliJ, PyCharm, WebStorm, GoLand, etc. The rename just makes that clear from the directory name.
+
+## User
+
+Build and test the JetBrains plugin.
+Build the vscode extension and install deps (`npm install`) and compile (`npm run compile`).

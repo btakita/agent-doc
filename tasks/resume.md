@@ -73,3 +73,36 @@ Option 1 works for me.
 Let's start with the personal projects first. I like those. I want to emphasize that corky also does topic contexts for the agent + collaborators. It is a git based tool that handles syncing across multiple mailboxes with different scopes...and uses the git workflow to handle updates and merges.
 
 Likewise, agent-doc is also a git based tool. It uses the git workflow to handle updates and merges.
+
+## Assistant
+
+Here are the copy-paste ready LinkedIn project entries:
+
+---
+
+**corky** — Git-Based Correspondence Toolkit for Agent-Assisted Email (Rust)
+
+- Built a git-native correspondence system that unifies email threads from multiple IMAP accounts (Gmail, Protonmail) into scoped markdown mailboxes, with per-topic and per-contact agent context that syncs across collaborators via 3-way merge
+- Designed multi-scope mailbox architecture where each collaborator receives only relevant threads and context, with bidirectional sync using content hashing (FNV-1a) and git-based conflict resolution for offline-first collaboration
+- Implemented crash-safe incremental IMAP sync with streaming merge, bulk import for Slack and Telegram archives, and label-based routing rules that fan out threads to multiple mailboxes
+
+**agent-doc** — Git-Native Document Sessions with AI Agents (Rust)
+
+- Created a document-as-interface model for persistent AI conversations: edit a markdown file offline, submit diffs, agent responds inline — all tracked through git commits for full session history and branch-based workflows
+- Engineered write-safe concurrent editing via 3-way merge (snapshot + user edits + agent response), preventing data loss when human and agent edit simultaneously
+- Built agent-agnostic core with pluggable LLM backends, automatic pre-commit of user changes, and snapshot-based diffing so only changed content is sent to the agent
+
+---
+
+Key shifts from the previous draft:
+- **corky**: Led with "git-native" and scoped collaboration. Added topic/contact context syncing and 3-way merge as a collaboration feature.
+- **agent-doc**: Led with "git-native" and offline editing. Emphasized git commits for session history and branch workflows.
+
+Ready for the Presence AI bullets and summary next.
+
+## User
+
+I would like to link to these projects. I also want to mention that I am dog-fooding both tools.
+Does the README.md for agent-doc and corky have a link to the mdbook site as well?
+Are there clear install instructions for both tools?
+

@@ -92,3 +92,97 @@ New PR:
 - I need help with the hotkey integration with `agent-doc`. I want the hotkey to write /agent-doc <path/to/context.md> in the interactive session. I prefer the interactive session over the pipe command. Since there is more user feedback.
  - Would this involve a Jetbrains macro or plugin?
  - Same question for VSCode.
+
+## Assistant
+
+### 1. AGENTS.md/CLAUDE.md Shared Module
+
+Both `agent-doc` and `corky` have nearly identical `audit_docs.rs` implementations with duplicated logic:
+
+**Current state:**
+| Feature | agent-doc (`audit_docs.rs`, 1154 lines) | corky (`audit_docs.rs`, 516 lines) |
+|---|---|---|
+| Finds CLAUDE.md at root | Yes | No |
+| Validates CLAUDE.md content | Yes (actionable checks) | No |
+| `find_root()` | 14 project markers | `Cargo.toml` only |
+| `--root` parameter | Yes | No |
+| Staleness check | All source file types | `.rs` only |
+| Shared functions | `check_tree_paths`, `check_line_budget`, `check_actionable` | Same logic, copy-pasted |
+
+Additionally, corky uses `CLAUDE.md` in `contact/sync.rs` for contact profiles — a separate concern from auditing.
+
+**Proposed shared crate: `instruction-files`** (or module in a workspace crate):
+
+```
+instruction-files/
+  src/
+    lib.rs            # re-exports
+    discovery.rs      # find_root(), find_instruction_files(), is_agent_file()
+    audit.rs          # check_tree_paths, check_line_budget, check_staleness, check_actionable
+    sync.rs           # 3-way merge for CLAUDE.md files (extract from contact/sync.rs)
+    types.rs          # InstructionFile, AuditResult, AuditConfig
+```
+
+Key design: `AuditConfig` struct parameterizes the differences:
+```rust
+pub struct AuditConfig {
+    pub root_markers: Vec<&'static str>,  // Cargo.toml, package.json, etc.
+    pub include_claude_md: bool,           // agent-doc: true, corky: false
+    pub staleness_extensions: Vec<&'static str>, // [".rs"] or [".rs", ".ts", ...]
+    pub root_override: Option<PathBuf>,    // --root parameter
+}
+```
+
+Both projects consume the same crate with different configs. The 3-way merge logic for CLAUDE.md (currently in `contact/sync.rs`) also moves here — topics, contacts, and threads all use it.
+
+### 2. Hotkey Integration
+
+**VSCode — built-in, no extension needed:**
+
+Add to `keybindings.json`:
+```json
+{
+  "key": "ctrl+shift+alt+a",
+  "command": "runCommands",
+  "args": {
+    "commands": [
+      "workbench.action.terminal.focus",
+      {
+        "command": "workbench.action.terminal.sendSequence",
+        "args": { "text": "/agent-doc ${relativeFile}\u000D" }
+      }
+    ]
+  },
+  "when": "editorTextFocus && editorLangId == markdown"
+}
+```
+
+- `${relativeFile}` → `tasks/plan.md` (workspace-relative)
+- `\u000D` = Enter (remove to type without executing)
+- `runCommands` focuses terminal first, then sends the text
+- `when` clause restricts to markdown files
+
+**JetBrains — no clean built-in equivalent:**
+
+| Approach | Complexity | Reliability |
+|---|---|---|
+| External Tool + xclip to clipboard, then paste | Medium | Medium |
+| External Tool + `xdotool type` (Linux) | Medium | Low (timing-dependent) |
+| Custom plugin with `TerminalView.sendText()` | High (Kotlin) | High |
+
+**Recommended JetBrains approach** — External Tool + xclip:
+
+1. **Settings > Tools > External Tools > +**:
+   - Program: `/bin/sh`
+   - Arguments: `-c "echo -n '/agent-doc $FilePathRelativeToProjectRoot$' | xclip -selection clipboard"`
+2. Assign a keybinding, then `Alt+F12` (terminal) + `Ctrl+Shift+V` (paste)
+
+For a one-key solution, a custom IntelliJ plugin (~50 lines of Kotlin) using `TerminalView.sendText()` is the right answer. This could be a small open-source plugin that pairs with agent-doc.
+
+**Recommendation:** Start with VSCode (zero effort, works today). If JetBrains is primary, the custom plugin is worth building — it's small and could be published to the JetBrains marketplace as an agent-doc companion.
+
+## User
+
+1. Does the crate need to be published to crates.io? If yes, let's find a name that is available.
+2. Create a submodule with the JetBrains plugin to use in this project. Kotlin is a good choice. I have a previous plugin for Python intentions. Source code is at ~/work/btakita/python-intentions. Claude Code was used to generate it.
+3. Let's figure out a way to support the hotkey for VSCode users. We can use the same approach as for JetBrains, but with a different terminal integration method.

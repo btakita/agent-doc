@@ -9,11 +9,11 @@ branch: null
 
 ## Status
 
-- **agent-doc**: v0.1.3 — crates.io + PyPI. 88 tests passing.
-  - Upgrade check: crates.io query with 24h cache, startup warning, `agent-doc upgrade` subcommand
-- **corky**: v0.9.3 — crates.io + PyPI. 244 tests passing.
+- **agent-doc**: v0.1.4 — crates.io + PyPI. 90 tests passing.
+  - Upgrade check + self-update: crates.io query with 24h cache, startup warning, `agent-doc upgrade` with GitHub Releases download
+- **corky**: v0.9.4 — crates.io + PyPI. 216 tests passing.
   - Contact sync v2: conversation-aware eligibility, explicit sharing, alias matching, 3-way merge via `.sync-state.json`
-  - Upgrade check: crates.io query with 24h cache, startup warning, `corky upgrade` subcommand
+  - Upgrade check + self-update: crates.io query with 24h cache, startup warning, `corky upgrade` with GitHub Releases download
 
 ## Outstanding
 
@@ -108,3 +108,25 @@ This would make `corky upgrade` the single upgrade command regardless of install
 ## User
 
 Yes. This will be for corky & agent-doc.
+
+## Assistant
+
+Done. Both `corky upgrade` and `agent-doc upgrade` now download prebuilt binaries from GitHub Releases as the primary upgrade strategy.
+
+**Upgrade fallback chain** (both projects):
+1. **GitHub Releases** — `try_github_release_upgrade()` detects platform via `cfg!()`, downloads `{name}-{target}.tar.gz` from releases, extracts via `tar`, atomically replaces the running binary
+2. **`cargo install`** — if available
+3. **`pip install --upgrade`** — if available
+4. **Manual instructions** — prints `curl | sh` URL, cargo, and pip commands
+
+**New helpers**: `detect_target()` (compile-time platform detection), `try_github_release_upgrade()` (download + extract + replace). 30s download timeout. Cross-filesystem fallback via copy if rename fails.
+
+**Released**:
+- agent-doc v0.1.4 — crates.io + PyPI (PR #3, squash-merged)
+- corky v0.9.4 — crates.io + PyPI (PR #8, squash-merged)
+
+Tests: agent-doc 90 (2 new), corky 216 (2 new). Clippy clean.
+
+## User
+
+

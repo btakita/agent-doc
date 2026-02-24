@@ -4,3 +4,6 @@
 [submodule "agent-doc"]
 	path = agent-doc
 	url = git@github.com:btakita/agent-doc.git
+[submodule "resume"]
+	path = resume
+	url = git@github.com:btakita/resume.git

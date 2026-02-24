@@ -376,3 +376,64 @@ Ready to scaffold any or all of these.
 ## User
 
 How can a crate be shared across multiple projects if it's not published to crates.io?
+
+## Assistant
+
+### Sharing Unpublished Crates
+
+Four options, in order of practicality for your setup:
+
+**1. Path dependency (current plan)** — works because agent-loop checks out everything together:
+```toml
+# agent-doc/Cargo.toml
+instruction-files = { path = "../instruction-files" }
+```
+Pro: Zero friction, instant builds. Con: Only works within the agent-loop checkout. A standalone clone of agent-doc can't resolve the path.
+
+**2. Git dependency** — works for standalone clones:
+```toml
+# agent-doc/Cargo.toml
+instruction-files = { git = "https://github.com/btakita/instruction-files" }
+```
+Pro: Anyone cloning agent-doc gets the dependency automatically. Con: Cargo fetches from git on each fresh build. No semver resolution — locked to a commit. The crate needs its own repo (or a subtree of agent-loop).
+
+**3. Path + git fallback** — best of both worlds:
+```toml
+# agent-doc/Cargo.toml
+[dependencies]
+instruction-files = { git = "https://github.com/btakita/agent-loop", subdirectory = "instruction-files" }
+
+[patch."https://github.com/btakita/agent-loop"]
+instruction-files = { path = "../instruction-files" }  # use local when available
+```
+Pro: Standalone clones fetch from git; local development uses path. Con: `[patch]` adds complexity.
+
+**4. Publish to crates.io** — cleanest for external consumers:
+```toml
+instruction-files = "0.1"
+```
+Pro: Standard Rust dependency resolution. Con: Semver commitment, publish workflow.
+
+### Recommendation for Your Setup
+
+**Start with option 1 (path only).** Here's why:
+
+- agent-doc and corky are submodules of agent-loop — they're always checked out together in your workflow
+- `cargo publish` for agent-doc/corky already works: when you run `cargo publish`, Cargo requires all path dependencies to also be published *or* the consuming crate must replace them. You handle this at publish time by either:
+  - Publishing `instruction-files` first (then agent-doc/corky reference it by version)
+  - Or using `[package]` metadata to replace path deps with version deps at publish time
+
+The practical answer: **path deps now, publish `instruction-files` to crates.io when you publish the next version of agent-doc/corky.** One extra `cargo publish` in the release sequence. The root Makefile can orchestrate this:
+
+```makefile
+publish:
+	$(MAKE) -C instruction-files publish  # publish shared crate first
+	$(MAKE) -C agent-doc publish
+	$(MAKE) -C corky publish
+```
+
+This means `instruction-files` *will* end up on crates.io, but only when agent-doc/corky need a published release. During development, path deps keep everything fast and local.
+
+## User
+
+I like the practical answer. Let's do it.

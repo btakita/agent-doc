@@ -169,3 +169,93 @@ This means the core merge machinery in `contact/sync.rs` can be generalized into
 ## User
 
 The topics should be configurable in .corky.toml. Including sharing topics with collaborators.
+
+## Assistant
+
+### Topics in `.corky.toml` — Full Config Design
+
+Agreed — topics should follow the exact same `shared_with` pattern that contacts already use. Here's the complete config spec:
+
+**`.corky.toml` — topic config:**
+
+```toml
+[topics.project-alpha]
+labels = ["project-alpha", "alpha-dev"]
+contacts = ["alice", "bob"]
+shared_with = ["alice", "bob"]   # sync topic context to these mailboxes
+
+[topics.hiring]
+labels = ["recruiting"]
+contacts = ["alice"]
+shared_with = ["alice"]          # only alice gets hiring context
+# bob does NOT get this topic's context, even if he has matching threads
+
+[topics.personal-dev]
+labels = ["dev-journal"]
+# no shared_with — topic stays root-only, never synced to collaborators
+```
+
+**The `shared_with` field** works identically to `[contacts.*.shared_with]`:
+
+- `shared_with = ["alice"]` → `topics/hiring/CLAUDE.md` gets 3-way merged into `mailboxes/alice/topics/hiring/CLAUDE.md`
+- Without `shared_with`, the topic context stays root-only — threads may still be tagged with the topic in collaborator mailboxes, but they won't receive the shared `CLAUDE.md`
+- Bidirectional: collaborator edits to topic context merge back to root on sync
+
+**Eligibility rules — parallel to contacts:**
+
+| | Contact | Topic |
+|---|---|---|
+| **Auto-match** | sender slugifies to contact name | thread label or sender in `contacts` list |
+| **Explicit sharing** | `shared_with` includes mailbox | `shared_with` includes mailbox |
+| **Root → Mailbox** | only if eligible | only if eligible |
+| **Mailbox → Root** | always | always |
+
+**Rust struct** (mirrors `Contact`):
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TopicConfig {
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub contacts: Vec<String>,
+    #[serde(default)]
+    pub shared_with: Vec<String>,
+}
+```
+
+Added to `CorkyConfig`:
+
+```rust
+pub struct CorkyConfig {
+    // ... existing fields ...
+    pub topics: HashMap<String, TopicConfig>,
+}
+```
+
+**`.sync-state.json`** — topics slot mirrors contacts:
+
+```json
+{
+  "contacts": { "alice": { "mailboxes": { "work": "fnv1a_hex" } } },
+  "topics": { "project-alpha": { "mailboxes": { "alice": "fnv1a_hex", "bob": "fnv1a_hex" } } }
+}
+```
+
+**Implementation order:**
+
+1. Add `TopicConfig` struct + wire into `CorkyConfig` deserialization
+2. Extract core 3-way merge from `contact/sync.rs` → shared `context_sync` module
+3. Topic sync: eligibility check (label/contact match OR `shared_with`), then delegate to shared merge
+4. Thread tagging: during sync, auto-add `**Topic**: {name}` to matching conversations
+5. `corky topics suggest` — scan untagged threads, propose topic assignments
+6. `corky topics list` — show topics with their sync status per mailbox
+
+The beauty is that steps 2-3 are mostly refactoring existing contact sync code. The new logic is just the eligibility check in step 3.
+
+## User
+
+Create an Makefile automation to run make release on both agent-doc and corky. I need a way to update my local copy of the repo with the latest changes.
+
+Publish any pending releases.
+

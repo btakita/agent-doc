@@ -398,3 +398,23 @@ Once you confirm, I'll create the GitHub repo, initialize it, move `BrianTakita.
 2. btakita/resume
 3. resume/
 4. keep tasks/resume.md here
+
+## Assistant
+
+Done. Set up the resume repo:
+
+1. Created **public** repo: https://github.com/btakita/resume
+2. Initialized with `BrianTakita.md` and pushed to main
+3. Added as submodule at `resume/` in agent-loop
+4. Session doc stays here at `tasks/resume.md`
+
+**Current state:**
+- `resume/BrianTakita.md` — your markdown resume (submodule, own git history)
+- `tasks/resume.md` — this agent-doc session (agent-loop repo)
+- `/home/brian/Documents/resume/BrianTakita.md` — the original copy (can be deleted or symlinked)
+
+The submodule is staged but not committed to agent-loop yet. To edit the resume, work directly in `resume/BrianTakita.md` and commit/push from within the submodule.
+
+## User
+
+commit and push. Ignore instruction-files for now since another agent is working on it.

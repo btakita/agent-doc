@@ -638,4 +638,26 @@ Also link to the pdf.
 
 Create a gh page with the pdf
 
+## Assistant
 
+Done. Created `README.md` and pushed to `btakita/resume`.
+
+**README** includes:
+- **Download PDF** link pointing to https://btakita.github.io/resume/BrianTakita.pdf
+- Local build instructions (`make pdf` / `make clean`)
+- GitHub Action workflow explanation (triggers, steps)
+- GitHub Pages section linking to https://btakita.github.io/resume/
+
+**GitHub Pages** was already enabled in the previous step — it's live at https://btakita.github.io/resume/ with a landing page that has PDF download and Markdown view buttons.
+
+The README push will also trigger the Action again (since it's a push to main), but it won't rebuild the PDF since `README.md` isn't in the trigger paths.
+
+## User
+
+For Open Source — Creator / Solo Developer, I have been creating open source software since 2002. So let's reflect that in the resume. Should I have other projects in there such as:
+
+- RSpec Ruby BDD framework: core contributor
+- SvelteJS: Contributor
+- RMemo/RelementJS: The smallest & most composable reactive Isomorphic Component Library in Javascript
+- rappstack: Full Stack Framework for building web applications & extenable app modules using BunJS & Elysia
+- anime-face-detector: Modernize fork to use uv/ruff/ty and convert from cv2 to pytorch

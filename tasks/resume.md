@@ -729,3 +729,16 @@ PDF regenerated locally. Commit and push to the resume repo when ready.
 Add:
 lazily-py: Lazy evaluation with context caching in Python
 lazily-zig: Cross Platform & Thread-safe Lazy evaluation with context caching in Zig
+
+## Assistant
+
+Added both to `resume/BrianTakita.md` under "Other contributions":
+
+- **lazily-py** — Creator. Lazy evaluation with context caching in Python
+- **lazily-zig** — Creator. Cross-platform & thread-safe lazy evaluation with context caching in Zig
+
+PDF regenerated. The "Other contributions" list now has 7 projects spanning Ruby, JavaScript, Python, Zig, .NET, and Rust — nice polyglot breadth.
+
+## User
+
+Other contributions should have each item on a separate line.

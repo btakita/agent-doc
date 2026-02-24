@@ -68,7 +68,11 @@ enum Commands {
         file: PathBuf,
     },
     /// Audit instruction files against the codebase
-    AuditDocs,
+    AuditDocs {
+        /// Project root directory (auto-detected if omitted)
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -90,6 +94,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Diff { file } => diff::run(&file),
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
-        Commands::AuditDocs => audit_docs::run(),
+        Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
     }
 }

@@ -325,3 +325,33 @@ Want me to draft a script to publish the post? Could be a small Python or Rust s
 ## User
 
 How do I export my resume with my agent-doc and corky projects in the experience?
+
+## Assistant
+
+Two parts: getting projects into the Experience section, and exporting.
+
+### Getting Projects into Experience
+
+LinkedIn has a "Projects" section, but it doesn't export cleanly to PDF and recruiters skim past it. **Add them as an Experience entry instead:**
+
+- **Title**: Creator / Solo Developer (or "Independent Software Engineer")
+- **Company**: Open Source (or self-employed)
+- **Date range**: when you started → Present
+- **Description**: the corky + agent-doc bullets we've been drafting
+
+This puts them in the Experience section of any export, right alongside Presence AI.
+
+### Exporting
+
+1. **LinkedIn "Save to PDF"**: Profile > More > Save to PDF. Quick but limited formatting — it exports Experience, Education, Skills. Good enough for most purposes.
+2. **Build your own resume**: Take the content we've drafted here and put it in a markdown or LaTeX template you control. Better formatting, not dependent on LinkedIn's renderer, and you can tailor per-application.
+
+Option 2 is the power move — you already have all the copy-paste ready content from this session. A clean markdown resume rendered to PDF (via Pandoc, or a tool like Reactive Resume) gives you full control.
+
+Want me to draft a complete markdown resume file combining your Presence AI experience + the open source projects?
+
+## User
+
+Yes, please. Markdown resume. My LinkedIn profile resume is at /home/brian/Documents/resume/BrianTakita-20260224.pdf
+
+My profile is at https://www.linkedin.com/in/btakita/

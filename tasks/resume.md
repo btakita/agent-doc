@@ -519,3 +519,17 @@ Pick one, remix, or edit inline.
 ## User
 
 B
+
+## Assistant
+
+Applied Option B tagline and regenerated PDF.
+
+**Updated `resume/BrianTakita.md`:**
+- Tagline: "Building emergent software systems through agent loops — spec-driven development, automated verification, and collaborative intelligence tooling where agents and humans work in parallel with full context. 20+ years full stack experience."
+- Corky: SLOC metric removed (applied earlier)
+
+PDF regenerated at `resume/BrianTakita.pdf`. Both files ready to commit and push to the resume repo.
+
+## User
+
+My Presence job has ended as of February 2026. I will update Linked In as well.

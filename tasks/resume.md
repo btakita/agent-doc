@@ -418,3 +418,20 @@ The submodule is staged but not committed to agent-loop yet. To edit the resume,
 ## User
 
 commit and push. Ignore instruction-files for now since another agent is working on it.
+
+## Assistant
+
+Done. Committed snapshots and pushed all 23 commits to remote:
+
+- **Resume submodule** was already committed (auto-staged by `git submodule add`)
+- **Snapshots** committed for both resume and plan sessions
+- **instruction-files/** left uncommitted as requested
+- **Pushed** `cdb92db..310ef38 main -> main`
+
+Everything is live:
+- https://github.com/btakita/resume — public resume repo
+- https://github.com/btakita/agent-loop — updated with resume submodule
+
+## User
+
+Generate the pdf

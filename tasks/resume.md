@@ -661,3 +661,52 @@ For Open Source — Creator / Solo Developer, I have been creating open source s
 - RMemo/RelementJS: The smallest & most composable reactive Isomorphic Component Library in Javascript
 - rappstack: Full Stack Framework for building web applications & extenable app modules using BunJS & Elysia
 - anime-face-detector: Modernize fork to use uv/ruff/ty and convert from cv2 to pytorch
+
+## Assistant
+
+**Date range**: Agreed — changing from "2024 – Present" to "2002 – Present". Over two decades of open source work.
+
+**Which projects to include**: Be selective. The resume already lists Erector/JS Test Server/Unison under Pivotal Labs. The Open Source section should highlight projects where you were creator or core contributor.
+
+### Recommended additions (strong signal)
+
+| Project | Why | Narrative fit |
+|---|---|---|
+| **RSpec** — Core contributor | High-profile, widely known BDD framework. Ties to "automated verification" theme. | Strong |
+| **SvelteJS** — Contributor | Framework-level engagement with modern frontend ecosystem. | Good |
+| **RMemo/RelementJS** — Creator | "Smallest & most composable" shows minimalism/first-principles. Isomorphic = full stack. | Good |
+
+### Optional (depends on space)
+
+| Project | Consideration |
+|---|---|
+| **rappstack** | Full stack framework — shows breadth, but overlaps with freelance experience. Include if you want to emphasize BunJS/Elysia. |
+| **anime-face-detector** | Modernization fork — niche. Less relevant unless targeting CV/ML roles. The uv/ruff/ty modernization shows you stay current with Python tooling. |
+
+### Proposed structure
+
+Keep corky and agent-doc as featured projects (full bullet descriptions), add others as a concise list below:
+
+```markdown
+### Open Source — Creator / Solo Developer
+**2002 – Present**
+
+[corky and agent-doc sections stay as-is]
+
+**Other contributions:**
+- **RSpec** — Core contributor to the Ruby BDD testing framework
+- **SvelteJS** — Contributor
+- **RMemo/RelementJS** — Creator. Smallest & most composable reactive isomorphic component library in JavaScript
+- **rappstack** — Creator. Full-stack framework using BunJS & Elysia for extensible web app modules
+```
+
+This keeps the section focused — featured projects get detailed bullets, others get one-liners showing breadth.
+
+Want me to apply this, or adjust which projects make the cut?
+
+## User
+
+Expand BDD to be Behavior Driven Development (BDD) — it's a common term.
+
+Add:
+- Access Query Analyzer: .NET Winforms query analyzer for MS Access

@@ -533,3 +533,45 @@ PDF regenerated at `resume/BrianTakita.pdf`. Both files ready to commit and push
 ## User
 
 My Presence job has ended as of February 2026. I will update Linked In as well.
+
+Help me with about as well:
+
+Over 20 years of software development experience developing full-stack applications. Currently focused on the full pipeline of Realtime AI Avatars using Generative models.
+
+Utilizes philosophy, logic, language, & qualitative/quantitative approaches to create software models to explore & accurately represent the domain.
+
+## Assistant
+
+Updated the resume:
+
+**Changes to `resume/BrianTakita.md`:**
+- Presence AI dates: "April 2024 – Present" → "April 2024 – February 2026"
+- Summary: "Currently focused on the full pipeline of Realtime AI Avatars" → "Most recently built the full real-time AI avatar pipeline at Presence AI. Now focused on spec-driven agent tooling and collaborative intelligence workflows."
+
+PDF regenerated at `resume/BrianTakita.pdf`.
+
+### LinkedIn About Section — Updated Draft
+
+Here's a copy-paste replacement for your LinkedIn About:
+
+---
+
+Over 20 years of software development experience developing full-stack applications. Most recently built the full real-time AI avatar pipeline at Presence AI — facial landmark detection, LatentSync lip-sync inference, and frame sequencing on H100 GPUs. Now building spec-driven agent tooling and collaborative intelligence workflows in Rust.
+
+Utilizes philosophy, logic, language, & qualitative/quantitative approaches to create software models to explore & accurately represent the domain.
+
+Currently dog-fooding two open-source tools: corky (git-native correspondence toolkit) and agent-doc (persistent AI document sessions) — both built through the same spec-driven agent methodology they enable.
+
+---
+
+This keeps the original philosophical paragraph intact while updating the focus and adding a forward-looking paragraph about your current work. The corky/agent-doc mention ties your About to your Experience entries.
+
+Want to adjust the tone or emphasis?
+
+### LinkedIn Presence AI Update
+
+For the Presence AI entry on LinkedIn, change the date from "Present" to "February 2026". The bullets can stay as-is — they're strong and the past tense reads naturally since the bullets describe completed work.
+
+## User
+
+Thank you. Find the lucal PAT on my github. Give the lucas PAT push permission on the btakita/resume repo.

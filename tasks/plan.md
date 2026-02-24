@@ -535,3 +535,4 @@ Both are ready for installation/testing. No source changes were needed.
 
 ## User
 
+In the JetBrains plugin, add an intention when in a *.md file to run `/agent-doc` on the current file.

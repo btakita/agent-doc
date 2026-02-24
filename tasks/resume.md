@@ -54,3 +54,22 @@ This positions you at the intersection of AI engineering and developer tooling, 
 ## User
 
 Does linkedin provide an api so we can make these changes together?
+
+## Assistant
+
+LinkedIn's API is extremely restrictive for profile editing — the Profile API is read-only unless you're an approved LinkedIn partner. No public API exists to update experience bullets, summary, or project descriptions.
+
+**What works:**
+1. **I draft, you paste** — I write the final polished text for each section, you copy into LinkedIn's editor. The hard part is the writing, not the data entry.
+2. **LinkedIn's "Import from resume"** — upload a PDF and LinkedIn suggests updates, but it's unreliable.
+3. **Browser automation** (Playwright) — technically possible but fragile, against ToS, risks account restrictions.
+
+Option 1 is the practical path. Want me to draft the final copy-paste versions for your summary, Presence AI bullets, and corky/agent-doc project entries?
+
+## User
+
+Option 1 works for me.
+
+Let's start with the personal projects first. I like those. I want to emphasize that corky also does topic contexts for the agent + collaborators. It is a git based tool that handles syncing across multiple mailboxes with different scopes...and uses the git workflow to handle updates and merges.
+
+Likewise, agent-doc is also a git based tool. It uses the git workflow to handle updates and merges.

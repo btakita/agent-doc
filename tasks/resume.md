@@ -775,4 +775,19 @@ PDF regenerated.
 
 ## User
 
-Add Python, Typescript, & Zig to my Top Skills. I have mostly vibe-coded Rust but I think it's a great fit with Claude. 
+Add Python, Typescript, & Zig to my Top Skills. I have mostly vibe-coded Rust but I think it's a great fit with Claude.
+
+## Assistant
+
+Updated Top Skills:
+
+**Before:** Spec-Driven Development, Agents, Rust
+**After:** Spec-Driven Development, Agents, Rust, Python, TypeScript, Zig
+
+Rust stays — vibe-coded or not, you have two published Rust crates on crates.io and a growing codebase. Claude being good at Rust actually reinforces the spec-driven methodology: you write the spec, the agent writes idiomatic Rust, you audit. That's the workflow you're selling.
+
+PDF regenerated.
+
+## User
+
+Proofread the resume to find any grammatical error or any prose that is unclear/awkward.

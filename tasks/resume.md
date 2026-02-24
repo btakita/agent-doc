@@ -355,3 +355,28 @@ Want me to draft a complete markdown resume file combining your Presence AI expe
 Yes, please. Markdown resume. My LinkedIn profile resume is at /home/brian/Documents/resume/BrianTakita-20260224.pdf
 
 My profile is at https://www.linkedin.com/in/btakita/
+
+## Assistant
+
+Done. Created `/home/brian/Documents/resume/BrianTakita.md` — a complete markdown resume with all 6 pages from your LinkedIn PDF plus the open source projects.
+
+**What's new vs the PDF:**
+- **Open Source — Creator / Solo Developer** entry added between Presence AI and your freelance work, with the polished corky + agent-doc bullets and dog-fooding lines
+- All experience entries preserved from the PDF, cleaned up for markdown formatting
+- Links made clickable (GitHub repos, project URLs)
+- Consistent date formatting and heading structure
+
+**To render as PDF:**
+```sh
+pandoc /home/brian/Documents/resume/BrianTakita.md -o /home/brian/Documents/resume/BrianTakita.pdf
+```
+Or use a styled template for better formatting:
+```sh
+pandoc BrianTakita.md -o BrianTakita.pdf --pdf-engine=xelatex -V geometry:margin=1in
+```
+
+The file is at `/home/brian/Documents/resume/BrianTakita.md` — edit it directly or continue iterating here.
+
+## User
+
+Let's move BrianTakita.md into a resume repo. This repo will be a submodule of agent-loop.

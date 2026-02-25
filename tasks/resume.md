@@ -108,3 +108,45 @@ It is now strange that the directory is called mail. I wonder if corky is doing 
 Or is there a different abstraction to hold this communication with other email address & social media.
 
 Is mailbox still a good metaphor for this scope?
+
+## Assistant
+
+### Draft Created
+
+Created two files in `mail/`:
+
+- **`profiles.toml`** — registered `btakita` with LinkedIn handle `briantakita` (URN will be set after `corky social auth linkedin --profile btakita`)
+- **`social/20260224-agent-tooling-linkedin.md`** — the LinkedIn post with YAML frontmatter, status: `draft`
+
+To publish later: change `status: draft` → `status: ready`, then `corky social publish mail/social/20260224-agent-tooling-linkedin.md`.
+
+### Is "mail" still the right metaphor?
+
+Good instinct to question this. The tension is real: `mail/` originally meant "email data directory." Now it holds social posts, profiles, contacts that aren't email-specific. But **corky isn't doing too much — the abstraction just needs a name upgrade.**
+
+What corky actually manages is **correspondence** — structured communication across channels. Email, Slack imports, Telegram imports, and now social posts are all outbound/inbound correspondence. The tool name "corky" (correspondence kit) already captures this.
+
+**The directory name `mail/` is the real problem, not the scope.** Options:
+
+| Name | Pros | Cons |
+|---|---|---|
+| `mail/` (keep) | Zero migration, familiar | Misleading now that social posts live here |
+| `corky/` | Matches tool name | Collides with source repo name in dev workflow |
+| `correspondence/` | Accurate, matches "corky" etymology | Long |
+| `comms/` | Short, covers email + social + messaging | Informal |
+| `data/` | Generic, never wrong | Too vague |
+
+**"Mailbox" as metaphor** still works at the sub-level — a mailbox is a scoped view of correspondence for a collaborator. Alice's mailbox contains the threads, drafts, and social posts relevant to her. That's fine.
+
+The issue is really just the top-level `mail/` directory name. A rename to `comms/` or keeping `mail/` with the understanding that it's shorthand would both work. This is mostly cosmetic — the resolution chain in `resolve.rs` already abstracts the path, so renaming later is a one-line change + migration script.
+
+**Recommendation:** Keep `mail/` for now. It's entrenched in docs, gitignores, and muscle memory. Rename if/when Bluesky or Mastodon are added and it feels genuinely confusing. The abstraction (correspondence across channels) is sound — only the directory name lags behind.
+
+## User
+
+I like comms as a term...but havn't seen it used other than by military.
+
+Would mail be more confusing than comms for multiple social network support?
+I can see correspondence hence comms as being more correctly scoped as a broader category than mail.
+
+So it would be logical to use comms...but I'm not aware of precedence with other apps.

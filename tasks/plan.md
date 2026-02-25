@@ -247,3 +247,26 @@ Done. agent-doc v0.3.0 released.
 Is pypi updated as well?
 
 One issue...the 0.2.0 release was skipped. Let's learn from this. Let's have AGENTS.md understand tha
+
+## Assistant
+
+**PyPI** — updated. `pyproject.toml` bumped from v0.1.4 → v0.3.0 and published via `maturin publish`. Both wheel (`manylinux_2_39_x86_64`) and source distribution uploaded.
+
+PyPI was 3 versions behind because v0.2.0 was tagged but never published to PyPI (only crates.io + GitHub Releases). Now in sync.
+
+On the v0.2.0 skip — waiting for you to finish your thought on AGENTS.md conventions.
+
+## User
+
+We can leave the 0.2.0 skip as is. Next time, I would rather change the unpublished 0.2.0 release to the head of main. So there would only be the 0.2.0 release.
+
+Still getting this. Is agent-doc setup to fix this? Do we need to restart the claude session for the latest agent-doc update?
+
+git add -f tasks/plan.md && git commit -m "agent-doc: $(date '+%Y-%m-%d %H:%M:%S')" --no-verify
+Commit plan.md before responding
+
+Command contains $() command substitution
+
+Do you want to proceed?
+❯ 1. Yes
+2. No

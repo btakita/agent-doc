@@ -9,12 +9,14 @@ branch: null
 
 ## Status
 
-- **agent-doc**: v0.2.0 — crates.io + GitHub Releases. 85 tests passing (64 unit + 21 integration).
+- **agent-doc**: v0.3.0 — crates.io + GitHub Releases. 87 tests passing (66 unit + 21 integration).
   - Tmux session routing: `start`, `route`, `prompt` subcommands with auto-start cascade
   - `Tmux` struct with `-L` socket isolation for testing (9 tmux isolation tests)
-  - Session registry (`sessions.json`) — UUID → tmux pane mapping, liveness checks, auto-start
+  - Session registry (`sessions.json`) — UUID → tmux pane mapping, liveness checks, auto-start, file path
   - Prompt detection: `agent-doc prompt <file>` captures pane, parses Claude Code prompts → JSON
+  - Multi-session polling: `agent-doc prompt --all` polls all live sessions, returns JSON array
   - Prompt answering: `agent-doc prompt --answer <N> <file>` navigates + confirms via arrow keys
+  - `agent-doc commit <file>` — git add + commit with generated timestamp
   - `send_keys` split: literal text (`-l`) + 50ms delay + separate Enter (Claude Code TUI fix)
   - `new_window -a`: append flag for next available window index
   - `AGENT_DOC_NO_AUTOSTART`: env var to prevent auto-start in tests
@@ -227,3 +229,21 @@ git add -f tasks/plan.md && git commit -m "agent-doc: $(date '+%Y-%m-%d %H:%M:%S
 ## User
 
 PR, squash merge, release agent-doc
+
+## Assistant
+
+Done. agent-doc v0.3.0 released.
+
+1. **PR** — [#5](https://github.com/btakita/agent-doc/pull/5) (multi-session prompt polling + commit subcommand)
+2. **Squash merge** — merged to main as `0c352ed`
+3. **Version bump** — v0.2.0 → v0.3.0 in `Cargo.toml`, changelog in `VERSIONS.md`
+4. **crates.io** — [published](https://crates.io/crates/agent-doc/0.3.0)
+5. **GitHub Release** — [v0.3.0](https://github.com/btakita/agent-doc/releases/tag/v0.3.0) with prebuilt `x86_64-unknown-linux-gnu` binary
+
+87 tests passing. Includes the previously-unreleased prompt detection and send-keys fixes from v0.2.0.
+
+## User
+
+Is pypi updated as well?
+
+One issue...the 0.2.0 release was skipped. Let's learn from this. Let's have AGENTS.md understand tha

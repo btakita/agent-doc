@@ -535,6 +535,46 @@ Three additions:
 2. **`agent-doc skill install`** — write bundled SKILL.md to `.claude/skills/agent-doc/`
 3. **`agent-doc skill check`** — compare installed vs bundled version
 
+## Assistant
+
+You're right on both annotations. Let me correct my thinking:
+
+**`agent-doc claim` does NOT start a new Claude session.** It only updates `sessions.json` — a registry write, no new process. But the problem with "run it in the terminal" is that *you're already inside Claude*. You'd have to exit Claude → run `agent-doc claim` → restart Claude. That's terrible UX.
+
+**`/agent-doc claim <file>` as a skill is the right call.** Your annotation nails it: a resumed session can claim files immediately. The workflow becomes:
+
+1. Start/resume Claude (however you want)
+2. Type `/agent-doc claim tasks/plan.md` — Claude runs `agent-doc claim` via Bash
+Does agent-doc claim bind only to the TMUX pane...or is it bind to the claude session as well?
+3. Plugin Submit now routes correctly
+4. `/agent-doc tasks/plan.md` — normal document session
+
+No leaving Claude. No terminal juggling. The skill detects "claim" as the first arg and delegates to the CLI command.
+
+**Updated skill definition (pseudocode):**
+
+```
+If first arg is "claim":
+  Run: agent-doc claim <remaining args>
+  Print: "Claimed <file> for this session (pane $TMUX_PANE)"
+Else:
+  Normal document session workflow
+```
+
+This is cleaner than my original suggestion. Claim should be skill-invokable, not terminal-only.
+
+### Updated implementation plan
+
+1. **`agent-doc claim <file>`** — CLI: read `$TMUX_PANE` + frontmatter UUID → write sessions.json
+2. **`agent-doc skill install`** — write bundled SKILL.md (with `claim` support) to `.claude/skills/agent-doc/`
+3. **`agent-doc skill check`** — compare installed vs bundled version
+4. **Update SKILL.md** — add `claim` detection to skill workflow
+5. **Fix stale SKILL.md files** in agent-doc repo (`$()` → `agent-doc commit`)
+
+Implement?
+
 ## User
 
+Document the use cases in a table. Add to SPECS.md
 
+Implement

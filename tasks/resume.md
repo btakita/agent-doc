@@ -626,3 +626,28 @@ LinkedIn OAuth is not configured yet. No credentials or tokens found.
 ## User
 
 I need a Default Company Page. See https://www.linkedin.com/help/linkedin/answer/a548360/
+
+## Assistant
+
+LinkedIn requires a Company/Organization Page associated with your developer app — personal profiles won't work.
+
+**Quick solution — create a minimal Company Page:**
+
+1. Go to [linkedin.com/company/setup/new](https://www.linkedin.com/company/setup/new/)
+2. Choose "Small business"
+3. Name it "Brian Takita" or "BT Software" — just needs to exist
+4. Add a logo and basic description (can be minimal)
+5. Go back to [linkedin.com/developers](https://www.linkedin.com/developers/), create your app, select the new page as Default Company Page
+
+The page doesn't need followers or activity — it's just a gate LinkedIn requires for API access. Many solo developers create one solely for this.
+
+**Alternative:** publish manually for now. Copy the post body from `mail/social/20260224-agent-tooling-linkedin.md` and paste into LinkedIn's web composer. Set up the OAuth pipeline later.
+
+## User
+
+Rate my tagline, write better alternatives:
+Cybernetic Agent Loops for rapid quality product development.
+
+This is for the LinkedIn company page.
+
+Update AGENT.md to avoid using $() command substitutions if possible

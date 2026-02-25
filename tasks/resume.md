@@ -68,3 +68,60 @@ Let's add a way to post to LinkedIn. Corky would be a good place to add this cap
 
 ## User
 
+
+
+## Assistant
+
+### LinkedIn Posting via Corky — Design
+
+**Yes, corky is the right home.** It already handles correspondence across email/Telegram/Slack — social media posting is a natural extension of "outbound correspondence."
+
+**API Summary:**
+- **Endpoint:** `POST https://api.linkedin.com/rest/posts` — text, images, articles all supported
+- **OAuth scopes:** `w_member_social` + `openid` + `profile` — all self-service, no approval needed
+- **Token lifetime:** 60 days (refresh tokens are partner-restricted, so re-auth every ~2 months via browser)
+- **Rate limits:** ~100 req/day per user token; 3-5 posts/day practical ceiling
+
+**OAuth flow for CLI:**
+1. Spin up local HTTP server on `127.0.0.1:8484/callback`
+2. Open browser to LinkedIn authorization URL
+3. Capture the `?code=` redirect
+4. Exchange for access token, store in `~/.config/corky/tokens.json`
+5. Auto-detect expiry, prompt re-auth when needed
+
+**Multi-platform architecture** (for future Twitter/X, Mastodon, Bluesky):
+```
+corky/src/social/
+  mod.rs          — SocialPlatform trait
+  linkedin.rs     — reqwest-based LinkedIn Posts API
+  bluesky.rs      — AT Protocol (future)
+  mastodon.rs     — Mastodon API (future)
+  auth/
+    oauth2.rs     — Shared OAuth2 flow (local callback server)
+    token_store.rs — Encrypted token storage
+```
+
+**No unified Rust crate exists** for multi-platform social posting. `gen-linkedin` (v0.1.0) exists but is too immature — raw `reqwest` with a thin wrapper is better.
+
+**Proposed commands:**
+```bash
+corky social auth linkedin       # OAuth flow, store token
+corky social post linkedin       # Post from stdin or --file
+corky social post linkedin --draft  # Preview without posting
+```
+
+**Implementation order:**
+1. `SocialPlatform` trait + token store
+2. LinkedIn OAuth flow (local callback server)
+3. `corky social post linkedin` — text posts
+4. Future: Bluesky, Mastodon, Twitter/X
+
+**LinkedIn app setup required first:**
+1. Create app at [linkedin.com/developers](https://www.linkedin.com/developers/)
+2. Enable "Share on LinkedIn" + "Sign In with LinkedIn using OpenID Connect" products
+3. Add `http://127.0.0.1:8484/callback` as redirect URI
+4. Note client_id and client_secret
+
+## User
+
+Would LinkedIn in any way penalize a post created by an app vs having the actual user create the post?

@@ -149,4 +149,36 @@ Topics, contacts, and threads share the same sync primitive — content-hash-bas
 
 ## User
 
-I think agent-doc should ignore markdown comments. This would allow someone to plan out a multi-step set of interactions with the agent. wdyt? 
+I think agent-doc should ignore markdown comments. This would allow someone to plan out a multi-step set of interactions with the agent. wdyt?
+
+## Assistant
+
+Great idea. Markdown comments (`<!-- ... -->`) as a hidden scratchpad for planning multi-step interactions.
+
+**Use case:**
+
+```markdown
+## User
+
+Implement claim command
+
+<!-- Step 2: Update SPECS.md with use case table -->
+<!-- Step 3: PR, squash merge, release -->
+```
+
+After the agent responds to step 1, uncomment step 2 and submit. The agent sees it as new text.
+
+**Recommendation: strip from diff only, keep in context.**
+
+The agent should *see* comments (useful context), but changes to comments shouldn't trigger a response:
+- Adding a comment = no diff (silent)
+- Uncommenting text = diff detected (agent responds)
+- Editing a comment = no diff (silent)
+
+**Implementation:** Skill-level change in SKILL.md — strip `<!-- ... -->` blocks before comparing snapshot vs current. Snapshot stores full content, diff algorithm ignores comment-only changes.
+
+Should I update the SKILL.md?
+
+## User
+
+yes

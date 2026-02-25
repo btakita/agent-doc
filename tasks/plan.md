@@ -252,3 +252,57 @@ Nothing seems to happen when I run Ctrl+Alt+Shift+a...or run the Submit to Agent
 How do I post images other than the cli...I will post a screenshot after to follow up this agent-doc call.
 
 Can we always build the signed Jetbrains plugin after building the unsigned plugin?
+
+## Assistant
+
+### 1. Plugin fix — nothing happens because JetBrains can't find `agent-doc`
+
+JetBrains doesn't inherit your shell PATH (`~/bin` isn't visible). The plugin was calling `ProcessBuilder("agent-doc", ...)` which silently fails when the binary isn't in PATH. No error shown because there was zero error handling.
+
+**Fixed `TerminalUtil.kt`:**
+- Added `resolveAgentDoc()` — checks `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin` before falling back to bare `agent-doc`
+- Added IDE balloon notifications — success shows "Routed plan.md", failures show the actual error
+- Background thread reads process output so the EDT isn't blocked
+- Registered `Agent Doc` notification group in `plugin.xml`
+
+**Reinstall the plugin:**
+```
+agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip
+```
+Settings > Plugins > Install from Disk > restart IDE.
+
+### 2. Posting images
+
+For this CLI session: just paste or drag a screenshot path. Claude Code can read image files directly — use the file path (e.g., `/tmp/screenshot.png`).
+
+For agent-doc documents: images aren't embedded in the markdown session. Reference them by path or paste the relevant text (stack traces, error messages) directly into the `## User` block, as you did with the IOException.
+
+Does markdown support base64 encoded images? I wonder if I can copy/paste an image as base64.
+
+### 3. Signed plugin always builds now
+
+Updated `build.gradle.kts`:
+- `signPlugin` reads certificate from `certificate/chain.crt` and `certificate/private.pem` files directly (env var fallback still works for CI)
+- `signPlugin` task depends on `buildPlugin` — running `./gradlew signPlugin` always builds first, then signs
+
+Single command to build + sign:
+```bash
+cd agent-doc-jetbrains && ./gradlew signPlugin
+```
+Thank you
+## User
+
+I got the Routed plan.md
+But the session did not receive.
+
+I keep on getting this request...can we change how we assign the timestamp to avoid this constant request in Claude
+
+cd /home/brian/work/btakita/agent-loop && git add -f tasks/plan.md && git commit -m "agent-doc: $(date '+%Y-%m-%d
+%H:%M:%S')" --no-verify 2>&1 || echo "nothing to commit"
+Commit plan.md before responding
+
+Command contains $() command substitution
+
+Do you want to proceed?
+❯ 1. Yes
+2. No

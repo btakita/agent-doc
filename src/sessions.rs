@@ -16,6 +16,9 @@ pub struct SessionEntry {
     pub pid: u32,
     pub cwd: String,
     pub started: String,
+    /// Relative path to the session document (empty for legacy entries).
+    #[serde(default)]
+    pub file: String,
 }
 
 pub type SessionRegistry = HashMap<String, SessionEntry>;
@@ -107,6 +110,7 @@ impl Tmux {
             .cmd()
             .args([
                 "new-window",
+                "-a",
                 "-t",
                 session,
                 "-c",
@@ -127,14 +131,61 @@ impl Tmux {
     }
 
     /// Send keys to a tmux pane.
+    ///
+    /// Uses `-l` for literal text (no special key interpretation), then sends
+    /// Enter separately. A small delay between text and Enter ensures the TUI
+    /// (e.g., Claude Code) processes the input before the submit.
     pub fn send_keys(&self, pane_id: &str, text: &str) -> Result<()> {
+        // Send text literally (no tmux key interpretation)
         let status = self
             .cmd()
-            .args(["send-keys", "-t", pane_id, text, "Enter"])
+            .args(["send-keys", "-t", pane_id, "-l", text])
+            .status()
+            .context("failed to run tmux send-keys (text)")?;
+        if !status.success() {
+            anyhow::bail!("tmux send-keys failed (text)");
+        }
+
+        // Brief pause for TUI to process input
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Send Enter separately
+        let status = self
+            .cmd()
+            .args(["send-keys", "-t", pane_id, "Enter"])
+            .status()
+            .context("failed to run tmux send-keys (enter)")?;
+        if !status.success() {
+            anyhow::bail!("tmux send-keys failed (enter)");
+        }
+        Ok(())
+    }
+
+    /// Capture the visible content of a tmux pane.
+    pub fn capture_pane(&self, pane_id: &str) -> Result<String> {
+        let output = self
+            .cmd()
+            .args(["capture-pane", "-t", pane_id, "-p"])
+            .output()
+            .context("failed to run tmux capture-pane")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux capture-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Send a single key (not literal text) to a tmux pane.
+    pub fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["send-keys", "-t", pane_id, key])
             .status()
             .context("failed to run tmux send-keys")?;
         if !status.success() {
-            anyhow::bail!("tmux send-keys failed");
+            anyhow::bail!("tmux send-keys failed for key: {}", key);
         }
         Ok(())
     }
@@ -204,7 +255,7 @@ pub fn save(registry: &SessionRegistry) -> Result<()> {
 }
 
 /// Register a session → pane mapping.
-pub fn register(session_id: &str, pane_id: &str) -> Result<()> {
+pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
     let mut registry = load()?;
     let pid = std::process::id();
     let cwd = std::env::current_dir()
@@ -219,6 +270,7 @@ pub fn register(session_id: &str, pane_id: &str) -> Result<()> {
             pid,
             cwd,
             started,
+            file: file.to_string(),
         },
     );
     save(&registry)
@@ -270,6 +322,7 @@ mod tests {
                 pid: 12345,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: "test.md".to_string(),
             },
         );
         save(&reg).unwrap();
@@ -301,6 +354,7 @@ mod tests {
                 pid: 1000,
                 cwd: "/tmp/a".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -310,6 +364,7 @@ mod tests {
                 pid: 2000,
                 cwd: "/tmp/b".to_string(),
                 started: "2026-01-01T00:01:00Z".to_string(),
+                file: String::new(),
             },
         );
 
@@ -333,6 +388,7 @@ mod tests {
                 pid: 100,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -342,6 +398,7 @@ mod tests {
                 pid: 200,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:05:00Z".to_string(),
+                file: String::new(),
             },
         );
 
@@ -361,6 +418,7 @@ mod tests {
                 pid: 1,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -370,6 +428,7 @@ mod tests {
                 pid: 2,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
 

@@ -185,6 +185,8 @@ fn test_cli_route_generates_session_for_bare_file() {
     cmd.arg("route");
     cmd.arg(&doc);
     cmd.current_dir(tmp.path());
+    // Prevent auto-start from creating real tmux windows
+    cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
     // Route should generate a session UUID (not error), then fail on tmux (not available in CI)
     // The key behavior: it should NOT fail with "no session UUID"
     let output = cmd.output().unwrap();
@@ -209,6 +211,8 @@ fn test_cli_route_generates_session_for_null_session() {
     cmd.arg("route");
     cmd.arg(&doc);
     cmd.current_dir(tmp.path());
+    // Prevent auto-start from creating real tmux windows
+    cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
     let output = cmd.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

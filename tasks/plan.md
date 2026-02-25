@@ -409,3 +409,48 @@ The workflow is much better now. I would like to figure out how to get prompted,
 
 Hold on...the document didn't update. I see the following in the console:
 
+
+## Assistant
+
+### 1. Workflow improvement — glad it's working!
+
+The route from JetBrains is now: `Ctrl+Shift+Alt+A` → inline hint → command arrives in this session within seconds. That's the target UX.
+
+### 2. Document not updating
+
+The previous submit was triggered by the hotkey but the `## User` block was empty (no new text). Per the skill spec, if there's no diff, I say "nothing changed" in console and don't write to the document. This is correct behavior but confusing UX.
+
+**Possible improvement:** When a submit arrives with an empty `## User` block, append a brief acknowledgment anyway (e.g., "No new content — route confirmed working.") so the document always shows activity. Worth adding to the spec?
+
+### 3. Permission prompts in JetBrains — feasible but fragile today
+
+**What you want:** When Claude asks a question or needs permission (e.g., "Do you want to proceed?"), surface it in JetBrains as a dialog instead of requiring a terminal switch.
+
+**How it could work:**
+1. Poll `tmux capture-pane -t <pane> -p` every ~1 second
+2. Parse the output for Claude Code's permission patterns (numbered choices, yes/no prompts)
+3. Show a JetBrains dialog with the options
+4. Send the user's choice back via `tmux send-keys`
+
+**Why it's fragile:**
+- Claude Code's TUI output has terminal escape codes — parsing is unreliable
+- The prompt format could change between Claude Code versions
+- Race conditions between polling and user input
+
+**More robust paths (future):**
+- Claude Code exposing a hooks API or MCP events for permission requests
+- Claude Code supporting a `--headless` or `--json-events` mode
+- A local WebSocket bridge that Claude Code pushes events t
+
+**My recommendation:** Worth prototyping the `tmux capture-pane` approach as a proof-of-concept. If it works well enough for the common cases (yes/no, numbered choices), ship it. Refine later when Claude Code adds better extensibility.
+
+## User
+
+Ok...let's try the recommendation. commit the plugin first though...because it could be a bit risky...but it should work I guess...
+
+What kind of ui would the Jetbrains plugin show? A dialog in the same document bottom right corner could work. But nothing invasive like a popup in the middle of the screen.
+Hotkey support would make it worthwhile...because I can use hotkeys to answer the question in the console...though the hotkeys are not always a consistent pattern.
+
+## User
+
+Submit Agent Doc should also save the current markdown file before notifying the claude session.

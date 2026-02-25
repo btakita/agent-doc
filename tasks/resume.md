@@ -287,3 +287,97 @@ Does corky automatically install the cron when installed?
 
 Can we have the email draft frontmatter follow the same conventions as the social media drafts?
 lower snake case names...
+
+## Assistant
+
+### Cron
+
+**No**, corky does not auto-install cron entries. That's deliberate — system-level config shouldn't be modified silently by a CLI tool.
+
+Options:
+
+1. **Document only** (recommended for now) — print the cron one-liner in `corky schedule --help` and README. The user runs `crontab -e` themselves.
+
+2. **`corky schedule watch --interval 300`** — add a long-running poll mode following the existing `corky watch` pattern (uses tokio). No cron needed. Run as a systemd service or background process.
+
+3. **`corky schedule install`** — append a crontab entry programmatically. Crosses a boundary most CLI tools avoid.
+
+Option 1 is sufficient. Option 2 makes sense later if you want a unified daemon that handles both IMAP polling and scheduled publishing in one process.
+
+Let's have a unified `corky watch`. Is `--interval <i>` useful? If yes, plan to add it.
+
+### Email Draft Format
+
+You're right — the two formats should converge. Currently:
+
+| | Email drafts | Social drafts |
+|---|---|---|
+| Format | `**Key**: value` (markdown bold) | YAML frontmatter (`---`) |
+| Parser | Regex | `serde_yaml` |
+| Field names | Title Case (`Status`, `Scheduled-At`) | snake_case (`status`, `scheduled_at`) |
+
+**Proposal: migrate email drafts to YAML frontmatter.**
+
+Before (current):
+```markdown
+# Subject Line
+
+**To**: alice@example.com
+**CC**: bob@example.com
+**Status**: draft
+**Author**: Brian
+**Account**: personal
+**From**: brian@example.com
+**In-Reply-To**: <msg-id>
+
+---
+
+Body text here.
+```
+
+After (unified):
+```markdown
+---
+subject: Subject Line
+to: alice@example.com
+cc: bob@example.com
+status: draft
+author: Brian
+account: personal
+from: brian@example.com
+in_reply_to: "<msg-id>"
+scheduled_at: null
+---
+
+Body text here.
+```
+
+**Changes required:**
+
+| File | Change |
+|---|---|
+| `corky/src/draft/mod.rs` | Replace regex parser with YAML frontmatter parser (like `social/draft.rs`) |
+| `corky/src/draft/new.rs` | Generate YAML frontmatter instead of `**Key**: value` |
+| `corky/src/schedule.rs` | Simplify email scanning — use same YAML parse path |
+| `corky/src/mailbox/validate_draft.rs` | Update validation for new format |
+| `corky/SPECS.md` | Update §3 (File Formats) and §13 (Scheduling) |
+| All existing email drafts | Migration: `corky draft migrate` command |
+
+**Migration strategy:**
+
+1. Parser supports **both formats** during transition — detect by presence of `---` at line 1
+2. `corky draft migrate [--dry-run]` converts existing drafts to YAML frontmatter
+3. `corky draft new` generates the new format immediately
+4. After migration, deprecate the `**Key**: value` format (remove dual-parse in a future version)
+
+**Benefits:**
+- Unified format across all draft types
+- `serde_yaml` is stronger than regex (type safety, proper escaping)
+- snake_case everywhere — no `Scheduled-At` vs `scheduled_at` inconsistency
+- Scheduler code simplifies significantly (one YAML parse path, not two)
+
+This is a non-trivial refactor. Want me to implement it? Or keep it as a future task and ship the scheduler with the current dual-format approach?
+
+yes, plan for implementation now.
+
+

@@ -30,10 +30,13 @@ src/
   snapshot.rs       # Snapshot path/read/write
   git.rs            # Commit, branch, squash
   config.rs         # Global config (~/.config/agent-doc/config.toml)
+  sessions.rs       # Session registry (sessions.json) + Tmux struct
+  route.rs          # Route /agent-doc commands to correct tmux pane
+  start.rs          # Start Claude session inside tmux pane
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend
-  audit_docs.rs     # Audit instruction files (CLAUDE.md, AGENTS.md, SKILL.md)
+  audit_docs.rs     # Audit instruction files (via instruction-files crate)
 ```
 
 ## Agent Backend Contract

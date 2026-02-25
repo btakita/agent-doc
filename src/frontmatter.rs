@@ -1,10 +1,16 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
+    /// Document/routing UUID — permanent identifier for tmux session routing.
     #[serde(default)]
     pub session: Option<String>,
+    /// Agent conversation ID — used for `--resume` with agent backends.
+    /// Separate from `session` so the routing key never changes.
+    #[serde(default)]
+    pub resume: Option<String>,
     #[serde(default)]
     pub agent: Option<String>,
     #[serde(default)]
@@ -46,6 +52,28 @@ pub fn set_session_id(content: &str, session_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.session = Some(session_id.to_string());
     write(&fm, body)
+}
+
+/// Update the resume (agent conversation) ID in a document string.
+pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.resume = Some(resume_id.to_string());
+    write(&fm, body)
+}
+
+/// Ensure the document has a session ID. If no frontmatter exists, creates one
+/// with a new UUID v4. If frontmatter exists but session is None/null, generates
+/// a UUID and sets it. If session already exists, returns as-is.
+/// Returns (updated_content, session_id).
+pub fn ensure_session(content: &str) -> Result<(String, String)> {
+    let (fm, _body) = parse(content)?;
+    if let Some(ref session_id) = fm.session {
+        // Session already set — return content unchanged
+        return Ok((content.to_string(), session_id.clone()));
+    }
+    let session_id = Uuid::new_v4().to_string();
+    let updated = set_session_id(content, &session_id)?;
+    Ok((updated, session_id))
 }
 
 #[cfg(test)]
@@ -121,6 +149,7 @@ mod tests {
         // Start from write output to ensure consistent formatting
         let fm = Frontmatter {
             session: Some("test-id".to_string()),
+            resume: Some("resume-id".to_string()),
             agent: Some("claude".to_string()),
             model: Some("opus".to_string()),
             branch: Some("dev".to_string()),
@@ -182,5 +211,36 @@ mod tests {
         assert_eq!(fm.agent.as_deref(), Some("claude"));
         assert_eq!(fm.model.as_deref(), Some("opus"));
         assert_eq!(fm.branch.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn ensure_session_no_frontmatter() {
+        let content = "# Hello\n\nBody.\n";
+        let (updated, sid) = ensure_session(content).unwrap();
+        // Should have generated a UUID
+        assert_eq!(sid.len(), 36); // UUID v4 string length
+        let (fm, body) = parse(&updated).unwrap();
+        assert_eq!(fm.session.as_deref(), Some(sid.as_str()));
+        assert!(body.contains("# Hello"));
+    }
+
+    #[test]
+    fn ensure_session_null_session() {
+        let content = "---\nsession:\nagent: claude\n---\nBody\n";
+        let (updated, sid) = ensure_session(content).unwrap();
+        assert_eq!(sid.len(), 36);
+        let (fm, body) = parse(&updated).unwrap();
+        assert_eq!(fm.session.as_deref(), Some(sid.as_str()));
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+        assert!(body.contains("Body"));
+    }
+
+    #[test]
+    fn ensure_session_existing_session() {
+        let content = "---\nsession: existing-id\nagent: claude\n---\nBody\n";
+        let (updated, sid) = ensure_session(content).unwrap();
+        assert_eq!(sid, "existing-id");
+        // Content should be unchanged
+        assert_eq!(updated, content);
     }
 }

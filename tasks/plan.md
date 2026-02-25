@@ -924,3 +924,48 @@ yes
 
 Make sure the install.sh looks for tmux. Install tmux if missing on Linux or OSX.
 If on windows and missing, install equivalent like itmux.
+
+## Assistant
+
+### Done — install.sh + auto-frontmatter + separated session/resume
+
+**1. `bin/install.sh`** — installs scripts and ensures dependencies:
+- Detects OS (Linux/macOS/Windows)
+- **tmux**: installs via apt/dnf/pacman/zypper/apk (Linux), brew/port (macOS), suggests itmux or WSL (Windows)
+- **jq**: same package manager detection (falls back to python3 if unavailable)
+- Symlinks `agent-doc-start` and `agent-doc-route` to `~/.local/bin/`
+- Warns if `~/.local/bin` is not in PATH
+
+**2. Separated `session` from `resume` in frontmatter:**
+
+The `session` field was pulling double duty — tmux routing key AND Claude conversation ID. After the first submit, Claude would overwrite it with its own session ID, breaking tmux pane lookups.
+
+New design:
+```yaml
+---
+session: cf853a21-...    # permanent routing UUID (for tmux)
+resume: abc123...        # Claude conversation ID (for --resume)
+agent: null
+model: null
+branch: null
+---
+```
+
+Changes in agent-doc crate:
+- **`frontmatter.rs`**: Added `resume` field to `Frontmatter` struct, added `set_resume_id()` helper
+- **`submit.rs`**: Calls `ensure_session()` at start (auto-generates UUID if missing), uses `fm.resume` for `--resume`/fork detection, stores Claude's returned session_id in `resume` (not `session`)
+- **`reset.rs`**: Clears `resume` (agent conversation), keeps `session` (routing key)
+- **`init.rs`**: Generates UUID v4 for `session` on scaffold (already done by subagent)
+- All 93 tests pass, clean build
+
+**3. JetBrains plugin signed:**
+- `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (6.8KB)
+
+**Remaining:**
+- [ ] Wire agent-doc to use `instruction-files` as path dependency
+- [ ] Wire corky to use `instruction-files` as path dependency
+
+## User
+
+Should instruction-files be published with instruction-files as version dependencies? Or should we keep this as a git dependency?
+

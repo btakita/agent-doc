@@ -426,4 +426,37 @@ How do I make the plugin run the file & associate the doc to the correct tmux pa
 
 Want me to implement `agent-doc register`? ~30 lines — reads `$TMUX_PANE`, reads frontmatter UUID, writes sessions.json.
 
+## Assistant
+
+On the inline question ("How do I make the plugin run the file & associate the doc to the correct tmux pane?"):
+
+**Currently:** The plugin calls `agent-doc route <file>`, which already handles two cases:
+- **Pane alive:** Sends `/agent-doc <file>` to the registered pane
+- **Pane dead/missing:** Auto-starts a new session (creates pane, launches Claude, registers it)
+
+**The gap:** When the pane is alive but belongs to a *different* Claude session (your reboot scenario), `route` sends to the wrong session. It can't tell the difference — the pane exists and is running `claude`.
+
+**Two paths to fix this:**
+
+**A. `agent-doc register` (user runs once):**
+You start Claude manually, then run `agent-doc register tasks/plan.md` in that session. The plugin's subsequent `route` calls go to the right place. Simple, explicit, no magic.
+
+**B. Make `route` smarter (automatic):**
+`agent-doc route` could call `agent-doc prompt <file>` first to check if the registered pane's Claude session actually has the right document context. If not, auto-start a new session. More complex, fragile (heuristic-based).
+
+**Recommendation: Option A.** `agent-doc register` is simple, explicit, and covers the gap. The plugin workflow becomes:
+
+1. Start Claude however you want (manually, `agent-doc start`, etc.)
+2. Run `agent-doc register tasks/plan.md` once in that session
+3. Use the plugin Submit — it routes correctly
+
+Shall I implement `register` + `skill install` + `skill check` together? All three are small additions.
+
 ## User
+
+Are there alternative names to `agent-doc register`?
+- agent-doc claim
+- agent-doc lock
+- agent-doc take
+
+I like claim over lock because we have a last call wins flow. Thoughts? Any other alternatives?

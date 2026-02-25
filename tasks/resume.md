@@ -296,3 +296,53 @@ If the conceptual recursion still feels wrong, the only alternative that avoids 
 There is a mailboxes/ directory though...I think this is how corky works. Please verify
 
 See /home/brian/work/btakita/agent-loop/mail/mailboxes/lucas
+
+## Assistant
+
+### Correction — `mailboxes/` IS a literal directory
+
+You're right, I was wrong. Verified the actual layout:
+
+```
+mail/                           <- data root (owner's mailbox + shared data)
+  conversations/                <- owner's conversations
+  drafts/                       <- owner's drafts
+  contacts/                     <- shared contacts
+  mailboxes/                    <- collaborator mailboxes
+    lucas/                      <- Lucas's scoped mailbox
+      conversations/
+      drafts/
+      contacts/
+  social/                       <- social drafts
+  profiles.toml
+```
+
+The data root doubles as the owner's mailbox. `mailboxes/` is a real subdirectory containing collaborator scoped views. So renaming to `mailbox/` would produce:
+
+```
+mailbox/mailboxes/lucas/conversations/
+```
+
+That's a literal path stutter — not just conceptual. Valid concern.
+
+**Options to resolve:**
+
+| # | Approach | Path example | Migration |
+|---|---|---|---|
+| 1 | **Keep `mail/`** | `mail/mailboxes/lucas/` | None |
+| 2 | **`mailbox/` + flatten** | `mailbox/brian/`, `mailbox/lucas/` (no `mailboxes/` subdir) | Restructure owner data into named subdir |
+| 3 | **`mailbox/` + rename inner** | `mailbox/peers/lucas/` | Rename `mailboxes/` to `peers/` |
+| 4 | **`correspondence/` or `comms/`** | `correspondence/mailboxes/lucas/` | Rename top-level only |
+
+**Option 2 (flatten) is architecturally cleanest** — every collaborator is a peer, including the owner. Brian's data moves from `mailbox/conversations/` to `mailbox/brian/conversations/`. The root only contains shared data (profiles.toml, social/). But it's a bigger migration + resolve.rs refactor.
+
+**Option 1 (keep `mail/`) is pragmatic** — zero migration, no stutter. `mail/mailboxes/lucas/` reads naturally: "in the mail store, mailboxes, Lucas's." The actor-model "mailbox" concept still works as the internal abstraction even if the directory isn't literally called that.
+
+**Updated recommendation:** Given the stutter problem, `mail/` is actually the strongest option after all. It avoids `mailbox/mailboxes/`, it's short, it's familiar. The postal connotation is slightly narrow, but "mail" in Unix already means "messages" broadly (think `maildir`, `sendmail`, `/var/mail`). And corky's full name is "correspondence kit" — the directory name doesn't need to carry the full semantic weight.
+
+If the stutter bothers you enough to do option 2 (flatten), that's the right long-term architecture. But it's a real refactor, not a rename.
+
+## User
+
+My hesitation with flattening is that a mailbox name can conflict with a system file name...such as social.
+Or whatever is added in the future. Is there a convention for these predefined names that we can use? Like a leading .social or something else?

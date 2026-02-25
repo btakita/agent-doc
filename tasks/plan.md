@@ -448,3 +448,27 @@ Each poll cycle:
 ## User
 
 When I edit resume.md, the background loop reverts to the last saved state...unless I quickly save. Please only apply the sync **one time after the write happens**.
+
+## Assistant
+
+Fixed. The poller was calling `reloadFiles()` unconditionally every 1.5s, which clobbered unsaved editor changes.
+
+Now it tracks the file's `modificationStamp` and only reloads when the stamp changes (i.e., when Claude actually writes to the file on disk):
+
+```kotlin
+file.refresh(false, false)
+val currentStamp = file.modificationStamp
+if (currentStamp != lastKnownModStamp) {
+    lastKnownModStamp = currentStamp
+    // Reload once
+    FileDocumentManager.getInstance().reloadFiles(file)
+}
+```
+
+No stamp change = no reload = safe to type in the editor while the poller runs.
+
+Plugin rebuilt and signed. Restart IntelliJ.
+
+## User
+
+cleanup

@@ -621,3 +621,23 @@ agent-doc skill check                # Check if installed skill is up to date
 Create a PR branch.
 Update README and other user facing docs.
 version bump. minor or patch?
+
+I'm getting an error everytime when submitting the agent doc. Claude fixes it but it's wasted tokens.
+
+❯ /agent-doc tasks/plan.md
+
+● Bash(agent-doc commit tasks/plan.md)
+⎿  Error: Exit code 1
+fatal: pathspec 'tasks/plan.md' did not match any files
+Error: git add failed
+
+     fatal: pathspec 'tasks/plan.md' did not match any files
+     Error: git add failed
+
+● Bash(pwd && ls tasks/plan.md 2>&1)
+⎿  Error: Exit code 2
+/home/brian/work/btakita/agent-loop/agent-doc
+ls: cannot access 'tasks/plan.md': No such file or directory
+
+     /home/brian/work/btakita/agent-loop/agent-doc
+     ls: cannot access 'tasks/plan.md': No such file or directory

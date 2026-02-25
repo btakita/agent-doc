@@ -177,5 +177,26 @@ Can we instead show the prompt, but only on the IDE window? So if someone comes 
 
 Plugin needs rebuilding (`./gradlew buildPlugin`) to take effect.
 
-## User
+## Assistant
 
+Yes — revised the approach. Instead of dismissing on focus loss, the prompt now lives **inside** the IDE window itself.
+
+**Changed `JDialog` → `JLayeredPane` overlay:**
+
+The `PromptPanel` no longer creates a separate top-level `JDialog`. Instead, it adds a `JPanel` to the IDE frame's `JLayeredPane` at `POPUP_LAYER`. This means:
+
+1. **No WM popup leak** — the panel is a child component of the IDE window, not a separate window. It only renders within the IDE frame.
+2. **Persists across focus changes** — when you switch away and come back, the prompt is still there waiting.
+3. **Repositions on resize** — a `ComponentListener` on the frame keeps the panel anchored to the bottom.
+4. **Same hotkeys** — 1-9 to select, Esc to dismiss. Same styling.
+
+**Key changes in `PromptPanel.kt`:**
+- `currentPopup: JDialog?` → `currentPanel: JPanel?` + `currentFrame: JFrame?`
+- `show()`: adds panel to `frame.layeredPane` at `JLayeredPane.POPUP_LAYER`
+- `dismiss()`: removes panel from layered pane, cleans up resize listener
+- No focus listeners needed — the panel is part of the window
+
+Plugin needs rebuilding (`./gradlew buildPlugin`).
+
+## User
+rebuild plugin

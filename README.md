@@ -27,6 +27,8 @@ agent-doc run session.md                  # diff, send, append response
 agent-doc diff session.md                 # preview what would be sent
 agent-doc reset session.md                # clear session + snapshot
 agent-doc clean session.md                # squash session git history
+agent-doc route session.md               # route to tmux pane (or auto-start)
+agent-doc start session.md               # start Claude in current tmux pane
 ```
 
 ## Document Format
@@ -58,7 +60,8 @@ Follow-up. You can also annotate inline:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `session` | no | (generated on first run) | Session ID for continuity |
+| `session` | no | (generated on first run) | Session ID for tmux routing |
+| `resume` | no | (none) | Claude conversation ID for `--resume` |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |
 | `branch` | no | (none) | Git branch for session commits |
@@ -138,6 +141,26 @@ default_agent = "claude"
 
 Override per-document via `agent:` in frontmatter, or per-invocation via `--agent`.
 
+## Tmux Session Routing
+
+Route documents to persistent Claude sessions via tmux:
+
+```sh
+agent-doc route plan.md    # send to existing pane, or auto-start one
+```
+
+**How it works:**
+1. Each document gets a `session` UUID in frontmatter (auto-generated if missing)
+2. A session registry (`sessions.json`) maps UUIDs to tmux pane IDs
+3. `route` checks if the pane is alive — if so, sends the command; if dead, auto-starts a new one
+
+**Auto-start cascade:**
+- No tmux server → create `"claude"` session
+- `"claude"` session missing → create it
+- `"claude"` session exists → create new window
+
+This enables a multi-document workflow where each document has its own Claude session in a dedicated tmux pane.
+
 ## Editor Integration
 
 ### JetBrains
@@ -163,6 +186,9 @@ agent-doc init <file> [title] [--agent <name>]
 agent-doc diff <file>
 agent-doc reset <file>
 agent-doc clean <file>
+agent-doc route <file>     # route to existing tmux pane or auto-start
+agent-doc start <file>     # start Claude session in current tmux pane
+agent-doc audit-docs       # audit instruction files for staleness
 ```
 
 ## License

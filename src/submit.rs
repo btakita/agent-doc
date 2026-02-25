@@ -26,7 +26,12 @@ pub fn run(
         }
     };
 
-    let content_original = std::fs::read_to_string(file)?;
+    // Ensure the document has a session UUID (for tmux routing)
+    let raw_content = std::fs::read_to_string(file)?;
+    let (content_original, _session_id) = frontmatter::ensure_session(&raw_content)?;
+    if content_original != raw_content {
+        std::fs::write(file, &content_original)?;
+    }
     let (fm, _body) = frontmatter::parse(&content_original)?;
 
     // Resolve agent
@@ -38,7 +43,7 @@ pub fn run(
     let backend = agent::resolve(agent_name, agent_config)?;
 
     // Build prompt
-    let prompt = if fm.session.is_some() {
+    let prompt = if fm.resume.is_some() {
         format!(
             "The user edited the session document. Here is the diff since the last submit:\n\n\
              <diff>\n{}\n</diff>\n\n\
@@ -80,15 +85,15 @@ pub fn run(
 
     eprintln!("Submitting to {}...", agent_name);
 
-    // Send to agent
-    let fork = fm.session.is_none();
+    // Send to agent — use `resume` for agent conversation tracking
+    let fork = fm.resume.is_none();
     let model = model.or(fm.model.as_deref());
-    let response = backend.send(&prompt, fm.session.as_deref(), fork, model)?;
+    let response = backend.send(&prompt, fm.resume.as_deref(), fork, model)?;
 
-    // Build our version: original + session_id update + response appended
+    // Build our version: original + resume_id update + response appended
     let mut content_ours = content_original.clone();
     if let Some(ref sid) = response.session_id {
-        content_ours = frontmatter::set_session_id(&content_ours, sid)?;
+        content_ours = frontmatter::set_resume_id(&content_ours, sid)?;
     }
     content_ours.push_str("\n## Assistant\n\n");
     content_ours.push_str(&response.text);

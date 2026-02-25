@@ -125,3 +125,150 @@ fn test_cli_init_requires_file() {
     cmd.arg("init");
     cmd.assert().failure();
 }
+
+#[test]
+fn test_cli_start_requires_file() {
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("start");
+    cmd.assert().failure();
+}
+
+#[test]
+fn test_cli_route_requires_file() {
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("route");
+    cmd.assert().failure();
+}
+
+#[test]
+fn test_cli_start_file_not_found() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["start", "/nonexistent/file.md"]);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
+fn test_cli_route_file_not_found() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["route", "/nonexistent/file.md"]);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
+fn test_cli_start_not_in_tmux() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+    std::fs::write(&doc, "---\nsession: test-123\n---\n# Test\n").unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("start");
+    cmd.arg(&doc);
+    // Remove TMUX env vars to simulate not being in tmux
+    cmd.env_remove("TMUX");
+    cmd.env_remove("TMUX_PANE");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not running inside tmux"));
+}
+
+#[test]
+fn test_cli_route_generates_session_for_bare_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+    std::fs::write(&doc, "# No frontmatter\n").unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("route");
+    cmd.arg(&doc);
+    cmd.current_dir(tmp.path());
+    // Route should generate a session UUID (not error), then fail on tmux (not available in CI)
+    // The key behavior: it should NOT fail with "no session UUID"
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("no session UUID"),
+        "route should auto-generate session UUID, got: {}",
+        stderr
+    );
+    // Verify the file was updated with frontmatter
+    let content = std::fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("session:"), "frontmatter should have been generated");
+}
+
+#[test]
+fn test_cli_route_generates_session_for_null_session() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+    std::fs::write(&doc, "---\nsession: null\nagent: claude\n---\n# Test\n").unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("route");
+    cmd.arg(&doc);
+    cmd.current_dir(tmp.path());
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("no session UUID"),
+        "route should auto-generate UUID for null session, got: {}",
+        stderr
+    );
+    // Verify the file now has a real session UUID (not null)
+    let content = std::fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("session:"), "frontmatter should exist");
+    assert!(!content.contains("session: null"), "session should no longer be null");
+    // Agent field should be preserved
+    assert!(content.contains("agent:"), "other frontmatter fields should be preserved");
+}
+
+#[test]
+fn test_cli_start_generates_session_for_bare_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+    std::fs::write(&doc, "# No frontmatter\n").unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("start");
+    cmd.arg(&doc);
+    cmd.env_remove("TMUX");
+    cmd.env_remove("TMUX_PANE");
+    // start should generate the UUID first, THEN fail on tmux check
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not running inside tmux"));
+    // Verify the file was updated with frontmatter before the tmux error
+    let content = std::fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("session:"), "start should auto-generate session UUID");
+}
+
+#[test]
+fn test_cli_start_generates_session_for_null_session() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+    std::fs::write(&doc, "---\nsession: null\n---\n# Test\n").unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("start");
+    cmd.arg(&doc);
+    cmd.env_remove("TMUX");
+    cmd.env_remove("TMUX_PANE");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not running inside tmux"));
+    let content = std::fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("session:"), "frontmatter should exist");
+    assert!(!content.contains("session: null"), "session should no longer be null");
+}
+
+#[test]
+fn test_cli_help_shows_start_and_route() {
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("start"))
+        .stdout(predicate::str::contains("route"));
+}

@@ -455,3 +455,70 @@ Cases #1, #9, #10, #11, and the auto-start cascade in `route` all require a runn
 ## User
 
 Is it possible to have process isolation to simulate the different scenarios with tmux? Would a lightweight container be needed to do this?
+
+## Assistant
+
+### Yes — tmux `-L` socket isolation, no container needed
+
+tmux supports fully independent servers via the `-L` flag. Each server has its own sessions, windows, and panes — completely isolated from the user's real tmux:
+
+```rust
+#[cfg(test)]
+fn test_tmux_server(name: &str) -> TmuxServer {
+    // -L creates a named socket in /tmp/tmux-{uid}/
+    // Completely isolated from the user's tmux
+    Command::new("tmux")
+        .args(["-L", name, "-f", "/dev/null", "new-session", "-d", "-s", "test"])
+        .status().unwrap();
+    TmuxServer { name: name.to_string() }
+}
+
+impl Drop for TmuxServer {
+    fn drop(&mut self) {
+        Command::new("tmux").args(["-L", &self.name, "kill-server"]).status().ok();
+    }
+}
+```
+
+**Three approaches compared:**
+
+| Approach | Isolation | Speed | CI-friendly | Complexity |
+|---|---|---|---|---|
+| `-L` socket | Full tmux isolation | Fast (<100ms) | Yes | Low — add param to tmux calls |
+| Container (Docker/Podman) | OS-level | Slow (~5s startup) | Yes but heavy | High — Dockerfile, CI config |
+| Fake tmux (mock) | None (no real tmux) | Instant | Yes | Medium — mock all tmux commands |
+
+**`-L` is the clear winner.** It runs real tmux with real panes, so we test actual behavior, not mocked behavior. No containers, no extra dependencies.
+
+**What changes in `sessions.rs`:**
+
+```rust
+pub struct TmuxConfig {
+    pub server_socket: Option<String>,  // -L flag; None = default server
+}
+
+impl TmuxConfig {
+    fn base_args(&self) -> Vec<&str> {
+        match &self.server_socket {
+            Some(s) => vec!["-L", s],
+            None => vec![],
+        }
+    }
+}
+```
+
+All `Command::new("tmux")` calls would prepend `config.base_args()`. Production uses `None` (default server), tests use `Some("agent-doc-test-{uuid}")`.
+
+**This closes all 5 "requires live tmux" gaps:**
+
+| # | Scenario | Now testable? |
+|---|---|---|
+| 1 | Happy path — pane alive | Yes — create pane in test server, verify `send-keys` |
+| 9 | No tmux server | Yes — use `-L nonexistent`, verify auto-start creates it |
+| 10 | tmux running, no "claude" session | Yes — start test server without "claude", verify creation |
+| 11 | "claude" session exists | Yes — create "claude" in test server, verify new window |
+| Auto-start cascade | Yes — full end-to-end in isolated server |
+
+## User
+
+Test the TMUX cases using -L.

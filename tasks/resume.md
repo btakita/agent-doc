@@ -651,3 +651,32 @@ Cybernetic Agent Loops for rapid quality product development.
 This is for the LinkedIn company page.
 
 Update AGENT.md to avoid using $() command substitutions if possible
+
+## Assistant
+
+### Tagline Review
+
+**"Cybernetic Agent Loops for rapid quality product development."** — 6/10
+
+Strengths:
+- "Cybernetic" is distinctive and signals the human-agent feedback loop
+- "Agent Loops" is technically precise
+
+Weaknesses:
+- "Cybernetic" can read as sci-fi buzzword to some audiences
+- "rapid quality product development" is generic
+- Missing: what makes YOUR loops different (spec-driven, dog-fooded, open source)
+
+**Alternatives (strongest first):**
+
+1. **"Spec-driven agent tooling for teams that ship."** — Direct, opinionated, memorable.
+2. **"Agent loops that close the gap between spec and ship."** — Captures feedback loop without "cybernetic."
+3. **"Open-source agent tooling for spec-driven development."** — Leads with open-source differentiator.
+4. **"Human-agent feedback loops for software that ships fast."** — Unpacks "cybernetic" into plain language.
+5. **"Collaborative intelligence tooling — from spec to ship."** — Matches your resume header brand.
+
+If keeping "cybernetic": **"Cybernetic agent loops — from spec to ship."**
+
+## User
+I like Collaborative intelligence tooling — from spec to ship.
+Which one seems strongest to you?

@@ -198,7 +198,12 @@ agent-doc-start /tmp/test.md
 # TODO: agent-doc-start should call ensure_session or generate UUID itself
 ```
 
+agent-doc-start should call ensure_session
+
 **Known gap:** `agent-doc-start` requires the session UUID to already exist in frontmatter. Documents created with `agent-doc init` get one automatically, but manually created `.md` files won't have it. Consider having `agent-doc-start` auto-generate the UUID if missing (using the same awk + uuidgen pattern).
+
+Yes, agent-doc-start should auto-generate the UUID if missing.
 
 ## User
 
+Would it be advantageous to agent-doc-start and agent-doc to Rust? 

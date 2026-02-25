@@ -700,3 +700,18 @@ If you later want something punchier for marketing copy, #1 is your go-to. For t
 ## User
 
 I like #1 as well now that you mention it.
+
+## Assistant
+
+Use both — they serve different purposes:
+
+- **Company Page tagline:** "Collaborative intelligence tooling — from spec to ship." — Brand-aligned, works as identity.
+- **Marketing / README / pitch:** "Spec-driven agent tooling for teams that ship." — Punchy, action-oriented, converts.
+
+Use #5 on the LinkedIn Company Page (brand coherence with your personal profile). Use #1 anywhere you need to grab attention fast — repo READMEs, conference bios, cold outreach.
+
+## User
+
+Let's save these as a topic. brian-takita-company or should this all be merged into brian-takita?
+
+How does the brian-takita topic work with the brian contact? They should at least be associated.

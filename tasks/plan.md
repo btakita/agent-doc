@@ -245,4 +245,4 @@ The numbered buttons `[1] Yes`, `[2] No` map directly to the number keys. The pa
 
 ## User
 
-
+How can I make the font size bigger for that dialog?

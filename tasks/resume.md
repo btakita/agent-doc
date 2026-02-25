@@ -253,3 +253,46 @@ I like mailbox...A hesitation I have is the mailbox/mailboxes/ directory...
 This demonstrates that mailbox is recursive...which is actually good. So maybe that's ok.
 
 It is strange...but it does demonstrate the recursive directory structure.
+
+## Assistant
+
+### The `mailbox/mailboxes/` recursion
+
+You're right that it looks recursive — and you're right that it IS recursive, by design. The top-level `mailbox/` is the corky data root. Each collaborator's subdirectory within it is also conceptually a "mailbox." So `mailbox/brian/` means "Brian's mailbox inside the mailbox store." That's not a bug — it's the abstraction being honest about itself.
+
+**Precedent for self-referential nesting:**
+
+- `git/` repo containing `.git/` — "git inside git"
+- `node_modules/*/node_modules/` — modules containing modules
+- Unix `/home/` — the home of all homes
+- Erlang/OTP: a process (actor) can spawn child processes, each with their own mailbox. The system IS a mailbox containing mailboxes
+
+**The path in practice:**
+
+```
+mailbox/                    <- corky data root (the "system mailbox")
+  brian/                    <- Brian's scoped mailbox
+    conversations/
+    drafts/
+    contacts/
+  alice/                    <- Alice's scoped mailbox
+    conversations/
+    drafts/
+  profiles.toml
+  social/
+    20260224-agent-tooling-linkedin.md
+```
+
+Users would never type `mailbox/mailboxes/` — there's no literal `mailboxes/` subdirectory. The collaborator directories (brian/, alice/) ARE the mailboxes directly. So the recursion is conceptual, not a literal path stutter.
+
+**The strangeness is actually clarity.** When someone sees `mailbox/brian/conversations/`, they immediately understand: "this is Brian's mailbox, and it contains his conversations." If the top-level were `data/` or `store/`, that self-documenting quality disappears.
+
+If the conceptual recursion still feels wrong, the only alternative that avoids it would be calling the top-level something different from what it contains — like `post_office/` containing mailboxes. But that's worse: more characters, more metaphor to explain, and "post office" has even stronger postal connotations.
+
+**Bottom line:** `mailbox/` works. The recursion is the point — it's mailboxes all the way down.
+
+## User
+
+There is a mailboxes/ directory though...I think this is how corky works. Please verify
+
+See /home/brian/work/btakita/agent-loop/mail/mailboxes/lucas

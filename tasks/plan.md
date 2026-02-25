@@ -410,3 +410,48 @@ The code is already modular enough that extraction would be a ~1 hour task: move
 
 Do we have full test coverage, including edge cases?
 Document the edge case table. Examine the edge case table to make sure all use cases are accounted for.
+
+## Assistant
+
+### Test Coverage Audit — 68 tests (47 unit + 21 integration)
+
+Added 6 new tests to close gaps found during audit. Here's the complete edge case table with coverage status:
+
+| # | Scenario | `start` | `route` | Tests | Coverage |
+|---|---|---|---|---|---|
+| 1 | Happy path — session exists, pane alive | Registers pane, execs claude | `tmux send-keys` to pane | Manual only | Requires live tmux |
+| 2 | No frontmatter — raw `.md` file | Generates UUID, writes frontmatter | Generates UUID, writes frontmatter, auto-starts | `ensure_session_no_frontmatter`, `test_cli_start_generates_session_for_bare_file`, `test_cli_route_generates_session_for_bare_file` | **Full** |
+| 3 | Null session — `session: null` | Generates UUID, writes it back | Generates UUID, writes it back, auto-starts | `ensure_session_null_session`, `test_cli_start_generates_session_for_null_session`, `test_cli_route_generates_session_for_null_session` | **Full** |
+| 4 | Session exists, no pane registered | Registers pane, execs claude | No pane found → auto-start | `ensure_session_existing_session`, `load_empty_returns_empty_map` | **Full** (logic) |
+| 5 | Session exists, pane dead | Registers new pane (overwrite) | Detects dead → auto-start | `pane_alive_returns_false_for_nonexistent`, `registry_overwrite_existing_session` | **Full** (logic) |
+| 6 | Not in tmux (`$TMUX` unset) | Error: "not running inside tmux" | Auto-start cascade | `test_cli_start_not_in_tmux`, `test_cli_start_generates_session_for_bare_file` | **Full** for start |
+| 7 | File not found | Error | Error | `test_cli_start_file_not_found`, `test_cli_route_file_not_found` | **Full** |
+| 8 | No file argument | clap error | clap error | `test_cli_start_requires_file`, `test_cli_route_requires_file` | **Full** |
+| 9 | No tmux server | Error (not in tmux) | Creates "claude" session | Logic in `auto_start()` | Requires live tmux |
+| 10 | tmux running, no "claude" session | N/A | Creates "claude" session | Logic in `auto_start()` | Requires live tmux |
+| 11 | tmux running, "claude" exists | N/A | New window in "claude" | Logic in `auto_start()` | Requires live tmux |
+| 12 | Multiple sessions | Each gets own registration | Routes per UUID | `registry_multiple_sessions_isolated` | **Full** |
+| 13 | Stale registry entries | Overwritten on re-register | Dead pane detected | `prune_removes_dead_panes_from_map`, `pane_alive_returns_false_for_nonexistent` | **Full** |
+| 14 | Registry file missing | Creates `sessions.json` | Auto-starts | `load_empty_returns_empty_map` | **Full** |
+| 15 | Help text | Works | Works | `test_cli_help_shows_start_and_route` | **Full** |
+| 16 | Registry roundtrip | Write entry | Read entry back | `registry_roundtrip` | **Full** |
+
+### New tests added this round:
+
+**Integration tests:**
+- `test_cli_route_generates_session_for_null_session` — verifies `route` auto-generates UUID when `session: null`, preserves other fields
+- `test_cli_start_generates_session_for_bare_file` — verifies `start` generates UUID for raw markdown, then fails on tmux check
+- `test_cli_start_generates_session_for_null_session` — verifies `start` replaces null session with real UUID
+
+**Unit tests:**
+- `registry_multiple_sessions_isolated` — 2 sessions in one registry, verifies no cross-contamination
+- `registry_overwrite_existing_session` — re-registering same session updates pane/pid
+- `prune_removes_dead_panes_from_map` — pruning removes entries with nonexistent tmux panes
+
+### Untestable without live tmux (5 scenarios):
+
+Cases #1, #9, #10, #11, and the auto-start cascade in `route` all require a running tmux server. These are tested by the manual test scenarios documented earlier. The core logic (session lookup, pane liveness, registry CRUD) is fully unit-tested — only the actual `tmux` process spawning is untested.
+
+## User
+
+Is it possible to have process isolation to simulate the different scenarios with tmux? Would a lightweight container be needed to do this?

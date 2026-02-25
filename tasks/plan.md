@@ -378,4 +378,52 @@ This would update sessions.json without starting a new Claude session. You'd run
 ## User
 
 How do I use agent-doc to start the correct claude session?
-How do I use agent-doc to 
+How do I use agent-doc to associate the md file to the current claude session?
+
+## Assistant
+
+### Starting a session from scratch
+
+```
+agent-doc start tasks/plan.md
+```
+
+Handles everything: creates tmux pane, launches `claude --resume <id>`, registers in `sessions.json`. Plugin routing works immediately.
+
+Does this work with resuming a claude session?
+
+### Associating a file with the current session
+
+**Not yet implemented.** This is what `agent-doc register` would do:
+
+```
+agent-doc register tasks/plan.md    # Register current tmux pane for this file
+```
+
+Reads `$TMUX_PANE` + frontmatter UUID → updates `sessions.json`. Covers the case where you started Claude manually.
+
+**Workaround:** I manually fixed `sessions.json` to point plan.md → pane `%4` (this session).
+
+### Making the plugin trigger agent-doc
+
+The JetBrains plugin's Submit action (`Ctrl+Shift+Alt+A` or right-click → "Submit Agent Doc") already does this:
+1. Saves all open documents
+2. Runs `agent-doc route <file>` — which sends `/agent-doc <file>` to the registered tmux pane
+3. Starts the PromptPoller for permission prompts
+
+The "run the file" part is handled by `agent-doc route`. Your third question appears cut off — send the rest when ready.
+
+How do I make the plugin run the file & associate the doc to the correct tmux pane?
+
+### Summary
+
+| Scenario | Command |
+|---|---|
+| Start fresh session in tmux | `agent-doc start tasks/plan.md` |
+| Associate existing Claude with file | `agent-doc register tasks/plan.md` *(not yet implemented)* |
+| Submit from plugin | `Ctrl+Shift+Alt+A` (calls `agent-doc route`) |
+| Fix routing manually | Edit `.agent-doc/sessions.json` |
+
+Want me to implement `agent-doc register`? ~30 lines — reads `$TMUX_PANE`, reads frontmatter UUID, writes sessions.json.
+
+## User

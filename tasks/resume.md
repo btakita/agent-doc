@@ -738,4 +738,18 @@ A self contact does make sense for at least that use case. But you are right tha
 
 Yes. I want the brian-takita topic to hold the memory so I can share it with lucas.
 
-Preferably in AGENTS.md or an appropri
+Preferably in an appropriately named md file.
+
+## Assistant
+
+Created `mail/topics/brian-takita/README.md` — the canonical shareable brand/identity context. Lucas gets it via git sync.
+
+Contents: taglines (#1 and #5 with contexts), brand vocabulary, LinkedIn Company Page notes, open source projects, social profiles, resume pipeline reference.
+
+Auto memory (`memory/brian-takita.md`) updated to be a quick-reference mirror that points to the canonical topic file.
+
+**Directory convention:** `mail/topics/{topic-name}/README.md`. No code changes needed — it's a data convention. When topics prove useful enough, `corky topic` commands can formalize it later.
+
+## User
+
+Why was brian-takita not shared with the lucas mailbox?

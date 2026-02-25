@@ -16,6 +16,9 @@ pub struct SessionEntry {
     pub pid: u32,
     pub cwd: String,
     pub started: String,
+    /// Relative path to the session document (empty for legacy entries).
+    #[serde(default)]
+    pub file: String,
 }
 
 pub type SessionRegistry = HashMap<String, SessionEntry>;
@@ -252,7 +255,7 @@ pub fn save(registry: &SessionRegistry) -> Result<()> {
 }
 
 /// Register a session → pane mapping.
-pub fn register(session_id: &str, pane_id: &str) -> Result<()> {
+pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
     let mut registry = load()?;
     let pid = std::process::id();
     let cwd = std::env::current_dir()
@@ -267,6 +270,7 @@ pub fn register(session_id: &str, pane_id: &str) -> Result<()> {
             pid,
             cwd,
             started,
+            file: file.to_string(),
         },
     );
     save(&registry)
@@ -318,6 +322,7 @@ mod tests {
                 pid: 12345,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: "test.md".to_string(),
             },
         );
         save(&reg).unwrap();
@@ -349,6 +354,7 @@ mod tests {
                 pid: 1000,
                 cwd: "/tmp/a".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -358,6 +364,7 @@ mod tests {
                 pid: 2000,
                 cwd: "/tmp/b".to_string(),
                 started: "2026-01-01T00:01:00Z".to_string(),
+                file: String::new(),
             },
         );
 
@@ -381,6 +388,7 @@ mod tests {
                 pid: 100,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -390,6 +398,7 @@ mod tests {
                 pid: 200,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:05:00Z".to_string(),
+                file: String::new(),
             },
         );
 
@@ -409,6 +418,7 @@ mod tests {
                 pid: 1,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
         reg.insert(
@@ -418,6 +428,7 @@ mod tests {
                 pid: 2,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                file: String::new(),
             },
         );
 

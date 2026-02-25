@@ -15,6 +15,7 @@ mod start;
 mod submit;
 mod upgrade;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -90,11 +91,19 @@ enum Commands {
     },
     /// Detect permission prompts from a Claude Code session
     Prompt {
-        /// Path to the session document
-        file: PathBuf,
+        /// Path to the session document (omit with --all)
+        file: Option<PathBuf>,
         /// Answer a prompt by selecting option N (1-based)
         #[arg(long)]
         answer: Option<usize>,
+        /// Poll all active sessions instead of a single file
+        #[arg(long)]
+        all: bool,
+    },
+    /// Commit a session document (git add + commit with timestamp)
+    Commit {
+        /// Path to the session document
+        file: PathBuf,
     },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
@@ -128,10 +137,17 @@ fn main() -> anyhow::Result<()> {
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
         Commands::Route { file } => route::run(&file),
-        Commands::Prompt { file, answer } => match answer {
-            Some(option) => prompt::answer(&file, option),
-            None => prompt::run(&file),
-        },
+        Commands::Prompt { file, answer, all } => {
+            if all {
+                return prompt::run_all();
+            }
+            let file = file.context("FILE required when not using --all")?;
+            match answer {
+                Some(option) => prompt::answer(&file, option),
+                None => prompt::run(&file),
+            }
+        }
+        Commands::Commit { file } => git::commit(&file),
         Commands::Upgrade => upgrade::run(),
     }
 }

@@ -33,8 +33,9 @@ pub fn run(file: &Path) -> Result<()> {
 
     let pane_id = sessions::current_pane()?;
 
-    // Register session → pane
-    sessions::register(&session_id, &pane_id)?;
+    // Register session → pane (with relative file path)
+    let file_str = file.to_string_lossy();
+    sessions::register(&session_id, &pane_id, &file_str)?;
     eprintln!(
         "Registered session {} → pane {}",
         &session_id[..8],

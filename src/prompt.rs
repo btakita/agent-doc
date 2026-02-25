@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::sessions::Tmux;
+use crate::sessions::{SessionRegistry, Tmux};
 use crate::{frontmatter, sessions};
 
 #[derive(Debug, Serialize)]
@@ -84,6 +84,45 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
     let pane_content = tmux.capture_pane(&pane_id)?;
     let info = parse_prompt(&pane_content);
     println!("{}", serde_json::to_string(&info)?);
+    Ok(())
+}
+
+/// Entry in the `--all` output: one per live session.
+#[derive(Debug, Serialize)]
+pub struct PromptAllEntry {
+    pub session_id: String,
+    pub file: String,
+    #[serde(flatten)]
+    pub prompt: PromptInfo,
+}
+
+/// Poll all live sessions for active prompts.
+pub fn run_all() -> Result<()> {
+    run_all_with_tmux(&Tmux::default_server())
+}
+
+pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
+    let registry: SessionRegistry = sessions::load()?;
+    let mut entries: Vec<PromptAllEntry> = Vec::new();
+
+    for (session_id, entry) in &registry {
+        if !tmux.pane_alive(&entry.pane) {
+            continue;
+        }
+
+        let prompt = match tmux.capture_pane(&entry.pane) {
+            Ok(content) => parse_prompt(&content),
+            Err(_) => inactive(),
+        };
+
+        entries.push(PromptAllEntry {
+            session_id: session_id.clone(),
+            file: entry.file.clone(),
+            prompt,
+        });
+    }
+
+    println!("{}", serde_json::to_string(&entries)?);
     Ok(())
 }
 
@@ -381,5 +420,40 @@ mod tests {
     fn parse_option_line_no_match() {
         assert!(parse_option_line("Not an option").is_none());
         assert!(parse_option_line("").is_none());
+    }
+
+    #[test]
+    fn prompt_all_entry_serializes_flat() {
+        let entry = PromptAllEntry {
+            session_id: "abc-123".to_string(),
+            file: "tasks/plan.md".to_string(),
+            prompt: PromptInfo {
+                active: true,
+                question: Some("Allow?".to_string()),
+                options: Some(vec![
+                    PromptOption { index: 1, label: "Yes".to_string() },
+                    PromptOption { index: 2, label: "No".to_string() },
+                ]),
+                selected: Some(0),
+            },
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"session_id\":\"abc-123\""));
+        assert!(json.contains("\"file\":\"tasks/plan.md\""));
+        assert!(json.contains("\"active\":true"));
+        assert!(json.contains("\"question\":\"Allow?\""));
+    }
+
+    #[test]
+    fn prompt_all_entry_inactive_omits_optional_fields() {
+        let entry = PromptAllEntry {
+            session_id: "def-456".to_string(),
+            file: "tasks/resume.md".to_string(),
+            prompt: inactive(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"active\":false"));
+        assert!(!json.contains("\"question\""));
+        assert!(!json.contains("\"options\""));
     }
 }

@@ -614,3 +614,29 @@ Note: `cargo publish` is blocked because `instruction-files` isn't on crates.io 
 
 audit docs.
 publish instruction-files first. Then publish the rest.
+
+## Assistant
+
+Done. All three crates published to crates.io:
+
+1. **audit-docs** — Fixed 3 stale doc warnings (mtime issue from squash merge). `make precommit` clean.
+
+2. **instruction-files v0.1.0** — Published to crates.io.
+   - Created [GitHub repo](https://github.com/btakita/instruction-files), initialized with .gitignore, pushed
+   - Removed `publish = false` from Cargo.toml, added repository field
+   - 45 tests pass
+
+3. **agent-doc v0.2.0** — Published to crates.io.
+   - Successfully resolved `instruction-files v0.1.0` from crates.io (no more path-only dependency)
+   - 77 tests pass
+
+4. **corky v0.9.5** — Published to crates.io.
+   - Patch bump (internal refactor only — audit-docs extracted to instruction-files crate)
+   - Tagged `v0.9.5`, pushed to GitHub
+   - 252 tests pass
+
+Publish order was: `instruction-files` → `agent-doc` → `corky` (dependency chain).
+
+## User
+
+

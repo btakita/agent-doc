@@ -306,3 +306,34 @@ Command contains $() command substitution
 Do you want to proceed?
 ❯ 1. Yes
 2. No
+
+## Assistant
+
+### 1. Route fix — registered this session
+
+The "Routed plan.md" balloon was working, but the command went to pane `%85` (an auto-started Claude session) instead of THIS session at pane `%73`. This happened because you started Claude manually, not via `agent-doc start`, so there was no registry entry.
+
+**Fixed:** Updated `sessions.json` to point to `%73` (this pane). Next `Ctrl+Shift+Alt+A` should work.
+
+**UX gap identified:** We need an `agent-doc register <file>` subcommand to register an existing Claude session's pane without having to edit JSON manually. Added to Outstanding.
+
+### 2. Base64 images in markdown
+
+Yes, markdown supports it: `![alt](data:image/png;base64,...)`. But the base64 string for a screenshot is typically 50-200KB of text — it would bloat the document badly. Not practical for agent-doc sessions.
+
+Better options for sharing images:
+- Reference by path: `See /tmp/screenshot.png`
+- In the CLI: just provide the file path and Claude can read it
+- Paste error text directly (as you've been doing — this is the best approach)
+
+### 3. `$()` confirmation prompt — fixed
+
+The `$(date ...)` command substitution triggers Claude Code's security prompt every time. I'll stop using that pattern. Going forward, agent-doc commits will use a pre-computed timestamp variable to avoid the prompt.
+
+### 4. Outstanding items added
+
+- `agent-doc register <file>` — register current tmux pane for a document without starting a new Claude session
+
+## User
+
+

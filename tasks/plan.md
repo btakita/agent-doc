@@ -219,3 +219,30 @@ src/config/
 ## User
 
 First...are there any pending releases?
+
+How do I use the shortcut key to answer yes?
+
+## Assistant
+
+### Pending Releases
+
+- **agent-doc**: 2 unreleased commits since v0.2.0:
+  - `a07efe7` feat: add prompt detection subcommand
+  - `56a5d6f` fix: send-keys split, new-window append, test isolation
+  - Ready for v0.2.1 (patch) or v0.3.0 (minor, since prompt is a new feature).
+- **corky**: Up to date — no unreleased commits since latest tag.
+- **instruction-files**: Published to crates.io as v0.1.0 but has **no git tags**. Needs `git tag v0.1.0` on the publish commit.
+
+### Shortcut Keys
+
+In the JetBrains PromptPanel (the yellow bar at the bottom):
+
+- Press **`1`** on your keyboard → selects "Yes"
+- Press **`2`** → selects "No"
+- Press **`Esc`** → dismisses the panel without answering
+
+The numbered buttons `[1] Yes`, `[2] No` map directly to the number keys. The panel needs keyboard focus — if the number keys don't respond, click the yellow bar first, then press the number.
+
+## User
+
+

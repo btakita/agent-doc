@@ -408,4 +408,5 @@ The code is already modular enough that extraction would be a ~1 hour task: move
 
 ## User
 
-
+Do we have full test coverage, including edge cases?
+Document the edge case table. Examine the edge case table to make sure all use cases are accounted for.

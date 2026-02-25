@@ -264,3 +264,17 @@ If you want even larger, just say — or I can wire it to follow the IDE's edito
 ## User
 
 Yes...scale it with the IDE editor font size
+
+## Assistant
+
+Done — `PromptPanel.kt` now reads the editor font size from `EditorColorsManager.getInstance().globalScheme.editorFontSize` and derives all panel fonts from it:
+
+- **Question**: editor font size + 1, bold
+- **Buttons**: editor font size
+- **Esc hint**: editor font size - 2, italic
+
+No more hardcoded pt values. The panel scales automatically when you change your editor font in **Settings > Editor > Font**. Plugin rebuilt and signed — restart IntelliJ to pick it up.
+
+## User
+
+Ok...now topics...I have another agent planning email + social media scheduling. Would the work on topics clash with the scheduling work?

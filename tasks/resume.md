@@ -125,3 +125,28 @@ corky social post linkedin --draft  # Preview without posting
 ## User
 
 Would LinkedIn in any way penalize a post created by an app vs having the actual user create the post?
+
+## Assistant
+
+### No confirmed penalty for API-created posts
+
+**Official stance:** LinkedIn's documentation treats API posts as fully equivalent to native posts. The Posts API uses `"feedDistribution": "MAIN_FEED"` — same distribution pipeline as manually created posts. No official docs mention reduced reach for API-sourced content.
+
+**No "posted via" label:** Unlike Twitter/X (which used to show "via TweetDeck"), LinkedIn does **not** display a visible source attribution on API-created posts. Viewers can't tell the difference.
+
+**Community evidence is mixed but mostly favorable:**
+- **Buffer's experiment:** API/third-party posts averaged *higher* reach (7,024) than native posts (6,071). Conclusion: "no significant difference."
+- **Richard van der Blom (2024 algorithm report):** Claimed third-party scheduling tools were penalized, but based on a paid report with limited public data.
+- **2025 consensus:** Multiple sources (Botdog, Agorapulse, Social Status) indicate any such penalty was **removed** by 2025.
+
+**Bottom line:** Safe to post via the API. No visible "posted via app" label, no confirmed algorithmic penalty, and the dominant view is that any historical penalty has been reversed.
+
+## User
+
+What is the detailed design plan for LinkedIn posting via a draft?
+Propose the draft frontmatter for a linkedin post?
+Will the permissions be based on who has the token? So a collaborator can directly post if the collaborator has the token?
+
+Edge Case: What if the collaborator has their own LinkedIn account token or multiple tokens? Would the author on the frontmatter need to match the linkedin profile name? 
+
+Let's discuss...

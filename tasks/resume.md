@@ -715,3 +715,27 @@ Use #5 on the LinkedIn Company Page (brand coherence with your personal profile)
 Let's save these as a topic. brian-takita-company or should this all be merged into brian-takita?
 
 How does the brian-takita topic work with the brian contact? They should at least be associated.
+
+## Assistant
+
+**Single file: `brian-takita.md` in auto memory.** No split needed — the company page is an extension of your personal brand as a solo dev. One file keeps taglines, positioning, and brand voice coherent.
+
+**On the contact question:** Corky contacts (`mail/contacts/`) are for people you correspond with — they hold AGENTS.md context for writing to that person. A self-contact doesn't fit the model. Personal brand/identity context belongs in auto memory, where every future AI session inherits your brand decisions.
+
+Saved to `~/.claude/projects/.../memory/brian-takita.md` with:
+- Both taglines (#1 and #5) with their contexts
+- Brand vocabulary (collaborative intelligence, spec-driven, agent loops, dog-fooding)
+- LinkedIn Company Page notes
+- Resume pipeline reference
+- Social profiles
+
+If you later want corky to have a "topics" concept (reusable context that attaches to threads/drafts), that's a separate feature — about subject matter, not identity.
+
+## User
+
+Sometimes I send emails to myself...mainly for TODOs or info I want to look into later.
+A self contact does make sense for at least that use case. But you are right that it is for conversations with the contact.
+
+Yes. I want the brian-takita topic to hold the memory so I can share it with lucas.
+
+Preferably in AGENTS.md or an appropri

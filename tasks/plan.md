@@ -790,3 +790,15 @@ For now, `README.md` + `docs.rs` covers it.
 ## User
 
 Any version bumps or releases needed?
+
+## Assistant
+
+No version bumps needed right now:
+
+- **instruction-files v0.1.0** — Only post-publish change is the README. Could do a v0.1.1 to get it on crates.io's page, but not urgent.
+- **agent-doc v0.2.0** — Just published. Clean, no changes since release.
+- **corky v0.9.5** — Just published. Has WIP social media features (`src/social/`, 5 new test files) but those are in-progress, not ready for release.
+
+## User
+
+

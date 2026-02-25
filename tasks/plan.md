@@ -348,3 +348,41 @@ Error: file not found: /tmp/.tmp0vnmJ7/test.md
 mise WARN  Current directory does not exist or is not accessible: /tmp/.tmp0vnmJ7
  /tmp/.tmp0vnmJ7                                                                                                                                                                                                                      00:24:16
 ❯
+
+## Assistant
+
+### 1. Stale tmux window from tests
+
+That `/tmp/.tmp0vnmJ7/test.md` error was a side effect from `cargo test`. The integration tests triggered auto-start which created real tmux windows using temp file paths. After the test finished, the temp dir was cleaned up but the tmux window persisted.
+
+**Fix needed:** Integration tests that trigger `route` (which can auto-start) should use `-L` isolated tmux servers so they don't pollute the user's tmux. Added to Outstanding.
+
+Can we fix this now?
+
+Safe to close that tmux window — it's an orphan from the test run.
+
+I did.
+
+### 2. send-keys Enter fix (already applied)
+
+The `send_keys` was sending text + Enter in a single tmux call. Claude Code's TUI wasn't processing the Enter as a submit. Fixed to:
+1. Send text with `-l` (literal mode)
+2. Wait 50ms
+3. Send Enter separately
+
+Rebuilt and installed. Try `Ctrl+Shift+Alt+A` again — should fully work now.
+
+### 3. Bugs fixed this session
+
+| Bug | Root cause | Fix |
+|---|---|---|
+| Plugin "no such file" | Plugin called `agent-doc-route` (old name) | Fixed `SubmitAction.kt` |
+| Plugin silent failure | JetBrains PATH doesn't include `~/bin` | Added `resolveAgentDoc()` with common paths |
+| Route to wrong session | Manual Claude sessions not registered | Updated `sessions.json` manually |
+| `tmux new-window` crash | Duplicate window index | Added `-a` flag (append) |
+| send-keys Enter not submitting | Text + Enter in single call too fast for TUI | Split into literal text + 50ms delay + Enter |
+| Test creates orphan tmux windows | Auto-start in tests uses real tmux | TODO: use `-L` isolation in tests |
+
+## User
+
+

@@ -246,3 +246,21 @@ The numbered buttons `[1] Yes`, `[2] No` map directly to the number keys. The pa
 ## User
 
 How can I make the font size bigger for that dialog?
+
+## Assistant
+
+Done — bumped the font sizes in `PromptPanel.kt` and rebuilt the plugin:
+
+| Element | Before | After |
+|---------|--------|-------|
+| Question | 12pt bold | **14pt bold** |
+| Buttons | 11pt | **13pt** |
+| Esc hint | 10pt italic | **11pt italic** |
+
+Plugin rebuilt and signed. Restart IntelliJ to pick up the change (or re-install from `build/distributions/`).
+
+If you want even larger, just say — or I can wire it to follow the IDE's editor font size via `EditorColorsManager` so it scales automatically with your preferences.
+
+## User
+
+Yes...scale it with the IDE editor font size

@@ -447,3 +447,19 @@ Want me to add this to SPECS.md now?
 ## User
 
 yes
+
+## Assistant
+
+### Added to SPECS.md §2.5
+
+Added the naming convention block as **§2.5 Directory Naming Convention** in `corky/SPECS.md`, right after the Data Directory sections (§2.1–§2.4). It includes:
+
+- Directory naming table (`mail/`, `mailboxes/`, `social/`, `contacts/`)
+- "Why mailbox internally, mail as directory" rationale bullets
+- The load-bearing architecture warning about `mailboxes/`
+
+This keeps the naming rationale co-located with the layout spec it documents. The discussion that produced it (Actor Pattern analysis, stutter problem, namespace collisions) is preserved here in the session doc for context, while SPECS.md gets just the actionable reference.
+
+## User
+
+cleanup this doc

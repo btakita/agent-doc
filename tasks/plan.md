@@ -198,5 +198,16 @@ The `PromptPanel` no longer creates a separate top-level `JDialog`. Instead, it 
 
 Plugin needs rebuilding (`./gradlew buildPlugin`).
 
+## Assistant
+
+Plugin rebuilt and signed.
+
+```
+agent-doc-jetbrains-0.1.0-signed.zip  (35 KB)
+```
+
+Install from: `Settings → Plugins → ⚙ → Install Plugin from Disk → select the zip`. Restart IDE to pick up the change.
+
 ## User
-rebuild plugin
+
+cleanup

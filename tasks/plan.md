@@ -387,3 +387,25 @@ Rebuilt and installed. Try `Ctrl+Shift+Alt+A` again — should fully work now.
 
 The Routed ... overlay is a bit invasive. Does Jetbrains support an inline notification.
 Like can it be a info bubble near the cursor that is very short? There should be quick feedback and it goes away. Not a bubble in the lower right corner (away from the actual file) that sticks around a bit too long...
+
+## Assistant
+
+### Inline hint — done
+
+Replaced the balloon notification with `HintManager.showInformationHint()` — a small hint that appears right at the cursor position and auto-dismisses in ~2 seconds. Errors still use balloon notifications (they need to persist and be readable).
+
+Plugin rebuilt and signed. Reinstall:
+```
+agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip
+```
+
+### Test orphan fix — done
+
+Added `AGENT_DOC_NO_AUTOSTART=1` env var check in `route.rs`. The two route integration tests now set this var, preventing them from creating real tmux windows. All 21 tests pass.
+
+## User
+
+The workflow is much better now. I would like to figure out how to get prompted, in a lightweight way, the questions & permissions that claude asks for...without having to jump to the terminal window. Is that possible or would require a fragile hack to pull off?
+
+Hold on...the document didn't update. I see the following in the console:
+

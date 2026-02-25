@@ -283,3 +283,53 @@ The binary is already v0.3.0 (`which agent-doc` → `/home/brian/bin/agent-doc`)
 ## User
 
 Does agent-doc upgrades have a way to upgrade the skill? Should this be automatic?
+
+## Assistant
+
+**No** — `agent-doc upgrade` currently only updates the binary. It has zero awareness of skill files. The SKILL.md in the agent-doc repo is also stale (still has the old `$()` pattern from before the `commit` subcommand).
+
+**Proposed: `agent-doc install-skill`**
+
+Embed the SKILL.md content in the binary via `include_str!`, then write it out on demand:
+
+```
+agent-doc install-skill              # Write SKILL.md to .claude/skills/agent-doc/SKILL.md
+agent-doc install-skill --check      # Print "up to date" or "outdated (binary: v0.4.0, skill: v0.3.0)"
+```
+
+**How it works:**
+
+1. **Build time:** `include_str!("../.claude/skills/agent-doc/SKILL.md")` bundles the skill content into the binary. The source of truth is `agent-doc/.claude/skills/agent-doc/SKILL.md` in the repo.
+2. **`install-skill`:** Writes the bundled content to `.claude/skills/agent-doc/SKILL.md` relative to CWD. Creates directories if needed. Idempotent — skips if content matches.
+3. **After `agent-doc upgrade`:** Prints a reminder: "Run `agent-doc install-skill` in your projects to update the skill definition."
+4. **Auto-detect:** If `.claude/skills/agent-doc/SKILL.md` already exists in CWD, `upgrade` could auto-update it (no manual step for the common case).
+
+**Why not fully automatic?**
+
+The skill file lives in the *project*, not globally. `upgrade` runs once but you may have multiple projects with agent-doc skills. Auto-updating the CWD project after upgrade is reasonable; other projects need a manual `install-skill`.
+
+`agent-doc skill check` would work on the CWD project. Is there a virtual environment for Rust that is commonly used? 
+
+**Immediate fix needed:** Sync the agent-doc repo's SKILL.md files to use `agent-doc commit <FILE>` instead of the `$()` pattern.
+
+yes
+
+**Implementation scope:**
+
+| File | Change |
+|---|---|
+| `agent-doc/.claude/skills/agent-doc/SKILL.md` | Fix stale git integration line → `agent-doc commit <FILE>` |
+| `agent-doc/SKILL.md` | Same fix (root-level copy) |
+| `agent-doc/src/install_skill.rs` | **New.** `include_str!`, write to `.claude/skills/agent-doc/SKILL.md`, `--check` flag |
+| `agent-doc/src/upgrade.rs` | After successful upgrade, auto-install skill if `.claude/skills/agent-doc/` exists in CWD |
+| `agent-doc/src/main.rs` | Add `InstallSkill` subcommand |
+
+Want me to implement?
+
+## User
+
+How about
+- `agent-doc skill install`
+- `agent-doc skill check`
+
+I rebooted but the plugin does not seem to associate with the correct claude session when I Submit Agent Doc

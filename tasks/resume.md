@@ -344,3 +344,58 @@ This is the true edge case — two people independently create `profiles.toml` e
 ## User
 
 Does this system handle mapping mailboxes using a different handle for the same account?
+
+## Assistant
+
+### Cross-Mailbox Handle Mapping
+
+**Yes, by design.** Each mailbox has its own `social/profiles.toml`. The same LinkedIn account can have different handles in different mailboxes:
+
+```
+# Mailbox A (work team)
+[profiles.btakita]
+person_urn = "urn:li:person:abc123"
+
+# Mailbox B (open source project)
+[profiles.brian]
+person_urn = "urn:li:person:abc123"    # same account!
+```
+
+**This works because:**
+- Profile registry is **mailbox-scoped**, not global
+- Token store is **local and keyed by `person_urn`**, not by handle
+- At publish time: `author` → `profiles.toml` → `person_urn` → token store lookup by URN
+
+**Design refinement — token store keyed by URN:**
+
+```json
+{
+  "tokens": {
+    "urn:li:person:abc123": {
+      "platform": "linkedin",
+      "display_name": "Brian Takita",
+      "access_token": "AQUvlL_...",
+      "expires_at": "2026-04-25T00:00:00Z"
+    }
+  }
+}
+```
+
+**Resolution chain:**
+1. Draft has `author: btakita` (or `brian` — depends on mailbox)
+2. `profiles.toml` → `person_urn = "urn:li:person:abc123"`
+3. Token store lookup by URN → access token
+4. Post to LinkedIn
+
+| Scenario | Works? | Why |
+|---|---|---|
+| Same account, different handles across mailboxes | Yes | URN-based token lookup |
+| Same handle, different accounts across mailboxes | Yes | Each mailbox has own `profiles.toml` |
+| Auth once, publish from any mailbox | Yes | Token store keyed by URN, not handle |
+| Move between mailboxes | Yes | Register handle in new mailbox's `profiles.toml` |
+
+**Key insight:** The handle is a mailbox-local alias. The URN is the stable identity. Token store is a global credential vault that works across all mailboxes.
+
+## User
+
+This same conflict can happen with handle + email addresses and other social media. So we should verify that all urns are accounted for. Do you also validate that an url is not used for multiple account records?

@@ -712,3 +712,5 @@ Pushed as commit `fa219fc` to the PR branch. No absolute paths needed in the ski
 
 squash merge, release current minor version...do not make a new version.
 cleanup this doc
+
+I'm getting the plugin popup in other window manager windows

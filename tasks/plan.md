@@ -690,5 +690,25 @@ Done. PR created: [#6](https://github.com/btakita/agent-doc/pull/6)
 
 93 tests passing, clippy clean. Ready for review + merge.
 
+## Assistant
+
+On the inline annotation ("Can you have agent-doc commit be relative to the git root unless an absolute path is given?"):
+
+**Yes — implemented and pushed to PR.** `agent-doc commit` now resolves relative paths against the git root:
+
+1. Try superproject root (`git rev-parse --show-superproject-working-tree`) — handles submodule CWD
+2. Try git toplevel (`git rev-parse --show-toplevel`) — handles normal git CWD
+3. Fallback: use as-is (relative to CWD)
+
+Each step checks if the resolved path exists before using it. Absolute paths skip resolution entirely.
+
+**Example:** CWD is `agent-loop/agent-doc` (submodule):
+- `agent-doc commit tasks/plan.md` → resolves to `/home/brian/.../agent-loop/tasks/plan.md` (superproject root)
+- No more "pathspec did not match" errors
+
+Pushed as commit `fa219fc` to the PR branch. No absolute paths needed in the skill.
+
 ## User
 
+squash merge, release current minor version...do not make a new version.
+cleanup this doc

@@ -999,3 +999,32 @@ Ready to wire both crates now.
 ## User
 
 Wire them up according to the plan.
+
+## Assistant
+
+### Wired — instruction-files is now the shared audit crate
+
+**agent-doc** (1153 → 12 lines in `audit_docs.rs`):
+- Added `instruction-files = { path = "../instruction-files", version = "0.1" }` to Cargo.toml
+- Removed `once_cell`, `regex`, `glob` direct deps (now transitive via instruction-files)
+- `audit_docs.rs` is now a thin wrapper: `instruction_files::run(&AuditConfig::agent_doc(), root_override)`
+- 52 tests pass (41 unit + 11 integration)
+
+**corky** (515 → 10 lines in `audit_docs.rs`):
+- Added `instruction-files = { path = "../instruction-files", version = "0.1" }` to Cargo.toml
+- `audit_docs.rs` is now: `instruction_files::run(&AuditConfig::corky(), None)`
+- 252 tests pass
+
+**instruction-files**: 45 tests pass — the shared crate carries all the audit logic.
+
+All outstanding items from the plan are now complete:
+- [x] `bin/install.sh` with tmux detection
+- [x] JetBrains plugin signed
+- [x] Auto-frontmatter with session UUID
+- [x] Separated `session` (routing) from `resume` (agent conversation)
+- [x] Wire agent-doc → instruction-files
+- [x] Wire corky → instruction-files
+
+## User
+
+

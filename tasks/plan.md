@@ -351,3 +351,26 @@ For the best document-editing experience, submit from JetBrains and let the poll
 ## User
 
 I did submit from JetBrains...but it doesn't seem to poll at times. I'm switching panes and selecting the terminal while the task is running.
+
+Also, when I selected this plan.md, the resume.md had a question that was not picked up by the plugin.
+
+## Assistant
+
+Two issues, two root causes:
+
+**1. File not refreshing** — Fixed. The poller was using `file.refresh(true, false)` (async), which batches VFS refreshes and may not trigger promptly when the editor loses focus. Changed to:
+- `file.refresh(false, false)` — synchronous, completes immediately
+- `FileDocumentManager.getInstance().reloadFiles(file)` — explicitly reloads the editor buffer on the EDT
+
+Plugin rebuilt and signed. Restart IntelliJ to pick it up.
+
+**2. resume.md prompt not detected** — Design limitation. The `PromptPoller` only monitors the **most recently submitted file**. When you submitted plan.md, the poller switched to polling plan.md's tmux session. resume.md's session prompt was invisible.
+
+To fix this properly, the poller would need to monitor **all active sessions** (iterate `sessions.json` entries, poll each). That's a larger change — adding to Outstanding:
+- `PromptPoller`: poll all active sessions, not just the last-submitted file
+
+let's plan implementation for polling all active sessions.
+
+## User
+
+

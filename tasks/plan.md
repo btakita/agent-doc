@@ -727,8 +727,40 @@ include_claude_md = true
 
 That's a future enhancement. Today the struct approach works for the two consumers.
 
-Where would the toml be located? Would it be an addon with dependencies? So would corky and agent-docs both have a section for instruciton-files...or should we always have .instruction-files.toml? 
+Where would the toml be located? Would it be an addon with dependencies? So would corky and agent-docs both have a section for instruciton-files...or should we always have .instruction-files.toml?
+
+## Assistant
+
+### 1. Both AGENTS.md and CLAUDE.md everywhere
+
+Collapse to a single `AuditConfig::default()` that always discovers and audits both `AGENTS.md` and `CLAUDE.md`. No more `include_claude_md` flag.
+
+Convention: `CLAUDE.md -> AGENTS.md` symlink (or vice versa) so both names resolve. Any AI coding tool that looks for either file finds the same content.
+
+### 2. Config: `.instruction-files.toml` at project root
+
+```
+myproject/
+  .instruction-files.toml   # project-level overrides (optional)
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  src/
+```
+
+**Why not embed in consumer configs:**
+
+| Approach | Problem |
+|---|---|
+| `[instruction-files]` in `.corky.toml` | agent-doc can't read it |
+| `[instruction-files]` in agent-doc config | corky can't read it |
+| Duplicate in both | Config drift |
+| **`.instruction-files.toml` at project root** | **One source of truth, both consumers read it** |
+
+**Resolution order:**
+1. `.instruction-files.toml` in project root (if exists)
+2. Fall back to `AuditConfig::default()` (polyglot, everything included)
+
+**Dependency strategy:** The consuming binary reads the TOML and constructs the `AuditConfig` -- zero new deps in the library crate. The library stays pure data + audit logic. Both agent-doc and corky already have `toml` in their deps.
 
 ## User
-
 

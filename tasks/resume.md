@@ -590,3 +590,15 @@ corky draft migrate --dry-run    # Show what would change without writing
 ## User
 
 Let's modify the linked in draft. Near the end, mention something like ..."oh yeah, I'm using corky to publish this post as well." Integrate it in smoothly in the post.
+
+## Assistant
+
+Updated `mail/social/20260224-agent-tooling-linkedin.md`. Added a self-referential aside to the "100% dog-fooding" line:
+
+> 100% dog-fooding. 100% open source. 100% spec-driven development. Even this post — drafted in a corky social markdown file and published via `corky social publish`.
+
+Reinforces the dog-fooding theme with a concrete, self-evident example. The backtick CLI command gives it technical authenticity without breaking the flow.
+
+## User
+
+publish to linkedin

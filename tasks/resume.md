@@ -753,3 +753,30 @@ Auto memory (`memory/brian-takita.md`) updated to be a quick-reference mirror th
 ## User
 
 Why was brian-takita not shared with the lucas mailbox?
+
+## Assistant
+
+The `mail/topics/brian-takita/README.md` file sits in the **root data directory** (`mail/`). Mailbox sync (`corky mailbox sync`) does two things:
+
+1. `git pull --rebase` + `git push` on each mailbox repo
+2. Copies `voice.md` from root → mailbox **if the root copy is newer**
+
+That's it. No other files from the root data directory are propagated to mailbox repos. So `mail/topics/` stays local to the root — Lucas's mailbox (a separate git repo under `mail/mailboxes/lucas/`) never sees it.
+
+**Three options to fix this:**
+
+1. **Extend mailbox sync to copy `topics/`** — Add `topics/` to the selective copy list alongside `voice.md` in `corky/src/mailbox/sync.rs`. Simple, mirrors the `voice.md` pattern. Downside: one-way copy (root → mailbox), edits in the mailbox don't flow back.
+
+2. **Make topics a shared git submodule** — Create `mail/topics/` as its own repo, referenced as a submodule in both root and each mailbox. Bidirectional sync via git. More infrastructure overhead but true collaboration.
+
+3. **Move topic content into conversations** — Instead of a standalone `topics/` dir, reference the topic README from conversation threads via the existing `corky topics` config in `.corky.toml`. The topic metadata (keywords, mailboxes, contacts) is already config-based — the README content could be inlined as the `description` field, or the topic could point to a conversation thread that gets routed normally.
+
+**Recommendation: Option 1 for now.** It matches the established pattern (`voice.md` sync) and gets the content to Lucas immediately. If bidirectional topic editing becomes a need, upgrade to option 2 later.
+
+Want me to extend mailbox sync to include `topics/`?
+
+## User
+
+Can topic sharing be configured in .corky.toml? If a thread shared with a mailbox has a topic, that topic can be shared and added to the .corky.toml mailbox topics collection.
+
+This should allow bidirectional edits via the mailboxes/lucas monorepo...where topics/ <-> mailboxes/lucas/topics

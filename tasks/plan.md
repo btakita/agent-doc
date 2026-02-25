@@ -792,3 +792,72 @@ I want to support multiple sessions as well. So if the claude session is open, t
 
 If the claude session is not open, a new pane should be opened in "primary" window running the other claude sessions.
 If there is no active "primary" window, then a new shell is spawned, ensuring tmux is running, with the claude session.
+
+## Assistant
+
+### Session Registry Design
+
+**Registry:** `.agent-doc/sessions.json`
+```json
+{
+  "cf853a21-3aaf-4775-9cc8-0e789109f9dd": {
+    "pane": "%42",
+    "pid": 12345,
+    "cwd": "/home/brian/work/btakita/agent-loop",
+    "started": "2026-02-24T17:00:00Z"
+  }
+}
+```
+
+**Two shell scripts are the core:**
+
+**`agent-doc-start <file.md>`** — start Claude for a document:
+1. Read `session` from frontmatter (generate UUID if missing, write it back)
+2. Register `{session: $TMUX_PANE}` in `.agent-doc/sessions.json`
+3. Start `claude` in the current pane
+
+**`agent-doc-route <file.md>`** — send command to the right pane:
+1. Read `session` from frontmatter
+2. Look up pane in `.agent-doc/sessions.json`
+3. Check if pane is alive (`tmux list-panes`)
+4. **If alive:** `tmux send-keys -t <pane> "/agent-doc <path>" Enter`
+5. **If dead/missing — auto-start:**
+   ```
+   tmux running? → No → tmux new-session -s claude -d
+   "claude" window exists? → No → tmux new-window -t <primary> -n claude
+   → Yes → tmux split-window -t claude
+   Start claude in new pane, register in sessions.json
+   Send /agent-doc command
+   ```
+
+**Multi-session routing:**
+```
+tmux "claude" session:
+  Window 0: plan.md   → session cf853a21... → pane %42
+  Window 1: resume.md → session abc12345... → pane %43
+```
+
+IDE hotkey on `plan.md` → routes to pane %42.
+IDE hotkey on `resume.md` → routes to pane %43.
+
+**IDE plugins just call `agent-doc-route`:**
+- JetBrains: `ProcessBuilder("agent-doc-route", relativePath).start()`
+- VSCode: `child_process.exec("agent-doc-route " + relativePath)`
+
+One implementation, two consumers. The shell scripts are the source of truth.
+
+**TODO for agent-doc crate:** auto-add frontmatter (session UUID) to any document processed by `/agent-doc`.
+
+### Implementation pieces
+
+| Component | Purpose |
+|---|---|
+| `agent-doc-start` | Shell script — start claude, register pane |
+| `agent-doc-route` | Shell script — look up session, send-keys or auto-start |
+| JetBrains plugin | Calls `agent-doc-route` via `ProcessBuilder` |
+| VSCode extension | Calls `agent-doc-route` via `child_process.exec` |
+| agent-doc skill | Auto-frontmatter, update registry on each `/agent-doc` submit |
+
+Ready to implement the shell scripts.
+
+## User

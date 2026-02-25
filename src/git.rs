@@ -2,13 +2,54 @@ use anyhow::Result;
 use std::path::Path;
 use std::process::Command;
 
+/// Resolve a relative path against the git root (superproject root if in a submodule).
+/// Absolute paths are returned as-is.
+fn resolve_to_git_root(file: &Path) -> Result<std::path::PathBuf> {
+    if file.is_absolute() {
+        return Ok(file.to_path_buf());
+    }
+
+    // Try superproject first (handles submodule CWD case)
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-superproject-working-tree"])
+        .output();
+    if let Ok(ref o) = output {
+        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !root.is_empty() {
+            let resolved = std::path::PathBuf::from(&root).join(file);
+            if resolved.exists() {
+                return Ok(resolved);
+            }
+        }
+    }
+
+    // Try git toplevel
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output();
+    if let Ok(ref o) = output {
+        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !root.is_empty() {
+            let resolved = std::path::PathBuf::from(&root).join(file);
+            if resolved.exists() {
+                return Ok(resolved);
+            }
+        }
+    }
+
+    // Fallback: use as-is (relative to CWD)
+    Ok(file.to_path_buf())
+}
+
 /// Commit a file with an auto-generated message. Skips hooks.
+/// Relative paths are resolved against the git root (superproject if in a submodule).
 pub fn commit(file: &Path) -> Result<()> {
+    let resolved = resolve_to_git_root(file)?;
     let timestamp = chrono_timestamp();
     let msg = format!("agent-doc: {}", timestamp);
 
     let status = Command::new("git")
-        .args(["add", "-f", &file.to_string_lossy()])
+        .args(["add", "-f", &resolved.to_string_lossy()])
         .status()?;
     if !status.success() {
         anyhow::bail!("git add failed");

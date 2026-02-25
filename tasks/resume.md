@@ -1,3 +1,10 @@
+---
+session: db08a891-c339-4a49-9f49-2d8a1f30ed10
+resume: null
+agent: null
+model: null
+branch: null
+---
 # Resume Session
 
 ## Status
@@ -190,3 +197,59 @@ corky and comms seems like the name doesn't match as much...this is an intuitive
 
 corky and mail is less of a match than corky and correspondence...but not much less of a match.
 Also languages that use the Actor Pattern use the term mailbox. Not sure if this is an Actor pattern...but it does seem like it could be. Could you assess the Actor Pattern analogy with the Corky workflow?
+
+## Assistant
+
+### Actor Pattern — Corky Analogy
+
+Good intuition. Let's map it formally.
+
+**Actor Pattern primitives (Hewitt 1973, Erlang/OTP, Akka):**
+
+| Concept | Actor Pattern | Corky |
+|---|---|---|
+| **Actor** | Independent entity with private state | Collaborator (Brian, Alice) with scoped view |
+| **Mailbox** | Per-actor message queue | Per-collaborator collection of threads, drafts, posts |
+| **Message** | Immutable data sent between actors | Email, Slack thread, Telegram message, social post |
+| **Isolation** | No shared memory; actors only see their own state | Each collaborator sees only relevant threads (scoped) |
+| **Async** | Fire-and-forget message passing | Email/social/messaging is inherently async |
+
+**Where the analogy holds well:**
+
+- **Mailbox as interface.** In Actor systems, the mailbox IS how you interact with an actor — you send messages to it, the actor processes them on its own schedule. In Corky, the mailbox IS the collaborator's interface — all their correspondence arrives there, they process it on their own schedule. This is a real structural parallel.
+- **Scoped isolation.** Actors have private state that can't be peeked at from outside. Corky mailboxes are scoped — Alice doesn't see Brian's unrelated threads. The scoping mechanism differs (language-level vs topic filtering), but the principle is the same.
+- **Message-oriented.** Everything in Corky is a discrete message: an email, a thread reply, a social post. Actors think the same way.
+
+**Where it diverges:**
+
+- **No computation in the mailbox.** Actor mailboxes process messages and produce side effects. Corky mailboxes are passive stores — the human (or AI agent) does the processing externally. Corky is closer to a message broker than an actor runtime.
+- **Shared state via git.** Pure actors never share mutable state. Corky uses git as shared state with 3-way merge for conflict resolution. This is more like a CRDT or distributed database than actor isolation.
+- **No supervision tree.** Actor systems have hierarchical supervision (restart strategies, failure cascading). Corky collaborators are flat peers.
+
+**Verdict: the analogy is partial but the naming precedent is strong.**
+
+Corky's "mailbox" maps cleanly to the Actor Pattern's mailbox in the most important way: **it's the per-entity collection of inbound correspondence.** The Actor Pattern gives "mailbox" a formal CS meaning that's broader than "place where postal mail arrives." In actor systems, a mailbox receives any kind of message — HTTP requests, database events, timer ticks, signals. Social posts fit that abstraction naturally.
+
+**What this means for the naming decision:**
+
+- "Mailbox" has formal CS precedent from 1973 — it's not just postal mail
+- If you frame `mail/` as "actor mailbox" rather than "postal mail," the scope already covers social posts, messaging imports, and any future channel
+- The tone matches too: "corky mailbox" feels right — friendly, approachable, technically grounded
+
+**Revised options with the actor lens:**
+
+| Name | Vibe with "corky" | Scope | Precedent |
+|---|---|---|---|
+| `mail/` | Good — friendly, familiar | Narrow connotation (postal) | Universal |
+| `mailbox/` | Good — same register | Broad (actor model) | CS formal (1973) |
+| `comms/` | Mismatch — militaristic | Broad | Rare in tech |
+| `correspondence/` | Good — matches etymology | Exact | Formal English |
+
+`mailbox/` might be the sweet spot: friendly enough for corky, broad enough for social posts, and backed by 50 years of CS precedent. Only 7 characters. And it's already the term you use internally for the scoped-per-collaborator concept — promoting it to the directory name just makes the abstraction explicit.
+
+## User
+
+I like mailbox...A hesitation I have is the mailbox/mailboxes/ directory...
+This demonstrates that mailbox is recursive...which is actually good. So maybe that's ok.
+
+It is strange...but it does demonstrate the recursive directory structure.

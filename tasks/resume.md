@@ -94,3 +94,33 @@ Documented in **SPECS.md §2.5 Directory Naming Convention**.
 ## User
 
 Is it possible to schedule the linked in post using their api?
+
+## Assistant
+
+**No** — the LinkedIn Posts API does not support scheduled publishing.
+
+The `POST /rest/posts` endpoint only accepts two `lifecycleState` values:
+- `PUBLISHED` — publishes immediately
+- `DRAFT` — saves as draft (not visible to anyone)
+
+There is no `scheduledPublishAt` or equivalent field. LinkedIn's native web UI has a scheduling feature (clock icon when composing, up to 3 months ahead), but that capability is not exposed through the API.
+
+**Options for corky:**
+
+1. **Client-side scheduling** — corky already has `scheduled_at` in the draft frontmatter schema (SPECS.md §12.3). A cron job or systemd timer could check for ready drafts where `scheduled_at` is in the past and call `corky social publish` on them. Simple, reliable.
+
+2. **Use DRAFT state + timed publish** — create the post as a LinkedIn draft via API, then publish it at the scheduled time. But the API doesn't support publishing an existing draft either — you'd have to create a new `PUBLISHED` post at that time anyway.
+
+3. **Manual** — set `status: ready` in the draft, then run `corky social publish` when you want it to go live.
+
+Recommendation: option 1 is the cleanest. A one-liner cron entry like:
+```
+*/5 * * * * corky social publish-scheduled
+```
+...that checks `scheduled_at` on ready drafts and publishes any that are due. This would be a small addition to the existing `corky social` module.
+
+Want me to implement `corky social publish-scheduled`?
+
+## User
+
+

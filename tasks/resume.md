@@ -150,3 +150,121 @@ Will the permissions be based on who has the token? So a collaborator can direct
 Edge Case: What if the collaborator has their own LinkedIn account token or multiple tokens? Would the author on the frontmatter need to match the linkedin profile name? 
 
 Let's discuss...
+
+## Assistant
+
+### Draft Workflow — Detailed Design
+
+**Lifecycle:** `draft` → `ready` → `published`
+
+A social post is a markdown file in the corky mailbox, with frontmatter controlling its state:
+
+```yaml
+---
+platform: linkedin
+author: brian           # corky profile name (maps to token)
+visibility: public     # public | connections
+status: draft          # draft | ready | published
+tags: ["OpenSource", "Rust", "AITooling"]
+scheduled_at: null     # optional: ISO 8601 for future publish
+published_at: null     # set after publish
+post_id: null          # LinkedIn URN, set after publish
+post_url: null         # permalink, set after publish
+---
+```
+
+**File location:** `social/drafts/linkedin/2026-02-24-agent-tooling.md`
+
+The body is the post content in plain markdown. On publish, corky converts markdown to LinkedIn's plain-text format (strips formatting, preserves links and line breaks).
+
+**Commands:**
+
+```bash
+# Create a new draft from template
+corky social draft linkedin --title "agent-tooling"
+# → creates social/drafts/linkedin/2026-02-24-agent-tooling.md
+
+# Preview (renders as LinkedIn would display it)
+corky social preview social/drafts/linkedin/2026-02-24-agent-tooling.md
+
+# Publish (changes status draft→published, calls API)
+corky social publish social/drafts/linkedin/2026-02-24-agent-tooling.md
+
+# List all drafts
+corky social list --status draft
+corky social list --status published
+```
+
+### Permissions — Token-Based, Multi-Account
+
+**Yes, permissions are entirely token-based.** Whoever has a valid OAuth token for a LinkedIn account can post to it.
+
+**Token store design** (`~/.config/corky/tokens.json`):
+
+```json
+{
+  "profiles": {
+    "brian": {
+      "platform": "linkedin",
+      "person_urn": "urn:li:person:abc123",
+      "display_name": "Brian Takita",
+      "access_token": "AQUvlL_...",
+      "expires_at": "2026-04-25T00:00:00Z"
+    },
+    "company-page": {
+      "platform": "linkedin",
+      "person_urn": "urn:li:organization:xyz789",
+      "display_name": "My Company",
+      "access_token": "AQXyz...",
+      "expires_at": "2026-04-25T00:00:00Z"
+    }
+  },
+  "default_profile": "brian"
+}
+```
+
+**Resolution chain for `author` field:**
+1. `author: brian` → look up `profiles.brian` in token store → use that token
+2. `author:` omitted → use `default_profile`
+3. `author: unknown` → error: "no token found for profile 'unknown'. Run `corky social auth linkedin --profile unknown`"
+
+### Edge Case: Multiple LinkedIn Accounts
+
+**The `author` field references a corky profile name, not a LinkedIn display name.** This decouples the draft from the specific LinkedIn account:
+
+- `author: brian` → Brian's personal LinkedIn
+- `author: brian-company` → Brian posting as a company page admin
+- `author: alice` → Alice's LinkedIn (if Alice has authed on this machine)
+
+**Collaborator scenario:**
+If Alice and Brian share a corky mailbox (via git), they can each auth their own tokens locally:
+
+```bash
+# Alice's machine
+corky social auth linkedin --profile alice
+# Brian's machine
+corky social auth linkedin --profile brian
+```
+
+Draft files in git have `author: alice` or `author: brian`. Each person can only publish drafts that match a token they have locally. The token store is **never committed to git** — it's local-only in `~/.config/corky/`.
+
+**No name matching needed.** The `author` field is a corky profile key, not a LinkedIn profile name. The mapping is: `author` → profile key → token → LinkedIn API call with the token's `person_urn`. LinkedIn doesn't care what you call the profile locally.
+
+**Conflict prevention:** If Alice writes a draft with `author: brian`, she can't publish it unless she has Brian's token. She'd get: "No token for profile 'brian'. Ask Brian to publish, or change author to your profile."
+
+### Summary Table
+
+| Scenario | What happens |
+|---|---|
+| Single user, one account | `author` defaults to `default_profile` |
+| Single user, personal + company page | Two profiles in token store, specify in frontmatter |
+| Two collaborators sharing mailbox | Each has own token store locally, `author` determines who publishes |
+| Wrong author for available token | Error with clear message |
+| Token expired | Prompt to re-auth: `corky social auth linkedin --profile <name>` |
+| Draft without `author` | Uses `default_profile` from token store |
+
+## User
+
+Do we need to ensure that each network of collaborators have unique account names? What if another brian were to join the network of collaborators? How can we detect name conflicts? Would we need a distributed algorithm or would this need to be centralized? Or would a uid appended to the name be better if there is a conflict?
+
+What happens if a duplicate username were created...but is only conflicting when joining as a collaborator?

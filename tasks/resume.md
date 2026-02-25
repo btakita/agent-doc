@@ -602,3 +602,27 @@ Reinforces the dog-fooding theme with a concrete, self-evident example. The back
 ## User
 
 publish to linkedin
+
+## Assistant
+
+LinkedIn OAuth is not configured yet. No credentials or tokens found.
+
+**To publish via `corky social publish`:**
+
+1. Create a LinkedIn app at [linkedin.com/developers](https://www.linkedin.com/developers/)
+2. Enable "Share on LinkedIn" + "Sign In with LinkedIn using OpenID Connect"
+3. Add `http://127.0.0.1:8484/callback` as redirect URI
+4. Set credentials:
+   ```bash
+   export CORKY_LINKEDIN_CLIENT_ID="your-client-id"
+   export CORKY_LINKEDIN_CLIENT_SECRET="your-client-secret"
+   ```
+5. `corky social auth linkedin --profile btakita`
+6. Change `status: draft` → `status: ready` in `mail/social/20260224-agent-tooling-linkedin.md`
+7. `corky social publish mail/social/20260224-agent-tooling-linkedin.md`
+
+**To publish manually now:** copy the post body from `mail/social/20260224-agent-tooling-linkedin.md` and paste into LinkedIn's web composer.
+
+## User
+
+I need a Default Company Page. See https://www.linkedin.com/help/linkedin/answer/a548360/

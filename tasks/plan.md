@@ -334,3 +334,20 @@ corky topics suggest [--limit N] [--mailbox NAME]
 ## User
 
 The document did not refresh. I had to run the Reload All from Disk / Reload command to see the new content.
+
+## Assistant
+
+That's expected when submitting from the Claude Code terminal (`/agent-doc`) rather than the JetBrains plugin.
+
+The `PromptPoller` (which calls `file.refresh()` every 1.5s) only starts when you submit via **`Ctrl+Shift+Alt+A`** in JetBrains. The terminal `/agent-doc` workflow bypasses the plugin entirely, so the poller never starts and JetBrains doesn't know the file changed.
+
+**Options:**
+1. **Submit from JetBrains** (`Ctrl+Shift+Alt+A`) — the poller refreshes the file automatically every 1.5s
+2. **JetBrains auto-sync on focus** — Settings > Appearance & Behavior > System Settings > "Synchronize files on frame activation" (on by default). Just alt-tab back to IntelliJ.
+3. **Manual** — `Ctrl+Alt+Y` (Reload All from Disk), which is what you did
+
+For the best document-editing experience, submit from JetBrains and let the poller handle refreshes.
+
+## User
+
+I did submit from JetBrains...but it doesn't seem to poll at times. I'm switching panes and selecting the terminal while the task is running.

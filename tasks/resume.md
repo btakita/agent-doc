@@ -405,3 +405,45 @@ For the top-level name: **`mail/` is fine.** Every alternative creates a new pro
 ## User
 
 Can we have succinct documentation on the name convention somewhere? It's worthwhile to discuss.
+
+## Assistant
+
+### Naming Convention — Documentation
+
+Here's a compact reference. Where should it live permanently?
+
+**Options:**
+- **corky/SPECS.md** — add a section on directory naming rationale (alongside existing specs)
+- **corky/CLAUDE.md** — already has conventions; add naming rationale there
+- **mail/README.md** — document the data directory's own naming
+
+I'd suggest **SPECS.md** since it's the canonical reference for design decisions. Here's the block:
+
+---
+
+**Directory Naming Convention**
+
+| Directory | Purpose | Name rationale |
+|---|---|---|
+| `mail/` | Corky data root | Short, familiar, Unix precedent (`maildir`, `/var/mail`). Avoids `mailbox/mailboxes/` stutter. |
+| `mailboxes/` | Collaborator namespace | Namespace boundary — prevents collisions between mailbox names and system dirs (`social/`, `contacts/`). |
+| `social/` | Social media drafts | Channel-specific content at data root level. |
+| `contacts/` | Contact registry | Shared across all mailboxes. |
+
+**Why "mailbox" internally, "mail" as directory:**
+- "Mailbox" is the correct abstraction — per-entity message collection (actor model, Hewitt 1973)
+- `mail/` is shorthand for the data root; it doesn't need to carry the full semantic weight
+- `mailbox/` was considered but creates `mailbox/mailboxes/` path stutter
+- `comms/` rejected — militaristic tone clashes with "corky"
+- `correspondence/` rejected — too long (15 chars)
+- Flatten approaches rejected — namespace collisions between mailbox names and system dirs
+
+**The `mailboxes/` subdir is load-bearing architecture**, not cosmetic. It prevents a collaborator named "social" or "contacts" from colliding with system directories. Do not flatten without solving the namespace problem first.
+
+---
+
+Want me to add this to SPECS.md now?
+
+## User
+
+yes

@@ -2,6 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
+agent-doc-version: "0.4.1"
 ---
 
 # agent-doc submit
@@ -29,9 +30,11 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 ## Workflow
 
-### 0. Detect claim
+### 0. Pre-flight checks
 
-If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
+**Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
+
+**Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
 
 ### 1. Read the document and snapshot
 
@@ -42,8 +45,14 @@ If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop
 ### 2. Compute the diff
 
 - Compare snapshot (previous state) against current content
+- **Strip comments** from both sides before comparing:
+  - HTML comments: `<!-- ... -->` (including multiline)
+  - Link reference comments: `[//]: # (...)` (single-line)
+  - Comments are a user scratchpad — adding, editing, or removing comments should NOT trigger a response
+  - Uncommenting text (removing the markers) IS a real change and triggers a response
+  - The snapshot stores full content including comments; stripping is only for diff comparison
 - The diff represents what the user changed since the last submit
-- If no diff (content unchanged), tell the user nothing changed and stop
+- If no diff (content unchanged after comment stripping), tell the user nothing changed and stop
 
 ### 3. Respond
 

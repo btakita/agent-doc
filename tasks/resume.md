@@ -346,3 +346,62 @@ If the stutter bothers you enough to do option 2 (flatten), that's the right lon
 
 My hesitation with flattening is that a mailbox name can conflict with a system file name...such as social.
 Or whatever is added in the future. Is there a convention for these predefined names that we can use? Like a leading .social or something else?
+
+## Assistant
+
+### Namespace collision in the flatten approach
+
+Good catch. With flatten, the root mixes mailbox names and system directories:
+
+```
+mailbox/
+  brian/          <- mailbox
+  lucas/          <- mailbox
+  social/         <- system (collision if someone's named "social")
+  contacts/       <- system
+  profiles.toml   <- system
+```
+
+**Conventions to separate them:**
+
+| Convention | Example | Precedent | Tradeoff |
+|---|---|---|---|
+| **Dotfile prefix** | `.social/`, `.profiles.toml` | Unix hidden files, `.git/` | Social drafts are user content — hiding them feels wrong |
+| **Underscore prefix** | `_social/`, `_contacts/` | Jekyll `_layouts/`, Hugo | Visible but clearly "system"; less standard |
+| **System subdir** | `.corky/social/`, `.corky/contacts/` | `.git/`, `.config/` | Clean separation; extra nesting |
+| **Reserved name list** | Validate at `corky init` time | K8s reserved namespaces | Simple but brittle — new system dirs break existing mailboxes |
+
+**The dotfile approach has a problem:** `social/` contains user-facing drafts (your LinkedIn post lives there). Making it `.social/` hides user content, which is counterintuitive.
+
+**The system subdir approach is cleanest if you flatten:**
+
+```
+mailbox/
+  brian/                          <- mailbox
+  lucas/                          <- mailbox
+  .corky/                         <- system data (no human is named ".corky")
+    social/
+    contacts/
+    contacts.toml
+    profiles.toml
+    manifest.toml
+```
+
+The `.` prefix guarantees no collision with human names. All system data scoped under one dir. Mailboxes are the only visible entries at root.
+
+**But this reveals the real tradeoff.** The current `mailboxes/` subdir approach already solves the collision problem elegantly — mailboxes are namespaced under `mailboxes/`, system dirs live at root. No `.` prefixes, no reserved lists, no extra nesting. The cost is just the `mailboxes/` directory name.
+
+| Approach | Collision handling | Complexity |
+|---|---|---|
+| Current (`mail/mailboxes/lucas/`) | Built-in via namespace | Zero — already works |
+| Flatten + `.corky/` | Dotfile system dir | Migration + resolve.rs refactor + docs |
+| Flatten + reserved names | Validation logic | Fragile — new system dirs are breaking changes |
+| Flatten + underscore | Convention | Non-standard, still needs validation |
+
+**Updated recommendation:** Keep the current structure. The `mailboxes/` subdir is doing real architectural work — it's a namespace boundary that prevents collisions. The flatten approach requires re-solving a problem that `mailboxes/` already handles.
+
+For the top-level name: **`mail/` is fine.** Every alternative creates a new problem (stutter, tone mismatch, collision). `mail/` has none of these issues. The naming discussion has been productive — it confirmed that the current architecture is sound, and "mailbox" remains the right internal abstraction even if the directory isn't literally called that.
+
+## User
+
+Can we have succinct documentation on the name convention somewhere? It's worthwhile to discuss.

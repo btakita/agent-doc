@@ -578,3 +578,46 @@ Implement?
 Document the use cases in a table. Add to SPECS.md
 
 Implement
+
+## Assistant
+
+Done. 93 tests passing (72 unit + 21 integration), clippy clean.
+
+### Inline annotation answer
+
+"Does agent-doc claim bind only to the TMUX pane...or is it bind to the claude session as well?"
+
+**Pane only.** `claim` binds a document to a tmux pane ID (`%4`), not a Claude session/conversation. The pane is the routing target — `route` sends keystrokes to the pane. Claude sessions are ephemeral (restart, resume), but the pane persists. If Claude restarts on the same pane, routing works without re-claiming. Documented in SPECS.md §8.3.
+
+### Implementation summary
+
+| File | Change |
+|---|---|
+| `agent-doc/src/claim.rs` | **New.** Read frontmatter UUID + `$TMUX_PANE` → `sessions::register()` |
+| `agent-doc/src/skill.rs` | **New.** `include_str!("../SKILL.md")`, `install()` writes to `.claude/skills/agent-doc/SKILL.md`, `check()` compares versions. 6 tests. |
+| `agent-doc/src/main.rs` | Added `Claim`, `Skill { Install, Check }` subcommands + match arms |
+| `agent-doc/SKILL.md` | Updated: `$()` → `agent-doc commit`, added `/agent-doc claim <FILE>` invocation + step 0 detect-claim |
+| `agent-doc/.claude/skills/agent-doc/SKILL.md` | Synced from root SKILL.md |
+| `.claude/skills/agent-doc/SKILL.md` | Synced from root SKILL.md |
+| `agent-doc/SPECS.md` | Added §7.7–7.13 (all commands), §8 Session Routing with use case table (U1–U11), §8.3 Claim Semantics |
+
+### CLI
+
+```
+agent-doc claim tasks/plan.md       # Claim file for current tmux pane
+agent-doc skill install              # Install bundled SKILL.md to project
+agent-doc skill check                # Check if installed skill is up to date
+```
+
+### Skill invocation
+
+```
+/agent-doc claim tasks/plan.md      # Claim via skill (no leaving Claude)
+/agent-doc tasks/plan.md            # Normal document session
+```
+
+## User
+
+Create a PR branch.
+Update README and other user facing docs.
+version bump. minor or patch?

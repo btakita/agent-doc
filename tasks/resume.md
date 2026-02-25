@@ -150,3 +150,43 @@ Would mail be more confusing than comms for multiple social network support?
 I can see correspondence hence comms as being more correctly scoped as a broader category than mail.
 
 So it would be logical to use comms...but I'm not aware of precedence with other apps.
+
+## Assistant
+
+### "Comms" in tech — precedent check
+
+**You're right that it's uncommon as a directory/app name.** Here's the landscape:
+
+**Apps using "comms" or similar:**
+- Google, Slack, Discord, Teams — all use "messaging" or "channels," never "comms"
+- **Intercom** describes itself as a "customer communications platform" — uses "communications" in marketing, not directory structure
+- **Twilio** brands as "Communications API"
+- In gamedev/enterprise: "comms" appears in internal tooling but not consumer products
+
+**The military association is real** — "comms" feels operational, terse, tactical. But for a CLI tool used by developers, that register actually works. Developers are comfortable with terse jargon (`src/`, `bin/`, `lib/`, `pkg/`).
+
+**Closer precedents for multi-channel data directories:**
+- `~/.local/share/` — XDG generic
+- `~/Messages/` — macOS iMessage store
+- Git uses `.git/` — tool name as directory
+
+**The real question: who sees this directory name?**
+
+If it's primarily you (developer workflow, symlink), the name matters less. If it's new users running `corky init`, the name is their first impression of scope. The default fallback `~/Documents/mail` becoming `~/Documents/comms` would immediately signal "this handles more than email." That's a meaningful UX signal for new users.
+
+**My updated take:** `comms/` is fine for a CLI tool. The military connotation is a feature, not a bug — it signals crisp, operational communication management. No consumer app uses it, which means no confused expectations. And it's only 5 characters.
+
+But this is a **non-blocking decision**. `resolve.rs` abstracts the path, so renaming later is a one-line change + migration script. Don't let it slow down the LinkedIn app setup and first post.
+
+**If you want to rename now:** it's a small change — update `resolve.rs` fallback, `.gitignore`, symlink, docs. Maybe 30 minutes of work including tests. If you want to defer, `mail/` keeps working.
+
+## User
+
+I'm still not sure what name to pick yet.
+
+corky and correspondence makes sense...but correspondence is long.
+
+corky and comms seems like the name doesn't match as much...this is an intuitive gut feeling of how the names feel together...like corky is kindof a silly friendly name but comms is more militaristic. Though I'm sure there are soldiers named Corky...but it's not exactly what I think of when I say Corky.
+
+corky and mail is less of a match than corky and correspondence...but not much less of a match.
+Also languages that use the Actor Pattern use the term mailbox. Not sure if this is an Actor pattern...but it does seem like it could be. Could you assess the Actor Pattern analogy with the Corky workflow?

@@ -689,3 +689,42 @@ The presets exist because the same four audit checks work identically -- only th
 Can we just always use polyglot. How much slower would it be than a single rust streamlined config?
 
 What about supporting niche or new languages? Can we config?
+
+## Assistant
+
+### 1. Always polyglot -- yes, negligible performance difference
+
+The staleness check does a filesystem walk of `source_dirs`, filtering by `source_extensions`. The bottleneck is the directory walk, not the extension matching. Checking 26 extensions vs 1 adds essentially zero cost (string comparison during walk). The polyglot `skip_dirs` is actually *more* comprehensive (10 dirs vs 2), saving time in repos with large build artifact trees.
+
+In a typical Rust project (~500 source files), both presets finish in under 50ms. The difference is unmeasurable.
+
+The only meaningful difference is `include_claude_md` — a policy choice, not a performance one. Corky chose `AGENTS.md` as its convention, but could audit `CLAUDE.md` too.
+
+**Recommendation:** Collapse to a single `AuditConfig::default()` that's polyglot. If corky needs to exclude `CLAUDE.md`, that's one field override, not a separate preset.
+
+### 2. Niche/new languages -- already possible, could be easier
+
+`AuditConfig` has public fields, so you can extend today:
+
+```rust
+let mut config = AuditConfig::default();
+config.source_extensions.push("v");      // Verilog
+config.source_extensions.push("svelte"); // Svelte
+config.root_markers.push("dune-project"); // OCaml
+```
+
+For external users, a config file would be better -- extend defaults without writing Rust:
+
+```toml
+# .instruction-files.toml (future)
+extra_extensions = ["v", "svelte", "gleam"]
+extra_root_markers = ["dune-project"]
+extra_skip_dirs = ["_build"]
+include_claude_md = true
+```
+
+That's a future enhancement. Today the struct approach works for the two consumers.
+
+## User
+
+

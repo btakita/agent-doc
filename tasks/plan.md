@@ -822,4 +822,6 @@ The social media feature is ready. Assessment:
 
 ## User
 
+cleanup plan.md
 
+Is agent-doc ready for the tmux + Jetbrains integration? What do I need to do to use it?

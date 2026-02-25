@@ -460,3 +460,35 @@ Are there alternative names to `agent-doc register`?
 - agent-doc take
 
 I like claim over lock because we have a last call wins flow. Thoughts? Any other alternatives?
+
+## Assistant
+
+**`claim` is the best choice.** Here's the reasoning:
+
+| Name | Pros | Cons |
+|---|---|---|
+| `claim` | Matches last-call-wins. Assertive, clear. "I'm claiming this doc." | None significant |
+| `register` | Accurate, formal | Dry, no personality. Sounds like a one-time setup |
+| `lock` | Familiar pattern | **Wrong semantics** — implies exclusion, but there's no locking |
+| `take` | Short | Aggressive — implies taking FROM someone |
+| `bind` | Clean technical term | Could confuse with tmux `bind-key` |
+| `attach` | Intuitive | Conflicts with tmux `attach-session` |
+| `pin` | Nice metaphor | Implies permanence — but claims are overridable |
+
+**`claim` wins because:**
+- Last-call-wins is exactly how claims work (the latest claim overrides previous ones)
+- No false implication of exclusion or permanence
+- Short, memorable, distinctive
+- Natural verb: "claim this file for my session"
+
+```
+agent-doc claim tasks/plan.md       # Claim this file for the current tmux pane
+```
+
+Ready to implement `claim` + `skill install` + `skill check`?
+
+## User
+
+Would `/agent-doc claim tasks/plan.md` also work?
+Could a session claim multiple md files? Would that be ok with how the system is made?
+I think the UX would be ok. Thoughts?

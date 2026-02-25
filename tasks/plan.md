@@ -1027,4 +1027,4 @@ All outstanding items from the plan are now complete:
 
 ## User
 
-
+Cleanup plan.md. How do we test the interaction?

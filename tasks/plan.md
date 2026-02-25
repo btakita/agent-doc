@@ -322,4 +322,6 @@ All 62 tests pass.
 
 ## User
 
+Please reprint the edge case table with latest design.
 
+Does tmux support broadcasting to all panes? Would broadcasting help in any way or is the direct routing better for all of our use cases?

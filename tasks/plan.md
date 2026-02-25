@@ -860,10 +860,6 @@ One implementation, two consumers. The shell scripts are the source of truth.
 
 Ready to implement the shell scripts.
 
-## User
-
-ee
-
 ## Assistant
 
 ### Implemented Session Registry — Shell Scripts + IDE Plugin Rewrites
@@ -914,11 +910,17 @@ export PATH="$PATH:/path/to/agent-loop/bin"
 
 **Remaining:**
 - [ ] Add `bin/` to PATH (dotfiles or symlink to `~/.local/bin/`)
+Add to ~/.local/bin
 - [ ] Sign and test the JetBrains plugin
+Yes
 - [ ] Auto-frontmatter in agent-doc crate (generate session UUID if missing)
+Do it
 - [ ] Wire agent-doc to use `instruction-files` as path dependency
+yes
 - [ ] Wire corky to use `instruction-files` as path dependency
+yes
 
 ## User
 
-
+Make sure the install.sh looks for tmux. Install tmux if missing on Linux or OSX.
+If on windows and missing, install equivalent like itmux.

@@ -54,7 +54,7 @@ object TerminalUtil {
         }
     }
 
-    private fun resolveAgentDoc(): String {
+    fun resolveAgentDoc(): String {
         val candidates = listOf(
             System.getenv("HOME")?.let { "$it/bin/agent-doc" },
             System.getenv("HOME")?.let { "$it/.local/bin/agent-doc" },
@@ -76,7 +76,7 @@ object TerminalUtil {
         }
     }
 
-    private fun notifyError(project: Project, content: String) {
+    fun notifyError(project: Project, content: String) {
         try {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")

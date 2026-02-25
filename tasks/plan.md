@@ -454,3 +454,46 @@ Hotkey support would make it worthwhile...because I can use hotkeys to answer th
 ## User
 
 Submit Agent Doc should also save the current markdown file before notifying the claude session.
+
+## Assistant
+
+### 1. Plugin committed
+
+Committed as `37c29ff` — `feat: add agent-doc JetBrains plugin v0.1.0` with all session fixes (TerminalUtil.kt, SubmitAction.kt, plugin.xml, build.gradle.kts) plus agent-doc submodule (send-keys split, new-window append, test isolation).
+
+### 2. Save-before-route — done
+
+Added `FileDocumentManager.getInstance().saveAllDocuments()` to `SubmitAction.kt`. Now `Ctrl+Shift+Alt+A` always flushes unsaved editor changes to disk before calling `agent-doc route`.
+
+### 3. Prompt polling — implemented
+
+**Rust CLI** (`agent-doc prompt <file>`):
+- Captures tmux pane content via `tmux capture-pane`
+- Strips ANSI escape codes
+- Parses for Claude Code's numbered-option prompt pattern
+- Returns JSON: `{"active":true,"question":"...","options":[...],"selected":N}` or `{"active":false}`
+- 8 unit tests passing
+
+**Answer support** (`agent-doc prompt --answer <N> <file>`):
+- Navigates to the selected option via arrow keys
+- Sends Enter to confirm
+
+**JetBrains plugin** (`PromptPoller` + `PromptPanel`):
+- After each submit, starts polling `agent-doc prompt` every 1.5 seconds
+- When a prompt is detected: shows a bottom-anchored bar with the question and numbered buttons
+- **Hotkeys:** Press 1-9 to select an option, Esc to dismiss
+- Auto-dismisses when the prompt clears (Claude continues processing)
+- Non-invasive: anchored to the bottom of the IDE window, not a center popup
+
+**To test:**
+1. Reinstall plugin: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+2. Restart IDE
+3. Submit a document with `Ctrl+Shift+Alt+A`
+4. When Claude asks a permission question, the prompt bar should appear at the bottom
+5. Press 1/2/3 or click a button to answer
+
+All 85 agent-doc tests pass (64 unit + 21 integration).
+
+## User
+
+

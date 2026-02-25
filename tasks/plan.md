@@ -639,4 +639,5 @@ Publish order was: `instruction-files` → `agent-doc` → `corky` (dependency c
 
 ## User
 
-
+Let's create a README for instruction-files. Explain it's purpose and what it does.
+Link to agent-doc and corky as well.

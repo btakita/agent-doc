@@ -107,6 +107,7 @@ impl Tmux {
             .cmd()
             .args([
                 "new-window",
+                "-a",
                 "-t",
                 session,
                 "-c",
@@ -127,14 +128,32 @@ impl Tmux {
     }
 
     /// Send keys to a tmux pane.
+    ///
+    /// Uses `-l` for literal text (no special key interpretation), then sends
+    /// Enter separately. A small delay between text and Enter ensures the TUI
+    /// (e.g., Claude Code) processes the input before the submit.
     pub fn send_keys(&self, pane_id: &str, text: &str) -> Result<()> {
+        // Send text literally (no tmux key interpretation)
         let status = self
             .cmd()
-            .args(["send-keys", "-t", pane_id, text, "Enter"])
+            .args(["send-keys", "-t", pane_id, "-l", text])
             .status()
-            .context("failed to run tmux send-keys")?;
+            .context("failed to run tmux send-keys (text)")?;
         if !status.success() {
-            anyhow::bail!("tmux send-keys failed");
+            anyhow::bail!("tmux send-keys failed (text)");
+        }
+
+        // Brief pause for TUI to process input
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Send Enter separately
+        let status = self
+            .cmd()
+            .args(["send-keys", "-t", pane_id, "Enter"])
+            .status()
+            .context("failed to run tmux send-keys (enter)")?;
+        if !status.success() {
+            anyhow::bail!("tmux send-keys failed (enter)");
         }
         Ok(())
     }

@@ -56,7 +56,10 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         );
     }
 
-    // Auto-start cascade
+    // Auto-start cascade (can be disabled for testing)
+    if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+        anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+    }
     auto_start(tmux, file, &session_id, &file_path)?;
     Ok(())
 }

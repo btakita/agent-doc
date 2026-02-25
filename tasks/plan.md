@@ -612,4 +612,5 @@ Note: `cargo publish` is blocked because `instruction-files` isn't on crates.io 
 
 ## User
 
-
+audit docs.
+publish instruction-files first. Then publish the rest.

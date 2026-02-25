@@ -325,3 +325,53 @@ All 62 tests pass.
 Please reprint the edge case table with latest design.
 
 Does tmux support broadcasting to all panes? Would broadcasting help in any way or is the direct routing better for all of our use cases?
+
+## Assistant
+
+### Updated Edge Case Table
+
+| # | Scenario | `start` | `route` | Test |
+|---|---|---|---|---|
+| 1 | Happy path — session exists, pane alive | Registers pane, execs claude | `tmux send-keys` to pane | Manual |
+| 2 | No frontmatter — raw `.md` file | Generates UUID, writes frontmatter, registers pane | Generates UUID, writes frontmatter, auto-starts pane | `test_cli_route_generates_session_for_bare_file` |
+| 3 | Null session — `session: null` | Generates UUID, writes it back, registers | Generates UUID, writes it back, auto-starts | Frontmatter unit tests |
+| 4 | Session exists, no pane registered | Registers pane, execs claude | No pane found → auto-start cascade | `load_empty_returns_empty_map` |
+| 5 | Session exists, pane dead | Registers new pane (overwrite) | Detects dead pane → auto-start cascade | `pane_alive_returns_false_for_nonexistent` |
+| 6 | Not in tmux (`$TMUX` unset) | Error: "not running inside tmux" | Auto-start: creates tmux session "claude" | `test_cli_start_not_in_tmux` |
+| 7 | File not found | Error: "file not found" | Error: "file not found" | `test_cli_start_file_not_found`, `test_cli_route_file_not_found` |
+| 8 | No file argument | clap error | clap error | `test_cli_start_requires_file`, `test_cli_route_requires_file` |
+| 9 | No tmux server running | Error (not in tmux) | Creates "claude" tmux session | Logic in `auto_start()` |
+| 10 | tmux running, no "claude" session | N/A | Creates "claude" session | Logic in `auto_start()` |
+| 11 | tmux running, "claude" session exists | N/A | Creates new window in "claude" | Logic in `auto_start()` |
+| 12 | Multiple sessions (plan.md + resume.md) | Each gets own registration | Routes to correct pane per UUID | Registry isolation |
+| 13 | Stale registry entries | Overwritten on re-register | Dead pane detected, auto-start | `pane_alive_returns_false_for_nonexistent` |
+| 14 | Registry file missing | Creates `sessions.json` | Creates `sessions.json`, auto-starts | `load_empty_returns_empty_map` |
+| 15 | Help text | Works | Works | `test_cli_help_shows_start_and_route` |
+| 16 | Registry roundtrip | Write entry | Read entry back | `registry_roundtrip` |
+
+### tmux Broadcasting
+
+Yes, tmux supports broadcasting via `synchronize-panes`:
+
+```bash
+# Toggle broadcast mode for all panes in the current window
+tmux set-option synchronize-panes on   # everything typed goes to ALL panes
+tmux set-option synchronize-panes off
+```
+
+**Direct routing is better for all our use cases.** Here's why:
+
+| Concern | Broadcast | Direct routing |
+|---|---|---|
+| Multiple sessions | Sends same command to ALL panes — wrong session gets wrong file | Each pane gets its own command |
+| Targeting | No way to target one pane | `send-keys -t <pane>` targets exactly one |
+| Auto-start | Can't create panes selectively | Creates pane only when needed |
+| Concurrent work | Interrupts other running sessions | No disruption to other panes |
+
+Broadcasting is useful for sysadmin tasks (run same command on 10 servers). For agent-doc, each document has its own session and needs its own command — direct routing is the right primitive.
+
+The only hypothetical use for broadcast would be a "refresh all sessions" command (send `/agent-doc` to every registered pane). But even that is better implemented as a loop over the registry with individual `send-keys` calls, since each pane needs a different file path.
+
+## User
+
+

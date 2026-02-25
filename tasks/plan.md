@@ -206,4 +206,44 @@ Yes, agent-doc-start should auto-generate the UUID if missing.
 
 ## User
 
-Would it be advantageous to agent-doc-start and agent-doc to Rust? 
+Would it be advantageous to agent-doc-start and agent-doc to Rust?
+
+## Assistant
+
+### Yes — Rust subcommands are the right move
+
+The shell scripts were a good prototype, but integrating into `agent-doc` as subcommands is strictly better:
+
+```
+agent-doc start tasks/plan.md    # register pane, exec claude
+agent-doc route tasks/plan.md    # route to correct pane via tmux
+```
+
+**Why Rust wins here:**
+
+| Concern | Shell | Rust subcommand |
+|---|---|---|
+| UUID generation | awk hack or uuidgen | `ensure_session()` already exists |
+| JSON read/write | jq (+ python3 fallback) | `serde_json` already in deps |
+| YAML frontmatter | awk parsing | `frontmatter::parse()` already exists |
+| Error handling | `set -e` + string checks | `anyhow::Result` with context |
+| Distribution | Separate scripts + PATH setup | `cargo install agent-doc` — single binary |
+| Testing | Manual only | Unit + integration tests |
+| Dependencies | tmux + jq + python3 | tmux only |
+
+**What changes:**
+- Add `Start` and `Route` subcommands to `main.rs`
+- New `src/start.rs` — calls `ensure_session()`, writes `sessions.json`, execs claude
+- New `src/route.rs` — reads session from frontmatter, looks up pane, calls `tmux send-keys` or auto-starts
+- New `src/sessions.rs` — `sessions.json` read/write + pane liveness check
+- Shell scripts in `bin/` become thin wrappers (or removed entirely)
+- `install.sh` simplifies to just ensuring tmux is present
+- IDE plugins call `agent-doc route <path>` instead of `agent-doc-route <path>`
+
+**tmux interaction stays as `Command::new("tmux")`** — same pattern as `git` operations in `git.rs`. No async needed.
+
+Ready to implement.
+
+## User
+
+

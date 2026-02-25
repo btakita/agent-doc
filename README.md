@@ -29,6 +29,12 @@ agent-doc reset session.md                # clear session + snapshot
 agent-doc clean session.md                # squash session git history
 agent-doc route session.md               # route to tmux pane (or auto-start)
 agent-doc start session.md               # start Claude in current tmux pane
+agent-doc claim session.md               # claim file for current tmux pane
+agent-doc commit session.md              # git add + commit with timestamp
+agent-doc prompt session.md              # detect permission prompts → JSON
+agent-doc skill install                  # install Claude Code skill definition
+agent-doc skill check                    # check if skill is up to date
+agent-doc upgrade                        # upgrade to latest version
 ```
 
 ## Document Format
@@ -186,9 +192,16 @@ agent-doc init <file> [title] [--agent <name>]
 agent-doc diff <file>
 agent-doc reset <file>
 agent-doc clean <file>
-agent-doc route <file>     # route to existing tmux pane or auto-start
-agent-doc start <file>     # start Claude session in current tmux pane
-agent-doc audit-docs       # audit instruction files for staleness
+agent-doc route <file>              # route to existing tmux pane or auto-start
+agent-doc start <file>              # start Claude session in current tmux pane
+agent-doc claim <file>              # claim file for current tmux pane
+agent-doc prompt <file> [--all]     # detect permission prompts → JSON
+agent-doc prompt --answer N <file>  # answer prompt option N
+agent-doc commit <file>             # git add + commit with timestamp
+agent-doc skill install             # install Claude Code skill definition
+agent-doc skill check               # check if installed skill is up to date
+agent-doc audit-docs                # audit instruction files for staleness
+agent-doc upgrade                   # upgrade to latest version
 ```
 
 ## License

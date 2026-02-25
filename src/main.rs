@@ -1,5 +1,6 @@
 mod agent;
 mod audit_docs;
+mod claim;
 mod clean;
 mod config;
 mod diff;
@@ -10,6 +11,7 @@ mod prompt;
 mod reset;
 mod route;
 mod sessions;
+mod skill;
 mod snapshot;
 mod start;
 mod submit;
@@ -105,8 +107,26 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Claim a document for the current tmux pane
+    Claim {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Manage the Claude Code skill definition
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+}
+
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// Install the skill definition to .claude/skills/agent-doc/SKILL.md
+    Install,
+    /// Check if the installed skill matches the binary version
+    Check,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -148,6 +168,11 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => git::commit(&file),
+        Commands::Claim { file } => claim::run(&file),
+        Commands::Skill { command } => match command {
+            SkillCommands::Install => skill::install(),
+            SkillCommands::Check => skill::check(),
+        },
         Commands::Upgrade => upgrade::run(),
     }
 }

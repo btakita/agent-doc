@@ -123,4 +123,5 @@ Want me to implement `corky social publish-scheduled`?
 
 ## User
 
-
+I would also want to support email scheduling as well...What would the refactored plan look like?
+What would be the common module used by the email and social media modules for example?

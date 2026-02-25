@@ -301,3 +301,36 @@ Notable: `SocialDraftMeta` already has `scheduled_at: Option<DateTime<Utc>>` —
 ## User
 
 implement topics
+
+## Assistant
+
+Done — topics implemented (Phases 1-3). All 290 tests passing, clippy clean.
+
+**Files created:**
+- `src/config/topic.rs` — `TopicConfig` struct, `load_topics()`, `save_topic()` (format-preserving), 5 unit tests
+- `src/topics/mod.rs` — module with `run_list`, `run_add`, `run_info`, `run_suggest` dispatch
+- `src/topics/list.rs` — list configured topics (compact or `--verbose`)
+- `src/topics/add.rs` — add topic to `.corky.toml`
+- `src/topics/info.rs` — show details + matching conversations by keyword
+- `src/topics/suggest.rs` — frequency histogram of conversation subjects, 3 unit tests
+
+**Files modified:**
+- `src/config/mod.rs` — added `pub mod topic`
+- `src/config/corky_config.rs` — added `topics: HashMap<String, TopicConfig>` to `CorkyConfig`
+- `src/lib.rs` — added `pub mod topics`
+- `src/cli.rs` — added `Topics(TopicCommands)` with `List`, `Add`, `Info`, `Suggest` subcommands
+- `src/main.rs` — added dispatch for all 4 topic subcommands
+
+**CLI:**
+```
+corky topics list [--verbose]
+corky topics add <name> --keyword kw1,kw2 [--description "..."]
+corky topics info <name>
+corky topics suggest [--limit N] [--mailbox NAME]
+```
+
+**No conflicts** with the scheduling agent's concurrent work (`Schedule` commands + `src/schedule/` module coexist cleanly).
+
+## User
+
+The document did not refresh. I had to run the Reload All from Disk / Reload command to see the new content.

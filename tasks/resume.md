@@ -268,3 +268,79 @@ Draft files in git have `author: alice` or `author: brian`. Each person can only
 Do we need to ensure that each network of collaborators have unique account names? What if another brian were to join the network of collaborators? How can we detect name conflicts? Would we need a distributed algorithm or would this need to be centralized? Or would a uid appended to the name be better if there is a conflict?
 
 What happens if a duplicate username were created...but is only conflicting when joining as a collaborator?
+
+## Assistant
+
+### Profile Name Uniqueness — Git-Native Registry
+
+**The core tension:** The `author` field lives in the shared git repo (drafts). The token store is local. If two people both use `--profile brian`, their local token stores work fine independently — but drafts in the shared repo become ambiguous.
+
+**Solution: Mailbox-scoped profile registry** (`social/profiles.toml` in the shared repo):
+
+```toml
+[profiles.btakita]
+person_urn = "urn:li:person:abc123"
+display_name = "Brian Takita"
+platform = "linkedin"
+
+[profiles.bsmith]
+person_urn = "urn:li:person:xyz789"
+display_name = "Brian Smith"
+platform = "linkedin"
+```
+
+This file is **git-tracked** — visible to all collaborators. No distributed consensus needed; git merge handles conflict resolution.
+
+**Why not the alternatives:**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| Convention-only ("just pick unique names") | Zero infrastructure | No enforcement, silent breakage |
+| UID suffix (`brian-abc123`) | Guaranteed unique | Ugly, defeats purpose of human-readable names |
+| Centralized server | Strong consistency | Requires infrastructure, overkill for git-native tool |
+| **Git-tracked registry** | Human-readable, enforceable, git-native | Adds one file to the repo |
+
+### Conflict Detection Flow
+
+**On `corky social auth linkedin --profile X`:**
+
+1. Check `social/profiles.toml` for existing entry with name `X`
+2. If name exists with **same `person_urn`** → no conflict, update token locally
+3. If name exists with **different `person_urn`** → conflict:
+   ```
+   Error: Profile 'brian' is already registered to Brian Takita (urn:li:person:abc123).
+   Choose a different name: corky social auth linkedin --profile brian-smith
+   ```
+4. If name doesn't exist → register in `profiles.toml`, commit, auth locally
+
+### Late-Joining Conflict (The Tricky Case)
+
+**Scenario:** Alice has been using `author: brian` for months in her solo repo. Brian joins as collaborator and also has `author: brian` locally.
+
+**Detection point:** When Brian runs `corky social auth linkedin --profile brian` in the shared repo, corky checks `profiles.toml` and finds the conflict.
+
+**Resolution options:**
+
+1. **Brian picks a new name:** `corky social auth linkedin --profile btakita`
+2. **Auto-suggest:** System proposes `brian-2` or `brian-takita` based on display name
+3. **Existing drafts are safe:** Alice's drafts with `author: brian` remain valid — they map to Alice's URN in the registry. Only new drafts from Brian use his new profile name.
+
+**What if both contribute drafts with `author: brian` before merging?**
+
+This is the true edge case — two people independently create `profiles.toml` entries with the same name but different URNs. Git merge detects the conflict in `profiles.toml` (same key, different values). Resolution:
+
+1. Git merge conflict on `profiles.toml` → human resolves by renaming one profile
+2. `corky social check` — audit command that validates all draft `author` fields against `profiles.toml`, flags orphans
+3. Bulk rename: `corky social rename-author brian brian-smith` — updates all draft frontmatter
+
+### Summary
+
+- **No distributed algorithm needed** — git is the distributed system
+- **Profile registry** (`social/profiles.toml`) is the source of truth for name→URN mapping
+- **Conflict detection** happens at auth time (proactive) and at merge time (git-native)
+- **Late joins** are handled gracefully — existing drafts stay valid, newcomer picks a unique name
+- Profile names should be **handle-style** (`btakita`, not `brian`) to minimize collisions in practice
+
+## User
+
+Does this system handle mapping mailboxes using a different handle for the same account?

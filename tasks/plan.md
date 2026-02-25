@@ -176,3 +176,13 @@ No. All 6 items under "corky — Topics" in Outstanding are unchecked.
 ## User
 
 The plugin needs to refresh the document after agent-doc writes the file.
+
+## Assistant
+
+Added `file.refresh(true, false)` to the PromptPoller's polling cycle. Since it already runs every 1.5s after a submit, it now also refreshes the VirtualFile from disk — so when Claude writes back to the document, JetBrains picks up the change automatically.
+
+Reinstall plugin: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+
+cleanup

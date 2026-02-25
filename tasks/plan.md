@@ -375,3 +375,37 @@ The only hypothetical use for broadcast would be a "refresh all sessions" comman
 ## User
 
 Is the tmux router something worth packaging on it's own?
+
+## Assistant
+
+### Not yet — but the boundary is clean if needed later
+
+The tmux routing logic (~250 lines in `sessions.rs` + `start.rs` + `route.rs`) has a generic core:
+
+| Layer | Generic? | What it does |
+|---|---|---|
+| `sessions.rs` — registry | Yes | UUID → tmux pane mapping, liveness checks, auto-start cascade |
+| `start.rs` — start | Partially | Registers pane (generic) + execs `claude` (agent-doc-specific) |
+| `route.rs` — route | Partially | Looks up pane (generic) + sends `/agent-doc` command (specific) |
+
+**Who else would use it?**
+- Other AI CLI tools (Codex CLI, Aider, etc.) that run in tmux
+- Any developer workflow tool with session-based terminal routing
+- tmux-based orchestration scripts
+
+**Why not now:**
+1. No second consumer exists yet
+2. The API surface isn't validated — extracting too early locks in the wrong abstractions
+3. agent-doc is the only user, so changes are frictionless
+4. Publishing a crate creates maintenance burden (semver, docs, issues)
+
+**When to extract:**
+- A second tool wants session → tmux pane routing
+- The `sessions.rs` module stabilizes (no changes for 2-3 releases)
+- Someone asks for it
+
+The code is already modular enough that extraction would be a ~1 hour task: move `sessions.rs` to a new crate, parameterize the command that gets sent (instead of hardcoding `/agent-doc`), and have agent-doc depend on it. Same pattern as the `instruction-files` extraction.
+
+## User
+
+

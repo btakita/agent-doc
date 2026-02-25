@@ -522,3 +522,94 @@ All `Command::new("tmux")` calls would prepend `config.base_args()`. Production 
 ## User
 
 Test the TMUX cases using -L.
+
+## Assistant
+
+### Implemented — tmux `-L` isolation tests
+
+**77 tests pass (56 unit + 21 integration). Zero warnings. Clean clippy.**
+
+Refactored `sessions.rs` to introduce a `Tmux` struct that threads `-L` through all tmux commands. Added 9 new tmux isolation tests that create independent tmux servers per test.
+
+**Changes:**
+
+**`src/sessions.rs`** — Added `Tmux` struct:
+```rust
+#[derive(Debug, Clone, Default)]
+pub struct Tmux {
+    server_socket: Option<String>,  // -L flag for isolation
+}
+```
+All tmux operations are now methods on `Tmux`:
+- `pane_alive()`, `running()`, `session_exists()`
+- `new_session()`, `new_window()`, `send_keys()`
+- `auto_start()` — the cascade logic (previously inline in `route.rs`)
+
+Production uses `Tmux::default_server()`. Tests use `Tmux::isolated("name")`.
+
+Removed 7 dead free function wrappers (`pane_alive`, `tmux_running`, `tmux_session_exists`, `tmux_new_session`, `tmux_new_window`, `tmux_send_keys`, `prune`) — `route.rs` now uses `Tmux` methods directly.
+
+**`src/route.rs`** — Refactored to accept `&Tmux`:
+- `run()` creates `Tmux::default_server()` and delegates to `run_with_tmux()`
+- `auto_start()` takes `&Tmux` and uses `tmux.auto_start()` for the cascade
+
+**New tests (all use isolated `-L` servers):**
+
+| Test | Edge case # | What it verifies |
+|---|---|---|
+| `tmux_isolated_server_not_running_initially` | — | Fresh `-L` socket has no server |
+| `tmux_create_session_and_verify` | #1 | Session creation, pane liveness, server running |
+| `tmux_session_exists_returns_false_for_missing` | #10 | Session lookup accuracy |
+| `tmux_new_window_creates_second_pane` | #11 | New window gets different pane ID |
+| `tmux_send_keys_to_pane` | #1 | send-keys doesn't error |
+| `tmux_pane_alive_returns_false_after_kill` | #5 | Dead pane detection |
+| `tmux_auto_start_cascade_no_server` | #9 | Creates "claude" session from scratch |
+| `tmux_auto_start_cascade_no_session` | #10 | Creates "claude" when other session exists |
+| `tmux_auto_start_cascade_session_exists` | #11 | Creates new window when "claude" exists |
+
+**Updated edge case coverage — all 16 now tested:**
+
+| # | Scenario | Coverage |
+|---|---|---|
+| 1 | Happy path — pane alive | **Full** — `tmux_create_session_and_verify`, `tmux_send_keys_to_pane` |
+| 2 | No frontmatter | **Full** — 3 tests |
+| 3 | Null session | **Full** — 3 tests |
+| 4 | No pane registered | **Full** — `load_empty_returns_empty_map` |
+| 5 | Pane dead | **Full** — `tmux_pane_alive_returns_false_after_kill` |
+| 6 | Not in tmux | **Full** — `test_cli_start_not_in_tmux` |
+| 7 | File not found | **Full** — 2 CLI tests |
+| 8 | No file argument | **Full** — 2 CLI tests |
+| 9 | No tmux server | **Full** — `tmux_auto_start_cascade_no_server` |
+| 10 | No "claude" session | **Full** — `tmux_auto_start_cascade_no_session` |
+| 11 | "claude" exists | **Full** — `tmux_auto_start_cascade_session_exists` |
+| 12 | Multiple sessions | **Full** — `registry_multiple_sessions_isolated` |
+| 13 | Stale entries | **Full** — `prune_removes_dead_panes_from_map` |
+| 14 | Registry missing | **Full** — `load_empty_returns_empty_map` |
+| 15 | Help text | **Full** — CLI test |
+| 16 | Registry roundtrip | **Full** — `registry_roundtrip` |
+
+All 16 edge cases now have automated test coverage. Zero gaps.
+
+## User
+
+Create a PR. commit. squash merge into main. bump minor version. release
+
+## Assistant
+
+Done. Here's what was executed:
+
+1. **Precommit** — Updated 3 stale docs (CLAUDE.md, README.md, SKILL.md) with new modules and subcommands. `make precommit` passes: 77 tests, clean clippy, clean audit-docs.
+
+2. **Branch & commit** — Created `20260224/tmux-session-routing`, committed 14 files (+1043 / -1166 lines).
+
+3. **PR** — [#4](https://github.com/btakita/agent-doc/pull/4) created and squash merged into `main`.
+
+4. **Version bump** — `0.1.4` → `0.2.0` in Cargo.toml.
+
+5. **Release** — Tagged `v0.2.0`, pushed, created [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.2.0).
+
+Note: `cargo publish` is blocked because `instruction-files` isn't on crates.io yet. GitHub Releases is the primary distribution channel (self-update already uses it).
+
+## User
+
+

@@ -385,4 +385,5 @@ Rebuilt and installed. Try `Ctrl+Shift+Alt+A` again — should fully work now.
 
 ## User
 
-
+The Routed ... overlay is a bit invasive. Does Jetbrains support an inline notification.
+Like can it be a info bubble near the cursor that is very short? There should be quick feedback and it goes away. Not a bubble in the lower right corner (away from the actual file) that sticks around a bit too long...

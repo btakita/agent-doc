@@ -70,13 +70,14 @@ resume: abc123...        # Claude conversation ID (for --resume)
 ### agent-doc
 
 - [ ] `agent-doc register <file>` — register current tmux pane without starting a new session
-- [ ] `agent-doc prompt --all` — poll all active sessions (multi-session support)
+- [x] `agent-doc prompt --all` — poll all active sessions (multi-session support)
+- [x] `agent-doc commit <file>` — git add + commit with generated timestamp
 - [ ] Codex backend (`src/agent/codex.rs`) — plan at `tasks/integrations/codex.md`
 
 ### agent-doc-jetbrains
 
-- [ ] Multi-session prompt polling — track all submitted files, poll via `--all`
-- [ ] PromptPanel file context — prepend `[filename]` to prompt question
+- [x] Multi-session prompt polling — track all submitted files, poll via `--all`
+- [x] PromptPanel file context — prepend `[filename]` to prompt question
 
 ### instruction-files
 
@@ -177,3 +178,52 @@ Topics, contacts, and threads share the same sync primitive — content-hash-bas
 ## User
 
 Implement **Multi-session polling plan**
+
+The git tag whenever resume.md or plan.md is updated uses $() substitution to get the timestamp. Please add the functionality directly to agent-doc.
+
+## Assistant
+
+Both done. 87 tests passing, clippy clean, plugin built and signed.
+
+### Multi-session prompt polling — implemented
+
+**Phase 1: `SessionEntry.file`** — `agent-doc/src/sessions.rs`
+- Added `file: String` field with `#[serde(default)]` for backward compat
+- `register()` now takes a `file` parameter
+- Updated `start.rs` and `route.rs` callers
+
+**Phase 2: `agent-doc prompt --all`** — `agent-doc/src/prompt.rs` + `main.rs`
+- New `PromptAllEntry` struct (flattened `session_id` + `file` + `PromptInfo`)
+- `run_all()` iterates `sessions.json`, captures each live pane, returns JSON array
+- CLI: `agent-doc prompt --all` (file arg now optional)
+- 2 new unit tests (serialization, optional field omission)
+
+**Phase 3: Plugin multi-session** — `PromptPoller.kt`
+- Replaced single-file tracking with `ConcurrentHashMap<String, TrackedFile>`
+- `addFile(file)` adds to tracked set, `ensurePolling()` starts poller once
+- Polls via `agent-doc prompt --all` (one process per cycle)
+- Auto-discovers sessions from `--all` output (VirtualFile resolution via `LocalFileSystem`)
+- Each tracked file gets independent `modificationStamp` tracking
+
+**Phase 4: File context in PromptPanel** — `PromptPanel.kt`
+- `show()` accepts optional `fileName` parameter
+- Prompt question shows `[plan.md] Do you want to proceed?`
+
+**SubmitAction.kt** — changed `start(file)` → `addFile(file)` (additive, no stop)
+
+### `agent-doc commit <file>` — new subcommand
+
+Added `agent-doc commit <file>` which runs `git add -f <file>` + `git commit` with a generated `agent-doc: YYYY-MM-DD HH:MM:SS` message. No shell `$()` substitution needed — the timestamp is generated internally by the binary.
+
+The `/agent-doc` skill can now use:
+```
+agent-doc commit tasks/plan.md
+```
+instead of:
+```
+git add -f tasks/plan.md && git commit -m "agent-doc: $(date '+%Y-%m-%d %H:%M:%S')" --no-verify
+```
+
+## User
+
+PR, squash merge, release agent-doc

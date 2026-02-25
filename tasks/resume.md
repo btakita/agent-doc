@@ -379,5 +379,3 @@ Body text here.
 This is a non-trivial refactor. Want me to implement it? Or keep it as a future task and ship the scheduler with the current dual-format approach?
 
 yes, plan for implementation now.
-
-

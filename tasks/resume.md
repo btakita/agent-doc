@@ -680,3 +680,23 @@ If keeping "cybernetic": **"Cybernetic agent loops — from spec to ship."**
 ## User
 I like Collaborative intelligence tooling — from spec to ship.
 Which one seems strongest to you?
+
+## Assistant
+
+My strongest pick on pure punch is #1 ("Spec-driven agent tooling for teams that ship") — it's the most opinionated and LinkedIn taglines reward brevity.
+
+But **#5 wins on brand coherence.** "Collaborative intelligence" is already in your resume header and LinkedIn headline. Using it in the Company Page tagline creates unified brand vocabulary across your personal profile and company page. That consistency compounds — people start associating the phrase with you.
+
+**Recommendation: Go with #5 — "Collaborative intelligence tooling — from spec to ship."**
+
+- Matches your personal brand language (resume, LinkedIn profile)
+- The em dash creates natural rhythm — setup, payoff
+- "From spec to ship" is concrete and outcome-oriented
+- Distinctive without being jargon-heavy
+- Works as both tagline and positioning statement
+
+If you later want something punchier for marketing copy, #1 is your go-to. For the Company Page that sits alongside your personal profile, #5 is the right call.
+
+## User
+
+I like #1 as well now that you mention it.

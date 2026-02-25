@@ -702,6 +702,8 @@ The only meaningful difference is `include_claude_md` — a policy choice, not a
 
 **Recommendation:** Collapse to a single `AuditConfig::default()` that's polyglot. If corky needs to exclude `CLAUDE.md`, that's one field override, not a separate preset.
 
+Yes...let's support both AGENTS.md and CLAUDE.md. agent-docs should have AGENTS.md->CLAUDE.md. We should support Claude and other code agent loops.
+
 ### 2. Niche/new languages -- already possible, could be easier
 
 `AuditConfig` has public fields, so you can extend today:
@@ -724,6 +726,8 @@ include_claude_md = true
 ```
 
 That's a future enhancement. Today the struct approach works for the two consumers.
+
+Where would the toml be located? Would it be an addon with dependencies? So would corky and agent-docs both have a section for instruciton-files...or should we always have .instruction-files.toml? 
 
 ## User
 

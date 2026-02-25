@@ -492,3 +492,49 @@ Ready to implement `claim` + `skill install` + `skill check`?
 Would `/agent-doc claim tasks/plan.md` also work?
 Could a session claim multiple md files? Would that be ok with how the system is made?
 I think the UX would be ok. Thoughts?
+
+## Assistant
+
+### `/agent-doc claim` as a skill invocation
+
+**Yes, it could.** The skill receives the full argument string, so `/agent-doc claim tasks/plan.md` would pass `"claim tasks/plan.md"` to the skill. The skill definition would detect `claim` as the first word and run `agent-doc claim <file>` via Bash instead of the normal document workflow.
+
+But there's a cleaner option: just run it directly in the terminal. `agent-doc claim tasks/plan.md` is a CLI command — no need to go through Claude. You'd typically run it once when starting a session, before using the plugin.
+
+I'm unsure about this. Would agent-doc claim start a new claude session? What if I want to resume a claude session?
+
+That said, making it work as `/agent-doc claim <file>` is a nice-to-have for discoverability. Easy to add to the skill definition.
+
+It also allows an resumed session to claim a file.
+
+### Multiple files per session — works perfectly
+
+Yes. The architecture already supports this. Each document has its own `session` UUID in frontmatter, and `sessions.json` maps UUID → pane. Multiple UUIDs can point to the same pane:
+
+```json
+{
+  "cf853a21-...": { "pane": "%4", "file": "tasks/plan.md" },
+  "db08a891-...": { "pane": "%4", "file": "tasks/resume.md" }
+}
+```
+
+The user would run:
+```
+agent-doc claim tasks/plan.md
+agent-doc claim tasks/resume.md
+```
+
+Both files route to pane `%4`. The plugin Submit sends to whichever file is active. `agent-doc prompt --all` returns entries for both, and the PromptPoller already tracks multiple files via `ConcurrentHashMap<String, TrackedFile>`.
+
+**No code changes needed** to support multi-file claims — the data model already handles it. `claim` just writes a new entry to sessions.json per call.
+
+### Ready to implement
+
+Three additions:
+1. **`agent-doc claim <file>`** — read `$TMUX_PANE` + frontmatter UUID → write sessions.json
+2. **`agent-doc skill install`** — write bundled SKILL.md to `.claude/skills/agent-doc/`
+3. **`agent-doc skill check`** — compare installed vs bundled version
+
+## User
+
+

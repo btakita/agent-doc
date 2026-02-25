@@ -28,11 +28,15 @@ src/
   clean.rs          # Squash git history
   frontmatter.rs    # YAML frontmatter parse/write
   snapshot.rs       # Snapshot path/read/write
-  git.rs            # Commit, branch, squash
+  git.rs            # Commit, branch, squash (includes `commit` subcommand)
   config.rs         # Global config (~/.config/agent-doc/config.toml)
   sessions.rs       # Session registry (sessions.json) + Tmux struct
   route.rs          # Route /agent-doc commands to correct tmux pane
   start.rs          # Start Claude session inside tmux pane
+  claim.rs          # Claim document for current tmux pane
+  prompt.rs         # Detect permission prompts from Claude Code sessions
+  skill.rs          # Manage bundled SKILL.md (install/check)
+  upgrade.rs        # Self-update via crates.io / GitHub Releases
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend

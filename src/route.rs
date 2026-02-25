@@ -56,7 +56,10 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         );
     }
 
-    // Auto-start cascade
+    // Auto-start cascade (can be disabled for testing)
+    if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+        anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+    }
     auto_start(tmux, file, &session_id, &file_path)?;
     Ok(())
 }
@@ -80,7 +83,7 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
     let new_pane = tmux.auto_start(TMUX_SESSION_NAME, &cwd)?;
 
     // Register immediately so subsequent route calls find this pane
-    sessions::register(session_id, &new_pane)?;
+    sessions::register(session_id, &new_pane, file_path)?;
 
     // Start agent-doc start in the new pane
     let start_cmd = format!("{} start {}", agent_doc_bin, file_path);

@@ -654,6 +654,35 @@ We seriously have presets in this library? Explain in detail what these presets 
 - **File discovery** -- where it looks for `AGENTS.md`, `CLAUDE.md`, `SKILL.md` and how it finds project root.
 - **Used by** -- links to [agent-doc](https://github.com/btakita/agent-doc) and [corky](https://github.com/btakita/corky) with explanation of how each delegates to this crate.
 
-## User
+## Assistant
 
+`AuditConfig` has two presets that configure how the audit behaves for different project types:
+
+### `AuditConfig::agent_doc()`
+
+Designed for polyglot projects. Broad detection:
+
+| Field | Value | Why |
+|---|---|---|
+| `root_markers` | 13 markers: `Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`, `Gemfile`, `pom.xml`, etc. | agent-doc works with any language |
+| `include_claude_md` | `true` | Audits `CLAUDE.md` files (Claude Code instruction files) |
+| `source_extensions` | 26 extensions: `rs`, `ts`, `py`, `go`, `rb`, `java`, `c`, `cpp`, `swift`, `zig`, etc. | Staleness check needs all languages for mtime comparison |
+| `source_dirs` | `src`, `lib`, `app`, `pkg`, `cmd`, `internal` | Common source dirs across ecosystems |
+| `skip_dirs` | 10 dirs: `node_modules`, `target`, `build`, `dist`, `__pycache__`, etc. | Build artifacts to ignore |
+
+### `AuditConfig::corky()`
+
+Designed for a single Rust project. Narrow and fast:
+
+| Field | Value | Why |
+|---|---|---|
+| `root_markers` | `Cargo.toml` only | corky is Rust-only |
+| `include_claude_md` | `false` | corky uses `AGENTS.md` convention |
+| `source_extensions` | `rs` only | Only Rust source files |
+| `source_dirs` | `src` only | Standard Rust layout |
+| `skip_dirs` | `target`, `.git` | Minimal skip list |
+
+The presets exist because the same four audit checks work identically -- only the file discovery scope and staleness comparison differ between projects. Without presets, each consumer would duplicate 20+ lines of config.
+
+## User
 

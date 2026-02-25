@@ -336,4 +336,15 @@ The `$(date ...)` command substitution triggers Claude Code's security prompt ev
 
 ## User
 
+Saw a tmux window open with this error:
 
+/home/brian/work/btakita/agent-loop/agent-doc/target/debug/agent-doc start /tmp/.tmp0vnmJ7/test.md
+mise WARN  Current directory does not exist or is not accessible: /tmp/.tmp0vnmJ7
+mise WARN  Current directory does not exist or is not accessible: /tmp/.tmp0vnmJ7
+mise WARN  Current directory does not exist or is not accessible: /tmp/.tmp0vnmJ7
+ /tmp/.tmp0vnmJ7                                                                                                                                                                                                                      00:24:15
+❯ /home/brian/work/btakita/agent-loop/agent-doc/target/debug/agent-doc start /tmp/.tmp0vnmJ7/test.md
+Error: file not found: /tmp/.tmp0vnmJ7/test.md
+mise WARN  Current directory does not exist or is not accessible: /tmp/.tmp0vnmJ7
+ /tmp/.tmp0vnmJ7                                                                                                                                                                                                                      00:24:16
+❯

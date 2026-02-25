@@ -278,3 +278,26 @@ No more hardcoded pt values. The panel scales automatically when you change your
 ## User
 
 Ok...now topics...I have another agent planning email + social media scheduling. Would the work on topics clash with the scheduling work?
+
+## Assistant
+
+**No clash.** The three features are architecturally isolated in corky:
+
+| Feature | Config | Storage | Code modules |
+|---------|--------|---------|--------------|
+| Topics | `[topics.*]` in `.corky.toml` | Config-driven, no files | `src/topics/`, `src/config/topic.rs` |
+| Social scheduling | `scheduled_at` in draft frontmatter | `mail/social/*.md` | `src/social/` |
+| Email scheduling | Draft send times | `mail/drafts/*.md` | `src/draft/`, `src/sync/` |
+
+Notable: `SocialDraftMeta` already has `scheduled_at: Option<DateTime<Utc>>` — it's just unused (`None`). The scheduling agent can populate that field and add a scheduler daemon entirely within `src/social/` without touching topics.
+
+**Only 3 files touched by both** (trivial additions — enum variant + config field):
+- `src/config/corky_config.rs` — `TopicConfig` parallel to existing `SocialConfig`
+- `src/cli.rs` — `Topics(TopicCommands)` parallel to existing `Social(SocialCommands)`
+- `src/main.rs` — one match arm
+
+**Safe to work in parallel.** The other agent can focus on scheduling while topics goes into its own module.
+
+## User
+
+implement topics

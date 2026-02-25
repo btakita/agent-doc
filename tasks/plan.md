@@ -374,4 +374,4 @@ The only hypothetical use for broadcast would be a "refresh all sessions" comman
 
 ## User
 
-
+Is the tmux router something worth packaging on it's own?

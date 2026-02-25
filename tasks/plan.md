@@ -262,11 +262,24 @@ We can leave the 0.2.0 skip as is. Next time, I would rather change the unpublis
 
 Still getting this. Is agent-doc setup to fix this? Do we need to restart the claude session for the latest agent-doc update?
 
+```
 git add -f tasks/plan.md && git commit -m "agent-doc: $(date '+%Y-%m-%d %H:%M:%S')" --no-verify
-Commit plan.md before responding
+```
 
-Command contains $() command substitution
+## Assistant
 
-Do you want to proceed?
-❯ 1. Yes
-2. No
+Two fixes applied:
+
+**1. Release convention** — saved to memory. Next time an unpublished tag exists, I'll move it forward to HEAD (`git tag -d <tag> && git tag <tag> && git push --force`) instead of bumping the version.
+
+**2. Skill definition updated** — `.claude/skills/agent-doc/SKILL.md` line 63 was still using the old `git add -f ... && git commit -m "agent-doc: $(date ...)"` pattern. Changed to:
+
+```
+agent-doc commit <FILE>
+```
+
+The binary is already v0.3.0 (`which agent-doc` → `/home/brian/bin/agent-doc`), so the `commit` subcommand works. **Yes, you need to restart this Claude session** for the updated skill definition to take effect — the skill text is loaded at session start and injected into each `/agent-doc` invocation. After restart, the `$()` substitution prompt will stop appearing.
+
+## User
+
+Does agent-doc upgrades have a way to upgrade the skill? Should this be automatic?

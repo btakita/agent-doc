@@ -159,3 +159,20 @@ Topics, contacts, and threads share the same sync primitive — content-hash-bas
 ## User
 
 Have we implemented topics?
+
+## Assistant
+
+No. All 6 items under "corky — Topics" in Outstanding are unchecked.
+
+**What exists today:** Topics appear only as free-form markdown in contact AGENTS.md files. `corky contact add --from <conversation>` pre-fills a `## Topics` section from the thread subject. But that's template text — no structured data, no sync, no CLI subcommands.
+
+**What's planned but not built:**
+- `TopicConfig` struct in `.corky.toml`
+- Topic sync with eligibility rules (label/contact match OR `shared_with`)
+- Thread tagging during sync
+- `corky topics suggest` / `corky topics list` CLI subcommands
+- Extracting 3-way merge to a shared `context_sync` module
+
+## User
+
+The plugin needs to refresh the document after agent-doc writes the file.

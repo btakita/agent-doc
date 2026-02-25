@@ -371,6 +371,80 @@ To fix this properly, the poller would need to monitor **all active sessions** (
 
 let's plan implementation for polling all active sessions.
 
+## Assistant
+
+### Multi-Session Prompt Polling Plan
+
+**Problem:** `PromptPoller` tracks one file. Submitting plan.md stops watching resume.md. Permission prompts on other sessions go unnoticed.
+
+**Approach:** Add `agent-doc prompt --all` (CLI-side iteration) so the plugin makes one call per poll cycle instead of N.
+
+#### Phase 1: Store file path in SessionEntry
+
+`sessions.rs` — add `file` field to `SessionEntry`:
+```rust
+pub struct SessionEntry {
+    pub pane: String,
+    pub pid: u32,
+    pub cwd: String,
+    pub started: String,
+    pub file: String,  // NEW: relative path to session document
+}
+```
+Set during `register()` in `start.rs`. Existing entries without `file` get `""` (serde default).
+
+#### Phase 2: `agent-doc prompt --all`
+
+`prompt.rs` — new mode that iterates `sessions.json`:
+```
+agent-doc prompt --all
+```
+Output:
+```json
+[
+  {"session_id":"abc...","file":"tasks/plan.md","active":true,"question":"...","options":[...]},
+  {"session_id":"def...","file":"tasks/resume.md","active":false}
+]
+```
+- Load registry, filter to live panes only
+- Capture each pane, parse for prompts
+- Return JSON array
+
+#### Phase 3: Plugin — poll all sessions
+
+`PromptPoller.kt` changes:
+- Remove single-file tracking (`currentFile`, `currentPrompt`)
+- Track a `Set<VirtualFile>` of submitted files (add on each submit, never clear)
+- Poll via `agent-doc prompt --all` instead of per-file
+- Refresh all tracked VirtualFiles each cycle
+- For each active prompt, show `PromptPanel` with file name in the question
+
+`PromptPanel.kt` changes:
+- Prepend file name to question: `"[resume.md] Do you want to proceed?"`
+- If multiple prompts are active simultaneously, show them stacked or cycle between them
+
+#### Phase 4: File refresh for all tracked files
+
+Each poll cycle:
+1. Call `agent-doc prompt --all` (one process)
+2. For each tracked VirtualFile: `file.refresh(false, false)` + `reloadFiles(file)`
+3. For each active prompt result: update PromptPanel
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `agent-doc/src/sessions.rs` | Add `file: String` to `SessionEntry` |
+| `agent-doc/src/start.rs` | Pass file path to `register()` |
+| `agent-doc/src/prompt.rs` | Add `--all` mode, `PromptAllInfo` struct |
+| `agent-doc/src/main.rs` | Wire `--all` flag |
+| `PromptPoller.kt` | Multi-session polling, tracked file set |
+| `PromptPanel.kt` | Show file name, handle multiple prompts |
+
+**Not in scope:**
+- Auto-discovering files (only files submitted via plugin are tracked)
+- Persisting tracked files across IDE restarts
+
 ## User
 
-
+When I edit resume.md, the background loop reverts to the last saved state...unless I quickly save. Please only apply the sync **one time after the write happens**.

@@ -333,3 +333,49 @@ How about
 - `agent-doc skill check`
 
 I rebooted but the plugin does not seem to associate with the correct claude session when I Submit Agent Doc
+
+## Assistant
+
+### `agent-doc skill install` / `agent-doc skill check`
+
+Agreed — subcommand group is better. Cleaner namespace and leaves room for future skill commands (e.g. `agent-doc skill list`, `agent-doc skill diff`).
+
+```
+agent-doc skill install              # Write bundled SKILL.md to .claude/skills/agent-doc/SKILL.md
+agent-doc skill check                # "up to date" or "outdated (binary: v0.4.0, installed: v0.3.0)"
+```
+
+Implementation: `Skill` enum with `Install` / `Check` variants in `main.rs`, logic in `src/skill.rs`.
+
+On the Rust virtual env question you annotated — no, Rust doesn't have a per-project virtual environment like Python's venv. The closest patterns are:
+- **`rustup override`** — per-directory toolchain (nightly vs stable)
+- **`cargo install --root`** — install to a custom prefix
+- But binary discovery (`which agent-doc`) is system-wide, not project-scoped
+
+The `install-skill` approach sidesteps this: the binary is global, but the skill file is per-project. `agent-doc skill install` writes the bundled version to the CWD project.
+
+### Plugin routing fix — pane mismatch after reboot
+
+**Root cause:** After restarting Claude, this session started on pane `%4`, but `sessions.json` still mapped plan.md to pane `%7` (a different Claude session). The plugin was sending `/agent-doc tasks/plan.md` to the wrong pane.
+
+**Immediate fix:** Updated `sessions.json` to point `cf853a21` → pane `%4` (this session). Plugin routing should work now.
+
+**Underlying issue:** When you start Claude manually (not via `agent-doc start`), there's no hook to update `sessions.json`. This is exactly the use case for `agent-doc register` (already in the Outstanding list):
+
+```
+agent-doc register tasks/plan.md    # Register current tmux pane for this file
+```
+
+This would update sessions.json without starting a new Claude session. You'd run it once after starting Claude manually.
+
+**Updated Outstanding:**
+
+| Item | Status |
+|---|---|
+| `agent-doc skill install` / `check` | New — replaces `install-skill` |
+| `agent-doc register <file>` | Existing — now higher priority (pane mismatch pain point) |
+
+## User
+
+How do I use agent-doc to start the correct claude session?
+How do I use agent-doc to 

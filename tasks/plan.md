@@ -53,7 +53,7 @@ agent-doc skill check                  # compare installed vs binary version
 
 ### agent-doc-jetbrains
 
-- [ ] PromptPanel focus fix — dismiss when IDE loses focus (popup leaks to other WM windows)
+- [x] PromptPanel focus fix — `JDialog` → `JLayeredPane` overlay (no WM popup leak, persists on focus change)
 
 ### instruction-files
 
@@ -144,70 +144,9 @@ Topics, contacts, and threads share the same sync primitive — content-hash-bas
 8. `agent-doc skill install` / `check` — embedded SKILL.md management
 9. `agent-doc commit` — git root resolution (superproject-aware)
 10. v0.4.0 released — [PR #6](https://github.com/btakita/agent-doc/pull/6) squash merged, published to crates.io + PyPI + GitHub Release
-11. PromptPanel focus fix — dismiss when IDE loses focus (WM popup leak)
-
-## Assistant
-
-### Release v0.4.0 — already complete
-
-PR #6 was already squash-merged and published to all targets:
-- **crates.io**: 0.4.0
-- **PyPI**: 0.4.0
-- **GitHub Release**: [v0.4.0](https://github.com/btakita/agent-doc/releases/tag/v0.4.0) with prebuilt binary
-
-No new version created.
-
-### Document cleaned up
-
-Trimmed from 685 → 150 lines:
-- Status updated to v0.4.0 with condensed feature list
-- Completed items removed from Outstanding
-- Session Routing condensed to single command reference block
-- 500+ lines of conversation thread replaced with 11-item session log
-
-### Plugin popup fix — PromptPanel.kt
-
-**Root cause:** `JDialog` had no focus awareness — stayed visible when JetBrains lost focus, appearing on top of other WM windows.
-
-**Fix applied to `agent-doc-jetbrains/src/main/kotlin/.../PromptPanel.kt`:**
-1. **Pre-show check:** `if (!frame.isFocused) return` — skip showing if IDE isn't focused
-2. **Window focus listener:** `windowLostFocus` → `dismiss(project)` — auto-dismiss on focus loss
-
-Can we instead show the prompt, but only on the IDE window? So if someone comes back to the IDE, the pending set of answers will still be there?
-
-Plugin needs rebuilding (`./gradlew buildPlugin`) to take effect.
-
-## Assistant
-
-Yes — revised the approach. Instead of dismissing on focus loss, the prompt now lives **inside** the IDE window itself.
-
-**Changed `JDialog` → `JLayeredPane` overlay:**
-
-The `PromptPanel` no longer creates a separate top-level `JDialog`. Instead, it adds a `JPanel` to the IDE frame's `JLayeredPane` at `POPUP_LAYER`. This means:
-
-1. **No WM popup leak** — the panel is a child component of the IDE window, not a separate window. It only renders within the IDE frame.
-2. **Persists across focus changes** — when you switch away and come back, the prompt is still there waiting.
-3. **Repositions on resize** — a `ComponentListener` on the frame keeps the panel anchored to the bottom.
-4. **Same hotkeys** — 1-9 to select, Esc to dismiss. Same styling.
-
-**Key changes in `PromptPanel.kt`:**
-- `currentPopup: JDialog?` → `currentPanel: JPanel?` + `currentFrame: JFrame?`
-- `show()`: adds panel to `frame.layeredPane` at `JLayeredPane.POPUP_LAYER`
-- `dismiss()`: removes panel from layered pane, cleans up resize listener
-- No focus listeners needed — the panel is part of the window
-
-Plugin needs rebuilding (`./gradlew buildPlugin`).
-
-## Assistant
-
-Plugin rebuilt and signed.
-
-```
-agent-doc-jetbrains-0.1.0-signed.zip  (35 KB)
-```
-
-Install from: `Settings → Plugins → ⚙ → Install Plugin from Disk → select the zip`. Restart IDE to pick up the change.
+11. PromptPanel fix — `JDialog` → `JLayeredPane` overlay (no WM leak, persists on focus change). Plugin rebuilt and signed.
+12. Document cleanup — condensed from 685 → 150 lines
 
 ## User
 
-cleanup
+I think agent-doc should ignore markdown comments. This would allow someone to plan out a multi-step set of interactions with the agent. wdyt? 

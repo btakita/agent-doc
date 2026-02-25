@@ -296,4 +296,4 @@ Shell scripts in `bin/` are now superseded — the Rust subcommands are the cano
 
 ## User
 
-
+For #2 & #3, why would there be an error? Does this mean there is no tmux session_id binding it to the tmux pane? If not, then create a new tmux pane with `agent-doc start`, register the tmux sesion_id and claude session_id, and write the values to the frontmatter. Does that make sense?

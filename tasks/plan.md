@@ -297,3 +297,29 @@ Shell scripts in `bin/` are now superseded — the Rust subcommands are the cano
 ## User
 
 For #2 & #3, why would there be an error? Does this mean there is no tmux session_id binding it to the tmux pane? If not, then create a new tmux pane with `agent-doc start`, register the tmux sesion_id and claude session_id, and write the values to the frontmatter. Does that make sense?
+
+## Assistant
+
+### Fixed — `route` now auto-generates session UUID
+
+You're right, it should never error on missing frontmatter. Fixed `route.rs` to call `ensure_session()` first, same as `start`. The flow is now:
+
+1. `route` reads the file
+2. If no frontmatter or no session → generates UUID, writes frontmatter to file
+3. Looks up the pane in `sessions.json`
+4. If no pane (because this is a brand-new document) → auto-start cascade creates tmux pane, registers it, runs `agent-doc start`
+
+**Updated use cases #2 and #3:**
+
+| # | Scenario | `route` behavior (fixed) |
+|---|---|---|
+| 2 | **No frontmatter** — raw `.md` file | Generates UUID, writes frontmatter, auto-starts new pane |
+| 3 | **Null session** — `session: null` | Generates UUID, writes it back, auto-starts new pane |
+
+The test `test_cli_route_generates_session_for_bare_file` confirms: a bare `# No frontmatter` file gets frontmatter with a session UUID after `route` processes it.
+
+All 62 tests pass.
+
+## User
+
+

@@ -8,10 +8,10 @@ pub fn run(file: &Path) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    // Clear session ID in frontmatter
+    // Clear agent conversation ID (resume) — keep session (routing key)
     let content = std::fs::read_to_string(file)?;
     let (mut fm, body) = frontmatter::parse(&content)?;
-    fm.session = None;
+    fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
     std::fs::write(file, updated)?;
 

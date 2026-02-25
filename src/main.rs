@@ -7,7 +7,10 @@ mod frontmatter;
 mod git;
 mod init;
 mod reset;
+mod route;
+mod sessions;
 mod snapshot;
+mod start;
 mod submit;
 mod upgrade;
 
@@ -74,6 +77,16 @@ enum Commands {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// Start Claude in a tmux pane and register the session
+    Start {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Route /agent-doc command to the correct tmux pane
+    Route {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -104,6 +117,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
+        Commands::Start { file } => start::run(&file),
+        Commands::Route { file } => route::run(&file),
         Commands::Upgrade => upgrade::run(),
     }
 }

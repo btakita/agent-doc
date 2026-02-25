@@ -33,7 +33,7 @@ branch: null
   - Hotkey (`Ctrl+Shift+Alt+A`) + right-click context menu
   - `SubmitAction`: saves all documents before routing, starts prompt poller after submit
   - `TerminalUtil`: `resolveAgentDoc()` checks `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin`
-  - `PromptPoller`: polls `agent-doc prompt` every 1.5s after submit
+  - `PromptPoller`: polls `agent-doc prompt` every 1.5s after submit, refreshes VirtualFile from disk
   - `PromptPanel`: bottom-anchored bar with numbered hotkeys (1-9, Esc to dismiss)
   - Inline cursor hint on success (`HintManager`), balloon notification on error
   - `signPlugin` depends on `buildPlugin`, reads from `certificate/` files
@@ -156,33 +156,8 @@ Topics, contacts, and threads share the same sync primitive — content-hash-bas
 
 ## Assistant
 
-## User
-
-Have we implemented topics?
-
-## Assistant
-
-No. All 6 items under "corky — Topics" in Outstanding are unchecked.
-
-**What exists today:** Topics appear only as free-form markdown in contact AGENTS.md files. `corky contact add --from <conversation>` pre-fills a `## Topics` section from the thread subject. But that's template text — no structured data, no sync, no CLI subcommands.
-
-**What's planned but not built:**
-- `TopicConfig` struct in `.corky.toml`
-- Topic sync with eligibility rules (label/contact match OR `shared_with`)
-- Thread tagging during sync
-- `corky topics suggest` / `corky topics list` CLI subcommands
-- Extracting 3-way merge to a shared `context_sync` module
+Cleaned up. Rolled file-refresh fix into Status (PromptPoller now refreshes VirtualFile from disk). Topics: not implemented — all items remain in Outstanding.
 
 ## User
 
-The plugin needs to refresh the document after agent-doc writes the file.
-
-## Assistant
-
-Added `file.refresh(true, false)` to the PromptPoller's polling cycle. Since it already runs every 1.5s after a submit, it now also refreshes the VirtualFile from disk — so when Claude writes back to the document, JetBrains picks up the change automatically.
-
-Reinstall plugin: `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
-
-## User
-
-cleanup
+Show me the plan to implement topics.

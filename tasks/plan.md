@@ -246,4 +246,4 @@ Ready to implement.
 
 ## User
 
-
+yes implement. Please provide a table of all of the use cases and resolutions. Add tests for all of the edge cases. Make sure all edge cases work. 

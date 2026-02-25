@@ -222,3 +222,33 @@ at java.base/java.lang.ProcessImpl.<init>(ProcessImpl.java:295)
 at java.base/java.lang.ProcessImpl.start(ProcessImpl.java:225)
 at java.base/java.lang.ProcessBuilder.start(ProcessBuilder.java:1126)
 ... 39 more
+
+## Assistant
+
+### Fixed — JetBrains plugin was calling the old shell script name
+
+The installed plugin was running `agent-doc-route` (old shell script) instead of `agent-doc route` (Rust subcommand).
+
+**Root cause:** The installed plugin was stale — built before the shell-to-Rust migration. Two fixes applied:
+
+1. **`SubmitAction.kt`** — was passing `/agent-doc $relativePath` as the path argument to `sendToTerminal`, which would produce `agent-doc route "/agent-doc tasks/plan.md"`. Fixed to pass just `relativePath`.
+2. **`extension.ts`** (VSCode) — cosmetic fix to error message string.
+
+**Plugin rebuilt.** Reinstall from the fresh unsigned zip:
+- Settings > Plugins > gear icon > Install Plugin from Disk
+- Select `agent-doc-jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+- Restart IDE
+
+Also make sure `agent-doc` binary is v0.2.0:
+```bash
+agent-doc --version   # should show 0.2.0
+# If not: cd ~/work/btakita/agent-loop/agent-doc && cargo install --path .
+```
+
+## User
+
+Nothing seems to happen when I run Ctrl+Alt+Shift+a...or run the Submit to Agent Doc command...
+
+How do I post images other than the cli...I will post a screenshot after to follow up this agent-doc call.
+
+Can we always build the signed Jetbrains plugin after building the unsigned plugin?

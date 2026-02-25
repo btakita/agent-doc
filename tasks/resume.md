@@ -283,4 +283,7 @@ corky schedule list             # Show all pending
 
 ## User
 
+Does corky automatically install the cron when installed?
 
+Can we have the email draft frontmatter follow the same conventions as the social media drafts?
+lower snake case names...

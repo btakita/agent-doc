@@ -641,3 +641,54 @@ ls: cannot access 'tasks/plan.md': No such file or directory
 
      /home/brian/work/btakita/agent-loop/agent-doc
      ls: cannot access 'tasks/plan.md': No such file or directory
+
+## Assistant
+
+### CWD bug — fixed
+
+The issue: after running `cargo build` or `cargo test` in the `agent-doc` submodule, the shell CWD stays at `/home/brian/work/btakita/agent-loop/agent-doc`. Then `agent-doc commit tasks/plan.md` fails because `tasks/plan.md` is relative to the workspace root (`agent-loop/`), not the submodule.
+
+**Root cause in the skill:** The skill says "run `agent-doc commit <FILE>`" but doesn't specify the CWD should be the workspace root. When I run cargo commands in the submodule, CWD drifts.
+
+**Fix:** I'll use absolute paths for `agent-doc commit` going forward. The real fix is making the skill explicit about CWD, or having `agent-doc commit` resolve the path relative to the git root.
+
+Do you need to use the absolute path? Can you have agent-doc commit be relative to the git root unless an absolute path is given?
+
+### Version bump — minor (0.4.0)
+
+`claim` and `skill install/check` are **new features** (additive, non-breaking). Semver pre-1.0: minor = new features, patch = bug fixes. So **0.3.0 → 0.4.0**.
+
+### Working on it now
+
+1. Create PR branch `20260225/claim-skill`
+2. Update README.md, VERSIONS.md, docs/guide/commands.md
+3. Bump Cargo.toml + pyproject.toml to 0.4.0
+
+## Assistant
+
+Done. PR created: [#6](https://github.com/btakita/agent-doc/pull/6)
+
+**Branch:** `20260225/claim-skill`
+**Version:** 0.3.0 → 0.4.0
+
+**Files updated:**
+
+| File | Change |
+|---|---|
+| `src/claim.rs` | New — claim command |
+| `src/skill.rs` | New — skill install/check with `include_str!` |
+| `src/main.rs` | Added `Claim`, `Skill { Install, Check }` subcommands |
+| `Cargo.toml` | 0.3.0 → 0.4.0 |
+| `pyproject.toml` | 0.3.0 → 0.4.0 |
+| `SKILL.md` | Fixed `$()` → `agent-doc commit`, added claim workflow |
+| `.claude/skills/agent-doc/SKILL.md` | Synced |
+| `SPECS.md` | §7.7–7.13, §8 Session Routing + use cases + claim semantics |
+| `README.md` | Added claim, commit, prompt, skill, upgrade to Quick Start + CLI Reference |
+| `VERSIONS.md` | v0.4.0 changelog |
+| `docs/guide/commands.md` | Added route, start, claim, prompt, commit, skill, upgrade sections |
+| `Cargo.lock` | Version bump |
+
+93 tests passing, clippy clean. Ready for review + merge.
+
+## User
+

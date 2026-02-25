@@ -686,3 +686,6 @@ The presets exist because the same four audit checks work identically -- only th
 
 ## User
 
+Can we just always use polyglot. How much slower would it be than a single rust streamlined config?
+
+What about supporting niche or new languages? Can we config?

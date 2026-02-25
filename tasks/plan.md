@@ -861,3 +861,64 @@ One implementation, two consumers. The shell scripts are the source of truth.
 Ready to implement the shell scripts.
 
 ## User
+
+ee
+
+## Assistant
+
+### Implemented Session Registry — Shell Scripts + IDE Plugin Rewrites
+
+All components built and verified:
+
+**1. `bin/agent-doc-start`** — Start Claude in a tmux pane, register session:
+- Reads session UUID from YAML frontmatter
+- Registers `{session → pane_id}` in `.agent-doc/sessions.json`
+- `exec claude` to replace the script process
+- Requires `jq` (falls back to `python3`)
+
+**2. `bin/agent-doc-route`** — Route commands to the correct tmux pane:
+- Reads session UUID from frontmatter
+- Looks up pane in `.agent-doc/sessions.json`
+- If pane alive: `tmux send-keys -t <pane> "/agent-doc <path>" Enter`
+- Auto-start cascade if dead/missing:
+  1. No tmux? → `tmux new-session -s claude`
+  2. No "claude" session? → create it
+  3. "claude" session exists → `tmux new-window`
+  4. Start `agent-doc-start` in new pane
+
+**3. JetBrains plugin** — Completely simplified:
+- Removed `SubmitIntention.kt` (never worked)
+- Removed terminal and markdown plugin dependencies
+- `TerminalUtil.sendToTerminal()` now just calls `ProcessBuilder("agent-doc-route", relativePath)`
+- Build passes, re-sign with `./gradlew signPlugin`
+
+**4. VSCode extension** — Rewritten to use `child_process.exec("agent-doc-route")`:
+- Same routing logic as JetBrains
+- Shows success/error messages via VSCode notifications
+- Build passes (`npm run compile`)
+
+**Usage:**
+```bash
+# Terminal 1: Start Claude for plan.md
+cd /path/to/project
+bin/agent-doc-start tasks/plan.md
+# → Registers session, starts claude
+
+# Terminal 2 (or IDE hotkey): Route command
+bin/agent-doc-route tasks/plan.md
+# → Sends /agent-doc to the correct pane
+
+# Add to PATH for IDE plugins:
+export PATH="$PATH:/path/to/agent-loop/bin"
+```
+
+**Remaining:**
+- [ ] Add `bin/` to PATH (dotfiles or symlink to `~/.local/bin/`)
+- [ ] Sign and test the JetBrains plugin
+- [ ] Auto-frontmatter in agent-doc crate (generate session UUID if missing)
+- [ ] Wire agent-doc to use `instruction-files` as path dependency
+- [ ] Wire corky to use `instruction-files` as path dependency
+
+## User
+
+

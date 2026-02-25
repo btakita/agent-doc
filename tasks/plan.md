@@ -969,3 +969,33 @@ Changes in agent-doc crate:
 
 Should instruction-files be published with instruction-files as version dependencies? Or should we keep this as a git dependency?
 
+## Assistant
+
+### Path + version — best of both worlds
+
+Use this in both `agent-doc/Cargo.toml` and `corky/Cargo.toml`:
+
+```toml
+[dependencies]
+instruction-files = { path = "../instruction-files", version = "0.1" }
+```
+
+**How it works:**
+- **Local builds**: Cargo uses the path (fast, no network)
+- **`cargo publish`**: Cargo uses the version from crates.io (path is ignored in published crates)
+- **Standalone clones**: If someone clones just agent-doc without agent-loop, `cargo build` fetches from crates.io
+
+**No git dependency needed.** Git deps add complexity (locked to commits, no semver resolution) and don't help since everything lives in the same agent-loop checkout.
+
+**Publish order** (already in root Makefile):
+1. `cargo publish` instruction-files (first time publishes to crates.io)
+2. `cargo publish` agent-doc
+3. `cargo publish` corky
+
+The `version = "0.1"` field is what makes `cargo publish` work — without it, Cargo refuses to publish a crate with path-only dependencies.
+
+Ready to wire both crates now.
+
+## User
+
+Wire them up according to the plan.

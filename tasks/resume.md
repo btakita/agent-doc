@@ -399,3 +399,70 @@ person_urn = "urn:li:person:abc123"    # same account!
 ## User
 
 This same conflict can happen with handle + email addresses and other social media. So we should verify that all urns are accounted for. Do you also validate that an url is not used for multiple account records?
+
+## Assistant
+
+### Unified Identity Registry — Cross-Platform Validation
+
+You're right — `profiles.toml` should be a **unified identity registry** for all platforms, not just LinkedIn:
+
+```toml
+[profiles.btakita]
+display_name = "Brian Takita"
+
+[profiles.btakita.linkedin]
+urn = "urn:li:person:abc123"
+
+[profiles.btakita.bluesky]
+urn = "did:plc:xyz789"
+
+[profiles.btakita.email]
+urn = "brian.takita@gmail.com"
+
+[profiles.alice]
+display_name = "Alice Smith"
+
+[profiles.alice.linkedin]
+urn = "urn:li:person:def456"
+
+[profiles.alice.email]
+urn = "alice@example.com"
+```
+
+### Two-Way Uniqueness Constraints
+
+**1. Handle → URN (forward):** One handle maps to one identity per platform.
+
+**2. URN → Handle (reverse):** A single URN must NOT appear under multiple profiles. Prevents two handles claiming the same account.
+
+**Validation rules (`corky social check`):**
+
+| Check | What it catches |
+|---|---|
+| Duplicate handle names | Two `[profiles.X]` with same X |
+| Duplicate URNs (same platform) | Two profiles with same LinkedIn/Bluesky/email URN |
+| Orphaned authors | Draft `author:` not in `profiles.toml` |
+| Missing platform URN | Profile exists but no URN for draft's platform |
+| Stale tokens | Token store entry expired |
+
+**When validation runs:**
+- `corky social auth` — on registration (proactive)
+- `corky social publish` — before posting (gate)
+- `corky social check` — manual audit (comprehensive)
+- `corky sync` — on merge (flag conflicts)
+
+**Example — catching a duplicate URN:**
+```
+$ corky social auth linkedin --profile brian2
+Error: LinkedIn account urn:li:person:abc123 is already registered
+as profile 'btakita'. Cannot register as 'brian2'.
+To use this account, use: author: btakita
+```
+
+### Cross-Platform Identity Coherence
+
+The unified registry enables **cross-posting**: if `btakita` has LinkedIn, Bluesky, and email entries, `corky social publish --all` could post to all platforms for that profile in one command.
+
+## User
+
+Implement. Make sure we have full edge case testing. Document the edge case table.

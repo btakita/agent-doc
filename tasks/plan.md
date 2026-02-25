@@ -161,3 +161,61 @@ Cleaned up. Rolled file-refresh fix into Status (PromptPoller now refreshes Virt
 ## User
 
 Show me the plan to implement topics.
+
+## Assistant
+
+### Topics Implementation Plan
+
+**Phase 1: Config** — `TopicConfig` in `.corky.toml`
+```toml
+[topics.project-alpha]
+keywords = ["alpha", "release", "milestone"]
+mailboxes = ["work"]
+contacts = ["alice", "bob"]
+description = "Project Alpha development and releases"
+```
+- `TopicConfig` struct in `src/config/topic.rs` (parallel to `contact.rs`)
+- `pub topics: HashMap<String, TopicConfig>` added to `CorkyConfig`
+- Format-preserving writes via `toml_edit`
+
+**Phase 2: CLI subcommands**
+```
+corky topics list [--verbose]                     # show configured topics
+corky topics add <name> [--keyword K]             # add topic to .corky.toml
+corky topics info <name>                          # show topic details + matching threads
+corky topics suggest [--limit N] [--mailbox M]    # auto-discover from conversations
+```
+- `TopicsCommands` enum in `cli.rs` (mirrors `ContactCommands`)
+- Each subcommand in `src/topics/{list,add,info,suggest}.rs`
+
+**Phase 3: Topic suggestion**
+- Scan `conversations/` (or `mailboxes/{name}/conversations/` if `--mailbox`)
+- Extract thread subjects, strip `Re:`/`Fwd:` prefixes via existing `thread_key_from_subject()`
+- Frequency histogram, return top N
+- Simple and deterministic — no ML
+
+**Phase 4: Thread tagging** (future, not in initial scope)
+- During `corky sync`, auto-tag threads matching topic keywords
+- Add `**Topic**: {name}` to conversation metadata
+- Requires sync state extension
+
+**Not in scope initially:**
+- 3-way merge extraction — defer until topics become versioned documents
+- Topics are static config, not synced files — no sync state needed
+- Thread tagging during sync (Phase 4)
+
+**Module layout:**
+```
+src/topics/
+  mod.rs        # pub mod suggest, list, add, info
+  suggest.rs    # frequency-based subject extraction
+  list.rs       # list configured topics
+  add.rs        # edit .corky.toml
+  info.rs       # show topic details
+src/config/
+  topic.rs      # TopicConfig struct, load/save
+```
+
+## User
+
+First...are there any pending releases?

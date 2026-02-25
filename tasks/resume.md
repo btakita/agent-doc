@@ -466,3 +466,5 @@ The unified registry enables **cross-posting**: if `btakita` has LinkedIn, Blues
 ## User
 
 Implement. Make sure we have full edge case testing. Document the edge case table.
+
+cleanup resume.md

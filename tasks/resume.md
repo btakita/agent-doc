@@ -780,3 +780,45 @@ Want me to extend mailbox sync to include `topics/`?
 Can topic sharing be configured in .corky.toml? If a thread shared with a mailbox has a topic, that topic can be shared and added to the .corky.toml mailbox topics collection.
 
 This should allow bidirectional edits via the mailboxes/lucas monorepo...where topics/ <-> mailboxes/lucas/topics
+
+## Assistant
+
+Yes — this is the cleanest approach. The `mailboxes` field already exists in the topic config:
+
+```toml
+[topics.brian-takita]
+keywords = ["corky", "agent-doc"]
+mailboxes = ["lucas"]
+description = "Personal brand and tooling identity"
+```
+
+**Proposed flow:**
+
+**Forward sync** (during `corky mailbox sync`):
+1. Read `.corky.toml` topics
+2. For each topic with `mailboxes` containing this mailbox: copy `topics/{name}/` → `mailboxes/{mailbox}/topics/{name}/`
+3. Git add + commit in the mailbox repo
+
+**Reverse sync** (during `corky mailbox sync`):
+1. After `git pull` on the mailbox repo, check `mailboxes/{mailbox}/topics/` for files newer than root `topics/`
+2. Copy back: `mailboxes/{mailbox}/topics/{name}/` → `topics/{name}/`
+
+**Auto-association** — when a routed conversation matches a topic's keywords, add that mailbox to the topic's `mailboxes` list automatically. This is the "topic follows conversation" behavior. `corky topics suggest` already discovers topic-conversation matches — extending it to update `mailboxes` in `.corky.toml` is natural.
+
+**Conflict resolution:** mtime-based (newer wins), same pattern as `voice.md` sync. If both sides edit the same file between syncs, the more recent edit wins. For truly concurrent edits, git merge in the mailbox repo handles it — the mailbox is already a git repo with `pull --rebase`.
+
+**Changes required:**
+
+| File | Change |
+|---|---|
+| `corky/src/mailbox/sync.rs` | Add `sync_topics()` after `voice.md` copy — iterate topics with matching mailbox, bidirectional copy with mtime comparison |
+| `corky/src/config/topic.rs` | Add helper: `topics_for_mailbox(name) -> Vec<TopicConfig>` |
+| `corky/SPECS.md` | Add topic sync to mailbox sync section |
+
+This keeps the existing architecture intact — no submodules, no new repos. The `.corky.toml` `mailboxes` field drives everything. Lucas sees `topics/brian-takita/` in his repo and can edit it; edits flow back on next sync.
+
+Want me to implement?
+
+## User
+
+yes...in a PR...make sure we have user docs and SPECS

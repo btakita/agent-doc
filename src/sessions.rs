@@ -158,6 +158,35 @@ impl Tmux {
         Ok(())
     }
 
+    /// Capture the visible content of a tmux pane.
+    pub fn capture_pane(&self, pane_id: &str) -> Result<String> {
+        let output = self
+            .cmd()
+            .args(["capture-pane", "-t", pane_id, "-p"])
+            .output()
+            .context("failed to run tmux capture-pane")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux capture-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Send a single key (not literal text) to a tmux pane.
+    pub fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["send-keys", "-t", pane_id, key])
+            .status()
+            .context("failed to run tmux send-keys")?;
+        if !status.success() {
+            anyhow::bail!("tmux send-keys failed for key: {}", key);
+        }
+        Ok(())
+    }
+
     /// Auto-start cascade: create session/window as needed, return pane ID.
     ///
     /// 1. Server not running → create session

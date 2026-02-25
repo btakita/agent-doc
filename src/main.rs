@@ -6,6 +6,7 @@ mod diff;
 mod frontmatter;
 mod git;
 mod init;
+mod prompt;
 mod reset;
 mod route;
 mod sessions;
@@ -87,6 +88,14 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Detect permission prompts from a Claude Code session
+    Prompt {
+        /// Path to the session document
+        file: PathBuf,
+        /// Answer a prompt by selecting option N (1-based)
+        #[arg(long)]
+        answer: Option<usize>,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -119,6 +128,10 @@ fn main() -> anyhow::Result<()> {
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
         Commands::Route { file } => route::run(&file),
+        Commands::Prompt { file, answer } => match answer {
+            Some(option) => prompt::answer(&file, option),
+            None => prompt::run(&file),
+        },
         Commands::Upgrade => upgrade::run(),
     }
 }

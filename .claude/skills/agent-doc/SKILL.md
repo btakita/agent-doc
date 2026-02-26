@@ -84,6 +84,7 @@ After responding, update the document file:
 
 If the document is in a git repo:
 - Before responding: `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
+- **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
 - After writing response: do NOT commit (leave as uncommitted for diff gutters)
 
 ## Document Format

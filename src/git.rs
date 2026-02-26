@@ -3,10 +3,14 @@ use std::path::Path;
 use std::process::Command;
 
 /// Resolve a relative path against the git root (superproject root if in a submodule).
-/// Absolute paths are returned as-is.
-fn resolve_to_git_root(file: &Path) -> Result<std::path::PathBuf> {
+/// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
+fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     if file.is_absolute() {
-        return Ok(file.to_path_buf());
+        // Find git root from the file's directory
+        let parent = file.parent().unwrap_or(Path::new("/"));
+        let root = git_toplevel_at(parent)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        return Ok((root, file.to_path_buf()));
     }
 
     // Try superproject first (handles submodule CWD case)
@@ -16,9 +20,10 @@ fn resolve_to_git_root(file: &Path) -> Result<std::path::PathBuf> {
     if let Ok(ref o) = output {
         let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if !root.is_empty() {
-            let resolved = std::path::PathBuf::from(&root).join(file);
+            let root_path = std::path::PathBuf::from(&root);
+            let resolved = root_path.join(file);
             if resolved.exists() {
-                return Ok(resolved);
+                return Ok((root_path, resolved));
             }
         }
     }
@@ -30,25 +35,42 @@ fn resolve_to_git_root(file: &Path) -> Result<std::path::PathBuf> {
     if let Ok(ref o) = output {
         let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if !root.is_empty() {
-            let resolved = std::path::PathBuf::from(&root).join(file);
+            let root_path = std::path::PathBuf::from(&root);
+            let resolved = root_path.join(file);
             if resolved.exists() {
-                return Ok(resolved);
+                return Ok((root_path, resolved));
             }
         }
     }
 
     // Fallback: use as-is (relative to CWD)
-    Ok(file.to_path_buf())
+    let cwd = std::env::current_dir().unwrap_or_default();
+    Ok((cwd, file.to_path_buf()))
+}
+
+/// Get git toplevel from a specific directory.
+fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
+    Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+        })
 }
 
 /// Commit a file with an auto-generated message. Skips hooks.
 /// Relative paths are resolved against the git root (superproject if in a submodule).
+/// Git commands run from the resolved git root, so this works even when CWD is a submodule.
 pub fn commit(file: &Path) -> Result<()> {
-    let resolved = resolve_to_git_root(file)?;
+    let (git_root, resolved) = resolve_to_git_root(file)?;
     let timestamp = chrono_timestamp();
     let msg = format!("agent-doc: {}", timestamp);
 
     let status = Command::new("git")
+        .current_dir(&git_root)
         .args(["add", "-f", &resolved.to_string_lossy()])
         .status()?;
     if !status.success() {
@@ -57,6 +79,7 @@ pub fn commit(file: &Path) -> Result<()> {
 
     // Commit — ignore failure (nothing to commit is fine)
     let _ = Command::new("git")
+        .current_dir(&git_root)
         .args(["commit", "-m", &msg, "--no-verify"])
         .status();
     Ok(())

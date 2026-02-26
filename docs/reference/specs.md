@@ -1,1 +1,1 @@
-{{#include ../../SPECS.md}}
+{{#include ../../SPEC.md}}

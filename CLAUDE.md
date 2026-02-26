@@ -43,6 +43,17 @@ src/
   audit_docs.rs     # Audit instruction files (via instruction-files crate)
 ```
 
+## Release Process
+
+1. Bump version in `Cargo.toml` + `pyproject.toml` (keep in sync)
+2. `make check` (clippy + test)
+3. Branch → PR → squash merge to main
+4. Tag: `git tag v<version> && git push origin v<version>`
+5. `cargo publish` (crates.io)
+6. `maturin publish` (PyPI)
+7. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
+8. Install binary: `cargo install --path .`
+
 ## Agent Backend Contract
 
 Each agent backend implements: take a prompt string, return (response_text, session_id).

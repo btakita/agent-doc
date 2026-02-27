@@ -64,3 +64,18 @@ But this depends on PATH ordering (`~/.local/bin` before `/usr/bin`). The `.desk
 ## User
 
 Please write the wrapper script. The .desktop didn't seem to work.
+
+## Assistant
+
+Written and installed at `~/.local/bin/slack`:
+
+```sh
+#!/bin/sh
+exec env GTK_IM_MODULE= /usr/bin/slack "$@"
+```
+
+Verified: `which slack` now resolves to `/home/brian/.local/bin/slack` (takes precedence over `/usr/bin/slack`). Restart Slack for it to take effect — next launch via dmenu will use the wrapper.
+
+## User
+
+The .local/bin/slack update did not work. Hotkey still captured.

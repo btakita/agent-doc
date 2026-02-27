@@ -151,3 +151,15 @@ This might work if Electron checks `XMODIFIERS` for XIM-based input methods.
 ## User
 
 send it
+
+I don't see the screenshot in the draft
+
+## Assistant
+
+**Sent** — but without the screenshot. Corky doesn't support email attachments, so the email went out with "I've attached a screenshot" but no actual attachment. That's my mistake — I should have removed that line from the draft since the attachment couldn't be included.
+
+**To fix:** Reply to the sent email in Gmail and attach the screenshot there. Or forward it to `feedback@slack.com` with the image added.
+
+## User
+
+claim tasks/corky.md

@@ -359,3 +359,29 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 The claim plugin command does not bind with the laid out tmux window.
 
 Do we need to model the tmux layout of the currently opened window? Can tmux detect what window is currently viewed?
+
+Reposition this tmux window to position 1
+
+## Assistant
+
+**Window moved to position 1.** (`tmux move-window -s @83 -t 1`)
+
+**Re: claim not binding with layout window:**
+
+The problem: `claim` uses `tmux display-message -p '#{pane_id}'` which returns the **globally active pane** — could be in any window. The `layout` command dynamically discovers its target window, but `claim` has no awareness of it.
+
+**Yes, tmux can detect the current window:** `tmux display-message -p '#{window_id}'`. But from the IDE, "active" means whatever was last focused in tmux before switching to IntelliJ — not necessarily the layout window.
+
+**Current data model:** `sessions.json` stores `{session_uuid → pane_id}` only — no window IDs. The layout command discovers windows dynamically by querying which window each pane is in.
+
+**Two options to fix:**
+
+1. **Plugin-side: claim + layout sync** — After `ClaimAction` runs `agent-doc claim`, automatically trigger the layout sync (same logic as `SyncLayoutAction`). Claim binds document → pane, then layout rearranges all visible documents' panes into one window. Simple, no Rust changes.
+
+2. **Rust-side: `agent-doc claim --layout`** — Add a flag that runs layout after claiming. Or store the "layout window" in sessions.json so `claim` can target the right window directly.
+
+Option 1 is simpler and requires only a plugin change. Want me to implement it?
+
+## User
+
+Can we have the plugins send their layouts to agent-doc --layout...and have agent-doc rearrange the panes accordingly?

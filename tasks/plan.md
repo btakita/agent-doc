@@ -277,3 +277,15 @@ The claims.log is **deferred** — prints on next `/agent-doc` invocation, not i
 ## User
 
 I get it. claims.log is a good idea.
+
+## Assistant
+
+Claims.log confirmed as the approach. Already implemented and working:
+
+1. IDE claim → `agent-doc claim` → appends to `.agent-doc/claims.log`
+2. `tmux display-message` → 3s visual confirmation (immediate)
+3. Next `/agent-doc` → skill reads + prints + truncates claims.log (permanent session record)
+
+## User
+
+PR, squash merge, release

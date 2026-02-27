@@ -1,0 +1,47 @@
+{
+  "name": "agent-doc",
+  "displayName": "Agent Doc",
+  "description": "Submit markdown documents to AI agents via agent-doc",
+  "version": "0.1.0",
+  "publisher": "btakita",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/btakita/agent-loop"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentDoc.submit",
+        "title": "Agent Doc: Submit"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agentDoc.submit",
+        "key": "ctrl+shift+alt+a",
+        "when": "editorTextFocus && editorLangId == markdown"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

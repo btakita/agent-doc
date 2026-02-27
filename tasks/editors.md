@@ -311,3 +311,31 @@ If the tmux window you're looking at is different from window @8, switch to it: 
 
 I need a way to have tmux show the same layout as my editor.
 I have no idea where the commands are being routed.
+
+## Assistant
+
+**Added "Sync Tmux Layout" action.**
+
+New `SyncLayoutAction` that manually forces the tmux panes to match your current IDE editor split. It runs `agent-doc layout` or `agent-doc focus` immediately (no debounce) and clears the dedup cache so automatic sync resumes after.
+
+**Access it via:**
+- **Ctrl+Shift+Alt+L** — direct hotkey
+- **Alt+Enter** → popup → "Sync Tmux Layout" (item 3)
+- **Right-click** → "Sync Tmux Layout"
+
+Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+**Summary of all Agent Doc hotkeys:**
+
+| Hotkey | Action |
+|---|---|
+| Ctrl+Shift+Alt+A | Submit to Agent Doc |
+| Ctrl+Shift+Alt+C | Claim for Tmux Pane |
+| Ctrl+Shift+Alt+L | Sync Tmux Layout |
+| Alt+Enter | Popup menu (all three) |
+
+## User
+
+The syncing is not complete. It displayed the "..side by side" message. But switching editor documents does not change the tmux selection. Need to have a full recovery of syncing.
+
+I still don't have any idea where this is 

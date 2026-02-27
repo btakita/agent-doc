@@ -262,4 +262,18 @@ The `tmux display-message` (3s overlay) is still there for immediate visual feed
 
 ## User
 
-I want the Claude session to echo that a claim was made in the session itself. 
+I want the Claude session to echo that a claim was made in the session itself.
+
+## Assistant
+
+The claims.log is **deferred** — prints on next `/agent-doc` invocation, not immediately. For immediate echo in the Claude session, can't inject output into a tmux pane without Claude Code treating it as input. Options:
+
+**A. `send-keys` with idle check** — After claim, plugin sends message to pane via send-keys. Immediate, permanent record. But interrupts mid-response, costs API call, Claude might act on it.
+
+**B. Claims.log (current)** — Deferred, reliable, zero interruption. Record on next `/agent-doc` invocation.
+
+**C. Hybrid** — Check if pane is idle. If idle → send-keys for immediate echo. If busy → claims.log for deferred.
+
+## User
+
+I get it. claims.log is a good idea.

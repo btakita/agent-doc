@@ -125,4 +125,29 @@ Review the draft and set `status: review` when ready.
 
 ## User
 
-The text is not underlined. It goes into a mode where it's underlined but not formatted as underline. I cannot move the cursor with the keyboard. If I click on the editor pane, the underline disappears. 
+The text is not underlined. It goes into a mode where it's underlined but not formatted as underline. I cannot move the cursor with the keyboard. If I click on the editor pane, the underline disappears.
+
+## Assistant
+
+Good correction — this changes the diagnosis. The behavior you describe (underlined "u" appears, keyboard locked, clicking dismisses) is actually **IBus unicode code point input mode**, not Slack's underline formatting. `Ctrl+Shift+U` is the standard GTK/IBus shortcut for entering a Unicode code point by hex value.
+
+This means the intercept IS at the system/input method level — but Electron/Chromium ignores `GTK_IM_MODULE=` because it uses its own input method handling layer. That's why the wrapper didn't help.
+
+**Updated the draft** at `mail/drafts/2026-02-27-bug-ctrl-shift-u-keybinding-conflict-on-linux-underline-over.md`:
+- Subject updated: "...enters unicode input mode instead"
+- Corrected the actual behavior description (unicode input mode, not underline formatting)
+- Listed the attempted fixes (GTK_IM_MODULE, wrapper script) and why they failed (Electron handles IM independently)
+- Noted this is a Slack/Electron issue where `Ctrl+Shift+U` is intercepted before reaching Slack's keybinding handler
+
+Review the updated draft. You can also try one more thing — update the wrapper to also set `XMODIFIERS`:
+
+```sh
+#!/bin/sh
+exec env GTK_IM_MODULE= XMODIFIERS= /usr/bin/slack "$@"
+```
+
+This might work if Electron checks `XMODIFIERS` for XIM-based input methods.
+
+## User
+
+send it

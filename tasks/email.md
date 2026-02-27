@@ -50,3 +50,15 @@ corky filter push              # apply
 ## User
 
 push them
+
+## Assistant
+
+**Done. 2 filters pushed to Gmail.**
+
+Deleted 2 existing filters, created 2 new ones:
+1. **correspondence** — from/to match for 17 addresses → `correspondence` label + mark important
+2. **for-lucas** — from match for 14 addresses → `for-lucas` label + star + mark important + forward to `dev@briantakita.me` + never spam
+
+## User
+
+sync

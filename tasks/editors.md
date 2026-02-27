@@ -127,3 +127,21 @@ Plugin zip for install: `agent-doc/editors/jetbrains/build/distributions/agent-d
 
 The intention menu is not available when I press the hotkey. Not in the action list either.
 Can we force the intention menu to be available from anywhere in a *.md file?
+
+## Assistant
+
+**Fixed.** Two issues:
+
+1. **`language="TEXT"` wrong** — Markdown files use language ID `Markdown`, not `TEXT`. Removed the `<language>` tag entirely so the intentions register for all file types. Our `isAvailable()` already filters to `.md` files only.
+
+2. **Missing description files** — IntelliJ requires `intentionDescriptions/<ClassName>/description.html` resource files for each intention. Without them, the intention silently fails to register. Added both:
+   - `intentionDescriptions/SubmitIntention/description.html`
+   - `intentionDescriptions/ClaimIntention/description.html`
+
+Plugin rebuilt. Reinstall from `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`.
+
+After reinstalling, press **Alt+Enter** in any `.md` file — you should see "Submit to Agent Doc" and "Claim for Tmux Pane" in the intentions list.
+
+## User
+
+I don't see the signed build

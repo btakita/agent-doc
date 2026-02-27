@@ -203,4 +203,60 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 
 ## User
 
-Something happened. I moved corky.md to the other side of the ide split. I ran the claim command. I pressed tab in the tmux window (not sure if this affected anything). The tmux window 1 closed. tmux window 1 opened with only 1 session and was not bound to the editor plugin anymore. the tmux window 1 closed again. 
+Something happened. I moved corky.md to the other side of the ide split. I ran the claim command. I pressed tab in the tmux window (not sure if this affected anything). The tmux window 1 closed. tmux window 1 opened with only 1 session and was not bound to the editor plugin anymore. the tmux window 1 closed again.
+
+I resumed the tmux session on window 2. But now it's no longer bound to the editor plugin.
+
+Please add a resync with tmux command to correct sync issues.
+
+## Assistant
+
+**Root cause identified: race condition in `EditorTabSyncListener`.**
+
+The plugin log shows exactly what happened:
+
+```
+17:56:15.098 layout corky.md+slack.md → Broke out pane %4, Joined corky.md (%17)
+17:56:15.507 layout editors.md+slack.md → Broke out pane %17, Joined editors.md (%4)
+```
+
+Moving a tab across IDE splits fires `selectionChanged` **twice** in 400ms — once for each split gaining/losing focus. Each fires `agent-doc layout` which breaks out previous panes and joins new ones. The 100ms debounce is too short. The second layout *undoes* the first, creating orphaned panes and closing windows.
+
+**Three fixes needed:**
+
+1. **EditorTabSyncListener: increase debounce + concurrency guard** — 100ms → 500ms, skip if layout already running, skip if file set unchanged
+2. **Layout: don't break panes with active Claude sessions** — check before `break-pane`
+3. **`agent-doc resync` command** — validate sessions.json against live tmux panes, remove stale entries
+
+I'll implement fix #1 (plugin debounce) and fix #3 (resync command) now.
+
+**Implemented:**
+
+### Fix 1: EditorTabSyncListener hardened
+- Debounce increased from 100ms → **500ms**
+- Added **concurrency guard** (`AtomicBoolean`) — skips if a layout command is already running
+- Added **dedup** — skips if the sorted file set hasn't changed since last execution
+
+### Fix 3: `agent-doc resync` command
+New subcommand that validates sessions.json against live tmux panes:
+```
+$ agent-doc resync
+Removed 1 stale session(s):
+  tasks/corky.md (pane %17 dead)
+
+Active sessions:
+  tasks/editors.md → pane %32
+  tasks/plan.md → pane %4
+  tasks/slack.md → pane %26
+  ...
+```
+
+21 tests pass. Binary installed. Plugin rebuilt and signed.
+
+**To recover now:**
+1. Run `agent-doc resync` to clean up stale pane references
+2. Reinstall plugin from `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+3. Re-claim any files that lost their pane binding with `Ctrl+Shift+Alt+C`
+
+## User
+

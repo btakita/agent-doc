@@ -6,6 +6,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.ui.Splitter
 import java.awt.Component
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -15,16 +16,28 @@ import java.util.concurrent.atomic.AtomicLong
  * - Single visible .md file → `agent-doc focus <file>`
  * - Multiple visible .md files in splits → `agent-doc layout <files...> --split h|v`
  *
- * Debounces rapid events (100ms) so only the final state is acted upon.
+ * Guards against rapid-fire events:
+ * - 500ms debounce so only the final state is acted upon
+ * - Concurrency guard: skips if a layout command is already running
+ * - Dedup: skips if the file set hasn't changed since the last execution
  *
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
  */
 class EditorTabSyncListener : FileEditorManagerListener {
 
     companion object {
-        private const val DEBOUNCE_MS = 100L
+        private const val DEBOUNCE_MS = 500L
         private val generation = AtomicLong(0)
+        private val running = AtomicBoolean(false)
+        @Volatile private var lastFileSet: List<String> = emptyList()
+        @Volatile private var lastActiveFile: String = ""
         private val LOG_FILE = java.io.File("/tmp/agent-doc-plugin.log")
+
+        /** Clear the dedup cache so the next automatic sync runs unconditionally. */
+        fun clearLastFileSet() {
+            lastFileSet = emptyList()
+            lastActiveFile = ""
+        }
     }
 
     private fun log(msg: String) {
@@ -54,6 +67,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         // Detect split orientation from the Swing component tree.
         val split = detectSplitOrientation(project)
+        val activeFile = TerminalUtil.relativePath(project, file)
 
         // Debounce: bump generation, wait, then check if we're still current.
         val myGen = generation.incrementAndGet()
@@ -66,22 +80,52 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     return@Thread
                 }
 
-                val agentDoc = TerminalUtil.resolveAgentDoc()
-                val cmd = if (visibleMdFiles.size == 1) {
-                    listOf(agentDoc, "focus", visibleMdFiles[0])
-                } else {
-                    val splitFlag = if (split == "v") "v" else "h"
-                    listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag)
+                val sorted = visibleMdFiles.sorted()
+                val fileSetChanged = sorted != lastFileSet
+                val activeFileChanged = activeFile != lastActiveFile
+
+                // Dedup: skip if neither file set nor active file changed.
+                if (!fileSetChanged && !activeFileChanged) {
+                    log("dedup: unchanged set=$sorted active=$activeFile")
+                    return@Thread
                 }
-                log("exec: ${cmd.joinToString(" ")}")
-                val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(basePath))
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
-                log("result: exit=$exitCode output=${output.trim()}")
+
+                // Concurrency guard: skip if another layout command is running.
+                if (!running.compareAndSet(false, true)) {
+                    log("guard: layout already running, skipping")
+                    return@Thread
+                }
+
+                try {
+                    lastFileSet = sorted
+                    lastActiveFile = activeFile
+
+                    val agentDoc = TerminalUtil.resolveAgentDoc()
+                    val cmd = if (fileSetChanged) {
+                        // File set changed → full layout
+                        if (visibleMdFiles.size == 1) {
+                            listOf(agentDoc, "focus", visibleMdFiles[0])
+                        } else {
+                            val splitFlag = if (split == "v") "v" else "h"
+                            listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag)
+                        }
+                    } else {
+                        // Same file set, different active file → just focus
+                        listOf(agentDoc, "focus", activeFile)
+                    }
+                    log("exec: ${cmd.joinToString(" ")}")
+                    val process = ProcessBuilder(cmd)
+                        .directory(java.io.File(basePath))
+                        .redirectErrorStream(true)
+                        .start()
+                    val output = process.inputStream.bufferedReader().readText()
+                    val exitCode = process.waitFor()
+                    log("result: exit=$exitCode output=${output.trim()}")
+                } finally {
+                    running.set(false)
+                }
             } catch (e: Exception) {
+                running.set(false)
                 log("error: ${e.message}")
             }
         }.start()

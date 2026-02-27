@@ -17,6 +17,8 @@
         <notificationGroup id="Agent Doc"
                            displayType="BALLOON"
                            isLogByDefault="true"/>
+        <actionPromoter
+            implementation="com.github.btakita.agentdoc.AgentDocActionPromoter"/>
     </extensions>
 
     <projectListeners>
@@ -27,6 +29,12 @@
     </projectListeners>
 
     <actions>
+        <action id="AgentDoc.Popup"
+                class="com.github.btakita.agentdoc.AgentDocPopupAction"
+                text="Agent Doc Actions"
+                description="Show Agent Doc actions for the current markdown file">
+            <keyboard-shortcut first-keystroke="alt ENTER" keymap="$default"/>
+        </action>
         <action id="AgentDoc.Submit"
                 class="com.github.btakita.agentdoc.SubmitAction"
                 text="Submit to Agent Doc"
@@ -35,6 +43,23 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.Claim"
+                class="com.github.btakita.agentdoc.ClaimAction"
+                text="Claim for Tmux Pane"
+                description="Claim this document for the currently active tmux pane">
+            <keyboard-shortcut first-keystroke="ctrl shift alt C" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.SyncLayout"
+                class="com.github.btakita.agentdoc.SyncLayoutAction"
+                text="Sync Tmux Layout"
+                description="Re-sync tmux pane layout to match the current editor split">
+            <keyboard-shortcut first-keystroke="ctrl shift alt L" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>

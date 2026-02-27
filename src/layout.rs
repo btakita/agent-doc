@@ -78,10 +78,20 @@ pub fn run_with_tmux(files: &[&Path], split: Split, tmux: &Tmux) -> Result<()> {
     }
 
     if pane_files.len() < 2 {
-        if let Some((ref pane_id, _)) = pane_files.first() {
-            tmux.select_pane(pane_id)?;
+        // Only focus the most recently selected file's pane (files[0]).
+        // If that file has no pane, don't change focus at all — the user
+        // selected an unclaimed file, so switching to a different pane
+        // would be confusing.
+        if let Some(first_file) = files.first() {
+            let first_display = first_file.display().to_string();
+            for (pane_id, display) in &pane_files {
+                if *display == first_display {
+                    tmux.select_pane(pane_id)?;
+                    break;
+                }
+            }
         }
-        anyhow::bail!("need at least 2 active panes for layout");
+        return Ok(());
     }
 
     // Deduplicate panes (multiple files might share a pane).

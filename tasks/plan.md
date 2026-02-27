@@ -182,3 +182,9 @@ Should I update the SKILL.md?
 ## User
 
 yes
+
+The commits were on a branch. Now I lost my changes. What branch was I on?
+
+We absolutely need to maintain branch discipline. I was not aware that we were off of the main branch. Now I potentially lost a bunch of work.
+
+I also need you to look at the reflogs because I reset the last commit.

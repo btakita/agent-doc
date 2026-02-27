@@ -55,3 +55,5 @@ Want me to implement?
 ## User
 
 yes
+
+I want to file a Jetbrains bug report for the intentions menu not showing up on markdown files. Can we test again and confirm it's an issue. I would like intentions to be a menu with the plugin commands.

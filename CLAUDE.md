@@ -38,6 +38,7 @@ src/
   layout.rs         # Arrange tmux panes to mirror editor split layout
   prompt.rs         # Detect permission prompts from Claude Code sessions
   skill.rs          # Manage bundled SKILL.md (install/check)
+  resync.rs         # Validate sessions.json, remove dead panes
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   agent/
     mod.rs          # Agent trait

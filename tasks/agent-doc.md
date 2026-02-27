@@ -8,3 +8,4 @@ branch: null
 
 I see flickering in the tmux when switching task documents.
 
+There is also flickering when the claude session shows diffs.

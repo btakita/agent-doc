@@ -338,4 +338,24 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 
 The syncing is not complete. It displayed the "..side by side" message. But switching editor documents does not change the tmux selection. Need to have a full recovery of syncing.
 
-I still don't have any idea where this is 
+I still don't have any idea which claude session this document is being routed to.
+
+## Assistant
+
+**Fixed: tab switching now changes tmux focus.**
+
+Root cause: the dedup guard in `EditorTabSyncListener` only tracked the **file set** (which files are visible). When you switch between `editors.md` and `slack.md` in a split, the same two files are always visible — so the dedup skipped every event. But the **active file** changed, which should trigger `agent-doc focus` to select the right tmux pane.
+
+**Fix:** dedup now tracks both the file set AND the active file:
+- File set changed → full `agent-doc layout` (rearrange panes)
+- Same file set, different active file → `agent-doc focus <activeFile>` (select pane)
+- Both unchanged → skip (true dedup)
+
+**Your routing:** `tasks/editors.md` → pane %32 (session 4aee457b). All 10 sessions have live panes.
+
+Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+The claim plugin command does not bind with the laid out tmux window.
+
+Do we need to model the tmux layout of the currently opened window? Can tmux detect what window is currently viewed?

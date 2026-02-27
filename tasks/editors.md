@@ -114,3 +114,16 @@ Plugin rebuilt. Reinstall from `agent-doc/editors/jetbrains/build/distributions/
 ## User
 The distribution directory should be /home/brian/work/btakita/agent-loop/agent-doc/editors/jetbrains now. I want to delete
 agent-doc-jetbrains
+
+## Assistant
+
+Deleted `agent-doc-jetbrains/` from disk. The canonical source is now `agent-doc/editors/jetbrains/`.
+
+Plugin zip for install: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+
+`agent-doc-vscode/` also still exists on disk if you want that removed too — the canonical source is `agent-doc/editors/vscode/`.
+
+## User
+
+The intention menu is not available when I press the hotkey. Not in the action list either.
+Can we force the intention menu to be available from anywhere in a *.md file?

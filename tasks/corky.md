@@ -137,4 +137,13 @@ Is there a way to test this locally before releasing?
 
 ## User
 
+```
+corky social draft linkedin      # Create social media draft
+corky social publish FILE       # Publish to LinkedIn
+```
+This should be scoped to linkedin
 
+```
+corky linkedin draft      # Create social media draft for Linkedin
+corky linkedin publish FILE       # Publish to LinkedIn
+```

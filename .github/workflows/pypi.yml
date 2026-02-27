@@ -29,6 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Clone instruction-files (path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: btakita/instruction-files
+          path: ../instruction-files
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,6 +55,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Clone instruction-files (path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: btakita/instruction-files
+          path: ../instruction-files
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1

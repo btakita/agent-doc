@@ -12,6 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Clone instruction-files (path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: btakita/instruction-files
+          path: ../instruction-files
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

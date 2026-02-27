@@ -276,3 +276,20 @@ tasks/judith-krug.md → pane %26
 tasks/qwire-holdings.md → pane %27
 tasks/ron-berkes.md → pane %5
 tasks/toby-hill.md → pane %5
+
+## Assistant
+
+**The popup is on Alt+Enter, not Alt+Space.**
+
+The `AgentDocPopupAction` is bound to **Alt+Enter**. Alt+Space is typically a window manager shortcut (window menu) — it won't trigger our popup.
+
+**Three ways to claim/re-claim:**
+1. **Alt+Enter** → popup → select "Claim for Tmux Pane" (requires latest plugin installed)
+2. **Ctrl+Shift+Alt+C** — direct hotkey (always works)
+3. **Right-click** → "Claim for Tmux Pane" (context menu)
+
+Your `resync` output looks clean — all 10 sessions have live panes. No stale entries to clean up.
+
+## User
+
+The resync did not change the tmux window.

@@ -1,0 +1,23 @@
+{
+  "cf853a21-3aaf-4775-9cc8-0e789109f9dd": {
+    "pane": "%35",
+    "pid": 95583,
+    "cwd": "/home/brian/work/btakita/agent-loop",
+    "started": "2026-02-28T00:42:39Z",
+    "file": "tasks/plan.md"
+  },
+  "9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20": {
+    "pane": "%26",
+    "pid": 1276335,
+    "cwd": "/home/brian/work/btakita/agent-loop",
+    "started": "2026-02-26T16:15:59Z",
+    "file": "tasks/judith-krug.md"
+  },
+  "db08a891-c339-4a49-9f49-2d8a1f30ed10": {
+    "pane": "%5",
+    "pid": 340875,
+    "cwd": "/home/brian/work/btakita/agent-loop",
+    "started": "2026-02-26T00:41:38Z",
+    "file": "tasks/resume.md"
+  }
+}

@@ -9,3 +9,7 @@ plan.md
 research.md
 mail
 tmp/
+
+# Editor plugins moved to agent-doc/editors/
+agent-doc-jetbrains/
+agent-doc-vscode/

@@ -1,3 +1,10 @@
+---
+description: Submit a session document to an AI agent and append the response
+user-invocable: true
+argument-hint: "<file>"
+agent-doc-version: "0.4.0"
+---
+
 # agent-doc submit
 
 Interactive document session — respond to user edits in a markdown document.
@@ -6,7 +13,11 @@ Interactive document session — respond to user edits in a markdown document.
 
 ```
 /agent-doc <FILE>
+/agent-doc claim <FILE>
 ```
+
+- `/agent-doc <FILE>` — run the document session workflow (diff, respond, write back)
+- `/agent-doc claim <FILE>` — claim a file for the current tmux pane (run `agent-doc claim <FILE>` via Bash, then stop)
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
@@ -19,6 +30,12 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 ## Workflow
 
+### 0. Pre-flight checks
+
+**Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
+
+**Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
+
 ### 1. Read the document and snapshot
 
 - Read `<FILE>` to get current content
@@ -28,8 +45,14 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 ### 2. Compute the diff
 
 - Compare snapshot (previous state) against current content
+- **Strip comments** from both sides before comparing:
+  - HTML comments: `<!-- ... -->` (including multiline)
+  - Link reference comments: `[//]: # (...)` (single-line)
+  - Comments are a user scratchpad — adding, editing, or removing comments should NOT trigger a response
+  - Uncommenting text (removing the markers) IS a real change and triggers a response
+  - The snapshot stores full content including comments; stripping is only for diff comparison
 - The diff represents what the user changed since the last submit
-- If no diff (content unchanged), tell the user nothing changed and stop
+- If no diff (content unchanged after comment stripping), tell the user nothing changed and stop
 
 ### 3. Respond
 
@@ -60,7 +83,8 @@ After responding, update the document file:
 ### 5. Git integration (optional)
 
 If the document is in a git repo:
-- Before responding: `git add -f <FILE> && git commit -m "agent-doc: <timestamp>" --no-verify`
+- Before responding: `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
+- **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
 - After writing response: do NOT commit (leave as uncommitted for diff gutters)
 
 ## Document Format

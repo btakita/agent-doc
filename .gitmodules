@@ -7,3 +7,12 @@
 [submodule "resume"]
 	path = resume
 	url = git@github.com:btakita/resume.git
+[submodule "instruction-files"]
+	path = instruction-files
+	url = git@github.com:btakita/instruction-files.git
+[submodule "philosophy"]
+	path = philosophy
+	url = https://github.com/btakita/philosophy
+[submodule "presence"]
+	path = presence
+	url = git@github.com:btakita/presence.git

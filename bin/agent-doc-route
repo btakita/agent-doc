@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# agent-doc-route — Route /agent-doc command to the correct tmux pane.
+#
+# Usage: agent-doc-route <file.md>
+#
+# 1. Reads session UUID from the file's YAML frontmatter.
+# 2. Looks up the pane in .agent-doc/sessions.json.
+# 3. If pane is alive: sends `/agent-doc <path>` via tmux send-keys.
+# 4. If pane is dead/missing: auto-starts a new Claude session.
+#
+# Auto-start cascade:
+#   - tmux running? → No → start tmux session "claude"
+#   - "claude" session exists? → No → create tmux session "claude"
+#   - Create new window in "claude" session
+#   - Start agent-doc-start in new pane
+#   - Send /agent-doc command after a brief delay
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+die() { echo "error: $*" >&2; exit 1; }
+
+FILE="${1:?Usage: agent-doc-route <file.md>}"
+[[ -f "$FILE" ]] || die "file not found: $FILE"
+
+# --- Extract session UUID from YAML frontmatter ---
+extract_session() {
+  local file="$1"
+  awk '
+    /^---$/ { in_fm = !in_fm; next }
+    in_fm && /^session:/ {
+      sub(/^session:[[:space:]]*/, "")
+      gsub(/["'\'']/, "")
+      if ($0 != "" && $0 != "null") print $0
+    }
+  ' "$file"
+}
+
+SESSION=$(extract_session "$FILE")
+[[ -n "$SESSION" ]] || die "no session UUID in frontmatter of $FILE"
+
+SESSIONS_FILE=".agent-doc/sessions.json"
+TMUX_SESSION="claude"
+
+# --- Look up pane for this session ---
+lookup_pane() {
+  [[ -f "$SESSIONS_FILE" ]] || return 1
+  if command -v jq &>/dev/null; then
+    jq -r --arg sid "$SESSION" '.[$sid].pane // empty' "$SESSIONS_FILE"
+  else
+    python3 -c "
+import json
+data = json.load(open('$SESSIONS_FILE'))
+entry = data.get('$SESSION', {})
+pane = entry.get('pane', '')
+if pane: print(pane)
+"
+  fi
+}
+
+# --- Check if a tmux pane is alive ---
+pane_alive() {
+  local pane="$1"
+  tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx "$pane"
+}
+
+# --- Send command to an existing pane ---
+send_command() {
+  local pane="$1"
+  tmux send-keys -t "$pane" "/agent-doc $FILE" Enter
+  echo "Sent /agent-doc $FILE → pane $pane"
+}
+
+# --- Auto-start: create a new Claude session in tmux ---
+auto_start() {
+  echo "Session $SESSION not found or pane dead. Auto-starting..."
+
+  # Ensure tmux server is running
+  if ! tmux has-session 2>/dev/null; then
+    # No tmux sessions at all — create the "claude" session
+    tmux new-session -d -s "$TMUX_SESSION" -c "$(pwd)"
+    local new_pane
+    new_pane=$(tmux display-message -t "$TMUX_SESSION" -p '#{pane_id}')
+    tmux send-keys -t "$new_pane" "$SCRIPT_DIR/agent-doc-start $FILE" Enter
+    echo "Created tmux session '$TMUX_SESSION', starting Claude in pane $new_pane"
+    echo "Waiting for Claude to start..."
+    # Queue the /agent-doc command — user triggers again once Claude is ready
+    return 0
+  fi
+
+  # tmux is running — check if "claude" session exists
+  if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux new-session -d -s "$TMUX_SESSION" -c "$(pwd)"
+    local new_pane
+    new_pane=$(tmux display-message -t "$TMUX_SESSION" -p '#{pane_id}')
+    tmux send-keys -t "$new_pane" "$SCRIPT_DIR/agent-doc-start $FILE" Enter
+    echo "Created tmux session '$TMUX_SESSION', starting Claude in pane $new_pane"
+    return 0
+  fi
+
+  # "claude" session exists — create a new window for this session
+  tmux new-window -t "$TMUX_SESSION" -c "$(pwd)"
+  local new_pane
+  new_pane=$(tmux display-message -t "$TMUX_SESSION" -p '#{pane_id}')
+  tmux send-keys -t "$new_pane" "$SCRIPT_DIR/agent-doc-start $FILE" Enter
+  echo "Created new window in '$TMUX_SESSION', starting Claude in pane $new_pane"
+}
+
+# --- Main routing logic ---
+PANE=$(lookup_pane)
+
+if [[ -n "$PANE" ]] && pane_alive "$PANE"; then
+  send_command "$PANE"
+else
+  auto_start
+fi

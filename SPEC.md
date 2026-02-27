@@ -13,17 +13,17 @@ agent-loop/
   mail/            # Symlink to private data (~/.../mail), gitignored
   plan.md          # Planning documents, gitignored
   CLAUDE.md        # Cross-cutting agent instructions
-  SPECS.md         # This file
+  SPEC.md          # This file
 ```
 
 ## 3. Conventions
 
-- Each submodule has its own CLAUDE.md and SPECS.md with project-specific instructions
+- Each submodule has its own CLAUDE.md and SPEC.md with project-specific instructions
 - Root CLAUDE.md covers cross-cutting concerns only
 - `mail/` is private data — never commit real names or email content to public repos
 - Submodules are pinned to specific commits; update with `git submodule update`
 
 ## 4. Submodule Specs
 
-- **agent-doc**: See `agent-doc/SPECS.md`
-- **corky**: See `corky/SPECS.md`
+- **agent-doc**: See `agent-doc/SPEC.md`
+- **corky**: See `corky/SPEC.md`

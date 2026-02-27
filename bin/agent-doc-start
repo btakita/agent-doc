@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# agent-doc-start — Start Claude in a tmux pane and register the session.
+#
+# Usage: agent-doc-start <file.md>
+#
+# Reads the session UUID from the file's YAML frontmatter.
+# Registers the tmux pane in .agent-doc/sessions.json.
+# Starts `claude` in the current pane.
+
+set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 1; }
+
+FILE="${1:?Usage: agent-doc-start <file.md>}"
+[[ -f "$FILE" ]] || die "file not found: $FILE"
+
+# --- Extract session UUID from YAML frontmatter ---
+extract_session() {
+  local file="$1"
+  # Match "session: <uuid>" in YAML frontmatter (between --- delimiters)
+  awk '
+    /^---$/ { in_fm = !in_fm; next }
+    in_fm && /^session:/ {
+      sub(/^session:[[:space:]]*/, "")
+      # Strip quotes if present
+      gsub(/["'\'']/, "")
+      if ($0 != "" && $0 != "null") print $0
+    }
+  ' "$file"
+}
+
+SESSION=$(extract_session "$FILE")
+[[ -n "$SESSION" ]] || die "no session UUID in frontmatter of $FILE"
+
+# --- Ensure we're in tmux ---
+[[ -n "${TMUX:-}" ]] || die "not running inside tmux"
+
+PANE_ID="$TMUX_PANE"
+PID="$$"
+CWD="$(pwd)"
+STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+# --- Register session in .agent-doc/sessions.json ---
+SESSIONS_DIR=".agent-doc"
+SESSIONS_FILE="$SESSIONS_DIR/sessions.json"
+mkdir -p "$SESSIONS_DIR"
+
+# Create sessions.json if it doesn't exist
+[[ -f "$SESSIONS_FILE" ]] || echo '{}' > "$SESSIONS_FILE"
+
+# Use a temp file for atomic write
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+# Add/update the session entry using jq (or python as fallback)
+if command -v jq &>/dev/null; then
+  jq --arg sid "$SESSION" \
+     --arg pane "$PANE_ID" \
+     --arg pid "$PID" \
+     --arg cwd "$CWD" \
+     --arg started "$STARTED" \
+     '.[$sid] = {pane: $pane, pid: ($pid | tonumber), cwd: $cwd, started: $started}' \
+     "$SESSIONS_FILE" > "$TMP"
+else
+  python3 -c "
+import json, sys
+data = json.load(open('$SESSIONS_FILE'))
+data['$SESSION'] = {
+    'pane': '$PANE_ID',
+    'pid': $PID,
+    'cwd': '$CWD',
+    'started': '$STARTED'
+}
+json.dump(data, open('$TMP', 'w'), indent=2)
+"
+fi
+
+mv "$TMP" "$SESSIONS_FILE"
+trap - EXIT
+
+echo "Registered session $SESSION → pane $PANE_ID"
+echo "Starting claude..."
+
+# --- Start claude ---
+exec claude

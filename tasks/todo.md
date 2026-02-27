@@ -1,0 +1,3 @@
+- Cube Call Recorder trial ends 3/1/2026
+  - Either cancel or get 1 year subscription
+  - Do not get on their weekly plan

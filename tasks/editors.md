@@ -425,3 +425,24 @@ Which approach do you prefer? Or a combination (e.g., set pane title + route to 
 ## User
 
 Option 3
+
+THe mid-reponse is a good point. and not necessary...so I like option 1 or 2 instead. I don't want it to stick around persistently though.
+
+## Assistant
+
+**Done — using Option 2 (tmux display-message).**
+
+`agent-doc claim` now shows a 3-second overlay notification on the target pane:
+```
+Claimed tasks/editors.md (pane %35)
+```
+
+Auto-dismisses — not persistent. I tried Option 1 (pane title) first but Claude Code continuously overrides the pane title with its own status spinner, so it gets immediately replaced.
+
+Binary rebuilt and installed. Plugin reverted back to direct claim (not send-keys).
+
+Plugin signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+
+process release

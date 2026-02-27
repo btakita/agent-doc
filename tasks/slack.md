@@ -112,3 +112,17 @@ search the internet for a bug report if any
 ## User
 
 Compose an email with the bug report. Include the screenshot I gave you.
+
+## Assistant
+
+Draft saved to `mail/drafts/2026-02-27-bug-ctrl-shift-u-keybinding-conflict-on-linux-underline-over.md`.
+
+Includes: steps to reproduce, expected vs actual behavior, environment (Slack 4.47.69, CachyOS, kernel 6.19.3), confirmation it's not a system-level IBus issue, and the workaround.
+
+**Note on the screenshot:** Corky doesn't support email attachments yet. You'll need to attach the screenshot manually when sending — either via Gmail's compose UI after `corky draft push` creates the draft, or by forwarding the draft and adding the image.
+
+Review the draft and set `status: review` when ready.
+
+## User
+
+The text is not underlined. It goes into a mode where it's underlined but not formatted as underline. I cannot move the cursor with the keyboard. If I click on the editor pane, the underline disappears. 

@@ -203,3 +203,4 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 
 ## User
 
+Something happened. I moved corky.md to the other side of the ide split. I ran the claim command. I pressed tab in the tmux window (not sure if this affected anything). The tmux window 1 closed. tmux window 1 opened with only 1 session and was not bound to the editor plugin anymore. the tmux window 1 closed again. 

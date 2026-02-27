@@ -115,4 +115,26 @@ corky draft push mail/drafts/draft.md --send
 
 ## User
 
-PR, squash merge, release
+Is there a way to test this locally before releasing?
+
+## Assistant
+
+**v0.12.1 released** with email attachment support.
+
+### Release summary
+
+- **PR**: https://github.com/btakita/corky/pull/17 (squash merged)
+- **Tag**: `v0.12.1`
+- **crates.io**: published
+- **PyPI**: published
+- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.12.1 (with x86_64 Linux binary)
+- **Local**: `cargo install --path .` updated from v0.11.5 → v0.12.1
+
+### Also updated
+- `SPEC.md` — documented `attachments:` field in draft format, `--attach` flag on `draft new`, multipart/mixed behavior on `draft push`
+- `VERSIONS.md` — added v0.12.1 entry
+- `Cargo.toml` + `pyproject.toml` — version bumped to 0.12.1
+
+## User
+
+

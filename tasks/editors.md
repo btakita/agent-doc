@@ -385,3 +385,25 @@ Option 1 is simpler and requires only a plugin change. Want me to implement it?
 ## User
 
 Can we have the plugins send their layouts to agent-doc --layout...and have agent-doc rearrange the panes accordingly?
+
+## Assistant
+
+**Yes — this is already the architecture, and now claim triggers it too.**
+
+The `EditorTabSyncListener` already sends layouts to `agent-doc layout <files...> --split h|v` on every tab switch. The missing piece was that `ClaimAction` didn't re-sync after claiming.
+
+**Fix:** `ClaimAction` now calls `SyncLayoutAction.syncLayout(project)` after a successful claim. This means: claim binds document → pane, then layout immediately rearranges all visible documents' panes into one window.
+
+Extracted `syncLayout()` into a shared static method so both `ClaimAction` and `SyncLayoutAction` use the same logic.
+
+**Flow after this fix:**
+1. Press `Ctrl+Shift+Alt+C` (claim) → binds document to active tmux pane
+2. Plugin immediately calls `agent-doc layout <visible .md files> --split h|v`
+3. agent-doc moves all relevant panes into one window, arranges them side-by-side
+4. User sees the correct layout in tmux
+
+Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+
+When I run Claim For Tmux Pane...can we have the claude session acknowledge Claimed tasks/ron-berkes.md for pane %4?

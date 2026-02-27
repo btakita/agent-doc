@@ -176,3 +176,4 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 
 ## User
 
+Intention not available

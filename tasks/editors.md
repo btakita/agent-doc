@@ -293,3 +293,21 @@ Your `resync` output looks clean — all 10 sessions have live panes. No stale e
 ## User
 
 The resync did not change the tmux window.
+
+## Assistant
+
+**Correct — `resync` only cleans `sessions.json`, it doesn't rearrange tmux panes.**
+
+Since all 10 sessions had live panes, there was nothing to clean. To re-sync the tmux layout with your IDE:
+
+1. **Switch tabs in the IDE** — clicking between `.md` tabs triggers `EditorTabSyncListener` which calls `agent-doc layout/focus` to arrange panes
+2. **Or manually:** `agent-doc layout tasks/editors.md tasks/slack.md --split h`
+
+The plugin log confirms sync is still firing — the dedup guard caught the last event because the file set hadn't changed. Your panes %26 (slack) and %32 (editors) are in window @8.
+
+If the tmux window you're looking at is different from window @8, switch to it: `tmux select-window -t @8`
+
+## User
+
+I need a way to have tmux show the same layout as my editor.
+I have no idea where the commands are being routed.

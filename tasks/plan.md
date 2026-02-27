@@ -188,3 +188,48 @@ The commits were on a branch. Now I lost my changes. What branch was I on?
 We absolutely need to maintain branch discipline. I was not aware that we were off of the main branch. Now I potentially lost a bunch of work.
 
 I also need you to look at the reflogs because I reset the last commit.
+
+## Assistant
+
+### SKILL.md Updated
+
+Comment stripping was already implemented in the SKILL.md (v0.5.3) during the previous session — `<!-- ... -->` and `[//]: # (...)` are stripped before diff comparison. The snapshot stores full content; only the diff algorithm ignores comment-only changes.
+
+### Your Branch: `20260225/topic-sync`
+
+**Your work is safe.** Here's the reflog timeline:
+
+```
+HEAD@{9}:  commit 9af6c15 — "session sync: task docs, snapshots, skill v0.5.3, submodule pointers"
+HEAD@{6}:  git reset HEAD~1  → moved branch back to 9405146
+HEAD@{7}:  rebase attempted, then aborted
+HEAD@{4}:  checkout: 20260225/topic-sync → main
+```
+
+**Current state:**
+- You're on `main` (old — Feb 25 commits)
+- `20260225/topic-sync` still exists locally at `9405146` — **30 commits ahead of main** (47 files, +4927/-2069 lines)
+- The reset "session sync" commit (`9af6c15`) is orphaned but recoverable from reflog
+
+**To recover:**
+```bash
+git checkout 20260225/topic-sync          # switch back to your branch
+git cherry-pick 9af6c15                   # recover the reset commit (optional)
+```
+
+**On branch discipline:** I take responsibility — the previous session's agent-doc commits all went to whatever branch was current (`20260225/topic-sync`), and I never flagged that we were off main. The `agent-doc commit` command commits to the current branch without checking or warning. Going forward, I should verify the branch at the start of each session and alert you if it's not main.
+
+## User
+
+Help me understand the commit before git rebase HEAD~1
+
+```
+6c58ce9 HEAD@{5}: checkout: moving from 20260225/topic-sync to main
+9405146 (20260225/topic-sync) HEAD@{6}: reset: moving to HEAD
+9405146 (20260225/topic-sync) HEAD@{7}: reset: moving to HEAD~1
+9af6c15 HEAD@{8}: rebase (abort): returning to refs/heads/20260225/topic-sync
+318c8e2 (origin/20260225/topic-sync) HEAD@{9}: rebase (start): checkout refs/remotes/origin/20260225/topic-sync
+9af6c15 HEAD@{10}: commit: session sync: task docs, snapshots, skill v0.5.3, submodule pointers
+9405146 (20260225/topic-sync) HEAD@{11}: commit: agent-doc: 2026-02-27 17:16:06
+f6ddea3 HEAD@{12}: commit: agent-doc: 2026-02-27 17:15:08
+```

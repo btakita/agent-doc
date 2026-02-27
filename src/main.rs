@@ -11,6 +11,7 @@ mod init;
 mod layout;
 mod prompt;
 mod reset;
+mod resync;
 mod route;
 mod sessions;
 mod skill;
@@ -127,6 +128,8 @@ enum Commands {
         #[arg(long, short, default_value = "h")]
         split: String,
     },
+    /// Validate sessions.json against live tmux panes, remove stale entries
+    Resync,
     /// Manage the Claude Code skill definition
     Skill {
         #[command(subcommand)]
@@ -193,6 +196,7 @@ fn main() -> anyhow::Result<()> {
             let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
             layout::run(&paths, split)
         }
+        Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {
             SkillCommands::Install => skill::install(),
             SkillCommands::Check => skill::check(),

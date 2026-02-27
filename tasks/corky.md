@@ -200,3 +200,19 @@ No new abstractions needed. Convention is enforced by the spec + consistent nami
 ## User
 
 pr, merge, release
+
+## Assistant
+
+**corky v0.12.2 released** — `corky social` → `corky linkedin`.
+
+- **PR**: https://github.com/btakita/corky/pull/18 (squash merged)
+- **Tag**: `v0.12.2`
+- **crates.io**: published
+- **PyPI**: published
+- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.12.2 (with x86_64 Linux binary)
+- **Local**: `cargo install --path .` updated v0.12.1 → v0.12.2
+- **VERSIONS.md**: added v0.12.2 entry with `BREAKING CHANGE` prefix
+
+## User
+
+Is bin/build-mail-filters still necessary?

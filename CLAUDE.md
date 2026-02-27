@@ -43,6 +43,9 @@ src/
     mod.rs          # Agent trait
     claude.rs       # Claude backend
   audit_docs.rs     # Audit instruction files (via instruction-files crate)
+editors/
+  jetbrains/        # IntelliJ plugin (Kotlin/Gradle)
+  vscode/           # VS Code extension (TypeScript)
 ```
 
 ## Release Process

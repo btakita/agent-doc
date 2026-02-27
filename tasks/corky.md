@@ -65,3 +65,54 @@ Want me to implement Phase 1?
 ## User
 
 Implement Phase 1
+
+## Assistant
+
+**Phase 1 implemented.** Attachment support for corky drafts is live.
+
+### Changes
+
+**`Cargo.toml`** — added `mime_guess = "2"` for content-type detection
+
+**`src/draft/mod.rs`** (core changes):
+- `EmailDraftMeta.attachments: Vec<String>` — new YAML field
+- `compose_email()` — when attachments present, builds `MultiPart::mixed()` with text body + binary attachment parts. Uses `mime_guess` for content-type detection (png, pdf, etc.), falls back to `application/octet-stream`
+- `run()` — reads attachment paths from YAML, validates files exist at send time, prints attachment list in pre-send summary
+
+**`src/draft/new.rs`**:
+- `run()` and `render()` accept `attachments: &[String]` parameter
+- Renders `attachments:` list in YAML frontmatter when present
+
+**`src/cli.rs`**:
+- `DraftCommands::New` — added `--attach` flag (repeatable)
+
+**`src/main.rs`**:
+- Passes `attachments` through to `draft::new::run()`
+
+**`src/draft/migrate.rs`**:
+- Legacy format gets `attachments: Vec::new()` (no attachments)
+
+### Usage
+
+```sh
+# Create draft with attachments
+corky draft new "Bug report" --to feedback@slack.com --attach /tmp/screenshot.png
+
+# Or add to existing draft YAML:
+# attachments:
+#   - /tmp/screenshot.png
+#   - /tmp/doc.pdf
+
+# Send (attachments included as MIME multipart/mixed)
+corky draft push mail/drafts/draft.md --send
+```
+
+### Verification
+
+- `cargo clippy` — clean
+- `cargo test` — 383 tests pass (including new `test_render_with_attachments`)
+- `make release` — binary built and installed
+
+## User
+
+PR, squash merge, release

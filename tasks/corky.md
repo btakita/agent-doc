@@ -147,3 +147,24 @@ This should be scoped to linkedin
 corky linkedin draft      # Create social media draft for Linkedin
 corky linkedin publish FILE       # Publish to LinkedIn
 ```
+
+## Assistant
+
+Refactor `corky social` → `corky linkedin`:
+
+| Current | Proposed |
+|---------|----------|
+| `corky social auth linkedin` | `corky linkedin auth` |
+| `corky social draft linkedin "body"` | `corky linkedin draft "body"` |
+| `corky social publish FILE` | `corky linkedin publish FILE` |
+| `corky social check` | `corky linkedin check` |
+| `corky social list` | `corky linkedin list` |
+| `corky social rename-author OLD NEW` | `corky linkedin rename-author OLD NEW` |
+
+Platform param goes away — implicit from the subcommand. Internal `src/social/` module stays platform-aware. When a second platform is added later, it gets its own top-level subcommand (`corky bluesky draft`).
+
+Shall I implement?
+
+## User
+
+Yes

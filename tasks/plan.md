@@ -289,3 +289,19 @@ Claims.log confirmed as the approach. Already implemented and working:
 ## User
 
 PR, squash merge, release
+
+## Assistant
+
+Done. agent-doc v0.5.2 released:
+
+- [PR #12](https://github.com/btakita/agent-doc/pull/12) — squash merged
+- Published: crates.io + PyPI + GitHub Release
+- Binary installed, skill updated to v0.5.2
+
+Changes: claim notifications (display-message + claims.log), plugin popup actions (Alt+Enter), `resync` subcommand, EditorTabSyncListener hardening, layout focus fixes.
+
+99. v0.5.2 released — [PR #12](https://github.com/btakita/agent-doc/pull/12): claim notifications, plugin popup, resync, layout hardening. Published crates.io + PyPI + GitHub Release.
+
+## User
+
+audit docs

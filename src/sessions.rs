@@ -190,6 +190,104 @@ impl Tmux {
         Ok(())
     }
 
+    /// Select (focus) a tmux pane.
+    pub fn select_pane(&self, pane_id: &str) -> Result<()> {
+        // Switch to the window containing the pane first (select-pane alone
+        // doesn't change the active window).
+        let status = self
+            .cmd()
+            .args(["select-window", "-t", pane_id])
+            .status()
+            .context("failed to run tmux select-window")?;
+        if !status.success() {
+            anyhow::bail!("tmux select-window failed for {}", pane_id);
+        }
+        let status = self
+            .cmd()
+            .args(["select-pane", "-t", pane_id])
+            .status()
+            .context("failed to run tmux select-pane")?;
+        if !status.success() {
+            anyhow::bail!("tmux select-pane failed for {}", pane_id);
+        }
+        Ok(())
+    }
+
+    /// Get the window ID that contains a pane.
+    pub fn pane_window(&self, pane_id: &str) -> Result<String> {
+        let output = self
+            .cmd()
+            .args([
+                "display-message",
+                "-t",
+                pane_id,
+                "-p",
+                "#{window_id}",
+            ])
+            .output()
+            .context("failed to run tmux display-message")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Move a pane into another pane's window with the given split direction.
+    ///
+    /// `split_flag` is `-h` for horizontal (side-by-side) or `-v` for vertical (stacked).
+    pub fn join_pane(&self, src_pane: &str, dst_pane: &str, split_flag: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["join-pane", "-s", src_pane, "-t", dst_pane, split_flag])
+            .status()
+            .context("failed to run tmux join-pane")?;
+        if !status.success() {
+            anyhow::bail!("tmux join-pane failed: {} → {}", src_pane, dst_pane);
+        }
+        Ok(())
+    }
+
+    /// List all pane IDs in a given window.
+    pub fn list_window_panes(&self, window_id: &str) -> Result<Vec<String>> {
+        let output = self
+            .cmd()
+            .args([
+                "list-panes",
+                "-t",
+                window_id,
+                "-F",
+                "#{pane_id}",
+            ])
+            .output()
+            .context("failed to run tmux list-panes")?;
+        if !output.status.success() {
+            anyhow::bail!("tmux list-panes failed for window {}", window_id);
+        }
+        let panes = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Ok(panes)
+    }
+
+    /// Break a pane out of its window into a new window.
+    /// Used by `layout` to disassemble a mirror window before rebuilding.
+    pub fn break_pane(&self, pane_id: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["break-pane", "-s", pane_id, "-d"])
+            .status()
+            .context("failed to run tmux break-pane")?;
+        if !status.success() {
+            anyhow::bail!("tmux break-pane failed for {}", pane_id);
+        }
+        Ok(())
+    }
+
     /// Auto-start cascade: create session/window as needed, return pane ID.
     ///
     /// 1. Server not running → create session

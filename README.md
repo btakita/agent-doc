@@ -30,6 +30,8 @@ agent-doc clean session.md                # squash session git history
 agent-doc route session.md               # route to tmux pane (or auto-start)
 agent-doc start session.md               # start Claude in current tmux pane
 agent-doc claim session.md               # claim file for current tmux pane
+agent-doc focus session.md               # focus tmux pane for a session
+agent-doc layout a.md b.md --split h     # arrange panes to mirror editor splits
 agent-doc commit session.md              # git add + commit with timestamp
 agent-doc prompt session.md              # detect permission prompts → JSON
 agent-doc skill install                  # install Claude Code skill definition

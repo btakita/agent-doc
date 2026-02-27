@@ -52,3 +52,46 @@ Want me to implement the batch fix?
 ## User
 
 Please update my tmux config...add surrounding comments. If this works, we should document.
+
+## Assistant
+
+Updated `~/.config/tmux/.tmux.basic.conf` — added 3 settings with `# agent-doc:` comment block:
+
+```bash
+# agent-doc: reduce flicker during pane operations and high-throughput output
+set -sg escape-time 10                              # fast escape (default 500ms causes lag)
+set -g focus-events on                              # consistent redraw on focus change
+set -ga terminal-overrides ",xterm-256color:Tc"     # true color support, fewer escape redraws
+```
+
+**What was already set:** `escape-time 10` was already active at runtime (from tmux-sensible plugin). Added it to the config file for persistence.
+
+**What changed:** `focus-events on` and `terminal-overrides` with `Tc` (true color) — both applied to the running session immediately.
+
+Switch between some task documents to see if it helped. The tab-switch flickering will need the command batching fix in agent-doc itself for full resolution — these tmux settings mainly help with the diff-display flickering.
+
+## User
+
+Still getting these not found errors:
+
+```
+● Bash(cp tasks/corky.md .agent-doc/snapshots/f2df7f9ef91ea80a49568ee9cffa2966c1dcec6813ffb86c134e14e2273e28c3.md)
+  ⎿  Error: Exit code 1
+     cp: cannot stat 'tasks/corky.md': No such file or directory
+
+     cp: cannot stat 'tasks/corky.md': No such file or directory
+
+● Bash(pwd && ls tasks/corky.md 2>&1)
+  ⎿  Error: Exit code 2
+     /home/brian/work/btakita/agent-loop/corky
+     ls: cannot access 'tasks/corky.md': No such file or directory
+
+     /home/brian/work/btakita/agent-loop/corky
+     ls: cannot access 'tasks/corky.md': No such file or directory
+
+● Bash(cp /home/brian/work/btakita/agent-loop/tasks/corky.md
+      /home/brian/work/btakita/agent-loop/.agent-doc/snapshots/f2df7f9ef91ea80a49568ee9cffa2966c1dcec6813ffb86c1…)
+  ⎿  Done
+
+✽ Percolating… (4m 9s · ↑ 4.5k tokens · thought for 2s)
+```

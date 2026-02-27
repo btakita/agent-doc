@@ -260,3 +260,19 @@ Active sessions:
 
 ## User
 
+I don't see Re-claim in the context popup menu Alt+space
+
+❯ agent-doc resync
+All 10 session(s) have live panes.
+
+Active sessions:
+tasks/agent-doc.md → pane %4
+tasks/slack.md → pane %26
+tasks/resume.md → pane %5
+tasks/editors.md → pane %32
+tasks/plan.md → pane %4
+tasks/plan2.md → pane %5
+tasks/judith-krug.md → pane %26
+tasks/qwire-holdings.md → pane %27
+tasks/ron-berkes.md → pane %5
+tasks/toby-hill.md → pane %5

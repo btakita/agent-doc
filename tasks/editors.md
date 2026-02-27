@@ -177,3 +177,29 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 ## User
 
 Intention not available
+
+## Assistant
+
+**Abandoned `IntentionAction` — switched to custom popup action.**
+
+After research, the root cause: IntelliJ's `ShowIntentionsPass` uses `IntentionManager.getAvailableIntentions(languages)` with language filtering tied to `DaemonCodeAnalyzer`. The intention infrastructure fundamentally requires the code analysis pipeline to be active, which doesn't reliably trigger for Markdown files without the Markdown plugin dependency chain.
+
+**New approach:** `AgentDocPopupAction` — a standard `AnAction` bound to **Alt+Enter** that shows a `JBPopupFactory` popup menu with Submit and Claim commands. An `ActionPromoter` gives it priority over the built-in `ShowIntentionActions` in `.md` files, so Alt+Enter works normally in code files.
+
+**Changes:**
+1. `AgentDocPopupAction.kt` (new) — shows numbered popup with Submit/Claim on Alt+Enter
+2. `AgentDocActionPromoter.kt` (new) — prioritizes our action over `ShowIntentionActions` for `.md` files
+3. `plugin.xml` — added `AgentDoc.Popup` action with `alt ENTER` shortcut + `<actionPromoter>`
+4. Deleted: `SubmitIntention.kt`, `ClaimIntention.kt`, `AgentDocStartup.kt`, `intentionDescriptions/`
+
+**How it works now:**
+1. Open a `.md` file
+2. Press **Alt+Enter** → popup appears with:
+   - `1. Submit to Agent Doc`
+   - `2. Claim for Tmux Pane`
+3. Press 1 or 2 (or click) to execute
+
+Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+

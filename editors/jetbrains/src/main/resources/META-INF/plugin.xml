@@ -1,0 +1,40 @@
+<idea-plugin require-restart="false">
+    <id>com.github.btakita.agent-doc</id>
+    <name>Agent Doc</name>
+    <vendor url="https://github.com/btakita">btakita</vendor>
+    <description><![CDATA[
+        Submit markdown documents to AI agents via agent-doc.
+
+        Press a hotkey to route <code>/agent-doc path/to/file.md</code> to the correct
+        Claude Code session via tmux. Supports multiple concurrent sessions —
+        each document routes to its own tmux pane based on the session UUID
+        in the YAML frontmatter.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Agent Doc"
+                           displayType="BALLOON"
+                           isLogByDefault="true"/>
+    </extensions>
+
+    <projectListeners>
+        <listener class="com.github.btakita.agentdoc.PluginLifecycleListener"
+                  topic="com.intellij.openapi.project.ProjectManagerListener"/>
+        <listener class="com.github.btakita.agentdoc.EditorTabSyncListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    </projectListeners>
+
+    <actions>
+        <action id="AgentDoc.Submit"
+                class="com.github.btakita.agentdoc.SubmitAction"
+                text="Submit to Agent Doc"
+                description="Route /agent-doc command to the correct Claude session via tmux">
+            <keyboard-shortcut first-keystroke="ctrl shift alt A" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

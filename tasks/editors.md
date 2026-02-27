@@ -158,3 +158,21 @@ agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed
 
 ## User
 Intention menu still not available
+
+## Assistant
+
+**Fixed — switched to programmatic registration.**
+
+The XML-based `<intentionAction>` registration silently fails for Markdown files. Root cause: IntelliJ's intention loader may skip intentions that lack `before.X.template`/`after.X.template` resource files, and the Markdown editor may not fully integrate with XML-registered intentions.
+
+**New approach:** `AgentDocStartup.kt` — a `PostStartupActivity` that registers intentions via `IntentionManager.getInstance().addAction()` at project open, bypassing XML machinery entirely.
+
+**Changes:**
+1. `AgentDocStartup.kt` (new) — registers `SubmitIntention` and `ClaimIntention` programmatically on first project open
+2. `plugin.xml` — replaced `<intentionAction>` entries with `<postStartupActivity>` extension
+3. Added `before.md.template` / `after.md.template` for both intentions (Settings UI)
+
+Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip`
+
+## User
+

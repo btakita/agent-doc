@@ -32,3 +32,5 @@ The **Ctrl+V** method is the most reliable workaround for the Slack-internal con
 ## User
 
 I start slack via dmenu. What is a good way to have the slack executable always have `GTK_IM_MODULE=` set for slack?
+
+What is your response?

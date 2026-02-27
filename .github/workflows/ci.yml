@@ -13,10 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Clone instruction-files (path dependency)
-        uses: actions/checkout@v4
-        with:
-          repository: btakita/instruction-files
-          path: ../instruction-files
+        run: git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
 
       - uses: dtolnay/rust-toolchain@stable
         with:

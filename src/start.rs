@@ -44,8 +44,18 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Exec claude (replaces this process)
     eprintln!("Starting claude...");
-    use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new("claude").exec();
-    // exec() only returns on error
-    Err(anyhow::anyhow!("failed to exec claude: {}", err))
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new("claude").exec();
+        // exec() only returns on error
+        Err(anyhow::anyhow!("failed to exec claude: {}", err))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = std::process::Command::new("claude")
+            .status()
+            .context("failed to run claude")?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }

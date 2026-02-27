@@ -344,3 +344,18 @@ What is going on with https://github.com/btakita/corky/pull/10?
 ## User
 
 I thought we currently support image uploads to linkedin?
+
+## Assistant
+
+**Yes — image uploads are already on main.** PR #10 is stale/superseded. The feature landed in a prior release:
+
+- `linkedin.rs`: `upload_image()` (two-step: init + binary upload) + multi-image carousel (up to 20)
+- `publish.rs`: `upload_images()` resolves paths relative to draft, uploads, passes URNs to `create_post()`
+- `draft.rs`: `images: Vec<String>` in `SocialDraftMeta`
+- 7+ tests: IM1-IM6 + roundtrip with images
+
+PR #10 can be **closed as superseded** — its changes are already on main. Want me to close it?
+
+## User
+
+close it

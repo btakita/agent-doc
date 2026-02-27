@@ -6,5 +6,26 @@ model: null
 branch: null
 ---
 
+## User
+
 Set my gmail filters from the latest edits
 
+## Assistant
+
+No recent edits to `mail/filters.toml` — the file is unchanged and working tree is clean.
+
+Current filters (2):
+1. **for-lucas** — forwards job platform emails (Upwork, LinkedIn, Wellfound, etc.) to `dev@briantakita.me`, stars, marks important
+2. **correspondence** — marks personal correspondence as important (from/to match with family/business contacts)
+
+To push current filters to Gmail:
+```
+corky filter push --dry-run    # preview first
+corky filter push              # apply to Gmail
+```
+
+Or edit `mail/filters.toml` with your changes and re-submit — I'll push them for you.
+
+## User
+
+We don't have filters.toml anymore correct? It should be in .corky.toml

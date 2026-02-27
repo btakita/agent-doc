@@ -97,3 +97,18 @@ The wrapper script at `~/.local/bin/slack` can be removed — it doesn't help fo
 ## User
 
 search the internet for a bug report if any
+
+## Assistant
+
+**No existing bug report found.** Searched broadly — no one has publicly reported the `Ctrl+Shift+U` underline vs hyperlink conflict on Linux.
+
+**Context from the search:**
+- [Slack's docs](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts) list `Ctrl+Shift+U` as the Linux hyperlink shortcut. Underline is only documented for Mac (`Cmd+U`).
+- Multiple sources say [Slack doesn't support underline](https://everythingwhat.com/can-you-underline-in-slack) at all — but your toolbar clearly shows a `U` icon. This suggests underline was added recently to the Linux client, creating the keybinding collision. It's likely a newer regression.
+- The only related Linux reports are about the [system-level Ctrl+Shift+U unicode conflict on Fedora/GTK](https://discussion.fedoraproject.org/t/disabling-unicode-code-point-keystroke-ctrl-shift-u-on-fedora-35/78685) — a different issue.
+
+**Slack has no public bug tracker.** Reports go to `feedback@slack.com`. This seems worth reporting since `Ctrl+Shift+U` is the *documented* hyperlink shortcut that they broke by adding underline to the same binding.
+
+## User
+
+Compose an email with the bug report. Include the screenshot I gave you.

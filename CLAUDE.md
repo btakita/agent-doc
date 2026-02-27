@@ -34,6 +34,8 @@ src/
   route.rs          # Route /agent-doc commands to correct tmux pane
   start.rs          # Start Claude session inside tmux pane
   claim.rs          # Claim document for current tmux pane
+  focus.rs          # Focus tmux pane for a session document
+  layout.rs         # Arrange tmux panes to mirror editor split layout
   prompt.rs         # Detect permission prompts from Claude Code sessions
   skill.rs          # Manage bundled SKILL.md (install/check)
   upgrade.rs        # Self-update via crates.io / GitHub Releases

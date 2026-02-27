@@ -163,3 +163,11 @@ I don't see the screenshot in the draft
 ## User
 
 claim tasks/corky.md
+
+## Assistant
+
+Claimed `tasks/corky.md` for pane %26 (session `584ef929`). Note: this replaced the slack.md claim on this pane.
+
+## User
+
+corky 0.12.1 supports attachments. Please send a reply to the sent email with the attached screenshot.

@@ -323,3 +323,24 @@ Audit clean. Updated 4 docs across 2 repos:
 ## User
 
 commit all submodules...if there are pending releases, publish the releases.
+
+What is going on with https://github.com/btakita/corky/pull/10?
+
+## Assistant
+
+**Submodules committed and pushed.** One pending release:
+
+**agent-doc v0.5.3** — doc-only release to bundle updated SKILL.md (absolute snapshot paths).
+- [PR #13](https://github.com/btakita/agent-doc/pull/13) squash merged
+- Published: crates.io + PyPI + GitHub Release. Binary + skill installed.
+
+**corky** — doc-only SPEC.md fix pushed to main (no release for config ref typo).
+
+**Re: [corky PR #10](https://github.com/btakita/corky/pull/10)** — "Add LinkedIn image upload support." Stale PR from `20260225/linkedin-images`, branched before SPEC rename + social→linkedin refactor. Has merge conflicts. The feature (image uploads) is valid — 7 files, 320 insertions. Recommend: close and re-implement on fresh branch from main (cleanest given conflict volume).
+
+101. Submodule commits — agent-doc docs pushed, corky SPEC fix pushed, parent submodule pointers updated.
+102. agent-doc v0.5.3 released — [PR #13](https://github.com/btakita/agent-doc/pull/13): bundled SKILL.md with absolute paths. Published crates.io + PyPI + GitHub Release.
+
+## User
+
+I thought we currently support image uploads to linkedin?

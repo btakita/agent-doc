@@ -407,3 +407,21 @@ Plugin rebuilt and signed: `agent-doc/editors/jetbrains/build/distributions/agen
 ## User
 
 When I run Claim For Tmux Pane...can we have the claude session acknowledge Claimed tasks/ron-berkes.md for pane %4?
+
+## Assistant
+
+**Good idea.** A few options, from safest to most interactive:
+
+1. **Set tmux pane title** — `tmux select-pane -t %4 -T "tasks/ron-berkes.md"`. Visible in the status bar, doesn't interrupt Claude. Can be done in Rust's `claim.rs`.
+
+2. **tmux display-message** — `tmux display-message -t %4 "Claimed tasks/ron-berkes.md"`. Brief overlay notification in the pane, auto-dismisses. Non-invasive.
+
+3. **Route `/agent-doc claim` to the Claude session** — Instead of running `agent-doc claim` from the IDE process, send `/agent-doc claim tasks/ron-berkes.md` to the Claude session via `tmux send-keys`. The Claude session has the agent-doc skill, so it runs the claim with the correct `TMUX_PANE` env var and prints the acknowledgment. Most integrated, but requires the Claude session to be idle (not mid-response).
+
+Option 3 is the most natural — the Claude session literally runs the claim and confirms it. But it's risky if Claude is mid-response. Options 1+2 are safe and immediate.
+
+Which approach do you prefer? Or a combination (e.g., set pane title + route to Claude when idle)?
+
+## User
+
+Option 3

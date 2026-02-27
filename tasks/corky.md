@@ -216,3 +216,17 @@ pr, merge, release
 ## User
 
 Is bin/build-mail-filters still necessary?
+
+## Assistant
+
+**No — `bin/build-mail-filters` is superseded by `corky filter build`.**
+
+The Python script converts `filters.toml` → Gmail XML. Corky now does the same natively:
+- `corky filter build` — TOML → XML (reads from `[[gmail.filters]]` in `.corky.toml`)
+- `corky filter push` — pushes directly to Gmail API (no XML export needed)
+
+The `filters.toml` → `.corky.toml` migration was done in session 3 (entry 66). Safe to delete `bin/build-mail-filters`.
+
+## User
+
+delete it

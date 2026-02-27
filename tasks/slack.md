@@ -34,3 +34,33 @@ The **Ctrl+V** method is the most reliable workaround for the Slack-internal con
 I start slack via dmenu. What is a good way to have the slack executable always have `GTK_IM_MODULE=` set for slack?
 
 What is your response?
+
+## Assistant
+
+**Override the `.desktop` file** — dmenu reads XDG desktop entries, and `~/.local/share/applications/` takes precedence over `/usr/share/applications/`.
+
+```sh
+cp /usr/share/applications/slack.desktop ~/.local/share/applications/slack.desktop
+```
+
+Edit the `Exec=` line in the copy:
+
+```diff
+-Exec=/usr/bin/slack %U
++Exec=env GTK_IM_MODULE= /usr/bin/slack %U
+```
+
+That's it. dmenu sees the same "Slack" entry but launches it with the env var. Survives package updates (system file gets overwritten, your local override persists).
+
+**Alternative: wrapper script** at `~/.local/bin/slack`:
+
+```sh
+#!/bin/sh
+exec env GTK_IM_MODULE= /usr/bin/slack "$@"
+```
+
+But this depends on PATH ordering (`~/.local/bin` before `/usr/bin`). The `.desktop` file override is more reliable.
+
+## User
+
+Please write the wrapper script. The .desktop didn't seem to work.

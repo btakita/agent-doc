@@ -29,3 +29,24 @@ Or edit `mail/filters.toml` with your changes and re-submit — I'll push them f
 ## User
 
 We don't have filters.toml anymore correct? It should be in .corky.toml
+
+## Assistant
+
+**Correct — `corky filter push` reads from `.corky.toml`, not `mail/filters.toml`.**
+
+The active config is `/home/brian/work/btakita/mail/.corky.toml` with **uncommitted edits** — the entire `[gmail]` section (filters, OAuth creds) plus contacts, topics, and LinkedIn config.
+
+Differences from the old `mail/filters.toml`:
+- **correspondence**: +4 addresses (`*@onesynergee.org`, `berkes06@yahoo.com`, `rberkes@gmail.com`, `feedback@slack.com`)
+- **for-lucas**: +1 address (`*@mercor.com`)
+- Addresses sorted alphabetically
+
+Ready to push:
+```
+corky filter push --dry-run    # preview
+corky filter push              # apply
+```
+
+## User
+
+push them

@@ -1821,3 +1821,5 @@ Done:
 ## User
 
 compact this document
+
+claim tasks/agent-doc.md

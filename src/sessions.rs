@@ -380,10 +380,26 @@ pub fn lookup(session_id: &str) -> Result<Option<String>> {
     Ok(registry.get(session_id).map(|e| e.pane.clone()))
 }
 
-/// Get the pane ID of the current pane (from TMUX_PANE env var).
+/// Get the pane ID of the current pane.
+/// Tries TMUX_PANE env var first, then falls back to querying tmux
+/// for the active pane (works from outside tmux, e.g. IDE processes).
 pub fn current_pane() -> Result<String> {
-    std::env::var("TMUX_PANE")
-        .context("TMUX_PANE not set — are you running inside tmux?")
+    if let Ok(pane) = std::env::var("TMUX_PANE") {
+        return Ok(pane);
+    }
+    // Fallback: query tmux for the active pane
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#{pane_id}"])
+        .output()
+        .context("failed to query tmux for active pane — is tmux running?")?;
+    if !output.status.success() {
+        anyhow::bail!("tmux display-message failed — not inside tmux and no tmux server found");
+    }
+    let pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if pane.is_empty() {
+        anyhow::bail!("tmux returned empty pane ID");
+    }
+    Ok(pane)
 }
 
 /// Check if we're inside tmux.

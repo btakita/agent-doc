@@ -89,3 +89,28 @@ Want me to add the intention registrations?
 
 ## User
 Yes. I'm aware that it is unconventional. But intentions support contextual actions as well. I don't know of any better way to have contextual actions.
+
+## Assistant
+
+**Done.** Both actions now appear in the Alt+Enter intentions menu on `.md` files.
+
+**New files:**
+- `SubmitIntention.kt` — `IntentionAction` for "Submit to Agent Doc"
+- `ClaimIntention.kt` — `IntentionAction` for "Claim for Tmux Pane"
+
+**`plugin.xml`** — registered both under `<intentionAction>` with `language="TEXT"` and `category="Agent Doc"`.
+
+Both use `familyName = "Agent Doc"` so they group together in the intentions list. `isAvailable()` checks for `.md` extension — they only appear when editing markdown files.
+
+**How it works now:**
+1. Open a `.md` file in the editor
+2. Press **Alt+Enter** → see "Submit to Agent Doc" and "Claim for Tmux Pane" in the intentions list
+3. Select one → executes the action
+
+The existing hotkeys and context menus still work as before. This is additive.
+
+Plugin rebuilt. Reinstall from `agent-doc/editors/jetbrains/build/distributions/`.
+
+## User
+The distribution directory should be /home/brian/work/btakita/agent-loop/agent-doc/editors/jetbrains now. I want to delete
+agent-doc-jetbrains

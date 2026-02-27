@@ -79,3 +79,21 @@ Verified: `which slack` now resolves to `/home/brian/.local/bin/slack` (takes pr
 ## User
 
 The .local/bin/slack update did not work. Hotkey still captured.
+
+## Assistant
+
+Confirmed — this is a **Slack-internal keybinding conflict**, not a system-level intercept. `GTK_IM_MODULE` only fixes IBus/Unicode input; it can't resolve a conflict inside Slack's Electron app. Slack doesn't expose keybinding customization, so `Ctrl+Shift+U` can't be rebound.
+
+**Best workaround: Ctrl+V**
+
+1. Copy the URL to clipboard
+2. Select the text you want to hyperlink
+3. `Ctrl+V` — Slack detects URL + selected text → creates hyperlink
+
+Or click the chain/link icon in the formatting toolbar (6th icon).
+
+The wrapper script at `~/.local/bin/slack` can be removed — it doesn't help for this issue. This is a Slack bug worth reporting to Slack if it matters enough.
+
+## User
+
+search the internet for a bug report if any

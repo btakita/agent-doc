@@ -168,3 +168,35 @@ Shall I implement?
 ## User
 
 Yes
+
+I would like the social media command hierarchy to share the same patterns. Some network may have features that others don't have as well. Some may lack.
+
+How can we reinforce the convention? I want to be careful to not add code complexity only for the sake of the convention.
+
+## Assistant
+
+**`corky social` → `corky linkedin` refactored.** 383 tests pass.
+
+Changes:
+- `cli.rs`: `SocialCommands` → `LinkedinCommands`, removed `platform` parameter (implicit)
+- `main.rs`: dispatch hardcodes `"linkedin"` when calling `social::run_*()` functions
+- `publish.rs`, `profiles.rs`: error messages updated (`corky linkedin auth`, `corky linkedin check`)
+- `SPEC.md`, `README.md`: CLI reference updated
+
+Internal `src/social/` module unchanged — still platform-aware for when new platforms are added.
+
+**Convention enforcement without code complexity:**
+
+The right approach is **documentation, not abstractions**. Don't build a trait hierarchy or command registration framework for one platform. Instead:
+
+1. **SPEC.md § 12.7** already documents the CLI pattern. When adding a second platform (e.g., Bluesky), copy the `LinkedinCommands` enum, name it `BlueskyCommands`, and follow the same shape. The SPEC enforces the convention.
+
+2. **Each platform gets its own top-level subcommand** (`corky linkedin`, `corky bluesky`). Shared commands (auth, draft, publish, check, list, rename-author) follow the same names. Platform-specific features are additional subcommands — they don't need to exist on other platforms.
+
+3. **The internal `social/` module is already the shared code.** `run_auth()`, `run_draft()`, `run_publish()` all take a `platform` string parameter. New platforms plug into the same functions with their own API client modules (like `linkedin.rs` → `bluesky.rs`).
+
+No new abstractions needed. Convention is enforced by the spec + consistent naming. Complexity only grows when a second platform arrives.
+
+## User
+
+pr, merge, release

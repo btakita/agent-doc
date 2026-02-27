@@ -106,9 +106,10 @@ The body alternates `## User` and `## Assistant` blocks. Inline annotations (blo
 
 ## Snapshot Storage
 
-- Location: `.agent-doc/snapshots/` relative to CWD
+- Location: `.agent-doc/snapshots/` relative to the project root (where the document lives)
 - Filename: `sha256(canonical_path) + ".md"`
 - Contains the full document content after the last submit
+- **IMPORTANT:** Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session.
 
 ## Success Criteria
 

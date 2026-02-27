@@ -132,6 +132,10 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping.
 
+**Notifications:**
+- `tmux display-message` — 3-second overlay on the target pane showing "Claimed {file} (pane {id})"
+- `.agent-doc/claims.log` — appends `Claimed {file} for pane {id}` for deferred display by the SKILL.md workflow on next invocation
+
 ### 7.10 focus
 
 `agent-doc focus <FILE>` — focus the tmux pane for a session document.
@@ -154,7 +158,16 @@ Exits with error if the pane is dead or no session is registered.
 
 `--split h` (default): horizontal/side-by-side. `--split v`: vertical/stacked. Single file falls back to `focus`. Dead panes and files without sessions are skipped with warnings.
 
-### 7.12 prompt
+### 7.12 resync
+
+`agent-doc resync` — validate sessions.json against live tmux panes.
+
+1. Load `sessions.json`
+2. For each entry, check if the pane is alive via `tmux has-session`
+3. Remove entries with dead panes
+4. Report removed entries and remaining active sessions
+
+### 7.13 prompt
 
 `agent-doc prompt <FILE>` — detect permission prompts from a Claude Code session.
 
@@ -163,11 +176,11 @@ Exits with error if the pane is dead or no session is registered.
 - `--answer N` navigates to option N and confirms
 - `--all` polls all live sessions, returns JSON array
 
-### 7.11 commit
+### 7.14 commit
 
 `agent-doc commit <FILE>` — git add + commit with auto-generated timestamp.
 
-### 7.12 skill
+### 7.15 skill
 
 `agent-doc skill install` — write the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md` in the current project. Idempotent (skips if content matches).
 
@@ -175,7 +188,7 @@ Exits with error if the pane is dead or no session is registered.
 
 The bundled SKILL.md contains an `agent-doc-version` frontmatter field set to the binary's version at build time. When the skill is invoked via Claude Code, the pre-flight step compares this field against the installed binary version (`agent-doc --version`). If the binary is newer, `agent-doc skill install` runs automatically to update the skill before proceeding.
 
-### 7.13 upgrade
+### 7.16 upgrade
 
 `agent-doc upgrade` — check crates.io for latest version, upgrade via GitHub Releases binary download → cargo install → pip install (cascade).
 
@@ -216,6 +229,8 @@ Multiple documents can map to the same pane (one Claude session, multiple files)
 | U9 | Install skill in new project | `agent-doc skill install` | Writes bundled SKILL.md to `.claude/skills/agent-doc/` |
 | U10 | Check skill version after upgrade | `agent-doc skill check` | Reports "up to date" or "outdated" |
 | U11 | Permission prompt from plugin | PromptPoller polls `prompt --all` | Shows bottom bar with numbered hotkeys in IDE |
+| U12 | Claim notification in session | Skill reads `.agent-doc/claims.log` | Prints claim records, truncates log |
+| U13 | Clean up dead pane mappings | `agent-doc resync` | Removes stale entries from sessions.json |
 
 ### 8.3 Claim Semantics
 

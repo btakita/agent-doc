@@ -145,3 +145,16 @@ After reinstalling, press **Alt+Enter** in any `.md` file — you should see "Su
 ## User
 
 I don't see the signed build
+
+## Assistant
+
+**Fixed.** Was running `buildPlugin` instead of `signPlugin`. Ran `./gradlew signPlugin` — signed zip now at:
+
+```
+agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0-signed.zip
+```
+
+(I'll use `signPlugin` instead of `buildPlugin` going forward.)
+
+## User
+Intention menu still not available

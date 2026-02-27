@@ -305,3 +305,21 @@ Changes: claim notifications (display-message + claims.log), plugin popup action
 ## User
 
 audit docs
+
+## Assistant
+
+Audit clean. Updated 4 docs across 2 repos:
+
+**agent-doc** (3 docs):
+- `SPEC.md` — added §7.12 `resync`, claims.log + display-message to §7.9 `claim`, use cases U12/U13
+- `CLAUDE.md` — added `resync.rs` to module layout
+- `README.md` — added `resync`, `focus`, `layout` to CLI Reference
+
+**corky** (1 doc):
+- `SPEC.md` — fixed `[social.linkedin]` → `[linkedin]` config reference
+
+100. Audit docs — agent-doc SPEC/CLAUDE/README updated for resync + claims.log. Corky SPEC fixed stale `[social.linkedin]` config ref. Both repos pass `audit-docs` clean.
+
+## User
+
+commit all submodules...if there are pending releases, publish the releases.

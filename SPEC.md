@@ -132,7 +132,29 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping.
 
-### 7.10 prompt
+### 7.10 focus
+
+`agent-doc focus <FILE>` — focus the tmux pane for a session document.
+
+1. Read session UUID from file's YAML frontmatter
+2. Look up pane ID in `sessions.json`
+3. Run `tmux select-window -t <pane-id>` then `tmux select-pane -t <pane-id>`
+
+Exits with error if the pane is dead or no session is registered.
+
+### 7.11 layout
+
+`agent-doc layout <FILE>... [--split h|v]` — arrange tmux panes to mirror editor split layout.
+
+1. Resolve each file to its session pane via frontmatter → `sessions.json`
+2. Pick the target window (the one containing the most wanted panes; tiebreak: most total panes)
+3. Break out any unwanted panes from the target window (`tmux break-pane`)
+4. Join remaining wanted panes into the target window (`tmux join-pane`)
+5. Focus the first file's pane (the most recently selected file)
+
+`--split h` (default): horizontal/side-by-side. `--split v`: vertical/stacked. Single file falls back to `focus`. Dead panes and files without sessions are skipped with warnings.
+
+### 7.12 prompt
 
 `agent-doc prompt <FILE>` — detect permission prompts from a Claude Code session.
 

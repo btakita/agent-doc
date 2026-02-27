@@ -4,9 +4,11 @@ mod claim;
 mod clean;
 mod config;
 mod diff;
+mod focus;
 mod frontmatter;
 mod git;
 mod init;
+mod layout;
 mod prompt;
 mod reset;
 mod route;
@@ -19,7 +21,7 @@ mod upgrade;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "agent-doc", version, about = "Interactive document sessions with AI agents")]
@@ -112,6 +114,19 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Focus the tmux pane for a session document
+    Focus {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Arrange tmux panes to mirror editor split layout
+    Layout {
+        /// Session documents to arrange
+        files: Vec<PathBuf>,
+        /// Split direction: h (horizontal/side-by-side) or v (vertical/stacked)
+        #[arg(long, short, default_value = "h")]
+        split: String,
+    },
     /// Manage the Claude Code skill definition
     Skill {
         #[command(subcommand)]
@@ -169,6 +184,15 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Commit { file } => git::commit(&file),
         Commands::Claim { file } => claim::run(&file),
+        Commands::Focus { file } => focus::run(&file),
+        Commands::Layout { files, split } => {
+            let split = match split.as_str() {
+                "v" | "vertical" => layout::Split::Vertical,
+                _ => layout::Split::Horizontal,
+            };
+            let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
+            layout::run(&paths, split)
+        }
         Commands::Skill { command } => match command {
             SkillCommands::Install => skill::install(),
             SkillCommands::Check => skill::check(),

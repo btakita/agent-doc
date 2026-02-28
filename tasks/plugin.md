@@ -101,3 +101,19 @@ Both plugin zips rebuilt (unsigned + signed). **Uninstall → restart → instal
 ## User
 
 commit the plugin changes
+
+## Assistant
+
+**Committed.**
+
+**Submodule** (`ccf03d7`): re-add ActionPromoter, simplify popup action. 3 files: new `AgentDocActionPromoter.kt`, simplified `AgentDocPopupAction.kt` (removed HighlightInfo check), `plugin.xml` (re-added `<actionPromoter>`).
+
+**Parent** (`59d702b`): updated submodule pointer.
+
+agent-doc submodule is 4 commits ahead of origin.
+
+6. Committed plugin changes — ActionPromoter re-added, popup simplified. Submodule + parent updated.
+
+## User
+
+cleanme

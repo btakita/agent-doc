@@ -1006,3 +1006,58 @@ Or just paste the draft at https://youtrack.jetbrains.com/newIssue?project=IDEA 
 ## User
 
 Please use the Jetbrains bug report template. The Copy/Paste was rejected
+
+## Assistant
+
+**YouTrack bug report — formatted for the web form:**
+
+**Pre-filled URL** (opens form with project/summary/type/subsystem set):
+https://youtrack.jetbrains.com/newIssue?project=IDEA&summary=Spellcheck%20%22Replace%20with%22%20quick-fix%20silently%20fails%20in%20specific%20Markdown%20files&c=Type%20Bug&c=Subsystem%20Spell%20Checker
+
+**Paste this into the Description field** (use Ctrl+Shift+V for plain text paste):
+
+```
+**Description**
+The spellcheck "Replace with" intention action does nothing when triggered in certain Markdown files. No error is shown in the editor and no exceptions appear in idea.log. The same action works correctly in other Markdown files and in Java/Kotlin files.
+
+**Steps to Reproduce**
+1. Open IntelliJ IDEA Ultimate 2025.3
+2. Create a new .md file with this content:
+
+---
+session: null
+---
+
+He often needs help looking for housing on CraigsList.
+Also looking for a storage unit in Pallisades.
+
+3. Wait for the spellcheck inspection to underline "Pallisades" (green squiggly)
+4. Place caret on "Pallisades"
+5. Press Alt+Enter → select "Replace with 'Palisades'" (or press Alt+Shift+Enter)
+6. Alternatively: click the "Replace with 'Palisades'" link in the intention popup
+
+**Expected Result**
+"Pallisades" is replaced with "Palisades"
+
+**Actual Result**
+Nothing happens. The word is not replaced. No error message, no exception in idea.log.
+
+**Additional Information**
+- The issue is file-specific: "Replace with" works in other .md files in the same project
+- The affected file had an external edit (modified outside IDEA by a CLI tool)
+- Ctrl+Alt+Y (Synchronize), closing/reopening the file, and Invalidate Caches all fail to fix it
+- idea.log is flooded with: MarkdownPreviewFileEditor: panel is null, cannot update preview
+- No spellcheck-related exceptions in idea.log
+- All third-party plugins were disabled to confirm it's not a plugin issue
+- OS: Linux 6.19.4-2-cachyos x86_64
+```
+
+Set **Affected versions** to `2025.3` if available in the dropdown.
+
+If the paste is still rejected, the form may require markdown formatting instead of plain text — try removing the `**bold**` markers.
+
+121. YouTrack bug report formatted for web form with pre-filled URL.
+
+## User
+
+Couldn't create issue. Affected versions is required, details: The 'Affected Versions' field is required for bugs

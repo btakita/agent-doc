@@ -44,5 +44,26 @@ Both plugin zips rebuilt (unsigned + signed).
 
 ## User
 
-Now the Agent-Doc Actions doesn't popup AND Replace me does nothing 
+Now the Agent-Doc Actions doesn't popup AND Replace me does nothing
 
+## Assistant
+
+**Two separate issues:**
+
+1. **Agent Doc popup not appearing** — IDEA is still running the old self-disabling plugin (cached bytecode). The new zip is built but hasn't been installed in IDEA yet.
+
+   **Fix:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk" → select:
+   ```
+   agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip
+   ```
+   If it doesn't take effect, **uninstall first → restart → install → restart**. (Same caching issue we hit before with ClaimAction.)
+
+2. **"Replace with" does nothing** — This is the same IDEA bug we diagnosed earlier. It's per-file, not caused by our plugin (confirmed: still broken with plugin disabled). We have a YouTrack bug report ready for it.
+
+The new plugin source has no self-disabling — just a simple `.md` extension check. Once installed, Alt+Enter will always show the Agent Doc popup in Markdown files.
+
+3. Plugin reinstall needed — IDEA running cached old version. "Replace with" is the known IDEA bug (not our plugin).
+
+## User
+
+I uninstalled and installed. Replace with works. But the Agent Doc Actions still is not properly bound to Alt+Enter.

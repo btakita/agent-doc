@@ -1083,3 +1083,23 @@ Also updated the description to say "2025.2" instead of "2025.3":
 ## User
 
 cleanup agent-doc
+
+## Assistant
+
+**agent-doc submodule cleaned up.** Committed from within the submodule, then updated the parent pointer.
+
+**Submodule commit** (`a533221`):
+- Deleted `AgentDocActionPromoter.kt`
+- Updated `AgentDocPopupAction.kt` — self-disabling `update()` with `HighlightInfo` check
+- Updated `plugin.xml` — removed `<actionPromoter>`, added `com.intellij.modules.lang` dependency
+
+**Parent commit** (`4ecaef9`): updated submodule pointer.
+
+agent-doc submodule is 2 commits ahead of origin (this commit + the prior v0.5.4 release commit). Working tree is clean.
+
+123. agent-doc cleanup — committed self-disabling popup changes, updated parent submodule pointer.
+
+## User
+
+audit docs
+clean this doc

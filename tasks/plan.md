@@ -444,3 +444,23 @@ You can also push to sync origin: `git push origin main` — that eliminates the
 ## User
 
 When I ran the Claim for Tmux Pane command for ron-berkes, the left tmux pane was claimed even though ron-berkes.md is open on the right split in the Idea editor.
+
+## Assistant
+
+**Known issue — claim binds to the focused tmux pane, not the editor split.**
+
+`ClaimAction.kt` runs `agent-doc claim <file>` without passing a pane ID. Since the IDE process has no `TMUX_PANE` env var, `claim.rs` falls back to `tmux display-message -p "#{pane_id}"` — which returns whichever tmux pane was last focused, not the one matching your editor split.
+
+**Workaround:** Focus the desired tmux pane before clicking "Claim for Tmux Pane".
+
+**Fix options:**
+
+1. **`--pane` CLI arg** — `agent-doc claim <file> --pane %5`. Plugin queries `tmux list-panes`, shows picker dialog.
+2. **Pane picker fallback** — When no `TMUX_PANE`, `claim` itself presents a numbered pane list to choose from.
+3. **Layout heuristic** — Plugin detects editor split position, maps to tmux pane by coordinates. Fragile.
+
+Option 1 + pane picker dialog in the plugin is the cleanest path. Want me to implement?
+
+## User
+
+Can the tmux positional pane layout be known by agent-doc? If so, we could match the tmux panes the requested positional layout

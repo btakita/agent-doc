@@ -12,13 +12,12 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Agent Doc"
                            displayType="BALLOON"
                            isLogByDefault="true"/>
-        <actionPromoter
-            implementation="com.github.btakita.agentdoc.AgentDocActionPromoter"/>
     </extensions>
 
     <projectListeners>

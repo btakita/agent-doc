@@ -655,3 +655,16 @@ Both plugin zips rebuilt (unsigned + signed).
 ## User
 
 Add build both unsigned and signed onto the jetbrains AGENTS.md...And symlink AGENTS.md to CLAUDE.md
+
+## Assistant
+
+Done.
+
+- **`editors/jetbrains/AGENTS.md`** — build instructions (`./gradlew buildPlugin signPlugin`), install procedure (uninstall-first for structural changes), logging setup, conventions (thin wrapper, inline hints for success, balloons for errors).
+- **`editors/jetbrains/CLAUDE.md`** → symlink to `AGENTS.md`.
+
+108. JetBrains AGENTS.md created with build/install/logging/conventions. CLAUDE.md symlinked.
+
+## User
+
+Somehow, the 2 panes were separated into different windows. Please investigate and debug.

@@ -1061,3 +1061,25 @@ If the paste is still rejected, the form may require markdown formatting instead
 ## User
 
 Couldn't create issue. Affected versions is required, details: The 'Affected Versions' field is required for bugs
+
+## Assistant
+
+Updated URL with "Affected versions" included:
+
+https://youtrack.jetbrains.com/newIssue?project=IDEA&summary=Spellcheck%20%22Replace%20with%22%20quick-fix%20silently%20fails%20in%20specific%20Markdown%20files&c=Type%20Bug&c=Subsystem%20Spell%20Checker&c=Affected%20versions%202025.2
+
+**Version correction:** Build IU-252.x = IDEA **2025.2** (not 2025.3 as previously stated — 252 maps to 2025.2 in JetBrains' numbering). If "2025.2" doesn't appear in the dropdown, check your IDEA's `Help > About` for the exact version string and select it manually.
+
+Also updated the description to say "2025.2" instead of "2025.3":
+
+```
+**Steps to Reproduce**
+1. Open IntelliJ IDEA Ultimate 2025.2 (Build IU-252.26830.84)
+...
+```
+
+122. Updated YouTrack URL with Affected versions=2025.2 pre-filled.
+
+## User
+
+cleanup agent-doc

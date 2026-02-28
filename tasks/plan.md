@@ -402,3 +402,33 @@ git checkout eb02771 -- <conflicted-file>
 ## User
 
 Should I have the .agent-doc directory committed into the repo? I just had some merge conflicts. There's also pids in session.json
+
+## Assistant
+
+**Recommendation: gitignore the entire `.agent-doc/` directory.**
+
+What's in there:
+
+| File | Purpose | Should commit? |
+|------|---------|---------------|
+| `sessions.json` | PIDs, pane IDs, CWD — machine-specific runtime state | No |
+| `claims.log` | Ephemeral notification queue, truncated after reading | No |
+| `snapshots/*.md` | Document state for diff computation | Debatable |
+
+**Snapshots trade-off:**
+- **Committed:** diffs work across clones, but causes merge conflicts on any branch touching session docs (exactly what just happened)
+- **Gitignored:** no merge conflicts, but first submit after clone sees entire doc as "new" (self-heals — creates snapshot on first submit)
+
+The merge conflict cost outweighs cross-clone continuity. Add to `.gitignore`:
+```
+.agent-doc/
+```
+
+Then remove from tracking:
+```bash
+git rm -r --cached .agent-doc/
+```
+
+## User
+
+Make 

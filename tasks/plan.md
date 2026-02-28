@@ -631,4 +631,27 @@ Both plugin zips rebuilt (unsigned + signed).
 
 ## User
 
-Have the same popup behavior that we use for routing the "Submit" action. Also rename "Submit" to "Run". 
+Have the same popup behavior that we use for routing the "Submit" action. Also rename "Submit" to "Run".
+
+There should be a editors/SPEC.md file. Also, editors/jetbrains/SPEC.md for specific behavior overlaid on editors/SPEC.md.
+
+## Assistant
+
+Done — three changes:
+
+**1. Popup → inline hint for all actions.** `showHint()` (lightweight, auto-dismissing) now used by ClaimAction and SyncLayoutAction instead of `notifyInfo()` balloon. Matches the Run/route behavior. Made `showHint` public on `TerminalUtil`.
+
+**2. "Submit" → "Run".** `plugin.xml` action text changed from "Submit to Agent Doc" to "Run Agent Doc". Action ID (`AgentDoc.Submit`) unchanged for compatibility.
+
+**3. Editor SPEC files created:**
+
+- **`editors/SPEC.md`** — common spec for all plugins: 9 sections covering Run, Claim, Sync Layout, Tab-to-Pane Sync, Prompt Polling, Popup Menu, Notifications, File Filtering, CLI Dependency.
+- **`editors/jetbrains/SPEC.md`** — JetBrains-specific overlay: Splitter tree walk, PromptPanel as JLayeredPane, WrapLayout, auto-save before poll, ActionPromoter, Logger-based diagnostics, dynamic lifecycle, keybindings table.
+
+Both plugin zips rebuilt (unsigned + signed).
+
+107. Popup → showHint for all actions. "Submit" → "Run". Editor SPEC files created (`editors/SPEC.md` + `editors/jetbrains/SPEC.md`).
+
+## User
+
+Add build both unsigned and signed onto the jetbrains AGENTS.md...And symlink AGENTS.md to CLAUDE.md

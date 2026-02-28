@@ -414,4 +414,21 @@ Is --window scope robust compared to the previous suggestion?
 
 ## User
 
-Would --window scope layout be more robust? I want to have something "just work" and move onto my next tasks. 
+Would --window scope layout be more robust? I want to have something "just work" and move onto my next tasks.
+
+## Assistant
+
+**Yes — `--window` scoped layout is already implemented and working.** Both safeguards are in place:
+
+1. **Window scoping** (`layout.rs:80-95`) — `--window` filtering retains only panes within the specified tmux window. Panes from other windows are never pulled in.
+2. **Session registry check** (`layout.rs:151-167`) — only registered session panes get broken out. Non-session panes (git shells, tools, etc.) are left untouched.
+
+**Plugin already wired:** Both `EditorTabSyncListener` and `SyncLayoutAction` pass `--window` from `projectWindowId()`. `ClaimAction` also passes `--window` for position-scoped claims.
+
+**More robust than the alternative** (filtering by first file's window): the window ID comes from the session registry — explicit, not inferred at runtime.
+
+**CLI compiles clean, plugin zips already built.** The 3-pane bug should be resolved. You're good to move on.
+
+## User
+
+compact this doc

@@ -432,3 +432,15 @@ git rm -r --cached .agent-doc/
 ## User
 
 Why is idea stuck in a git state that has many changes?
+
+## Assistant
+
+Git working tree is clean (`git status` → nothing to commit). You're only 1 commit ahead of `origin/main`. IDEA's `M↓` indicators are stale — cached from before the merge/rebase operations that rewrote history.
+
+**Fix:** `Ctrl+Alt+Y` (Synchronize) in IDEA. If that doesn't clear it: `File > Invalidate Caches... > Invalidate and Restart`.
+
+You can also push to sync origin: `git push origin main` — that eliminates the 1-commit-ahead state.
+
+## User
+
+When I ran the Claim for Tmux Pane command for ron-berkes, the left tmux pane was claimed even though ron-berkes.md is open on the right split in the Idea editor.

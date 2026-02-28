@@ -758,3 +758,19 @@ New bug...plan.md + pane is selected.
 Navigate to claim.rs on right editor
 Navigate to robert-ward.md on right editor
 Left tmux pane still selected
+
+## Assistant
+
+**Fixed — reverted PID liveness check in layout.** The PID check from #110 was too aggressive. robert-ward.md was claimed with the old binary (dead PID=249986), so layout/focus skipped its pane entirely.
+
+Layout now uses the simpler `pane_alive` check (does the tmux pane exist?) without PID verification. The PID registration fix from #112 is still in place for future claims, but layout doesn't gate on it.
+
+The original #110 problem (dead-Claude pane joined into layout) was actually caused by the plugin not being updated — now that positional claim works, dead panes aren't claimed in the first place.
+
+Binary installed. The focus should work now when switching between plan.md and robert-ward.md.
+
+113. Revert PID check in layout — too aggressive, blocked focus for panes with stale PIDs.
+
+## User
+
+PR, version bump, merge, release

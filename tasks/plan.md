@@ -719,3 +719,19 @@ It's not working as designed. The replacement pane was not running Claude Code.
 ## User
 
 After Claiming for a tmux pane, the claiming tmux pane should be selected.
+
+## Assistant
+
+Done. `claim.rs` now calls `tmux select-pane -t <pane_id>` after registering, before showing the display-message. The claimed pane gets focused immediately.
+
+93 tests pass, clippy clean, binary installed.
+
+111. Claim auto-focus — `select-pane` after claim so the claimed pane is immediately selected.
+
+## User
+
+After I claim for a tmux pane, focus tmux pane is immediately focused. I claimed robert-ward.md for a tmux pane and the right tmux pane was selected.
+
+However, when I switch my to the left document, plan.md, the tmux pane focus does not change.
+
+It does change when I cycle back to robert-ward (right) then back to plan (left).

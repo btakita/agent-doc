@@ -774,3 +774,19 @@ Binary installed. The focus should work now when switching between plan.md and r
 ## User
 
 PR, version bump, merge, release
+
+## Assistant
+
+Done. **agent-doc v0.5.4 released:**
+
+- [PR #14](https://github.com/btakita/agent-doc/pull/14) — squash merged
+- Published: crates.io + PyPI + [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.5.4)
+- Binary installed, skill updated to v0.5.4
+
+Changes: positional claim (`--position`), plugin split detection, IntelliJ Logger, showHint UX, "Submit"→"Run", claim auto-focus, PID registration fix, editor SPECs, JetBrains AGENTS.md.
+
+114. v0.5.4 released — [PR #14](https://github.com/btakita/agent-doc/pull/14): positional claim, plugin improvements, editor SPECs. Published crates.io + PyPI + GitHub Release.
+
+## User
+
+The agent-doc jetbrains popup takes precedence over "More actions" and intentions popup. The intentions popup and "More actions" should take precedence.

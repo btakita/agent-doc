@@ -135,3 +135,17 @@ Removed verbose back-and-forth while keeping every decision, outcome, and lesson
 ## User
 
 It's been 2 days. Judith texted me that she will look it over. No response. I think she made her decision.
+
+## Assistant
+
+**Realistic read:** Two days after "I'll look it over" with no follow-up likely means she's going with TMO or MA. The no-subject original email + factual errors weakened the first impression, and established vendors have polished sales processes.
+
+**Options:**
+1. **Brief follow-up in 2-3 days** — "Hi Judith, just checking if you had a chance to review. Happy to hop on a call if useful." Low pressure, keeps the door open.
+2. **Let it go** — Respect the silence. If she's interested, she'll reach out.
+3. **Add value** — Send something useful (TMO vs MA comparison from your research) without asking for anything. Positions you as knowledgeable.
+
+The pitch itself was solid — platform-agnostic intelligence layer is genuinely differentiated from TMO/MA. The delivery just had friction. Lessons captured in the Corky bugs section above. If she passes, the strategy and tooling transfer to the next prospect.
+
+## User
+

@@ -620,3 +620,15 @@ No more temp file creation in production. To enable debug output when needed: ID
 ## User
 
 In the jetbrains plugin, make the info popup go away after 3 seconds.
+
+## Assistant
+
+Done. `TerminalUtil.notifyInfo()` now auto-expires info notifications after 3 seconds via `notification.expire()`. Error notifications (`notifyError`) still persist until manually dismissed.
+
+Both plugin zips rebuilt (unsigned + signed).
+
+106. Info notification auto-expire — 3-second timeout on `notifyInfo()` balloons. Error notifications unchanged.
+
+## User
+
+Have the same popup behavior that we use for routing the "Submit" action. Also rename "Submit" to "Run". 

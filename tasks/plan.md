@@ -790,3 +790,22 @@ Changes: positional claim (`--position`), plugin split detection, IntelliJ Logge
 ## User
 
 The agent-doc jetbrains popup takes precedence over "More actions" and intentions popup. The intentions popup and "More actions" should take precedence.
+
+## Assistant
+
+Fixed `AgentDocActionPromoter.kt` — replaced `promote()` with `suppress()`.
+
+**Before:** `promote()` sorted `AgentDocPopupAction` to the front for all .md files, overriding IDEA's intentions/quick-fixes on Alt+Enter.
+
+**After:** `suppress()` hides `AgentDocPopupAction` when `ShowIntentionActions` or `ShowMoreActions` is in the action list:
+- **Alt+Enter with intentions** → IDEA's intentions popup (Agent Doc suppressed)
+- **Alt+Enter without intentions** → Agent Doc popup
+- **Dedicated shortcuts** → always work
+
+Both plugin zips rebuilt (unsigned + signed).
+
+115. ActionPromoter fix — `promote()` → `suppress()`. Intentions/quick-fixes take precedence over Agent Doc popup on Alt+Enter.
+
+## User
+
+Replace with command does not work anymore

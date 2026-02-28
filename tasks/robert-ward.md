@@ -5,16 +5,16 @@ agent: null
 model: null
 branch: null
 ---
-8x9 $183/mo 2nd month free
-424-276-0685
-Public Storage
-2300 Purdue Ave
-Los Angeles, CA 90064
-https://www.publicstorage.com/self-storage-ca-los-angeles/121.html
 
-7x10 $190/mo 1st month $1
-424-276-0904
-Public Storage
-11625 W Olympic Blvd
-Los Angeles, CA 90064
-https://www.publicstorage.com/self-storage-ca-los-angeles/121.html
+Robert Ward is a long time friend who lives in LA.
+He has a Chinese Medicine, acupressure, therapeutic massage practice.
+
+He did not complete the Chinese Medicine program
+
+robert-ward introduced me to judith-krug.
+
+He often works from his phone and rarely uses his laptop.
+He often needs help looking for housing on CraigsList.
+Also looking for a storage unit.
+
+I have been thinking of building a tool to scrape CraigsList `rooms / shared` category for specific areas in  Santa Monica, Venice, Palisades.

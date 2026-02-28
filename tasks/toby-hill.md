@@ -33,7 +33,7 @@ Brian Takita and Toby Hill were in the conversation.
 
 **Transcription complete** — `phone_20260226-130230_6469149767-diarized.md` (20:22, 272 segments, 2 speakers, confidence scores).
 
-**Speaker names are swapped** — the diarizer assigned labels backwards. Lines labeled "Brian Takita" are actually Toby, and vice versa. Evident from line 14: "Toby Hill" says "I'm doing well, Toby" — that's Brian speaking. Want me to swap the names throughout?
+**Speaker names are swapped** — the diarizer assigned labels backwards. Lines labeled "Brian Takita" are actually Toby, and vice versa. Evident from line 14: “Toby Hill” says "I'm doing well, Toby" — that's Brian speaking. Want me to swap the names throughout?
 
 **Call summary** — Recruiting call with Toby Hill (UK-based recruiter, NYC office):
 - **Fake candidates plague**: Toby describes AI-generated resumes/candidates flooding pipelines (~50% of 1000+ applications)

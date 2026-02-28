@@ -1123,3 +1123,4 @@ For uppercase convention files (`AGENTS.md`, `CLAUDE.md`), there's no strong pre
 
 ## User
 
+compact this doc

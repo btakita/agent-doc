@@ -970,3 +970,27 @@ This markdown file is now. It had an external edit.
 ## User
 
 Do you have the bug report ready for this?
+
+## Assistant
+
+**YouTrack bug report draft** — ready to paste at https://youtrack.jetbrains.com/newIssue?project=IDEA
+
+**Title:** Spellcheck "Replace with" quick-fix does nothing in Markdown files
+
+**Steps to reproduce:**
+1. Create a `.md` file with YAML frontmatter (`---\nsession: null\n---\nPallisades`)
+2. Wait for spellcheck green squiggly on "Pallisades"
+3. Alt+Enter → "Replace with 'Palisades' Alt+Shift+Enter"
+4. Click or press Alt+Shift+Enter
+
+**Expected:** Word replaced. **Actual:** Nothing happens. No error logged.
+
+**Environment:** IDEA Ultimate 2025.3 (IU-252.26830.84), Linux 6.19.4-2-cachyos x86_64
+
+**Additional:** Works in .java/.kt files. `idea.log` flooded with `MarkdownPreviewFileEditor: panel is null, cannot update preview`. No spellcheck exceptions. Persists after Invalidate Caches. Third-party plugins disabled.
+
+File at https://youtrack.jetbrains.com/newIssue?project=IDEA — use "Markdown" subsystem and "Bug" type.
+
+## User
+
+Is there a Jetbrains bug tracker api that we can use?

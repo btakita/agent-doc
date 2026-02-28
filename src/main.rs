@@ -114,6 +114,9 @@ enum Commands {
     Claim {
         /// Path to the session document
         file: PathBuf,
+        /// Positional hint to select pane by position (left, right, top, bottom)
+        #[arg(long)]
+        position: Option<String>,
     },
     /// Focus the tmux pane for a session document
     Focus {
@@ -186,7 +189,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => git::commit(&file),
-        Commands::Claim { file } => claim::run(&file),
+        Commands::Claim { file, position } => claim::run(&file, position.as_deref()),
         Commands::Focus { file } => focus::run(&file),
         Commands::Layout { files, split } => {
             let split = match split.as_str() {

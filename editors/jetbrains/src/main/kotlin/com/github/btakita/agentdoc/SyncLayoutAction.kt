@@ -34,7 +34,7 @@ class SyncLayoutAction : AnAction() {
                 .distinct()
 
             if (visibleMdFiles.isEmpty()) {
-                if (notify) TerminalUtil.notifyInfo(project, "No .md files open")
+                if (notify) TerminalUtil.showHint(project, "No .md files open")
                 return
             }
 
@@ -58,7 +58,7 @@ class SyncLayoutAction : AnAction() {
                     val exitCode = process.waitFor()
                     if (notify) {
                         if (exitCode == 0) {
-                            TerminalUtil.notifyInfo(project, output.ifEmpty { "Layout synced" })
+                            TerminalUtil.showHint(project, output.ifEmpty { "Layout synced" })
                         } else {
                             TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
                         }

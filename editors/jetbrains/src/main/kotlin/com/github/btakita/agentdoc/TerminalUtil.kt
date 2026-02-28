@@ -69,7 +69,7 @@ object TerminalUtil {
         return "agent-doc"
     }
 
-    private fun showHint(project: Project, message: String) {
+    fun showHint(project: Project, message: String) {
         ApplicationManager.getApplication().invokeLater {
             val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return@invokeLater
             HintManager.getInstance().showInformationHint(editor, message)
@@ -89,10 +89,15 @@ object TerminalUtil {
 
     fun notifyInfo(project: Project, content: String) {
         try {
-            NotificationGroupManager.getInstance()
+            val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
                 .createNotification(content, NotificationType.INFORMATION)
-                .notify(project)
+            notification.notify(project)
+            // Auto-expire after 3 seconds
+            Thread {
+                Thread.sleep(3000)
+                notification.expire()
+            }.start()
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
         }

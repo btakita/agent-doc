@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -31,7 +32,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private val running = AtomicBoolean(false)
         @Volatile private var lastFileSet: List<String> = emptyList()
         @Volatile private var lastActiveFile: String = ""
-        private val LOG_FILE = java.io.File("/tmp/agent-doc-plugin.log")
+        private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
 
         /** Clear the dedup cache so the next automatic sync runs unconditionally. */
         fun clearLastFileSet() {
@@ -41,9 +42,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun log(msg: String) {
-        try {
-            LOG_FILE.appendText("${java.time.Instant.now()} $msg\n")
-        } catch (_: Exception) {}
+        LOG.debug(msg)
     }
 
     override fun selectionChanged(event: FileEditorManagerEvent) {

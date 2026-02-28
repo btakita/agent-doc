@@ -12,7 +12,7 @@ use std::path::Path;
 
 use crate::{frontmatter, sessions};
 
-pub fn run(file: &Path) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -27,11 +27,21 @@ pub fn run(file: &Path) -> Result<()> {
         eprintln!("Generated session UUID: {}", session_id);
     }
 
-    let pane_id = sessions::current_pane()?;
+    let pane_id = if let Some(pos) = position {
+        sessions::pane_by_position(pos)?
+    } else {
+        sessions::current_pane()?
+    };
 
-    // Register session → pane
+    // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let file_str = file.to_string_lossy();
-    sessions::register(&session_id, &pane_id, &file_str)?;
+    let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
+    sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
+
+    // Focus the claimed pane (select its window first for cross-window support)
+    let _ = std::process::Command::new("tmux")
+        .args(["select-pane", "-t", &pane_id])
+        .status();
 
     // Show a brief notification on the target pane
     let msg = format!("Claimed {} (pane {})", file_str, pane_id);

@@ -987,10 +987,22 @@ Do you have the bug report ready for this?
 
 **Environment:** IDEA Ultimate 2025.3 (IU-252.26830.84), Linux 6.19.4-2-cachyos x86_64
 
-**Additional:** Works in .java/.kt files. `idea.log` flooded with `MarkdownPreviewFileEditor: panel is null, cannot update preview`. No spellcheck exceptions. Persists after Invalidate Caches. Third-party plugins disabled.
+**Additional:** Only seems to happen in one *.md file. Replace with works with other markdown files. `idea.log` flooded with `MarkdownPreviewFileEditor: panel is null, cannot update preview`. No spellcheck exceptions. Persists after Invalidate Caches. Third-party plugins disabled.
 
 File at https://youtrack.jetbrains.com/newIssue?project=IDEA — use "Markdown" subsystem and "Bug" type.
 
 ## User
 
 Is there a Jetbrains bug tracker api that we can use?
+
+## Assistant
+
+Yes — [YouTrack REST API](https://www.jetbrains.com/help/youtrack/devportal/api-howto-create-issue.html) supports creating issues, but requires a [permanent token](https://www.jetbrains.com/help/youtrack/devportal/authentication-with-permanent-token.html).
+
+**Setup:** https://youtrack.jetbrains.com → Profile → Authentication → "New token" (YouTrack scope). Then I can file it via `curl` with `Authorization: Bearer <token>`.
+
+Or just paste the draft at https://youtrack.jetbrains.com/newIssue?project=IDEA — faster if this is a one-off.
+
+## User
+
+Please use the Jetbrains bug report template. The Copy/Paste was rejected

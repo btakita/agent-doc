@@ -25,4 +25,24 @@ Both plugin zips rebuilt (unsigned + signed). Install from disk — no uninstall
 
 Is the self-disabling necessary? I only had it to fix the Replace with but that was an Idea bug or an issue with another plugin.
 
-Just make sure 
+Just make sure Alt+Enter still opens the intention menu
+
+## Assistant
+
+**Self-disabling removed entirely.** You're right — the "Replace with" bug was an IDEA bug, not our plugin. No reason for the HighlightInfo complexity.
+
+`AgentDocPopupAction.update()` now just checks `.md` extension. Alt+Enter behavior:
+
+- **No intentions at caret** → Agent Doc popup shows directly
+- **Intentions at caret** → IDEA shows a disambiguation popup (choose "Agent Doc Actions" or "Show Intention Actions")
+
+Removed `HighlightInfo`/`HighlightSeverity` imports and `com.intellij.modules.lang` dependency.
+
+Both plugin zips rebuilt (unsigned + signed).
+
+2. Removed self-disabling — simple `.md` check only. Alt+Enter always available; IDEA disambiguates when intentions also exist.
+
+## User
+
+Now the Agent-Doc Actions doesn't popup AND Replace me does nothing 
+

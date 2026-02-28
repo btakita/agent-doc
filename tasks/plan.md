@@ -599,3 +599,24 @@ Always build both the agent-doc-jetbrains and the agent-doc-jetbrains-signed. Qu
 ## User
 
 Is /tmp/agent-doc-plugin.log only for development? I don't want to release with this log file.
+
+## Assistant
+
+**Positional claim confirmed working.** Plugin log shows `strategy1: found position=right` for toby-hill.md — the reinstall took effect and Splitter tree walk detects position correctly.
+
+**Logging cleaned up — `/tmp/agent-doc-plugin.log` removed.** Replaced with IntelliJ's built-in `Logger`:
+
+- `ClaimAction.kt` — `LOG_FILE.appendText("[claim] ...")` → `LOG.debug(...)`
+- `EditorTabSyncListener.kt` — same change
+
+No more temp file creation in production. To enable debug output when needed: IDEA → `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`. Logs appear in `idea.log` only when debug level is enabled.
+
+**Both plugin zips built** (unsigned + signed). 93 agent-doc tests pass.
+
+**Going forward:** always building both `agent-doc-jetbrains-0.1.0.zip` and `agent-doc-jetbrains-0.1.0-signed.zip`.
+
+105. Plugin logging cleanup — `/tmp/agent-doc-plugin.log` → IntelliJ `Logger.debug()`. Both plugin zips rebuilt.
+
+## User
+
+In the jetbrains plugin, make the info popup go away after 3 seconds.

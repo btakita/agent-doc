@@ -563,3 +563,23 @@ Want me to sign it first?
 Still didn't work. I ran Clam for on toby-hill while the left tmux claim was selected...and the left tmux pane claimed toby-hill
 
 The plugin didn't hot-reload either.
+
+## Assistant
+
+**The plugin needs a manual reinstall** — hot-reload doesn't apply when the plugin's classes change structurally (new imports, new methods). The `.zip` was rebuilt but IDEA is still running the cached old version.
+
+**To install:** IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..." → select:
+```
+agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip
+```
+Then restart IDEA.
+
+I did this twice. Idea restarted. What is wrong with this flow?
+
+I've also added **diagnostic logging** to `/tmp/agent-doc-plugin.log` — after reinstalling, try claiming again and check that file. It will show whether `detectEditorPosition` is finding the splitter, whether the EDITOR context is available, and what position it detects (or why it falls back to null).
+
+Also added a second detection strategy: if the EDITOR component isn't found in the Splitter tree, it now checks `managerEx.windows` to find which split window contains the file, then uses the window index + orientation as a heuristic.
+
+## User
+
+Always build both the agent-doc-jetbrains and the agent-doc-jetbrains-signed. Question, if I install agent-doc-jetbrains, would it be easier to run diagnostics & debug on the plugin?

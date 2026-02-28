@@ -431,4 +431,4 @@ git rm -r --cached .agent-doc/
 
 ## User
 
-Make 
+Why is idea stuck in a git state that has many changes?

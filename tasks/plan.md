@@ -893,3 +893,23 @@ Self-disabling is the only approach that eliminates the ActionPromoter entirely,
 ## User
 
 Ok...Self-disabling then.
+
+## Assistant
+
+Implemented self-disabling `AgentDocPopupAction`:
+
+**How it works:** `update()` checks `DocumentMarkupModel` for `HighlightInfo` at the caret position. If the daemon analyzer has results there (spellcheck, inspections, etc.), the action disables itself → `ShowIntentionActions` is the sole Alt+Enter action → intentions work natively. When no highlights exist at the caret, Agent Doc enables itself → Alt+Enter shows the Agent Doc popup.
+
+**Changes:**
+- `AgentDocPopupAction.kt` — `update()` now queries markup model for highlights at caret
+- `plugin.xml` — removed `<actionPromoter>`, added `com.intellij.modules.lang` dependency (needed for `HighlightInfo`)
+- Deleted `AgentDocActionPromoter.kt` — no longer needed
+
+Alt+Enter keybinding kept. Both plugin zips rebuilt. Please uninstall → restart → install → restart.
+
+I need to explicitly uninstall the plugin first? Not just reinstall?
+
+118. Self-disabling popup — Agent Doc disables itself when intentions exist at caret. ActionPromoter removed. Alt+Enter shared cleanly.
+
+## User
+

@@ -699,3 +699,23 @@ The wanted panes are together. %1 being in a separate window is the expected sid
 ## User
 
 It's not working as designed. The replacement pane was not running Claude Code.
+
+## Assistant
+
+**Bug confirmed.** Pane %4 (judith-krug.md) was running `zsh`, not `claude`. The registered PID (221067) is dead — Claude crashed or was killed in that pane, leaving a bare shell.
+
+**Root cause:** `layout.rs` only checked `pane_alive()` (does the tmux pane exist?) but not whether the registered Claude process is still running. A pane with a dead Claude session passes the alive check because the pane itself still exists (running zsh after Claude exits).
+
+**Fix:** Added PID liveness check to layout.rs:
+- `sessions::lookup_entry()` — returns full entry including PID
+- `sessions::pid_alive(pid)` — checks `/proc/<pid>` existence
+- Layout now requires **both** pane exists AND registered PID alive
+- Dead Claude sessions get a specific warning: `"warning: Claude (pid X) is dead in pane Y for Z, skipping"`
+
+93 tests pass, clippy clean, binary installed.
+
+110. Layout PID liveness check — panes with dead Claude processes are now skipped instead of being joined into the layout window.
+
+## User
+
+After Claiming for a tmux pane, the claiming tmux pane should be selected.

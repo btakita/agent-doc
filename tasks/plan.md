@@ -735,3 +735,26 @@ After I claim for a tmux pane, focus tmux pane is immediately focused. I claimed
 However, when I switch my to the left document, plan.md, the tmux pane focus does not change.
 
 It does change when I cycle back to robert-ward (right) then back to plan (left).
+
+## Assistant
+
+**Bug found and fixed — `register()` was storing the CLI's own PID, not the pane's process PID.**
+
+When `claim` registered a session, it stored `std::process::id()` — the PID of the short-lived `agent-doc claim` process. After the CLI exits, that PID is dead. The PID liveness check (added in #110) then caused layout/focus to skip every claimed pane.
+
+**Fix:**
+- `sessions::pane_pid(pane_id)` — queries `tmux display-message -t <pane> -p "#{pane_pid}"` to get the actual process PID in the pane
+- `sessions::register_with_pid()` — new variant that accepts explicit PID
+- `claim.rs` now uses `pane_pid()` to register the pane's real process PID
+- `start.rs` still uses `std::process::id()` (correct — exec replaces the process, PID stays)
+
+**Verified:** After re-claiming plan.md, its PID is 15271 (alive=True). Binary installed. Re-claim other files via IDE to update their PIDs.
+
+112. Fix PID registration in claim — store pane's actual PID, not CLI's ephemeral PID.
+
+## User
+
+New bug...plan.md + pane is selected.
+Navigate to claim.rs on right editor
+Navigate to robert-ward.md on right editor
+Left tmux pane still selected

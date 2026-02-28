@@ -359,3 +359,46 @@ PR #10 can be **closed as superseded** — its changes are already on main. Want
 ## User
 
 close it
+
+How do I convert the git merge I just did to a git rebase. It looks like it will rebase cleanly
+
+I handled the merge conflict on the merge. Can we realign the git history?
+
+## Assistant
+
+**Closed [PR #10](https://github.com/btakita/corky/pull/10)** — superseded, LinkedIn image uploads already on main. Branch deleted.
+
+### Converting Merge → Rebase
+
+Current graph:
+```
+*   1e440a2 (main) agent-doc: 18:07:24  ← post-merge commit
+*   eb02771 Merge branch '20260225/topic-sync'
+|\
+| * 9405146 (topic-sync) ← 30+ commits from Feb 27 sessions
+* | 6d9411c ← this session (main-only)
+* | 5db00f2 ← this session (main-only)
+* | 6c58ce9 ← old main
+```
+
+**Main-only commits to replay:** `5db00f2`, `6d9411c`
+
+```bash
+git stash                              # save uncommitted changes
+git reset --hard 6d9411c               # undo merge + post-merge, back to pre-merge main
+git rebase 20260225/topic-sync         # replay main-only commits on top of 9405146
+git stash pop                          # restore uncommitted changes
+```
+
+If any file conflicts during rebase, pull the resolved version from your merge:
+```bash
+git checkout eb02771 -- <conflicted-file>
+```
+
+**Note:** The snapshot file (`.agent-doc/snapshots/2ca8a80b...`) has leftover merge conflict markers. After the rebase, I'll overwrite it with the clean document content.
+
+103. Closed PR #10 — LinkedIn image uploads superseded.
+
+## User
+
+Should I have the .agent-doc directory committed into the repo? I just had some merge conflicts. There's also pids in session.json

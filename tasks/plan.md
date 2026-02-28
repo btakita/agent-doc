@@ -907,9 +907,10 @@ Implemented self-disabling `AgentDocPopupAction`:
 
 Alt+Enter keybinding kept. Both plugin zips rebuilt. Please uninstall → restart → install → restart.
 
-I need to explicitly uninstall the plugin first? Not just reinstall?
+**Q: Do I need to explicitly uninstall first?** No — just "Install Plugin from Disk" with the new zip. The new zip doesn't include the deleted `AgentDocActionPromoter` class. Unlike the earlier ClaimAction caching issue (same class, different signatures → stale cache), this change removes a class entirely and modifies an existing one, which the classloader handles cleanly. Restart if prompted.
 
 118. Self-disabling popup — Agent Doc disables itself when intentions exist at caret. ActionPromoter removed. Alt+Enter shared cleanly.
 
 ## User
 
+Replace with 'Palisades' still does nothing.

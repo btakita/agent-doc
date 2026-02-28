@@ -583,3 +583,19 @@ Also added a second detection strategy: if the EDITOR component isn't found in t
 ## User
 
 Always build both the agent-doc-jetbrains and the agent-doc-jetbrains-signed. Question, if I install agent-doc-jetbrains, would it be easier to run diagnostics & debug on the plugin?
+
+## Assistant
+
+**Both built** — signed and unsigned are in `build/distributions/`.
+
+**"I did this twice, what's wrong?"** — Checked the diagnostic log: **zero `[claim]` entries**. The log has `selectionChanged`, `exec`, `dedup` from `EditorTabSyncListener` but nothing from `ClaimAction`. This confirms the updated `ClaimAction` code never ran — IDEA is still using the old cached classes despite the reinstall.
+
+**Fix:** In IDEA: Settings → Plugins → find "Agent Doc" → **Uninstall** → restart IDEA → then "Install Plugin from Disk" with the new zip → restart again. Reinstalling over an existing plugin sometimes doesn't replace cached bytecode.
+
+**Unsigned vs signed for debugging:** No difference for diagnostics. Both run the same code. The signing just adds a signature for marketplace verification. Use whichever is convenient — the unsigned zip is fine for development.
+
+**Diagnostic logging** is now in `/tmp/agent-doc-plugin.log` with `[claim]` prefix. After the clean reinstall, try claiming and check for `[claim]` entries in the log.
+
+## User
+
+Is /tmp/agent-doc-plugin.log only for development? I don't want to release with this log file.

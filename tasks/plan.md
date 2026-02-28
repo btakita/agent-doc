@@ -668,3 +668,34 @@ Done.
 ## User
 
 Somehow, the 2 panes were separated into different windows. Please investigate and debug.
+
+## Assistant
+
+**Root cause: layout break-out logic displaces unwanted panes into new windows.**
+
+When you switched editor tabs (e.g., from plan.md + toby-hill.md to plan.md + judith-krug.md), the tab sync fired `agent-doc layout tasks/plan.md tasks/judith-krug.md --split h`. The layout code at `layout.rs:134-141`:
+
+1. Picks the target window (the one with most wanted panes)
+2. **Breaks out unwanted panes** — %1 (toby-hill/ron-berkes) was in the window but not in the new editor split, so `break-pane(%1)` moved it to a new solo window
+3. Joins wanted panes — %4 (judith-krug) was joined in
+
+This is by design — the layout mirrors the editor's visible files. Panes not in the current editor view get displaced. In tmux, `break-pane` creates a new window for the displaced pane (there's no "hide" option).
+
+**Current state:**
+```
+Window 0: %2 (plan.md) + %4 (judith-krug.md) — correct layout
+Window 1: %1 (ron-berkes.md) — displaced, alone
+```
+
+The wanted panes are together. %1 being in a separate window is the expected side effect of the layout sync. When you switch back to plan.md + ron-berkes.md in the editor, %1 will be joined back in and %4 will be broken out.
+
+**Possible improvements:**
+- **Parking window:** instead of creating new windows per displaced pane, join all displaced panes into a single "holding" window
+- **No break-out:** leave all panes in one window (but then you'd have 3+ panes instead of 2)
+- **Status quo:** current behavior is correct but visually jarring when you see solo panes in separate windows
+
+109. Investigated pane separation — layout break-out logic working as designed. Displaced panes get their own windows when not in the current editor view.
+
+## User
+
+It's not working as designed. The replacement pane was not running Claude Code.

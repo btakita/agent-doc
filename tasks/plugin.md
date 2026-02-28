@@ -5,115 +5,41 @@ agent: null
 model: null
 branch: null
 ---
-I lost the Alt+Enter to open Agent Doc Actions key binding. We made a recent change for Agent Doc Actions to disable itself with certain conditions.
 
-## Assistant
+## JetBrains Plugin — Alt+Enter Keybinding Fix
 
-**Fixed — severity filter was too broad.** The self-disabling `update()` checked for ANY `HighlightInfo` at the caret, but Markdown files are saturated with `INFORMATION`-severity highlights for syntax elements (headers, paragraphs, links, emphasis). The caret was almost always inside one, so Agent Doc was permanently disabled.
+**Issue:** Alt+Enter stopped opening Agent Doc Actions popup after adding self-disabling `update()` logic.
 
-**Fix:** Added `tooltip.severity > HighlightSeverity.INFORMATION` filter. Now only disables for:
-- **TYPO** (spellcheck) — "Replace with" intentions
-- **WEAK_WARNING** / **WARNING** / **ERROR** — code inspections
+**Root cause:** Self-disabling was unnecessary — it was added to work around a "Replace with" spellcheck bug that turned out to be an IDEA bug, not caused by our plugin.
 
-Ignores `INFORMATION`-level syntax decoration that doesn't produce intentions.
+**Key discovery:** After clean reinstall (uninstall → restart → install → restart), "Replace with" worked fine. The ActionPromoter was never the cause of that bug.
 
-Both plugin zips rebuilt (unsigned + signed). Install from disk — no uninstall needed.
+### Resolution
 
-1. Alt+Enter severity filter — `HighlightInfo.severity > INFORMATION`. Agent Doc popup restored for Markdown files.
+- **Removed self-disabling** — `AgentDocPopupAction.update()` now just checks `.md` extension
+- **Re-added ActionPromoter** — `AgentDocActionPromoter.kt` with `promote()` to put Agent Doc first for `.md` files (required for Alt+Enter to win over IDEA's `ShowIntentionActions`)
+- **Removed `com.intellij.modules.lang` dependency** — no longer needed without HighlightInfo
 
-## User
+### Files changed
 
-Is the self-disabling necessary? I only had it to fix the Replace with but that was an Idea bug or an issue with another plugin.
+| File | Change |
+|------|--------|
+| `AgentDocActionPromoter.kt` | Re-created with `promote()` logic |
+| `AgentDocPopupAction.kt` | Simplified — removed HighlightInfo/severity check |
+| `plugin.xml` | Re-added `<actionPromoter>` registration |
 
-Just make sure Alt+Enter still opens the intention menu
+### Commits
 
-## Assistant
+- **Submodule** `ccf03d7` — re-add ActionPromoter, simplify popup action
+- **Parent** `59d702b` — updated submodule pointer
 
-**Self-disabling removed entirely.** You're right — the "Replace with" bug was an IDEA bug, not our plugin. No reason for the HighlightInfo complexity.
+### Lessons
 
-`AgentDocPopupAction.update()` now just checks `.md` extension. Alt+Enter behavior:
-
-- **No intentions at caret** → Agent Doc popup shows directly
-- **Intentions at caret** → IDEA shows a disambiguation popup (choose "Agent Doc Actions" or "Show Intention Actions")
-
-Removed `HighlightInfo`/`HighlightSeverity` imports and `com.intellij.modules.lang` dependency.
-
-Both plugin zips rebuilt (unsigned + signed).
-
-2. Removed self-disabling — simple `.md` check only. Alt+Enter always available; IDEA disambiguates when intentions also exist.
+1. **ActionPromoter is required** for Alt+Enter — without it, IDEA's `ShowIntentionActions` wins the shortcut silently
+2. **"Replace with" is an IDEA bug** — per-file, not caused by our plugin, confirmed by clean reinstall test
+3. **Plugin caching** — structural changes (new classes) require uninstall → restart → install → restart
+4. **Markdown HighlightInfo** — `.md` files are saturated with INFORMATION-severity highlights for syntax elements; any filter that checks for HighlightInfo presence will always trigger
 
 ## User
 
-Now the Agent-Doc Actions doesn't popup AND Replace me does nothing
 
-## Assistant
-
-**Two separate issues:**
-
-1. **Agent Doc popup not appearing** — IDEA is still running the old self-disabling plugin (cached bytecode). The new zip is built but hasn't been installed in IDEA yet.
-
-   **Fix:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk" → select:
-   ```
-   agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip
-   ```
-   If it doesn't take effect, **uninstall first → restart → install → restart**. (Same caching issue we hit before with ClaimAction.)
-
-2. **"Replace with" does nothing** — This is the same IDEA bug we diagnosed earlier. It's per-file, not caused by our plugin (confirmed: still broken with plugin disabled). We have a YouTrack bug report ready for it.
-
-The new plugin source has no self-disabling — just a simple `.md` extension check. Once installed, Alt+Enter will always show the Agent Doc popup in Markdown files.
-
-3. Plugin reinstall needed — IDEA running cached old version. "Replace with" is the known IDEA bug (not our plugin).
-
-## User
-
-I uninstalled and installed. Replace with works. But the Agent Doc Actions still is not properly bound to Alt+Enter.
-
-## Assistant
-
-Good news: **"Replace with" works** — confirms our plugin wasn't the cause.
-
-Alt+Enter problem: IDEA's built-in `ShowIntentionActions` also uses Alt+Enter. Without an ActionPromoter, IDEA gives priority to its built-in action — even when it has nothing to show in `.md` files, it "wins" the shortcut silently.
-
-**Options:**
-
-1. **Different keybinding** — e.g., `Ctrl+.` or `Alt+Period`. Zero conflict.
-2. **Register as IntentionAction** — Agent Doc items appear inside IDEA's own intentions popup. Most integrated.
-3. **Re-add ActionPromoter** — we now know the ActionPromoter didn't break "Replace with" (that was an IDEA bug independent of our plugin). Safe to re-add `promote()` to put our action first for `.md` files.
-
-Option 3 is the quickest fix. We removed the ActionPromoter thinking it caused the "Replace with" failure, but we've now proven that was wrong — the bug resolves/persists independently of our plugin.
-
-Which approach do you prefer?
-
-4. Alt+Enter not firing — `ShowIntentionActions` wins the shortcut without ActionPromoter. Need a resolution strategy.
-
-## User
-
-Readd ActionPromoter.
-
-## Assistant
-
-**ActionPromoter re-added.** Created `AgentDocActionPromoter.kt` with the original `promote()` logic — sorts `AgentDocPopupAction` to the front of the action list for `.md` files. Registered in `plugin.xml` as `<actionPromoter>`.
-
-Both plugin zips rebuilt (unsigned + signed). **Uninstall → restart → install → restart** since this adds a new class.
-
-5. Re-added ActionPromoter — `promote()` puts Agent Doc first for `.md` files. Alt+Enter restored.
-
-## User
-
-commit the plugin changes
-
-## Assistant
-
-**Committed.**
-
-**Submodule** (`ccf03d7`): re-add ActionPromoter, simplify popup action. 3 files: new `AgentDocActionPromoter.kt`, simplified `AgentDocPopupAction.kt` (removed HighlightInfo check), `plugin.xml` (re-added `<actionPromoter>`).
-
-**Parent** (`59d702b`): updated submodule pointer.
-
-agent-doc submodule is 4 commits ahead of origin.
-
-6. Committed plugin changes — ActionPromoter re-added, popup simplified. Submodule + parent updated.
-
-## User
-
-cleanme

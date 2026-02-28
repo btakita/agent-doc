@@ -223,3 +223,11 @@ yes
 ## User
 
 cleanme
+
+## Assistant
+
+**Session history squashed** (`ac44158`). All previous agent-doc commits for this file collapsed into one commit. Clean slate for future diffs.
+
+## User
+
+compact this doc

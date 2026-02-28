@@ -875,3 +875,21 @@ Which approach do you prefer?
 ## User
 
 I'm inclined to try Delegate-first. What does Self-disabling do that Delegate-first would not do?
+
+## Assistant
+
+**Delegate-first has a circular dependency.** For Agent Doc to delegate, it must win Alt+Enter first → still needs the ActionPromoter → ActionPromoter's presence breaks intentions (the original bug).
+
+**Self-disabling avoids this.** `update()` sets `isEnabledAndVisible = false` when intentions exist → IDEA's resolver never sees Agent Doc → ShowIntentionActions is the sole Alt+Enter action → zero interference. No ActionPromoter needed.
+
+| | Self-disabling | Delegate-first |
+|---|---|---|
+| ActionPromoter needed? | No | Yes (causes the bug) |
+| Intentions interference? | None | Same as before |
+| Agent Doc on Alt+Enter? | Only when no intentions | Always (delegates) |
+
+Self-disabling is the only approach that eliminates the ActionPromoter entirely, which is the root cause.
+
+## User
+
+Ok...Self-disabling then.

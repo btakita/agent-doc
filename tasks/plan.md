@@ -914,3 +914,15 @@ Alt+Enter keybinding kept. Both plugin zips rebuilt. Please uninstall → restar
 ## User
 
 Replace with 'Palisades' still does nothing.
+
+## Assistant
+
+We've now tried 4 approaches and "Replace with" is still broken. Since the self-disabling version removes the ActionPromoter entirely and Agent Doc disables itself when highlights exist, **our plugin may not be the cause.**
+
+**Diagnostic test:** Can you temporarily disable/uninstall the Agent Doc plugin entirely and test "Replace with" on a misspelled word in a `.md` file? If it's still broken without our plugin, it's an IDEA/Markdown plugin issue. If it works, something in our plugin is still interfering.
+
+Also: did "Replace with" in `.md` files ever work before we added the Agent Doc plugin?
+
+## User
+
+It still didn't work when disabling the plugin. Are you able to look in the idea logs to troubleshoot?

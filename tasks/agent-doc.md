@@ -410,6 +410,8 @@ The `layout` command is joining all claimed panes into the same window when `Edi
 
 Alternatively, with `--window` now available, `EditorTabSyncListener` and `SyncLayoutAction` should pass `--window` to scope layout to a single window. Want me to implement window-scoped layout?
 
+Is --window scope robust compared to the previous suggestion?
+
 ## User
 
 Would --window scope layout be more robust? I want to have something "just work" and move onto my next tasks. 

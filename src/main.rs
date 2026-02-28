@@ -117,11 +117,20 @@ enum Commands {
         /// Positional hint to select pane by position (left, right, top, bottom)
         #[arg(long)]
         position: Option<String>,
+        /// Explicit tmux pane ID (e.g. %42) — overrides position detection
+        #[arg(long)]
+        pane: Option<String>,
+        /// Scope pane resolution to this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
     },
     /// Focus the tmux pane for a session document
     Focus {
         /// Path to the session document
         file: PathBuf,
+        /// Explicit tmux pane ID — overrides session lookup
+        #[arg(long)]
+        pane: Option<String>,
     },
     /// Arrange tmux panes to mirror editor split layout
     Layout {
@@ -130,6 +139,12 @@ enum Commands {
         /// Split direction: h (horizontal/side-by-side) or v (vertical/stacked)
         #[arg(long, short, default_value = "h")]
         split: String,
+        /// Explicit tmux pane ID — scopes pane selection to this pane's session
+        #[arg(long)]
+        pane: Option<String>,
+        /// Only operate on panes within this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
     },
     /// Validate sessions.json against live tmux panes, remove stale entries
     Resync,
@@ -189,15 +204,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => git::commit(&file),
-        Commands::Claim { file, position } => claim::run(&file, position.as_deref()),
-        Commands::Focus { file } => focus::run(&file),
-        Commands::Layout { files, split } => {
+        Commands::Claim { file, position, pane, window } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref()),
+        Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
+        Commands::Layout { files, split, pane, window } => {
             let split = match split.as_str() {
                 "v" | "vertical" => layout::Split::Vertical,
                 _ => layout::Split::Horizontal,
             };
             let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
-            layout::run(&paths, split)
+            layout::run(&paths, split, pane.as_deref(), window.as_deref())
         }
         Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {

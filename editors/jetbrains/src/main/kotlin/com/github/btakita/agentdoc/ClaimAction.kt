@@ -37,11 +37,16 @@ class ClaimAction : AnAction() {
 
         LOG.debug("claim $relativePath position=$position agentDoc=$agentDoc")
 
+        val windowId = TerminalUtil.projectWindowId(project)
+
         Thread {
             try {
                 val cmd = mutableListOf(agentDoc, "claim", relativePath)
                 if (position != null) {
                     cmd.addAll(listOf("--position", position))
+                }
+                if (windowId != null) {
+                    cmd.addAll(listOf("--window", windowId))
                 }
                 LOG.debug("cmd: ${cmd.joinToString(" ")}")
                 val process = ProcessBuilder(cmd)

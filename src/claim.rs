@@ -12,9 +12,24 @@ use std::path::Path;
 
 use crate::{frontmatter, sessions};
 
-pub fn run(file: &Path, position: Option<&str>) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Validate --window if provided: check that the window is alive
+    if let Some(win) = window {
+        let alive = std::process::Command::new("tmux")
+            .args(["list-panes", "-t", win, "-F", "#{pane_id}"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !alive {
+            anyhow::bail!(
+                "tmux window {} is dead or not found — re-claim from the terminal first",
+                win
+            );
+        }
     }
 
     // Ensure session UUID exists in frontmatter
@@ -27,8 +42,15 @@ pub fn run(file: &Path, position: Option<&str>) -> Result<()> {
         eprintln!("Generated session UUID: {}", session_id);
     }
 
-    let pane_id = if let Some(pos) = position {
-        sessions::pane_by_position(pos)?
+    let pane_id = if let Some(p) = pane {
+        p.to_string() // Plugin-provided, authoritative
+    } else if let Some(pos) = position {
+        if let Some(win) = window {
+            // Scope position detection to the specified window
+            sessions::pane_by_position_in_window(pos, win)?
+        } else {
+            sessions::pane_by_position(pos)?
+        }
     } else {
         sessions::current_pane()?
     };

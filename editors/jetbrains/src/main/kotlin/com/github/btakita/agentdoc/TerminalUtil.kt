@@ -87,6 +87,41 @@ object TerminalUtil {
         }
     }
 
+    /**
+     * Reads sessions.json and returns the tmux window ID from any session
+     * entry that belongs to this project (matching cwd). Returns null if
+     * no window is recorded or sessions.json doesn't exist.
+     */
+    fun projectWindowId(project: Project): String? {
+        val basePath = project.basePath ?: return null
+        val sessionsFile = java.io.File(basePath, ".agent-doc/sessions.json")
+        if (!sessionsFile.exists()) return null
+        try {
+            val text = sessionsFile.readText()
+            // Simple JSON parsing — look for "window": "@N" in entries with matching cwd
+            // Use a lightweight approach to avoid adding a JSON dependency
+            val windowPattern = Regex(""""window"\s*:\s*"(@\d+)"""")
+            val cwdPattern = Regex(""""cwd"\s*:\s*"([^"]+)"""")
+
+            // Split by session entries (each starts with a UUID key)
+            val entries = text.split(Regex(""""[0-9a-f-]{36}"\s*:\s*\{"""))
+            for (entry in entries) {
+                val cwdMatch = cwdPattern.find(entry)
+                val windowMatch = windowPattern.find(entry)
+                if (cwdMatch != null && windowMatch != null) {
+                    val cwd = cwdMatch.groupValues[1]
+                    val window = windowMatch.groupValues[1]
+                    if (cwd == basePath && window.isNotEmpty()) {
+                        return window
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Fall through
+        }
+        return null
+    }
+
     fun notifyInfo(project: Project, content: String) {
         try {
             val notification = NotificationGroupManager.getInstance()

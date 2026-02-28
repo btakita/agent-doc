@@ -546,3 +546,18 @@ Tested: `--position left` → `%2` (left=0), `--position right` → `%1` (left=1
 ## User
 
 The claim fo tmux pane chose the selected pane instead of the side it was on. This time I claimed plan.md but the right tmux pane was selected...so the right tmux pane claimed plan.md
+
+## Assistant
+
+**The updated plugin hasn't been installed in IDEA yet.** The binary has `--position` support, but the JetBrains plugin running in your IDE is still the old `ClaimAction` — it doesn't call `detectEditorPosition()` or pass `--position`. It falls back to `current_pane()` → whichever tmux pane is focused.
+
+To install:
+1. IDEA → Settings → Plugins → gear → Install Plugin from Disk
+2. Select `agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+3. Should hot-reload (plugin has `require-restart="false"`)
+
+Want me to sign it first?
+
+## User
+
+Still didn't work. I ran Clam for on toby-hill while the left tmux claim was selected...and the left tmux pane claimed toby-hill

@@ -89,3 +89,15 @@ Which approach do you prefer?
 ## User
 
 Readd ActionPromoter.
+
+## Assistant
+
+**ActionPromoter re-added.** Created `AgentDocActionPromoter.kt` with the original `promote()` logic — sorts `AgentDocPopupAction` to the front of the action list for `.md` files. Registered in `plugin.xml` as `<actionPromoter>`.
+
+Both plugin zips rebuilt (unsigned + signed). **Uninstall → restart → install → restart** since this adds a new class.
+
+5. Re-added ActionPromoter — `promote()` puts Agent Doc first for `.md` files. Alt+Enter restored.
+
+## User
+
+commit the plugin changes

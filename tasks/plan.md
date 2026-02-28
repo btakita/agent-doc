@@ -464,3 +464,26 @@ Option 1 + pane picker dialog in the plugin is the cleanest path. Want me to imp
 ## User
 
 Can the tmux positional pane layout be known by agent-doc? If so, we could match the tmux panes the requested positional layout
+
+## Assistant
+
+**Yes — tmux exposes full pane coordinates.** `tmux list-panes -F "#{pane_id} #{pane_left} #{pane_top}"` gives cell positions for every pane. Your current window:
+
+```
+%2  left=0    (left pane)
+%1  left=121  (right pane)
+```
+
+**Positional claim design:**
+
+1. **CLI:** `agent-doc claim <file> --position left|right|top|bottom`
+2. **Resolution:** query `tmux list-panes`, sort by `pane_left` (left/right) or `pane_top` (top/bottom), pick the matching pane
+3. **Plugin:** detect which editor split the file is in, pass `--position` to claim
+
+**Current gap:** The JetBrains plugin's `SyncLayoutAction` detects split *orientation* (h/v) but not which file is on which *side*. Enhancement needed: walk the `Splitter` component tree to determine if the focused editor is the first or second child, then map to left/right or top/bottom.
+
+The tmux side is trivial (just `list-panes` + sort). The plugin side needs moderate work to detect split position. Worth implementing — eliminates the "focus the right pane first" workaround.
+
+## User
+
+Yes, implement...Are we maintaining the Jetbrains plugin SPEC file? I want feature parity with the VSCode plugin.

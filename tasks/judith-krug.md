@@ -149,3 +149,4 @@ The pitch itself was solid — platform-agnostic intelligence layer is genuinely
 
 ## User
 
+Robert Ward is going to reach out to Judith. We may have a conversation. Robert told me that Judith gets busy at times. She is deciding on what platform to go with. Her ex-husband & business partner recommended hubspot crm. It has a great price at $9/mo/seat. MA has Hubspot integration.

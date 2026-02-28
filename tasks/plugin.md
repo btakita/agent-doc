@@ -67,3 +67,25 @@ The new plugin source has no self-disabling — just a simple `.md` extension ch
 ## User
 
 I uninstalled and installed. Replace with works. But the Agent Doc Actions still is not properly bound to Alt+Enter.
+
+## Assistant
+
+Good news: **"Replace with" works** — confirms our plugin wasn't the cause.
+
+Alt+Enter problem: IDEA's built-in `ShowIntentionActions` also uses Alt+Enter. Without an ActionPromoter, IDEA gives priority to its built-in action — even when it has nothing to show in `.md` files, it "wins" the shortcut silently.
+
+**Options:**
+
+1. **Different keybinding** — e.g., `Ctrl+.` or `Alt+Period`. Zero conflict.
+2. **Register as IntentionAction** — Agent Doc items appear inside IDEA's own intentions popup. Most integrated.
+3. **Re-add ActionPromoter** — we now know the ActionPromoter didn't break "Replace with" (that was an IDEA bug independent of our plugin). Safe to re-add `promote()` to put our action first for `.md` files.
+
+Option 3 is the quickest fix. We removed the ActionPromoter thinking it caused the "Replace with" failure, but we've now proven that was wrong — the bug resolves/persists independently of our plugin.
+
+Which approach do you prefer?
+
+4. Alt+Enter not firing — `ShowIntentionActions` wins the shortcut without ActionPromoter. Need a resolution strategy.
+
+## User
+
+Readd ActionPromoter.

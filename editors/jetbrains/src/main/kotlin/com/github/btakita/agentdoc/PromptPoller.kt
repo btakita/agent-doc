@@ -36,12 +36,6 @@ class PromptPoller(private val project: Project) : Disposable {
     /** Recently answered prompt key — filtered from poll results until the answer takes effect. */
     @Volatile private var answeredPromptKey: String? = null
 
-    /** Timestamp of last answer — suppress re-show for a cooldown period. */
-    @Volatile private var lastAnswerTimeMs: Long = 0L
-
-    /** Cooldown after answering before showing any new prompt (prevents flicker). */
-    private val ANSWER_COOLDOWN_MS = 2000L
-
     /**
      * Register a file for tracking and ensure the poller is running.
      */
@@ -62,7 +56,6 @@ class PromptPoller(private val project: Project) : Disposable {
         currentPromptKey = null
         activePromptQueue = emptyList()
         answeredPromptKey = null
-        lastAnswerTimeMs = 0L
         ApplicationManager.getApplication().invokeLater {
             PromptPanel.dismiss(project)
         }
@@ -263,11 +256,6 @@ class PromptPoller(private val project: Project) : Disposable {
             return
         }
 
-        // Cooldown: suppress new prompts briefly after answering one (prevents flicker)
-        if (System.currentTimeMillis() - lastAnswerTimeMs < ANSWER_COOLDOWN_MS) {
-            return
-        }
-
         // Current prompt was resolved or nothing is showing — pick next
         val nextKey = activePromptQueue
             .firstOrNull { it in activeKeys && it != currentPromptKey }
@@ -291,7 +279,6 @@ class PromptPoller(private val project: Project) : Disposable {
     private fun answerPrompt(basePath: String, relativePath: String, optionIndex: Int) {
         answeredPromptKey = currentPromptKey
         currentPromptKey = null
-        lastAnswerTimeMs = System.currentTimeMillis()
         Thread {
             try {
                 val agentDoc = TerminalUtil.resolveAgentDoc()

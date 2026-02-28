@@ -100,13 +100,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     lastActiveFile = activeFile
 
                     val agentDoc = TerminalUtil.resolveAgentDoc()
+                    val windowId = TerminalUtil.projectWindowId(project)
+                    val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
                     val cmd = if (fileSetChanged) {
                         // File set changed → full layout
                         if (visibleMdFiles.size == 1) {
                             listOf(agentDoc, "focus", visibleMdFiles[0])
                         } else {
                             val splitFlag = if (split == "v") "v" else "h"
-                            listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag)
+                            listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag) + windowArgs
                         }
                     } else {
                         // Same file set, different active file → just focus

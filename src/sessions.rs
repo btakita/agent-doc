@@ -19,6 +19,9 @@ pub struct SessionEntry {
     /// Relative path to the session document (empty for legacy entries).
     #[serde(default)]
     pub file: String,
+    /// Tmux window ID (e.g. `@5`) at claim time. Empty for legacy entries.
+    #[serde(default)]
+    pub window: String,
 }
 
 pub type SessionRegistry = HashMap<String, SessionEntry>;
@@ -373,6 +376,18 @@ pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
 }
 
 pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
+    // Query the window ID for this pane
+    let window = pane_window(pane_id).unwrap_or_default();
+    register_full(session_id, pane_id, file, pid, &window)
+}
+
+pub fn register_full(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+) -> Result<()> {
     let mut registry = load()?;
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -387,9 +402,22 @@ pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) 
             cwd,
             started,
             file: file.to_string(),
+            window: window.to_string(),
         },
     );
     save(&registry)
+}
+
+/// Query the tmux window ID for a pane.
+pub fn pane_window(pane_id: &str) -> Result<String> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-t", pane_id, "-p", "#{window_id}"])
+        .output()
+        .context("failed to query tmux window ID")?;
+    if !output.status.success() {
+        anyhow::bail!("tmux display-message failed for pane {}", pane_id);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Look up the pane ID for a session.
@@ -470,6 +498,57 @@ pub fn pane_by_position(position: &str) -> Result<String> {
     }
 }
 
+/// Resolve a pane by positional hint within a specific tmux window.
+/// Like `pane_by_position` but scoped to the given window ID (e.g. `@1`).
+pub fn pane_by_position_in_window(position: &str, window: &str) -> Result<String> {
+    let output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-t",
+            window,
+            "-F",
+            "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
+        ])
+        .output()
+        .context("failed to query tmux panes")?;
+    if !output.status.success() {
+        anyhow::bail!("tmux list-panes failed for window {}", window);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut panes: Vec<(String, u32, u32, u32, u32)> = Vec::new();
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let id = parts[0].to_string();
+            let left: u32 = parts[1].parse().unwrap_or(0);
+            let top: u32 = parts[2].parse().unwrap_or(0);
+            let width: u32 = parts[3].parse().unwrap_or(0);
+            let height: u32 = parts[4].parse().unwrap_or(0);
+            panes.push((id, left, top, width, height));
+        }
+    }
+    if panes.is_empty() {
+        anyhow::bail!("no panes found in tmux window {}", window);
+    }
+    if panes.len() == 1 {
+        return Ok(panes[0].0.clone());
+    }
+    let selected = match position {
+        "left" => panes.iter().min_by_key(|p| p.1),
+        "right" => panes.iter().max_by_key(|p| p.1 + p.3),
+        "top" => panes.iter().min_by_key(|p| p.2),
+        "bottom" => panes.iter().max_by_key(|p| p.2 + p.4),
+        _ => anyhow::bail!(
+            "invalid position '{}' — use left, right, top, or bottom",
+            position
+        ),
+    };
+    match selected {
+        Some(pane) => Ok(pane.0.clone()),
+        None => anyhow::bail!("could not resolve pane for position '{}'", position),
+    }
+}
+
 /// Check if we're inside tmux.
 pub fn in_tmux() -> bool {
     std::env::var("TMUX").is_ok()
@@ -505,6 +584,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
                 file: "test.md".to_string(),
+                window: String::new(),
             },
         );
         save(&reg).unwrap();
@@ -537,6 +617,7 @@ mod tests {
                 cwd: "/tmp/a".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
         reg.insert(
@@ -547,6 +628,7 @@ mod tests {
                 cwd: "/tmp/b".to_string(),
                 started: "2026-01-01T00:01:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
 
@@ -571,6 +653,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
         reg.insert(
@@ -581,6 +664,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:05:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
 
@@ -601,6 +685,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
         reg.insert(
@@ -611,6 +696,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
                 file: String::new(),
+                window: String::new(),
             },
         );
 

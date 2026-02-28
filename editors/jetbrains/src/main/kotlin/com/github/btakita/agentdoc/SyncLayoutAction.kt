@@ -39,16 +39,18 @@ class SyncLayoutAction : AnAction() {
             }
 
             val split = detectSplitOrientation(project)
+            val windowId = TerminalUtil.projectWindowId(project)
             EditorTabSyncListener.clearLastFileSet()
 
             Thread {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
+                    val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
                     val cmd = if (visibleMdFiles.size == 1) {
                         listOf(agentDoc, "focus", visibleMdFiles[0])
                     } else {
                         val splitFlag = if (split == "v") "v" else "h"
-                        listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag)
+                        listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag) + windowArgs
                     }
                     val process = ProcessBuilder(cmd)
                         .directory(java.io.File(basePath))

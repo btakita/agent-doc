@@ -12,13 +12,24 @@ use std::path::Path;
 use crate::sessions::Tmux;
 use crate::{frontmatter, sessions};
 
-pub fn run(file: &Path) -> Result<()> {
-    run_with_tmux(file, &Tmux::default_server())
+pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
+    run_with_tmux(file, pane, &Tmux::default_server())
 }
 
-pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
+pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // If an explicit pane was provided, use it directly
+    if let Some(p) = pane_override {
+        if tmux.pane_alive(p) {
+            tmux.select_pane(p)?;
+            eprintln!("Focused pane {} ({})", p, file.display());
+            return Ok(());
+        } else {
+            anyhow::bail!("pane {} is dead for {}", p, file.display());
+        }
     }
 
     let content = std::fs::read_to_string(file)

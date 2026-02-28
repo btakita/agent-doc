@@ -33,18 +33,18 @@ impl Split {
     }
 }
 
-pub fn run(files: &[&Path], split: Split) -> Result<()> {
-    run_with_tmux(files, split, &Tmux::default_server())
+pub fn run(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&str>) -> Result<()> {
+    run_with_tmux(files, split, pane, window, &Tmux::default_server())
 }
 
-pub fn run_with_tmux(files: &[&Path], split: Split, tmux: &Tmux) -> Result<()> {
+pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&str>, tmux: &Tmux) -> Result<()> {
     if files.is_empty() {
         anyhow::bail!("at least one file required");
     }
 
     if files.len() == 1 {
         // Single file — just focus it, no layout needed.
-        return crate::focus::run_with_tmux(files[0], tmux);
+        return crate::focus::run_with_tmux(files[0], pane, tmux);
     }
 
     // Resolve each file to its session pane.
@@ -74,6 +74,23 @@ pub fn run_with_tmux(files: &[&Path], split: Split, tmux: &Tmux) -> Result<()> {
                     file.display()
                 );
             }
+        }
+    }
+
+    // If --window is specified, filter to only panes in that window.
+    // This prevents layout from pulling panes from other windows.
+    if let Some(win) = window {
+        let window_panes_list = tmux.list_window_panes(win).unwrap_or_default();
+        let window_pane_set: std::collections::HashSet<&str> =
+            window_panes_list.iter().map(|s| s.as_str()).collect();
+        let before = pane_files.len();
+        pane_files.retain(|(pane_id, _)| window_pane_set.contains(pane_id.as_str()));
+        if pane_files.len() < before {
+            eprintln!(
+                "Filtered {} panes outside window {}",
+                before - pane_files.len(),
+                win
+            );
         }
     }
 

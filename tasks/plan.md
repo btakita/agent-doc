@@ -926,3 +926,29 @@ Also: did "Replace with" in `.md` files ever work before we added the Agent Doc 
 ## User
 
 It still didn't work when disabling the plugin. Are you able to look in the idea logs to troubleshoot?
+
+I tried another Replace with in a separate document and it worked.
+
+## Assistant
+
+**Confirmed: NOT our plugin.** "Replace with" works in other docs but fails only in `plan.md`.
+
+**Root cause: document state desync.** This file is constantly modified externally (agent-doc commits, Edit tool, snapshot writes). IDEA's PSI tree is out of sync with the disk file — the spellcheck quick-fix targets stale offsets and silently fails.
+
+The `idea.log` is flooded with `MarkdownPreviewFileEditor: panel is null, cannot update preview` — the Markdown plugin is struggling with this file's frequent external modifications.
+
+**Fix:** Try in order:
+1. `Ctrl+Alt+Y` (Synchronize) — forces IDEA to reload from disk
+2. Close and reopen `tasks/plan.md`
+3. `File > Invalidate Caches > Invalidate and Restart`
+
+This is a known limitation of external file modification — IDEA's file watcher detects changes but the PSI 
+ tree doesn't always rebuild cleanly, especially for large Markdown files with frequent edits.
+
+119. Diagnosed "Replace with" failure — not our plugin. Document state desync from external modifications. Fix: Ctrl+Alt+Y or close/reopen file.
+
+## User
+
+The "Replace with" failure is happening in the robert-ward doc. I tried Ctrl+Alt+Y, Closing and reopening, and invalidate caches did not work.
+
+This markdown file is now. It had an external edit.

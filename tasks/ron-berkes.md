@@ -106,7 +106,7 @@ Can we detect who the speakers are? Ron Berkes and Brian Takita. Can you figure 
 
 Whisper doesn't do speaker diarization natively. Running **pyannote.audio** (speaker-diarization-3.1) to identify the 2 speakers, then mapping them to Ron vs Brian using content keywords:
 
-- **Ron clues:** "manufacturing china", "alibaba", "factory", "julian", "3A credit", "wordpress", "astro", "supabase", "22 years"
+- **Ron clues:** "manufacturing china", "alibaba", "factory", "julian", "3A credit", "WordPress", "astro", "supabase", "22 years"
 - **Brian clues:** "claude code", "spec driven", "rust", "cloudflare", "correspondence", "agent"
 
 Pipeline: pyannote segments → match with whisper timestamps (JSON) → label each line → diarized transcript.
@@ -149,7 +149,7 @@ I unblocked the hf terms.
 
 - `corky transcribe` uses whisper-rs with native **tdrz speaker turn detection** — no pyannote needed
 - Multi-format audio (WAV, MP3, FLAC, OGG, M4A, AAC, AMR via ffmpeg fallback)
-- Speaker-labeled markdown output with timestamps and YAML frontmatter
+- Speaker-labeled Markdown output with timestamps and YAML frontmatter
 - Auto-downloads models from HuggingFace (default: `large-v3-turbo`)
 - GPU support via `transcribe-cuda` feature
 - Configurable in `.corky.toml` under `[transcription]`
@@ -159,7 +159,7 @@ I unblocked the hf terms.
 - Corky handles AMR natively (ffmpeg fallback), matches your phone recording format.
 - It's already built and integrated with corky's config system.
 
-**Re: diarization specifically** — whisper's tdrz detects speaker *turns* but doesn't *identify* who is who. Corky's `--speakers` flag lets you provide names and it labels turns in order. For truly unknown speakers, pyannote is still better. But for your use case (you know who's on the call), corky's approach is sufficient.
+**Re: diarization specifically** — whisper's tdrz detects speaker *turns* but doesn't *identify* who is who. Corky's `--speakers` flag lets you provide names, and it labels turns in order. For truly unknown speakers, pyannote is still better. But for your use case (you know who's on the call), corky's approach is sufficient.
 
 **To re-run with speaker labels:**
 ```
@@ -209,7 +209,7 @@ No "Python API emulator" exists. The options:
 
 Let's try the ort crate approach. This is experimental. If it doesn't seem like it will work we may rip it out.
 
-This should probably be it's own crate.
+This should probably be its own crate.
 
 The other challenge is figuring out who is Ron Berkes and Brian Takita in the diarization process
 
@@ -247,7 +247,7 @@ Tell me more about content-based auto-detect, voice fingerprints per contact
 
 After diarization splits speech into `Speaker 1` / `Speaker 2`, score each speaker's text against keyword sets derived from their contact profile:
 
-- **Ron keywords** (from topics/context): "manufacturing china", "alibaba", "factory", "julian", "3A credit", "wordpress", "astro", "supabase", "22 years", "blueprint", "my platform"
+- **Ron keywords** (from topics/context): "manufacturing china", "alibaba", "factory", "julian", "3A credit", "WordPress", "astro", "supabase", "22 years", "blueprint", "my platform"
 - **Brian keywords**: "claude code", "spec driven", "rust", "cloudflare", "correspondence", "agent", "corky"
 
 Speaker with more Ron-keyword hits → labeled Ron. This is what the earlier `/tmp/diarize-simple.py` attempted.
@@ -618,3 +618,5 @@ Yes — 30 min wall time, 118 min CPU time (4 threads). Transcription is likely 
 ## User
 
 Still going. Should we track progress?
+
+cleanup me

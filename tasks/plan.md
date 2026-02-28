@@ -952,3 +952,21 @@ This is a known limitation of external file modification — IDEA's file watcher
 The "Replace with" failure is happening in the robert-ward doc. I tried Ctrl+Alt+Y, Closing and reopening, and invalidate caches did not work.
 
 This markdown file is now. It had an external edit.
+
+## Assistant
+
+**IDEA log analysis:** No spellcheck errors logged — the "Replace with" action fails silently. The log is flooded with `MarkdownPreviewFileEditor: panel is null, cannot update preview` but no intention/quickfix exceptions. No matching JetBrains YouTrack issue found.
+
+**Narrowing it down:** Was the "separate document" where it worked also a `.md` file with YAML frontmatter? If it was a `.java`/`.kt` file, this could be a Markdown-specific spellcheck bug in IDEA 2025.3. If it was another `.md` with frontmatter, the issue is specific to files that had external edits.
+
+**Possible workaround:** If you need the fix now, manually replace "Pallisades" → "Palisades" on line 20 of `robert-ward.md`. The "Replace with" quick-fix does the same thing — just a text substitution.
+
+**Next steps:**
+- This appears to be an IDEA bug. We could file on [YouTrack](https://youtrack.jetbrains.com/) with reproduction steps.
+- Our plugin changes (self-disabling popup, no ActionPromoter) are correct and unrelated.
+
+120. IDEA log analysis — no spellcheck errors. "Replace with" fails silently. Likely IDEA 2025.3 Markdown bug. Manual replacement is the workaround.
+
+## User
+
+Do you have the bug report ready for this?

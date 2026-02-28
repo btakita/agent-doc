@@ -487,3 +487,31 @@ The tmux side is trivial (just `list-panes` + sort). The plugin side needs moder
 ## User
 
 Yes, implement...Are we maintaining the Jetbrains plugin SPEC file? I want feature parity with the VSCode plugin.
+
+## Assistant
+
+**No separate plugin SPEC exists.** The main `agent-doc/SPEC.md` has use cases (U1-U13) but no per-plugin spec. Worth adding a `PLUGINS.md` or section in SPEC.md that defines the expected feature set.
+
+**Feature parity gap is massive.** VSCode is ~45 lines with submit-only. JetBrains has ~2000 lines across 8 files:
+
+| Feature | JetBrains | VSCode |
+|---------|-----------|--------|
+| Submit (Ctrl+Shift+Alt+A) | yes | yes |
+| Claim (Ctrl+Shift+Alt+C) | yes | no |
+| Layout sync (Ctrl+Shift+Alt+L) | yes | no |
+| Prompt polling + panel UI | yes | no |
+| Tab sync listener | yes | no |
+| Auto-merge (3-way git) | yes | no |
+| Popup menu (Alt+Enter) | yes | no |
+
+**Proposed plan:**
+
+1. **Positional claim** — add `--position left|right|top|bottom` to `agent-doc claim` CLI + update JetBrains `ClaimAction` to detect split position and pass it
+2. **Plugin SPEC** — add §10 Editor Plugins to `agent-doc/SPEC.md` defining required feature set
+3. **VSCode feature parity** — port claim, layout sync, prompt polling to VSCode extension (separate effort, substantial)
+
+Start with #1 (positional claim) since that's the immediate bug fix?
+
+## User
+
+Do #1. Would it be better to have a separate editors/SPEC.md file or would that confuse things? 

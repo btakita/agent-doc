@@ -561,3 +561,5 @@ Want me to sign it first?
 ## User
 
 Still didn't work. I ran Clam for on toby-hill while the left tmux claim was selected...and the left tmux pane claimed toby-hill
+
+The plugin didn't hot-reload either.

@@ -809,3 +809,22 @@ Both plugin zips rebuilt (unsigned + signed).
 ## User
 
 Replace with command does not work anymore
+
+## Assistant
+
+Fixed — switched from `suppress()` back to `promote()` with inverted priority.
+
+**Problem:** `suppress()` completely hides actions from the resolution pipeline, which broke IDEA's intention sub-actions ("Replace with" uses the same action chain).
+
+**Fix:** `promote()` now **reorders** instead of suppressing:
+- Intentions present → `ShowIntentionActions` promoted above `AgentDocPopupAction`
+- No intentions → `AgentDocPopupAction` promoted (Agent Doc popup shows)
+- No actions removed from the pipeline — "Replace with" and all intention sub-actions should work normally
+
+Both plugin zips rebuilt. Please reinstall and test.
+
+116. ActionPromoter fix — `suppress()` → `promote()` with inverted priority. Intentions promoted above Agent Doc; no actions suppressed.
+
+## User
+
+Replace with is still now working.

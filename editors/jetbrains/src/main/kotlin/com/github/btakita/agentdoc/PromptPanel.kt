@@ -130,7 +130,7 @@ object PromptPanel {
         optionsPanel.isOpaque = false
 
         val options = info.options ?: return
-        val maxLabelLen = 80
+        val maxLabelLen = 45
         for (opt in options) {
             val fullText = "[${opt.index}] ${opt.label}"
             val displayText = if (fullText.length > maxLabelLen) {
@@ -250,11 +250,13 @@ object PromptPanel {
             })
         }
 
-        // Size and position at bottom of the layered pane
+        // Size and position at bottom of the layered pane.
+        // Cap height to 30% of the window so buttons are always visible.
         fun layoutPanel(lp: JLayeredPane) {
             panel.setSize(lp.width, Short.MAX_VALUE.toInt())
             panel.doLayout()
-            val h = panel.preferredSize.height
+            val maxH = (lp.height * 0.30).toInt().coerceAtLeast(60)
+            val h = panel.preferredSize.height.coerceAtMost(maxH)
             panel.setSize(lp.width, h)
             panel.setLocation(0, lp.height - h)
         }

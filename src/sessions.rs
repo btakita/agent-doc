@@ -398,17 +398,6 @@ pub fn lookup(session_id: &str) -> Result<Option<String>> {
     Ok(registry.get(session_id).map(|e| e.pane.clone()))
 }
 
-/// Look up the full session entry for a session.
-pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
-    let registry = load()?;
-    Ok(registry.get(session_id).cloned())
-}
-
-/// Check if a session's registered process is still alive.
-pub fn pid_alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{}", pid)).exists()
-}
-
 /// Get the pane ID of the current pane.
 /// Tries TMUX_PANE env var first, then falls back to querying tmux
 /// for the active pane (works from outside tmux, e.g. IDE processes).

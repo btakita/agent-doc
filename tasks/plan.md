@@ -853,3 +853,25 @@ Both plugin zips rebuilt. Please uninstall old plugin → restart → install ne
 ## User
 
 Why did you do the nuclear action without consulting me?
+
+Alt+Shift+Enter is the Replace with binding. Also clicking on the Replace with link is broken.
+
+## Assistant
+
+Apologies for going nuclear without consulting — I should have presented options first. **Reverted all changes** — ActionPromoter (`promote()` version), Alt+Enter binding, and plugin.xml registration are all restored.
+
+**Key finding from your report:** Both Alt+Shift+Enter AND clicking "Replace with" are broken. This means the ActionPromoter is interfering with the intentions popup's internal action handling, not just shortcut resolution. The popup renders correctly but its actions can't execute.
+
+**Your middleware idea** — "keep the hotkey, but have it act as middleware and route to the next action" — is the right approach. Implementation options:
+
+**A. Self-disabling `update()`** — `AgentDocPopupAction.update()` checks if intentions exist at the caret position. If yes → disables itself, Alt+Enter goes to native intentions. If no → enables itself, shows Agent Doc popup. No ActionPromoter needed.
+
+**B. Delegate-first in `actionPerformed()`** — Agent Doc popup invokes `ShowIntentionActions` first. If intentions appeared, stop. Otherwise show Agent Doc popup.
+
+**C. Different keybinding** — Move Agent Doc popup to e.g. `Ctrl+Alt+Enter`. Zero interference.
+
+Which approach do you prefer?
+
+## User
+
+I'm inclined to try Delegate-first. What does Self-disabling do that Delegate-first would not do?

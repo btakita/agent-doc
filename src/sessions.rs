@@ -353,9 +353,27 @@ pub fn save(registry: &SessionRegistry) -> Result<()> {
 }
 
 /// Register a session → pane mapping.
+/// Get the PID of the foreground process in a tmux pane.
+pub fn pane_pid(pane_id: &str) -> Result<u32> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
+        .output()
+        .context("failed to query tmux pane PID")?;
+    if !output.status.success() {
+        anyhow::bail!("tmux display-message failed for pane {}", pane_id);
+    }
+    let pid_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    pid_str
+        .parse::<u32>()
+        .with_context(|| format!("invalid PID '{}' for pane {}", pid_str, pane_id))
+}
+
 pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
+    register_with_pid(session_id, pane_id, file, std::process::id())
+}
+
+pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
     let mut registry = load()?;
-    let pid = std::process::id();
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -380,6 +398,17 @@ pub fn lookup(session_id: &str) -> Result<Option<String>> {
     Ok(registry.get(session_id).map(|e| e.pane.clone()))
 }
 
+/// Look up the full session entry for a session.
+pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
+    let registry = load()?;
+    Ok(registry.get(session_id).cloned())
+}
+
+/// Check if a session's registered process is still alive.
+pub fn pid_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+}
+
 /// Get the pane ID of the current pane.
 /// Tries TMUX_PANE env var first, then falls back to querying tmux
 /// for the active pane (works from outside tmux, e.g. IDE processes).
@@ -400,6 +429,56 @@ pub fn current_pane() -> Result<String> {
         anyhow::bail!("tmux returned empty pane ID");
     }
     Ok(pane)
+}
+
+/// Resolve a pane by positional hint (left, right, top, bottom).
+/// Queries `tmux list-panes` for the current window and selects the pane
+/// at the requested position based on coordinates.
+pub fn pane_by_position(position: &str) -> Result<String> {
+    let output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-F",
+            "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
+        ])
+        .output()
+        .context("failed to query tmux panes")?;
+    if !output.status.success() {
+        anyhow::bail!("tmux list-panes failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut panes: Vec<(String, u32, u32, u32, u32)> = Vec::new();
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let id = parts[0].to_string();
+            let left: u32 = parts[1].parse().unwrap_or(0);
+            let top: u32 = parts[2].parse().unwrap_or(0);
+            let width: u32 = parts[3].parse().unwrap_or(0);
+            let height: u32 = parts[4].parse().unwrap_or(0);
+            panes.push((id, left, top, width, height));
+        }
+    }
+    if panes.is_empty() {
+        anyhow::bail!("no panes found in current tmux window");
+    }
+    if panes.len() == 1 {
+        return Ok(panes[0].0.clone());
+    }
+    let selected = match position {
+        "left" => panes.iter().min_by_key(|p| p.1),
+        "right" => panes.iter().max_by_key(|p| p.1 + p.3),
+        "top" => panes.iter().min_by_key(|p| p.2),
+        "bottom" => panes.iter().max_by_key(|p| p.2 + p.4),
+        _ => anyhow::bail!(
+            "invalid position '{}' — use left, right, top, or bottom",
+            position
+        ),
+    };
+    match selected {
+        Some(pane) => Ok(pane.0.clone()),
+        None => anyhow::bail!("could not resolve pane for position '{}'", position),
+    }
 }
 
 /// Check if we're inside tmux.

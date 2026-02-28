@@ -37,7 +37,7 @@
         </action>
         <action id="AgentDoc.Submit"
                 class="com.github.btakita.agentdoc.SubmitAction"
-                text="Submit to Agent Doc"
+                text="Run Agent Doc"
                 description="Route /agent-doc command to the correct Claude session via tmux">
             <keyboard-shortcut first-keystroke="ctrl shift alt A" keymap="$default"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>

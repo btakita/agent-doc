@@ -131,10 +131,19 @@ pub fn run_with_tmux(files: &[&Path], split: Split, tmux: &Tmux) -> Result<()> {
     }
     let target_window = best_window;
 
-    // Break out any panes currently in the target window that aren't wanted.
+    // Break out unwanted panes, but only if they are registered sessions.
+    // Non-session panes (shells, tools, etc.) are left in place — the user
+    // didn't ask us to manage them.
+    let registry = sessions::load().unwrap_or_default();
+    let session_panes: std::collections::HashSet<String> =
+        registry.values().map(|e| e.pane.clone()).collect();
+
     let window_panes = tmux.list_window_panes(&target_window)?;
     for existing_pane in &window_panes {
-        if !wanted.contains(existing_pane.as_str()) && window_panes.len() > 1 {
+        if !wanted.contains(existing_pane.as_str())
+            && session_panes.contains(existing_pane)
+            && window_panes.len() > 1
+        {
             tmux.break_pane(existing_pane)?;
             eprintln!("Broke out pane {} from window {}", existing_pane, target_window);
         }

@@ -441,3 +441,17 @@ Also created `profiles/startup-founder.toml` (filtered, 4 pages) as a bonus.
 ## User
 
 Proofread. iterate and commit
+
+## Assistant
+
+**Proofread — 3 fixes applied and committed:**
+
+1. **"across all industries" → "across industries"** (line 88) — more modest and accurate
+2. **Censible bare URLs → descriptive bullet** — three orphan links replaced with "Built ESG Portfolio Rebalancing tool and ESG analytics platform" with inline links. Now matches Career Highlight.
+3. **Open Source date "2024" → "2006"** — section includes RSpec, rr, backbone-signal from 2006+. Date range now accurate.
+
+PDF rebuilt. Resume pushed, parent pointer updated.
+
+## User
+
+commit and push

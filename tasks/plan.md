@@ -257,3 +257,25 @@ That commit happens to be current HEAD of main right now, so today it would matc
 ## User
 
 So we would need to rm the symlink, submodule init and update the submodule to pin the updated revision, commit, then restore the symlink?
+
+## Assistant
+
+**Yes.** Full cycle:
+
+```sh
+rm briantakita.me-dev                              # remove symlink
+git submodule update --init briantakita.me-dev     # restore real checkout
+cd briantakita.me-dev && git pull && cd ..          # fetch latest
+git add briantakita.me-dev                         # update pointer
+git commit -m "update briantakita.me-dev pointer"
+git submodule deinit briantakita.me-dev            # remove checkout
+ln -s /home/brian/work/btakita/briantakita.me-dev briantakita.me-dev  # restore symlink
+```
+
+7 steps — clunky. Could wrap in a shell alias or `agent-doc` subcommand if frequent. But if you rarely update the pointer, fine as-is.
+
+**Simpler alternative:** drop the submodule entirely, keep a plain symlink. You lose pointer tracking but gain zero friction. The submodule mainly buys reproducible clones — if you're the only one cloning agent-loop, the pointer doesn't matter much.
+
+## User
+
+Is there a plugin or library that supports these symlinks and zero-friction submodule pinning?

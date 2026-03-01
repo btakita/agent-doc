@@ -52,3 +52,29 @@ In resume/BrianTakita, reduce the margins to the same margins as resume/Brian-ha
   - `Job Title` should be italicized
 - Dates worked at job should be smaller and not bold sans-serif font
 - Bullet points should be left aligned with no left margin
+
+## Assistant
+
+**All 8 changes applied to `resume/BrianTakita.md` + `resume/resume.css`:**
+
+1. HR lines hidden (`hr { display: none }`)
+2. Contact lines centered (`<div style="text-align:center">`)
+3. `Location:` label removed
+4. Company — *Job Title* bumped to 12pt, title italicized via `### Company — *Job Title*`
+5. Dates wrapped in `<small>` — 9pt, gray (#555), not bold
+6. Bullet left margin reduced (`padding-left: 1em; margin-left: 0`)
+
+PDF rebuilt with `make pdf`.
+
+## User
+
+50% horizontal margin
+linkify contact info
+remove horizontal lines under section title
+Color Section Titles blue
+
+Break out Skills from Summary
+Rename Top Skills to Skills
+
+Date range at job: Remove top/bottom padding
+Bullet point lists: Remove left-right margin and padding

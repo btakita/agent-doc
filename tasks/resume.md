@@ -234,4 +234,22 @@ Why does exploring the philosophy repo take >30k tokens in my query? Are we miss
 
 > Most recently architected the full real-time multi-modal text/audio/video AI avatar pipeline at Presence AI.
 
-Does this read well or is the double emphasis on "multi-modal text/audio/video" too much? I aded multi-modal for the keyword and text/audio/video lipsync for additional keywords.
+Does this read well or is the double emphasis on "multi-modal text/audio/video lipsync" too much? I aded multi-modal for the keyword and text/audio/video lipsync for additional keywords.
+
+## Assistant
+
+It reads fine for ATS keyword scanning but stacks 7 modifiers before the noun. Two options that preserve all keywords with better flow:
+
+**Option A — em-dash parenthetical:**
+> Most recently architected a real-time multimodal AI avatar pipeline — text, audio, and video lipsync — at Presence AI.
+
+**Option B — reorder:**
+> Most recently architected the full real-time AI avatar pipeline at Presence AI: multimodal lipsync across text, audio, and video.
+
+Both keep every keyword (real-time, multimodal, text, audio, video, lipsync, AI avatar pipeline). Also: "multi-modal" → "multimodal" (no hyphen) is standard in ML/AI literature.
+
+Your current version works for ATS. If you want it to read smoothly to a human too, Option A.
+
+## User
+
+Option A please

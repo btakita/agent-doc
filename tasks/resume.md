@@ -433,3 +433,11 @@ Also created `profiles/startup-founder.toml` (filtered, 4 pages) as a bonus.
 ## User
 
 10,000+ row exports is not impressive. ESG Portfolio Rebalancing tool is better.
+
+## Assistant
+
+**Updated.** Censible Career Highlight: "10,000+ row exports, SVG/PDF reports" → "ESG Portfolio Rebalancing tool". Added "ESG Portfolio Rebalancing" to highlight phrases in both profiles. PDF rebuilt.
+
+## User
+
+Proofread. iterate and commit

@@ -126,3 +126,11 @@ clean:
 ## User
 
 make should default to make BrianTakita.pdf
+
+## Assistant
+
+**Done.** Removed the `pdf` phony wrapper — `BrianTakita.pdf` is now the first (and default) target. `make` directly builds the PDF with dependency tracking on `.md` and `.css`.
+
+## User
+
+The side page margins are still too much. How do we reduce the side margins? I have it at 0 on @page. Is there another css setting such as print or something else that I'm missing?

@@ -348,3 +348,29 @@ PDF rebuilt. Resume pushed, parent pointer updated.
 ## User
 
 Is my resume ready to send to startup founder level technical recruiters?
+
+## Assistant
+
+**Yes — with caveats.** The content is strong. Readiness assessment through the lens of a startup founder/CTO:
+
+**What works well:**
+- **Clear signal**: Tagline immediately says "agent loops, context engineering, spec-driven development" — exactly the vocabulary for frontier AI infra hiring
+- **Deep technical proof**: Presence AI section reads like an architect — real-time video pipeline, H100s, WebRTC, LatentSync
+- **Open source as product**: corky and agent-doc show you ship end-to-end
+- **20-year innovation thread**: BDD → reactive → context engineering → agent tooling. Founders love people who've been ahead of curves before
+- **Strong highlights**: 83 phrases bolded — key terms jump out on a 10-second scan
+
+**What a founder might question:**
+
+1. **Length** — 4-5 pages in PDF. Startup founders skim; most won't read past page 2. Consider a 2-page version via TOML profile filtering for first send, full version as follow-up.
+2. **"Other contributions" list** — 18 items is impressive breadth but dilutes the signal. Top 4 (corky, agent-doc, rr, RSpec) carry the weight.
+3. **Missing: "What I want next"** — Summary says what you've done but not what role/problem you're drawn to. A one-liner like "Seeking founding/lead engineer roles building real-time AI infrastructure" would convert scanners to callers.
+4. **Freelance + Censible overlap** — Both end Feb 2026, both 7-10 years. A founder may wonder about commitment. Note concurrent part-time work.
+
+**Recommendation:** Create a `profiles/startup-founder.toml` that filters to ~2 pages: Presence AI, Open Source (corky + agent-doc), Freelance (one-liner), Pivotal Labs. Adds "Seeking" line to summary.
+
+Want me to create that profile?
+
+## User
+
+Yes

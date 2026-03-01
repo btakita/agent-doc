@@ -450,3 +450,11 @@ All arrows are bidirectional (`↔`) showing fan-out and fan-in between API Serv
 ## User
 
 commit resume
+
+## Assistant
+
+**Committed.** Resume submodule: full-stack data flow bullet (moved to first position under Presence AI) + rebuilt PDF. Parent pointer updated.
+
+## User
+
+Please note my updates to BrianTakita.md. Highlight the impactful phrases for getting a job at the tip of the spear for innovative agentic work.

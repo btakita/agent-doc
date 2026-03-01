@@ -374,3 +374,41 @@ Want me to create that profile?
 ## User
 
 Yes
+
+I want the first 2 pages to be strong signal across my entire career. and following pages for detail. Please communicate the structure.
+
+## Assistant
+
+**Created `profiles/startup-founder.toml`** — but first build is 3 pages (down from 5). Your request changes the approach: you want ALL entries, but front-loaded signal.
+
+**Proposed structure:**
+
+**Pages 1-2 (Signal — entire career at a glance):**
+1. Tagline + Contact + Summary + Skills (already page 1)
+2. **Career Highlights** (NEW section) — 6-8 punchy one-liners spanning 20 years:
+   - **Presence AI**: Architected real-time multimodal AI avatar pipeline — text, audio, video lipsync on H100 GPUs via WebRTC
+   - **Open Source**: corky (git-native correspondence in Rust), agent-doc (document-as-interface for AI agents), RSpec (BDD core contributor), rr (pioneered proxy test doubles)
+   - **Pivotal Labs**: Mentored developers across 20+ startups. Speaker at RailsConf 2008
+   - **honk.com**: Led development; acquired by TrueCar
+   - **Milyoni**: Social Entertainment Platform for Warner Brothers, Lions Gate, Paramount
+   - **Censible**: 10-year ESG analytics platform — Martin Investments portal, 10K+ row exports
+   - **Context Engineering**: Domain ontology system (152 nodes) since 2014 — structuring agent reasoning across domains
+   - **BDD Pioneer**: Early contributor — RSpec, Screw Unit, rr proxy pattern (now `patch` in pytest)
+
+**Pages 3-5 (Detail):**
+- Full Experience section (all entries, chronological)
+- Education
+
+This requires adding a `## Career Highlights` section to `BrianTakita.md`. Two options:
+
+**Option A — Always show Career Highlights**: Add to master template; appears in all versions. Works because it's useful context for every reader.
+
+**Option B — Profile-controlled**: Add section to template but filter it out of the default profile via `sections.include`. Only shows in startup-founder profile.
+
+Recommend **Option A** — a career highlights section benefits every reader and doesn't hurt the full version.
+
+Want me to implement?
+
+## User
+
+Option A

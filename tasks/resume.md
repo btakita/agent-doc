@@ -203,10 +203,14 @@ Does the summary need to be updated for the career targets?
 
 **Summary: Yes, needs updating.** Current summary focuses on agentic work but doesn't mention reactive or event-driven programming — a 15+ year thread from backbone-signal → ctx-core → rmemo → relysjs. Proposed:
 
-> Over 20 years building full-stack systems with deep expertise in reactive programming, event-driven architecture, and real-time pipelines. Most recently architected the full real-time AI avatar pipeline at Presence AI. Now building spec-driven agent tooling and collaborative intelligence workflows. A 15-year lineage of reactive event-driven development — applied to modern agentic systems where humans and agents work in parallel with full context.
+> Over 20 years building full-stack systems with deep expertise in reactive programming, event-driven architecture, and real-time pipelines. Most recently architected the full real-time AI avatar pipeline at Presence AI. Now building spec-driven agent tooling and collaborative intelligence workflows. A 15-year lineage of reactive framework development — applied to modern agentic systems where humans and agents work in parallel with full context.
 
 Want me to apply highlights + summary update?
 
 ## User
 
 Yes, apply updates.
+
+I want to highlight context engineering as well. Particularly with the philosophy repo. I started the repo in 2016 in anticipation of modern agentic loops.
+
+Why does exploring the philosophy repo take >30k tokens in my query? Are we missing context files that distill what the philosophy repo is?

@@ -313,3 +313,26 @@ Let's come up with a different way to edit.
 
 An exclusion list could work as well, but would have the same rename issue.
 How can we make this more intent driven with less development surprises?
+
+## Assistant
+
+**Fixed.** Changed the default behavior to be safe-by-default:
+
+1. **`sections.experience` unset = include ALL entries** in their original order. No filtering. You only set it when you actively want to filter/reorder for a specific job profile.
+2. **`sections.include` unset = include ALL sections.** Same principle.
+3. **Mismatch warnings** — if a filter name doesn't match any heading, `build.py` now prints a warning to stderr so you notice immediately.
+
+Updated `profiles/default.toml` — both `experience` and `include` are now commented out (include everything). The comments show how to enable filtering when needed:
+
+```toml
+[sections]
+# Unset = include ALL entries. Only set when filtering for a specific job.
+# experience = ["Presence AI", "Open Source", "Censible"]
+# include = ["Summary", "Skills", "Experience", "Education"]
+```
+
+**Design principle:** The markdown is the source of truth. Profiles only *add* emphasis and *optionally* filter — they never silently drop content by default.
+
+## User
+
+Add resume AGENTS.md with a CLAUDE.md symlink

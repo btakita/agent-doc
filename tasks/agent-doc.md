@@ -37,3 +37,33 @@ branch: null
 ## User
 
 commit agent-doc. bump version. Let gh actions do the release
+
+## Assistant
+
+**Released agent-doc v0.5.5.**
+
+- **Committed** (`93d077a`) — 12 files, 214 insertions: window-scoped routing, `--pane`/`--window` flags, layout safeguards
+- **Bumped** 0.5.4 → 0.5.5 in `Cargo.toml` + `pyproject.toml`
+- **Tests:** clippy clean, 93 tests pass (72 unit + 21 integration)
+- **Tagged** `v0.5.5` and pushed to origin — GH Actions building binaries + GitHub Release → PyPI auto-publishes
+- **crates.io:** published manually (not automated)
+- **Parent submodule** pointer updated (`772a2ec`)
+
+## User
+
+Are there any plugins that can structure Markdown files?
+Such as document structure. And summary of the text in a section?
+
+## Assistant
+
+**No existing plugin does this well.** Tree-sitter has a markdown parser but the AST is just headings/paragraphs/lists — not semantic. `smart_outline` on markdown would just be a table of contents.
+
+**What you'd actually want:** A `doc-outline` tool that parses `##` headings, returns heading tree with token counts per section, optionally 1-line AI summary per section (cached), and lets you "unfold" a specific section by heading name. The markdown equivalent of `smart_outline`/`smart_unfold`.
+
+**Simplest path:** Add `agent-doc outline <file>` to the CLI — split on `^## `, count tokens, optional summary. Or extend claude-mem plugin since it already has the `smart_*` infrastructure. No tree-sitter needed for markdown.
+
+**Impact:** Session docs like plan.md (160 lines) → heading structure + summaries in ~200 tokens instead of ~2K tokens for full read.
+
+## User
+
+Implement. Add to docs and skill.

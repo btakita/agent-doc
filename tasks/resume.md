@@ -282,3 +282,17 @@ Option 1 reads naturally. Option 2 maximizes keyword scanning. Option 3 balances
 ## User
 
 Proofread. Commit if it looks good. If not iterate.
+
+## Assistant
+
+**Proofread clean — 3 fixes applied and committed:**
+
+1. **"Wordpress" → "WordPress"** — official capitalization
+2. **"Fullstack" → "Full-Stack"** — consistent with rest of resume
+3. **"2008 Rails Conf" → "RailsConf 2008"** — official conference name
+
+Also added `.gitignore` for `__pycache__/`. Resume pushed, parent pointer updated.
+
+## User
+
+Should I add early contributor to Behavior Driven Development (BDD)?

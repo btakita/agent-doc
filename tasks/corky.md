@@ -265,3 +265,22 @@ Just run `corky filter push` when you edit filters. The manual step is a feature
 ## User
 
 Can we have a warning in corky watch if the upstream mail server filters is out of sync with .corky.toml?
+
+## Assistant
+
+**Yes — cheap to implement.** Read-only drift detection, no mutations.
+
+**New `corky filter check` command:**
+1. Fetch remote Gmail filters (1 API call) + label map (1 API call)
+2. Load local `.corky.toml` filters, convert to API format (reuses `convert_filters()` from push.rs)
+3. Normalize + compare. Report: "N in .corky.toml but not on Gmail" / "N on Gmail but not in .corky.toml"
+
+**Watch integration:** Hourly check (same counter pattern as `auto_upgrade`). 2 API calls/hour — negligible vs Gmail's 1M/day free tier. Logs warning on drift, never auto-pushes.
+
+**Implementation:** ~150 new lines in `filter/check.rs`, 3 lines in `watch.rs`. Reuses existing push.rs infrastructure.
+
+Shall I implement?
+
+## User
+
+yes...then bump version and release

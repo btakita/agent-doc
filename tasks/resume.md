@@ -261,4 +261,31 @@ Want me to build this? Or do you have a different vision for the config structur
 
 Yes...Build this
 
-Add a README with instructio
+Add a README.md with instructions to use this.
+Also add SPEC.md
+
+## Assistant
+
+**Built.** TOML-driven resume build system is working.
+
+**New files in `resume/`:**
+- **`build.py`** — Python build script. Reads markdown template + TOML profile, applies phrase highlighting, skill bolding, and section filtering, then outputs PDF via pandoc + weasyprint.
+- **`profiles/default.toml`** — Default profile with general full-stack + AI emphasis (18 highlighted phrases, 9 bolded skills, all experience entries).
+- **`README.md`** — Updated with profile usage, quick start, pipeline diagram, and profile options table.
+- **`SPEC.md`** — Full specification: architecture, profile schema, build process, highlighting rules, section filtering, CLI usage.
+- **`Makefile`** — Updated to use `build.py`. `make` (default) or `make PROFILE=backend-ai` for variants.
+
+**Usage:**
+```bash
+make                          # Default profile → BrianTakita.pdf
+make PROFILE=backend-ai       # Named profile → BrianTakita-backend-ai.pdf
+cp profiles/default.toml profiles/backend-ai.toml  # Create new profile
+```
+
+PDF verified — phrases are bolded throughout Experience and Summary, skills are bolded in Skills section.
+
+## User
+
+> ### Brian Takita — *Fullstack Engineer*
+
+If I change Brian Takita to Freelance, the section disappears. Why?

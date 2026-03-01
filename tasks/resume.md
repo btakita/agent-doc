@@ -499,3 +499,17 @@ Is the resume ready to send to high level founder-level technical recruiters?
 ## User
 
 I picked Option 3 - hybrid for Linked In. Why is Option 1 recommended?
+
+## Assistant
+
+**Option 3 is actually the better choice for your audience.** My recommendation was wrong.
+
+Option 1 (narrative) reads like a mission statement — abstract, evocative. Option 3 (hybrid) opens with credibility ("20+ years"), names Presence AI (social proof), states current work (agent tooling), and closes with domain expertise. Every clause carries concrete signal.
+
+For founder-level recruiters: "Architected" > "Building" (shipped, not experimenting). Pipe-separated format is the standard LinkedIn scan pattern. 212 chars uses more of the 220 limit. Good pick.
+
+Option 1 would be better for a conference bio or personal blog where narrative voice matters.
+
+## User
+
+Let's save Option 1 and 3 into resume/*.md files. Make note the purpose. It could be in a single profile-statement-list.md as a "database" md file as well. Please name and annotate appropriately.

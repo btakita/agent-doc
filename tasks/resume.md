@@ -316,4 +316,20 @@ And add `"Behavior Driven Development"` to highlight phrases. Want me to apply?
 
 ## User
 
+yes
 
+## Assistant
+
+**Applied.** Open Source header: `2024 – Present | Early contributor to Behavior Driven Development (BDD)`. "Behavior Driven Development" added to highlight phrases — bolded in RSpec entry. PDF rebuilt.
+
+## User
+
+(inline edit: added RR proxy innovation detail)
+
+## Assistant
+
+**Captured.** Updated RR entry: "Pioneered proxy-based test doubles (mock.proxy, stub.proxy) — pattern now standard as `patch` in Python's pytest/unittest". This strengthens the "innovating in lasting ways" narrative — your proxy pattern in RR predates Python's `unittest.mock.patch`. PDF rebuilt.
+
+## User
+
+Proofread please. Commit if it looks good...else iterate

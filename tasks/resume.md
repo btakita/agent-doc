@@ -289,3 +289,27 @@ PDF verified — phrases are bolded throughout Experience and Summary, skills ar
 > ### Brian Takita — *Fullstack Engineer*
 
 If I change Brian Takita to Freelance, the section disappears. Why?
+
+## Assistant
+
+The `sections.experience` filter in `profiles/default.toml` matches by company name prefix. It has `"Brian Takita"` which matches `### Brian Takita — *Fullstack Engineer*`. When you rename it to `### Freelance — *Fullstack Engineer*`, the prefix becomes `"Freelance"` and `"Brian Takita"` no longer matches — so it's filtered out.
+
+**Fix:** Update `profiles/default.toml` to match the new heading:
+
+```toml
+# Change this:
+"Brian Takita",
+# To this:
+"Freelance",
+```
+
+This is by design — the TOML profile drives the filter, so heading renames need a corresponding TOML update. Want me to make the matching more flexible (e.g., fuzzy matching or matching against the full heading line instead of just the prefix)?
+
+## User
+
+This development flow is not obvious as to why a name change would cause the section to disappear.
+Let's come up with a different way to edit.
+[sections] > experience could be unset to include all sections.
+
+An exclusion list could work as well, but would have the same rename issue.
+How can we make this more intent driven with less development surprises?

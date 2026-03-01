@@ -124,13 +124,13 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 ### 7.9 claim
 
-`agent-doc claim <FILE>` — claim a document for the current tmux pane.
+`agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P]` — claim a document for a tmux pane.
 
 1. Ensure session UUID in frontmatter (generate if missing)
-2. Read `$TMUX_PANE` (must be inside tmux)
-3. Register session → pane in `sessions.json`
+2. Determine pane: `--pane P` overrides, else `$TMUX_PANE` (must be inside tmux)
+3. Register session → pane in `sessions.json`, including window ID if `--window` given
 
-Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping.
+Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
 
 **Notifications:**
 - `tmux display-message` — 3-second overlay on the target pane showing "Claimed {file} (pane {id})"
@@ -138,9 +138,9 @@ Unlike `start`, does not launch Claude — the caller is already inside a Claude
 
 ### 7.10 focus
 
-`agent-doc focus <FILE>` — focus the tmux pane for a session document.
+`agent-doc focus <FILE> [--pane P]` — focus the tmux pane for a session document.
 
-1. Read session UUID from file's YAML frontmatter
+1. Read session UUID from file's YAML frontmatter (or use `--pane` override)
 2. Look up pane ID in `sessions.json`
 3. Run `tmux select-window -t <pane-id>` then `tmux select-pane -t <pane-id>`
 
@@ -148,13 +148,14 @@ Exits with error if the pane is dead or no session is registered.
 
 ### 7.11 layout
 
-`agent-doc layout <FILE>... [--split h|v]` — arrange tmux panes to mirror editor split layout.
+`agent-doc layout <FILE>... [--split h|v] [--window W]` — arrange tmux panes to mirror editor split layout.
 
 1. Resolve each file to its session pane via frontmatter → `sessions.json`
-2. Pick the target window (the one containing the most wanted panes; tiebreak: most total panes)
-3. Break out any unwanted panes from the target window (`tmux break-pane`)
-4. Join remaining wanted panes into the target window (`tmux join-pane`)
-5. Focus the first file's pane (the most recently selected file)
+2. If `--window` given, filter to panes registered for that window only
+3. Pick the target window (the one containing the most wanted panes; tiebreak: most total panes)
+4. Break out only registered session panes that aren't wanted (shells and tool panes are left untouched)
+5. Join remaining wanted panes into the target window (`tmux join-pane`)
+6. Focus the first file's pane (the most recently selected file)
 
 `--split h` (default): horizontal/side-by-side. `--split v`: vertical/stacked. Single file falls back to `focus`. Dead panes and files without sessions are skipped with warnings.
 
@@ -207,12 +208,13 @@ The bundled SKILL.md contains an `agent-doc-version` frontmatter field set to th
     "pid": 12345,
     "cwd": "/path/to/project",
     "started": "2026-02-25T21:24:46Z",
-    "file": "tasks/plan.md"
+    "file": "tasks/plan.md",
+    "window": "1"
   }
 }
 ```
 
-Multiple documents can map to the same pane (one Claude session, multiple files).
+Multiple documents can map to the same pane (one Claude session, multiple files). The `window` field (optional) enables window-scoped routing — `claim --window` and `layout --window` use it to filter panes to the correct IDE window.
 
 ### 8.2 Use Cases
 

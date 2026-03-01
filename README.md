@@ -32,6 +32,8 @@ agent-doc start session.md               # start Claude in current tmux pane
 agent-doc claim session.md [--window W]  # claim file for a tmux pane
 agent-doc focus session.md               # focus tmux pane for a session
 agent-doc layout a.md b.md --split h [--window W]  # arrange panes (window-scoped)
+agent-doc outline session.md             # section structure + token counts
+agent-doc outline session.md --json      # JSON output for tooling
 agent-doc resync                         # validate sessions, remove dead panes
 agent-doc commit session.md              # git add + commit with timestamp
 agent-doc prompt session.md              # detect permission prompts → JSON
@@ -200,6 +202,7 @@ agent-doc start <file>              # start Claude session in current tmux pane
 agent-doc claim <file> [--window W] [--pane P]  # claim file for a tmux pane
 agent-doc focus <file> [--pane P]              # focus tmux pane for a session
 agent-doc layout <files> --split h [--window W] # arrange panes (window-scoped)
+agent-doc outline <file> [--json]    # section structure + token counts
 agent-doc resync                    # validate sessions, remove dead panes
 agent-doc prompt <file> [--all]     # detect permission prompts → JSON
 agent-doc prompt --answer N <file>  # answer prompt option N

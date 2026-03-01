@@ -216,3 +216,49 @@ Bold phrases, use different formats. Make it tasteful and subtle, but let's make
 Let's make this customizable according to the job as well.
 
 I want to tailor the resume depending on the job. Perhaps we can have a toml file to configure the resume.
+
+## Assistant
+
+**Committed** — resume submodule + parent pointer updated.
+
+**Proposal: TOML-driven resume tailoring**
+
+Keep `BrianTakita.md` as the master template with all content. A TOML profile per job controls what gets emphasized and included:
+
+```toml
+# profiles/default.toml
+[highlight]
+# Phrases auto-bolded in output
+phrases = [
+  "real-time video pipeline",
+  "NVIDIA H100 GPUs",
+  "closed-loop agentic workflows",
+  "spec-driven",
+  "20+ years",
+]
+
+# Skills to bold in Skills section
+skills = ["Rust", "Python", "TypeScript", "Docker", "AWS"]
+
+[sections]
+# Which experience entries to include (omit = shorter resume)
+experience = [
+  "Presence AI",
+  "Open Source",
+  "Brian Takita",
+  "Censible",
+  "SocialChorus",
+]
+```
+
+Build: `make pdf PROFILE=backend-ai` uses `profiles/backend-ai.toml`.
+
+A Python build script reads the markdown template, applies the TOML config (bold phrases, filter sections, reorder skills), then outputs tailored markdown → HTML → PDF.
+
+Want me to build this? Or do you have a different vision for the config structure?
+
+## User
+
+Yes...Build this
+
+Add a README with instructio

@@ -474,3 +474,10 @@ Want me to remove `profiles/startup-founder.toml` and `BrianTakita-startup-found
 
 yes
 
+## Assistant
+
+**Removed.** `profiles/startup-founder.toml` and `BrianTakita-startup-founder.pdf` deleted. Committed and pushed. Default resume with Career Highlights is now the single general-purpose version.
+
+## User
+
+Is the resume ready to send to high level founder-level technical recruiters?

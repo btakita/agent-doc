@@ -164,3 +164,24 @@ Want me to add items 1-4 to the resume?
 ## User
 
 Yes...Add all of these items. 1-8
+
+## Assistant
+
+**All 8 items added to BrianTakita.md:**
+
+1. **menu.com** → Freelance: multi-tenant frontend (SvelteJS, Sapper, Cordova, AWS)
+2. **Martin Investments** → Censible: analyst portal, ESG algorithms, 10K+ row XLSX, SVG/PDF reports
+3. **Pivotal Labs** → "Mentored developers across 20+ startups" + "Speaker at 2008 Rails Conf"
+4. **honk.com** → expanded: Sinatra, Lucene search, Engine Yard, Erector
+5. **rebuildjs** → Other contributions: hackable Vite alternative for MPAs
+6. **relysjs + hyopjs** → Other contributions: reactive server + tiny hydration (61 B)
+7. **backbone-signal, Screw Unit, Desert** → Other contributions
+8. **SvelteJS + Nano Stores** → expanded with breadth-first queueing algorithm detail
+
+PDF rebuilt.
+
+## User
+
+Proof-read BrianTakita.md. Is all of the valuable info highlighted...for work at the cutting edge of systems involving agentic loops, reactive programming, event-driven programming, machine learning, and real-time systems?
+
+Does the summary need to be updated for the career targets? 

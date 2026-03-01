@@ -28,8 +28,11 @@ object TerminalUtil {
      * 3. Sends the command via `tmux send-keys`
      * 4. Auto-starts a new Claude session if needed
      */
-    fun sendToTerminal(project: Project, relativePath: String) {
-        val basePath = project.basePath ?: return
+    fun sendToTerminal(project: Project, relativePath: String, onComplete: (() -> Unit)? = null) {
+        val basePath = project.basePath ?: run {
+            onComplete?.invoke()
+            return
+        }
 
         val agentDoc = resolveAgentDoc()
         try {
@@ -43,13 +46,18 @@ object TerminalUtil {
 
             // Read output in background thread to avoid blocking EDT
             Thread {
-                val output = process.inputStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
-                if (exitCode != 0) {
-                    notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
+                try {
+                    val output = process.inputStream.bufferedReader().readText()
+                    val exitCode = process.waitFor()
+                    if (exitCode != 0) {
+                        notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
+                    }
+                } finally {
+                    onComplete?.invoke()
                 }
             }.start()
         } catch (e: Exception) {
+            onComplete?.invoke()
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
         }
     }

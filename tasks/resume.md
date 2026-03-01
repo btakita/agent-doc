@@ -263,3 +263,22 @@ Option A please
 Can we make a LinkedIn version of the summary limited to 220 characters?
 
 > Over 20 years building full-stack systems with deep expertise in reactive programming, event-driven architecture, and real-time pipelines. Most recently architected a real-time multimodal AI avatar pipeline — text, audio, and video lipsync — at Presence AI. Now building spec-driven agent tooling and collaborative intelligence workflows. A decade of context engineering — from a domain ontology system (2014) through reactive frameworks to modern agentic systems where humans and agents work in parallel with full context.
+
+## Assistant
+
+LinkedIn headline is 220 chars max. Three options:
+
+**Option 1 — narrative (187 chars):**
+> Building emergent software systems through agent loops & context engineering. 20+ yrs full-stack: reactive, event-driven, real-time AI pipelines. Multimodal avatar systems at Presence AI.
+
+**Option 2 — keyword-dense (178 chars):**
+> Full-Stack Engineer | 20+ Years | Real-Time Multimodal AI Pipelines | Agent Tooling & Context Engineering | Reactive & Event-Driven Architecture | Rust, Python, TypeScript, React
+
+**Option 3 — hybrid (212 chars):**
+> 20+ years full-stack | Architected real-time multimodal AI avatar pipeline at Presence AI | Building agent tooling & context engineering for collaborative intelligence | Reactive & event-driven systems
+
+Option 1 reads naturally. Option 2 maximizes keyword scanning. Option 3 balances both.
+
+## User
+
+Proofread. Commit if it looks good. If not iterate.

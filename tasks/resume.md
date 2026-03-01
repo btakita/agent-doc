@@ -513,3 +513,18 @@ Option 1 would be better for a conference bio or personal blog where narrative v
 ## User
 
 Let's save Option 1 and 3 into resume/*.md files. Make note the purpose. It could be in a single profile-statement-list.md as a "database" md file as well. Please name and annotate appropriately.
+
+## Assistant
+
+**Created `resume/profile-statements.md`** — single annotated reference file:
+
+- **LinkedIn Headline — Active (Hybrid, 212 chars)**: recruiter search, founder outreach
+- **LinkedIn Headline — Narrative (187 chars)**: conference bios, about pages
+- **Resume Tagline**: h1 subtitle from BrianTakita.md
+- **Resume Summary**: full Summary paragraph
+
+Each annotated with best-use context and rationale.
+
+## User
+
+commit

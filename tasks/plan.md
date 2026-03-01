@@ -111,4 +111,7 @@ Key work: Claims notification log, positional claim (`--position` + Splitter tre
 
 ## User
 
-I want claude to run in yolo mode for this project
+I want claude to run in yolo mode for this project.
+What would be the risks? Do I need a Docker container?
+
+I also want to figure out how to use tokens more efficiently.

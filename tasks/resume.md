@@ -437,3 +437,16 @@ Such as:
 React <-> GraphQL <-> API Services <-> Multimodal Avatar Agents + Postgres 
 
 Should Postgres be in this diagram? I want to show there is a fan out from API Services to Multimodal Avatar Agents + Postgres
+And a fan-in as well
+
+## Assistant
+
+**Updated.** The Presence AI bullet now reads:
+
+> Full-stack feature development: React ↔ GraphQL ↔ API Services ↔ Multimodal Avatar Agents + PostgreSQL
+
+All arrows are bidirectional (`↔`) showing fan-out and fan-in between API Services and both Avatar Agents and PostgreSQL. Postgres belongs — it shows you own persistence alongside the AI inference layer. PDF rebuilt.
+
+## User
+
+commit resume

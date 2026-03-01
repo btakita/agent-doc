@@ -199,3 +199,20 @@ Build is clean — zero weasyprint warnings. Content starts flush at the top mar
 
 How do I make the ul padding-left match the width of the bullet?
 I want the bullets to line up with the left margin. Now the bullets are rendered as a negative relative margin.
+
+## Assistant
+
+**Done.** Added `list-style-position: inside` to `ul` in `resume.css`. This places the bullet marker inside the content flow, flush with the left margin.
+
+Note: with `inside` positioning, wrapped lines don't have a hanging indent — they wrap back to the left edge under the bullet. This is fine for short bullet points but can look dense on longer ones.
+
+## User
+
+commit first
+
+There's a lot of resume text. Let's make some important phrases pop out more.
+Bold phrases, use different formats. Make it tasteful and subtle, but let's make eye scanning easily see important & valuable phrases.
+
+Let's make this customizable according to the job as well.
+
+I want to tailor the resume depending on the job. Perhaps we can have a toml file to configure the resume.

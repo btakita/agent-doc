@@ -102,3 +102,11 @@ Open source contributions:
 ```
 
 should be rendered on separate lines.
+
+## Assistant
+
+**Fixed.** Pandoc requires a blank line between a paragraph and a bullet list — without it, everything merges into a single `<p>`. Added a blank line after `Open source contributions:` in `BrianTakita.md`. PDF rebuilt — list items now render on separate lines.
+
+## User
+
+commit resume

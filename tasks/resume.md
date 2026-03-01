@@ -333,3 +333,18 @@ yes
 ## User
 
 Proofread please. Commit if it looks good...else iterate
+
+## Assistant
+
+**Proofread clean — 4 fixes applied and committed:**
+
+1. **"full stack" → "full-stack"** (line 3) — consistent with "Full-Stack" used elsewhere
+2. **"i.e." → "e.g."** (line 102) — CEO and sales are examples, not a complete list
+3. **"Fox News Corp" → "News Corp"** (line 135) — correct corporate entity name
+4. **"Agentic system" → "Agentic Systems"** (line 23) — capitalization consistency + plural
+
+PDF rebuilt. Resume pushed, parent pointer updated.
+
+## User
+
+Is my resume ready to send to startup founder level technical recruiters?

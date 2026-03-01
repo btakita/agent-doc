@@ -222,3 +222,23 @@ Recommendation: **keep the separate checkout** (option 1). The disk cost is triv
 ## User
 
 Can I emulate the submodule with the symlink? But keep the submodule configuration?
+
+## Assistant
+
+**Done.** Submodule deinited, replaced with symlink, `ignore = all` added to `.gitmodules`.
+
+```
+briantakita.me-dev -> /home/brian/work/btakita/briantakita.me-dev
+```
+
+**What happened:**
+1. `git submodule deinit briantakita.me-dev` — removed the checkout, kept `.gitmodules` + index gitlink
+2. Replaced directory with symlink to `/home/brian/work/btakita/briantakita.me-dev`
+3. Added `ignore = all` to `.gitmodules` — suppresses `git status` from inspecting the submodule (avoids symlink errors)
+
+**Result:** `git status` is clean (no complaint about the submodule). The symlink gives you the same files. Fresh clones of agent-loop still get a real submodule checkout via `git submodule update --init`.
+
+**To update the submodule pointer** (when you want agent-loop to track a new commit of briantakita.me-dev): remove symlink → `git submodule update --init briantakita.me-dev` → `git add briantakita.me-dev` → commit → deinit + re-symlink.
+
+## User
+

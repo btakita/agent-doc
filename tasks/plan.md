@@ -193,3 +193,15 @@ briantakita.me @ 7339f49 (heads/main)
 ## User
 
 Oops, we should have added git@github.com:btakita/briantakita.me-dev.git as the submodule instead. The briantakita.me submodule is contained in that repo.
+
+## Assistant
+
+**Fixed.** Removed `briantakita.me`, added `briantakita.me-dev` — commit `88444b5`, pushed.
+
+```
+briantakita.me-dev @ e1fe801 (heads/main)
+```
+
+## User
+
+Can we have a local symlink to /home/brian/work/btakita/briantakita.me-dev instead of a separate checkout? But keep the git submodule configuration.

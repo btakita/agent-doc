@@ -134,3 +134,23 @@ make should default to make BrianTakita.pdf
 ## User
 
 The side page margins are still too much. How do we reduce the side margins? I have it at 0 on @page. Is there another css setting such as print or something else that I'm missing?
+
+## Assistant
+
+**Found it.** Pandoc's `--standalone` injects an inline `<style>` with `body { max-width: 36em; padding-left: 50px; padding-right: 50px }` which was overriding your `@page` side margins.
+
+**Fix:** Added `!important` to the body overrides in `resume.css`:
+
+```css
+body {
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+```
+
+Now side spacing is controlled entirely by `@page margin` (currently `0.75in 0in`). Text runs edge-to-edge. Resume dropped from 7 to 6 pages.
+
+## User
+
+The first page content should be vertical aligned top

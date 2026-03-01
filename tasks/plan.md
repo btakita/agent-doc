@@ -205,3 +205,20 @@ briantakita.me-dev @ e1fe801 (heads/main)
 ## User
 
 Can we have a local symlink to /home/brian/work/btakita/briantakita.me-dev instead of a separate checkout? But keep the git submodule configuration.
+
+## Assistant
+
+**Git rejects symlinks for submodule paths.** Tested — `git submodule update` fails with "expected submodule path not to be a symbolic link". This is a hard constraint in git's submodule implementation.
+
+**Alternatives:**
+
+1. **Keep the separate checkout** (current). Git manages it normally. Costs ~50MB disk but avoids all workarounds.
+2. **Drop the submodule, use a plain symlink.** `briantakita.me-dev -> /home/brian/work/btakita/briantakita.me-dev` with no git tracking. You'd manage the external repo yourself. Simplest but loses submodule pointer tracking.
+3. **Bind mount.** `mount --bind /home/brian/work/btakita/briantakita.me-dev briantakita.me-dev` — git sees a real directory, not a symlink. But requires root and doesn't persist across reboots without fstab.
+4. **Git worktree.** In the external repo: `git worktree add /home/brian/work/btakita/agent-loop/briantakita.me-dev main`. Same branch checked out in two places. But git worktrees and submodules don't compose well.
+
+Recommendation: **keep the separate checkout** (option 1). The disk cost is trivial, and it's the only approach that composes cleanly with `git submodule update --init --recursive`.
+
+## User
+
+

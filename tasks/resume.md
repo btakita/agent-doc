@@ -184,4 +184,29 @@ PDF rebuilt.
 
 Proof-read BrianTakita.md. Is all of the valuable info highlighted...for work at the cutting edge of systems involving agentic loops, reactive programming, event-driven programming, machine learning, and real-time systems?
 
-Does the summary need to be updated for the career targets? 
+Does the summary need to be updated for the career targets?
+
+## Assistant
+
+**Highlight audit — 18 missing phrases for the 5 target domains:**
+
+**Reactive programming** (major career thread, under-highlighted):
+- `"reactive contexts"`, `"reactive isomorphic UI library"`, `"reactive web app server"`, `"Signal & Slots reactive API"`, `"reactive programming"`, `"breadth-first queueing algorithm"`
+
+**Event-driven:** `"event-driven relational algebra"`, `"event framework"`, `"real-time social interaction"`
+
+**Machine learning:** `"Whisper audio feature extraction"`, `"landmark temporal smoothing"`
+
+**Real-time:** `"streaming merge"`
+
+**Career signals:** `"Speaker at 2008 Rails Conf"`, `"20+ startups"`, `"10,000+ rows"`, `"Lucene search"`, `"offline-first collaboration"`, `"multi-service AI monorepo"`
+
+**Summary: Yes, needs updating.** Current summary focuses on agentic work but doesn't mention reactive or event-driven programming — a 15+ year thread from backbone-signal → ctx-core → rmemo → relysjs. Proposed:
+
+> Over 20 years building full-stack systems with deep expertise in reactive programming, event-driven architecture, and real-time pipelines. Most recently architected the full real-time AI avatar pipeline at Presence AI. Now building spec-driven agent tooling and collaborative intelligence workflows. A 15-year lineage of reactive event-driven development — applied to modern agentic systems where humans and agents work in parallel with full context.
+
+Want me to apply highlights + summary update?
+
+## User
+
+Yes, apply updates.

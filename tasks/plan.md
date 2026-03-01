@@ -242,3 +242,4 @@ briantakita.me-dev -> /home/brian/work/btakita/briantakita.me-dev
 
 ## User
 
+If I were to check out the monorepo somewhere else, would the briantakita.me-dev be at HEAD of the main branch?

@@ -78,3 +78,22 @@ Rename Top Skills to Skills
 
 Date range at job: Remove top/bottom padding
 Bullet point lists: Remove left-right margin and padding
+
+## Assistant
+
+**All 8 changes applied to `resume/resume.css` + `resume/BrianTakita.md`:**
+
+1. **50% horizontal margin** — `@page margin: 0.5in 0.25in` (horizontal halved)
+2. **Linkify contact info** — Email → `mailto:`, Phone → `tel:` links
+3. **Remove section title underlines** — `h2 { border-bottom: none }`
+4. **Blue section titles** — `h2 { color: #0066cc }`
+5. **Skills broken out** — Separate `## Skills` section below Summary
+6. **Renamed** — "Top Skills" → "Skills" (removed duplicate entries: Rust, Docker, Sveltejs)
+7. **Date range padding removed** — `small { display: block; margin: 0; padding: 0 }`
+8. **Bullet list margins** — you set `padding-left: 0` directly
+
+PDF rebuilt. Note: h1 is 36pt (your edit) — page 1 ends at Skills with Experience on page 2.
+
+## User
+
+Makefile to build resume

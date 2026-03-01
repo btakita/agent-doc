@@ -249,3 +249,19 @@ Please update may gmail filters from .corky.toml
 ## User
 
 Should corky watch update gmail filters or would you consider this dangerous?
+
+## Assistant
+
+**Keep filters manual-only.**
+
+**The danger is real:** `corky filter push` is destructive — deletes all existing Gmail filters, recreates from config. A typo or partial edit in `.corky.toml` would silently wipe your filters and replace with broken ones. Gmail has no undo for filter changes and no retroactive apply via API.
+
+**The cost of manual is low.** You edit filters rarely (monthly). `corky filter push` is one command. Safety/convenience tradeoff favors manual.
+
+**If you still wanted auto-push**, the safe version: watch `.corky.toml` via `notify` crate, diff old vs new filter set, only auto-push additive changes (new filters, not deletions), log every push with timestamped backup. But this adds complexity for a rare operation.
+
+Just run `corky filter push` when you edit filters. The manual step is a feature, not a bug.
+
+## User
+
+Can we have a warning in corky watch if the upstream mail server filters is out of sync with .corky.toml?

@@ -97,3 +97,32 @@ PDF rebuilt. Note: h1 is 36pt (your edit) — page 1 ends at Skills with Experie
 ## User
 
 Makefile to build resume
+
+## Assistant
+
+Current `resume/Makefile`:
+
+```makefile
+.PHONY: pdf clean
+
+PDF = BrianTakita.pdf
+MD = BrianTakita.md
+CSS = resume.css
+HTML_TMP = /tmp/resume.html
+
+pdf: $(PDF)
+
+$(PDF): $(MD) $(CSS)
+	pandoc $(MD) -o $(HTML_TMP) --standalone --metadata title="Brian Takita"
+	weasyprint $(HTML_TMP) $(PDF) --stylesheet $(CSS)
+	@rm -f $(HTML_TMP)
+
+clean:
+	rm -f $(PDF) $(HTML_TMP)
+```
+
+**Targets:** `make pdf` (default) builds PDF from `.md` + `.css` via pandoc → weasyprint. `make clean` removes outputs. Rebuilds only when source files change.
+
+## User
+
+make should default to make BrianTakita.pdf

@@ -354,3 +354,27 @@ Follows dual-name convention from corky: `AGENTS.md` canonical (committed), `CLA
 ## User
 
 Why is React still such a big deal with job placement? If someone knows web components or similar frameworks, one can easily work with React. Why is React the proxy for front end development work now?
+
+## Assistant
+
+React's dominance in hiring isn't about technical superiority. It's about **risk reduction for hiring managers**:
+
+1. **Installed base.** React has the largest production codebase footprint. Companies are statistically most likely maintaining a React app. They want someone productive on day 1.
+2. **Signal compression.** Recruiters and ATS can't evaluate "understands component models and reactive rendering." They grep for "React." It's a keyword proxy — the most popular keyword wins.
+3. **Team coordination cost.** If the team uses React, hiring someone who prefers Svelte or web components creates friction. Managers see onboarding risk.
+4. **Network effects.** More React devs → more tutorials → more jobs → more devs. Self-reinforcing regardless of technical merit.
+
+**You're right that skills transfer.** Someone who knows Svelte, web components, or Vue deeply understands reactivity, component lifecycle, state management, and DOM abstraction. React is just syntax at that point. But the job market rewards exact keyword matches, not transferable understanding.
+
+**Resume strategy:**
+
+- **List React explicitly in Skills** even if your deepest experience is Svelte/web components. If you've used it at all, it belongs there.
+- **Frame transferable experience** — "Built reactive component systems" alongside specific framework names.
+- Your React experience at Censible, SocialChorus, etc. is real and should be highlighted in profiles targeting React-heavy roles.
+- Consider a `profiles/frontend-react.toml` that bolts `"React"`, `"component"`, `"SPA"` onto the highlight phrases.
+
+The honest answer: React is the COBOL of front-end. Not because it's old or bad, but because there's so much of it deployed that knowing it is table stakes, regardless of whether better alternatives exist.
+
+## User
+
+commit

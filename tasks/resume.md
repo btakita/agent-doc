@@ -214,3 +214,24 @@ Yes, apply updates.
 I want to highlight context engineering as well. Particularly with the philosophy repo. I started the repo in 2016 in anticipation of modern agentic loops.
 
 Why does exploring the philosophy repo take >30k tokens in my query? Are we missing context files that distill what the philosophy repo is?
+
+## Assistant
+
+**All updates applied.** Summary rewritten, 21 new phrases added, philosophy repo added to resume, PDF rebuilt (68 highlights total).
+
+**Changes:**
+
+1. **Summary rewritten** — leads with reactive programming, event-driven architecture, real-time pipelines. Closes with: "A decade of context engineering — from a domain ontology system (2014) through reactive frameworks to modern agentic systems where humans and agents work in parallel with full context."
+2. **Tagline updated** — added "context engineering" after "agent loops"
+3. **Philosophy repo added** to Open Source Other contributions: `philosophy` — Domain ontology system (152 nodes) defining scope, context, resolution, and abstraction — structuring agent reasoning across domains (since 2014)
+4. **21 new highlight phrases** in `default.toml`: context engineering (3), reactive (6), event-driven (3), ML (2), open source (2), career signals (5)
+
+**Date correction:** First git commit is **November 5, 2014** — two years earlier than remembered. Used "since 2014" in the resume.
+
+**Re: token cost.** The philosophy repo has good context files — `CLAUDE.md` (14-term kernel), `AGENTS.md`, `SPEC.md`, `README.md`. The ~30k tokens came from the explore agent reading deep into the 152 `src/*.md` node files. For resume purposes, only high-level facts matter. A one-paragraph TL;DR in the README would let agents stop earlier.
+
+## User
+
+> Most recently architected the full real-time multi-modal text/audio/video AI avatar pipeline at Presence AI.
+
+Does this read well or is the double emphasis on "multi-modal text/audio/video" too much? I aded multi-modal for the keyword and text/audio/video lipsync for additional keywords.

@@ -189,7 +189,18 @@ Exits with error if the pane is dead or no session is registered.
 
 The bundled SKILL.md contains an `agent-doc-version` frontmatter field set to the binary's version at build time. When the skill is invoked via Claude Code, the pre-flight step compares this field against the installed binary version (`agent-doc --version`). If the binary is newer, `agent-doc skill install` runs automatically to update the skill before proceeding.
 
-### 7.16 upgrade
+### 7.16 outline
+
+`agent-doc outline <FILE> [--json]` — display markdown section structure with line counts and approximate token counts.
+
+1. Read file, skip YAML frontmatter
+2. Parse `#`-prefixed headings into a section tree
+3. For each section: heading text, depth, line number, content lines, approximate tokens (bytes/4)
+4. Content before the first heading appears as `(preamble)`
+
+Default output: indented text table. `--json` outputs a JSON array of section objects (`heading`, `depth`, `line`, `lines`, `tokens`).
+
+### 7.17 upgrade
 
 `agent-doc upgrade` — check crates.io for latest version, upgrade via GitHub Releases binary download → cargo install → pip install (cascade).
 

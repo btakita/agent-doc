@@ -9,6 +9,7 @@ mod frontmatter;
 mod git;
 mod init;
 mod layout;
+mod outline;
 mod prompt;
 mod reset;
 mod resync;
@@ -146,6 +147,14 @@ enum Commands {
         #[arg(long)]
         window: Option<String>,
     },
+    /// Display markdown outline with section structure and token counts
+    Outline {
+        /// Path to the markdown document
+        file: PathBuf,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+    },
     /// Validate sessions.json against live tmux panes, remove stale entries
     Resync,
     /// Manage the Claude Code skill definition
@@ -214,6 +223,7 @@ fn main() -> anyhow::Result<()> {
             let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
             layout::run(&paths, split, pane.as_deref(), window.as_deref())
         }
+        Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {
             SkillCommands::Install => skill::install(),

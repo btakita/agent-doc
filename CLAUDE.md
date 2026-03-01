@@ -36,6 +36,7 @@ src/
   claim.rs          # Claim document for current tmux pane
   focus.rs          # Focus tmux pane for a session document
   layout.rs         # Arrange tmux panes to mirror editor split layout
+  outline.rs        # Markdown section structure + token counts
   prompt.rs         # Detect permission prompts from Claude Code sessions
   skill.rs          # Manage bundled SKILL.md (install/check)
   resync.rs         # Validate sessions.json, remove dead panes

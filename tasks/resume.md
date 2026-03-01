@@ -295,4 +295,25 @@ Also added `.gitignore` for `__pycache__/`. Resume pushed, parent pointer update
 
 ## User
 
-Should I add early contributor to Behavior Driven Development (BDD)?
+Should I add early contributor to Behavior Driven Development (BDD)? I want to show my track record of innovating in lasting ways.
+
+## Assistant
+
+**Yes — strong signal.** The resume has the facts (RSpec core contributor, Screw Unit co-creator) but doesn't connect them to the BDD movement. This fits a clear 20-year pattern of building foundational tools that become or anticipate industry standards:
+
+- **BDD** (2006) — shaped how the industry tests software (RSpec, Screw Unit, RR)
+In RR...I innovated the proxy (mock.proxy, stub.proxy, etc) which is now `patch` in pytest. 
+- **Reactive frameworks** (2012) — backbone-signal → ctx-core → rmemo
+- **Domain ontology / context engineering** (2014) — philosophy repo
+- **Agent tooling** (2024) — corky, agent-doc
+
+Recommended: add to the Open Source section header to keep the Summary from getting longer:
+
+> ### Open Source — *Creator / Solo Developer*
+> <small>2024 – Present | Early contributor to Behavior Driven Development (BDD)</small>
+
+And add `"Behavior Driven Development"` to highlight phrases. Want me to apply?
+
+## User
+
+

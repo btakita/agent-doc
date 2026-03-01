@@ -14,6 +14,8 @@ branch: null
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Corky**: v0.11.0 released — [GitHub](https://github.com/btakita/corky/releases/tag/v0.11.0) / [crates.io](https://crates.io/crates/corky/0.11.0) / [PyPI](https://pypi.org/project/corky/0.11.0/)
 
+https://docs.google.com/document/d/1uzrPXd27h-8vZB5RWP4_9xcuCVrMEXVYfvcRU39NwX0/edit?usp=sharing
+
 ## Completed
 
 ### Resume
@@ -166,3 +168,19 @@ PDF rebuilt — content now starts flush with the top margin.
 ## User
 
 I added the auto because it is pushed down with `margin: 0 !important`. Please test BrianTakita.pdf until it is not pushed down anymore.
+
+## Assistant
+
+**Fixed.** Two separate issues were causing the pushed-down content:
+
+1. **`body { margin: auto }` wasn't the fix** — it was masking the real problem (vertical centering instead of top-alignment)
+2. **Root cause:** Pandoc's `--standalone` injects `h1, h2, h3, h4, h5, h6 { margin-top: 1.4em }` as an author stylesheet, which has **higher priority** than our `resume.css` (loaded as a user stylesheet via weasyprint's `--stylesheet`). So our `h1 { margin-top: 0 }` was silently overridden.
+
+**Fix:** Added `!important` to `h1 { margin-top: 0 !important }` in `resume.css`. Verified by testing with `@page { margin: 0 }` — content now starts flush at the absolute top of the page with no extra offset.
+
+Current `@page` margin is `0.75in 0.75in` — the top whitespace you see is that intentional page margin, not a CSS bug.
+
+## User
+
+I want to find a md->html converter that does not inject CSS like pandoc seems to do.
+This would make it easier to style the resume.

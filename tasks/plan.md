@@ -243,3 +243,17 @@ briantakita.me-dev -> /home/brian/work/btakita/briantakita.me-dev
 ## User
 
 If I were to check out the monorepo somewhere else, would the briantakita.me-dev be at HEAD of the main branch?
+
+## Assistant
+
+**No — it's pinned at commit `e1fe801`** ("loosen typescript requirement"), which is where main was when you added the submodule.
+
+A fresh clone runs `git submodule update --init`, which checks out that exact commit — not whatever main points to later. Submodule pointers are explicit, not branch-tracking.
+
+That commit happens to be current HEAD of main right now, so today it would match. But after future pushes to briantakita.me-dev, the clone would get `e1fe801` while main has moved on.
+
+**To advance the pointer:** `git submodule update --remote briantakita.me-dev` → `git add briantakita.me-dev` → commit. On your machine with the symlink, you'd temporarily restore the real checkout to do this.
+
+## User
+
+So we would need to rm the symlink, submodule init and update the submodule to pin the updated revision, commit, then restore the symlink?

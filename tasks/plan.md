@@ -181,3 +181,15 @@ All repos now pass `audit-docs`. Committed (`21c9c77`), pushed, parent pointer u
 ## User
 
 Lets add git@github.com:btakita/briantakita.me.git as a submodule
+
+## Assistant
+
+**Done.** Added `briantakita.me` as a submodule at `briantakita.me/` — commit `aec4fdf`, pushed.
+
+```
+briantakita.me @ 7339f49 (heads/main)
+```
+
+## User
+
+Oops, we should have added git@github.com:btakita/briantakita.me-dev.git as the submodule instead. The briantakita.me submodule is contained in that repo.

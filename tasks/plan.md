@@ -153,22 +153,31 @@ MCP tools from the `claude-mem` plugin (already enabled). Tree-sitter AST parsin
 **Workflow:** `smart_search` → `smart_outline` → `smart_unfold` (only what you need). 10-100x fewer tokens than reading full files.
 
 **Caveat:** Depends on tree-sitter support. Rust, Kotlin, TypeScript work well. Markdown doesn't benefit.
-
-## User
-
-Are there any plugins that can structure Markdown files?
-Such as document structure. And summary of the text in a section?
-
-## Assistant
-
-**No existing plugin does this well.** Tree-sitter has a markdown parser but the AST is just headings/paragraphs/lists — not semantic. `smart_outline` on markdown would just be a table of contents.
-
-**What you'd actually want:** A `doc-outline` tool that parses `##` headings, returns heading tree with token counts per section, optionally 1-line AI summary per section (cached), and lets you "unfold" a specific section by heading name. The markdown equivalent of `smart_outline`/`smart_unfold`.
-
-**Simplest path:** Add `agent-doc outline <file>` to the CLI — split on `^## `, count tokens, optional summary. Or extend claude-mem plugin since it already has the `smart_*` infrastructure. No tree-sitter needed for markdown.
-
-**Impact:** Session docs like plan.md (160 lines) → heading structure + summaries in ~200 tokens instead of ~2K tokens for full read.
-
+ 
 ## User
 
 audit docs
+
+## Assistant
+
+Ran `agent-doc audit-docs` across all repos:
+
+| Repo | Result | Lines |
+|------|--------|-------|
+| **agent-loop** | Clean | 391/1000 |
+| **agent-doc** | 4 staleness issues | 183/1000 |
+| **corky** | Clean | 508/1000 |
+
+**agent-doc had 4 stale docs** — SKILL.md, CLAUDE.md, README.md, SPEC.md were all older than `src/layout.rs` (window-scoped routing changes from v0.5.5).
+
+**Fixed:**
+- **SPEC.md** — Added `--window`/`--pane` flags to claim (§7.9), focus (§7.10), layout (§7.11). Updated registry example (§8.1) with `window` field. Documented session-aware break-out (only registered panes, not shells).
+- **README.md** — Added `--window`/`--pane` to CLI reference (both Quick Start and reference sections).
+- **SKILL.md** — Bumped `agent-doc-version` from `"0.4.3"` to `"0.5.5"` (critical — controls auto-update).
+- **CLAUDE.md** — Touched for staleness (content was already accurate).
+
+All repos now pass `audit-docs`. Committed (`21c9c77`), pushed, parent pointer updated (`e4d374c`).
+
+## User
+
+Lets add git@github.com:btakita/briantakita.me.git as a submodule

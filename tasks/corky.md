@@ -233,4 +233,19 @@ delete it
 
 Does corky watch update gmail filters from changes in .corky.toml?
 
-Please update may gmail filters from 
+Please update may gmail filters from .corky.toml
+
+## Assistant
+
+**`bin/build-mail-filters`** — already deleted. No file exists and no git history references it. Nothing to clean up.
+
+**`corky watch` does NOT update Gmail filters.** It's an IMAP polling daemon — syncs email, pushes/pulls shared mailbox repos, runs scheduled publishes. It doesn't monitor `.corky.toml` for changes or trigger filter operations. Filters are manual-only via `corky filter push`.
+
+**Gmail filters updated.** Ran `corky filter push` from `/home/brian/work/btakita/mail/`:
+- Deleted 2 existing filters
+- Created 2 filters from `.corky.toml`
+- Done (2 filters pushed to Gmail)
+
+## User
+
+Should corky watch update gmail filters or would you consider this dangerous?

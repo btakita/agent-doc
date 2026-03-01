@@ -378,3 +378,14 @@ The honest answer: React is the COBOL of front-end. Not because it's old or bad,
 ## User
 
 commit
+
+## Assistant
+
+**Committed.** Resume submodule: TOML build system + AGENTS.md + CLAUDE.md symlink (9 files, +521 lines). Parent submodule pointer updated.
+
+## User
+
+`### Open Source — *Creator / Solo Developer*` is on a line at the bottom of page 1.
+How do I create section affinity so the page break can be nudged to keep sections intact?
+
+Would LaTeX be better than markdown for this?

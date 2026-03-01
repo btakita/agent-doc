@@ -76,3 +76,29 @@ compact resume.md
 ## User
 
 Phrases should apply to all content in the resume. I added Engineering Physics, but it was not highlighted.
+
+## Assistant
+
+**Fixed.** `build.py` was only applying phrase highlighting to Experience, Summary, and the tagline — Education and other sections were excluded.
+
+Changed line 163 from:
+```python
+if name in ("Experience", "Summary", "") and highlight.get("phrases"):
+```
+to:
+```python
+if highlight.get("phrases"):
+```
+
+Verified: `BS, **Engineering Physics** (1997 – 2002)` — now bolded in the PDF.
+
+## User
+
+```
+Open source contributions:
+- [Erector](https://github.com/pivotal/erector) — Ruby Builder and Widget framework for generating HTML
+- [JS Test Server](https://github.com/pivotal/js-test-server) — organized Javascript TDD
+- [Unison](https://github.com/grockit/unison) — event-driven relational algebra library for Ruby
+```
+
+should be rendered on separate lines.

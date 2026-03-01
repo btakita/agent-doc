@@ -253,3 +253,13 @@ Your current version works for ATS. If you want it to read smoothly to a human t
 ## User
 
 Option A please
+
+## Assistant
+
+**Applied.** Summary now reads: "Most recently architected a real-time multimodal AI avatar pipeline — text, audio, and video lipsync — at Presence AI." Also added "multimodal" to highlight phrases and fixed casing (multi-modal → multimodal). PDF rebuilt.
+
+## User
+
+Can we make a LinkedIn version of the summary limited to 220 characters?
+
+> Over 20 years building full-stack systems with deep expertise in reactive programming, event-driven architecture, and real-time pipelines. Most recently architected a real-time multimodal AI avatar pipeline — text, audio, and video lipsync — at Presence AI. Now building spec-driven agent tooling and collaborative intelligence workflows. A decade of context engineering — from a domain ontology system (2014) through reactive frameworks to modern agentic systems where humans and agents work in parallel with full context.

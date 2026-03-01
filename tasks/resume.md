@@ -389,3 +389,30 @@ commit
 How do I create section affinity so the page break can be nudged to keep sections intact?
 
 Would LaTeX be better than markdown for this?
+
+## Assistant
+
+**No need for LaTeX.** CSS paged media handles this. Added `break-after: avoid` to `h2`, `h3`, and `small` in `resume.css`. This tells weasyprint: never put a page break right after a heading or date range — so they stay with their content.
+
+```css
+h3 { break-after: avoid; }  /* heading stays with bullets */
+h2 { break-after: avoid; }  /* section title stays with content */
+small { break-after: avoid; }  /* date range stays with bullets */
+```
+
+PDF rebuilt — "Open Source" heading now carries its content to the next page instead of orphaning at the bottom of page 1.
+
+**Available CSS paged media properties** (all supported by weasyprint):
+
+| Property | Effect |
+|---|---|
+| `break-after: avoid` | Keep heading with following content |
+| `break-before: avoid` | Don't break before element |
+| `break-inside: avoid` | Keep entire block on one page |
+| `break-before: page` | Force page break |
+
+LaTeX would give similar control but at the cost of leaving the markdown ecosystem. The current pipeline (markdown → HTML → CSS paged media → PDF) handles page breaks well enough for a resume.
+
+## User
+
+commit resume

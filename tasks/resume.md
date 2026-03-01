@@ -457,3 +457,20 @@ PDF rebuilt. Resume pushed, parent pointer updated.
 commit and push
 
 Do we still need a startup-founder profile...or does the Career Highlights with details effectively cover that use case?
+
+I didn't mean to revert your changes. I only meant to change tool to system
+
+## Assistant
+
+**Committed and pushed.** Re-applied the 3 accidentally reverted proofread fixes (kept your "tool" → "system" change).
+
+**Re: startup-founder profile — you're right, it's largely redundant now.** Career Highlights gives a founder the full-career scan in 60 seconds on pages 1-2. The remaining detail pages are optional. A 4-page filtered version doesn't meaningfully improve scan time over 5 pages when Career Highlights already front-loads the signal.
+
+**Recommendation:** Delete the startup-founder profile. Keep the TOML infrastructure for when you want a profile tailored to a specific job posting (e.g., filter to AI/ML roles only, reorder skills for a React-heavy position). The default resume with Career Highlights is your general-purpose send.
+
+Want me to remove `profiles/startup-founder.toml` and `BrianTakita-startup-founder.pdf`?
+
+## User
+
+yes
+

@@ -416,3 +416,24 @@ LaTeX would give similar control but at the cost of leaving the markdown ecosyst
 ## User
 
 commit resume
+
+## Assistant
+
+**Committed.** Resume submodule changes:
+- CSS: `break-after: avoid` on h1-h4 + small
+- Skills: added WebRTC, REST, GraphQL
+- Presence AI: "via WebRTC using LiveKit"
+- Open Source: restructured with h4 sub-headings (corky, agent-doc, Other contributions)
+- Renamed "Brian Takita" → "Freelance"
+
+Parent submodule pointer updated.
+
+## User
+
+Can "Full-Stack feature implementations including React, GraphQL, Postgres, Livekit, MicroServices" be updated to include the data flows?
+
+Such as:
+
+React <-> GraphQL <-> API Services <-> Multimodal Avatar Agents + Postgres 
+
+Should Postgres be in this diagram? I want to show there is a fan out from API Services to Multimodal Avatar Agents + Postgres

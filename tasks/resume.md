@@ -455,3 +455,5 @@ PDF rebuilt. Resume pushed, parent pointer updated.
 ## User
 
 commit and push
+
+Do we still need a startup-founder profile...or does the Career Highlights with details effectively cover that use case?

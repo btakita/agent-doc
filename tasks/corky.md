@@ -230,3 +230,7 @@ The `filters.toml` → `.corky.toml` migration was done in session 3 (entry 66).
 ## User
 
 delete it
+
+Does corky watch update gmail filters from changes in .corky.toml?
+
+Please update may gmail filters from 

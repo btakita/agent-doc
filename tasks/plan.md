@@ -221,4 +221,4 @@ Recommendation: **keep the separate checkout** (option 1). The disk cost is triv
 
 ## User
 
-
+Can I emulate the submodule with the symlink? But keep the submodule configuration?

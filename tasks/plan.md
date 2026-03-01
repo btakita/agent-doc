@@ -115,3 +115,27 @@ I want claude to run in yolo mode for this project.
 What would be the risks? Do I need a Docker container?
 
 I also want to figure out how to use tokens more efficiently.
+
+## Assistant
+
+**Yolo mode enabled.** Added `"defaultMode": "bypassPermissions"` to `.claude/settings.json`. Takes effect on next session start.
+
+**Risks for this project — low:**
+- Git is your safety net (`git reset --hard` undoes any file damage)
+- No secrets in the repo (credentials use `_cmd` fields, `mail/` is gitignored)
+- No production systems — dev workspace only
+- Main risk: Claude running destructive commands (`rm -rf`, `git push --force`) without asking. CLAUDE.md already instructs against this.
+
+**You don't need Docker.** Docker is for untrusted workloads or CI. Your setup (local dev, git-tracked, no secrets) is fine bare. Safer alternative: `"acceptEdits"` mode (auto-approves file edits, still prompts for bash).
+
+**Token efficiency strategies:**
+1. Subagents + haiku model for simple tasks (already doing this)
+2. Document compaction (already doing this)
+3. `/clear` between unrelated tasks to reset context
+4. `smart_outline`/`smart_unfold` from claude-mem plugin instead of full file reads
+5. Fix CLAUDE.md duplication — Workflow/Task/Core Principles sections are doubled
+6. Snapshot-based diffs in agent-doc skill already minimize payload
+
+## User
+
+Explain `smart_outline`/`smart_unfold` from claude-mem plugin instead of full file reads

@@ -110,3 +110,33 @@ should be rendered on separate lines.
 ## User
 
 commit resume
+
+Proofread BrianTakita.md
+
+## Assistant
+
+**Committed.** Resume submodule: restructured Other contributions, phrase highlighting fix, blank line fix. Parent pointer updated.
+
+**Proofread findings:**
+
+1. **"Github" → "GitHub"** (line 8) — official capitalization
+2. **Skills casing**: "SqlAlchemy" → "SQLAlchemy", "Vuejs" → "Vue.js" (line 23)
+3. **"Javascript" → "JavaScript"** (lines 58, 59) — official capitalization
+4. **"FrontEnd" → "Frontend"** (line 84) — inconsistent casing
+5. **Trailing period inconsistency** — line 58 ends with period, most Other contributions entries don't
+6. **rr description** (line 63) — reads like a README excerpt; could match the terse style of other entries
+7. **Tense mix** — "Manage, develop" (present) for Freelance/Censible roles that end Feb 2026. Past tense if concluded.
+8. **"Mentor" → "Mentored"** (line 110) — imperative instead of past tense
+9. **"The interactive document"** (line 91) — changed from "The app" but ambiguous; "The application" clearer
+
+Want me to apply these fixes?
+
+## User
+
+Yes...correct these.
+
+Also please read https://briantakita.me/portfolio and https://briantakita.me/open-source
+
+Let's mine these links to make sure we have captured valuable & relevant info.
+
+I will add my site to this monorepo after.

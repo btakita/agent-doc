@@ -279,3 +279,19 @@ ln -s /home/brian/work/btakita/briantakita.me-dev briantakita.me-dev  # restore 
 ## User
 
 Is there a plugin or library that supports these symlinks and zero-friction submodule pinning?
+
+## Assistant
+
+**No standard git tool does this.** Researched the landscape:
+
+**[Gitman](https://gitman.readthedocs.io/en/latest/use-cases/submodules/)** — closest match. Replaces `.gitmodules` with `.gitman.yml`. `gitman install --force` clones into `.gitman/` (gitignored) and creates a **symlink** at the target path pointing to the pinned revision. Symlink + pinning in one tool. But it's a separate dependency (`pip install gitman`), not native git, and all cloners need it.
+
+**[Local URL override](https://git-scm.com/docs/gitmodules)** — `git config --local submodule.briantakita.me-dev.url /home/brian/work/btakita/briantakita.me-dev`. Makes `git submodule update` fetch from local (instant, no network). But still creates a separate checkout — doesn't eliminate the duplicate.
+
+**Nothing in standard git** supports symlink-as-submodule-path. Hard architectural constraint.
+
+**For your case:** current setup (symlink + `ignore = all`) is the best pragmatic option. Gitman is overkill for one submodule. The 7-step pointer update is the tradeoff.
+
+## User
+
+Let's just have a regular submodule. I can symlink the opposite direction.

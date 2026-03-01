@@ -139,3 +139,22 @@ I also want to figure out how to use tokens more efficiently.
 ## User
 
 Explain `smart_outline`/`smart_unfold` from claude-mem plugin instead of full file reads
+
+## Assistant
+
+MCP tools from the `claude-mem` plugin (already enabled). Tree-sitter AST parsing for token-efficient code exploration.
+
+**`smart_outline(file_path)`** — Structural overview: all functions, classes, methods with signatures, bodies folded. ~150 tokens vs ~4K for a full `Read`.
+
+**`smart_unfold(file_path, symbol_name)`** — Expand one specific function after seeing the outline. Read 20 lines instead of 500.
+
+**`smart_search(query)`** — Cross-codebase symbol search. Returns folded views with token counts. Scoped by `path` and `file_pattern`.
+
+**Workflow:** `smart_search` → `smart_outline` → `smart_unfold` (only what you need). 10-100x fewer tokens than reading full files.
+
+**Caveat:** Depends on tree-sitter support. Rust, Kotlin, TypeScript work well. Markdown doesn't benefit.
+
+## User
+
+Are there any plugins that can structure Markdown files?
+Such as document structure. And summary of the text in a section?

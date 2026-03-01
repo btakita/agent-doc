@@ -480,3 +480,4 @@ PDF rebuilt. Bold phrases now tell the story: builds *with* agents and builds ag
 ## User
 
 commit resume
+compact resume.md

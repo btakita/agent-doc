@@ -336,3 +336,21 @@ Updated `profiles/default.toml` — both `experience` and `include` are now comm
 ## User
 
 Add resume AGENTS.md with a CLAUDE.md symlink
+
+## Assistant
+
+**Done.** Created `resume/AGENTS.md` + `resume/CLAUDE.md → AGENTS.md` symlink.
+
+Contents cover:
+- Architecture (file layout diagram)
+- Design principles (markdown-as-source-of-truth, safe-by-default, no injected CSS)
+- Build usage (`make` / `make PROFILE=X`)
+- Profile schema (`[highlight]` and `[sections]`)
+- Conventions (template patterns, CSS specifics, mismatch warnings)
+- Files table
+
+Follows dual-name convention from corky: `AGENTS.md` canonical (committed), `CLAUDE.md` is symlink.
+
+## User
+
+Why is React still such a big deal with job placement? If someone knows web components or similar frameworks, one can easily work with React. Why is React the proxy for front end development work now?

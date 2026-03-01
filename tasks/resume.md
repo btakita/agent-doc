@@ -37,3 +37,18 @@ branch: null
 ## User
 
 In resume/BrianTakita, reduce the margins to the same margins as resume/Brian-hand-edit
+
+## Assistant
+
+**Done.** Reduced `resume.css` `@page` margin from `0.75in` to `0.5in` to match the hand-edited PDF's tighter layout. Rebuilt with `make pdf` — Experience section now visible on page 1.
+
+## User
+
+- Remove hr lines from resume.
+- Center align `Linkedin | Email | Github` line
+- Center align `Location | Website | Phone` line
+- Remove `Location: ` label
+- `Company — Job Title` line should have larger font
+  - `Job Title` should be italicized
+- Dates worked at job should be smaller and not bold sans-serif font
+- Bullet points should be left aligned with no left margin

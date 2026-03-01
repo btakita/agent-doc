@@ -140,3 +140,27 @@ Also please read https://briantakita.me/portfolio and https://briantakita.me/ope
 Let's mine these links to make sure we have captured valuable & relevant info.
 
 I will add my site to this monorepo after.
+
+## Assistant
+
+**Proofread fixes applied (9 corrections):** GitHub casing, SQLAlchemy, Vue.js, JavaScript (x3), frontend, rr description, past tense (Managed, Developed, Mentored, Created, Converted), "The application". PDF rebuilt.
+
+**Website mining — valuable info NOT in the resume:**
+
+High-value additions:
+1. **menu.com** — Missing from Freelance. Multi-tenant frontend (SvelteJS, Sapper, Cordova, AWS). Strongest SvelteJS production evidence.
+2. **Martin Investments** — Missing. Analyst portal with ESG algorithms, XLSX export 10K+ rows, SVG/PDF reports. Strengthens Censible ESG story.
+3. **Pivotal Labs** — "Speaker at 2008 Rails Conf" + "mentored developers across 20+ startups" not in resume.
+4. **honk.com** — Website mentions Lucene, Sinatra, Erector, Engine Yard — resume only lists Rails.
+
+Lower priority:
+5. **rebuildjs** — "Simple hackable alternative to Vite for MPAs." Shows you build build tools.
+6. **relysjs/hyopjs** — Part of rappstack ecosystem, could be folded into that entry.
+7. **backbone-signal, Desert, Screw Unit** — Historical open source not in resume.
+8. **Nano Stores, Svelte contributions** — Breadth-first queueing algorithm. Resume just says "Contributor."
+
+Want me to add items 1-4 to the resume?
+
+## User
+
+Yes...Add all of these items. 1-8

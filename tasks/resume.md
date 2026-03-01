@@ -182,5 +182,20 @@ Current `@page` margin is `0.75in 0.75in` — the top whitespace you see is that
 
 ## User
 
-I want to find a md->html converter that does not inject CSS like pandoc seems to do.
+I want to find a md->html converter that does not inject CSS like  pandoc seems to do.
 This would make it easier to style the resume.
+
+## Assistant
+
+**Done — used pandoc itself, just dropped `--standalone`.** Pandoc without `--standalone` outputs a clean HTML fragment with zero injected CSS. Wrapped it in a minimal `<html><body>` shell in the Makefile.
+
+Changes:
+1. **`Makefile`** — pandoc now outputs a bare fragment, assembled into minimal HTML, then rendered by weasyprint with `--stylesheet resume.css`
+2. **`resume.css`** — removed all `!important` hacks and the `header#title-block-header` rule (no longer needed since pandoc doesn't inject competing styles)
+
+Build is clean — zero weasyprint warnings. Content starts flush at the top margin. All styling is now controlled by `resume.css` alone.
+
+## User
+
+How do I make the ul padding-left match the width of the bullet?
+I want the bullets to line up with the left margin. Now the bullets are rendered as a negative relative margin.

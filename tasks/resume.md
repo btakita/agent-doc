@@ -481,3 +481,21 @@ yes
 ## User
 
 Is the resume ready to send to high level founder-level technical recruiters?
+
+## Assistant
+
+**Yes.** Resume is ready.
+
+- **Pages 1-2**: Summary + Skills + Career Highlights — full 20-year arc in 60 seconds
+- **Pages 3-5**: Detailed experience for deep dives
+- **4 rounds proofread**: casing, tense, corporate names, punctuation all clean
+- **Auto-deployed PDF**: [btakita.github.io/resume](https://btakita.github.io/resume/)
+
+**Pair with when sending:**
+- PDF link (always current via GitHub Pages)
+- LinkedIn headline (still need to pick from 3 options — Option 1 narrative recommended)
+- 2-3 sentence email intro tailored to the specific company
+
+## User
+
+I picked Option 3 - hybrid for Linked In. Why is Option 1 recommended?

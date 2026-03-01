@@ -458,3 +458,25 @@ commit resume
 ## User
 
 Please note my updates to BrianTakita.md. Highlight the impactful phrases for getting a job at the tip of the spear for innovative agentic work.
+
+## Assistant
+
+**Updated `profiles/default.toml`** — phrases now tuned for frontier agentic work.
+
+**New agentic phrases (the differentiators):**
+- `"closed-loop agent auditing"`, `"self-auditing development infrastructure"` — systems that verify themselves
+- `"agent-authored code"`, `"human and agent reasoning"` — agent-human collaboration
+- `"agent loops"`, `"collaborative intelligence"`, `"agents and humans work in parallel"` — tagline phrases
+- `"emergent software systems"`, `"automated verification"` — systems-thinking
+
+**New agent tooling phrases:**
+- `"persistent AI conversations"`, `"agent-agnostic core"`, `"pluggable LLM backends"` — you build agent infra
+- `"per-topic and per-contact agent context"`, `"snapshot-based diffing"` — context engineering in practice
+
+**New tech:** `"Multimodal Avatar Agents"`, `"WebRTC"`. **Skills reordered:** `Context Engineering`, `Spec-Driven Development`, `Agents` first; added `WebRTC`, `GraphQL`.
+
+PDF rebuilt. Bold phrases now tell the story: builds *with* agents and builds agent infrastructure.
+
+## User
+
+commit resume

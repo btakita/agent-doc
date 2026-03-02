@@ -487,3 +487,62 @@ Yes. Write it in NAMING.md
 
 ## User
 
+I want to make this name system universal and applicable to any repo. So if the repo is using camelCase, it respects the camelCase. But it can allow for extending to camelCase_with_immutable_names as well if needed. Would be interesting to be able to have name "modules" to explicitly declare the design of the name system.
+
+## Assistant
+
+### Done — NAMING.md created, AGENTS.md updated
+
+Created `/home/brian/work/ctx-core/ctx-core-dev/NAMING.md` — rewritten as a **universal meta-convention**, not ctx-core-specific. Added a "Naming Convention" section to AGENTS.md linking to it.
+
+### Factory function alternatives
+
+| Pattern | Example | Verdict |
+|---|---|---|
+| `create_` prefix | `create_memo()` | **Recommended** — most conventional (React, DOM APIs) |
+| `new_` prefix | `new_memo()` | Conflicts semantically with `new` keyword |
+| `make_` prefix | `make_memo()` | Common in functional codebases (Elm, OCaml) |
+| No marker | `memo()` | Fine for short obvious utilities |
+
+Recommendation: `create_` for compound names, no marker for short obvious ones.
+`create_` is somewhat long and is imperative. I can use it.
+
+### Universality — the meta-convention
+
+NAMING.md now frames immutable tagging as a **composable property you add to any naming convention**, not a replacement:
+
+- **camelCase repo**: `createContext_auth()` — preserves `createContext`, adds immutable `auth`
+- **PascalCase repo**: `Response_header_name` — preserves `Response`, adds immutable tags
+- **snake_case repo**: Native compatibility — already immutable
+
+The core insight: `_` is the universal join that preserves any existing name. camelCase names stay camelCase. PascalCase stays PascalCase. Your tags stay lowercase singular.
+
+### Name "modules" idea
+
+Interesting concept — a way to declare the naming design for a codebase. Something like:
+
+```yaml
+# .naming.yml
+convention: camelCase              # base convention for this repo
+immutable_tags: true               # enable immutable tag extension
+suffixes:
+  array: _a
+  type: _T
+  signal: $
+prefixes:
+  factory: create_
+  reactive: use_
+namespace_separator: __
+```
+
+This would let linters and AI agents understand the naming rules programmatically. Could be a future tool that:
+1. Validates names against the declared convention
+2. Auto-generates conventional aliases
+3. Builds a tag graph from the codebase
+4. Powers the vector search/ML features from the original tag-vector vision
+
+Want me to flesh out the name modules concept further, or is NAMING.md good for now?
+
+## User
+
+Flesh out the name modules further please. We will iterate on this.

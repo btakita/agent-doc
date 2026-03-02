@@ -774,8 +774,337 @@ What aspects do you want to dig into first?
 
 ## User
 
-I want to build a tool to support the name system. With it's own git repo.
+I want to build a tool to support the name system. With its own git repo.h
 The tool can be built using Rust or Zig. Open for discussion. Probably Rust to take advantage of ecosystem and relative stability.
 
 I want configurations for all major languages. This would ensure that we have full coverage of existing ecosystems along with the ability to extend name systems.
 
+## Assistant
+
+### `nametag` — Rust CLI Tool
+
+**Rust is the right choice.** The ecosystem is tailor-made for this:
+
+- **tree-sitter** — parse source code across 50+ languages to extract identifiers
+- **serde + serde_yaml** — parse `.naming.yml` configs
+- **clap** — CLI framework
+- **petgraph** — tag relationship graph algorithms
+- **colored/owo-colors** — terminal output formatting
+- Cross-compilation via `cross` for prebuilt binaries (Linux, macOS, Windows)
+
+Zig would require building most of this from scratch.
+
+### Repo structure
+
+```
+nametag/
+├── Cargo.toml
+├── src/
+│   ├── main.rs                  # CLI entrypoint (clap)
+│   ├── config/
+│   │   ├── mod.rs               # .naming.yml parsing
+│   │   ├── schema.rs            # Config schema types
+│   │   └── resolve.rs           # Config inheritance/extends
+│   ├── parser/
+│   │   ├── mod.rs               # Name parser — decompose identifiers into tags
+│   │   ├── tokenizer.rs         # Split by _, __, case boundaries
+│   │   └── pattern.rs           # Match against pattern templates
+│   ├── lint/
+│   │   ├── mod.rs               # Linting engine
+│   │   ├── rules.rs             # Built-in rules (immutability, singular, etc.)
+│   │   └── reporter.rs          # Error/warning output
+│   ├── graph/
+│   │   ├── mod.rs               # Tag graph builder
+│   │   └── query.rs             # Search/traverse the graph
+│   ├── alias/
+│   │   └── mod.rs               # Convention alias generator
+│   └── extract/
+│       ├── mod.rs               # Source code identifier extraction
+│       └── tree_sitter.rs       # tree-sitter integration
+├── lang/                        # Language preset configs
+│   ├── javascript.yml
+│   ├── typescript.yml
+│   ├── python.yml
+│   ├── rust.yml
+│   ├── go.yml
+│   ├── java.yml
+│   ├── ruby.yml
+│   ├── swift.yml
+│   ├── kotlin.yml
+│   ├── c.yml
+│   ├── cpp.yml
+│   ├── csharp.yml
+│   ├── php.yml
+│   ├── elixir.yml
+│   ├── css.yml
+│   ├── sql.yml
+│   └── shell.yml
+├── presets/                     # Convention presets
+│   ├── immutable-tag.yml        # The base immutable tag convention
+│   └── ctx-core.yml             # ctx-core specific extensions
+└── tests/
+    ├── parse_test.rs
+    ├── lint_test.rs
+    └── fixtures/                # Test source files per language
+```
+
+### Language configurations
+
+Each language config captures idiomatic naming norms as a `.naming.yml` preset:
+
+#### `lang/typescript.yml`
+
+```yaml
+version: 1
+name: typescript
+
+contexts:
+  variable:
+    convention: camelCase
+  function:
+    convention: camelCase
+  type:
+    convention: PascalCase
+  interface:
+    convention: PascalCase
+    prefix: ""                   # no "I" prefix by default
+  enum:
+    convention: PascalCase
+  enum_member:
+    convention: PascalCase       # or UPPER_SNAKE_CASE
+  constant:
+    convention: UPPER_SNAKE_CASE
+  class:
+    convention: PascalCase
+  method:
+    convention: camelCase
+  parameter:
+    convention: camelCase
+  file:
+    convention: kebab-case       # or camelCase depending on framework
+  package:
+    convention: kebab-case
+
+# tree-sitter grammar for extraction
+tree_sitter: tree-sitter-typescript
+identifier_nodes:
+  - variable_declarator.name
+  - function_declaration.name
+  - type_alias_declaration.name
+  - interface_declaration.name
+  - class_declaration.name
+  - method_definition.name
+  - formal_parameters.required_parameter.identifier
+```
+
+#### `lang/python.yml`
+
+```yaml
+version: 1
+name: python
+
+contexts:
+  variable:
+    convention: snake_case
+  function:
+    convention: snake_case
+  class:
+    convention: PascalCase
+  method:
+    convention: snake_case
+  constant:
+    convention: UPPER_SNAKE_CASE
+  module:
+    convention: snake_case
+  package:
+    convention: snake_case
+  parameter:
+    convention: snake_case
+  private:
+    convention: snake_case
+    prefix: "_"
+  dunder:
+    convention: snake_case
+    prefix: "__"
+    suffix: "__"
+
+tree_sitter: tree-sitter-python
+```
+
+#### `lang/rust.yml`
+
+```yaml
+version: 1
+name: rust
+
+contexts:
+  variable:
+    convention: snake_case
+  function:
+    convention: snake_case
+  type:
+    convention: PascalCase       # structs, enums, traits
+  constant:
+    convention: UPPER_SNAKE_CASE
+  module:
+    convention: snake_case
+  macro:
+    convention: snake_case
+    suffix: "!"
+  lifetime:
+    convention: snake_case
+    prefix: "'"
+  crate:
+    convention: snake_case       # kebab-case in Cargo.toml, snake_case in code
+
+tree_sitter: tree-sitter-rust
+
+# Rust enforces conventions via clippy
+enforced: true
+enforcer: clippy
+```
+
+#### `lang/go.yml`
+
+```yaml
+version: 1
+name: go
+
+contexts:
+  exported:
+    convention: PascalCase       # public
+  unexported:
+    convention: camelCase        # private
+  type:
+    convention: PascalCase
+  interface:
+    convention: PascalCase
+    suffix: "er"                 # Reader, Writer, Stringer
+  constant:
+    convention: PascalCase       # exported constants
+  package:
+    convention: lowercase        # single word, no underscores
+  file:
+    convention: snake_case
+
+tree_sitter: tree-sitter-go
+```
+
+#### `lang/css.yml`
+
+```yaml
+version: 1
+name: css
+
+contexts:
+  class:
+    convention: kebab-case
+  id:
+    convention: kebab-case
+  custom_property:
+    convention: kebab-case
+    prefix: "--"
+  animation:
+    convention: kebab-case
+
+# BEM convention (interesting overlap with tag-vector!)
+bem:
+  block: "{block}"
+  element: "{block}__{element}"      # __ separator = namespace!
+  modifier: "{block}--{modifier}"    # -- separator = variant
+
+tree_sitter: tree-sitter-css
+```
+
+Note: CSS BEM already uses `__` for element separation and `--` for modifiers — same separators as the immutable tag convention. This isn't coincidence — BEM solves the same problem (flat, composable, searchable names).
+
+### CLI commands
+
+```bash
+# Initialize a .naming.yml in current directory
+nametag init                          # interactive setup
+nametag init --lang typescript        # from language preset
+nametag init --preset immutable-tag   # from convention preset
+
+# Parse a name into tags
+nametag parse "auth0__user__validate"
+nametag parse "createContext_auth"
+nametag parse "person_name_a"
+
+# Lint source files against .naming.yml
+nametag lint .                        # lint current directory
+nametag lint src/ --fix               # auto-fix where possible
+nametag lint --severity error         # only errors, no warnings
+
+# Generate aliases between conventions
+nametag alias "create_auth_context"   # show all convention variants
+nametag alias --from snake_case --to camelCase "create_auth_context"
+
+# Build and query tag graph
+nametag graph .                       # build graph from codebase
+nametag graph --format dot            # output as graphviz DOT
+nametag graph --format json           # output as JSON
+nametag search "auth0"                # find all names containing tag
+
+# Extract identifiers from source
+nametag extract src/                  # list all identifiers
+nametag extract src/ --format json    # structured output
+```
+
+### Config resolution order
+
+Like ESLint/Prettier, configs cascade:
+
+1. **Language preset** (`lang/typescript.yml`) — base language norms
+2. **Convention preset** (`presets/immutable-tag.yml`) — the immutable tag layer
+3. **Project config** (`.naming.yml` in repo root) — project-specific overrides
+4. **Package config** (`.naming.yml` in subdirectory) — package-level overrides
+
+```yaml
+# .naming.yml — project level
+extends:
+  - "@nametag/typescript"          # language base
+  - "@nametag/immutable-tag"       # convention layer
+
+# Project overrides
+convention: snake_case             # override TS camelCase default
+patterns:
+  factory: "create_{name}"
+```
+
+### Distribution
+
+- **Cargo install**: `cargo install nametag`
+- **Homebrew**: `brew install nametag`
+- **npm wrapper**: `npx nametag lint` (thin wrapper calling the binary)
+- **GitHub Releases**: prebuilt binaries for Linux/macOS/Windows
+- **PyPI wrapper**: `pip install nametag` for Python ecosystem
+
+### MVP scope
+
+Phase 1 — get something useful fast:
+
+1. **Config parsing** — `.naming.yml` with `extends`
+2. **Name parser** — decompose identifiers into tags
+3. **`nametag parse`** — CLI command
+4. **`nametag init`** — generate config from language preset
+5. **3 language presets** — TypeScript, Python, Rust
+
+Phase 2 — lint and extract:
+
+6. **tree-sitter integration** — extract identifiers from source
+7. **`nametag lint`** — validate against config
+8. **`nametag extract`** — list identifiers
+9. **All major language presets** (16 languages)
+
+Phase 3 — graph and search:
+
+10. **`nametag graph`** — build tag relationship graph
+11. **`nametag search`** — semantic tag search
+12. **`nametag alias`** — convention translation
+
+Want me to create the repo and scaffold Phase 1?
+
+## User
+
+Yes. Another goal is to transfer semantic meaning between different languages. So even if the search name is mutated...like with camelCase changing the casing or matching between snake_case and camelCase, the meaning can be preserved.

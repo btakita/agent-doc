@@ -1097,3 +1097,33 @@ Verified: symlink resolves correctly, all files accessible, 12/12 tests pass via
 ## User
 
 audit docs
+
+## Assistant
+
+Audited all docs against source. Found 10 issues, fixed the high/medium ones:
+
+**Fixed (pushed):**
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 1 | README.md | Language table had only 3 of 19 | Expanded to full 19-language table |
+| 2 | README.md | "more coming" in features | Updated to "19 languages" |
+| 3 | AGENTS.md | `tests/fixtures/` in architecture (doesn't exist) | Removed |
+| 4 | AGENTS.md | `lang/` only named 3 presets | Changed to "19 languages" |
+| 5 | AGENTS.md | Listed `thiserror` as used | Removed (dead dep) |
+| 6 | Cargo.toml | `thiserror = "2"` declared but never imported | Removed |
+| 7 | Cargo.toml | Missing publishing metadata | Added `repository`, `keywords`, `categories` |
+
+**Low-priority (not fixed, for future):**
+
+| # | File | Issue |
+|---|------|-------|
+| 8 | SPEC.md | Tokenization section doesn't document that all non-kebab conventions go through underscore-then-camelCase pipeline |
+| 9 | SPEC.md | `set` shape detection for single-tag edge case not specified |
+| 10 | SPEC.md | `split_camel_case()` internal underscore handling not documented |
+
+12/12 tests pass after all changes.
+
+## User
+
+Let's add nim, haskell, D lang, lua as well

@@ -295,3 +295,24 @@ Is there a plugin or library that supports these symlinks and zero-friction subm
 ## User
 
 Let's just have a regular submodule. I can symlink the opposite direction.
+
+## Assistant
+
+**Done.** Restored regular submodule:
+- Removed symlink, ran `git submodule update --init briantakita.me-dev` (checkout at `e1fe801`)
+- Removed `ignore = all` from `.gitmodules`
+
+The external checkout at `/home/brian/work/btakita/briantakita.me-dev` has local state (`node_modules/`, `.idea/`, `.env`, `bun.lock`) not in the submodule. When ready for the reverse symlink:
+
+```sh
+mv /home/brian/work/btakita/briantakita.me-dev /home/brian/work/btakita/briantakita.me-dev.bak
+ln -s /home/brian/work/btakita/agent-loop/briantakita.me-dev /home/brian/work/btakita/briantakita.me-dev
+cp -r /home/brian/work/btakita/briantakita.me-dev.bak/{node_modules,.idea,.env,bun.lock} /home/brian/work/btakita/briantakita.me-dev/
+```
+
+## User
+
+Change of plan. Let's remove the briantakita.me-dev submodule.
+Instead, without a submodule but with a .gitignore, symlink to ~/work/ctx-core/ctx-core-dev
+
+This also contains briantakita.me and the ctx-core libraries as well.

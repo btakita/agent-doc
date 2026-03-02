@@ -542,3 +542,35 @@ Your current setup (1 session per project, subagents for parallelism, submodules
 ## User
 
 Ok...sounds like we don't need workmux. I would like to save exploring the tmux 2d stack feature somewhere. Should it be in specs/*.md?
+
+## Assistant
+
+**Yes — `specs/` is the right home**, but inside the `agent-doc` project since this is an agent-doc feature.
+
+The tmux 2D stacking idea is a **bounded feature** — clear scope (pane groups bound to documents, dynamic show/hide via tmux windows, vertical stacking within columns) and a clear done state (layout command supports it). That makes it a spec, not a journal entry.
+
+**Where it goes:**
+
+```
+agent-doc/
+  specs/
+    pane-groups.md     # status: planned — dynamic pane groups + 2D stacking
+```
+
+Not in `agent-loop/tasks/` — that's for rolling session docs. Not in `agent-doc/SPEC.md` — that's for resolved decisions, and this isn't implemented yet.
+
+**What would go in it:**
+- The pane group concept (tmux windows as grouping, document-bound)
+- 2D stacking layout (nested splits: vertical within columns)
+- How `agent-doc layout` would extend (`--column left/right`)
+- How focus/switch works (window switching = visibility toggle)
+- How parallel tasks spawn/collapse panes
+- Status: `planned` — not yet built
+
+This captures the exploration from this conversation as a decision-ready spec. When you come back to build it, the spec is the starting point — no need to re-derive the design from conversation history.
+
+Want me to create the file now with the design we discussed?
+
+## User
+
+yes

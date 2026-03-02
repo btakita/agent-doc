@@ -1430,4 +1430,15 @@ A blog post would work well as a bridge — "From Tag Vector to Tag Path" — ex
 
 Please create https://github.com/btakita/tagpath repo. And push the changes.
 
-Ad
+Add tagpath into agent-loop as a submodule.
+
+## Assistant
+
+Done.
+
+**GitHub repo created:** https://github.com/btakita/tagpath (public, pushed to main)
+
+**Submodule added:** `tagpath/` in agent-loop (staged in `.gitmodules` + `tagpath`, ready to commit)
+
+## User
+

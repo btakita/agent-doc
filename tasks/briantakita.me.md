@@ -423,7 +423,51 @@ assets--download--sync
 
 ## User
 
+How do I automatically upgrade all packages versions in the package.json files?
+
+## Assistant
+
+`bun update` only updates within existing semver ranges. To bump to the absolute latest versions (breaking ranges), use `npm-check-updates`:
+
+```bash
+cd ~/work/btakita/briantakita.me-dev
+
+# Update all workspace package.json files to latest versions
+bunx npm-check-updates -u --workspaces
+
+# Reinstall with new versions
+bun install
+```
+
+For a single workspace package:
+```bash
+cd app/briantakita.me && bunx npm-check-updates -u
+```
+
+**Note:** After upgrading, you may hit issues like the postcss@8.5.6 circular import bug (broken ESM wrapper in Bun). If that happens, pin problematic packages in the root `package.json`:
+```json
+"overrides": {
+  "postcss": "~8.4.49"
+}
+```
+
+Also remember to re-run `ctx-core--link` after `bun install` to restore your local dev symlinks.
 
 ## User
 
-How do I automatically upgrade all packages versions in the package.
+I tried:
+
+rm -rf node_modules
+bun i
+
+Now getting:
+
+~/work/btakita/briantakita.me-dev main !4 ?4                                                                                                                                                                                         ▼ 06:34:36
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+error: ENOENT reading "/home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/node_modules/@ctx-core/source-map"
+
+Bun v1.3.10 (Linux x64)
+error: script "dev" exited with code 1
+error: script "dev" exited with code 1

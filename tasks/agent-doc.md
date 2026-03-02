@@ -293,3 +293,25 @@ The comment won't hurt the Show HN. Different audiences — HN thread readers vs
 ## User
 
 Please write the comment. Should it be a reply to another message in the thread or stand-alone?
+
+## Assistant
+
+**Reply to CloakHQ's comment** — they explicitly ask about context drift across parallel sessions. Perfect entry point.
+
+Draft:
+
+> I've been building agent-doc [1] to solve exactly this. Each parallel Claude Code session gets its own markdown document as the interface (e.g., tasks/plan.md, tasks/auth.md). The agent reads/writes to the document, and a snapshot-based diff system means each submit only processes what changed — comments are stripped, so you can annotate without triggering responses.
+>
+> The routing layer uses tmux: `agent-doc claim`, `route`, `focus`, `layout` commands manage which pane owns which document, scoped to tmux windows. A JetBrains plugin lets you submit from the IDE with a hotkey — it finds the right pane and sends the skill command.
+>
+> For context sync across agents, the key insight was: don't sync. Each agent owns one document with its own conversation history. The orchestration doc (plan.md) references feature docs but doesn't duplicate their content. When an agent finishes a feature, its key decisions get extracted into SPEC.md. The documents ARE the shared context — any agent can read any document.
+>
+> It's been working well for running 4-6 parallel sessions across corky (email client), agent-doc itself, and a JetBrains plugin — all from one tmux window with window-scoped routing.
+>
+> [1] https://github.com/btakita/agent-doc
+
+**Why reply vs standalone:** Replying to CloakHQ frames it as answering their question (HN culture rewards this). Standalone carries more "look at my thing" energy. The reply will still be visible to everyone browsing the thread.
+
+## User
+
+Can we readd highlighting which TMUX pane is currently selected. I only see 1 yellow line between the 2 panes now.

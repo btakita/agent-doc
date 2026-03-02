@@ -1413,3 +1413,21 @@ So: **tagpath** for the crate, **Tag Path** for the naming system. Ready to rena
 ## User
 
 Yes. Tag Path. Let's rename Tag Vector to tag path. Perhaps in a blog post.
+
+## Assistant
+
+Done. Renamed everything:
+
+**Repo:** `/home/brian/work/btakita/nametag` → `/home/brian/work/btakita/tagpath`
+- Cargo.toml, CLI name/about, error messages all updated
+- 12/12 tests pass
+
+**Convention:** "Tag Vector" → "Tag Path" in `NAMING.md` (link text updated, URL preserved for the existing blog post)
+
+A blog post would work well as a bridge — "From Tag Vector to Tag Path" — explaining the evolution: why the rename (path metaphor is more intuitive than vector), introducing the `tagpath` tool, and framing Tag Path as the adoptable successor to the original system.
+
+## User
+
+Please create https://github.com/btakita/tagpath repo. And push the changes.
+
+Ad

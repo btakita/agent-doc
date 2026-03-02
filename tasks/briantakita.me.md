@@ -359,3 +359,39 @@ Same behavior — converts `context.response` to a `Response` to inspect/set hea
 ## User
 
 Now how do I have **all** of the internal dependencies symlinked. So I can test this while in development?
+
+I'm open to non-symlink solutions as well. As long as I can efficiently test an internal dependency without having to release the internal dependency.
+
+## Assistant
+
+**Already done.** Updated `ctx-core--link.sh` to symlink all 14 internal packages. All of them live in `ctx-core-dev/lib/`:
+
+```
+$ ctx-core--link
+
+@ctx-core/dev-tools, monorepo, preprocess, source-map    (4 direct)
+@ctx-core/child_process, ctx-core-package-tools, dir, fs, package  (5 transitive)
+ctx-core, relysjs, rebuildjs, relementjs, rmemo           (5 standalone)
+```
+
+**Key insight:** `relysjs`, `rebuildjs`, `relementjs`, and `rmemo` all live in `ctx-core-dev/lib/` alongside the @ctx-core packages. The link script now covers everything.
+
+**Workflow:**
+1. Edit code in `ctx-core-dev/lib/<package>/`
+2. Run `ctx-core--link` in briantakita.me-dev (if after a `bun install`)
+3. `bun run dev` — picks up local changes immediately
+4. When ready to ship: commit + publish from ctx-core-dev, then `ctx-core--unlink` + `bun install` in briantakita.me-dev
+
+**Note:** `bun install` overwrites symlinks. Always re-run `ctx-core--link` after installing.
+
+## User
+
+~/work/btakita/agent-loop/briantakita.me-dev main !3 ?4                                                                                                                                                                              ▼ 05:57:20
+❯ bun run start
+$ cd ./app/briantakita.me && bun start
+$ bun ./start.ts
+error: Cannot find module './dist/server--dev/index.js' from '/home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/start.ts'
+
+Bun v1.3.6 (Linux x64)
+error: script "start" exited with code 1
+error: script "start" exited with code 1

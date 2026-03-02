@@ -332,3 +332,30 @@ Option 1 gets you running immediately. Option 2 is the right long-term fix.
 ## User
 
 Do the proper fix. Option 2
+
+## Assistant
+
+Fixed in `/home/brian/work/relysjs/relysjs/server/compression/index.js`.
+
+**Change:** Removed `mapResponse` import from elysia. Replaced with inline Response conversion:
+
+```js
+const res = context.response instanceof Response
+    ? context.response
+    : new Response(
+        typeof context.response === 'object'
+            ? JSON.stringify(context.response)
+            : String(context.response ?? ''),
+        { headers: {} }
+    )
+```
+
+Same behavior — converts `context.response` to a `Response` to inspect/set headers. No elysia internal API dependency.
+
+**Tested:** `bun run start` no longer crashes on `mapResponse`. The next error is `Cannot find module './dist/server--dev/index.js'` — that's a separate issue (build artifact missing). Run `bun run dev` instead of `bun run start`, or build first.
+
+**To publish:** Commit and release a new relysjs version from `/home/brian/work/relysjs/relysjs`. Also copied the fix to `node_modules/relysjs/` so briantakita.me-dev works immediately without publishing.
+
+## User
+
+Now how do I have **all** of the internal dependencies symlinked. So I can test this while in development?

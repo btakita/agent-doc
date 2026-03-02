@@ -471,3 +471,5 @@ error: ENOENT reading "/home/brian/work/btakita/briantakita.me-dev/app/briantaki
 Bun v1.3.10 (Linux x64)
 error: script "dev" exited with code 1
 error: script "dev" exited with code 1
+
+Can we make the symlinking part of bun install for briantakita.me-dev?

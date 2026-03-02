@@ -1010,3 +1010,34 @@ The issue was that the submodule was added before the rename and language preset
 ## User
 
 Now add the config for Zig. Zig is a special case with functions being camelCase, variables being snake_case, etc. This system should be able to represent Zig.
+
+## Assistant
+
+Created `lang/zig.yml` and pushed. Zig's mixed conventions are a great validation of the per-context design:
+
+| Context | Convention | Example |
+|---------|-----------|---------|
+| function | camelCase | `allocPrint`, `readByte` |
+| variable, constant, parameter, field | snake_case | `my_value`, `max_size` |
+| type, struct, enum, union, error_set | PascalCase | `ArrayList`, `Allocator` |
+| enum_field | snake_case | `end_of_stream` |
+| namespace (file-as-module) | PascalCase | `std.mem` |
+| file, package | snake_case | `build.zig` |
+
+Zig-specific patterns:
+- `init`/`deinit` — constructor/destructor (not `create_*`/`new_*`)
+- `next` — iterator protocol (`next()` returns `?T`)
+- `format` — std.fmt integration
+- `is{Name}` — predicates
+
+Notable: Zig uses snake_case for `const` (not UPPER_SNAKE like most languages). The `contexts:` mapping handles this naturally.
+
+12/12 tests pass. Total: 18 languages.
+
+## User
+
+Let's also add Odin which has different concepts for allocation 
+
+https://forum.odin-lang.org/t/question-about-terminology-make-vs-new-vs-create/322
+https://github.com/odin-lang/Odin/wiki/Naming-Convention
+https://github.com/odin-lang/examples/wiki/Naming-and-style-convention

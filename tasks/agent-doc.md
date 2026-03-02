@@ -292,3 +292,4 @@ The comment won't hurt the Show HN. Different audiences — HN thread readers vs
 
 ## User
 
+Please write the comment. Should it be a reply to another message in the thread or stand-alone?

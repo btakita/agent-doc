@@ -395,3 +395,35 @@ error: Cannot find module './dist/server--dev/index.js' from '/home/brian/work/b
 Bun v1.3.6 (Linux x64)
 error: script "start" exited with code 1
 error: script "start" exited with code 1
+
+## Assistant
+
+`bun run start` requires pre-built artifacts (`dist/server--dev/`). Use **`bun run dev`** instead — it builds then starts the dev server.
+
+I tested `bun run dev` and the elysia/relysjs fix works. The next error is **missing assets**:
+
+```
+Cannot find module '../public/assets/favicon.svg'
+```
+
+The `public/` directory doesn't exist yet — you need to sync assets from S3 first (the original issue from this session). Make sure mise is active, then:
+
+```bash
+cd ~/work/btakita/briantakita.me-dev
+assets--download--sync    # syncs s3://assets.briantakita.me → public/assets/
+bun run dev               # build + start dev server
+```
+
+If `assets--download--sync` still fails with 401, export the credentials manually first:
+```bash
+export AWS_ACCESS_KEY_ID=$(pass briantakita.me/AWS_ACCESS_KEY_ID)
+export AWS_SECRET_ACCESS_KEY=$(pass briantakita.me/AWS_SECRET_ACCESS_KEY)
+assets--download--sync
+```
+
+## User
+
+
+## User
+
+How do I automatically upgrade all packages versions in the package.

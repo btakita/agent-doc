@@ -159,3 +159,36 @@ Want me to create this as a proper script in briantakita.me-dev's `bin/`?
 ## User
 
 Yes, create a script. Please use readlink -f to get the absolute path for the env variables. Since these repos may be opened on their own.
+
+## Assistant
+
+Created two scripts in `app/-briantakita.me-dev-bin/bin/`:
+
+**`ctx-core--link.sh`** — Symlinks all @ctx-core packages from local ctx-core-dev:
+- Uses `readlink -f` to resolve absolute paths from the script's location
+- Expects `ctx-core-dev` as a sibling directory (e.g., both under `~/work/btakita/`)
+- Links all 9 @ctx-core/* packages + base `ctx-core`
+- Handles `ctx-core-package-tools` being in `tools/` (not `lib/`)
+
+**`ctx-core--unlink.sh`** — Restores npm versions via `bun install --force`
+
+Both are registered in package.json `bin` field, so after `bun install` they're available as:
+```bash
+ctx-core--link      # switch to local ctx-core-dev
+ctx-core--unlink    # restore npm versions
+```
+
+## User
+
+~/work/btakita/agent-loop/briantakita.me-dev main !1 ?2                                                                                                                                                                              ▼ 21:37:48
+❯ mise trust
+mise trusted /home/brian/work/btakita/briantakita.me-dev
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:38:58
+❯ bun i
+[0.01ms] ".env"
+bun install v1.3.6 (d530ed99)
+
+Checked 575 installs across 639 packages (no changes) [8.00ms]
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:39:01
+❯ ctx-core--link
+zsh: command not found: ctx-core--link

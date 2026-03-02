@@ -1230,3 +1230,17 @@ Committed and pushed to https://github.com/btakita/tagpath.
 ## User
 
 commit tagpath
+
+## Assistant
+
+Done. Updated the tagpath submodule pointer in agent-loop:
+
+```
+e32706c → 10fa8a9 (Convert presets from YAML to TOML, add 11 new languages)
+```
+
+Committed as `d0caf98` in agent-loop.
+
+## User
+
+compact this doc. Save the phases we are working on. Is phase 1 complete?

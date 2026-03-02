@@ -16,6 +16,3 @@
 [submodule "presence"]
 	path = presence
 	url = git@github.com:btakita/presence.git
-[submodule "briantakita.me-dev"]
-	path = briantakita.me-dev
-	url = git@github.com:btakita/briantakita.me-dev.git

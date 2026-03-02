@@ -316,3 +316,19 @@ Change of plan. Let's remove the briantakita.me-dev submodule.
 Instead, without a submodule but with a .gitignore, symlink to ~/work/ctx-core/ctx-core-dev
 
 This also contains briantakita.me and the ctx-core libraries as well.
+
+## Assistant
+
+**Done.**
+
+- Removed `briantakita.me-dev` submodule (deinit + `git rm` + cleared `.git/modules/`)
+- Created symlink: `ctx-core-dev -> /home/brian/work/ctx-core/ctx-core-dev`
+- Added `ctx-core-dev` to `.gitignore`
+
+Submodule removal is staged. The `.gitignore` update and symlink are local-only (gitignored). `git status` is clean for the symlink — it doesn't appear.
+
+Contents accessible: `lib/`, `bin/`, `node_modules/`, `pnpm-workspace.yaml`, etc.
+
+## User
+
+Ready

@@ -574,3 +574,21 @@ Want me to create the file now with the design we discussed?
 ## User
 
 yes
+
+## Assistant
+
+**Created `agent-doc/specs/pane-groups.md`** — `status: planned`.
+
+First file in the new `specs/` directory. Contains:
+- Pane group concept (tmux windows as document-bound groups)
+- 2D stacking layout (nested splits for vertical columns)
+- Layout command extension (`--column left/right`)
+- Session registry changes (group member tracking)
+- Full lifecycle (claim → parallels → focus switch → collapse)
+- Open questions (auto-close, max panes, auto-detect)
+
+The `specs/` pattern is established — future bounded features get their own spec here, tracked by `status:` frontmatter.
+
+## User
+
+compact this doc

@@ -505,3 +505,40 @@ Going back to the agent doc with the parallel task would show the stacked tmux a
 Once the parallel task finish, the stacking can collapse.
 
 Sanity check: I do see parallel agents run. How does workmux improve the already existing flow?
+
+## Assistant
+
+### Dynamic pane groups
+
+The flow you describe is **pane groups bound to documents**:
+- Focus doc A (3 parallel tasks) → show 3 stacked panes
+- Switch to doc B (1 session) → show 1 pane
+- Switch back → 3 reappear
+- Tasks finish → collapse to 1
+
+**Implementation approach:** Use tmux windows as the grouping. Each doc gets its own tmux window. Parallel tasks spawn extra panes within that window. `agent-doc focus` switches to the right window (already does this). When parallel tasks finish, their panes close and the window returns to 1 pane.
+
+No pane hide/show needed — window switching IS the visibility toggle. The session registry already tracks which panes belong to which doc.
+
+### workmux vs existing subagents
+
+Good sanity check. The parallel agents you see are **Claude subagents** (the `Agent` tool). Here's the real difference:
+
+| | Claude subagents | workmux worktrees |
+|---|---|---|
+| **Isolation** | Shared filesystem, shared git | Separate worktree, own branch |
+| **Duration** | Minutes (one context window) | Hours/days (persistent) |
+| **Merge** | Changes appear immediately | Explicit merge step |
+| **Visibility** | Hidden (in context) | Visible (tmux pane, editable) |
+| **Human control** | None mid-flight | Full — edit spec, redirect |
+
+**For our workflow — workmux doesn't add much.** Subagents handle short parallel tasks well. Submodules give project isolation. workmux would matter for:
+- Monorepo where two agents edit overlapping files (need branch isolation)
+- Multi-day features that outlast context windows
+- Human review/redirect mid-execution
+
+Your current setup (1 session per project, subagents for parallelism, submodules for isolation) is already solid. workmux solves a problem you don't have yet.
+
+## User
+
+Ok...sounds like we don't need workmux. I would like to save exploring the tmux 2d stack feature somewhere. Should it be in specs/*.md?

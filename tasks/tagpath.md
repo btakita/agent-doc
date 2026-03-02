@@ -1186,3 +1186,47 @@ Want me to convert? We could support both formats (detect by extension: `.naming
 ## User
 
 Yes...convert to toml. Add the **Remaining gaps** languages as well.
+
+## Assistant
+
+Done. Full YAML → TOML migration complete + 11 new languages. **39 total languages, 12/12 tests pass.**
+
+### TOML Migration
+
+Converted everything:
+
+| Component | Before | After |
+|-----------|--------|-------|
+| 28 lang presets | `lang/*.yml` | `lang/*.toml` |
+| 1 convention preset | `presets/immutable-tag.yml` | `presets/immutable-tag.toml` |
+| Config dependency | `serde_yaml` | `toml` crate |
+| Config loading | `serde_yaml::from_str` | `toml::from_str` |
+| CLI init output | `.naming.yml` | `.naming.toml` |
+| Default config | YAML format | TOML format |
+| README/AGENTS/SPEC | YAML references | TOML references |
+
+### New Languages (11)
+
+| Language | Default | Notable |
+|----------|---------|---------|
+| **Common Lisp** | kebab-case | `*earmuffs*`, `+constants+`, `defun`/`defvar`, `with-` macros |
+| **Scheme** | kebab-case | `define`, `?` predicates, `!` mutation, `set!`, `call/cc` |
+| **Racket** | kebab-case | `define`, `?` predicates, `!` mutation, `#lang` modules |
+| **Erlang** | snake_case | PascalCase modules, atoms, `is_` guards, OTP `gen_*` |
+| **F#** | camelCase | PascalCase types/modules, `|>` pipeline, `Async.` prefix |
+| **OCaml** | snake_case | PascalCase modules, `'` type variables, `with_`/`of_` |
+| **Julia** | snake_case | PascalCase types, `!` mutating, Unicode identifiers |
+| **Objective-C** | camelCase | PascalCase classes, 2-3 letter prefixes (`NS`, `UI`) |
+| **V** | snake_case | PascalCase types, Go-inspired, `C.` interop prefix |
+| **Crystal** | snake_case | PascalCase types, `?`/`!` suffixes, Ruby-inspired |
+| **Gleam** | snake_case | PascalCase types/constructors, labeled arguments |
+
+### Full Language List (39)
+
+C, C++, C#, Clojure, Common Lisp, Crystal, CSS, D, Dart, Elixir, Erlang, F#, Gleam, Go, Haskell, Java, JavaScript, Julia, Kotlin, Lua, Nim, Objective-C, OCaml, Odin, Perl, PHP, Python, R, Racket, Ruby, Rust, Scala, Scheme, Shell, SQL, Swift, TypeScript, V, Zig.
+
+Committed and pushed to https://github.com/btakita/tagpath.
+
+## User
+
+commit tagpath

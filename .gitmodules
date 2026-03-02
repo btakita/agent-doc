@@ -16,3 +16,6 @@
 [submodule "presence"]
 	path = presence
 	url = git@github.com:btakita/presence.git
+[submodule "tagpath"]
+	path = tagpath
+	url = git@github.com:btakita/tagpath.git

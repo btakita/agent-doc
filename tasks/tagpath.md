@@ -118,3 +118,41 @@ Cross-language search doesn't require tree-sitter — regex extraction gets 80% 
 ## User
 
 Can we also better integrate "meaning" with coding agents such as Claude Code using the tree sitter integration?
+
+## Assistant
+
+### Coding agents + tree-sitter = semantic code understanding
+
+Yes — this is one of the most compelling use cases. Today, when Claude Code (or any coding agent) sees your codebase, it reads text. Tree-sitter integration with tagpath would give agents a **semantic vocabulary layer**:
+
+**1. Intent-preserving refactoring**
+
+An agent could say "rename the `user` concept across all files" and tagpath would find every identifier containing the `user` tag regardless of convention — `userName`, `user_name`, `UserName`, `get-user-data` — and rename them consistently per-language convention.
+
+**2. Cross-language symbol resolution**
+
+When an agent works on a full-stack project (Python backend + TypeScript frontend), tagpath provides a **shared semantic index**. The agent understands that `fetchUserProfile` in TypeScript and `fetch_user_profile` in Python are the same concept, enabling coherent cross-boundary changes.
+
+**3. Convention enforcement in generated code**
+
+When Claude Code generates new code, tagpath's `.naming.toml` tells it exactly what conventions to use per context. Instead of guessing from examples, the agent reads the config: "functions are camelCase, types are PascalCase, constants are SCREAMING_SNAKE_CASE."
+
+**4. Semantic search for agent context**
+
+Agents have limited context windows. `tagpath search "auth validate"` returns semantically relevant identifiers across the whole codebase — better than grep for building the right context window for a task.
+
+### Integration model
+
+The natural integration is as an **MCP tool** — tagpath exposes `parse`, `search`, `lint` as tools that Claude Code can call during a session. The agent uses tagpath to understand naming patterns before writing code, and to validate its output after.
+
+This strengthens the Phase 2 split:
+- **2a:** regex extraction + cross-language search (immediately useful for agents)
+- **2b:** tree-sitter + lint (context-aware validation, richer agent integration)
+
+Want to start building Phase 2a?
+
+## User
+
+Can I have a domain ontology like with the philosophy repo for each tag in the tag path?
+
+Let's implement Phase 2.

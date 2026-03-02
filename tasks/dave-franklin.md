@@ -77,3 +77,13 @@ I'm available for a call Tuesday or Wednesday. What time works best for you?
 
 Best,
 Brian
+
+## Assistant
+
+Looks good — send it with the PDF attached. Clean, direct, mirrors the JD's language.
+
+## User
+
+Hi Brian,
+
+Thanks for following up with me. I will call you this upcoming Tuesday at 12:30 PM EST. Does this work?

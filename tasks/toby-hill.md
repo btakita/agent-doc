@@ -53,3 +53,30 @@ Here is the message that I sent to Toby Hill. I can edit it so please help me wi
 
 Hi Toby, thank you for the call that we had on 2/26 at 1PM Eastern. Here is my updated resume as requested. It now has a career summary. And the breadth of the full stack developer role on my most recent job @Presence.AI.
 
+## Assistant
+
+**Transcript:** `mail/contacts/toby-hill/recordings/20260227-toby-hill.md` (20:22, speakers still swapped from diarizer).
+
+**Edits to your message:**
+
+Your draft is close but has a sentence fragment and some awkward phrasing. Suggested revision:
+
+> Hi Toby, thank you for our call on 2/26. Here is my updated resume as requested — I've added a career summary and expanded the Presence AI section to show the full-stack scope (React, GraphQL, API services) as you suggested. Looking forward to hearing back from Richard.
+>
+> Best,
+> Brian
+
+**What changed:**
+- "the call that we had" → "our call" (tighter)
+- Merged the fragment ("And the breadth...") into one sentence
+- "@Presence.AI" → "Presence AI" (correct company name)
+- Named specific tech (React, GraphQL) — directly addresses Toby's feedback that the resume read backend-only
+- "Looking forward to hearing back from Richard" — references the agreed next step from the call, shows you were listening
+- Added closing
+
+## User
+
+Hi Toby, thank you for our call on 2/26. Here is my updated resume as requested — I've added a career summary and expanded the Presence AI section to show the full-stack scope (React, GraphQL, API services) as you suggested. Looking forward to hearing back from Richard.
+
+Best,
+Brian

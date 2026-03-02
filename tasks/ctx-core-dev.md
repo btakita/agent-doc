@@ -1347,6 +1347,42 @@ Your call — either works. Which one feels right?
 
 ## User
 
-graphtag is easier to phonetically pronounce. dagtag is a bit of a tongue twister. But I do like the presision of dagtag.
+graphtag is easier to phonetically pronounce. dagtag is a bit of a tongue twister. But I do like the precision of dagtag.
 
 But graphtag is good enough. Maybe there's a better option?
+
+## Assistant
+
+Searched crates.io — here's the expanded field:
+
+| Name | Avail | Pronunciation | Meaning |
+|------|-------|---------------|---------|
+| `graphtag` | yes | smooth | tag graph relationships |
+| `dagtag` | yes | tongue-twister | DAG + tag (precise) |
+| `tagpath` | yes | smooth | names are paths through tags |
+| `tagvec` | yes | smooth | tag vector (original concept) |
+| `semtag` | yes | smooth | semantic tag |
+| `namegraph` | yes | smooth | graph of names |
+
+**Refined recommendation: `tagpath`**
+
+- **Pronounceable** — two clean syllables
+- **Accurate** — a name IS a path through a tag graph (`auth → user → validate`)
+- **Intuitive** — developers immediately get "tags + paths"
+- **Modest** — doesn't overclaim (graph/DAG are implementation details)
+- **Memorable** — `tagpath parse "auth0__user__validate"` reads naturally
+
+Runner-ups: `semtag` (semantic tag — captures meaning-preservation), `graphtag` (emphasizes the emergent graph structure).
+
+Ranking: **tagpath > semtag > graphtag > tagvec > dagtag**
+
+## User
+
+tagpath is good. semtag has an overload with the semantic web...as "semantic tag" is used.
+
+Tag Path name system?
+Graph Tag name system?
+Semantic Tag name system?
+Tag Vector name system?
+
+Rate each phrase according to relevant criteria.

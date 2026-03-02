@@ -420,3 +420,43 @@ workmux merge telegram   # merge branch → main, delete worktree, close window
 ## User
 
 Can we have tmux windows stack vertically on the same side as the editor document?
+
+## Assistant
+
+**Yes — the tmux side is easy.** Stack panes vertically within a tmux window:
+
+```sh
+tmux select-layout -t @1 even-vertical
+```
+
+Or via agent-doc: `agent-doc layout <files...> --split v` (already supports vertical stacking).
+
+```
+┌──────────────┬─────────────┐
+│              │  claude 1   │
+│    IDE       ├─────────────┤
+│   (editor)   │  claude 2   │
+│              ├─────────────┤
+│              │  claude 3   │
+└──────────────┴─────────────┘
+```
+
+**The hard part is IDE ↔ tmux positioning.** Tmux can't position itself relative to JetBrains — they're separate OS windows. Options:
+
+1. **Manual tiling** — IDE left half, tmux right half. Within tmux, panes stack vertically. Works now, no tooling needed.
+2. **Tiling WM** — Hyprland/Sway/i3 auto-tiles IDE + terminal side by side. You're on CachyOS which likely has Hyprland available.
+3. **IDE embedded terminal** — Run tmux inside JetBrains' terminal. We removed this but it's possible. Downside: smaller viewport.
+
+For your setup (ultrawide, two app windows), option 1 with `even-vertical` layout is the quickest win. Want me to apply it now?
+
+## User
+
+I'm talking about 2nd level stacking. I have the tmux windows under the editor. The 2 documents are horizonatal (left | right).
+
+The tmux pane is also left | right with 1 session on each side.
+
+If we have parallel sessions on either side, we could have that left or right side stack vertically. So if the left side had 3 sessions for the agent document running, it could look something like:
+
+left 1 | right (full height)
+left 2 | ...
+left 3 | ...

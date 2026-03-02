@@ -1108,3 +1108,139 @@ Want me to create the repo and scaffold Phase 1?
 ## User
 
 Yes. Another goal is to transfer semantic meaning between different languages. So even if the search name is mutated...like with camelCase changing the casing or matching between snake_case and camelCase, the meaning can be preserved.
+
+I also want to represent english prose as a variant. So we can translate between english prose and tags in different languages.
+
+## Assistant
+
+### Repo created — Phase 1 working
+
+Created `/home/brian/work/btakita/nametag` with a working Rust CLI. **12 tests passing.**
+
+**What works now:**
+
+```bash
+$ nametag parse "auth0__user__validate"
+name:       auth0__user__validate
+convention: SnakeCase
+tags:       [auth0, user, validate]
+dimension 0: [auth0]
+dimension 1: [user]
+dimension 2: [validate]
+role:       validator
+canonical:  auth0_user_validate
+
+$ nametag parse "personName"
+tags:       [person, name]
+canonical:  person_name
+
+$ nametag parse "PersonName"
+tags:       [person, name]
+canonical:  person_name
+
+$ nametag parse "createContext_auth"
+tags:       [create, context, auth]
+role:       factory
+canonical:  create_context_auth
+```
+
+**Semantic equivalence proven:** `personName` (camelCase), `person_name` (snake_case), and `PersonName` (PascalCase) all decompose to the same canonical tags `[person, name]`. This is the foundation for cross-convention semantic transfer.
+
+**Features:**
+- Convention auto-detection (snake, camel, Pascal, kebab, UPPER_SNAKE)
+- Mixed convention support: `createContext_auth` → `[create, context, auth]`
+- Namespace detection via `__`
+- Role detection (factory, hook, setter, getter, predicate, validator)
+- Shape detection (array, record, map)
+- JSON output (`--format json`)
+- `nametag init` with 3 language presets (TypeScript, Python, Rust) + immutable-tag convention preset
+- Config schema for `.naming.yml`
+
+### English prose as a variant
+
+This is a powerful extension. The canonical tag list is the **lingua franca** — every representation (code identifier, prose, even natural language) maps to and from it:
+
+```
+Tags:         [auth0, user, validate]
+                    ↓
+snake_case:   auth0__user__validate
+camelCase:    validateAuth0User
+PascalCase:   ValidateAuth0User
+kebab-case:   auth0--user--validate
+UPPER_SNAKE:  AUTH0__USER__VALIDATE
+Prose:        "validate the auth0 user"
+```
+
+To implement prose conversion, the parser needs a **prose convention**:
+
+```yaml
+# .naming.yml
+conventions:
+  prose:
+    join: " "                    # space-separated
+    namespace: ", "              # comma for dimension boundaries
+    word_order: natural          # "validate the auth0 user" (verb-object)
+    articles: [the, a, an]      # stripped during parsing, added during generation
+    prepositions: [of, for, in, with, by]  # stripped/added contextually
+```
+
+**Parsing prose → tags:**
+```
+"validate the auth0 user"
+→ strip articles: [validate, auth0, user]
+→ canonical: [auth0, user, validate]  (reordered by inference level)
+```
+
+**Generating prose ← tags:**
+```
+[auth0, user, validate] + role: validator
+→ "validate the auth0 user"
+```
+
+This makes `nametag` a **bidirectional translator** between:
+- Code identifiers (any convention)
+- Natural language descriptions
+- Documentation strings
+- Variable names across languages in a polyglot codebase
+
+The `nametag alias` command would gain a `--prose` flag:
+```bash
+$ nametag alias "auth0__user__validate" --prose
+"validate the auth0 user"
+
+$ nametag parse --convention prose "validate the auth0 user"
+tags: [auth0, user, validate]
+canonical: auth0_user_validate
+```
+
+### Cross-language transfer
+
+For transferring between languages, the tool maps through canonical tags:
+
+```
+TypeScript:  validateAuth0User()        → [auth0, user, validate]
+Python:      validate_auth0_user()      ← [auth0, user, validate]
+Rust:        validate_auth0_user()      ← [auth0, user, validate]
+Go:          ValidateAuth0User()        ← [auth0, user, validate]
+Ruby:        validate_auth0_user        ← [auth0, user, validate]
+CSS class:   auth0-user-validate        ← [auth0, user, validate]
+SQL column:  auth0_user_validate        ← [auth0, user, validate]
+Prose:       "validate the auth0 user"  ← [auth0, user, validate]
+```
+
+Each language config defines how to **reconstruct** a name from canonical tags. The `.naming.yml` `patterns` section handles role-based restructuring (e.g., Go exports require PascalCase, so `validate` becomes the first PascalCase word).
+
+### Next iteration
+
+Want me to:
+1. Add prose convention support to the parser?
+2. Add `nametag alias` command for cross-convention translation?
+3. Add more language presets?
+
+## User
+
+There is already a crate named [nametag](https://crates.io/crates/nametag).
+
+Any alternatives? nametag would be a good name. There is also [tag-vec](https://crates.io/crates/tag-vec) which would essentially have a subset of our implementation.
+
+tag-graph is a possibility. But each name is a 1d vector...which technically is a graph. I wonder if we can encode more than 1d in a name. 

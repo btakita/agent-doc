@@ -61,3 +61,21 @@ Still to do: the `Readme.md` has 4 outdated sections (Lerna, Sapper, Quovo, tech
 ## User
 
 Please fix docs.
+
+## Assistant
+
+Fixed all 4 outdated sections in `Readme.md`:
+
+1. **Lerna → pnpm workspaces** — Replaced the "Forking ctx-core with Lerna & git submodule" section with pnpm-based instructions. Updated Usage to show `pnpm add @ctx-core/<package-name>`.
+
+2. **Tech stack updated** — Replaced ES6/Svelte/Sapper with TypeScript (ES2022), pnpm workspaces, Svelte/SvelteKit, Solid.js.
+
+3. **Removed Quovo demo section** — The entire "Demos" section with the quovo portfolio viewer and Google Hangout references is gone.
+
+4. **Sapper removed** — No longer referenced anywhere.
+
+Preserved everything else: philosophy sections, naming conventions, optionality, monorepo rationale, acknowledgements.
+
+## User
+
+I ran a command to upgrade all dependencies of the subpackages in ctx-core-dev. Can you determine what script I ran? 

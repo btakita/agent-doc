@@ -101,3 +101,61 @@ Added `briantakita.me-dev` to `.gitignore` under the existing "Local symlinks (n
 Please review briantakita.me-dev. I also added the ctx-core-dev symlink into the repo. Is there any chance that we can symlink the dependencies into briantakita.me-dev so I can test changes to ctx-core-dev without having to release the next version?
 
 We can do this with git as well, but there potentially a few dependencies to manage. So symlinks could be easier for testing purposes.
+
+## Assistant
+
+Yes — symlinks are the simplest way to test ctx-core-dev changes in briantakita.me-dev without publishing.
+
+**briantakita.me-dev uses 9 @ctx-core packages** (bun workspace):
+
+| Direct (in package.json) | Transitive |
+|---|---|
+| `@ctx-core/dev-tools` ^8.3.68 | `@ctx-core/child_process` |
+| `@ctx-core/monorepo` ^21.4.158 | `@ctx-core/ctx-core-package-tools` |
+| `@ctx-core/preprocess` ^0.1.3 | `@ctx-core/dir` |
+| `@ctx-core/source-map` ^0.2.110 | `@ctx-core/fs` |
+| | `@ctx-core/package` |
+
+Plus most `lib/*` packages depend on plain `ctx-core` ^7.2.27.
+
+**Approach — symlink `node_modules/@ctx-core/*` to local sources:**
+
+Replace each installed package with a symlink to the matching `ctx-core-dev/lib/*` directory. A script like:
+
+```bash
+#!/bin/sh
+# Run from briantakita.me-dev root
+CTX_CORE_DEV="../ctx-core-dev"  # or absolute path
+
+for pkg in dev-tools monorepo preprocess source-map child_process ctx-core-package-tools dir fs package; do
+  src="$CTX_CORE_DEV/lib/$pkg"
+  dest="node_modules/@ctx-core/$pkg"
+  if [ -d "$src" ]; then
+    rm -rf "$dest"
+    ln -s "$(realpath "$src")" "$dest"
+    echo "linked @ctx-core/$pkg → $src"
+  else
+    echo "SKIP @ctx-core/$pkg (not found at $src)"
+  fi
+done
+
+# Also link the base ctx-core package
+src="$CTX_CORE_DEV/lib/ctx-core"
+dest="node_modules/ctx-core"
+if [ -d "$src" ]; then
+  rm -rf "$dest"
+  ln -s "$(realpath "$src")" "$dest"
+  echo "linked ctx-core → $src"
+fi
+```
+
+**Caveats:**
+- `bun install` will overwrite the symlinks — re-run the script after any `bun install`
+- The ctx-core-dev packages must be built first (`build-watch` in ctx-core-dev handles this)
+- For `dev-tools`, check if it's at `lib/dev-tools` or `tools/ctx-core-dev-tools` in ctx-core-dev
+
+Want me to create this as a proper script in briantakita.me-dev's `bin/`?
+
+## User
+
+Yes, create a script. Please use readlink -f to get the absolute path for the env variables. Since these repos may be opened on their own.

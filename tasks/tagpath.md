@@ -1073,3 +1073,13 @@ Convention summary:
 ## User
 
 I don't see /home/brian/work/btakita/agent-loop/tagpath/lang/odin.yml
+
+## Assistant
+
+The submodule was still pointing at `24ab001` (before zig/odin commits). Updated it to `07601f9` — both `odin.yml` and `zig.yml` are now visible at `/home/brian/work/btakita/agent-loop/tagpath/lang/`.
+
+This keeps happening because the commits go to the standalone repo at `/home/brian/work/btakita/tagpath` but the agent-loop submodule copy needs a `git pull` to catch up. I'll make sure to update the submodule after each push going forward.
+
+## User
+
+Let's have ~/work/btakita/agent-loop/tagpath be the canonical repo with ~/work/btakita/tagpath being a symlink to ~/work/btakita/agent-loop/tagpath.

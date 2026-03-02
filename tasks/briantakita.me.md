@@ -254,3 +254,48 @@ ln -sf ../@btakita/-briantakita.me-dev-bin/bin/ctx-core--unlink.sh node_modules/
 
 ERROR: ctx-core-dev not found at /home/brian/work/btakita/ctx-core-dev
 Expected sibling directory to briantakita.me-dev
+
+## Assistant
+
+Fixed. The issue was `readlink -f` resolved through the agent-loop symlink to `/home/brian/work/btakita/briantakita.me-dev`, then looked for a sibling `ctx-core-dev` which doesn't exist there (it's at `/home/brian/work/ctx-core/ctx-core-dev`).
+
+**Changes:**
+
+1. **Updated `ctx-core--link.sh`** — now searches: `CTX_CORE_DEV` env var > `ctx-core-dev` symlink in repo root > sibling directory. Clear error message if none found.
+
+2. **Created symlink** in briantakita.me-dev:
+   ```
+   ctx-core-dev -> /home/brian/work/ctx-core/ctx-core-dev
+   ```
+
+3. **Added `ctx-core-dev` to `.gitignore`** under "Local symlinks (not submodules)".
+
+**Tested — all 10 packages linked:**
+```
+linked @ctx-core/dev-tools -> .../ctx-core-dev/lib/dev-tools
+linked @ctx-core/monorepo -> .../ctx-core-dev/lib/monorepo
+linked @ctx-core/preprocess -> .../ctx-core-dev/lib/preprocess
+linked @ctx-core/source-map -> .../ctx-core-dev/lib/source-map
+linked @ctx-core/child_process -> .../ctx-core-dev/lib/child_process
+linked @ctx-core/ctx-core-package-tools -> .../ctx-core-dev/tools/ctx-core-package-tools
+linked @ctx-core/dir -> .../ctx-core-dev/lib/dir
+linked @ctx-core/fs -> .../ctx-core-dev/lib/fs
+linked @ctx-core/package -> .../ctx-core-dev/lib/package
+linked ctx-core -> .../ctx-core-dev/lib/ctx-core
+```
+
+## User
+
+~/work/btakita/agent-loop/briantakita.me-dev main !3 ?3                                                                                                                                                                              ▼ 05:43:18
+❯ bun run start
+$ cd ./app/briantakita.me && bun start
+$ bun ./start.ts
+1 | })
+2 | {
+^
+SyntaxError: Export named 'mapResponse' not found in module '/home/brian/work/btakita/briantakita.me-dev/node_modules/.bun/elysia@1.4.15+89aae903c556c6ee/node_modules/elysia/dist/bun/index.js'.
+at loadAndEvaluateModule (2:1)
+
+Bun v1.3.6 (Linux x64)
+error: script "start" exited with code 1
+error: script "start" exited with code 1

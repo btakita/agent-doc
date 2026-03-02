@@ -1325,3 +1325,28 @@ Want me to rename the repo from `nametag` to `graphtag`?
 ## User
 
 graphtag or dagtag?
+
+## Assistant
+
+Both available on crates.io.
+
+| | `graphtag` | `dagtag` |
+|---|---|---|
+| Technically accurate | Good — tags form a graph | More precise — name paths are acyclic |
+| Accessible | "Graph" is universal | "DAG" is CS jargon |
+| Memorable | Simple compound | Punchy, two syllables |
+| Googleable | Unique | Unique |
+
+**`graphtag`** — broader accessibility. "Graph" communicates the concept to anyone. The acyclic property is implicit (who would make a cyclic name?).
+
+**`dagtag`** — more precise, has a nice ring to it. Signals to technical audiences that this is a well-thought-out data structure, not just string manipulation.
+
+**My lean: `graphtag`** for adoption. But if the primary audience is developers who know what a DAG is, `dagtag` is more distinctive and technically precise.
+
+Your call — either works. Which one feels right?
+
+## User
+
+graphtag is easier to phonetically pronounce. dagtag is a bit of a tongue twister. But I do like the presision of dagtag.
+
+But graphtag is good enough. Maybe there's a better option?

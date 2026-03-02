@@ -173,3 +173,4 @@ Robert Ward is going to reach out to Judith. We may have a conversation. Robert 
 
 ## User
 
+Judith is going with the Mortgage Automator. What are some next steps?

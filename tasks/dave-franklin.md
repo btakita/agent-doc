@@ -87,3 +87,17 @@ Looks good — send it with the PDF attached. Clean, direct, mirrors the JD's la
 Hi Brian,
 
 Thanks for following up with me. I will call you this upcoming Tuesday at 12:30 PM EST. Does this work?
+
+## Assistant
+
+That's Tuesday March 4th at 12:30 PM EST. Quick confirmation reply:
+
+> Hi Dave, Tuesday at 12:30 PM EST works perfectly. Talk to you then.
+>
+> Best,
+> Brian
+
+Short and confirms the time. No need to add anything else — save the conversation for the call.
+
+## User
+

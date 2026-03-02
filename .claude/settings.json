@@ -1,5 +1,30 @@
 {
   "enabledPlugins": {
     "claude-mem@thedotmack": true
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux set-option -p pane-border-style 'fg=colour226' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux set-option -p pane-border-style 'fg=colour39' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null"
+          }
+        ]
+      }
+    ]
   }
 }

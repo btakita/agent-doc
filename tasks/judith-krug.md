@@ -150,3 +150,26 @@ The pitch itself was solid — platform-agnostic intelligence layer is genuinely
 ## User
 
 Robert Ward is going to reach out to Judith. We may have a conversation. Robert told me that Judith gets busy at times. She is deciding on what platform to go with. Her ex-husband & business partner recommended hubspot crm. It has a great price at $9/mo/seat. MA has Hubspot integration.
+
+## Assistant
+
+**She hasn't decided yet** — "Judith gets busy at times" from Robert corrects my earlier read. Silence ≠ rejection. She's still evaluating.
+
+**HubSpot CRM at $9/mo/seat is compelling** — cheapest option by far. But HubSpot alone doesn't do mortgage-specific workflows (loan origination, RE 885 disclosures, fractionalized notes). It's a CRM, not a LOS.
+
+**The landscape now:**
+
+| Option | Cost | What it does | What it doesn't |
+|---|---|---|---|
+| HubSpot CRM | $9/mo/seat | Contacts, pipeline, follow-ups, email | Mortgage compliance, doc gen, servicing, investor pooling |
+| TMO | ~$600/mo | Loan origination, doc gen, compliance | Modern UI, AI, investor outreach |
+| MA | ~$1,137/mo | Full LOS + HubSpot integration + servicing | Price (she doesn't want servicing anyway) |
+
+**HubSpot + TMO could be her sweet spot** — CRM for investor relationships ($9/mo) + TMO for loan mechanics ($600/mo). MA's main advantage over TMO was the HubSpot integration, but if she runs HubSpot independently, TMO gets cheaper.
+
+**Your angle sharpens:** A platform-agnostic intelligence layer that bridges HubSpot (investor pipeline) ↔ TMO or her bespoke system (loan operations). Deal sourcing feeds into HubSpot contacts. Investor pitch decks pull from loan data. This is exactly the gap between CRM and LOS that neither vendor fills.
+
+**For the conversation with Robert:** Position yourself as the person who can connect these tools. "Judith's choosing between platforms — I can build the glue between whatever she picks and her investor outreach." That's something TMO and MA don't offer.
+
+## User
+

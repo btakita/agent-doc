@@ -332,3 +332,14 @@ Contents accessible: `lib/`, `bin/`, `node_modules/`, `pnpm-workspace.yaml`, etc
 ## User
 
 Ready
+
+## Assistant
+
+**Committed and pushed.** Submodule removal (`926983f`) + `.gitignore` update (`6f772c6`). 13 commits pushed to origin.
+
+```
+ctx-core-dev -> /home/brian/work/ctx-core/ctx-core-dev  (gitignored symlink)
+```
+
+## User
+

@@ -11,9 +11,7 @@ mail
 tmp/
 
 .agent-doc
-# Editor plugins moved to agent-doc/editors/
-agent-doc-jetbrains/
-agent-doc-vscode/
 
 # Local symlinks (not submodules)
+briantakita.me-dev
 ctx-core-dev

@@ -83,3 +83,59 @@ If you can tell me the agreement titles (visible on the IB registration/agreemen
 ## User
 
 Downloaded.
+
+## Assistant
+
+### ib_40796412.pdf — Risk Disclosure for Trading Digital Assets with Zero Hash Through IBKR's Platform
+*(Form 4436, Oct 18 2024, 5 pages — risk disclosure, not a binding contract)*
+
+14 key risk points:
+
+1. **Trading is risky** — you may sustain total loss
+2. **No investment/tax advice** — execution only
+3. **No FDIC/SIPC** — crypto not insured; Zero Hash is not a broker-dealer
+4. **Limited trading hours** — IBKR not 24/7; Zero Hash Web App available as backup at ibkr.zerohashforclients.com
+5. **Orders must be fully funded** — no margin for crypto
+6. **Highly speculative/volatile** — prices influenced by social media, regulation, sentiment
+7. **No margin value** — crypto has zero margin value at IBKR; if IBKR account has insufficient equity, IBKR assets (not crypto) may be liquidated
+8. **Liquidity risk** — Zero Hash can stop quoting or cease trading at any time
+9. **Commissions** — Zero Hash charges commissions
+10. **Zero Hash Agreement governs** — your crypto relationship is with Zero Hash, not IBKR
+11. **No short selling** — can't short digital assets
+12. **Limited asset selection** — subject to change without notice
+13. **Disruption risk** — systems can fail; IBKR services "as-is" with limited liability
+14. **Transfer out available** — you can move assets to an independent Zero Hash account
+
+**Notable:** NFA disclosure that NFA has NO regulatory authority over crypto.
+
+---
+
+### ib_40796411.pdf — Supplement to IB Client Agreement for Trading Digital Assets with Zero Hash
+*(Form 4437, Oct 30 2025, 7 pages — binding legal supplement)*
+
+Key terms:
+
+1. **Crypto services provided solely by Zero Hash** — IB is just the platform. **IB is NOT responsible for any losses** (theft, fraud, cybersecurity breach, loss of private keys, or any loss from trading/holding digital assets).
+
+2. **Two Payment Source Account options:**
+   - **Option A: IB Brokerage Account** — automatic cash movement by IB, but limited to Platform Assets only (BTC, ETH, LTC, BCH); trading limited to IB platform hours
+   - **Option B: Zero Hash Account** — manual cash movement by you, but access to ALL Zero Hash-supported crypto via Zero Hash Web App; transfers during banking hours only (8am-4pm NYC)
+
+3. **Full funding required** — orders exceeding available cash may be rejected; if they slip through, you're fully liable. IB can set limits on your Zero Hash Account balance.
+
+4. **No margin value, no lien** — Zero Hash assets have zero margin value. Positive: **IB has no lien or security interest** over your Zero Hash Account assets.
+
+5. **Fraudulent transfers** — IB can liquidate any crypto purchased with funds from a revoked ACH/ACATS transfer.
+
+6. **No Customer Protection Rule / No SIPA** — Zero Hash assets NOT protected under SEC Rule 15c3-3 or SIPC.
+
+7. **Withdrawals irreversible** — once broadcast to blockchain, no reversals. IB has zero liability for incorrect transfers.
+
+8. **Conditional orders** — may not execute during IB platform downtime. You waive claims for losses from downtime.
+
+9. **Pre-dispute arbitration** — inherits mandatory arbitration from IBKR Client Agreement (Paragraph 54).
+
+**Key takeaway:** Your IBKR brokerage assets (stocks, bonds) and crypto are in entirely separate legal regimes. IBKR's SIPC protection does NOT extend to anything in your Zero Hash Account. If Zero Hash fails, IBKR takes no responsibility.
+
+## User
+

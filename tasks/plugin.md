@@ -57,3 +57,14 @@ Is agent-doc-jetbrains and agent-doc-vscode still being used?
 agent-doc/editors/jetbrains and agent-doc/editors/vscode should be the canonical source code.
 
 agent-doc-jetbrains and agent-doc-vscode should be deleted.
+
+## Assistant
+
+**Deleted.** Both `agent-doc-jetbrains/` and `agent-doc-vscode/` removed from disk. They were gitignored leftovers from the migration to `agent-doc/editors/` (session 3).
+
+Also cleaned up `.gitignore` — removed the two entries and the "Editor plugins moved" comment since there's nothing left to ignore.
+
+Canonical source: `agent-doc/editors/jetbrains/` and `agent-doc/editors/vscode/` (inside the agent-doc submodule).
+
+## User
+

@@ -473,3 +473,58 @@ error: script "dev" exited with code 1
 error: script "dev" exited with code 1
 
 Can we make the symlinking part of bun install for briantakita.me-dev?
+
+## Assistant
+
+**Fixed all three issues.** `bun run dev` now gets past mapResponse, postcss, and broken symlinks.
+
+### 1. Broken symlinks — root cause
+
+After `rm -rf node_modules && bun i`, Bun recreated the root `.bun/` cache with new paths, but **170 stale symlinks** in workspace `node_modules/` dirs (e.g., `app/briantakita.me/node_modules/@ctx-core/source-map`) still pointed to old `.bun/` cache paths. Bun doesn't clean these up.
+
+**Fix:** Deleted all broken symlinks, then `bun install` to recreate proper ones.
+
+### 2. Automatic symlinking via `postinstall`
+
+Added to root `package.json`:
+```json
+"postinstall": "[ -d ctx-core-dev ] && sh ./app/-briantakita.me-dev-bin/bin/ctx-core--link.sh || true"
+```
+
+Now `bun install` automatically:
+- Cleans broken workspace symlinks (added to `ctx-core--link.sh`)
+- Links all 14 internal packages from ctx-core-dev
+- Silently skips if `ctx-core-dev` symlink doesn't exist
+
+**Tested:** `bun install` → postinstall runs → all 14 packages linked.
+
+### 3. postcss@8.5.6 override
+
+Applied the pin we discussed earlier:
+```json
+"overrides": {
+  "postcss": "~8.4.49"
+}
+```
+postcss downgraded to 8.4.49 — circular import error gone.
+
+### 4. relysjs mapResponse fix (ctx-core-dev copy)
+
+The symlink now points to `ctx-core-dev/lib/relysjs/` (not `/home/brian/work/relysjs/relysjs/`). Applied the same mapResponse removal fix there.
+
+### Current state
+
+`bun run dev` now fails only on missing env var:
+```
+ASSETS_BRIANTAKITA_ME__BUCKET_URL|missing
+```
+This is the mise `.env` loading issue — make sure mise is active:
+```bash
+cd ~/work/btakita/briantakita.me-dev
+mise trust && cd .. && cd briantakita.me-dev
+bun run dev
+```
+
+## User
+
+

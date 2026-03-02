@@ -528,3 +528,11 @@ Each annotated with best-use context and rationale.
 ## User
 
 commit
+
+## Assistant
+
+**Committed and pushed.** `profile-statements.md` added to resume repo. Parent pointer updated.
+
+## User
+
+

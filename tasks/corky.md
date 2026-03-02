@@ -284,3 +284,39 @@ Shall I implement?
 ## User
 
 yes...then bump version and release
+
+## Assistant
+
+**corky v0.12.3 released** with filter drift detection.
+
+### Implementation
+
+**`src/filter/check.rs`** (120 lines, 4 tests):
+- `run(account)` → fetches remote filters (2 API calls), converts local config to API format, normalizes both to criteria signatures (from/to/query), reports drift
+- Returns `bool` (true = in sync, false = drift detected)
+
+**`src/filter/push.rs`** — made types and helper functions `pub(crate)`: `FilterCreateRequest`, `ApiCriteria`, `ApiAction`, `ExistingFilter`, `fetch_existing_filters()`, `fetch_label_map()`, `convert_filters()`
+
+**`src/watch.rs`** — added `check_filter_drift()` with hourly counter (same pattern as auto-upgrade). Silently ignores auth/config errors in watch mode.
+
+**`src/cli.rs`** + **`src/main.rs`** — wired `FilterCommands::Check { account }` subcommand
+
+### Release
+
+- **Tag:** `v0.12.3`
+- **crates.io:** published
+- **Local:** installed (v0.12.2 → v0.12.3)
+- **SPEC.md:** §5.29 filter check + watch integration
+- **VERSIONS.md:** v0.12.3 entry
+- **Tests:** 387 pass, clippy clean, audit-docs clean
+
+### Verified
+
+```
+$ corky filter check
+Filters in sync (2 filter(s)).
+```
+
+## User
+
+

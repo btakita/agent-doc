@@ -329,3 +329,25 @@ Active pane now shows the default tmux active border. Applied immediately to thi
 ## User
 
 let's version bump and release the agent-doc changes.
+ 
+Credit the article
+
+Did you credit the article for these changes?
+
+## Assistant
+
+**Released agent-doc v0.5.6.**
+
+- Bumped 0.5.5 → 0.5.6 in `Cargo.toml` + `pyproject.toml`
+- Clippy clean, 21 tests pass
+- Tagged `v0.5.6`, pushed — GH Actions building binaries
+- **crates.io:** published
+- **SKILL.md** bumped to 0.5.6, installed
+- Parent pointer updated, pushed
+
+**Credited the article** in the [GitHub Release notes](https://github.com/btakita/agent-doc/releases/tag/v0.5.6):
+
+> The commit-doc linking feature was inspired by [Parallel coding agents with tmux and Markdown specs](https://schipper.ai/posts/parallel-coding-agents/) by @schipperai, where Feature Design (FD) numbers are referenced in every commit message.
+
+## User
+

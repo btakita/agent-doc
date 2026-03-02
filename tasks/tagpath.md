@@ -11,7 +11,7 @@ branch: null
 **tagpath** — Tag Path naming system. Parse, lint, and search tag-based identifiers across languages.
 
 - **Repo:** https://github.com/btakita/tagpath (submodule in agent-loop, symlinked from `~/work/btakita/tagpath`)
-- **Crate:** `tagpath` (not yet published to crates.io)
+- **Crate:** [`tagpath` v0.1.0](https://crates.io/crates/tagpath)
 - **Naming:** Chosen "Tag Path" over Tag Vector, Graph Tag, Semantic Tag, DAG Tag
 - **Config format:** TOML (`.naming.toml`)
 - **39 language presets:** C, C++, C#, Clojure, Common Lisp, Crystal, CSS, D, Dart, Elixir, Erlang, F#, Gleam, Go, Haskell, Java, JavaScript, Julia, Kotlin, Lua, Nim, Objective-C, OCaml, Odin, Perl, PHP, Python, R, Racket, Ruby, Rust, Scala, Scheme, Shell, SQL, Swift, TypeScript, V, Zig
@@ -71,3 +71,19 @@ Document compacted — removed the iterative design/naming discussions (preserve
 ## User
 
 commit, version bump, and release
+
+## Assistant
+
+Released **tagpath v0.1.0**:
+
+- **crates.io:** https://crates.io/crates/tagpath (`cargo install tagpath`)
+- **GitHub Release:** https://github.com/btakita/tagpath/releases/tag/v0.1.0
+- **Git tag:** `v0.1.0` pushed
+
+12/12 tests pass. Published all three targets (crates.io, GitHub Release, git tag).
+
+## User
+
+Phase 2 looks good. What is the utility of tree-sitter integration?
+Can we do a search for a "tag" across different languages.
+Such as Python <-> Typescript.

@@ -1146,3 +1146,43 @@ README updated (23 languages). 12/12 tests pass.
 ## User
 
 Let's add Perl...because why not? Any other common language that meet our threshold? How about Lisp?
+
+Can we convert the yaml to toml?
+
+## Assistant
+
+Added 5 more languages — Perl plus 4 others that were notable gaps:
+
+| Language | Default | Notable |
+|----------|---------|---------|
+| **Perl** | snake_case | `$`/`@`/`%` sigils, `::` package separator, `->new()` factory |
+| **Clojure** | kebab-case | First Lisp! `/` namespace separator, `*earmuffs*` for dynamic vars, `:keywords`, `?`/`!` suffixes, `->Record` factories |
+| **R** | snake_case | dot.case legacy (`is.na`, `data.frame`), `<-` replacement functions, S4/R5 classes are PascalCase |
+| **Scala** | camelCase | PascalCase constants (unusual), `apply`/`unapply` factory extractors, `_=` setter sugar |
+| **Dart** | camelCase | camelCase constants (not UPPER_SNAKE), `_` prefix for private, `factory` keyword constructor |
+
+Clojure covers the Lisp family nicely — kebab-case is universal across Common Lisp, Scheme, Clojure, etc. Clojure is the most actively used so it's the best representative. We could add `common-lisp.yml` or `scheme.yml` later, but the conventions are nearly identical (just different namespace handling).
+
+**Languages we now cover (28):** C, C++, C#, Clojure, CSS, D, Dart, Elixir, Go, Haskell, Java, JavaScript, Kotlin, Lua, Nim, Odin, Perl, PHP, Python, R, Ruby, Rust, Scala, Shell, SQL, Swift, TypeScript, Zig.
+
+**Remaining gaps** (lower priority): Common Lisp, Scheme, Racket, Erlang, F#, OCaml, Julia, MATLAB, Objective-C, V, Crystal, Gleam. Most would be variations on patterns we already have.
+
+### YAML → TOML
+
+Yes, we can convert the lang presets and `.naming.yml` format from YAML to TOML. Tradeoffs:
+
+| | YAML | TOML |
+|---|---|---|
+| Readability | Good for nested data | Better for flat/shallow config |
+| Ecosystem | serde_yaml (0.9, well-maintained) | toml (well-maintained, Cargo uses it) |
+| Nesting | Natural | Verbose with deep nesting (`[contexts.variable]`) |
+| Familiarity | CI/CD, k8s, GitHub Actions | Cargo.toml, pyproject.toml, Hugo |
+| Footguns | Indentation, "Norway problem" (no=false) | Fewer — stricter syntax |
+
+The Tag Path configs have moderate nesting (contexts with sub-fields), so TOML would be more verbose but arguably clearer. Since this is a Rust tool and Rust devs live in TOML-land (Cargo.toml), it would feel native.
+
+Want me to convert? We could support both formats (detect by extension: `.naming.yml` vs `.naming.toml`), or switch entirely to TOML.
+
+## User
+
+Yes...convert to toml. Add the **Remaining gaps**languages as well.

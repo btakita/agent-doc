@@ -215,3 +215,54 @@ The suggestion is passive — never auto-compacts. The user decides. This is the
 
 ## User
 
+I saw the post at https://news.ycombinator.com/item?id=47218318
+
+Is it worthwhile to comment in HN about agent-doc? Will we benefit in any way?
+
+## Assistant
+
+### Inline responses
+
+**Re: "I lost the binding"** — The `sessions.json` claims are intact (`tasks/agent-doc.md` → pane `%4`, window `@1`). The tmux hooks shouldn't affect claim routing — they just set pane border colors, not session state. If the JetBrains "Run Agent Doc" isn't routing correctly, re-claim from terminal: `agent-doc claim tasks/agent-doc.md --window @1`.
+
+**Re: Feature docs and SPEC.md** — Yes, exactly. SPEC.md is the **resolved definition** (canonical truth, concise). Feature docs are the **decision trails** (how you got there, alternatives considered). When a feature completes, key decisions get extracted into SPEC.md sections.
+
+Each project with agent-doc sessions should have its own feature directory:
+
+```
+project/
+  SPEC.md            # stable architecture decisions
+  specs/             # feature specs (lifecycle-tracked agent docs)
+    feature-a.md     # status: complete — becomes a decision record
+    feature-b.md     # status: in-progress
+  tasks/             # rolling session docs (journals)
+    plan.md
+```
+
+This mirrors the philosophy ontology: SPEC.md = resolved entity, specs/ = evolution of understanding. `agent-doc status` would scan `specs/*.md` frontmatter across projects for lifecycle dashboards.
+
+### HN comment — worth it, with conditions
+
+**Read the thread.** It's the schipper.ai article. Discussion covers drift/rot concerns, resource limits (Max plan token caps), and competing approaches (CAS automated supervisor, single-agent preference).
+
+**What agent-doc offers that the thread hasn't seen:**
+- **tmux routing as first-class infrastructure** — `claim`, `route`, `focus`, `layout` with window scoping
+- **JetBrains/VSCode plugin integration** — IDE-native hotkeys for submit/claim/layout
+- **SKILL.md bundled workflow** — Claude Code skill that auto-updates from the binary
+- **Snapshot-based diff** — comment-aware, minimal-payload document sessions
+- **Superproject-aware git** — commits from submodule context resolve to correct repo
+
+**Benefits of commenting:**
+1. **Early users / testers** — someone might try it, file issues, give feedback
+2. **Visibility** — agent-doc is a working open-source tool, not a pitch. HN respects that.
+3. **Network** — the schipperai author and other parallel-agent builders could become collaborators
+
+**Risks:**
+- Low — HN comments on 4-hour-old posts with 30+ comments still get read
+- agent-doc is niche (tmux + markdown + Claude Code) — won't appeal to everyone
+- No polished landing page yet — README.md is the only onboarding
+
+**Recommendation:** Comment with a brief "Show HN"-style description: what agent-doc does, how it differs from the FD approach, link to the repo. Keep it 3-4 paragraphs. Don't pitch — show.
+
+## User
+

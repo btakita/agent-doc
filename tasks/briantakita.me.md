@@ -86,3 +86,18 @@ cd .. && cd briantakita.me-dev
 
 Let's symlink /home/brian/work/btakita/briantakita.me-dev without using a git submodule. Add to .gitignore
 
+## Assistant
+
+Done. Follows the same pattern as `ctx-core-dev`:
+
+```
+briantakita.me-dev -> /home/brian/work/btakita/briantakita.me-dev
+```
+
+Added `briantakita.me-dev` to `.gitignore` under the existing "Local symlinks (not submodules)" section.
+
+## User
+
+Please review briantakita.me-dev. I also added the ctx-core-dev symlink into the repo. Is there any chance that we can symlink the dependencies into briantakita.me-dev so I can test changes to ctx-core-dev without having to release the next version?
+
+We can do this with git as well, but there potentially a few dependencies to manage. So symlinks could be easier for testing purposes.

@@ -8,3 +8,63 @@ branch: null
 Please summarize key points in mail/topics/interactive-brokers/Zero_Hash_and_Zero_Hash_Liquidity_Services_User_Agreement.pdf
 
 Anything of concern?
+
+## Assistant
+
+**Zero Hash US User Agreement — Summary & Concerns**
+
+Agreement between you and Zero Hash LLC (Delaware) — the back-end crypto technology provider behind Interactive Brokers' crypto offerings. Last updated Dec 11, 2025.
+
+**Entities involved:**
+- zerohash LLC (Chicago, IL) — technology/settlement
+- ZHLS (zerohash liquidity services) — acts as agent for trades
+- ZHT (zerohash trust company, NC) — custody/fiduciary for US customers
+- Connect Ltd. (Bermuda) — identity verification/wallet linking
+
+**21 Services covered:** Buy/Sell, Liquidity, Settlement, Custody, Tax Reporting, P2P, Rewards, Deposits, Withdrawals, ACH, RTP, Remittance, Staking, Swap, Account Funding, Tokenization, Pay Services, Payout Services, Auth (wallet linking), OneID, Specially Designated Accounts.
+
+**Items of Concern:**
+
+1. **Mandatory arbitration (S16)** — No class actions, no jury trial, no court. All disputes go to binding arbitration via New Era ADR (or JAMS for batch). Illinois law governs. You waive all rights to participate in class actions.
+
+2. **Unilateral modification (S2)** — They can change the agreement at any time at sole discretion. Continued use = acceptance. Only NY residents get prior notice by law. They're not even obligated to notify you directly.
+
+3. **No FDIC/SIPC protection on crypto (S5.2, S10.6)** — Digital assets are NOT insured by FDIC or SIPC. Fiat currency is held in FDIC-insured omnibus accounts, but the digital assets carry no deposit insurance. You bear all risk of loss.
+
+4. **Biometric data collection (S4.2.1)** — They may collect retina/iris scans, fingerprints, voiceprints, hand scans, facial geometry. Retained "as needed and at our discretion."
+
+5. **Staking risks (S1.13)** — Lock-up periods up to 10 days for unstaking. Slashing penalties can cause loss of staked assets. No guarantee of staking rewards — estimated, variable, not guaranteed.
+
+6. **24-hour error reporting window (S9.10)** — You must report transaction errors within 24 hours or waive your right to dispute them.
+
+7. **Account suspension at sole discretion (S7.2)** — They can freeze/terminate your account and all assets without prior notice. 2+ years of inactivity = escheatment (abandoned property laws).
+
+8. **Omnibus wallets (S10.7)** — Your crypto may be held in shared blockchain addresses with other users. No obligation to create segregated addresses.
+
+9. **Negative balance liability (S9.8)** — If your account goes negative, they can charge interest, offset from other accounts, and pursue collection.
+
+10. **ZHLS spread markup (S1.2)** — ZHLS can add undisclosed spreads to any trade at sole discretion. Execution price "is not meant to imply the market price."
+
+11. **Force majeure broad (S9.13)** — Covers acts of God through pandemics. No liability for delays/failures.
+
+12. **Transaction data ownership (S11.5)** — They claim joint ownership of all transaction data and can sell/redistribute it (anonymized) without your consent.
+
+13. **Location restrictions (S3.5)** — New York gets special mention: services may be limited/terminated if you're in NY. Moving to unsupported jurisdiction = they can cancel open orders and unstake your assets.
+
+14. **Assignment asymmetry (S18)** — They can assign the agreement to anyone at any time. You cannot.
+
+**What's standard/reasonable:**
+- Self-directed account (you make your own decisions)
+- KYC/AML verification requirements
+- Tax reporting (1099s, etc.)
+- Anti-fraud and prohibited activity rules
+- Hot/cold wallet security with multi-party computation
+- Title to assets remains with you (S10.4) — assets not property of zerohash or its creditors
+
+**Bottom line:** Leans heavily in zerohash's favor, which is typical for crypto infrastructure. Biggest practical concerns: (1) mandatory arbitration eliminates legal leverage, (2) the 24-hour error window is very tight, (3) no insurance on crypto holdings, and (4) broad unilateral modification rights.
+
+## User
+
+Summarize https://ndcdyn.interactivebrokers.com/registration-api/api/agreement/download-agreement?renderedFormId=40796412
+
+Summarize https://ndcdyn.interactivebrokers.com/registration-api/api/agreement/download-agreement?renderedFormId=40796411

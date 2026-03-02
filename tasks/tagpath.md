@@ -1185,4 +1185,4 @@ Want me to convert? We could support both formats (detect by extension: `.naming
 
 ## User
 
-Yes...convert to toml. Add the **Remaining gaps**languages as well.
+Yes...convert to toml. Add the **Remaining gaps** languages as well.

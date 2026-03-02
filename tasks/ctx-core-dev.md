@@ -254,3 +254,45 @@ ReferenceError: Cannot access 'postcss' before initialization.
 at /home/brian/work/btakita/briantakita.me-dev/node_modules/.bun/postcss@8.5.6/node_modules/postcss/lib/postcss.mjs:3:16
 
 Bun v1.3.10 (Linux x64)
+
+## Assistant
+
+### postcss GH issue
+
+No specific issue found in postcss/postcss or oven-sh/bun tracking this exact problem. The self-referencing `postcss.mjs` wrapper works in Node.js (which falls back to CJS for self-imports) so postcss considers it valid. This is a Bun module resolution limitation — Bun follows the ESM `"import"` condition strictly and doesn't break the cycle.
+
+You could file against [oven-sh/bun](https://github.com/oven-sh/bun/issues) as "postcss@8.5.x self-referencing ESM wrapper creates circular import". Related: [oven-sh/bun#4896](https://github.com/oven-sh/bun/issues/4896).
+
+### caniuse-lite
+
+The update ran successfully but the warning persists because Bun's module cache (`.bun/`) still has the old version. `update-browserslist-db` patches `node_modules/caniuse-lite/` but Bun resolves from `.bun/`. Fix:
+
+```bash
+cd ~/work/btakita/briantakita.me-dev
+rm -rf node_modules/.bun/caniuse-lite*
+bun install
+```
+
+The `baseline-browser-mapping` warning is separate — fix with:
+```bash
+bun add -D baseline-browser-mapping@latest
+```
+
+### Unblocking: postcss fix
+
+The postcss crash is still blocking you. Want me to apply the override to pin postcss@~8.4.49 in briantakita.me-dev's root package.json right now?
+
+## User
+
+For a few years I adopted a unique name system.
+The name system has served me well but there has been no adoption outside of me.
+Could you do an assessment of the name system in ctx-core-dev and briantakita.me-dev?
+
+Could you codify it into a document? I named it the tag-vector name system.
+
+See https://briantakita.me/posts/tag-vector-0-introduction. The source of the post is also in the briantakita.me-dev repo.
+
+Now I'm willing to switch to a conventional name system. Could you give me advantages/disadvantages?
+What would be the best way to go about this. I have changed my name system several times, but it has been a lot of work. However, I am also willing to transition slowly.
+
+Can I support both the conventional name system and the tag-vector name system.

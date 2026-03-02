@@ -1083,3 +1083,17 @@ This keeps happening because the commits go to the standalone repo at `/home/bri
 ## User
 
 Let's have ~/work/btakita/agent-loop/tagpath be the canonical repo with ~/work/btakita/tagpath being a symlink to ~/work/btakita/agent-loop/tagpath.
+
+## Assistant
+
+Done. Removed the standalone repo and created the symlink:
+
+```
+~/work/btakita/tagpath → ~/work/btakita/agent-loop/tagpath
+```
+
+Verified: symlink resolves correctly, all files accessible, 12/12 tests pass via the symlink path. No more sync issues — there's only one copy now.
+
+## User
+
+audit docs

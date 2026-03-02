@@ -269,5 +269,26 @@ The plugins are commit to the project but not released yet.
 
 Should we have a separate posting. Which would give me some time to polish agent-doc. Like a website & releasing the editor plugins.
 
+Should we wait for the separate posting or should we comment here as well?
+
+## Assistant
+
+**Do both.** They serve different purposes:
+
+**Comment on this thread now** (5 min effort):
+> "I built something similar — `agent-doc`: tmux session routing + IDE plugins for parallel Claude Code sessions. It routes `/agent-doc` slash commands to specific tmux panes, manages claims/layout across windows, and uses markdown docs as the agent interface. Repo: [link]"
+
+This is a seed — people browsing the thread see it, some star the repo. No pressure to be polished.
+
+**Show HN in 1-2 weeks** (polished launch):
+- Landing page on briantakita.me
+- JetBrains Marketplace + VSCode Marketplace submissions
+- README overhaul with GIF demo
+- Optional: 2-min demo video
+
+The comment won't hurt the Show HN. Different audiences — HN thread readers vs front-page browsers. And having a few stars/issues before launch adds credibility ("people are already using this").
+
+**Show HN timing:** Weekday morning US Pacific (Tuesday-Thursday, 8-10am). Avoid Monday/Friday.
+
 ## User
 

@@ -230,3 +230,27 @@ bun install v1.3.6 (d530ed99)
 ❯ ctx-core--link
 
 zsh: command not found: ctx-core--link
+
+## Assistant
+
+Bun bug — `bun install --force` reinstalled the workspace package but didn't create the new bin symlinks for the two new entries. The package.json and script files are correct.
+
+I created the symlinks manually:
+```
+node_modules/.bin/ctx-core--link -> ../@btakita/-briantakita.me-dev-bin/bin/ctx-core--link.sh
+node_modules/.bin/ctx-core--unlink -> ../@btakita/-briantakita.me-dev-bin/bin/ctx-core--unlink.sh
+```
+
+You should be able to run `ctx-core--link` now. If it breaks again after a future `bun install`, the workaround is:
+```bash
+ln -sf ../@btakita/-briantakita.me-dev-bin/bin/ctx-core--link.sh node_modules/.bin/ctx-core--link
+ln -sf ../@btakita/-briantakita.me-dev-bin/bin/ctx-core--unlink.sh node_modules/.bin/ctx-core--unlink
+```
+
+## User
+
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:40:59
+❯ ctx-core--link
+
+ERROR: ctx-core-dev not found at /home/brian/work/btakita/ctx-core-dev
+Expected sibling directory to briantakita.me-dev

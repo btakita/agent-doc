@@ -202,3 +202,22 @@ I'll start with Phase 2a. Want me to proceed, or adjust the plan first?
 ## User
 
 Yes. Start with 2a. Does this include indexing search results or does that come later...like in phase 3?
+
+## Assistant
+
+### Indexing in Phase 2a — lightweight, scan-per-run
+
+Phase 2a includes a **scan-time index** — when `tagpath extract` walks a directory, it builds an in-memory map of `tag → [(file, line, identifier, convention)]`. The `tagpath search` command uses this same extraction pipeline. It's computed fresh each run (no persistent cache).
+
+What Phase 2a does **not** include:
+- **Persistent index** (saved to disk for instant queries) — Phase 3
+- **Graph relationships** between tags — Phase 3
+- **Incremental updates** (only re-index changed files) — Phase 3
+
+Think of Phase 2a search as `grep` but semantic — it scans on every run. Phase 3 adds `tagpath index` to build and persist a `.naming/index.json` that makes search instant and enables graph queries.
+
+Building Phase 2a now — `extract` module + `search` module + CLI commands.
+
+## User
+
+Is Phase 2a complete? If yes, implement Phase 2b.

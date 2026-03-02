@@ -1243,4 +1243,85 @@ There is already a crate named [nametag](https://crates.io/crates/nametag).
 
 Any alternatives? nametag would be a good name. There is also [tag-vec](https://crates.io/crates/tag-vec) which would essentially have a subset of our implementation.
 
-tag-graph is a possibility. But each name is a 1d vector...which technically is a graph. I wonder if we can encode more than 1d in a name. 
+tag-graph is a possibility. But each name is a 1d vector...which technically is a graph. I wonder if we can encode more than 1d in a name.
+
+graphtag is another possibility
+
+## Assistant
+
+### Name availability on crates.io
+
+| Name | Available | Fit |
+|---|---|---|
+| `nametag` | **Taken** | UE4 FName emulation (dormant, v0.0.1, 2020) |
+| `tag-vec` | **Taken** | Tag storage data structure |
+| `tagname` | **Taken** | Enum variant names |
+| `graphtag` | **Available** | Strong — captures the graph nature |
+| `tag-graph` | **Available** | Good but reads as "a graph of tags" (noun) rather than a tool |
+| `immutag` | **Available** | Highlights immutability but obscures the graph/vector concept |
+| `taglang` | **Available** | Suggests a language, not a tool |
+| `tagvec` | **Available** | Available but `tag-vec` already taken — confusing |
+
+### Dimensionality in names
+
+You're right that each name is a 1D vector. But the `__` separator already gives you **multi-dimensional** encoding:
+
+```
+highest_net_worth__company_person_name
+      dimension 1         dimension 2
+  [highest,net,worth]  [company,person,name]
+```
+
+The real insight is that when you look at **all names in a codebase together**, they form a **directed graph** (DAG):
+
+```
+auth0 → user → validate
+auth0 → domain$
+auth0 → client → create
+blog_post → estimate_read_minutes
+blog_post → meta → sorted
+person → name
+company → person → name
+```
+
+Each name is a **path** through this graph. `__` creates branching/grouping. The graph emerges from the union of all name-paths.
+
+This is why **`graphtag`** is a strong name:
+- **graph** — the data structure that all names collectively form
+- **tag** — the atomic unit (immutable, singular, searchable)
+- A name is a path through the tag graph
+- The tool builds the graph, queries it, translates paths between conventions
+
+### Can we encode more than 1D in a single name?
+
+Yes — `__` already does this. But we could go further:
+
+**Current: linear dimensions with `__`**
+```
+as_of_2023__highest_net_worth__company_person_name
+    dim1            dim2              dim3
+```
+
+**Possible: nested dimensions with `___` (triple underscore)**
+```
+region___company__person___role__title
+  └─ region ──┐
+              └─ company → person ──┐
+                                    └─ role → title
+```
+
+But this gets unreadable fast. The pragmatic answer: **keep names as 1D paths, let the graph tool handle multi-dimensional queries.** A single name shouldn't try to encode the whole graph — it's one path through it. The tool reconstructs the full graph from all paths.
+
+### Recommendation: `graphtag`
+
+- Captures the core concept (tags forming a graph)
+- Available on crates.io
+- Short, memorable, unique
+- Works as both a crate name and CLI command: `graphtag parse`, `graphtag lint`
+- The `graph` framing invites the right mental model — names are paths through a tag graph, not isolated strings
+
+Want me to rename the repo from `nametag` to `graphtag`?
+
+## User
+
+graphtag or dagtag?

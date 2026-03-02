@@ -104,3 +104,40 @@ All tests pass (98 total), clippy clean, audit-docs clean.
 Read https://schipper.ai/posts/parallel-coding-agents/
 
 Anything that we can learn? Any improvements to our process?
+
+## Assistant
+
+**Read it.** They run 8 parallel Claude Code agents via tmux with a Feature Design (FD) markdown lifecycle — similar to our setup but with a few patterns worth stealing.
+
+**Already doing:**
+- tmux session routing (ours is more sophisticated — window-scoped, plugin-integrated)
+- Markdown session docs (their FDs ≈ our `tasks/*.md`)
+- Slash commands (their `/fd-*` ≈ our `/agent-doc`)
+- Subagent exploration, commit tracking
+
+**Worth adopting:**
+
+1. **Tmux idle notification** — They change window color when agents go idle (Claude Code notification hook → tmux bell). Low effort, high signal for monitoring multiple agents. Could add to `agent-doc` as a hook.
+
+Do it.
+
+2. **Commit-doc linking** — Their commits reference FD numbers (`FD-049: Implement...`). Our `agent-doc commit` just timestamps. Adding the doc name would create a searchable trail: `agent-doc(plugin): 2026-03-02 13:56`.
+
+Add the doc name to the commits.
+
+3. **`/fd-deep` fan-out** — 4 parallel Opus subagents exploring different design angles. We do this ad-hoc; they formalized it as a command. Could be `agent-doc deep <file>`.
+
+Ok...could you specify what would trigger this action from the agent doc? Do I need to explicitly command to explore multiple options?
+
+4. **Lifecycle frontmatter** — 8-stage status tracking (Planned → Designed → Open → In Progress → Complete). A `status:` field in our session doc frontmatter would help track many concurrent docs.
+
+This seems to be explicit to one doc per feature? Our docs are rolling atm. But it may make sense to break out features as well. So the status tracking could be useful to coordinate parallel agents. If each task were to write it's own agent doc, what would the flow look like? Would an agent doc stick around until deleted? Is an agent doc essentially a feature of the system that can evolve over time?
+
+5. **Context checkpointing** — They explicitly compact FD progress to avoid context burn. Our long docs (plan.md at 300+ lines) could benefit from periodic summarization of completed sections.
+
+Yes. I do explicitly request to compact a doc. Perhaps we could have a command. Also it may make sense to suggest the doc be compacted. Particularly if parts of the doc are compactable...unrelated to the current topic and complete.
+
+**Not worth adopting:** Their alias system (we have `route`/`focus`), Cursor cross-checking (we use subagents), 8-agent limit discussion (already handled by window scoping).
+
+## User
+

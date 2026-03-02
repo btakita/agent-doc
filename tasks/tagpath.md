@@ -87,3 +87,34 @@ Released **tagpath v0.1.0**:
 Phase 2 looks good. What is the utility of tree-sitter integration?
 Can we do a search for a "tag" across different languages.
 Such as Python <-> Typescript.
+
+## Assistant
+
+### Tree-sitter utility
+
+Tree-sitter gives **structured AST parsing** — it distinguishes function names, variables, types, imports, and string literals. Without it, `tagpath lint` can't know whether `user_name` is a variable (should be snake_case in Python) or a class (should be PascalCase). Tree-sitter provides the **context** that `.naming.toml` rules need.
+
+### Cross-language tag search — yes, the killer feature
+
+The canonical tag list is language-agnostic:
+
+```
+Python:      validate_user_name()  → [validate, user, name]
+TypeScript:  validateUserName()    → [validate, user, name]
+Go:          ValidateUserName()    → [validate, user, name]
+CSS:         .validate-user-name   → [validate, user, name]
+SQL:         validate_user_name    → [validate, user, name]
+```
+
+`tagpath search "user_name"` finds all five — semantic search, not textual. `grep` would need 5 different patterns.
+
+### Phase 2 split proposal
+
+- **2a:** Regex extraction + cross-language search (fast to build, immediately useful)
+- **2b:** tree-sitter for context-aware lint (heavier, enables full `.naming.toml` validation)
+
+Cross-language search doesn't require tree-sitter — regex extraction gets 80% accuracy. Tree-sitter adds the context layer needed for lint rules.
+
+## User
+
+Can we also better integrate "meaning" with coding agents such as Claude Code using the tree sitter integration?

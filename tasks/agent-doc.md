@@ -139,6 +139,79 @@ Yes. I do explicitly request to compact a doc. Perhaps we could have a command. 
 
 **Not worth adopting:** Their alias system (we have `route`/`focus`), Cursor cross-checking (we use subagents), 8-agent limit discussion (already handled by window scoping).
 
-## User
+## Assistant
 
+### 1. Tmux idle notification — Done
+
+Added hooks to `.claude/settings.json`:
+- **`Stop`** → pane border turns **yellow** (colour226) — agent idle, waiting for input
+- **`UserPromptSubmit`** → pane border turns **blue** (colour39) — agent working
+
+Takes effect next session start. The `2>/dev/null` suppresses errors when running outside tmux.
+
+I lost the binding of the selected Jetbrains editor and the claiming tmux pane.
+
+### 2. Commit-doc linking — Done
+
+Changed `agent-doc commit` format from `agent-doc: timestamp` to `agent-doc(doc-name): timestamp`.
+
+```
+# Before:
+agent-doc: 2026-03-02 14:07:07
+
+# After:
+agent-doc(agent-doc): 2026-03-02 14:11:45
+agent-doc(plan): 2026-03-02 14:12:00
+```
+
+Updated squash grep pattern (`--grep=^agent-doc`) to match both old and new formats. Committed (`e75e3b6`), pushed.
+
+### 3. Deep exploration trigger
+
+No — you wouldn't need to explicitly command it. The natural trigger is **design ambiguity in the document**. When the agent detects multiple viable approaches in a user request (e.g., "how should we handle X?"), it would autonomously spawn parallel subagents exploring different angles, then synthesize results.
+
+But formalizing this as `agent-doc deep <file>` has a different value: **you** can trigger it when you want breadth. "I'm stuck on the right approach for auth — deep explore this." The command fans out 3-4 subagents with different framing prompts, each writes findings, then synthesizes.
+
+Implementation would be: read the latest `## User` block, generate N variant prompts (e.g., "design X prioritizing simplicity", "design X prioritizing extensibility"), run them as parallel subagents, collect results into a `## Deep Exploration` section. Not complex to build — the skill infrastructure already supports subagents.
+
+### 4. Per-feature docs and lifecycle
+
+Yes — an agent doc can be both a **rolling conversation** (like plan.md) and a **feature spec** (like their FDs). The key difference is scope:
+
+- **Rolling docs** (plan.md, plugin.md): topic-scoped journals. No lifecycle — they grow, get compacted, continue.
+- **Feature docs** (tasks/codex.md, tasks/telegram.md): bounded scope, clear done state. These benefit from lifecycle tracking.
+
+**Flow for per-feature docs:**
+1. Create: `tasks/feature-name.md` with `status: planned` in frontmatter
+2. Design phase: user + agent iterate until `status: designed`
+3. Implementation: agent works, `status: in-progress`
+4. Verification: tests pass, docs updated, `status: complete`
+5. The doc **stays** as a decision record (like their 300+ FDs). Never deleted — searchable history.
+
+The feature docs seem to be an extension of SPEC.md. Similar to how the ontology of philosophy nodes and broken out terms in the entire context.
+
+Should each project have it's own feature directory? To track these specs?
+
+**Coordination across agents:** Each agent claims a feature doc. `agent-doc prompt --all` already polls all sessions. Adding `status:` to frontmatter lets a dashboard view (`agent-doc status`) show all active feature docs and their states. The plan.md rolling doc becomes the orchestration layer — it references feature docs, not duplicates their content.
+
+**An agent doc as an evolving feature:** Yes. A completed feature doc can reopen (`status: in-progress`) when the feature evolves. The conversation history IS the decision trail.
+
+### 5. Compaction command
+
+Two parts:
+
+**`agent-doc compact <file>`** — CLI command that:
+1. Reads the document, identifies completed `## User` / `## Assistant` exchanges
+2. Summarizes them into a `## Session Log` section (like plan.md's existing format)
+3. Removes the original exchanges, preserving the latest active conversation
+4. Updates the snapshot
+
+**Auto-suggestion** — The skill workflow could detect compactable state:
+- If doc exceeds a threshold (e.g., 200 lines)
+- If there are completed exchanges unrelated to the current topic
+- Print: "This doc has N completed exchanges (~K tokens). Run `/agent-doc compact` to summarize them."
+
+The suggestion is passive — never auto-compacts. The user decides. This is the same philosophy as `corky filter push` being manual.
+
+## User
 

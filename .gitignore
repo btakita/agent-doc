@@ -14,3 +14,6 @@ tmp/
 # Editor plugins moved to agent-doc/editors/
 agent-doc-jetbrains/
 agent-doc-vscode/
+
+# Local symlinks (not submodules)
+ctx-core-dev

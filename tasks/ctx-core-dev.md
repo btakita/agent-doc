@@ -546,3 +546,236 @@ Want me to flesh out the name modules concept further, or is NAMING.md good for 
 ## User
 
 Flesh out the name modules further please. We will iterate on this.
+
+## Assistant
+
+### Name Modules — A Declarative Naming System
+
+A **name module** is a formal declaration of how names are constructed in a given context. Think of it as a grammar for identifiers — parseable, composable, and toolable.
+
+#### The problem it solves
+
+Right now naming conventions are:
+- **Informal** — described in READMEs or tribal knowledge
+- **Unverifiable** — no linter can check "is this name immutable?"
+- **Opaque to tools** — IDEs, AI agents, and search can't understand name structure
+- **Non-composable** — mixing conventions across boundaries has no formal rules
+
+Name modules make naming conventions **first-class project artifacts**.
+
+#### Layers
+
+**Layer 1: Convention** — the base naming style
+
+```yaml
+convention: snake_case          # or: camelCase, PascalCase, kebab-case
+immutable: true                 # tags are never mutated during composition
+singular: true                  # tags are never pluralized
+```
+
+**Layer 2: Tags** — the atomic vocabulary
+
+```yaml
+tags:
+  open: true                    # allow unlisted tags
+  declared:
+    person: { level: entity }
+    name: { level: attribute }
+    company: { level: entity }
+    a: { shape: array }
+    R: { shape: record }
+    M: { shape: map }
+    create: { role: factory }
+    use: { role: hook }
+    set: { role: setter }
+```
+
+**Layer 3: Vectors** — composition rules
+
+```yaml
+vectors:
+  join: "_"                     # single underscore joins tags
+  namespace: "__"               # double underscore separates dimensions
+  direction: inferred           # vector direction by inference level
+```
+
+**Layer 4: Patterns** — name templates
+
+```yaml
+patterns:
+  factory: "create_{name}"
+  hook: "use_{name}"
+  setter: "set_{name}"
+  signal: "{name}$"
+  type: "{name}_T"
+  array: "{name}_a"
+  record: "{key}_R_{value}"
+  map: "{key}_M_{value}"
+```
+
+**Layer 5: Externals** — dependency name handling
+
+```yaml
+externals:
+  preserve_casing: true
+  join_with: "_"               # Response_header, createElement_form
+```
+
+**Layer 6: Packages**
+
+```yaml
+packages:
+  separator: "--"
+  pattern: "{category}--{platform}--{feature}"
+```
+
+#### Full example: `.naming.yml`
+
+```yaml
+version: 1
+name: ctx-core
+
+convention: snake_case
+immutable: true
+singular: true
+
+vectors:
+  join: "_"
+  namespace: "__"
+
+patterns:
+  factory: "create_{name}"
+  hook: "use_{name}"
+  setter: "set_{name}"
+  signal: "{name}$"
+  type: "{name}_T"
+  array: "{name}_a"
+
+externals:
+  preserve_casing: true
+  join_with: "_"
+
+packages:
+  separator: "--"
+  pattern: "{category}--{platform}--{feature}"
+
+tags:
+  open: true
+  declared:
+    auth0: { domain: authentication }
+    blog_post: { domain: content }
+    person: { level: entity }
+    name: { level: attribute }
+```
+
+#### For a camelCase repo
+
+```yaml
+version: 1
+name: my-react-app
+
+convention: camelCase
+immutable: true
+singular: true
+
+vectors:
+  join: "_"                    # camelCase_immutable_tag
+  namespace: "__"
+
+patterns:
+  factory: "create{Name}"     # conventional camelCase
+  hook: "use{Name}"           # React convention
+  type: "{Name}"              # PascalCase types
+
+externals:
+  preserve_casing: true
+  join_with: "_"              # createContext_auth, useState_user
+```
+
+#### Composing name modules
+
+Name modules extend each other — like CSS cascading:
+
+```yaml
+extends: "@immutable-tag/base"
+name: my-project
+
+convention: camelCase           # override base snake_case
+patterns:
+  factory: "create{Name}"      # override snake_case create_ pattern
+```
+
+Publish `@immutable-tag/base` as a shared convention. Any project inherits it, then overlays its own style.
+
+#### Tooling this enables
+
+1. **`nametag lint`** — Validate names against the module spec:
+   ```
+   ERROR: `personNames` violates singular rule (→ person_name_a)
+   WARN: `fetchUserData` — camelCase mutates tags
+   ```
+
+2. **`nametag parse`** — Decompose names into tags:
+   ```
+   $ nametag parse "auth0__user__validate"
+   namespace: auth0 → user → validate
+   tags: [auth0, user, validate]
+   role: validator
+   ```
+
+3. **`nametag alias`** — Auto-generate conventional aliases:
+   ```
+   $ nametag alias "create_auth_context"
+   camelCase: createAuthContext
+   PascalCase: CreateAuthContext
+   kebab-case: create-auth-context
+   ```
+
+4. **`nametag graph`** — Build a tag relationship graph:
+   ```
+   $ nametag graph
+   auth0 → user → validate
+   auth0 → domain (signal)
+   blog_post → estimate_read_minutes
+   ```
+
+5. **`nametag search`** — Semantic search by tag:
+   ```
+   $ nametag search "auth0"
+   auth0__user__validate()     (validator)
+   auth0_domain$               (signal)
+   create_auth0_client()       (factory)
+   ```
+
+6. **AI agent integration** — reads `.naming.yml` to:
+   - Generate correctly-named code
+   - Understand semantic structure of existing names
+   - Refactor between conventions preserving immutability
+
+#### Relationship to original Tag Vector vision
+
+| Original vision | Name modules |
+|---|---|
+| Font ligatures for arrows | `nametag parse` shows vector direction |
+| Vector database storage | `nametag graph` builds the tag graph |
+| ML algorithm support | `.naming.yml` is machine-readable |
+| Domain-specific analysis | Tags have declared domains |
+
+The key shift: instead of requiring tag-vector adoption, name modules **meet codebases where they are** and add immutability as an opt-in layer.
+
+#### Next steps
+
+1. Iterate on the `.naming.yml` schema
+2. Build a `nametag` CLI (parse, lint, alias, graph)
+3. Publish `@immutable-tag/base` as the shared convention
+4. Write a formal spec for the name module format
+
+What aspects do you want to dig into first?
+
+## User
+
+I want to build a tool to support the name system. With it's own git repo.
+The tool can be built using Rust or Zig. Open for discussion. Probably Rust to take advantage of ecosystem and relative stability.
+
+I want configurations for all major languages. This would ensure that we have full coverage of existing ecosystems along with the ability to extend name systems.
+

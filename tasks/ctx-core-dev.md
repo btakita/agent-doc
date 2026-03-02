@@ -296,3 +296,96 @@ Now I'm willing to switch to a conventional name system. Could you give me advan
 What would be the best way to go about this. I have changed my name system several times, but it has been a lot of work. However, I am also willing to transition slowly.
 
 Can I support both the conventional name system and the tag-vector name system.
+
+## Assistant
+
+### Tag-Vector Naming System — Assessment
+
+Analyzed both codebases and the Part 1 convention post. Here's the full system as used:
+
+**Core rules:**
+- Single `_` joins tags within a vector: `person_name`, `company_person_name`
+- Double `__` joins multi-dimensional vectors: `highest_net_worth__company_person_name`
+- Trailing `_` marks functions/factories: `memo_()`, `sig_()`, `be_()`
+- `$_` marks reactive signals: `pathname$_`, `AUTH0_DOMAIN$_`
+- `__new`, `__set` for constructors/setters: `cache$__new()`, `AUTH0_DOMAIN__set`
+- `_a1` for arrays, `_R` for Record, `_M` for Map
+- `_T` for types, `_I` for interfaces
+- `--` in package names for domain hierarchy: `domain--server--briantakita`, `ui--browser--blog`
+- `be_` prefix for reactive behaviors/effects
+- `__hyop` suffix for DOM hydration/on-page effects
+
+**Real examples from the codebases:**
+- `sorted_dehydrated_post_meta_a1__new()`
+- `blog_post__estimate_read_minutes__new()`
+- `id_be_lock_memosig_triple_()`
+- `progress_bar__hyop()`
+- `[AUTH0_DOMAIN$_, AUTH0_DOMAIN_, AUTH0_DOMAIN__set]` (signal triple)
+
+### Advantages
+
+1. **Flat structure** — Eliminates deep nesting. `auth0__user__validate()` instead of `auth0.user.validate()`. No module hierarchy to navigate.
+2. **Grep-friendly** — Every name is globally unique and immutable. `grep -r 'auth0__user__validate'` finds all usages. No aliasing ambiguity.
+3. **Type encoding** — Name tells you data shape: `_a1` = array, `_R` = Record, `$_` = reactive signal.
+4. **Self-documenting reactive patterns** — `[AUTH0_DOMAIN$_, AUTH0_DOMAIN_, AUTH0_DOMAIN__set]` instantly reveals a signal triple.
+5. **Domain context embedded** — `domain--server--briantakita` tells category, platform, and scope without opening the package.
+6. **Consistent factory pattern** — Trailing `_` universally means "function that creates something."
+
+### Disadvantages
+
+1. **Steep learning curve** — New contributors must learn the encoding (`__`, `$_`, `_a1`, `_T`, `__hyop`, `be_`) before reading code.
+2. **Verbose** — `sorted_dehydrated_post_meta_a1__new()` is 43 characters. Hard to scan at a glance.
+3. **No IDE autocomplete scoping** — Standard `object.method()` gives autocomplete within a scope. Flat names search the entire namespace.
+4. **Unconventional** — Violates JS/TS community norms (camelCase, PascalCase). Every new dev must be onboarded.
+5. **Symbol overload** — `_` traditionally means "private" in JS. `$` means observable/jQuery. `__` means dunder in Python. Existing expectations conflict.
+6. **No ecosystem** — No adoption, no community docs, no Stack Overflow answers, no shared understanding.
+7. **Tooling gap** — The blog post mentions future font ligatures and vector analysis tools that don't exist yet.
+
+### Dual Support — Yes, It Works
+
+You can absolutely support both. Here's how:
+
+**1. New code uses conventional names:**
+
+| Tag-Vector | Conventional |
+|---|---|
+| `auth0__user__validate()` | `validateAuth0User()` |
+| `blog_post__estimate_read_minutes__new()` | `createBlogPostReadTimeEstimate()` |
+| `domain--server--briantakita` | `@briantakita/domain-server` |
+| `$_` signals | Keep `$` suffix (Svelte/RxJS convention) |
+| `be_` (reactive) | `use` prefix (React/Solid convention) |
+| `__new` (constructor) | `create` prefix |
+| `__set` (setter) | `set` prefix |
+| `_a1` (array) | Plural name (`posts`, `items`) |
+| `_T` (type) | PascalCase (TypeScript context handles it) |
+| `trailing _` (function) | camelCase verb prefix |
+
+**2. Export aliases for backwards compatibility:**
+```ts
+export function validateAuth0User() { ... }
+export const auth0__user__validate = validateAuth0User // alias
+```
+
+**3. Gradual migration strategy:**
+- Start with **leaf packages** (no dependents) — rename exports, add aliases
+- Work inward toward core packages
+- Each package exports both names during transition
+- Drop old names only after all consumers are updated
+
+**4. Package rename:**
+- `domain--server--briantakita` → `@briantakita/domain-server`
+- `ui--browser--blog` → `@briantakita/blog-ui`
+- Publish old names as re-export wrappers during transition
+
+**My recommendation:** Keep tag-vector internally in ctx-core for now (deeply embedded, high migration cost). Use conventional names for all **new** public APIs and packages. Export dual names where needed. This minimizes disruption while making the code approachable to new contributors.
+
+Want me to create a formal document codifying the tag-vector system and the transition plan?
+
+## User
+
+Another reason is immutability of the tags. Which include casing (violated by camelCase) and singularity (no *ies replacing singular *y or *s appending to the end).
+
+If it were easier to adopt, I would go all in. But I'm afraid that it's not really easy enough to adopt.
+Perhaps some modifications to make it more adoptable would be useful?
+
+I need to have an overarching model that includes both conventional pascalCase and snake_case. I keep any dependency pascalCase_immutable_with_added_to_other_tags.

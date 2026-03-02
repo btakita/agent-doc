@@ -192,3 +192,41 @@ Checked 575 installs across 639 packages (no changes) [8.00ms]
 ~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:39:01
 ❯ ctx-core--link
 zsh: command not found: ctx-core--link
+
+## Assistant
+
+Bun cached the previous state — `bun install` said "no changes" so it didn't create the new bin symlinks. Force it:
+
+```bash
+bun install --force
+ctx-core--link
+```
+
+Or run the script directly without bun's bin resolution:
+
+```bash
+./app/-briantakita.me-dev-bin/bin/ctx-core--link.sh
+```
+
+## User
+
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:40:47
+❯ bun install --force
+
+[0.01ms] ".env"
+bun install v1.3.6 (d530ed99)
+
++ @btakita/-briantakita.me-dev-bin@workspace:app/-briantakita.me-dev-bin
++ @btakita/dev-bin@workspace:lib/dev-bin
++ @changesets/cli@2.29.7
++ @ctx-core/dev-tools@8.3.68
++ @ctx-core/monorepo@21.4.158
++ broken-link-checker@0.7.8
++ typescript@5.9.3
+
+546 packages installed [130.00ms]
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:40:5
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?3                                                                                                                                                                              ▼ 21:40:52
+❯ ctx-core--link
+
+zsh: command not found: ctx-core--link

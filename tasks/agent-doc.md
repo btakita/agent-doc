@@ -315,3 +315,17 @@ Draft:
 ## User
 
 Can we readd highlighting which TMUX pane is currently selected. I only see 1 yellow line between the 2 panes now.
+
+## Assistant
+
+**Fixed.** The hooks were overriding `pane-active-border-style` too, wiping out the active/inactive distinction.
+
+Changed hooks to:
+- Only set `pane-border-style` (inactive border) — yellow=idle, blue=working
+- **Unset** `pane-active-border-style` (`-pu`) — falls back to tmux default (green/bright)
+
+Active pane now shows the default tmux active border. Applied immediately to this pane.
+
+## User
+
+let's version bump and release the agent-doc changes.

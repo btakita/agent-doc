@@ -148,3 +148,39 @@ ReferenceError: Cannot access 'postcss' before initialization.
 at /home/brian/work/btakita/briantakita.me-dev/node_modules/.bun/postcss@8.5.6/node_modules/postcss/lib/postcss.mjs:3:16
 
 Bun v1.3.10 (Linux x64)
+
+## Assistant
+
+**Two issues:**
+
+### 1. Upgrading package.json versions
+
+`bun update` only updates within existing semver ranges (e.g., `^8.4.32` → latest 8.x). To bump to the absolute latest (breaking range), use `npm-check-updates`:
+
+```bash
+bunx npm-check-updates -u --workspaces   # rewrites package.json with latest versions
+bun install                               # reinstall with new versions
+```
+
+Or for a single workspace package:
+```bash
+cd app/briantakita.me && bunx npm-check-updates -u
+```
+
+### 2. postcss@8.5.6 circular import crash
+
+`postcss@8.5.6` has a broken ESM wrapper — `postcss.mjs` does `import postcss from 'postcss'` which creates a circular reference. Bun hits a TDZ (Temporal Dead Zone) error.
+
+**Fix — pin postcss to 8.4.x** in the root `package.json`:
+```json
+"overrides": {
+  "postcss": "~8.4.49"
+}
+```
+Then `bun install`. This affects all workspace packages.
+
+Or if the issue is only in `@rebuildjs/tailwindcss` (which declares `"postcss": "latest"`), the override prevents `latest` from pulling 8.5.6.
+
+## User
+
+Explain the postcss circular reference

@@ -156,3 +156,49 @@ Want to start building Phase 2a?
 Can I have a domain ontology like with the philosophy repo for each tag in the tag path?
 
 Let's implement Phase 2.
+
+## Assistant
+
+### Tag ontology — yes, powerful idea
+
+The philosophy repo structure maps directly to tags. Each tag in a tag path (like `user`, `validate`, `auth`) could have a definition file:
+
+```
+.naming/tags/
+├── user.md        → "An authenticated identity in the system"
+├── validate.md    → "Verify correctness against rules"
+├── auth.md        → "Authentication and authorization boundary"
+└── profile.md     → "User-facing data representation"
+```
+
+Following the philosophy pattern, each tag definition could include:
+
+- **Ontology** — what the tag means in this domain
+- **Relations** — links to related tags (`user` → `auth`, `profile`, `account`)
+- **Conventions** — how this tag appears in code (`user_name`, `UserService`, `is_user_active`)
+- **Examples** — concrete identifiers using this tag across the codebase
+
+This creates a **domain vocabulary** — the codebase's own ontology. An agent reads `.naming/tags/user.md` and understands not just the naming convention but the *meaning* of `user` in this project. Two projects might both have a `user` tag but define it differently.
+
+This fits naturally as a Phase 3 feature (graph building) since the tag definitions form a directed graph like the philosophy nodes. For Phase 2, we build the extraction and search foundation that the ontology layer will sit on top of.
+
+### Phase 2 implementation plan
+
+Based on the current codebase (parser, config, lint stub), here's the Phase 2 breakdown:
+
+**Phase 2a — `tagpath extract` + cross-language search**
+1. Regex-based identifier extraction from source files (walk directories, match identifiers per language)
+2. `tagpath extract <path>` — list all identifiers with their parsed tag paths
+3. `tagpath search <tags> <path>` — find identifiers containing given tags across all conventions
+4. Config inheritance — resolve `extends` chains in `.naming.toml`
+
+**Phase 2b — tree-sitter + lint**
+5. tree-sitter integration — context-aware extraction (function vs variable vs type)
+6. `tagpath lint` — validate identifiers against `.naming.toml` rules
+7. Fix dead_code warnings (structs become used)
+
+I'll start with Phase 2a. Want me to proceed, or adjust the plan first?
+
+## User
+
+Yes. Start with 2a. Does this include indexing search results or does that come later...like in phase 3?

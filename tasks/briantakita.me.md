@@ -298,4 +298,37 @@ at loadAndEvaluateModule (2:1)
 
 Bun v1.3.6 (Linux x64)
 error: script "start" exited with code 1
-error: script "start" exited with code 1
+
+
+## Assistant
+
+**elysia 1.4.15 broke relysjs's compression middleware.**
+
+`mapResponse` is defined internally in elysia 1.4.15's bun-specific bundle (`dist/bun/index.js`) but
+**not exported**. It was exported in elysia 1.0.27. relysjs@1.21.73 imports it at `server/compression
+/index.js:5`.
+
+**Dependency chain:**
+- `app/briantakita.me` declares `elysia: ^1.0.27` — allows up to `<2.0.0`
+- relysjs@1.21.73 declares `elysia: ^1.1.11`
+- Bun resolves to 1.4.15 → bun bundle drops `mapResponse` export → crash
+
+**Fix options:**
+
+1. **Quick fix — pin elysia in root `package.json`:**
+   ```json
+   "overrides": {
+     "elysia": "1.0.27"
+   }
+   ```
+   Then `bun install`. This forces all packages to use 1.0.27 where `mapResponse` is still exported.
+
+2. **Proper fix — update relysjs** (you're the author):
+   Replace `mapResponse` usage in `server/compression/index.js` with elysia 1.4+ compatible code. The
+ function just converts `context.response` to a `Response` object to inspect headers.
+
+Option 1 gets you running immediately. Option 2 is the right long-term fix.
+
+## User
+
+Do the proper fix. Option 2

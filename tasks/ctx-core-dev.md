@@ -104,3 +104,47 @@ There's also a more sophisticated alternative: `ctx_core__monorepo_pnpm__depende
 Please add ctx_core__monorepo_pnpm__dependencies__update.sh into AGENTS.md for upgrading dependencies.
 
 Then pnpm i --recursive to install the dependencies.
+
+How do I run the recursive upgrades in briantakita.me-dev?
+
+## Assistant
+
+Added a **Dependency Management** section to `AGENTS.md` in ctx-core-dev. Documents the full workflow:
+
+```bash
+ctx_core__monorepo_pnpm__dependencies__update  # query npm, update deps, create changesets
+pnpm i --recursive                              # install updated deps
+# then: changeset-version-COMMIT_EDITMSG → recursive-git-commit → pnpm-publish--force
+```
+
+**For briantakita.me-dev** — it uses bun workspaces (not pnpm), so the equivalent is:
+
+```bash
+bun update                    # update all deps in the workspace to latest compatible versions
+bun install                   # reinstall after updates
+```
+
+There's no `ctx_core__monorepo_pnpm__dependencies__update` equivalent for bun workspaces yet. The ctx-core-dev tooling is pnpm-specific. If you want the same "check npm registry + auto-create changesets" behavior in briantakita.me-dev, that would need a new script (or adapting the monorepo tool to support bun). For now, `bun update` handles the basics.
+
+## User
+
+How do I automatically upgrade all packages versions in the package.json files?
+
+I ran bun update...so this should not have happened
+
+~/work/btakita/agent-loop/briantakita.me-dev main !4 ?4                                                                                                                                                                              ▼ 06:15:32
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Browserslist: caniuse-lite is outdated. Please run:
+npx update-browserslist-db@latest
+Why you should do it regularly: https://github.com/browserslist/update-db#readme
+1 | import postcss from 'postcss'
+2 |
+3 | export default postcss
+^
+ReferenceError: Cannot access 'postcss' before initialization.
+at /home/brian/work/btakita/briantakita.me-dev/node_modules/.bun/postcss@8.5.6/node_modules/postcss/lib/postcss.mjs:3:16
+
+Bun v1.3.10 (Linux x64)

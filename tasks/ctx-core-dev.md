@@ -78,4 +78,29 @@ Preserved everything else: philosophy sections, naming conventions, optionality,
 
 ## User
 
-I ran a command to upgrade all dependencies of the subpackages in ctx-core-dev. Can you determine what script I ran? 
+I ran a command to upgrade all dependencies of the subpackages in ctx-core-dev. Can you determine what script I ran?
+
+## Assistant
+
+**`pnpm-up.sh`** — confirmed from shell history.
+
+Located at `bin/pnpm-up.sh`:
+```bash
+#!/bin/sh
+pnpm up -r --prefer-offline
+strip-workspace.sh
+```
+
+- `pnpm up -r` — recursively updates all workspace packages to latest compatible versions
+- `--prefer-offline` — uses cached packages when possible
+- `strip-workspace.sh` — cleans up workspace artifacts afterward
+
+Git log shows multiple "update dependencies" commits affecting package.json across all subpackages (2-line changes each).
+
+There's also a more sophisticated alternative: `ctx_core__monorepo_pnpm__dependencies__update.sh` (in `bin/`, implemented in `lib/monorepo/monorepo_pnpm__dependencies__update/`) — this checks the npm registry for latest versions and applies specific version updates per package. But `pnpm-up.sh` is what you ran most recently.
+
+## User
+
+Please add ctx_core__monorepo_pnpm__dependencies__update.sh into AGENTS.md for upgrading dependencies.
+
+Then pnpm i --recursive to install the dependencies.

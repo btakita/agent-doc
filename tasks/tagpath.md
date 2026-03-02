@@ -1041,3 +1041,35 @@ Let's also add Odin which has different concepts for allocation
 https://forum.odin-lang.org/t/question-about-terminology-make-vs-new-vs-create/322
 https://github.com/odin-lang/Odin/wiki/Naming-Convention
 https://github.com/odin-lang/examples/wiki/Naming-and-style-convention
+
+## Assistant
+
+Created `lang/odin.yml` and pushed. Odin introduces two unique aspects:
+
+**Ada_Case for types** — PascalCase with underscores (`Some_Type`, `Dynamic_Array`). Distinct from pure PascalCase. Our convention system represents this as a separate convention value.
+
+**Rich allocation semantics** — Odin distinguishes four concepts the Tag Path pattern system captures:
+
+| Pattern | Meaning | Paired with |
+|---------|---------|-------------|
+| `new` | allocate memory, return `^T` (no construction) | `free` |
+| `make` | allocate built-in types (slices, maps) | `delete` |
+| `create_{name}` | allocate AND construct | `destroy` |
+| `init` | construct in-place (by pointer, no allocation) | `destroy` |
+
+Most languages collapse these into a single "factory" pattern. Odin's explicitness maps cleanly to separate pattern entries in `.naming.yml`.
+
+Convention summary:
+
+| Context | Convention |
+|---------|-----------|
+| procedure, variable, parameter, field | snake_case |
+| type, struct, union, enum, enum_value | Ada_Case |
+| constant | UPPER_SNAKE_CASE |
+| import, package, file | snake_case |
+
+12/12 tests pass. Total: 19 languages. Pushed to https://github.com/btakita/tagpath.
+
+## User
+
+I don't see /home/brian/work/btakita/agent-loop/tagpath/lang/odin.yml

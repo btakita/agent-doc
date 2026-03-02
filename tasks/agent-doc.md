@@ -352,3 +352,21 @@ Did you credit the article for these changes?
 ## User
 
 Can [workmux](https://github.com/raine/workmux) be beneficial to our development flow?
+
+## Assistant
+
+**Complementary, not competing.** workmux solves git worktree isolation for parallel agents; agent-doc solves document-based conversation with agents. Different problems.
+
+**What workmux adds:** worktree management (create → work → merge → cleanup), dashboard TUI, agent status in window names, multi-terminal support (kitty, WezTerm, Zellij).
+
+**What we have that it doesn't:** document-as-interface, snapshot diffs, SKILL.md workflow, IDE plugins, prompt detection, outline.
+
+**Not needed for our current flow.** We use submodules — parallel agents touch different repos (corky, agent-doc, instruction-files), so code conflicts don't arise. workmux shines when multiple agents modify the same codebase (monorepo feature branches).
+
+**Future integration:** If we adopt feature-branch-per-agent workflows, workmux creates the worktree, agent-doc manages the conversation inside it. Worktree = isolation, document = context.
+
+## User
+
+I happen to just run a session per project. But I am interested in the worktree on the same repo.
+
+If we were to integrate, what would it look like?

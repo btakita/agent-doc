@@ -68,3 +68,18 @@ Agreement between you and Zero Hash LLC (Delaware) — the back-end crypto techn
 Summarize https://ndcdyn.interactivebrokers.com/registration-api/api/agreement/download-agreement?renderedFormId=40796412
 
 Summarize https://ndcdyn.interactivebrokers.com/registration-api/api/agreement/download-agreement?renderedFormId=40796411
+
+## Assistant
+
+Both URLs require an authenticated IB session — they return empty without your login cookies. These are personalized agreement downloads tied to your account registration.
+
+**To proceed:**
+1. Download the PDFs from your browser while logged into IB
+2. Save them to `mail/topics/interactive-brokers/` (e.g., `ib_40796412.pdf` and `ib_40796411.pdf`)
+3. Submit again and I'll summarize them
+
+If you can tell me the agreement titles (visible on the IB registration/agreement page), I can also look up the standard public versions.
+
+## User
+
+Downloaded.

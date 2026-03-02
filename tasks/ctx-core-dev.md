@@ -389,3 +389,101 @@ If it were easier to adopt, I would go all in. But I'm afraid that it's not real
 Perhaps some modifications to make it more adoptable would be useful?
 
 I need to have an overarching model that includes both conventional pascalCase and snake_case. I keep any dependency pascalCase_immutable_with_added_to_other_tags.
+
+I mainly don't want to be fighting against the rest of the world.
+
+## Assistant
+
+### Immutability — the strongest argument
+
+You're right that I undersold this. Immutability is the **core insight** that separates tag-vector from "just snake_case with extra rules":
+
+1. **Case immutability** — `person` is always `person`, never `Person` or `PERSON`. camelCase mutates: `personName` changes `name` → `Name`.
+2. **Singular immutability** — `company` is always `company`, never `companies`. The shape suffix carries collection semantics.
+3. **Grep = truth** — Literal string search finds *every* usage. No regex for case variants or pluralization.
+
+These are genuinely valuable properties that conventional naming can't provide.
+
+### Making it more adoptable — what to keep vs drop
+
+Adoption barriers ranked:
+
+| Barrier | Severity | Recommendation |
+|---|---|---|
+| Esoteric suffixes (`_a1`, `_R`, `_M`, `__hyop`) | **High** | Replace with intuitive alternatives |
+| Trailing `_` for functions | **Medium** | Drop — use verb prefixes instead |
+| `be_` prefix | **Medium** | Replace with `use` (React/Solid convention) |
+| `$_` for signals | **Low** | Keep `$` (Svelte/RxJS convention), drop `_` |
+| `__` for namespacing | **Low** | Keep — Python/C devs recognize it |
+| snake_case itself | **Low** | Conventional in Python, Rust, Ruby, SQL |
+
+### Proposed: "Immutable Tag Convention"
+
+Keep the immutability principles. Drop the exotic encoding. Accommodate external names.
+
+**Rules:**
+1. **Tags are always lowercase singular** — `person`, `company`, `name`
+2. **`_` joins tags** — `person_name`, `company_person` (standard snake_case)
+3. **`__` separates dimensions/namespaces** — `auth0__user__validate` (the power feature)
+4. **External names preserve their casing** — `Response_header`, `HTMLElement_class`, `Elysia_plugin`
+5. **Collections use `_a`** instead of `_a1` — or `_list` for readability
+6. **Types use `_T`** — keep (TypeScript community has `_T` patterns)
+7. **Reactive signals use `$`** — `pathname$`, `auth_domain$` (drop trailing `_`)
+8. **Functions drop trailing `_`** — use verb prefixes: `create_cache`, `validate_user`
+
+**Before → After:**
+
+| Current (tag-vector) | Proposed (immutable tag) |
+|---|---|
+| `memo_()` | `create_memo()` |
+| `be_sig_triple_()` | `use_sig_triple()` |
+| `AUTH0_DOMAIN$_` | `auth0_domain$` |
+| `progress_bar__hyop()` | `progress_bar__on_hydrate()` |
+| `sorted_dehydrated_post_meta_a1__new()` | `create_sorted_dehydrated_post_meta_a()` |
+
+### The overarching model: immutable composition
+
+Your `pascalCase_immutable_with_added_to_other_tags` idea is the unifying principle:
+
+```
+<external_PascalCase>_<your_tags>
+```
+
+- `Response_header_name` — `Response` from Web API, your tags `header`, `name`
+- `Elysia_compression_plugin` — `Elysia` preserved from framework
+- `HTMLElement_class_list` — external name preserved, your tags appended
+
+**The overarching rule: never mutate a name when composing it.** This is the immutability guarantee that both snake_case and preserved-PascalCase honor. camelCase is the only convention that breaks it (capitalizing the second word's first letter).
+
+Add this to AGENTS.md with a CLAUDE.md symlink
+
+### What fights the world vs what doesn't
+
+**Fights the world** (drop these):
+- `_a1`, `_R`, `_M` — alien encoding
+- `__hyop` — opaque jargon
+- `trailing _` — no precedent outside Scala
+What are alternatives to the factory function trailing `_`. `new_` prefix?
+
+**Doesn't fight the world** (keep these):
+- snake_case — universal across ecosystems
+- `__` namespacing — Python/C convention
+- `$` for reactive — Svelte/RxJS convention
+- Preserving external casing — just respectful composition
+
+Strip the former, keep the latter: **80% of the power, 3x the adoptability.**
+
+### Dual support model
+
+1. **Your code** — immutable tag convention (snake_case, `__`, `$` for signals)
+2. **External names** — preserve their casing when composing: `PascalCase_your_tag`
+3. **Public APIs** — optionally export conventional camelCase aliases for external adoption
+
+This means you're not fighting anyone. Internal code stays immutable and grep-friendly. External names are respected. And if someone wants camelCase, aliases bridge the gap.
+
+Want me to write this up as a formal document (e.g., `NAMING.md` in ctx-core-dev)?
+
+Yes. Write it in NAMING.md
+
+## User
+

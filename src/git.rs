@@ -67,7 +67,11 @@ fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
 pub fn commit(file: &Path) -> Result<()> {
     let (git_root, resolved) = resolve_to_git_root(file)?;
     let timestamp = chrono_timestamp();
-    let msg = format!("agent-doc: {}", timestamp);
+    let doc_name = file
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let msg = format!("agent-doc({}): {}", doc_name, timestamp);
 
     let status = Command::new("git")
         .current_dir(&git_root)
@@ -118,7 +122,7 @@ pub fn squash_session(file: &Path) -> Result<()> {
             "log",
             "--oneline",
             "--reverse",
-            "--grep=agent-doc:",
+            "--grep=^agent-doc",
             "--",
             &file_str,
         ])

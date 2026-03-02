@@ -994,5 +994,19 @@ Updated `generate_config()` with aliases (`js`, `rb`, `kt`, `cs`, `ex`, `sh`, `c
 
 ## User
 
-Complete rename from nametag to tagpath. See Cargo.toml 
+Complete rename from nametag to tagpath. See Cargo.toml
 Write the *.yml files in /home/brian/work/btakita/agent-loop/tagpath/lang
+
+## Assistant
+
+The submodule at `agent-loop/tagpath` was pointing at the old pre-rename commit. Updated it to latest (`24ab001`):
+
+- **Cargo.toml**: `name = "tagpath"` (confirmed)
+- **All 17 lang/*.yml files**: present
+- **No "nametag" references** remaining in source
+
+The issue was that the submodule was added before the rename and language preset commits were pushed. Now `git pull` inside the submodule brought it to HEAD with all changes.
+
+## User
+
+Now add the config for Zig. Zig is a special case with functions being camelCase, variables being snake_case, etc. This system should be able to represent Zig.

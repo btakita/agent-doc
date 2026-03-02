@@ -1386,3 +1386,30 @@ Semantic Tag name system?
 Tag Vector name system?
 
 Rate each phrase according to relevant criteria.
+
+## Assistant
+
+Good call on the semantic web collision — "semantic tag" is completely overloaded.
+
+**Criteria:** Clarity (self-explanatory?), Distinctiveness (unique in search?), Domain Fit (accurate?), Adoptability (natural in conversation?)
+
+| Phrase | Clarity | Distinct | Fit | Adopt | Overall |
+|--------|---------|----------|-----|-------|---------|
+| **Tag Path** | 9 | 7 | 8 | 8 | **8.0** |
+| **Tag Vector** | 7 | 9 | 9 | 6 | **7.8** |
+| **Graph Tag** | 7 | 6 | 7 | 7 | **6.8** |
+| **Semantic Tag** | 8 | 3 | 8 | 4 | **5.8** |
+
+**Tag Path wins.** Every identifier is literally a path through an ordered sequence of tags: `auth → user → validate`. The metaphor is immediately graspable. No namespace collisions. "Tag Path convention" and "Tag Path system" both read naturally.
+
+**Tag Vector** is the faithful original — more technically precise (tags have direction and magnitude via namespace depth), but "vector" requires explanation and sounds academic. Could remain the internal/theoretical name while Tag Path is the public brand.
+
+**Graph Tag** — "graph" is too overloaded (GraphQL, social graphs, charts). And the graph is an emergent property, not the primary interface.
+
+**Semantic Tag** — dead on arrival. HTML `<article>`, `<nav>`, Semantic Web, SEO — too many collisions.
+
+So: **tagpath** for the crate, **Tag Path** for the naming system. Ready to rename the repo?
+
+## User
+
+Yes. Tag Path. Let's rename Tag Vector to tag path. Perhaps in a blog post.

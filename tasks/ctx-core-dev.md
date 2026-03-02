@@ -38,3 +38,26 @@ There was some automation tools in managing the updates and upgrades.
 changeset-version-COMMIT_EDITMSG
 recursive-git-commit
 pnpm-publish--force
+
+## Assistant
+
+Created `AGENTS.md` and `CLAUDE.md → AGENTS.md` symlink in ctx-core-dev.
+
+**AGENTS.md covers:**
+- Architecture overview (lib/, tools/, bin/, dormant/)
+- Stack (TypeScript ES2022, pnpm workspaces, changesets, uvu, mise)
+- Core package (`ctx-core` v7.2.32, 48 exports)
+- **Release workflow** — the three automation tools you mentioned:
+  1. `changeset-version-COMMIT_EDITMSG` — runs `pnpm changeset version`, generates CHANGELOG diffs, populates per-package COMMIT_EDITMSG files
+  2. `recursive-git-commit` — opens editor for review, then commits recursively in each workspace package using COMMIT_EDITMSG
+  3. `pnpm-publish--force` — parallel publish via GNU `parallel`, skips already-published versions, supports `-d` dry run
+- Dev environment commands (`tmux-dev`, `build-watch`, etc.)
+- Conventions and git rules
+
+All three scripts live in `lib/monorepo/bin/` and are exposed via PATH in `.mise.toml`.
+
+Still to do: the `Readme.md` has 4 outdated sections (Lerna, Sapper, Quovo, tech stack). Want me to fix those next?
+
+## User
+
+Please fix docs.

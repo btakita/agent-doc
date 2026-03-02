@@ -535,4 +535,8 @@ commit
 
 ## User
 
+compact this doc
 
+Look at https://www.linkedin.com/jobs/view/4379083129/?refId=hGk1iex1cL0E5KY1CmWJNg%3D%3D&trackingId=bzzh9xyy6nH1tDXlgLIwvA%3D%3D
+
+I have a calendy link. What should I put in additional notes given my experience?

@@ -70,3 +70,4 @@ Document compacted — removed the iterative design/naming discussions (preserve
 
 ## User
 
+commit, version bump, and release

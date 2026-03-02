@@ -184,3 +184,73 @@ Or if the issue is only in `@rebuildjs/tailwindcss` (which declares `"postcss": 
 ## User
 
 Explain the postcss circular reference
+What about caniuse-lite?
+
+## Assistant
+
+### postcss circular reference explained
+
+postcss@8.5.6 ships two entrypoints (in `package.json` exports):
+- **CJS**: `lib/postcss.js` — the real implementation (`require('postcss/lib/at-rule')`, etc.)
+- **ESM**: `lib/postcss.mjs` — a thin wrapper
+
+The ESM wrapper does:
+```js
+import postcss from 'postcss'    // ← imports ITSELF
+export default postcss
+export const parse = postcss.parse
+// ... etc
+```
+
+When Bun resolves `import postcss from 'postcss'` in an ESM context, it follows the `"import"` condition in the exports map → back to `lib/postcss.mjs` → circular. The `postcss` binding hasn't been initialized yet (still in TDZ) → `ReferenceError: Cannot access 'postcss' before initialization`.
+
+**Why it works in Node.js:** Node resolves the self-import differently — it falls back to the CJS `lib/postcss.js` when the ESM wrapper imports from the package name, breaking the cycle. Bun doesn't do this fallback.
+
+**Fix:** Pin to `postcss@~8.4.49` (before the broken ESM wrapper was added).
+
+### caniuse-lite
+
+The warning is harmless but easy to fix:
+
+```bash
+cd ~/work/btakita/briantakita.me-dev
+bunx update-browserslist-db@latest
+```
+
+This updates the `caniuse-lite` database inline (no version bump needed). It patches the data files inside `node_modules/caniuse-lite/` so Browserslist/Autoprefixer know about recent browser releases. Run it periodically or after `bun install`.
+
+## User
+
+Is this issue tracked in the postcss gh?
+
+Not having much luck updating caniuse-lite
+
+~/work/btakita/agent-loop/briantakita.me-dev main !4 ?4                                                                                                                                                                              ▼ 06:26:06
+❯ update-browserslist-db
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Latest version:     1.0.30001775
+Updating caniuse-lite version
+$ bun update caniuse-lite
+[0.03ms] ".env"
+Resolving dependencies
+Resolved, downloaded and extracted [2]
+Saved lockfile
+caniuse-lite has been successfully updated
+
+No target browser changes
+~/work/btakita/agent-loop/briantakita.me-dev main !4 ?4                                                                                                                                                                              ▼ 06:29:11
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Browserslist: caniuse-lite is outdated. Please run:
+npx update-browserslist-db@latest
+Why you should do it regularly: https://github.com/browserslist/update-db#readme
+1 | import postcss from 'postcss'
+2 |
+3 | export default postcss
+^
+ReferenceError: Cannot access 'postcss' before initialization.
+at /home/brian/work/btakita/briantakita.me-dev/node_modules/.bun/postcss@8.5.6/node_modules/postcss/lib/postcss.mjs:3:16
+
+Bun v1.3.10 (Linux x64)

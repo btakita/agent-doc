@@ -48,3 +48,8 @@ Brian Takita and Toby Hill were in the conversation.
 ## User
 
 Where is the transcript?
+
+Here is the message that I sent to Toby Hill. I can edit it so please help me with helpful edits to the message. I sent him the updated BrianTakita.pdf
+
+Hi Toby, thank you for the call that we had on 2/26 at 1PM Eastern. Here is my updated resume as requested. It now has a career summary. And the breadth of the full stack developer role on my most recent job @Presence.AI.
+

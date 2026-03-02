@@ -46,3 +46,34 @@ Here is my draft reply:
 Hi Dave! Thank you for reaching out to me. I am interesting in learning more about this role. Would a call on Tuesday work for you?
 
 Please help me with a good reply. I'm sending resume/BrianTakita.pdf
+
+## Assistant
+
+**LinkedIn API:** No — LinkedIn's Messaging API is restricted to approved partners only. There's no public API to sync messages. You'd need to copy/paste or use browser automation (which violates their ToS).
+
+**Your draft** has a typo: "interesting" → "interested". But more importantly, this role is a strong fit — they specifically call out **Claude Code-based agents** — and your reply should signal that without overselling. A recruiter wants to quickly confirm you're relevant and schedule a call.
+
+**Suggested reply:**
+
+> Hi Dave, thank you for reaching out. This role is a strong fit — I'm actively building Claude Code agent tooling and spec-driven AI workflows, and I recently architected a real-time multimodal AI pipeline at Presence AI. I've attached my resume.
+>
+> I'm available for a call Tuesday or Wednesday. What time works best for you?
+>
+> Best,
+> Brian
+
+**Why this works:**
+- Names Claude Code directly (mirrors their job description — instant pattern match)
+- "Actively building" signals current, hands-on work (not theoretical)
+- Presence AI gives concrete shipped credibility
+- Short and action-oriented — matches the "builder, not strategist" tone of the JD
+- Offers two days for scheduling flexibility
+
+## User
+
+Hi Dave, thank you for reaching out. This role is a strong fit — I'm actively building Claude Code agent tooling and spec-driven AI workflows, and I recently architected a real-time multimodal AI pipeline at Presence AI. I've attached my resume.
+
+I'm available for a call Tuesday or Wednesday. What time works best for you?
+
+Best,
+Brian

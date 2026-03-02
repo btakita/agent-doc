@@ -370,3 +370,53 @@ Can [workmux](https://github.com/raine/workmux) be beneficial to our development
 I happen to just run a session per project. But I am interested in the worktree on the same repo.
 
 If we were to integrate, what would it look like?
+
+## Assistant
+
+**Worktree-per-feature with document sessions.** Here's the flow for a project like corky:
+
+### Kickoff
+```sh
+# Create spec doc in main working tree
+echo "## User\n\nAdd telegram integration" > specs/telegram.md
+
+# workmux creates worktree + tmux window + Claude session
+workmux add telegram -p "Implement per specs/telegram.md"
+```
+Creates `.worktrees/telegram/` (git worktree branched from main), tmux window with Claude running inside.
+
+### The bridge
+Spec doc lives in **main** (you edit it from IDE). Agent works in the **worktree** (code changes isolated).
+
+```
+main tree:          specs/telegram.md   ← human edits
+worktree:           src/telegram/...    ← agent writes code
+```
+
+`agent-doc route specs/telegram.md` sends the command to the worktree's Claude pane. The agent reads the spec, implements in the isolated worktree. No branch switching needed.
+
+### Parallel features
+```sh
+workmux add telegram     # worktree 1, tmux window 1
+workmux add transcribe   # worktree 2, tmux window 2
+workmux add filters      # worktree 3, tmux window 3
+```
+Three worktrees, three Claude sessions, zero merge conflicts. Each agent owns its branch. You edit all three specs from the same IDE window.
+
+### Merge and cleanup
+```sh
+workmux merge telegram   # merge branch → main, delete worktree, close window
+# specs/telegram.md stays as decision record (status: complete)
+```
+
+### What needs building
+- `agent-doc worktree <spec>` — wraps workmux + session claim
+- Session registry stores `worktree_path` alongside pane/window
+- Spec frontmatter: `worktree: telegram` binds doc to worktree
+- `agent-doc commit` already resolves git root correctly (works in worktrees)
+
+**Key insight:** Documents stay in main (human-facing, IDE-editable). Code changes happen in worktrees (agent-facing, isolated). Clean separation.
+
+## User
+
+Can we have tmux windows stack vertically on the same side as the editor document?

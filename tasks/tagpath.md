@@ -1127,3 +1127,22 @@ Audited all docs against source. Found 10 issues, fixed the high/medium ones:
 ## User
 
 Let's add nim, haskell, D lang, lua as well
+
+## Assistant
+
+Created and pushed all 4. Each has interesting quirks:
+
+| Language | Default | Notable |
+|----------|---------|---------|
+| **Nim** | camelCase | **Style-insensitive**: `myVar`, `my_var`, `myvar` all resolve to the same symbol (first letter case still matters). `new{Name}`/`init{Name}` factory patterns, camelCase constants |
+| **Haskell** | camelCase | Everything is immutable by default — no UPPER_SNAKE needed. `mk{Name}` factory, `un{Name}` newtype unwrap, `with{Name}` bracket pattern, PascalCase modules (`Data.Map`) |
+| **D** | camelCase | camelCase even for constants (not UPPER_SNAKE). `opCall`/`opAssign` operator overloads. Modules are snake_case (`std.algorithm`) |
+| **Lua** | snake_case | `__` prefix for metamethods (`__index`, `__tostring`). `MyClass:new()` factory pattern. PascalCase for metatables-as-classes |
+
+Nim's style insensitivity is a unique challenge — the Tag Path system can note it via the `style_insensitive: true` flag, meaning multiple surface forms map to the same canonical identity.
+
+README updated (23 languages). 12/12 tests pass.
+
+## User
+
+Let's add Perl...because why not? Any other common language that meet our threshold? How about Lisp?

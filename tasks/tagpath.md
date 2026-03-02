@@ -946,7 +946,7 @@ Followed the patterns from your other repos (corky, agent-doc, ctx-core-dev).
 
 ## User
 
-Please add more languages. Let's have the full set of languages 
+Please add more languages. Let's have the full set of languages
 
 │   ├── javascript.yml
 │   ├── typescript.yml
@@ -965,3 +965,34 @@ Please add more languages. Let's have the full set of languages
 │   ├── css.yml
 │   ├── sql.yml
 │   └── shell.yml
+
+## Assistant
+
+Created and pushed all 14 new language presets. Full set of 17 languages now in `lang/`:
+
+| Language | Default | Key Conventions |
+|----------|---------|-----------------|
+| JavaScript | camelCase | PascalCase classes, kebab-case files |
+| TypeScript | camelCase | PascalCase types/interfaces |
+| Python | snake_case | PascalCase classes, `__dunder__` |
+| Rust | snake_case | PascalCase types, `'lifetime`, `macro!` |
+| Go | camelCase | PascalCase exported, `New{Name}` factory, no Get prefix |
+| Java | camelCase | PascalCase classes, `get/set/is` prefixes |
+| Ruby | snake_case | PascalCase classes, `?` predicate, `!` bang, `=` setter |
+| Swift | camelCase | PascalCase types/protocols, `make{Name}` factory |
+| Kotlin | camelCase | PascalCase classes/objects, `create{Name}` factory |
+| C | snake_case | `_t` suffix types, UPPER_SNAKE macros, module prefix |
+| C++ | snake_case | STL-style, PascalCase classes, snake_case namespaces |
+| C# | PascalCase | `I` prefix interfaces, `_` prefix fields, `Async` suffix |
+| PHP | camelCase | `$` prefix vars, PascalCase classes |
+| Elixir | snake_case | PascalCase modules, `?` predicate, `!` bang |
+| CSS | kebab-case | `--` custom props, BEM `__{element}` / `--{modifier}` |
+| SQL | snake_case | UPPER_SNAKE keywords, `idx_`/`trg_` prefixes |
+| Shell | snake_case | UPPER_SNAKE env vars, `_` prefix private |
+
+Updated `generate_config()` with aliases (`js`, `rb`, `kt`, `cs`, `ex`, `sh`, `c++`, etc.). 12/12 tests pass. Pushed to https://github.com/btakita/tagpath.
+
+## User
+
+Complete rename from nametag to tagpath. See Cargo.toml 
+Write the *.yml files in /home/brian/work/btakita/agent-loop/tagpath/lang

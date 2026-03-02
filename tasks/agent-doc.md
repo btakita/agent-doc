@@ -67,3 +67,40 @@ Such as document structure. And summary of the text in a section?
 ## User
 
 Implement. Add to docs and skill.
+
+## Assistant
+
+**Implemented `agent-doc outline <file> [--json]`** — committed (`26b72c6`), pushed.
+
+**What it does:** Parses markdown headings into a section tree with line counts and approximate token counts (bytes/4). Two output modes:
+
+```
+$ agent-doc outline tasks/plan.md
+Plan: agent-doc & agent-loop                2 lines  ~    0 tokens
+  Status                                     20 lines  ~  345 tokens
+    Session Routing (tmux)                     15 lines  ~  167 tokens
+  Outstanding                                 2 lines  ~    0 tokens
+    ...
+  User                                        7 lines  ~   43 tokens
+  Assistant                                  20 lines  ~  290 tokens
+---
+Total                                     178 lines  ~ 2226 tokens
+```
+
+`--json` outputs `[{"heading","depth","line","lines","tokens"}, ...]` for tooling integration.
+
+**Files:**
+- `src/outline.rs` — 220 lines, 5 unit tests (heading parsing, sections, preamble, empty, JSON)
+- `src/main.rs` — wired as `Commands::Outline { file, json }`
+- **SPEC.md** — §7.16 outline spec
+- **README.md** — Quick Start + CLI Reference entries
+- **CLAUDE.md** — module layout entry
+- **SKILL.md** (bundled) — version bumped to 0.5.5
+
+All tests pass (98 total), clippy clean, audit-docs clean.
+
+## User
+
+Read https://schipper.ai/posts/parallel-coding-agents/
+
+Anything that we can learn? Any improvements to our process?

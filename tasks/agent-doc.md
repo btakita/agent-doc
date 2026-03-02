@@ -460,3 +460,48 @@ If we have parallel sessions on either side, we could have that left or right si
 left 1 | right (full height)
 left 2 | ...
 left 3 | ...
+
+## Assistant
+
+**Yes — nested tmux splits.** Split the left pane vertically while keeping the right full height:
+
+```sh
+# Current: %4 (left) | %11 (right)
+# Split left pane into 3 stacked:
+tmux split-window -t %4 -v    # left becomes 2 stacked
+tmux split-window -t %4 -v    # left becomes 3 stacked
+# Right (%11) stays full height automatically
+```
+
+Result:
+```
+┌───────────────┬─────────────────┐
+│  claude-1     │                 │
+├───────────────┤  claude-right   │
+│  claude-2     │  (full height)  │
+├───────────────┤                 │
+│  claude-3     │                 │
+└───────────────┴─────────────────┘
+```
+
+**For `agent-doc layout`** — this would be a column-based extension:
+
+```sh
+# Group by column, stack vertically within each
+agent-doc layout plan.md corky.md plugin.md --column left
+agent-doc layout agent-doc.md --column right
+```
+
+Or automatically: layout reads each doc's `--position` (left/right from IDE claim), groups them by column, splits vertically within. Aligns with the existing claim positioning system.
+
+**To try it now manually:** I can split `%4` into stacked panes and start new Claude sessions in them. Want me to?
+
+## User
+
+We just need to be able to track the ephemeral parallel sessions. So if we were to change the left side to another agent doc, the stacking would not show up...only the current agent doc's tmux pane would show.
+
+Going back to the agent doc with the parallel task would show the stacked tmux again.
+
+Once the parallel task finish, the stacking can collapse.
+
+Sanity check: I do see parallel agents run. How does workmux improve the already existing flow?

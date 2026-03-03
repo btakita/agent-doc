@@ -525,6 +525,8 @@ The algorithm now uses a **convergent loop** (max 3 attempts), **deferred evicti
 
 version bump and release
 
+A Claim for Tmux Pane command the results with Claim Failed due to the address pointing to a dead session should ensure the tmux layout is correct and attempt to connect to the current running session in the correct tmux pane.
+
 ## Assistant
 
 **Released agent-doc v0.7.1.**
@@ -538,4 +540,6 @@ I see your note about the Claim for Tmux Pane failure — that's a separate issu
 
 ## User
 
-A Claim for Tmux Pane command the results with Claim Failed due to the address pointing to a dead session should ensure the tmux layout is correct and attempt to connect to the current running session in the correct tmux pane.
+Please implement.
+Add tests.
+Document specs 

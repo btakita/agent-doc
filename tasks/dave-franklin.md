@@ -104,3 +104,38 @@ Short and confirms the time. No need to add anything else — save the conversat
 I create a contact directory for dave-franklin. I also has an amr recording phone call between Dave Franklin and Brian Takita.
 
 Please Add AGENTS.md/CLAUDE.md for dave-franklin and transcribe the call.
+
+## Assistant
+
+Done. Three files created:
+
+**1. `mail/contacts/dave-franklin/CLAUDE.md`** — Contact file with full role details, compensation discussion, and call summary. Key info captured:
+- Client is **Boston Consulting Group (BCG)** via **Inspire Solutions** (Dave's firm)
+- W2 at ~$140-145/hr (equivalent to $230K + benefits gap)
+- BCG wants people who **owned and shipped** GenAI products professionally
+- 10-20 person AI factory buildout, 12+ month contracts
+
+**2. `mail/contacts/dave-franklin/AGENTS.md`** — Symlink to CLAUDE.md
+
+**3. `mail/contacts/dave-franklin/recordings/20260303-dave-franklin.txt`** — Full transcription (~38 min call), cleaned up with speaker labels (Dave/Brian)
+
+### Dave's Resume Action Items
+
+1. Add **"AI Products Shipped"** section above work experience (3-4 items: Presence AI video agent, corky, agent-doc, tagpath)
+2. Remove: Freelance section, Social Chorus, open source section
+3. Clean up Sensible — end date at April 2024
+4. Merge Hot.com + TrueCar (acquisition)
+5. Keep everything from Pivotal Labs era onward
+6. Goal: **ordered, consistent, easy-to-follow timeline** — consulting firms won't parse a cluttered resume
+
+**Next step:** Craft the BCG-targeted resume revision and send to Dave tonight or tomorrow morning.
+
+## User
+
+Please create a topic on Boston Consulting Group.
+
+https://www.bcg.com/
+https://www.linkedin.com/company/bcg/
+
+I worked with Anil at Neo Innovations. He managed the Tenfore project. Censible was also a Neo client.
+https://www.linkedin.com/in/anilpod/

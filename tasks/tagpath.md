@@ -40,21 +40,27 @@ branch: null
 - [x] 12 tests passing
 - [x] YAML → TOML migration complete
 
-### Phase 2 — tree-sitter integration, lint, extract
+### Phase 2 — tree-sitter integration, lint, extract ✅
 
-- [ ] tree-sitter integration — parse source files to extract identifiers
-- [ ] `tagpath lint` — validate identifiers against `.naming.toml` rules
-- [ ] `tagpath extract` — list all identifiers from source files
-- [ ] Config inheritance — resolve `extends` chains
-- [ ] Fix dead_code warnings (NamingConfig structs unused until lint loads configs)
+- [x] `tagpath extract` — regex-based + AST-aware identifier extraction
+- [x] `tagpath search` — cross-language semantic tag search
+- [x] tree-sitter integration — 8 language grammars (Rust, Python, JS, TS, TSX, Go, C, C++)
+- [x] `tagpath lint` — validate identifiers against `.naming.toml` context rules
+- [x] Config loading wired up, dead_code warnings resolved
+- [x] 37 tests passing, cross-language matching proven
+- [x] GitHub Actions CI + release workflows
+- [x] Published v0.2.0 (crates.io + GitHub Release)
 
-### Phase 3 — Graph building, search, alias, prose
+### Phase 3 — Composability, graph, index, alias, prose
 
+- [ ] Config composability — explicit `extends` imports with merge resolution
 - [ ] `tagpath graph` — build tag relationship graph from codebase (petgraph)
-- [ ] `tagpath search` — semantic tag search across codebase
+- [ ] `tagpath index` — persistent index (`.naming/index.json`) for instant queries
 - [ ] `tagpath alias` — convention translation (`snake_case ↔ camelCase ↔ PascalCase`)
+- [ ] Tag ontology — `.naming/tags/*.md` domain vocabulary (philosophy-style)
 - [ ] Prose convention — translate between tags and natural language
-- [ ] Publish to crates.io, PyPI wrapper, GitHub Releases
+- [ ] WASM build — feature flag excluding tree-sitter, npm package via `wasm-pack`
+- [ ] MCP tool integration — expose parse/search/lint to coding agents
 
 ## Assistant
 
@@ -342,3 +348,59 @@ This fits as Phase 2.5 or early Phase 3. Want me to implement it?
 
 That's ok for now. Not a priority. Document in future tasks.
 
+I do want composability of tagpath specs. So if I start with the language base, I want to have a project import it and extend it with customizations. Let's support explicit imports. Let's discuss implicit imports.
+
+I don't know if want implicit imports. I definately want explicit imports.
+
+## Assistant
+
+WASM documented in Phase 3 roadmap. Phase 2 checklist updated to reflect completion.
+
+### Composable specs — explicit imports
+
+The `extends` field already exists in the schema (`extends: Option<Vec<String>>`). It just needs resolution logic. Here's the design:
+
+**Explicit imports** — what you get:
+
+```toml
+# .naming.toml (project level)
+version = 1
+name = "my-project"
+extends = ["rust"]
+
+# Override: Rust defaults snake_case functions,
+# but this project uses camelCase for them
+[contexts.function]
+convention = "camelCase"
+
+# Add project-specific context
+[contexts.signal]
+convention = "camelCase"
+suffix = "$"
+```
+
+Resolution: `extends` list resolves left-to-right, project overrides last (last wins):
+
+```toml
+extends = ["rust", "immutable-tag", "./team.toml"]
+```
+
+- `"rust"` → bundled `lang/rust.toml` (39 built-in language presets)
+- `"immutable-tag"` → bundled `presets/immutable-tag.toml`
+- `"./team.toml"` → relative path from config file's directory
+
+Merge is shallow per section: defining `[contexts.function]` replaces the whole function context from the base, not individual fields. This matches how tsconfig `extends` and ESLint configs work.
+
+### Implicit imports — the tradeoff
+
+Implicit imports would mean: tagpath auto-detects the language from file extensions and applies the matching `lang/*.toml` as a base without you writing `extends = ["rust"]`. The argument for it: less boilerplate. The argument against: **magic**. You can't easily see why a lint rule fired if the base config was silently loaded. Explicit is debuggable.
+
+A middle ground: `tagpath init --lang rust` already generates the full config. The user starts explicit from day one. If they later want to track upstream changes to the `rust` preset, they switch to `extends = ["rust"]` and remove the duplicated sections.
+
+**Recommendation:** Start with explicit only. Implicit can be added later as an opt-in flag (`auto_extends = true`) if the need arises.
+
+Want me to implement the `extends` resolution now?
+
+## User
+
+Yes...implement extends resolution now.

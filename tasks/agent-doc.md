@@ -484,3 +484,43 @@ How many test cases are there?
 Are we testing for both horizontal and vertical splits in the 1st dimension?
 
 Are we testing 2D plane layouts?
+
+## Assistant
+
+**17 sync reconciliation tests total** — 14 unit/integration + 3 property-based (proptest).
+
+**Unit/integration tests** (each uses real tmux via `IsolatedTmux`):
+
+| # | Test | Covers |
+|---|------|--------|
+| 1 | `test_sync_2col_happy_path` | Horizontal: 2 columns from separate windows |
+| 2 | `test_sync_already_correct` | Fast path: zero mutations |
+| 3 | `test_sync_unwanted_pane_evicted` | Evict unwanted, keep wanted |
+| 4 | `test_sync_missing_pane_joined` | Join missing pane from another window |
+| 5 | `test_sync_dead_pane_logged` | Dead pane: logged error, no crash |
+| 6 | `test_sync_wrong_order_reordered` | Panes present but wrong position |
+| 7 | `test_sync_3col_layout` | **2D**: 5 panes in 3 cols (2+2+1 grid) |
+| 8 | `test_sync_single_column_stacked` | **Vertical**: 3 panes in 1 column |
+| 9 | `test_sync_anchor_not_in_target` | Anchor in wrong window + evict |
+| 10 | `test_sync_mixed_evict_and_join` | Evict + join in same operation |
+| 11 | `test_sync_unwanted_is_only_pane` | Unwanted alone in target window |
+| 12 | `test_sync_multiple_unwanted` | 2+ unwanted panes evicted |
+| 13 | `test_sync_wanted_in_shared_window` | Isolate from shared window before join |
+
+**Property-based tests** (proptest, randomized):
+
+| # | Test | Property |
+|---|------|----------|
+| 1 | `reconcile_completeness` | 2-5 panes, 1-3 cols: all desired in window, no extras |
+| 2 | `reconcile_idempotent` | Second reconcile always hits fast path |
+| 3 | `reconcile_no_pane_loss` | Every pane still alive after reconcile |
+
+**Yes to both questions:**
+- Horizontal AND vertical splits tested individually (tests 1 vs 8) and combined (test 7)
+- 2D plane layouts tested: test 7 is a 2+2+1 grid, proptests generate random 2D layouts (up to 5 panes in up to 3 columns with stacking)
+
+The algorithm now uses a **convergent loop** (max 3 attempts), **deferred eviction** (when unwanted is the last pane), and a **reorder phase** (break non-anchor + rejoin when all wanted present but wrong order). 102 total tests pass, clippy clean, binary installed.
+
+## User
+
+vesion bump and release

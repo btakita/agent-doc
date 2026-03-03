@@ -309,6 +309,41 @@ impl Tmux {
         Ok(panes)
     }
 
+    /// List panes in a window sorted by position (left-to-right, top-to-bottom).
+    pub fn list_panes_ordered(&self, window_id: &str) -> Result<Vec<String>> {
+        let output = self
+            .cmd()
+            .args([
+                "list-panes",
+                "-t",
+                window_id,
+                "-F",
+                "#{pane_id} #{pane_left} #{pane_top}",
+            ])
+            .output()
+            .context("failed to run tmux list-panes")?;
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+        let mut panes: Vec<(String, u32, u32)> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    Some((
+                        parts[0].to_string(),
+                        parts[1].parse::<u32>().unwrap_or(0),
+                        parts[2].parse::<u32>().unwrap_or(0),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        panes.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
+        Ok(panes.into_iter().map(|(id, _, _)| id).collect())
+    }
+
     /// Break a pane out of its window into a new window.
     /// Used by `layout` to disassemble a mirror window before rebuilding.
     pub fn break_pane(&self, pane_id: &str) -> Result<()> {

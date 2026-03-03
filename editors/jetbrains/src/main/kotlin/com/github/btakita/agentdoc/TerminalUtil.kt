@@ -167,7 +167,8 @@ object TerminalUtil {
             val windowPattern = Regex(""""window"\s*:\s*"(@\d+)"""")
             val cwdPattern = Regex(""""cwd"\s*:\s*"([^"]+)"""")
 
-            // Split by session entries (each starts with a UUID key)
+            // Collect all candidate windows, then return the first alive one
+            val candidates = mutableSetOf<String>()
             val entries = text.split(Regex(""""[0-9a-f-]{36}"\s*:\s*\{"""))
             for (entry in entries) {
                 val cwdMatch = cwdPattern.find(entry)
@@ -176,9 +177,17 @@ object TerminalUtil {
                     val cwd = cwdMatch.groupValues[1]
                     val window = windowMatch.groupValues[1]
                     if (cwd == basePath && window.isNotEmpty()) {
-                        return window
+                        candidates.add(window)
                     }
                 }
+            }
+            // Validate each candidate — return the first alive tmux window
+            for (window in candidates) {
+                val alive = ProcessBuilder("tmux", "list-panes", "-t", window, "-F", "#{pane_id}")
+                    .redirectErrorStream(true)
+                    .start()
+                    .let { it.inputStream.readBytes(); it.waitFor() == 0 }
+                if (alive) return window
             }
         } catch (_: Exception) {
             // Fall through

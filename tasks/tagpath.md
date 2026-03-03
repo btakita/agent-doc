@@ -312,3 +312,33 @@ CI is running now: https://github.com/btakita/tagpath/actions
 ## User
 
 Does the crates release include binaries to all of the platforms? Should we have a wasm release as well?
+
+## Assistant
+
+### Crates.io vs GitHub Release
+
+**Crates.io does not distribute prebuilt binaries** — it distributes source code. Users compile with `cargo install tagpath`. The **GitHub Release** is where prebuilt binaries go, and the release workflow builds for all 5 platforms. However, v0.2.0 was tagged *before* the workflow existed, so its GitHub Release only has the manually-uploaded binary. Future tags will get all 5 automatically. (We can re-tag v0.2.0 to backfill, or wait for v0.3.0.)
+
+### WASM — yes, compelling
+
+WASM would enable:
+- **Browser playground** — try tagpath in the browser (parse, search demos)
+- **npm package** — `@btakita/tagpath` for JS/TS projects
+- **Editor extensions** — VS Code could embed WASM tagpath directly
+- **Lightweight MCP tool** — agents embed WASM instead of spawning a binary
+
+**The catch:** tree-sitter compiles C code via FFI. The core parser, regex extract, and search are pure Rust and compile to WASM cleanly. Tree-sitter (lint + AST extract) would need to stay native-only.
+
+**Recommended approach:**
+1. Add a `wasm` feature flag that excludes tree-sitter deps
+2. Core parser + regex extract + search work in WASM (the most useful parts)
+3. Tree-sitter stays native-only (lint + AST extract)
+4. Add `wasm32-unknown-unknown` to release workflow
+5. Publish via `wasm-pack` as npm package
+
+This fits as Phase 2.5 or early Phase 3. Want me to implement it?
+
+## User
+
+That's ok for now. Not a priority. Document in future tasks.
+

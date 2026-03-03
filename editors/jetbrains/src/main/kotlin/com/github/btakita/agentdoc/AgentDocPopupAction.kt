@@ -13,6 +13,7 @@ class AgentDocPopupAction : AnAction() {
 
         val group = DefaultActionGroup().apply {
             add(ActionManager.getInstance().getAction("AgentDoc.Submit"))
+            add(ActionManager.getInstance().getAction("AgentDoc.RunWithJunie"))
             add(ActionManager.getInstance().getAction("AgentDoc.Claim"))
             addSeparator()
             add(ActionManager.getInstance().getAction("AgentDoc.SyncLayout"))

@@ -81,4 +81,25 @@ Once confirmed, I'll fix the LayoutDetector to treat non-splitter Container chil
 
 When my editor focuses on resume.md, there is only 1 pane in the window.
 
-The focus action should cause the plugin to send a sync with the entire layout
+The focus action should cause the plugin to send a sync with the entire layout.
+
+All communication from plugin to agent-doc should send the layout. So agent-doc can be in sync.
+
+## Assistant
+
+**Fixed and released as v0.6.5.** Two changes:
+
+**1. Plugin always sends `sync --col`** — removed the `focus` shortcut for single files. Both `SyncLayoutAction` and `EditorTabSyncListener` now always send `agent-doc sync --col <files> --window <id>`, even for 1 file. This ensures the entire tmux window layout is managed on every editor event.
+
+**2. sync.rs single-file cleanup** — when `--window` is specified and only 1 file resolves, sync now breaks out unwanted session panes from the window before focusing. Previously it just selected the pane, leaving orphaned panes in the window.
+
+### Release
+- v0.6.5: 104 tests pass, clippy clean, plugin builds
+- Published to crates.io, GitHub Release
+- Binary installed (`agent-doc 0.6.5`), parent pointer pushed
+
+**To apply:** Rebuild plugin (`./gradlew buildPlugin`), reinstall the zip, restart IDE. The notification balloon will show the `--col` args on every sync.
+
+## User
+
+The sync action should also communicate which editor pane is selected.

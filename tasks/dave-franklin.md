@@ -186,4 +186,12 @@ I will add more experience to Censible -> Martin Investments. Please consolidate
 
 ## User
 
-Make Censible be until Octobel 2023.
+Make Censible be until April 2024.
+
+## Assistant
+
+Updated Censible to **January 2016 – April 2024 (8 years 4 months)** — aligns with Presence AI start date. Consulting PDF rebuilt.
+
+## User
+
+Commit and push

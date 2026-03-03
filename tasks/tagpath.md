@@ -601,3 +601,42 @@ audit docs. I found incorrect examples in README:
 `convention: SnakeCase`
 
 Should be: `convention: snake_case`
+
+Did the last instruction added frontmatter to tagpath/README.md
+
+```
+---
+session: 38e7f9cb-14ad-4c46-96e5-f1cfdea4a610
+resume: null
+agent: null
+model: null
+branch: null
+---
+```
+
+Or did I accidently run Claim for Tmux Pane on the README.md?
+
+## Assistant
+
+### Convention display fix — code bug, not just docs
+
+The README was correct *about what the CLI actually output* — but the CLI was wrong. The `Convention` enum used `{:?}` (Debug format) which prints Rust variant names (`SnakeCase`). Fixed by:
+
+1. Added `impl Display for Convention` in `parser/mod.rs` — outputs `snake_case`, `camelCase`, `PascalCase`, `kebab-case`, `UPPER_SNAKE_CASE`
+2. Changed `main.rs` line 111: `{:?}` → `{}`
+3. Changed `lint/mod.rs` line 88: `{:?}` → `{}`
+4. Fixed README line 26: `SnakeCase` → `snake_case`
+
+49/49 tests pass, clippy clean.
+
+### README frontmatter — removed
+
+That frontmatter was from `agent-doc claim` being run on `tagpath/README.md` (likely an accidental claim from the editor plugin). It's been removed — the README is clean for crates.io now.
+
+### Task doc
+
+Will compact on next submit if requested.
+
+## User
+
+In **Convention detection**, should we add Ada_Case?

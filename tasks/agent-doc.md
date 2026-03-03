@@ -207,3 +207,30 @@ Root cause of the 3-pane bug: the old Phase 6 ("break ALL non-anchor wanted pane
 Focusing on the opposite editor document is not changing the tmux pane focus.
 
 Running Claim for Tmux is showing an error:
+
+How many phases are there? It seems too complicated and prone to bugs...
+
+## Assistant
+
+**Root cause for both bugs: `projectWindowId()` returns stale window `@1`.**
+
+The plugin's `TerminalUtil.projectWindowId()` scans sessions.json for any entry matching the project cwd and returns the first window found. Your sessions.json has ~10 stale sessions pointing to dead window `@1` (briantakita.me.md, ctx-core-dev.md, etc.) that appear before the active `@30` sessions.
+
+- **Claim** validates `@1` → fails with "window @1 is dead"
+- **Sync** sends `--window @1` → dead window breaks the entire pipeline (empty panes, no layout match, focus never changes)
+
+**Fixes:**
+
+1. **Plugin** (`projectWindowId()`): Now validates each candidate window via `tmux list-panes -t @N`. Only returns alive windows.
+2. **CLI** (`sync.rs`): Dead `--window` falls back to auto-detected window instead of failing silently.
+3. **Debug logging**: Focus path mismatch in fast-path now logs the focus path vs map keys.
+
+**Phase count: 9 + fast path.** Phases 1-4 are resolution/setup. Phases 5-8 are layout manipulation. Phase 9 is focus. The fast path short-circuits 5-8 when layout is already correct. The complexity comes from handling all the edge cases (dead panes, cross-window moves, auto-creation). Could be simplified by treating "desired state" as a tmux snapshot and diffing against current state, but that's a larger refactor.
+
+Binary installed, plugin built. Reinstall plugin to apply.
+
+## User
+
+Left and right sides are inverted between the editor & tmux.
+
+Let's do the snapshot and diff refactor.

@@ -259,3 +259,52 @@ Installed `junie-bridge.sh` to `~/.local/bin/`. Binary rebuilt and installed.
 ## User
 
 Should we have the plugin directly run agent-doc in junie mode? Do we even need the junie-bridge.sh script?
+
+## Assistant
+
+**You're right — `junie-bridge.sh` is a dead end.** The current architecture is:
+
+```
+Plugin → agent-doc run --agent junie → junie.rs → junie-bridge.sh → writes request.md → ??? (nothing listens)
+```
+
+The bridge script polls for a `response.json` that nobody writes. Junie (JetBrains' AI) has no CLI, no API, and no file-watch protocol — it's locked inside the IDE. The bridge was a workaround for a non-existent interface.
+
+### What the plugin already does right
+
+`RunWithJunieAction.kt` already calls `agent-doc run --agent junie <file>` directly via `TerminalUtil.runWithAgent()`. That part is good — the plugin triggers the CLI, the CLI computes the diff, sends to the agent backend, writes the response back to the document.
+
+The problem is only the **agent backend** — what happens when junie.rs tries to actually get an LLM response.
+
+### Clean replacement: `api` backend
+
+Replace the Junie backend with a direct **HTTP API backend** (`agent/api.rs`):
+
+- Calls `api.anthropic.com` (or any OpenAI-compatible endpoint) via `ureq` (already a dependency)
+- No bridge script, no file-based IPC, no external process
+- Config in `~/.config/agent-doc/config.toml`:
+  ```toml
+  [agents.api]
+  provider = "anthropic"  # or "openai"
+  api_key_env = "ANTHROPIC_API_KEY"
+  model = "claude-sonnet-4-20250514"
+  ```
+- Plugin calls `agent-doc run --agent api <file>` — same flow, just works
+
+**Advantages over the bridge approach:**
+1. Single process — no subprocess chain, no file IPC
+2. Pay-per-token — much cheaper than Claude Code for diff-sized prompts
+3. Works with any API provider (Anthropic, OpenAI, local Ollama)
+4. No dependency on JetBrains AI subscription
+
+### What to do with junie.rs
+
+**Delete it** along with `junie-bridge.sh` and `RunWithJunieAction.kt`. Replace with:
+- `agent/api.rs` — HTTP API backend
+- Rename `RunWithJunieAction` → `RunWithApiAction` (or make it generic: `RunWithAgentAction` with configurable agent name)
+
+Want me to build this?
+
+## User
+
+I was able to run junie-bridge.sh successfully from Junie. I just want to be able to notify Junie of the diff.

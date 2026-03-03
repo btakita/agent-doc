@@ -427,3 +427,7 @@ Layout converged on attempt 2
 ## User
 
 The last claim caused 2 windows...with both windows having their own pane. Why is this broken?
+
+The session respons did not output to agent-doc.md
+
+

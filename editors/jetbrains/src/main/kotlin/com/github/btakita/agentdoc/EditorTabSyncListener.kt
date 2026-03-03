@@ -4,9 +4,6 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.ui.Splitter
-import java.awt.Component
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -15,12 +12,12 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * When the user switches editor tabs:
  * - Single visible .md file → `agent-doc focus <file>`
- * - Multiple visible .md files in splits → `agent-doc layout <files...> --split h|v`
+ * - Multiple visible .md files in splits → `agent-doc sync --col <files...>`
  *
  * Guards against rapid-fire events:
  * - 500ms debounce so only the final state is acted upon
  * - Concurrency guard: skips if a layout command is already running
- * - Dedup: skips if the file set hasn't changed since the last execution
+ * - Dedup: skips if the column structure hasn't changed since the last execution
  *
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
  */
@@ -30,13 +27,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val DEBOUNCE_MS = 500L
         private val generation = AtomicLong(0)
         private val running = AtomicBoolean(false)
-        @Volatile private var lastFileSet: List<String> = emptyList()
+        @Volatile private var lastColumnStructure: List<List<String>> = emptyList()
         @Volatile private var lastActiveFile: String = ""
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
 
         /** Clear the dedup cache so the next automatic sync runs unconditionally. */
         fun clearLastFileSet() {
-            lastFileSet = emptyList()
+            lastColumnStructure = emptyList()
             lastActiveFile = ""
         }
     }
@@ -64,9 +61,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         if (visibleMdFiles.isEmpty()) return
 
-        // Detect split orientation from the Swing component tree.
-        val split = detectSplitOrientation(project)
         val activeFile = TerminalUtil.relativePath(project, file)
+
+        // Detect 2D layout structure for dedup comparison
+        val editorLayout = LayoutDetector.detectEditorLayout(project)
+        val currentColumns: List<List<String>> = if (editorLayout != null && editorLayout.columns.size > 1) {
+            editorLayout.columns.map { it.files.sorted() }
+        } else {
+            listOf(visibleMdFiles.sorted())
+        }
 
         // Debounce: bump generation, wait, then check if we're still current.
         val myGen = generation.incrementAndGet()
@@ -79,13 +82,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     return@Thread
                 }
 
-                val sorted = visibleMdFiles.sorted()
-                val fileSetChanged = sorted != lastFileSet
+                val columnStructureChanged = currentColumns != lastColumnStructure
                 val activeFileChanged = activeFile != lastActiveFile
 
-                // Dedup: skip if neither file set nor active file changed.
-                if (!fileSetChanged && !activeFileChanged) {
-                    log("dedup: unchanged set=$sorted active=$activeFile")
+                // Dedup: skip if neither column structure nor active file changed.
+                if (!columnStructureChanged && !activeFileChanged) {
+                    log("dedup: unchanged columns=$currentColumns active=$activeFile")
                     return@Thread
                 }
 
@@ -96,22 +98,29 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
 
                 try {
-                    lastFileSet = sorted
+                    lastColumnStructure = currentColumns
                     lastActiveFile = activeFile
 
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowId = TerminalUtil.projectWindowId(project)
                     val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
-                    val cmd = if (fileSetChanged) {
-                        // File set changed → full layout
+                    val cmd = if (columnStructureChanged) {
+                        // Column structure changed → full sync
                         if (visibleMdFiles.size == 1) {
                             listOf(agentDoc, "focus", visibleMdFiles[0])
+                        } else if (editorLayout != null && editorLayout.columns.size > 1) {
+                            // 2D layout
+                            val colArgs = editorLayout.columns.flatMap { col ->
+                                listOf("--col", col.files.joinToString(","))
+                            }
+                            listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs
                         } else {
-                            val splitFlag = if (split == "v") "v" else "h"
-                            listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag) + windowArgs
+                            // Flat layout
+                            val colArg = visibleMdFiles.joinToString(",")
+                            listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs
                         }
                     } else {
-                        // Same file set, different active file → just focus
+                        // Same column structure, different active file → just focus
                         listOf(agentDoc, "focus", activeFile)
                     }
                     log("exec: ${cmd.joinToString(" ")}")
@@ -130,36 +139,5 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 log("error: ${e.message}")
             }
         }.start()
-    }
-
-    /**
-     * Walk the Swing component tree from EditorsSplitters to detect split orientation.
-     * Returns "h" for side-by-side (horizontal), "v" for stacked (vertical).
-     * Defaults to "h" if no split is detected.
-     */
-    private fun detectSplitOrientation(project: com.intellij.openapi.project.Project): String {
-        try {
-            val managerEx = FileEditorManagerEx.getInstanceEx(project)
-            val splitters = managerEx.splitters
-            val root = (splitters as? java.awt.Container) ?: return "h"
-            return findSplitterOrientation(root) ?: "h"
-        } catch (_: Exception) {
-            return "h"
-        }
-    }
-
-    private fun findSplitterOrientation(component: Component): String? {
-        if (component is Splitter) {
-            // Splitter.isVertical == true means components stacked vertically → "v"
-            // Splitter.isVertical == false means components side by side → "h"
-            return if (component.isVertical) "v" else "h"
-        }
-        if (component is java.awt.Container) {
-            for (child in component.components) {
-                val result = findSplitterOrientation(child)
-                if (result != null) return result
-            }
-        }
-        return null
     }
 }

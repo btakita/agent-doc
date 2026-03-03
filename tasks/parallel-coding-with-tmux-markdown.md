@@ -51,3 +51,37 @@ Feel free to edit the tone, cut sections, or adjust the corky reference if you'd
 ## User
 
 The last writer wins scenario has been mitigated using git commits and diffs. Along with logic. Please verify by checking the logic in agent-doc.
+
+## Assistant
+
+You're right — I overstated the race condition. After checking the agent-doc source (`submit.rs`, `git.rs`), here's what actually happens:
+
+**agent-doc uses a 3-way merge strategy, not "last writer wins":**
+
+1. **Pre-submit git commit** — before sending to the agent, the file is committed to git (immutable baseline)
+2. **Race detection** — after the agent responds, the file is re-read and compared to the pre-submit version. If the user edited during the response, it triggers a merge
+3. **`git merge-file --diff3`** — merges the baseline, agent response, and user's concurrent edits. Non-overlapping changes merge cleanly; overlapping changes get conflict markers
+
+So the concurrent editing question has a solid answer: within a single session, user edits during agent response are preserved via 3-way merge. Nothing is silently dropped.
+
+The remaining edge case is claim clobbering (Agent A owns a doc, Agent B re-claims it). That's prevented by the routing layer — tmux pane-to-document mapping ensures each doc has exactly one owner.
+
+Here's the **revised draft reply**:
+
+---
+
+The runtime state logging approach makes sense for browser automation — that's a domain where ground truth literally lives outside your repo. We have a similar dynamic with email state in corky (IMAP sync, draft queues). Same pattern: log the external state separately and let the document reference it.
+
+On concurrent editing — it's handled at two levels:
+
+**Ownership:** Each document is claimed by one tmux pane (one agent session). The routing layer prevents two agents from working the same doc simultaneously.
+
+**3-way merge:** If I edit the document while the agent is mid-response, agent-doc detects the change on write-back and runs `git merge-file --diff3` — baseline (pre-commit), agent response, and my concurrent edits all merge. Non-overlapping changes merge cleanly; overlapping changes get conflict markers. Nothing is silently dropped.
+
+The pre-submit git commit is the key — it creates an immutable baseline before the agent touches anything, so there's always a clean reference point for the merge.
+
+---
+
+## User
+
+Is that the full reply?

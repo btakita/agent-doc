@@ -459,3 +459,5 @@ This is the 7th attempt at fixing sync reconciliation. I should stop making incr
 ## User
 
 Yes...a proper full spec...with edgecases...and implementation. With full automated testing. Including fuzz testing.
+
+What happened last? Is there a session in progress? Was this last task implemented?

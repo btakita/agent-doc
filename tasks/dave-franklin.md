@@ -101,3 +101,6 @@ Short and confirms the time. No need to add anything else — save the conversat
 
 ## User
 
+I create a contact directory for dave-franklin. I also has an amr recording phone call between Dave Franklin and Brian Takita.
+
+Please Add AGENTS.md/CLAUDE.md for dave-franklin and transcribe the call.

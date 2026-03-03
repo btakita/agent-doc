@@ -640,3 +640,26 @@ Will compact on next submit if requested.
 ## User
 
 In **Convention detection**, should we add Ada_Case?
+
+## Assistant
+
+### Ada_Case — yes, worth adding
+
+**Ada_Case** (Title_Snake_Case): `User_Name`, `Get_User_Profile`, `HTTP_Request`. Each segment starts with uppercase, separated by underscores. Used in Ada, VHDL, PL/SQL.
+
+**Current behavior:** `detect_convention` misclassifies `User_Name` as `snake_case` because it only checks for underscores. Tags still extract correctly, but the convention label is wrong and a round-trip wouldn't preserve the original casing.
+
+**Detection heuristic change:**
+```
+contains '_' AND every segment starts with uppercase → Ada_Case
+contains '_' AND all uppercase → UPPER_SNAKE_CASE
+contains '_' → snake_case
+```
+
+**Impact:** One new enum variant, one match arm in detection, one Display/FromStr entry. No breaking changes. Small, clean addition.
+
+Want me to implement it?
+
+## User
+
+Yes

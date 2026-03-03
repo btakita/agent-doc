@@ -292,3 +292,21 @@ No other issues. Grammar, dates, and content are clean. **Ready to send to Dave.
 ## User
 
 Should we include the initial Python prototype for corky...using SPEC.md to transition to Rust in under 1 day?
+
+## Assistant
+
+**Yes — absolutely include it.** That's a killer story for BCG. A Python-to-Rust rewrite in under 1 day, driven by a spec document, hits three of their signals at once:
+
+1. **Rapid prototyping** — Python prototype to validate the concept fast
+2. **Spec-driven development** — SPEC.md as the transition blueprint (exactly the "agentic workflow" BCG is building)
+3. **Execution speed** — full Rust rewrite in under 1 day demonstrates the velocity they're hiring for
+
+**Updated corky bullet** in AI Products Shipped:
+
+> Built and shipped a git-native correspondence system in Rust that syncs email, Telegram, and Slack into scoped markdown mailboxes with per-contact agent context. Prototyped in Python, then spec-driven rewrite to Rust in under 1 day. Used daily for professional correspondence.
+
+The "prototyped in Python, then spec-driven rewrite to Rust in under 1 day" is the money phrase — it shows you use AI-assisted spec-driven workflows to move at startup speed with systems-language quality.
+
+## User
+
+For Corky, please include topics, Whisper diatized transcription, social media posting, and scheduled posts.

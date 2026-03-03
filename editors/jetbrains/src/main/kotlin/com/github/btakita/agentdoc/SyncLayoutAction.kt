@@ -67,7 +67,7 @@ class SyncLayoutAction : AnAction() {
                     }
                     if (notify) {
                         val summary = TerminalUtil.formatLayoutSummary(cmd)
-                        TerminalUtil.notifyInfo(project, summary)
+                        TerminalUtil.showHint(project, summary)
                     }
                     val process = ProcessBuilder(cmd)
                         .directory(java.io.File(basePath))

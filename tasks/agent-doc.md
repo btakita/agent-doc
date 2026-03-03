@@ -275,3 +275,16 @@ Focus:  "Focus: %4 (layout unchanged)"   — instant switch
 ## User
 
 version bump and release
+
+## Assistant
+
+**Released agent-doc v0.7.0.**
+
+- Snapshot-diff sync architecture, dead window handling, column inversion fix
+- Tagged, pushed, published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.7.0
+- Binary installed (`agent-doc 0.7.0`), parent pointer pushed
+
+## User
+
+Again..we got out of sync. Let's make a new rule. The tmux window should never change. All updates should happen within the same TMUX window.

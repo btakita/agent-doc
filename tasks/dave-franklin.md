@@ -208,3 +208,17 @@ Both pushed to origin.
 ## User
 
 The intro and summary have repeated phrases. Clean them up.
+
+## Assistant
+
+**Cleaned up.** Eliminated 5 repeated phrases between tagline and summary.
+
+**Tagline** now positions: "Shipping production AI systems and building agent tooling — real-time multimodal pipelines, spec-driven development infrastructure, context engineering."
+
+**Summary** now narrates with evidence: Presence AI pipeline specifics (H100, WebRTC), named shipped tools (corky, agent-doc, tagpath), context engineering decade, reactive/event-driven expertise.
+
+No more duplicate "spec-driven", "collaborative intelligence", "agents and humans work in parallel", or "20+ years". Both PDFs rebuilt.
+
+## User
+
+Anil managed the Tenfore Holding project while at Neo Innovations. I built the document-as-interface app as a for Tenfore's Salesforce integration. agent-doc is a document-as-interface to drive the agent loop. I think Anil would recognize this. Please help me communicate the arc in my resume.

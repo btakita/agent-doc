@@ -695,3 +695,22 @@ Semantic equivalence confirmed: `Person_Name` (Ada_Case) = `person_name` (snake_
 ## User
 
 version bump, release
+
+## Assistant
+
+### Released tagpath v0.4.0
+
+- **crates.io:** https://crates.io/crates/tagpath (`cargo install tagpath`)
+- **GitHub Release:** building now (5-target binary matrix) — https://github.com/btakita/tagpath/actions
+- **Git tag:** `v0.4.0` pushed
+
+**What's new in v0.4.0:**
+- Ada_Case convention detection and support
+- Fixed Convention display format (`snake_case` instead of `SnakeCase`)
+- Fixed lint output format
+- Removed accidental agent-doc frontmatter from README
+- 51/51 tests, clippy clean
+
+## User
+
+compact tasks/tagpath.md

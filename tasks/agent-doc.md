@@ -357,3 +357,28 @@ Recovery: 1 pane → 2 panes in correct order. The old code computed `in_window`
 ## User
 
 TMUX Window 0 shows only 1 pane. This command should cause it to show 2 panes with agent-doc on the left and tagpath on the right.
+
+## Assistant
+
+**Fixed — the break-out condition was too restrictive.**
+
+The break-out step only removed panes tracked in the session registry (`session_panes.contains()`). Pane %13 was a stale claude pane NOT in the registry, so it stayed in the window through every reconciliation attempt. The convergence loop kept trying but couldn't remove it.
+
+**Fix:** Break out ANY pane not in the desired layout, regardless of session registry. `break-pane` is non-destructive (moves to its own window, doesn't kill).
+
+Tested: ran sync targeting window 0 (@19) which had 3 panes (%34, %37, %13):
+```
+Reconcile attempt 1 — desired ["%34", "%37"], actual ["%34", "%37", "%13"]
+Broke out %13 from @19
+Layout converged on attempt 2
+Focus: %34 (layout unchanged)
+```
+
+Result: 2 panes, %34 (left) %37 (right).
+
+- 104 tests pass, clippy clean
+- Binary installed (`agent-doc 0.7.0`)
+
+## User
+
+This tmux resolution is completely broken. Please write a spec about the tmux resolution and CORRECTLY implement the spec.

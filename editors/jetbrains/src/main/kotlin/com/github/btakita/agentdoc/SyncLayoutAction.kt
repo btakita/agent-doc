@@ -183,12 +183,17 @@ object LayoutDetector {
             }
         }
 
-        // Check if this subtree contains any Splitter children
+        // Delegate only to children that contain Splitters.
+        // Non-splitter children (decorations, overlays, status bars) are skipped
+        // to avoid assigning bogus leaf indices that offset the real editor panes.
         if (component is java.awt.Container) {
-            for (child in component.components) {
-                if (containsSplitter(child)) {
-                    return component.components.flatMap { walkSplitterTree(it, leafCounter) }
-                }
+            val splitterChildren = component.components.filter { containsSplitter(it) }
+            if (splitterChildren.size == 1) {
+                // Wrapper around a single splitter subtree — delegate directly
+                return walkSplitterTree(splitterChildren[0], leafCounter)
+            } else if (splitterChildren.size > 1) {
+                // Multiple splitter subtrees — process all
+                return splitterChildren.flatMap { walkSplitterTree(it, leafCounter) }
             }
         }
 

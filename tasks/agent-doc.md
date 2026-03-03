@@ -238,3 +238,24 @@ The submodule had uncommitted changes from a Junie session — a Junie agent bac
 Got an error running with Junie agent backend
 
 agent-doc run failed (exit 1): [main 7ac6a40] agent-doc(plan): 2026-03-02 23:34:26 1 file changed, 1 insertion(+) Submitting to junie... Error: No such file or directory (os error 2)
+
+## Assistant
+
+**Fixed.** The `junie` command wasn't found because `junie-bridge.sh` wasn't on the PATH and the backend hardcoded `"junie"` as the command name.
+
+**Root cause:** `junie.rs` defaulted to running `junie` (which doesn't exist), but the actual bridge script is `junie-bridge.sh` shipped with the JetBrains plugin.
+
+**Fix:** `resolve_junie_bridge()` function that searches for the script in:
+1. `junie` on PATH
+2. `junie-bridge.sh` next to the `agent-doc` binary
+3. `~/bin/junie-bridge.sh` and `~/.local/bin/junie-bridge.sh`
+
+Also added a helpful error message pointing to installation instructions.
+
+Installed `junie-bridge.sh` to `~/.local/bin/`. Binary rebuilt and installed.
+
+**Note:** The bridge script is still a polling-based prototype — it writes the prompt to `~/.cache/junie-bridge/request.md` and waits for a `response.json`. There's no IDE-side watcher yet that picks up requests and runs them through Junie. That would be the next piece to build.
+
+## User
+
+Should we have the plugin directly run agent-doc in junie mode? Do we even need the junie-bridge.sh script?

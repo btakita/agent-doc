@@ -86,3 +86,7 @@ I could start with the left or right side having a vertical stack in the editor.
 
 left1 | right full
 left2 | ...
+
+Let's say we begin with left & right. There are 2 agent docs in left and 1 in right. If we vertically split the 2 agent docs in left to left1 and left2 then run the sync with agent-doc sync, it should automatically remove left2 from the existing left session, create a new claude session for left2 and register left2 in the new session.
+
+Running left2 would sync & run in the new left claude session if it does not previously exist. claude-mem should help with keeping full context across all claude sessions.

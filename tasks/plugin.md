@@ -165,3 +165,9 @@ The JB AI subscription is a **closed ecosystem**: Junie, AI Assistant chat, inli
 3. **Use JB AI for what it does well** — Junie for standalone tasks, AI Assistant for quick questions — reserve Claude Code for agent-doc sessions
 
 ## User
+
+The plugin is overeager in making any & all markdown files opened in the editor be claimed.
+
+For example, BrianTakita.md is not an agent doc, but was claimed when I opened it.
+
+Please help in making the plugin more selective about which markdown files it claims. Perhaps requiring an explicit command if the markdown file doesn't have the claim frontmatter?

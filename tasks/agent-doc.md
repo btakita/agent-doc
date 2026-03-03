@@ -311,4 +311,25 @@ There are now 3 panes in window 0. I had to manually delete windows in the tmux 
  
 Please resync and make sure the agent-doc sync automation results in an accurate state.
 
-Can agent-doc sync verify that the tmux panes are correct? And iterate until it correctly matches the layout it was given? 
+Can agent-doc sync verify that the tmux panes are correct? And iterate until it correctly matches the layout it was given?
+
+## Assistant
+
+**Current state is correct** — window @41 has %34 (agent-doc.md, left) and %37 (tagpath.md, right). The manual cleanup you did fixed the immediate problem.
+
+**Added verification loop to sync.** After reconciliation (Step 3), sync now:
+1. Re-snapshots the target window with `list_panes_ordered()`
+2. Compares against the desired layout
+3. If mismatch — retries once with a full break-rejoin cycle (only non-anchor panes leave the window temporarily)
+4. Logs the result either way, so you can see exactly what went wrong
+
+This catches any edge case where the incremental reconciliation produces the wrong result. The retry is a safety net, not the primary path.
+
+- 104 tests pass, clippy clean
+- Binary installed (`agent-doc 0.7.0`)
+
+## User
+
+Well now the tmux only shows 1 pane. The tmux sync command should iterate until the correct state is achieved.
+
+In the currently s

@@ -155,3 +155,26 @@ If focus still doesn't switch after testing, the next suspect is IntelliJ's `sel
 ## User
 
 The claims are not working anymore. tagpath is in right1, but it was claimed by left1. Now there is only 1 tmux pane now.
+
+All of the panes are in separate windows.
+
+## Assistant
+
+**Fixed — removed Phase 1.5 window filtering from sync.rs.**
+
+The Phase 1.5 window filter was too aggressive. When the plugin sent `sync --col tasks/agent-doc.md --col tasks/tagpath.md --window @30`, Phase 1.5 excluded tagpath.md's pane (%31) because it was in @46, not @30. This left only 1 resolved pane, triggering the "not enough panes" path which collapsed the window to 1 pane.
+
+The `--col` args are declarative — they mean "put these files in this window." Phase 6 (break out) + Phase 7 (join-pane) already handle moving panes between windows. Phase 1.5 was blocking that by filtering out the panes before they could be moved.
+
+- 104 tests pass, clippy clean
+- Binary installed
+
+## User
+
+I found another bug. I switched to resume and now there are 3 tmux panes again.
+
+Where is the logic that interprets the agent-doc sync command?
+
+I want it to "start fresh" and change any state that needs to be changed. In the 2 column example:
+1. Ensure that the tmux panes are in 2 columns. If there are extra panes in the window, close them. Don't solely rely on cached state, as the user may have changed the layout.
+2. Ensure that the tmux panes are populated with the matching claimed files.

@@ -389,3 +389,25 @@ Ctrl+Shift+Alt+J → agent-doc run --agent junie → bridge writes request.md �
 The tmux router just created a 3-column layout. Please fix.
 
 l1 | l2 | r1
+
+## Assistant
+
+**Fixed.** Bug was in `SyncLayoutAction.kt`'s `walkSplitterTree()` Container handling.
+
+**Root cause:** When a non-Splitter Container (e.g. `EditorsSplitters` root panel) had the splitter tree as a child alongside non-editor components (decorations, overlays), the old code `flatMap`-ed ALL children — assigning leaf indices to non-editor panels. This offset real leaf indices, causing each file to land in its own column instead of l1/l2 being grouped.
+
+**Fix:** Only delegate to children that contain Splitters. Non-splitter children are skipped:
+
+```kotlin
+// Before: component.components.flatMap { walkSplitterTree(it, leafCounter) }
+// After:
+val splitterChildren = component.components.filter { containsSplitter(it) }
+if (splitterChildren.size == 1) return walkSplitterTree(splitterChildren[0], leafCounter)
+else if (splitterChildren.size > 1) return splitterChildren.flatMap { ... }
+```
+
+Plugin rebuilt. Reinstall the zip to apply.
+
+## User
+
+Should the tmux panes automatically recover back to correct layout of l1 r1?

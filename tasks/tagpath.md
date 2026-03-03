@@ -165,3 +165,46 @@ Ready to enter plan mode and write a detailed implementation plan for Phase 3a (
 implement
 
 release
+
+## Assistant
+
+**Released tagpath v0.5.0** — Phase 3 complete.
+
+### New commands
+
+**`tagpath alias`** — Cross-convention alias generation:
+```sh
+tagpath alias person_name
+# snake_case:      person_name
+# camelCase:       personName
+# PascalCase:      PersonName
+# kebab-case:      person-name
+# UPPER_SNAKE_CASE: PERSON_NAME
+# Ada_Case:        Person_Name
+```
+
+**`tagpath prose`** — Human-readable descriptions:
+```sh
+tagpath prose create_user_profile  # "Creates a user profile"
+tagpath prose is_valid_email       # "Checks if email is valid"
+tagpath prose user_name_a          # "Array of user names"
+```
+
+**`tagpath graph`** — Tag co-occurrence graph (petgraph):
+```sh
+tagpath graph src/ --format dot    # Graphviz DOT output
+tagpath graph src/ --format json   # JSON nodes/edges
+tagpath graph src/ --query "user"  # Subgraph around "user" tags
+```
+
+### Stats
+
+- **72/72 tests**, clippy clean
+- New modules: `alias/mod.rs`, `prose/mod.rs`, `graph/mod.rs`
+- New dependency: `petgraph 0.8`
+- Docs updated: README, AGENTS.md, SPEC.md
+- Published: [crates.io](https://crates.io/crates/tagpath), GitHub tag `v0.5.0`
+
+## User
+
+

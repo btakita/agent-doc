@@ -139,3 +139,21 @@ https://www.linkedin.com/company/bcg/
 
 I worked with Anil at Neo Innovations. He managed the Tenfore project. Censible was also a Neo client.
 https://www.linkedin.com/in/anilpod/
+
+## Assistant
+
+Created `mail/contacts/dave-franklin/bcg-research.md` — comprehensive BCG topic covering:
+
+**Company:** $13.5B revenue (2024), "Big 3" consulting alongside McKinsey and Bain. **BCG X** is their 3,000+ person tech/AI division — AI advisory is ~20% of revenue. Partnerships with Anthropic, AWS, Google, Microsoft, OpenAI.
+
+**Agentic AI push:** BCG published a [$200B agentic AI opportunity](https://www.bcg.com/publications/2026/the-200-billion-dollar-ai-opportunity-in-tech-services) report (Feb 2026). They see agentic AI doubling AI-delivered value. 58% of surveyed companies already integrating AI agents; 13.7% ROI — beating non-agentic GenAI.
+
+**Anil Podduturi** — confirmed currently at BCG, based in Brooklyn. UC Berkeley grad. Active thought leader on AI product strategy (articles on AI memory and product team time pressure). Your Neo Innovation connection (Sep-Dec 2015) is a **warm path into BCG** — he managed the Tenfore project and knows your work firsthand. Censible was also a Neo client, so there's additional shared context.
+
+Updated `CLAUDE.md` with the Anil connection section and link to `bcg-research.md`.
+
+The research file also includes interview prep notes — strongest talking points mapped to what BCG values based on Dave's call + their public agentic AI publications.
+
+## User
+
+

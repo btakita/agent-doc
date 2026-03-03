@@ -161,29 +161,6 @@ pub fn run_with_tmux(
         }
     }
 
-    // --- Phase 1.5: Window filtering ---
-    // When --window is specified, exclude panes that live in a different window.
-    // This prevents cross-window pane theft (e.g., resume.md's pane in @30
-    // getting pulled into @1 when the user switches tabs).
-    if let Some(target_win) = window {
-        resolved.retain(|r| {
-            match tmux.pane_window(&r.pane_id) {
-                Ok(win) if win == target_win => true,
-                Ok(win) => {
-                    eprintln!(
-                        "Skipping {} (pane {} in window {}, not {})",
-                        r.path.display(),
-                        r.pane_id,
-                        win,
-                        target_win
-                    );
-                    false
-                }
-                Err(_) => true, // can't determine window, keep it
-            }
-        });
-    }
-
     if resolved.len() < 2 {
         // Not enough panes for 2D layout, but still break out unwanted
         // session panes from the target window so layout stays clean.
@@ -274,112 +251,138 @@ pub fn run_with_tmux(
         }
     }
 
-    // If --window is specified, override the auto-detected window
-    let target_window = window.map(|w| w.to_string()).unwrap_or(best_window);
+    // If --window is specified, override the auto-detected window — but only if alive
+    let target_window = if let Some(w) = window {
+        if tmux.list_window_panes(w).unwrap_or_default().is_empty() {
+            eprintln!("warning: --window {} is dead, using auto-detected window", w);
+            best_window
+        } else {
+            w.to_string()
+        }
+    } else {
+        best_window
+    };
 
     // The anchor is the first pane of the first column
     let anchor_pane = pane_columns[0][0].clone();
 
-    // --- Phase 5: Break out unwanted session panes from target window ---
+    // Flatten desired layout into ordered list for comparison
+    let desired_ordered: Vec<&str> = pane_columns
+        .iter()
+        .flat_map(|col| col.iter().map(|s| s.as_str()))
+        .collect();
+
+    // Helper: resolve --focus to a pane ID
+    let resolve_focus = |anchor: &str| -> String {
+        if let Some(focus_file) = focus {
+            let focus_path = PathBuf::from(focus_file);
+            file_to_pane
+                .get(&focus_path)
+                .cloned()
+                .unwrap_or_else(|| anchor.to_string())
+        } else {
+            anchor.to_string()
+        }
+    };
+
+    // --- Step 1: Snapshot current window state ---
+    let current_ordered = tmux.list_panes_ordered(&target_window).unwrap_or_default();
+
+    // --- Step 2: Fast path — layout already matches (same panes, same order) ---
+    if current_ordered.len() == desired_ordered.len()
+        && current_ordered
+            .iter()
+            .zip(&desired_ordered)
+            .all(|(c, d)| c == d)
+    {
+        let focus_pane = resolve_focus(&anchor_pane);
+        tmux.select_pane(&focus_pane)?;
+        eprintln!("Focus: {} (layout unchanged)", focus_pane);
+        return Ok(());
+    }
+
+    // --- Step 3: Reconcile — make window match desired layout ---
+    // 3a. Break out unwanted session panes from target window
     let registry = sessions::load().unwrap_or_default();
     let session_panes: HashSet<String> = registry.values().map(|e| e.pane.clone()).collect();
-
     let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
-    for existing_pane in &window_panes {
-        if !wanted.contains(existing_pane.as_str())
-            && session_panes.contains(existing_pane)
-            && window_panes.len() > 1
+    let mut remaining = window_panes.len();
+    for pane in &window_panes {
+        if !wanted.contains(pane.as_str()) && session_panes.contains(pane) && remaining > 1 {
+            tmux.break_pane(pane)?;
+            remaining -= 1;
+            eprintln!("Broke out {} from {}", pane, target_window);
+        }
+    }
+
+    // 3b. Break out all wanted panes (except anchor) from wherever they are.
+    //     This guarantees each is in its own window, ready for ordered join.
+    for pane in &desired_ordered[1..] {
+        let pane_win = tmux.pane_window(pane)?;
+        let siblings = tmux.list_window_panes(&pane_win)?;
+        if siblings.len() > 1 {
+            tmux.break_pane(pane)?;
+        }
+    }
+
+    // 3c. Ensure anchor is in the target window
+    let anchor_win = tmux.pane_window(&anchor_pane)?;
+    if anchor_win != target_window {
+        let anchor_siblings = tmux.list_window_panes(&anchor_win)?;
+        if anchor_siblings.len() > 1 {
+            tmux.break_pane(&anchor_pane)?;
+        }
+        let target_panes = tmux.list_window_panes(&target_window)?;
+        if let Some(existing) = target_panes.first() {
+            tmux.join_pane(&anchor_pane, existing, "-bh")?;
+            eprintln!("Moved anchor {} into {}", anchor_pane, target_window);
+        }
+    }
+
+    // 3d. Break out any remaining unwanted panes (may have been left to keep window alive)
+    let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
+    for pane in &window_panes {
+        if !wanted.contains(pane.as_str()) && session_panes.contains(pane) && window_panes.len() > 1
         {
-            tmux.break_pane(existing_pane)?;
-            eprintln!(
-                "Broke out pane {} from window {}",
-                existing_pane, target_window
-            );
+            tmux.break_pane(pane)?;
+            eprintln!("Broke out {} from {}", pane, target_window);
         }
     }
 
-    // --- Phase 6: Break all wanted panes (except anchor) to separate windows ---
-    // This gives us a clean slate for the 2D join algorithm.
-    for col in &pane_columns {
-        for pane_id in col {
-            if *pane_id == anchor_pane {
-                continue;
-            }
-            let pane_win = tmux.pane_window(pane_id)?;
-            let win_panes = tmux.list_window_panes(&pane_win)?;
-            if win_panes.len() > 1 {
-                tmux.break_pane(pane_id)?;
-            }
-        }
-    }
-
-    // --- Phase 7: 2D join algorithm ---
-    // Column 0: anchor stays. Join remaining files with -v (vertical stack).
+    // 3e. Join panes in column order
+    // Column 0: stack below anchor
     for pane_id in &pane_columns[0][1..] {
         tmux.join_pane(pane_id, &anchor_pane, "-v")?;
-        eprintln!("Joined pane {} below anchor (col 0, stack)", pane_id);
     }
-
-    // Columns 1+: join first file with -h (creates new column right of anchor).
-    // Then join remaining files with -v (stack within column).
-    for (col_idx, col) in pane_columns[1..].iter().enumerate() {
-        // First pane of this column joins horizontally to the anchor
+    // Columns 1+: horizontal split, then vertical stacks
+    for col in &pane_columns[1..] {
         let col_anchor = &col[0];
         tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
-        eprintln!(
-            "Joined pane {} to right of anchor (col {})",
-            col_anchor,
-            col_idx + 1
-        );
-
-        // Remaining panes stack vertically within this column
         for pane_id in &col[1..] {
             tmux.join_pane(pane_id, col_anchor, "-v")?;
-            eprintln!(
-                "Joined pane {} below {} (col {}, stack)",
-                pane_id,
-                col_anchor,
-                col_idx + 1
-            );
         }
     }
 
-    // --- Phase 8: Equalize layout ---
-    // After join, tmux gives unequal sizes. Equalize columns, then equalize
-    // rows within each column.
+    // --- Step 4: Equalize + Focus ---
     let anchor_window = tmux.pane_window(&anchor_pane)?;
     if pane_columns.len() == 2 {
-        // Two columns: resize the first column's first pane to 50% width
         let _ = tmux.resize_pane(&pane_columns[0][0], "-x", 50);
     } else if pane_columns.len() > 2 {
-        // 3+ columns: use even-horizontal as a starting point
         let _ = tmux.select_layout(&anchor_window, "even-horizontal");
     }
-    // Equalize vertical stacks within each column
     for col in &pane_columns {
         if col.len() > 1 {
-            // Resize first pane in stack to equal share
             let pct = 100 / col.len() as u32;
             let _ = tmux.resize_pane(&col[0], "-y", pct);
         }
     }
 
-    // --- Phase 9: Focus ---
-    let focus_pane = if let Some(focus_file) = focus {
-        let focus_path = PathBuf::from(focus_file);
-        file_to_pane
-            .get(&focus_path)
-            .cloned()
-            .unwrap_or_else(|| anchor_pane.clone())
-    } else {
-        anchor_pane.clone()
-    };
+    let focus_pane = resolve_focus(&anchor_pane);
     tmux.select_pane(&focus_pane)?;
 
-    let total_panes: usize = pane_columns.iter().map(|c| c.len()).sum();
     eprintln!(
         "Sync: {} panes in {} columns",
-        total_panes,
+        desired_ordered.len(),
         pane_columns.len()
     );
     Ok(())

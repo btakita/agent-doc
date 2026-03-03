@@ -281,4 +281,4 @@ But does NOT find `fetchPostData` (no `user` tag). Semantic search, not textual.
 
 version bump and release
 
-Let's also setup 
+Let's also setup github actions. Similar to agent-doc and corky.

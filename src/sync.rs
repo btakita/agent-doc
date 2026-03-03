@@ -159,6 +159,29 @@ pub fn run_with_tmux(
         }
     }
 
+    // --- Phase 1.5: Window filtering ---
+    // When --window is specified, exclude panes that live in a different window.
+    // This prevents cross-window pane theft (e.g., resume.md's pane in @30
+    // getting pulled into @1 when the user switches tabs).
+    if let Some(target_win) = window {
+        resolved.retain(|r| {
+            match tmux.pane_window(&r.pane_id) {
+                Ok(win) if win == target_win => true,
+                Ok(win) => {
+                    eprintln!(
+                        "Skipping {} (pane {} in window {}, not {})",
+                        r.path.display(),
+                        r.pane_id,
+                        win,
+                        target_win
+                    );
+                    false
+                }
+                Err(_) => true, // can't determine window, keep it
+            }
+        });
+    }
+
     if resolved.len() < 2 {
         // Not enough panes to arrange — just focus what we have
         if let Some(r) = resolved.first() {
@@ -298,7 +321,27 @@ pub fn run_with_tmux(
         }
     }
 
-    // --- Phase 8: Focus ---
+    // --- Phase 8: Equalize layout ---
+    // After join, tmux gives unequal sizes. Equalize columns, then equalize
+    // rows within each column.
+    let anchor_window = tmux.pane_window(&anchor_pane)?;
+    if pane_columns.len() == 2 {
+        // Two columns: resize the first column's first pane to 50% width
+        let _ = tmux.resize_pane(&pane_columns[0][0], "-x", 50);
+    } else if pane_columns.len() > 2 {
+        // 3+ columns: use even-horizontal as a starting point
+        let _ = tmux.select_layout(&anchor_window, "even-horizontal");
+    }
+    // Equalize vertical stacks within each column
+    for col in &pane_columns {
+        if col.len() > 1 {
+            // Resize first pane in stack to equal share
+            let pct = 100 / col.len() as u32;
+            let _ = tmux.resize_pane(&col[0], "-y", pct);
+        }
+    }
+
+    // --- Phase 9: Focus ---
     let focus_pane = if let Some(focus_file) = focus {
         let focus_path = PathBuf::from(focus_file);
         file_to_pane

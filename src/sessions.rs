@@ -238,6 +238,38 @@ impl Tmux {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Apply a named layout to a window (e.g., "even-horizontal", "tiled").
+    pub fn select_layout(&self, window_id: &str, layout: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["select-layout", "-t", window_id, layout])
+            .status()
+            .context("failed to run tmux select-layout")?;
+        if !status.success() {
+            anyhow::bail!("tmux select-layout failed for window {}", window_id);
+        }
+        Ok(())
+    }
+
+    /// Resize a pane to a specific percentage of the window.
+    pub fn resize_pane(&self, pane_id: &str, flag: &str, size: u32) -> Result<()> {
+        let status = self
+            .cmd()
+            .args([
+                "resize-pane",
+                "-t",
+                pane_id,
+                flag,
+                &format!("{}%", size),
+            ])
+            .status()
+            .context("failed to run tmux resize-pane")?;
+        if !status.success() {
+            anyhow::bail!("tmux resize-pane failed for pane {}", pane_id);
+        }
+        Ok(())
+    }
+
     /// Move a pane into another pane's window with the given split direction.
     ///
     /// `split_flag` is `-h` for horizontal (side-by-side) or `-v` for vertical (stacked).

@@ -163,17 +163,13 @@ pub fn run_with_tmux(
 
     if resolved.len() < 2 {
         // Not enough panes for 2D layout, but still break out unwanted
-        // session panes from the target window so layout stays clean.
+        // panes from the target window so layout stays clean.
         if let Some(target_win) = window {
-            let registry = sessions::load().unwrap_or_default();
-            let session_panes: HashSet<String> =
-                registry.values().map(|e| e.pane.clone()).collect();
             let wanted: HashSet<String> =
                 resolved.iter().map(|r| r.pane_id.clone()).collect();
             let window_panes = tmux.list_window_panes(target_win).unwrap_or_default();
             for existing_pane in &window_panes {
                 if !wanted.contains(existing_pane.as_str())
-                    && session_panes.contains(existing_pane)
                     && window_panes.len() > 1
                 {
                     tmux.break_pane(existing_pane)?;
@@ -287,8 +283,6 @@ pub fn run_with_tmux(
 
     // --- Convergent reconciliation loop ---
     // Re-queries tmux state each iteration. Max 3 attempts.
-    let registry = sessions::load().unwrap_or_default();
-    let session_panes: HashSet<String> = registry.values().map(|e| e.pane.clone()).collect();
 
     for attempt in 0..3 {
         // Snapshot current window state
@@ -313,11 +307,12 @@ pub fn run_with_tmux(
             current_refs
         );
 
-        // Step A: Break out unwanted session panes from target window
+        // Step A: Break out ALL unwanted panes from target window
+        // Any pane not in the desired layout gets moved out (non-destructive).
         let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
         let mut remaining = window_panes.len();
         for pane in &window_panes {
-            if !wanted.contains(pane.as_str()) && session_panes.contains(pane) && remaining > 1 {
+            if !wanted.contains(pane.as_str()) && remaining > 1 {
                 tmux.break_pane(pane)?;
                 remaining -= 1;
                 eprintln!("Broke out {} from {}", pane, target_window);
@@ -383,7 +378,6 @@ pub fn run_with_tmux(
         let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
         for pane in &window_panes {
             if !wanted.contains(pane.as_str())
-                && session_panes.contains(pane)
                 && window_panes.len() > 1
             {
                 tmux.break_pane(pane)?;

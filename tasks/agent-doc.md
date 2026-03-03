@@ -308,3 +308,5 @@ Want me to build this?
 ## User
 
 I was able to run junie-bridge.sh successfully from Junie. I just want to be able to notify Junie of the diff.
+
+How do I make the Jetbrains plugin call Junie directly with the diff?

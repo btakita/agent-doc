@@ -66,3 +66,19 @@ Sync: 2 panes in 2 columns
 error"},"request_id":"req_011CYgApx9xYPnz1xSYspsW2"}
 
 ✻ Worked for 3m 59s
+
+## Assistant
+
+**The CLI sync works correctly.** The manual run proves it: broke out %32, joined %30 to anchor, 2 panes at 120x119 widths. The issue is the **plugin's LayoutDetector**, not `sync.rs`.
+
+You're right that the v0.6.3 LayoutDetector fix is conceptually wrong. When a Container wraps both a Splitter subtree (left stacked column) and a bare editor pane (right column — no Splitter needed for a single file), the fix skips the bare editor pane entirely. The plugin then only sends files from the left column, and sync either focuses a single file or arranges only partial layout.
+
+**Next step:** Rebuild and reinstall the plugin — I added a notification balloon that shows the exact `--col` args detected. Run `cd agent-doc/editors/jetbrains && ./gradlew buildPlugin`, reinstall the zip, and trigger Ctrl+Shift+Alt+L. The balloon will show what the LayoutDetector sees.
+
+Once confirmed, I'll fix the LayoutDetector to treat non-splitter Container children as leaf editor panes instead of skipping them.
+
+## User
+
+When my editor focuses on resume.md, there is only 1 pane in the window.
+
+The focus action should cause the plugin to send a sync with the entire layout

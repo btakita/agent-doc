@@ -302,9 +302,13 @@ pub fn run_with_tmux(
     }
 
     // --- Step 3: Reconcile — make window match desired layout ---
-    // 3a. Break out unwanted session panes from target window
+    // Rule: NEVER break wanted panes out of the target window.
+    // Only break out unwanted panes, and only join in missing ones.
+
     let registry = sessions::load().unwrap_or_default();
     let session_panes: HashSet<String> = registry.values().map(|e| e.pane.clone()).collect();
+
+    // 3a. Break out unwanted session panes from target window
     let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
     let mut remaining = window_panes.len();
     for pane in &window_panes {
@@ -315,19 +319,10 @@ pub fn run_with_tmux(
         }
     }
 
-    // 3b. Break out all wanted panes (except anchor) from wherever they are.
-    //     This guarantees each is in its own window, ready for ordered join.
-    for pane in &desired_ordered[1..] {
-        let pane_win = tmux.pane_window(pane)?;
-        let siblings = tmux.list_window_panes(&pane_win)?;
-        if siblings.len() > 1 {
-            tmux.break_pane(pane)?;
-        }
-    }
-
-    // 3c. Ensure anchor is in the target window
+    // 3b. Ensure anchor is in the target window (join in if needed, never break out)
     let anchor_win = tmux.pane_window(&anchor_pane)?;
     if anchor_win != target_window {
+        // Isolate anchor from its current window if sharing
         let anchor_siblings = tmux.list_window_panes(&anchor_win)?;
         if anchor_siblings.len() > 1 {
             tmux.break_pane(&anchor_pane)?;
@@ -339,7 +334,49 @@ pub fn run_with_tmux(
         }
     }
 
-    // 3d. Break out any remaining unwanted panes (may have been left to keep window alive)
+    // 3c. Join missing wanted panes into the target window (skip those already there)
+    let in_window: HashSet<String> = tmux
+        .list_window_panes(&target_window)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    // Column 0: stack below anchor (skip anchor itself)
+    for pane_id in &pane_columns[0][1..] {
+        if !in_window.contains(pane_id.as_str()) {
+            // Isolate from current window if sharing
+            let pane_win = tmux.pane_window(pane_id)?;
+            let siblings = tmux.list_window_panes(&pane_win)?;
+            if siblings.len() > 1 {
+                tmux.break_pane(pane_id)?;
+            }
+            tmux.join_pane(pane_id, &anchor_pane, "-v")?;
+        }
+    }
+    // Columns 1+: horizontal split, then vertical stacks
+    for col in &pane_columns[1..] {
+        let col_anchor = &col[0];
+        if !in_window.contains(col_anchor.as_str()) {
+            let pane_win = tmux.pane_window(col_anchor)?;
+            let siblings = tmux.list_window_panes(&pane_win)?;
+            if siblings.len() > 1 {
+                tmux.break_pane(col_anchor)?;
+            }
+            tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
+        }
+        for pane_id in &col[1..] {
+            if !in_window.contains(pane_id.as_str()) {
+                let pane_win = tmux.pane_window(pane_id)?;
+                let siblings = tmux.list_window_panes(&pane_win)?;
+                if siblings.len() > 1 {
+                    tmux.break_pane(pane_id)?;
+                }
+                tmux.join_pane(pane_id, col_anchor, "-v")?;
+            }
+        }
+    }
+
+    // 3d. Break out any remaining unwanted panes (may have been kept to prevent empty window)
     let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
     for pane in &window_panes {
         if !wanted.contains(pane.as_str()) && session_panes.contains(pane) && window_panes.len() > 1
@@ -349,17 +386,45 @@ pub fn run_with_tmux(
         }
     }
 
-    // 3e. Join panes in column order
-    // Column 0: stack below anchor
-    for pane_id in &pane_columns[0][1..] {
-        tmux.join_pane(pane_id, &anchor_pane, "-v")?;
-    }
-    // Columns 1+: horizontal split, then vertical stacks
-    for col in &pane_columns[1..] {
-        let col_anchor = &col[0];
-        tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
-        for pane_id in &col[1..] {
-            tmux.join_pane(pane_id, col_anchor, "-v")?;
+    // 3e. Verify — re-snapshot and check layout matches desired state.
+    //     If mismatch, log details so the user can see what went wrong.
+    let actual = tmux.list_panes_ordered(&target_window).unwrap_or_default();
+    let actual_refs: Vec<&str> = actual.iter().map(|s| s.as_str()).collect();
+    if actual_refs != desired_ordered {
+        eprintln!(
+            "warning: layout mismatch after reconcile — desired {:?}, actual {:?}",
+            desired_ordered, actual_refs
+        );
+        // Retry once: break out everything except anchor and rejoin
+        let retry_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
+        for pane in &retry_panes {
+            if pane != &anchor_pane && retry_panes.len() > 1 {
+                let siblings = tmux.list_window_panes(&target_window).unwrap_or_default();
+                if siblings.len() > 1 {
+                    tmux.break_pane(pane)?;
+                }
+            }
+        }
+        // Rejoin in order
+        for pane_id in &pane_columns[0][1..] {
+            tmux.join_pane(pane_id, &anchor_pane, "-v")?;
+        }
+        for col in &pane_columns[1..] {
+            let col_anchor = &col[0];
+            tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
+            for pane_id in &col[1..] {
+                tmux.join_pane(pane_id, col_anchor, "-v")?;
+            }
+        }
+        let verified = tmux.list_panes_ordered(&target_window).unwrap_or_default();
+        let verified_refs: Vec<&str> = verified.iter().map(|s| s.as_str()).collect();
+        if verified_refs != desired_ordered {
+            eprintln!(
+                "error: layout still mismatched after retry — desired {:?}, actual {:?}",
+                desired_ordered, verified_refs
+            );
+        } else {
+            eprintln!("Retry succeeded — layout now matches");
         }
     }
 

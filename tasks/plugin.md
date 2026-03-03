@@ -68,3 +68,6 @@ Canonical source: `agent-doc/editors/jetbrains/` and `agent-doc/editors/vscode/`
 
 ## User
 
+I just ran into a usage limit on my Claude Code session. I have an existing JetBrains AI plan.
+
+Can we make the plugin act as a bridge to use the JB AI plan to reduce Claude Code account usage?

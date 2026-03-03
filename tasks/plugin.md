@@ -71,3 +71,33 @@ Canonical source: `agent-doc/editors/jetbrains/` and `agent-doc/editors/vscode/`
 I just ran into a usage limit on my Claude Code session. I have an existing JetBrains AI plan.
 
 Can we make the plugin act as a bridge to use the JB AI plan to reduce Claude Code account usage?
+
+## Assistant
+
+**No — JetBrains does not expose a public API for plugins to call the AI Assistant's LLM backend.**
+
+There's no `com.intellij.ai.LlmService` or equivalent that our plugin could call to pipe prompts through the JB AI plan. JetBrains has acknowledged the demand (YouTrack LLM-2340) but hasn't shipped it and gives no ETA.
+
+### What won't work
+
+- **Calling JB AI from our plugin** — The AI Assistant's internals (`com.jetbrains.ai.*`, `ai.grazie.*`) are private, undocumented, and break across versions.
+- **InlineCompletionProvider** — Real API, but only for ghost-text code completions, not general-purpose LLM calls.
+
+### What could work
+
+**Option A: Direct Anthropic API backend in agent-doc CLI**
+Add a new agent backend (`agent/api.rs`) that calls the Anthropic API directly via HTTP. No Claude Code CLI involved — just `agent-doc run` sends the diff to the API and appends the response. Uses your own Anthropic API key. Simplest path, keeps architecture unchanged.
+
+**Option B: ACP agent (JetBrains' official agent protocol)**
+Build agent-doc as a standalone ACP agent process. JetBrains routes AI chat messages to it through their unified AI interface. This is how Claude/Codex integrate with JetBrains now. Downside: replaces our document-based workflow with JB's chat UI.
+
+**Option C: Plugin-side HTTP client**
+Plugin calls Anthropic/OpenAI API directly with OkHttp, does diff→prompt→response, writes back to document. Bypasses CLI for submit. How DevoxxGenie/ProxyAI work.
+
+**Recommendation:** Option A — one new file (`agent/api.rs`, ~100 lines), uses `ureq` (already a dependency) to call `api.anthropic.com`. Set `ANTHROPIC_API_KEY`, add `agent: api` to frontmatter.
+
+## User
+
+I already spent money on a JB AI plan so I want to use JB with agent-doc if possible.
+
+Does the ACP agent support routing the agent-doc commands/diffs to the JB AI servers?

@@ -11,12 +11,13 @@ branch: null
 **tagpath** — Tag Path naming system. Parse, lint, and search tag-based identifiers across languages.
 
 - **Repo:** https://github.com/btakita/tagpath (submodule in agent-loop, symlinked from `~/work/btakita/tagpath`)
-- **Crate:** [`tagpath` v0.4.0](https://crates.io/crates/tagpath)
+- **Crate:** [`tagpath` v0.5.0](https://crates.io/crates/tagpath)
 - **Config format:** TOML (`.naming.toml`)
 - **39 language presets**, **14 tree-sitter grammars** (Rust, Python, JS, TS, TSX, Go, C, C++, Java, Ruby, PHP, C#, Swift, Kotlin)
 - **6 conventions:** snake_case, camelCase, PascalCase, kebab-case, UPPER_SNAKE_CASE, Ada_Case
 - **Docs:** README.md, AGENTS.md (symlinked as CLAUDE.md), SPEC.md
 - **CI:** GitHub Actions (clippy + test on push, 5-target release on tag)
+- **Skill:** `/tagpath` Claude Code skill at `.claude/skills/tagpath/SKILL.md`
 
 ### Key Concepts
 
@@ -39,6 +40,9 @@ src/
   extract/mod.rs       Identifier extraction (regex + tree-sitter)
   search/mod.rs        Cross-convention semantic search
   treesitter/mod.rs    Tree-sitter grammar loading and AST walking
+  alias/mod.rs         Cross-convention alias generation
+  prose/mod.rs         Human-readable prose descriptions
+  graph/mod.rs         Tag co-occurrence graph (petgraph)
 lang/                  Language presets (39 languages, TOML)
 presets/               Convention presets (immutable-tag.toml)
 ```
@@ -49,7 +53,7 @@ presets/               Convention presets (immutable-tag.toml)
 - **Intent-preserving refactoring** — rename a concept across all files/conventions
 - **Cross-language symbol resolution** — shared semantic index for polyglot projects
 - **Convention enforcement** — `.naming.toml` tells agents exact conventions per context
-- **Tag ontology** (Phase 3) — `.naming/tags/*.md` domain vocabulary per project
+- **Tag ontology** — `.naming/tags/*.md` domain vocabulary per project
 
 ## Phases
 
@@ -75,13 +79,18 @@ presets/               Convention presets (immutable-tag.toml)
 - [x] Ada_Case convention + Convention Display fix (v0.4.0)
 - [x] 51 tests, clippy clean
 
-### Phase 3 — Graph, index, alias, prose, dynamic loading
+### Phase 3 — Graph, alias, prose, skill ✅ (v0.5.0)
 
-- [ ] `tagpath graph` — build tag relationship graph from codebase (petgraph)
+- [x] `tagpath alias` — convention translation (`snake_case ↔ camelCase ↔ PascalCase`)
+- [x] `tagpath prose` — translate between tags and natural language
+- [x] `tagpath graph` — build tag relationship graph from codebase (petgraph)
+- [x] `/tagpath` Claude Code skill — installed in both repos
+- [x] 72 tests, clippy clean, published to crates.io
+
+### Phase 4 — Index, ontology, dynamic loading, WASM, MCP
+
 - [ ] `tagpath index` — persistent index (`.naming/index.json`) for instant queries
-- [ ] `tagpath alias` — convention translation (`snake_case ↔ camelCase ↔ PascalCase`)
 - [ ] Tag ontology — `.naming/tags/*.md` domain vocabulary (philosophy-style)
-- [ ] Prose convention — translate between tags and natural language
 - [ ] Dynamic `.so` grammar loading — runtime extensibility via `libloading`
 - [ ] WASM build — feature flag excluding tree-sitter, npm package via `wasm-pack`
 - [ ] MCP tool integration — expose parse/search/lint to coding agents
@@ -90,171 +99,12 @@ presets/               Convention presets (immutable-tag.toml)
 
 - **Explicit imports only** — no implicit/magic config loading. `tagpath init --lang rust` generates full config; `extends = ["rust"]` tracks upstream.
 - **Feature flags over monolith** — tree-sitter grammars are opt-in per language. `--no-default-features` gives regex-only.
-- **Dynamic loading deferred** — feature flags cover immediate need. Runtime `.so` loading (Helix/Neovim style) for Phase 3.
+- **Dynamic loading deferred** — feature flags cover immediate need. Runtime `.so` loading (Helix/Neovim style) for Phase 4.
 - **WASM deferred** — core parser/search compile to WASM cleanly; tree-sitter stays native. Not a priority.
 
 ## Assistant
 
-**Compacted.** 717 lines → structured summary preserving all decisions, architecture, phases, and design rationale. Conversation history preserved in git.
+**Compacted.** 260 lines → structured summary. Updated Phase 3 to ✅ (v0.5.0), added alias/prose/graph to architecture, bumped crate version to v0.5.0, created Phase 4 for remaining items. Conversation history preserved in git.
 
 ## User
 
-Let's start Phase 3. Build the graph. Caching. Alias generation. Prose conversion.
-
-## Assistant
-
-Phase 3 builds naturally on the existing `ParsedName` → `ExtractedIdentifier` → search pipeline. Here's the scope:
-
-### 3a. Alias Generation (simplest — start here)
-
-Given an identifier, produce all convention variants from its canonical tags:
-
-```sh
-tagpath alias person_name
-# snake_case:       person_name
-# camelCase:        personName
-# PascalCase:       PersonName
-# kebab-case:       person-name
-# UPPER_SNAKE_CASE: PERSON_NAME
-# Ada_Case:         Person_Name
-
-tagpath alias person_name --convention camelCase
-# personName
-```
-
-Purely stateless — tag decomposition already exists in `parser`, just need the inverse: tags → convention reconstruction. The lint module already has `suggest_fix()` doing this for fix suggestions, so it's mostly extracting and exposing that logic.
-
-### 3b. Prose Conversion (builds on alias + role)
-
-Convert identifiers to natural language descriptions using role detection + tag semantics:
-
-```sh
-tagpath prose create_user_profile
-# "Creates a user profile"
-
-tagpath prose is_valid_email
-# "Checks if email is valid"
-
-tagpath prose user_name_a
-# "Array of user names"
-```
-
-Rule-based using existing role/shape detection — no LLM needed. Templates map role→verb, shape→modifier, and tags→noun phrase.
-
-### 3c. Graph Building (most complex)
-
-Build a directed graph of identifier relationships within a codebase:
-
-```sh
-tagpath graph src/ --format dot
-tagpath graph src/ --format json
-tagpath graph src/ --query "user"  # subgraph around "user" tags
-```
-
-- **Nodes:** Canonical tag sequences (deduplicated across conventions)
-- **Edges:** Inferred from roles (factory→creates), co-occurrence in scopes, AST call patterns
-- **Output:** DOT (for Graphviz), JSON adjacency list
-- **Caching:** Index extracted identifiers to disk for fast re-queries
-
-**Recommended implementation order:** 3a → 3b → 3c (each builds on the last).
-
-Ready to enter plan mode and write a detailed implementation plan for Phase 3a (alias generation)?
-
-## User
-
-implement
-
-release
-
-## Assistant
-
-**Released tagpath v0.5.0** — Phase 3 complete.
-
-### New commands
-
-**`tagpath alias`** — Cross-convention alias generation:
-```sh
-tagpath alias person_name
-# snake_case:      person_name
-# camelCase:       personName
-# PascalCase:      PersonName
-# kebab-case:      person-name
-# UPPER_SNAKE_CASE: PERSON_NAME
-# Ada_Case:        Person_Name
-```
-
-**`tagpath prose`** — Human-readable descriptions:
-```sh
-tagpath prose create_user_profile  # "Creates a user profile"
-tagpath prose is_valid_email       # "Checks if email is valid"
-tagpath prose user_name_a          # "Array of user names"
-```
-
-**`tagpath graph`** — Tag co-occurrence graph (petgraph):
-```sh
-tagpath graph src/ --format dot    # Graphviz DOT output
-tagpath graph src/ --format json   # JSON nodes/edges
-tagpath graph src/ --query "user"  # Subgraph around "user" tags
-```
-
-### Stats
-
-- **72/72 tests**, clippy clean
-- New modules: `alias/mod.rs`, `prose/mod.rs`, `graph/mod.rs`
-- New dependency: `petgraph 0.8`
-- Docs updated: README, AGENTS.md, SPEC.md
-- Published: [crates.io](https://crates.io/crates/tagpath), GitHub tag `v0.5.0`
-
-## User
-
-Please add an installable skill for tagpath.
-
-## Assistant
-
-**Created `/tagpath` Claude Code skill** at `.claude/skills/tagpath/SKILL.md`.
-
-Invocable via `/tagpath <command> [args]` — exposes all 8 CLI commands:
-
-| Command | Purpose |
-|---------|---------|
-| `parse` | Decompose identifier into canonical tags, role, shape |
-| `alias` | Generate all 6 convention variants |
-| `prose` | Human-readable description |
-| `search` | Cross-convention semantic search |
-| `lint` | Validate against `.naming.toml` rules |
-| `extract` | Extract identifiers from source files |
-| `graph` | Tag co-occurrence graph (DOT/JSON) |
-| `init` | Initialize `.naming.toml` config |
-
-Also installed `tagpath` binary globally via `cargo install --path tagpath/`.
-
-Verified:
-```
-$ tagpath alias create_user_profile
-Ada_Case:        Create_User_Profile
-PascalCase:      CreateUserProfile
-camelCase:       createUserProfile
-kebab-case:      create-user-profile
-snake_case:      create_user_profile
-
-$ tagpath prose is_valid_email
-Checks if email is valid
-```
-
-## User
-
-Release. Install the skill.
-
-## Assistant
-
-**Done.** Skill committed, pushed, and installed.
-
-- **tagpath submodule** `7605486` — committed `.claude/skills/tagpath/SKILL.md`, pushed to origin
-- **agent-loop** `597ca61` — committed skill + updated submodule pointer, pushed to origin
-- **Binary installed** — `~/.cargo/bin/tagpath` v0.5.0 via `cargo install --path tagpath/`
-
-The `/tagpath` skill is now active. Use it via `/tagpath parse myVariable`, `/tagpath alias my_func`, etc.
-
-## User
-
-compact this file

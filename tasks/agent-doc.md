@@ -71,3 +71,18 @@ branch: null
 ## User
 
 commit agent-doc
+
+## Assistant
+
+**Committed and pushed.**
+
+- `agent-doc` submodule: `c5e8973` — `specs/pane-groups.md` (new file, 80 lines)
+- Parent pointer: `0d39066`
+
+## User
+
+I actually do want to support multiple agents per side...so 2d support.
+I could start with the left or right side having a vertical stack in the editor...with the tmux window matching the layout.
+
+left1 | right full
+left2 | ...

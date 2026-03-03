@@ -344,3 +344,5 @@ ctx-core-dev -> /home/brian/work/ctx-core/ctx-core-dev  (gitignored symlink)
 ## User
 
 Commit all submodules and agent-loop repo
+
+compact this file

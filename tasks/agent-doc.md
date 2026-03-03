@@ -461,3 +461,9 @@ For now: close the resume.md split in the editor, then Sync Tmux Layout will cor
 ## User
 
 Please commit all submodules. Release any unreleased changes.
+
+compact tasks/agent-doc.md
+
+I switched panes and the layout broke again. Switching to resume.md, which may be claimed by another tmux session, causes the 3 column layout. I also expands r1 too far so l1 | l2 are small with r1 taking up most of the real estate.
+
+All sync operations should set the entire layout. The tmux syncing should be a declarative api with agent-doc figuring out how to rearrange the tmux panes given what the current state is to the new declared layout.

@@ -101,3 +101,33 @@ Plugin calls Anthropic/OpenAI API directly with OkHttp, does diff→prompt→res
 I already spent money on a JB AI plan so I want to use JB with agent-doc if possible.
 
 Does the ACP agent support routing the agent-doc commands/diffs to the JB AI servers?
+Can skills and other context be supported?
+
+## Assistant
+
+**No — ACP does not give agents access to the JB AI models.**
+
+ACP is strictly an IDE-tools protocol (file access, terminal, permissions). Agents must bring their own LLM. There's no sampling/completion/inference capability in the ACP spec — it's deliberately silent on "how agents think."
+
+The ACP spec defines:
+- Client→agent: `initialize`, `session/prompt`, `session/cancel`
+- Agent→client: `fs/read_text_file`, `fs/write_text_file`, `terminal/create`, `session/request_permission`
+- **Zero LLM inference methods.**
+
+**Junie** (JetBrains' own agent) does use the JB AI service, but through a privileged first-party integration — not ACP. Third-party ACP agents don't get this access.
+
+### Re: skills and context
+
+ACP agents get IDE context (open files, terminal, file system) but **not** JetBrains AI features. An ACP agent can read your project files and execute commands, but it must call its own LLM for reasoning. There's no mechanism for an ACP agent to say "hey IDE, run this prompt through whatever model you have."
+
+MCP (Anthropic's protocol) has a "sampling" capability where servers can ask the client to do inference — ACP has no equivalent. The MCP-over-ACP RFD enables MCP tool servers to work through ACP, but even that doesn't bridge LLM access.
+
+### Bottom line
+
+Your JB AI plan gives you Junie, AI Assistant chat, and inline completions — but there's no programmatic API to route custom prompts through it. The subscription is locked to JetBrains' own features.
+
+**Most practical path:** Direct Anthropic API backend (`agent/api.rs`) in agent-doc. Even a small API budget goes far since agent-doc sends targeted diffs, not full codebases.
+
+## User
+
+Jetbrains IDEs have a MCP server. Can this agent-doc route via the MCP server? See screenshot. 

@@ -281,127 +281,109 @@ pub fn run_with_tmux(
         }
     };
 
-    // --- Convergent reconciliation loop ---
-    // Re-queries tmux state each iteration. Max 3 attempts.
+    // ===================================================================
+    // RECONCILIATION SPEC
+    //
+    // Goal: Make `target_window` contain exactly `desired_ordered` panes
+    //       in left-to-right, top-to-bottom order.
+    //
+    // Algorithm: "Nuclear rebuild" — always rebuild from anchor.
+    //   1. CHECK:  If current layout == desired → select focus, return.
+    //   2. ANCHOR: Ensure anchor (first desired pane) is in target window.
+    //   3. CLEAR:  Break out ALL non-anchor panes from target window.
+    //   4. BUILD:  Join desired panes in column order (left→right, top→bottom).
+    //   5. VERIFY: Re-check. If wrong, retry (max 3 total attempts).
+    //   6. FINISH: Equalize sizes, select focus pane.
+    //
+    // Invariants:
+    //   - Target window always has ≥1 pane (anchor is never removed).
+    //   - break-pane is non-destructive (moves pane to own window).
+    //   - Each join-pane re-queries tmux state (no stale caches).
+    //   - A pane sharing a window with others is isolated first.
+    // ===================================================================
+
+    // Helper: isolate a pane from its current window (break out if sharing).
+    let isolate = |tmux: &Tmux, pane: &str| -> Result<()> {
+        let win = tmux.pane_window(pane)?;
+        let siblings = tmux.list_window_panes(&win)?;
+        if siblings.len() > 1 {
+            tmux.break_pane(pane)?;
+        }
+        Ok(())
+    };
 
     for attempt in 0..3 {
-        // Snapshot current window state
-        let current_ordered = tmux.list_panes_ordered(&target_window).unwrap_or_default();
-        let current_refs: Vec<&str> = current_ordered.iter().map(|s| s.as_str()).collect();
-
-        // Check if layout already matches
+        // --- 1. CHECK ---
+        let current = tmux.list_panes_ordered(&target_window).unwrap_or_default();
+        let current_refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
         if current_refs == desired_ordered {
             if attempt > 0 {
                 eprintln!("Layout converged on attempt {}", attempt + 1);
             }
-            let focus_pane = resolve_focus(&anchor_pane);
-            tmux.select_pane(&focus_pane)?;
-            eprintln!("Focus: {} (layout unchanged)", focus_pane);
-            return Ok(());
+            break;
         }
-
         eprintln!(
             "Reconcile attempt {} — desired {:?}, actual {:?}",
-            attempt + 1,
-            desired_ordered,
-            current_refs
+            attempt + 1, desired_ordered, current_refs
         );
 
-        // Step A: Break out ALL unwanted panes from target window
-        // Any pane not in the desired layout gets moved out (non-destructive).
-        let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
-        let mut remaining = window_panes.len();
-        for pane in &window_panes {
-            if !wanted.contains(pane.as_str()) && remaining > 1 {
-                tmux.break_pane(pane)?;
-                remaining -= 1;
-                eprintln!("Broke out {} from {}", pane, target_window);
-            }
-        }
-
-        // Step B: Ensure anchor is in the target window
+        // --- 2. ANCHOR: Get anchor into target window ---
         let anchor_win = tmux.pane_window(&anchor_pane)?;
         if anchor_win != target_window {
-            let anchor_siblings = tmux.list_window_panes(&anchor_win)?;
-            if anchor_siblings.len() > 1 {
-                tmux.break_pane(&anchor_pane)?;
+            isolate(tmux, &anchor_pane)?;
+            // Join anchor to the left of whatever pane is in target
+            let existing = tmux.list_window_panes(&target_window)?;
+            if let Some(first) = existing.first() {
+                tmux.join_pane(&anchor_pane, first, "-bh")?;
             }
-            let target_panes = tmux.list_window_panes(&target_window)?;
-            if let Some(existing) = target_panes.first() {
-                tmux.join_pane(&anchor_pane, existing, "-bh")?;
-                eprintln!("Moved anchor {} into {}", anchor_pane, target_window);
+            eprintln!("Moved anchor {} into {}", anchor_pane, target_window);
+        }
+
+        // --- 3. CLEAR: Break out ALL non-anchor panes from target window ---
+        let in_window = tmux.list_window_panes(&target_window)?;
+        for pane in &in_window {
+            if pane != &anchor_pane {
+                tmux.break_pane(pane)?;
+                eprintln!("Cleared {} from {}", pane, target_window);
             }
         }
 
-        // Step C: Join missing wanted panes (re-query window each time)
+        // --- 4. BUILD: Join panes in column order ---
         // Column 0: stack below anchor
         for pane_id in &pane_columns[0][1..] {
-            let in_win: HashSet<String> =
-                tmux.list_window_panes(&target_window).unwrap_or_default().into_iter().collect();
-            if !in_win.contains(pane_id.as_str()) {
-                let pane_win = tmux.pane_window(pane_id)?;
-                let siblings = tmux.list_window_panes(&pane_win)?;
-                if siblings.len() > 1 {
-                    tmux.break_pane(pane_id)?;
-                }
-                tmux.join_pane(pane_id, &anchor_pane, "-v")?;
-            }
+            isolate(tmux, pane_id)?;
+            tmux.join_pane(pane_id, &anchor_pane, "-v")?;
         }
-        // Columns 1+: horizontal split, then vertical stacks
+        // Columns 1+: horizontal split right of anchor, then vertical stacks
         for col in &pane_columns[1..] {
             let col_anchor = &col[0];
-            let in_win: HashSet<String> =
-                tmux.list_window_panes(&target_window).unwrap_or_default().into_iter().collect();
-            if !in_win.contains(col_anchor.as_str()) {
-                let pane_win = tmux.pane_window(col_anchor)?;
-                let siblings = tmux.list_window_panes(&pane_win)?;
-                if siblings.len() > 1 {
-                    tmux.break_pane(col_anchor)?;
-                }
-                tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
-            }
+            isolate(tmux, col_anchor)?;
+            tmux.join_pane(col_anchor, &anchor_pane, "-h")?;
             for pane_id in &col[1..] {
-                let in_win: HashSet<String> =
-                    tmux.list_window_panes(&target_window).unwrap_or_default().into_iter().collect();
-                if !in_win.contains(pane_id.as_str()) {
-                    let pane_win = tmux.pane_window(pane_id)?;
-                    let siblings = tmux.list_window_panes(&pane_win)?;
-                    if siblings.len() > 1 {
-                        tmux.break_pane(pane_id)?;
-                    }
-                    tmux.join_pane(pane_id, col_anchor, "-v")?;
-                }
-            }
-        }
-
-        // Step D: Break out any remaining unwanted panes
-        let window_panes = tmux.list_window_panes(&target_window).unwrap_or_default();
-        for pane in &window_panes {
-            if !wanted.contains(pane.as_str())
-                && window_panes.len() > 1
-            {
-                tmux.break_pane(pane)?;
-                eprintln!("Broke out {} from {}", pane, target_window);
+                isolate(tmux, pane_id)?;
+                tmux.join_pane(pane_id, col_anchor, "-v")?;
             }
         }
     }
 
-    // Final verification after all attempts
+    // --- 5. VERIFY ---
     let final_state = tmux.list_panes_ordered(&target_window).unwrap_or_default();
     let final_refs: Vec<&str> = final_state.iter().map(|s| s.as_str()).collect();
     if final_refs != desired_ordered {
         eprintln!(
-            "error: layout did not converge after 3 attempts — desired {:?}, actual {:?}",
+            "error: layout did not converge — desired {:?}, actual {:?}",
             desired_ordered, final_refs
         );
     }
 
-    // --- Step 4: Equalize + Focus ---
-    let anchor_window = tmux.pane_window(&anchor_pane)?;
+    // --- 6. FINISH: Equalize + Focus ---
     if pane_columns.len() == 2 {
         let _ = tmux.resize_pane(&pane_columns[0][0], "-x", 50);
     } else if pane_columns.len() > 2 {
-        let _ = tmux.select_layout(&anchor_window, "even-horizontal");
+        let _ = tmux.select_layout(
+            &tmux.pane_window(&anchor_pane)?,
+            "even-horizontal",
+        );
     }
     for col in &pane_columns {
         if col.len() > 1 {
@@ -412,7 +394,6 @@ pub fn run_with_tmux(
 
     let focus_pane = resolve_focus(&anchor_pane);
     tmux.select_pane(&focus_pane)?;
-
     eprintln!(
         "Sync: {} panes in {} columns",
         desired_ordered.len(),

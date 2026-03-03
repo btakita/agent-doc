@@ -175,6 +175,33 @@ I found another bug. I switched to resume and now there are 3 tmux panes again.
 
 Where is the logic that interprets the agent-doc sync command?
 
-I want it to "start fresh" and change any state that needs to be changed. In the 2 column example:
+I want `agent-doc sync` to "start fresh" and change any state that needs to be changed. In the 2 column example:
 1. Ensure that the tmux panes are in 2 columns. If there are extra panes in the window, close them. Don't solely rely on cached state, as the user may have changed the layout.
 2. Ensure that the tmux panes are populated with the matching claimed files.
+3. Ensure that the correct tmux pane is in focus.
+
+## Assistant
+
+**Redesigned sync reconciliation to be declarative.** The logic is in `agent-doc/src/sync.rs`.
+
+Root cause of the 3-pane bug: the old Phase 6 ("break ALL non-anchor wanted panes") was a blunt instrument. When you switched from tagpath→resume, Phase 5 was supposed to break out tagpath's pane, but the old algorithm's break-all-rejoin cycle could race with itself and leave stale panes behind.
+
+**New algorithm** (Phases 5-7 rewritten):
+
+1. **Phase 5 — Break out unwanted**: Iterates all panes in the target window. Any pane NOT in the wanted set AND tracked in the session registry → `break-pane`. Tracks remaining count to never break the last pane.
+
+2. **Phase 6 — Ensure anchor in target window**: If the anchor pane is outside the target window, moves it in.
+
+3. **Phase 7 — Join missing panes**: Only joins panes that aren't already in the target window. Breaks them out of their current window first if shared, then `join-pane` with the correct split direction (-h for new column, -v for stacking).
+
+**Key changes from old algorithm:**
+- No more "break ALL non-anchor" step — panes already in the right window stay put
+- Remaining count tracking prevents breaking the last pane from a window
+- Each phase is idempotent — running sync twice with the same args is a no-op (fast path)
+- Fewer tmux commands per sync = less flicker
+
+104 tests pass, clippy clean, binary installed.
+
+## User
+
+Focusing on the opposite editor document is not changing the tmux pane focus.

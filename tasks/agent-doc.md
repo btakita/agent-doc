@@ -165,3 +165,50 @@ The `session:` field in doc frontmatter is an agent-doc concept (ties doc to sna
 Great! Implement please. Both agent-doc and the editor plugins as needed.
 
 version bump and release
+
+## Assistant
+
+**Done. `agent-doc sync` implemented, v0.6.0 released.**
+
+### Implementation (4 files, 553 insertions)
+
+1. **`src/sync.rs`** (273 lines, new) — Core 2D sync:
+   - Parses `--col file1,file2 --col file3` into columnar layout
+   - Resolves files → session panes via frontmatter + registry
+   - Auto-creates Claude sessions for unclaimed docs (tmux pane + `agent-doc start`)
+   - 2D join algorithm: `-h` for columns, `-v` for stacking within columns
+   - `--window` scoping, `--focus` pane selection
+   - 6 unit tests
+
+2. **`src/main.rs`** — Added `Sync` subcommand with `--col` (required, repeatable), `--window`, `--focus`
+
+3. **`SyncLayoutAction.kt`** — New `LayoutDetector` object walks Swing `Splitter` tree recursively:
+   - Horizontal splitter → separate columns
+   - Vertical splitter → merged into same column (stacked)
+   - Leaf-index approach maps splitter leaves to `EditorWindow` instances by order (avoids internal API)
+   - `syncLayout()` now uses `agent-doc sync --col` format
+
+4. **`EditorTabSyncListener.kt`** — Updated dedup to compare **column structure** (not flat file set), shared `LayoutDetector`, `sync --col` command construction with `--focus` for active file
+
+### Release
+
+- `make check` — 104 tests pass, clippy clean
+- Tagged `v0.6.0`, pushed to `origin/main`
+- Published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.6.0
+- Binary installed, SKILL.md updated
+- Parent pointer pushed
+
+### CLI usage
+
+```sh
+# 2 stacked left + 1 full-height right
+agent-doc sync --col plan.md,corky.md --col agent-doc.md
+
+# With window scoping and focus
+agent-doc sync --col plan.md,corky.md --col agent-doc.md --window @1 --focus plan.md
+```
+
+## User
+
+commit agent-doc. bump version release

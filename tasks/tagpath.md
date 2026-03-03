@@ -409,4 +409,48 @@ Make sure we have ample documentation with examples.
 
 audit docs
 
-Do we have treesitter support for all languages? I only see a handful of languages in treesitter/mod.rs 
+Do we have treesitter support for all languages? I only see a handful of languages in treesitter/mod.rs
+
+## Assistant
+
+### Extends resolution — done
+
+**43/43 tests pass** (37 existing + 6 new). `config::resolve(path)` loads `.naming.toml` and processes the `extends` chain:
+
+```toml
+# .naming.toml — extends Rust base, overrides function convention
+version = 1
+name = "my-project"
+extends = ["rust"]
+
+[contexts.function]
+convention = "camelCase"
+```
+
+- `extends` list resolves left-to-right, project config overrides last
+- Built-in names (`"rust"`, `"typescript"`, `"immutable-tag"`) → bundled presets
+- Relative paths (`"./team.toml"`) → resolved from config file's directory
+- Shallow merge: individual context/pattern keys override, not whole sections
+- `immutable`/`singular` changed to `Option<bool>` for proper inheritance
+
+End-to-end verified: `tagpath lint` with `extends = ["rust"]` + function override correctly flags `parse_name` (should be `camelCase` → `parseName`) while inheriting `type = PascalCase` from the Rust base.
+
+### Documentation — needs updating
+
+README and SPEC are stale (Phase 1 state). They need:
+- Phase 2 commands (`extract`, `search`, `lint`) with examples
+- `extends` documentation with composability examples
+- Updated CLI reference
+- Tree-sitter coverage section
+
+### Tree-sitter coverage — 8 of 39 languages
+
+Tree-sitter currently supports: **Rust, Python, JavaScript, TypeScript, TSX, Go, C, C++**. The other 31 language presets use **regex extraction** (catches most identifiers but without AST context). Tree-sitter adds function/variable/type classification needed for accurate lint.
+
+Adding more grammars is straightforward — each is a crate dependency + a match arm. Priority candidates: **Java, Ruby, PHP, C#, Swift, Kotlin** (most popular languages missing tree-sitter).
+
+Want me to update the docs now, or add more tree-sitter languages first?
+
+## User
+
+Update the docs then add more tree-sitter languages. Does tree-sitter have a plugin architecture? Do we need a fat monolith of all of the supported languages, can we compose the language support, or can we use our toml rules to bind to the supported language?

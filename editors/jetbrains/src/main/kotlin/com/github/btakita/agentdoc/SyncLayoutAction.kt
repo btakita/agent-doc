@@ -39,12 +39,17 @@ class SyncLayoutAction : AnAction() {
             }
 
             val windowId = TerminalUtil.projectWindowId(project)
+            // Determine the focused editor file for --focus
+            val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
+                if (it.name.endsWith(".md")) TerminalUtil.relativePath(project, it) else null
+            }
             EditorTabSyncListener.clearLastFileSet()
 
             Thread {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
+                    val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
                     // Always use sync --col (never focus) so that unwanted panes
                     // are broken out and the entire window layout is managed.
                     val editorLayout = if (visibleMdFiles.size > 1)
@@ -54,11 +59,11 @@ class SyncLayoutAction : AnAction() {
                         val colArgs = editorLayout.columns.flatMap { col ->
                             listOf("--col", col.files.joinToString(","))
                         }
-                        listOf(agentDoc, "sync") + colArgs + windowArgs
+                        listOf(agentDoc, "sync") + colArgs + focusArgs + windowArgs
                     } else {
                         // Single file or flat layout: sync with single column
                         val colArg = visibleMdFiles.joinToString(",")
-                        listOf(agentDoc, "sync", "--col", colArg) + windowArgs
+                        listOf(agentDoc, "sync", "--col", colArg) + focusArgs + windowArgs
                     }
                     if (notify) {
                         val summary = TerminalUtil.formatLayoutSummary(cmd)

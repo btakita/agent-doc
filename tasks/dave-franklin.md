@@ -159,3 +159,31 @@ The research file also includes interview prep notes — strongest talking point
 Let's work on a resume for BCG. Take all of Dave Franklin's suggestions with the profile in the toml configuration. Call it the consulting profile.
 
 I will add more experience to Censible -> Martin Investments. Please consolidate Honk -> Truecar.
+
+## Assistant
+
+**Created `profiles/consulting.toml`** — BCG-targeted resume with all of Dave's suggestions applied.
+
+### Changes made
+
+**Master template (`BrianTakita.md`):**
+- Consolidated honk.com + TrueCar into single entry: "TrueCar / honk.com — Lead Developer → Senior Software Engineer" (Aug 2009 – Feb 2012)
+- Added **AI Products Shipped** section between Career Highlights and Experience (4 items: Presence AI pipeline, corky, agent-doc, tagpath)
+
+**Consulting profile (`profiles/consulting.toml`):**
+- **Sections included:** Summary, Skills, AI Products Shipped, Career Highlights, Experience, Education
+- **Experience filtered to:** Presence AI, Censible, Neo Innovation, CrystalCommerce, Rundavoo, Milyoni, TrueCar/honk, Pivotal Labs
+- **Removed per Dave:** Freelance, SocialChorus, Open Source
+- **Phrase highlighting:** focused on shipped products, agentic workflows, scale, enterprise signals
+
+### Result
+
+4-page PDF at `resume/BrianTakita-consulting.pdf`. Clean timeline from Pivotal Labs (2006) through Presence AI (2026). AI Products Shipped section leads page 2.
+
+**Build:** `make PROFILE=consulting`
+
+**Ready for you** to update the Censible section with Martin Investments details. The consulting profile already includes Censible in the experience filter.
+
+## User
+
+Make Censible be until Octobel 2023.

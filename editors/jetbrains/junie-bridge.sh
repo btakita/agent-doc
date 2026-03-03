@@ -27,25 +27,9 @@ touch "${LOCK_FILE}"
 # Capture prompt from stdin
 cat > "${REQUEST_FILE}"
 
-# Signal the IDE agent (by creating/updating the request file)
-# The IDE agent should be watching for changes to REQUEST_FILE.
-
-# Wait for RESPONSE_FILE to be created/updated
-# Polling for 2 minutes
-MAX_WAIT=120
-WAITED=0
-while [ ! -f "${RESPONSE_FILE}" ] || [ "${RESPONSE_FILE}" -ot "${REQUEST_FILE}" ]; do
-  sleep 1
-  WAITED=$((WAITED + 1))
-  if [ ${WAITED} -ge ${MAX_WAIT} ]; then
-    rm "${LOCK_FILE}"
-    echo '{"is_error": true, "result": "Timed out waiting for Junie IDE agent response."}'
-    exit 1
-  fi
-done
-
-# Output response to stdout (agent-doc expects JSON)
-cat "${RESPONSE_FILE}"
+# Fire-and-forget: Return immediately to agent-doc with a 'submitting' message
+# This allows agent-doc run to finish, and the plugin to open the request and copy it to the clipboard
+echo '{"is_error": false, "result": "Submitting to junie..."}'
 
 # Cleanup
 rm "${LOCK_FILE}"

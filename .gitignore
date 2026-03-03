@@ -2,6 +2,7 @@
 .idea/
 *.iml
 .agent-doc/
+.junie/
 CLAUDE.local.md
 AGENTS.local.md
 plan.md

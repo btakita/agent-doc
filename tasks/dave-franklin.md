@@ -253,4 +253,12 @@ You're clear to reference the arc.
 
 ## User
 
-Well, I was owed money so I claimed ownership ownership the work. I granted Tenfore unrestricted usage of the IP.
+Well, I was owed money so I claimed ownership of the work. I granted Tenfore unrestricted usage of the IP.
+
+## Assistant
+
+Even better — you **own the IP**. Tenfore has an unrestricted license, but the work is yours. You have full rights to build on it, reference it, and tell the evolution story. The document-as-interface arc from Tenfore (2015) → agent-doc (2024) is entirely your IP.
+
+## User
+
+Please proofread the resume. Is it ready to send to Dave?

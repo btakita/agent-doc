@@ -156,4 +156,6 @@ The research file also includes interview prep notes — strongest talking point
 
 ## User
 
+Let's work on a resume for BCG. Take all of Dave Franklin's suggestions with the profile in the toml configuration. Call it the consulting profile.
 
+I will add more experience to Censible -> Martin Investments. Please consolidate Honk -> Truecar.

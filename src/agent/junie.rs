@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::process::Command;
 
 use super::{Agent, AgentResponse};
@@ -11,10 +12,52 @@ pub struct Junie {
 impl Junie {
     pub fn new(command: Option<String>, base_args: Option<Vec<String>>) -> Self {
         Self {
-            command: command.unwrap_or_else(|| "junie".to_string()),
+            command: command.unwrap_or_else(resolve_junie_bridge),
             base_args: base_args.unwrap_or_default(),
         }
     }
+}
+
+/// Find the junie-bridge.sh script. Checks:
+/// 1. `junie` on PATH
+/// 2. `junie-bridge.sh` next to the agent-doc binary
+/// 3. Common install locations
+fn resolve_junie_bridge() -> String {
+    // Check if `junie` exists on PATH
+    if Command::new("which")
+        .arg("junie")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return "junie".to_string();
+    }
+
+    // Check next to the agent-doc binary
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bridge = dir.join("junie-bridge.sh");
+            if bridge.exists() {
+                return bridge.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // Check common locations
+    if let Ok(home) = std::env::var("HOME") {
+        let candidates = [
+            PathBuf::from(&home).join("bin/junie-bridge.sh"),
+            PathBuf::from(&home).join(".local/bin/junie-bridge.sh"),
+        ];
+        for path in &candidates {
+            if path.exists() {
+                return path.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // Fallback — will produce a clear error message
+    "junie".to_string()
 }
 
 impl Agent for Junie {
@@ -63,6 +106,13 @@ impl Agent for Junie {
                     stdin.write_all(prompt.as_bytes())?;
                 }
                 child.wait_with_output()
+            })
+            .with_context(|| {
+                format!(
+                    "failed to run junie command '{}'. Install junie-bridge.sh to your PATH \
+                     or configure [agents.junie] command in ~/.config/agent-doc/config.toml",
+                    self.command
+                )
             })?;
 
         if !output.status.success() {

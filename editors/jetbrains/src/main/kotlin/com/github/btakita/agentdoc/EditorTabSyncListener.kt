@@ -104,24 +104,18 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowId = TerminalUtil.projectWindowId(project)
                     val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
-                    val cmd = if (columnStructureChanged) {
-                        // Column structure changed → full sync
-                        if (visibleMdFiles.size == 1) {
-                            listOf(agentDoc, "focus", visibleMdFiles[0])
-                        } else if (editorLayout != null && editorLayout.columns.size > 1) {
-                            // 2D layout
-                            val colArgs = editorLayout.columns.flatMap { col ->
-                                listOf("--col", col.files.joinToString(","))
-                            }
-                            listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs
-                        } else {
-                            // Flat layout
-                            val colArg = visibleMdFiles.joinToString(",")
-                            listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs
+                    // Always use sync --col (never focus) so that unwanted panes
+                    // are broken out and the entire window layout is managed.
+                    val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {
+                        // 2D layout
+                        val colArgs = editorLayout.columns.flatMap { col ->
+                            listOf("--col", col.files.joinToString(","))
                         }
+                        listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs
                     } else {
-                        // Same column structure, different active file → just focus
-                        listOf(agentDoc, "focus", activeFile)
+                        // Single file or flat layout
+                        val colArg = visibleMdFiles.joinToString(",")
+                        listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs
                     }
                     log("exec: ${cmd.joinToString(" ")}")
                     val summary = TerminalUtil.formatLayoutSummary(cmd)

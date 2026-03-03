@@ -82,8 +82,10 @@ pub fn run_with_tmux(
     let layout = Layout::parse(col_args)?;
     let all_files = layout.all_files();
 
-    // Degenerate: single file → just focus it
-    if all_files.len() == 1 {
+    // Single file: resolve, break out unwanted panes from window, then focus.
+    // Don't short-circuit — the window may have extra panes that need cleanup.
+    if all_files.len() == 1 && window.is_none() {
+        // Without --window, we can't do window cleanup; just focus.
         return crate::focus::run_with_tmux(all_files[0], None, tmux);
     }
 
@@ -183,7 +185,28 @@ pub fn run_with_tmux(
     }
 
     if resolved.len() < 2 {
-        // Not enough panes to arrange — just focus what we have
+        // Not enough panes for 2D layout, but still break out unwanted
+        // session panes from the target window so layout stays clean.
+        if let Some(target_win) = window {
+            let registry = sessions::load().unwrap_or_default();
+            let session_panes: HashSet<String> =
+                registry.values().map(|e| e.pane.clone()).collect();
+            let wanted: HashSet<String> =
+                resolved.iter().map(|r| r.pane_id.clone()).collect();
+            let window_panes = tmux.list_window_panes(target_win).unwrap_or_default();
+            for existing_pane in &window_panes {
+                if !wanted.contains(existing_pane.as_str())
+                    && session_panes.contains(existing_pane)
+                    && window_panes.len() > 1
+                {
+                    tmux.break_pane(existing_pane)?;
+                    eprintln!(
+                        "Broke out pane {} from window {}",
+                        existing_pane, target_win
+                    );
+                }
+            }
+        }
         if let Some(r) = resolved.first() {
             tmux.select_pane(&r.pane_id)?;
         }

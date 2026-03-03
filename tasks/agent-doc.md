@@ -163,3 +163,5 @@ The `session:` field in doc frontmatter is an agent-doc concept (ties doc to sna
 ## User
 
 Great! Implement please. Both agent-doc and the editor plugins as needed.
+
+version bump and release

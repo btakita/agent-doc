@@ -43,6 +43,15 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.RunWithJunie"
+                class="com.github.btakita.agentdoc.RunWithJunieAction"
+                text="Run with Junie"
+                description="Run agent-doc via the Junie agent">
+            <keyboard-shortcut first-keystroke="ctrl shift alt J" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.Claim"
                 class="com.github.btakita.agentdoc.ClaimAction"
                 text="Claim for Tmux Pane"

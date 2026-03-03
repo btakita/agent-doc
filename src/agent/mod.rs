@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod junie;
 
 use anyhow::Result;
 
@@ -29,6 +30,7 @@ pub fn resolve(name: &str, config: Option<&AgentConfig>) -> Result<Box<dyn Agent
     };
     match name {
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args))),
+        "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
             if config.is_some() {
                 Ok(Box::new(claude::Claude::new(cmd, args)))

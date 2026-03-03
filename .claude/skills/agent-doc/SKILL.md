@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.5.5"
+agent-doc-version: "0.5.6"
 ---
 
 # agent-doc submit
@@ -35,6 +35,8 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 **Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
 
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
+
+**Check claims log:** Read `.agent-doc/claims.log` (if it exists). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
 
 ### 1. Read the document and snapshot
 
@@ -104,9 +106,10 @@ The body alternates `## User` and `## Assistant` blocks. Inline annotations (blo
 
 ## Snapshot Storage
 
-- Location: `.agent-doc/snapshots/` relative to CWD
+- Location: `.agent-doc/snapshots/` relative to the project root (where the document lives)
 - Filename: `sha256(canonical_path) + ".md"`
 - Contains the full document content after the last submit
+- **IMPORTANT:** Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session.
 
 ## Success Criteria
 

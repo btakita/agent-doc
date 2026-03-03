@@ -62,6 +62,52 @@ object TerminalUtil {
         }
     }
 
+    /**
+     * Runs an /agent-doc command via `agent-doc run --agent <agent>`.
+     *
+     * This calls `agent-doc run --agent <agent> <path>` which:
+     * 1. Computes the diff for the document
+     * 2. Builds a prompt for the agent
+     * 3. Sends the prompt to the specified agent backend
+     * 4. Updates the document with the response
+     */
+    fun runWithAgent(project: Project, agent: String, relativePath: String, onComplete: (() -> Unit)? = null) {
+        val basePath = project.basePath ?: run {
+            onComplete?.invoke()
+            return
+        }
+
+        val agentDoc = resolveAgentDoc()
+        try {
+            val process = ProcessBuilder(agentDoc, "run", "--agent", agent, relativePath)
+                .directory(java.io.File(basePath))
+                .redirectErrorStream(true)
+                .start()
+
+            // Show quick inline hint near cursor
+            showHint(project, "Running with $agent: $relativePath")
+
+            // Read output in background thread to avoid blocking EDT
+            Thread {
+                try {
+                    val output = process.inputStream.bufferedReader().readText()
+                    val exitCode = process.waitFor()
+                    if (exitCode != 0) {
+                        notifyError(project, "agent-doc run failed (exit $exitCode):\n$output")
+                    } else {
+                        // Notify success and expire quickly
+                        notifyInfo(project, "Agent $agent finished: $relativePath")
+                    }
+                } finally {
+                    onComplete?.invoke()
+                }
+            }.start()
+        } catch (e: Exception) {
+            onComplete?.invoke()
+            notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
+        }
+    }
+
     fun resolveAgentDoc(): String {
         val candidates = listOf(
             System.getenv("HOME")?.let { "$it/bin/agent-doc" },

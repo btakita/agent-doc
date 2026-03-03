@@ -430,4 +430,32 @@ The last claim caused 2 windows...with both windows having their own pane. Why i
 
 The session respons did not output to agent-doc.md
 
+Switching pages break things. Please log all commands and the effect. I want to fix this and every attempt you have been doing is making things worse
 
+## Assistant
+
+You're right — each fix has been whack-a-mole. The core problem:
+
+**The nuclear rebuild destroys working state before building new state.** Step 3 (CLEAR) breaks ALL non-anchor panes into separate windows. Step 4 (BUILD) tries to rejoin them. Any failure in BUILD (dead pane, tmux error, race condition) returns early via `?`, leaving panes permanently scattered. No rollback.
+
+**Current tmux state confirms this:**
+- @126: %39 (agent-doc.md) — alone
+- @121: %38 (tagpath.md) — alone
+
+Both panes were broken out of the shared window and never rejoined.
+
+**What needs to change:**
+
+1. **Never break wanted panes** out of the target window. Only break out unwanted panes and join in missing panes. No "destroy then rebuild."
+
+2. **Log every tmux command** — every `break-pane`, `join-pane`, `select-pane`, `list-panes` with args and result. Pipe to stderr so you can see exactly what happened.
+
+3. **Don't abort on join failure** — if one join fails, log it and continue with remaining panes. Don't use `?` in the build step.
+
+4. **Re-query tmux state before each operation** — no stale caches.
+
+This is the 7th attempt at fixing sync reconciliation. I should stop making incremental patches and write a proper spec + implementation with full logging from scratch. Want me to proceed?
+
+## User
+
+Yes...a proper full spec...with edgecases...and implementation. With full automated testing. Including fuzz testing.

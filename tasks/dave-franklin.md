@@ -310,3 +310,15 @@ The "prototyped in Python, then spec-driven rewrite to Rust in under 1 day" is t
 ## User
 
 For Corky, please include topics, Whisper diatized transcription, social media posting, and scheduled posts.
+
+## Assistant
+
+**Updated corky bullet** in AI Products Shipped:
+
+> Built and shipped a git-native correspondence system in Rust that syncs email, Telegram, and Slack into scoped markdown mailboxes with per-contact agent context and topic-based routing. Includes Whisper-powered diarized transcription for voice messages, social media posting with scheduled delivery, and bidirectional sync across providers. Prototyped in Python, then spec-driven rewrite to Rust in under 1 day. Used daily for professional correspondence.
+
+Added: topic-based routing, Whisper diarized transcription, social media posting with scheduled delivery. Consulting PDF rebuilt.
+
+## User
+
+Format page 2 to get all of Censible on the page. Reduce margins if you have to.

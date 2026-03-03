@@ -52,4 +52,17 @@ agent-doc sync is not converting the 3 column layout back to the 2 column layout
 
 > Fix: only delegate to splitter-containing children.
 
-This doesn't seem correct. The entire window should be managed. So there should only be 2 columns right now in the tmux window. There are 3 columns due to routing the layout to only the left child.|
+This doesn't seem correct. The entire window should be managed. So there should only be 2 columns right now in the tmux window. There are 3 columns due to routing the layout to only the left child.
+
+● Bash(agent-doc sync --col tasks/agent-doc.md --col tasks/tagpath.md --window @30 2>&1)
+⎿  Broke out pane %32 from window @30
+Joined pane %30 to right of anchor (col 1)
+Sync: 2 panes in 2 columns
+
+● Bash(tmux list-panes -t @30 -F '#{pane_id} #{pane_width}x#{pane_height}' 2>/dev/null)
+⎿  %4 120x15
+%30 119x15
+⎿  API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server
+error"},"request_id":"req_011CYgApx9xYPnz1xSYspsW2"}
+
+✻ Worked for 3m 59s

@@ -174,3 +174,27 @@ Robert Ward is going to reach out to Judith. We may have a conversation. Robert 
 ## User
 
 Judith is going with the Mortgage Automator. What are some next steps?
+
+## Assistant
+
+**Judith chose MA.** Platform decision made — now the question is where you add value on top.
+
+**What MA covers:** Full LOS, HubSpot integration, portals, doc gen, RE 855, notifications. She's well-served on loan management.
+
+**Your opportunities (what MA doesn't do):**
+
+1. **Deal sourcing automation** — Agent loops scanning county records, NODs, probate, expired listings for properties matching her parameters (LTV caps, residential $75K+, commercial $100K+). No LOS does this.
+2. **Investor matching & pitch decks** — Auto-generated decks per investor risk profile. Pool orchestration for fractionalized notes (up to 10 per loan). MA has portals but not intelligent outreach.
+3. **Website modernization** — equityfundingsource.com is dated. Modern site with anonymized deal listings, intake forms, analytics funnels.
+4. **Data migration** — Bespoke system → MA. One-time project, clear scope, immediate need.
+5. **MA API customization** — Custom workflows or integrations beyond MA's defaults.
+
+**Recommended next steps:**
+
+1. **Congratulate the choice** — "MA is solid. Smart move."
+2. **Ask about onboarding timeline** — When does MA go live? Data migration needs?
+3. **Pitch deal sourcing** — "Now that loan management is covered, the bottleneck becomes deal flow."
+4. **Start small** — Website refresh or a migration assist to build trust first.
+
+## User
+

@@ -130,4 +130,38 @@ Your JB AI plan gives you Junie, AI Assistant chat, and inline completions — b
 
 ## User
 
-Jetbrains IDEs have a MCP server. Can this agent-doc route via the MCP server? See screenshot. 
+Jetbrains IDEs have a MCP server. Can this agent-doc route via the MCP server? See screenshot.
+
+## Assistant
+
+**The JB MCP Server goes the opposite direction from what you need.**
+
+It exposes IDE tools (file editing, run configs, inspections) **to** Claude Code — not JB AI models **from** Claude Code:
+
+```
+Claude Code (LLM + client) → MCP → JetBrains IDE (tools server)
+```
+
+You want `agent-doc → ??? → JetBrains AI (LLM)` — but that path doesn't exist. The MCP server doesn't proxy LLM requests through JB AI credits.
+
+### What the JB MCP Server IS useful for
+
+If you wire Claude Code as the MCP client (click "Auto-Configure"), then your Claude Code sessions gain IDE-aware tools:
+- Run configurations and build tasks
+- Code inspections and quick-fixes
+- Refactoring operations
+- Navigation and symbol resolution
+
+Since agent-doc already routes to Claude Code via tmux, your agent-doc sessions would **indirectly** gain these IDE capabilities. That's valuable — but the LLM is still Claude (your Claude Code plan), not JB AI.
+
+### The hard truth about JB AI plan
+
+The JB AI subscription is a **closed ecosystem**: Junie, AI Assistant chat, inline completions, AI-powered inspections. No programmatic API, no MCP sampling, no ACP inference passthrough. It can't be used as an LLM backend by external tools.
+
+### Practical options to reduce Claude Code usage
+
+1. **Anthropic API backend** (`agent/api.rs`) — pay-per-token, much cheaper for diff-sized prompts
+2. **Local models via Ollama** — free, works offline, good for routine tasks
+3. **Use JB AI for what it does well** — Junie for standalone tasks, AI Assistant for quick questions — reserve Claude Code for agent-doc sessions
+
+## User

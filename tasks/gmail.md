@@ -19,7 +19,3 @@ All done:
 **2. Resume committed** — deleted `Brian-hand-edit.pdf`, pushed to `btakita/resume` (`177a891`)
 
 **3. Agent-loop committed** (`f4ccab8`) — removed `agent-doc-jetbrains/`, updated resume submodule pointer + task documents
-
-## User
-
-update filters

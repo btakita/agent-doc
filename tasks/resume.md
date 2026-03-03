@@ -69,5 +69,16 @@ I havn't worked with Django. Since this company specializes in recruiting Django
 
 **What to omit in notes:** Agent tooling, context engineering, philosophy repo — not relevant to this Django/React SaaS role. Save for AI-specific positions.
 
-## User
+## Assistant
 
+Good catch — I incorrectly claimed Django experience. Revised Calendly notes:
+
+> 20+ years full-stack — most recently Lead Backend Engineer at Presence AI (real-time multimodal AI pipeline: Python, React, TypeScript, GraphQL, PostgreSQL). Extensive Python production experience with FastAPI, Flask, Graphene, and SQLAlchemy. No Django specifically, but 10+ years with Rails — Django's closest equivalent (MVC, ORM, migrations, admin, automated tests). Pick up new frameworks in days, not weeks. Currently shipping open-source developer tools in Rust. Happy to discuss how my pipeline and platform experience maps to your SaaS infrastructure challenges.
+
+**Why this works:**
+- **Honest** — names what you've actually used, doesn't overclaim
+- **Rails ↔ Django** — any Django shop understands this mapping. Same patterns: models, views, templates, migrations, admin, ORM, middleware
+- **"Days not months"** — 20 years + 6 Python web frameworks means Django is vocabulary, not a learning curve
+- **Foxley specializes in Django recruiting** — they'll appreciate honesty over discovering the gap mid-interview
+
+## User

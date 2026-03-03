@@ -212,3 +212,29 @@ agent-doc sync --col plan.md,corky.md --col agent-doc.md --window @1 --focus pla
 ## User
 
 commit agent-doc. bump version release
+
+## Assistant
+
+**Done. agent-doc v0.6.1 committed, tagged, and released.**
+
+The submodule had uncommitted changes from a Junie session — a Junie agent backend implementation:
+- `src/agent/junie.rs` — Junie agent backend (file-based bridge protocol)
+- `RunWithJunieAction.kt` — Ctrl+Shift+Alt+J plugin action
+- `TerminalUtil.runWithAgent()` — generic agent runner
+- `junie-bridge.sh` — file-based bridge script
+- SKILL.md updates (claims log, absolute snapshot paths)
+
+### Release checklist
+- `make check` — 104 tests pass, clippy clean
+- Plugin builds (unsigned + signed)
+- Committed `0549023`, tagged `v0.6.1`, pushed
+- Published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.6.1
+- Binary installed (`agent-doc 0.6.1`), SKILL.md updated
+- Parent pointer pushed
+
+## User
+
+Got an error running with Junie agent backend
+
+agent-doc run failed (exit 1): [main 7ac6a40] agent-doc(plan): 2026-03-02 23:34:26 1 file changed, 1 insertion(+) Submitting to junie... Error: No such file or directory (os error 2)

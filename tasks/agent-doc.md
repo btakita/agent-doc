@@ -461,3 +461,26 @@ This is the 7th attempt at fixing sync reconciliation. I should stop making incr
 Yes...a proper full spec...with edgecases...and implementation. With full automated testing. Including fuzz testing.
 
 What happened last? Is there a session in progress? Was this last task implemented?
+
+## Assistant
+
+**Not yet implemented.** Here's where we stand:
+
+- **Last exchange:** I diagnosed the nuclear rebuild as the root cause (Step 3 CLEAR destroys working state, Step 4 BUILD fails with no rollback). I proposed a from-scratch rewrite with logging. You approved.
+- **Current sync.rs:** Still has the broken nuclear rebuild at lines 284-367.
+- **This session:** Continuing from the approval. Starting the proper spec + implementation now.
+
+I'll proceed with:
+1. Write a complete spec with edge cases documented
+2. Implement the new algorithm with full tmux command logging
+3. Automated tests covering all edge cases
+4. Fuzz testing for random layout permutations
+
+Starting now.
+
+## User
+
+How many test cases are there?
+Are we testing for both horizontal and vertical splits in the 1st dimension?
+
+Are we testing 2D plane layouts?

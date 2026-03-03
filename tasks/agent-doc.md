@@ -542,4 +542,53 @@ I see your note about the Claim for Tmux Pane failure — that's a separate issu
 
 Please implement.
 Add tests.
-Document specs 
+Document detailed specs on the tmux interactions. Perhaps in a dedicated spec document.
+Audit docs.
+
+## Assistant
+
+**Implemented resilient `agent-doc claim` with dead-window recovery, tests, and spec docs.**
+
+### 1. Implementation (`claim.rs`)
+
+When `--window @N` is dead, claim now falls back instead of failing:
+
+1. Check window alive via `tmux list-panes -t @N`
+2. If alive → use it (no change)
+3. If dead → `find_alive_project_window()` scans `sessions.json` for entries with matching `cwd`, checks each window for liveness, returns first alive match
+4. If no alive windows → fall through to no-window behavior
+
+Extracted `is_window_alive()` and `find_alive_window_in_registry()` as separate functions — the latter takes a closure for testability.
+
+### 2. Tests (6 new unit tests)
+
+| Test | Covers |
+|------|--------|
+| `find_alive_window_returns_first_alive_match` | Returns alive window from mixed registry |
+| `find_alive_window_skips_wrong_cwd` | Filters by project cwd |
+| `find_alive_window_skips_empty_window` | Ignores legacy entries with no window |
+| `find_alive_window_returns_none_when_all_dead` | All windows dead → None |
+| `find_alive_window_returns_none_for_empty_registry` | Empty registry → None |
+| `find_alive_window_returns_none_when_no_cwd_match` | No cwd match → None |
+
+### 3. Spec updates (`SPEC.md` §7.9)
+
+Added **Window Resolution** section documenting the 4-step fallback:
+1. Alive → use directly
+2. Dead → scan registry for alive project window
+3. Found → use fallback window
+4. None found → no-window behavior
+
+### 4. Audit-docs
+
+All instruction files pass: CLAUDE.md, README.md, SKILL.md, SPEC.md — no staleness, no issues.
+
+### Verification
+
+- 108 unit tests + 21 CLI integration tests pass
+- Clippy clean
+- Binary installed (`agent-doc 0.7.1`)
+
+## User
+
+compact this file

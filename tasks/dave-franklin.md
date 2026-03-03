@@ -322,3 +322,22 @@ Added: topic-based routing, Whisper diarized transcription, social media posting
 ## User
 
 Format page 2 to get all of Censible on the page. Reduce margins if you have to.
+
+Proofread. Is this ready to send to Dave to review?
+
+## Assistant
+
+**Done.** Reduced margins from 0.75in to 0.5in/0.6in — PDF went from 4 pages to 3 pages. Censible is now fully on page 2 with Presence AI.
+
+**Proofread — clean.** No issues:
+- Dates consistent (Censible 8 years, Presence AI 1yr 10mo)
+- "lip-sync" standardized throughout
+- All 8 experience entries in correct chronological order
+- AI Products Shipped has updated corky bullet (Python→Rust, topics, Whisper, social media)
+- Document-as-interface arc visible in Neo Innovation and agent-doc entries
+
+**Ready to send to Dave.**
+
+## User
+
+commit and push

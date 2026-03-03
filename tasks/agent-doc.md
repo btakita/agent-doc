@@ -354,3 +354,38 @@ When you press `Ctrl+Shift+Alt+J` (Run with Junie) in the IDE:
 
 publish release
 
+## Assistant
+
+**Published. agent-doc v0.6.2 released.**
+
+Junie's changes verified and shipped:
+
+1. **`junie-bridge.sh`** — Removed 120s polling loop. Now fire-and-forget: captures diff to `~/.cache/junie-bridge/request.md`, returns `{"is_error": false, "result": "Submitting to junie..."}` immediately.
+
+2. **`TerminalUtil.kt`** — New `openJunieRequest()`: after `runWithAgent("junie", ...)` succeeds, opens `request.md` in editor and copies diff to clipboard.
+
+3. **`.gitignore`** — Added `.junie/` (Junie workspace directory).
+
+### Release checklist
+- `make check` — 104 tests pass, clippy clean
+- Plugin builds
+- Committed `5cc4de6`, tagged `v0.6.2`, pushed
+- Published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.6.2
+- Binary installed (`agent-doc 0.6.2`), SKILL.md updated
+- Updated `~/.local/bin/junie-bridge.sh` (fire-and-forget version)
+- Parent pointer pushed
+
+### Flow now
+
+```
+Ctrl+Shift+Alt+J → agent-doc run --agent junie → bridge writes request.md → returns success
+                                                → plugin opens request.md + copies to clipboard
+                                                → paste into Junie chat
+```
+
+## User
+
+The tmux router just created a 3-column layout. Please fix.
+
+l1 | l2 | r1

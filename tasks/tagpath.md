@@ -282,3 +282,33 @@ But does NOT find `fetchPostData` (no `user` tag). Semantic search, not textual.
 version bump and release
 
 Let's also setup github actions. Similar to agent-doc and corky.
+
+## Assistant
+
+### Released tagpath v0.2.0
+
+- **crates.io:** https://crates.io/crates/tagpath (`cargo install tagpath`)
+- **GitHub Release:** https://github.com/btakita/tagpath/releases/tag/v0.2.0
+- **Git tag:** `v0.2.0` pushed
+- **37/37 tests pass** — Phase 2 complete (extract, search, tree-sitter, lint, cross-language matching)
+
+### GitHub Actions — set up
+
+Two workflows added, matching the agent-doc/corky pattern:
+
+**CI** (`.github/workflows/ci.yml`) — runs on push/PR to main:
+- `cargo clippy -- -D warnings`
+- `cargo test`
+
+**Release** (`.github/workflows/release.yml`) — runs on `v*` tag push:
+- 5-target build matrix: x86_64-linux, aarch64-linux (cross), x86_64-macOS, aarch64-macOS, x86_64-windows
+- Packages binaries as `.tar.gz` (Unix) / `.zip` (Windows)
+- Creates GitHub Release with all platform artifacts
+
+Simpler than agent-doc/corky — no `instruction-files` dependency to clone, no `vendored-openssl`, no PyPI. Tree-sitter grammars compile C code via `cc` crate, which works natively on all targets and via `cross` for aarch64-linux.
+
+CI is running now: https://github.com/btakita/tagpath/actions
+
+## User
+
+Does the crates release include binaries to all of the platforms? Should we have a wasm release as well?

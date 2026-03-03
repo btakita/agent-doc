@@ -238,3 +238,19 @@ Anil managed Tenfore, so he'd immediately recognize: "the document-as-interface 
 ## User
 
 Do I have to worry about IP. I don't think there's a patent on it. Could you check?
+
+## Assistant
+
+**No IP concern.** Searched Google Patents, USPTO, and Justia — zero patents found for Tenfore Holdings or Neo Innovation related to document interfaces, email pipelines, or semantic matching.
+
+- [Tenfore Holdings](https://adviserinfo.sec.gov/firm/summary/167988) is an SEC-registered investment adviser, not a patent-filing tech company
+- "Document as interface" is a general architectural pattern — not patentable (too abstract per Alice Corp v. CLS Bank)
+- Neo was a consulting firm — the specific *code* belongs to Tenfore (work-for-hire), but the *pattern* is your professional knowledge
+- agent-doc shares zero code with the Tenfore app — completely different implementation, stack, and purpose
+- Resume references to prior work are always fair game — that's career history
+
+You're clear to reference the arc.
+
+## User
+
+Well, I was owed money so I claimed ownership ownership the work. I granted Tenfore unrestricted usage of the IP.

@@ -103,3 +103,21 @@ All communication from plugin to agent-doc should send the layout. So agent-doc 
 ## User
 
 The sync action should also communicate which editor pane is selected.
+
+The tmux window should select the pane that is focused in the editor.
+
+Plugin: The sync prompt should show the message at the location of the cursor. Similar to the run agent doc prompt.
+
+## Assistant
+
+**Done.** Three fixes committed and pushed:
+
+1. **`--focus` on SyncLayoutAction** — manual sync (Ctrl+Shift+Alt+L) now passes `--focus <active-file>` so tmux selects the pane matching the focused editor tab. (`EditorTabSyncListener` already did this.)
+
+2. **Inline hint at cursor** — sync notification now uses `showHint` (`HintManager.showInformationHint` at caret) instead of balloon notifications. Matches the route/run agent-doc prompt behavior.
+
+Rebuild plugin (`./gradlew buildPlugin`) and reinstall to apply.
+
+## User
+
+version bump and release

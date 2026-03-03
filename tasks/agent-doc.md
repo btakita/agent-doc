@@ -90,3 +90,56 @@ left2 | ...
 Let's say we begin with left & right. There are 2 agent docs in left and 1 in right. If we vertically split the 2 agent docs in left to left1 and left2 then run the sync with agent-doc sync, it should automatically remove left2 from the existing left session, create a new claude session for left2 and register left2 in the new session.
 
 Running left2 would sync & run in the new left claude session if it does not previously exist. claude-mem should help with keeping full context across all claude sessions.
+
+## Assistant
+
+**Good — this is `agent-doc sync` as the editor-to-tmux bridge.** Here's how it works:
+
+### The flow
+
+1. **Editor**: You arrange docs — left1, left2 stacked vertically | right full height
+2. **Plugin writes layout**: On each tab rearrange, JetBrains plugin writes `.agent-doc/layout.json`:
+   ```json
+   {
+     "columns": [
+       {"position": "left", "docs": ["tasks/plan.md", "tasks/corky.md"]},
+       {"position": "right", "docs": ["tasks/agent-doc.md"]}
+     ]
+   }
+   ```
+3. **`agent-doc sync`** reads layout.json and:
+   - For each doc without a registered session: split a new tmux pane, start `claude --resume`, claim the doc
+   - For docs that moved positions: re-register with new pane
+   - For docs removed from layout: leave session running (don't kill) but unmap from layout
+   - Arrange panes to match column structure (2D join)
+
+### Session lifecycle
+
+- **left1** already has a Claude session (existing claim) → no change
+- **left2** is new → sync creates tmux pane (`split-window -v` below left1), starts `claude --resume`, auto-claims
+If we run `claude --resume` on left2, could there be a conflict with the claude session? Could we use a session that is already used in another tmux pane? I don't want that because the claude sessions in the other panes may already be busy.
+- **right** already has session → no change
+
+Each doc = its own Claude session. No sharing. `agent-doc route` sends commands to the right pane.
+
+### claude-mem as the shared brain
+
+Each Claude session independently writes to claude-mem (observations, memories). When left2's new session starts, it can `mem-search` for prior context on that doc/feature. No explicit sync needed — claude-mem IS the cross-session context layer.
+
+This means session handoff is cheap: kill a session, start a new one, claude-mem recovers context.
+
+We don't have an explicit dependency on claude-mem. And other agent loop platform may be supported. So do we need a sync to ensure that everything works or does the entire agent document act as the sync?
+
+### Implementation pieces
+
+1. **JetBrains plugin**: `EditorLayoutWriter` — writes `.agent-doc/layout.json` on tab group changes
+2. **`agent-doc sync`** (new CLI command): reads layout.json, diffs against sessions.json, creates/arranges panes
+3. **`agent-doc start`** (existing): used by sync to spawn Claude in a new pane
+4. **Layout algorithm**: column-based 2D join (from `specs/pane-groups.md`)
+
+The plugin side is ~30 lines (listen for editor split events, serialize to JSON). The sync command is the main work — maybe 150 lines.
+
+Want to start building, or refine the design further?
+
+## User
+

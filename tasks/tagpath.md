@@ -207,4 +207,40 @@ tagpath graph src/ --query "user"  # Subgraph around "user" tags
 
 ## User
 
+Please add an installable skill for tagpath.
 
+## Assistant
+
+**Created `/tagpath` Claude Code skill** at `.claude/skills/tagpath/SKILL.md`.
+
+Invocable via `/tagpath <command> [args]` — exposes all 8 CLI commands:
+
+| Command | Purpose |
+|---------|---------|
+| `parse` | Decompose identifier into canonical tags, role, shape |
+| `alias` | Generate all 6 convention variants |
+| `prose` | Human-readable description |
+| `search` | Cross-convention semantic search |
+| `lint` | Validate against `.naming.toml` rules |
+| `extract` | Extract identifiers from source files |
+| `graph` | Tag co-occurrence graph (DOT/JSON) |
+| `init` | Initialize `.naming.toml` config |
+
+Also installed `tagpath` binary globally via `cargo install --path tagpath/`.
+
+Verified:
+```
+$ tagpath alias create_user_profile
+Ada_Case:        Create_User_Profile
+PascalCase:      CreateUserProfile
+camelCase:       createUserProfile
+kebab-case:      create-user-profile
+snake_case:      create_user_profile
+
+$ tagpath prose is_valid_email
+Checks if email is valid
+```
+
+## User
+
+Release. Install the skill.

@@ -141,5 +141,25 @@ The plugin side is ~30 lines (listen for editor split events, serialize to JSON)
 
 Want to start building, or refine the design further?
 
+## Assistant
+
+### Re: `claude --resume` conflicts
+
+**No conflict.** `claude --resume` doesn't reattach to an existing running session — it creates a **new** Claude Code process that resumes from the last conversation transcript. Each tmux pane runs its own independent process. Two panes can both have `claude --resume` running simultaneously in the same project — they're separate OS processes with separate context windows.
+
+The `session:` field in doc frontmatter is an agent-doc concept (ties doc to snapshot), not a Claude Code process ID. left1 runs process A, left2 runs process B. Both active, no conflicts.
+
+### Re: claude-mem dependency
+
+**The document IS the sync.** You're right — no dependency on claude-mem. The agent doc itself is the shared context:
+
+- Each doc contains full conversation history (or compacted summary)
+- Any Claude session can **read** any other doc for cross-doc context
+- New session starts → reads doc → has full context. Session dies → new one reads doc → picks up.
+- claude-mem enhances (faster search, persistent observations) but the system works without it
+
+**No external sync needed for `agent-doc sync`.** Only state required: `sessions.json` (pane↔doc mapping) + editor layout. The document is both the interface AND the state.
+
 ## User
 
+Great! Implement please. Both agent-doc and the editor plugins as needed.

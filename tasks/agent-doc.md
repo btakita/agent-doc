@@ -523,4 +523,19 @@ The algorithm now uses a **convergent loop** (max 3 attempts), **deferred evicti
 
 ## User
 
-vesion bump and release
+version bump and release
+
+## Assistant
+
+**Released agent-doc v0.7.1.**
+
+- Additive reconciliation with convergent loop, deferred eviction, reorder phase
+- Tagged, pushed, published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.7.1
+- Binary installed (`agent-doc 0.7.1`), parent pointer pushed
+
+I see your note about the Claim for Tmux Pane failure — that's a separate issue for the next submit. The claim command currently fails when sessions.json points to a dead pane. Instead, it should detect the dead session, find the running session in the current tmux pane, and re-register.
+
+## User
+
+A Claim for Tmux Pane command the results with Claim Failed due to the address pointing to a dead session should ensure the tmux layout is correct and attempt to connect to the current running session in the correct tmux pane.

@@ -85,3 +85,19 @@ The pre-submit git commit is the key — it creates an immutable baseline before
 ## User
 
 Is that the full reply?
+
+## Assistant
+
+Yes — that's the full reply as drafted (the section between the `---` markers). It covers:
+
+1. **Empathy on runtime state** — connects their browser automation challenge to your corky experience
+2. **Ownership model** — one tmux pane, one doc
+3. **3-way merge** — the technical answer to their concurrent editing question
+
+Want me to adjust length, tone, or add/remove sections?
+
+## User
+
+Would a CRDT help with concurrent editing?
+
+See https://jakelazaroff.com/words/an-interactive-intro-to-crdts/

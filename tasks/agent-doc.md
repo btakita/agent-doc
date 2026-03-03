@@ -411,3 +411,29 @@ Plugin rebuilt. Reinstall the zip to apply.
 ## User
 
 Should the tmux panes automatically recover back to correct layout of l1 r1?
+
+Because we still have the l1 l2 r1 layout.
+
+## Assistant
+
+**No automatic recovery** — tmux panes stay wherever `sync` last put them until a new `sync` runs with correct columns.
+
+To fix now:
+
+1. **Reinstall the plugin zip** → restart IDE
+2. **Switch tabs or press `Ctrl+Shift+Alt+L`** — the fixed `LayoutDetector` sends `sync --col l1,l2 --col r1` and tmux rearranges
+
+Or fix manually from terminal right now (no reinstall needed):
+```sh
+agent-doc sync --col <left1>,<left2> --col <right>
+```
+(Replace with your actual file paths.)
+
+`sync` reuses existing panes — breaks them out and re-joins into the correct 2-column layout. No sessions are killed.
+
+**After the plugin fix is installed**, every tab switch triggers a re-sync. The layout self-corrects on the next editor event.
+
+## User
+
+Sync Tmux Layout did not fix the layout. It refreshed l1 & l2...but the unbound r1 remains.
+l1 | l2 | r1

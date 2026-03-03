@@ -61,18 +61,18 @@ class SyncLayoutAction : AnAction() {
                             listOf(agentDoc, "sync", "--col", colArg) + windowArgs
                         }
                     }
+                    if (notify) {
+                        val summary = TerminalUtil.formatLayoutSummary(cmd)
+                        TerminalUtil.notifyInfo(project, summary)
+                    }
                     val process = ProcessBuilder(cmd)
                         .directory(java.io.File(basePath))
                         .redirectErrorStream(true)
                         .start()
                     val output = process.inputStream.bufferedReader().readText().trim()
                     val exitCode = process.waitFor()
-                    if (notify) {
-                        if (exitCode == 0) {
-                            TerminalUtil.showHint(project, output.ifEmpty { "Layout synced" })
-                        } else {
-                            TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
-                        }
+                    if (notify && exitCode != 0) {
+                        TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
                     }
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")

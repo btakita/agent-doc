@@ -121,3 +121,20 @@ Rebuild plugin (`./gradlew buildPlugin`) and reinstall to apply.
 ## User
 
 version bump and release
+
+## Assistant
+
+**Released agent-doc v0.6.6.**
+
+- `--focus` on SyncLayoutAction, inline hint at cursor
+- Tagged, pushed, published to crates.io
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.6.6
+- Binary installed (`agent-doc 0.6.6`), parent pointer pushed
+
+## User
+
+When I switch focus from left1 to right1, the tmux focus does not change. Why?
+
+left1 == agent-doc.md, right1 == tagpath.md
+
+agent-doc sync should include the focused pane in the sync.

@@ -332,4 +332,28 @@ This catches any edge case where the incremental reconciliation produces the wro
 
 Well now the tmux only shows 1 pane. The tmux sync command should iterate until the correct state is achieved.
 
-In the currently s
+## Assistant
+
+**Replaced one-shot reconciliation with a convergent loop (max 3 attempts).**
+
+Each iteration:
+1. Snapshot the target window with `list_panes_ordered()`
+2. Compare against desired layout — if match, exit early
+3. If not: break unwanted, ensure anchor, join missing panes (re-querying tmux state at each step)
+4. Loop back to snapshot
+
+Tested by manually breaking out %37 from @41 (leaving 1 pane), then running sync:
+```
+Reconcile attempt 1 — desired ["%34", "%37"], actual ["%34"]
+Layout converged on attempt 2
+Focus: %34 (layout unchanged)
+```
+
+Recovery: 1 pane → 2 panes in correct order. The old code computed `in_window` once and made stale decisions. The new code re-queries tmux before every join/break operation.
+
+- 104 tests pass, clippy clean
+- Binary installed (`agent-doc 0.7.0`)
+
+## User
+
+TMUX Window 0 shows only 1 pane. This command should cause it to show 2 panes with agent-doc on the left and tagpath on the right.

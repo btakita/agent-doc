@@ -127,10 +127,22 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 `agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P]` — claim a document for a tmux pane.
 
 1. Ensure session UUID in frontmatter (generate if missing)
-2. Determine pane: `--pane P` overrides, else `$TMUX_PANE` (must be inside tmux)
-3. Register session → pane in `sessions.json`, including window ID if `--window` given
+2. **Resolve effective window** (see Window Resolution below)
+3. Determine pane: `--pane P` overrides, else `--position` resolves via tmux pane geometry, else `$TMUX_PANE`
+4. Register session → pane in `sessions.json`, including window ID
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
+
+**Window Resolution:**
+
+When `--window W` is provided:
+
+1. Check if window `W` is alive (`tmux list-panes -t W`)
+2. If alive → use `W` (no change)
+3. If dead → scan `sessions.json` for entries with matching project `cwd` and non-empty `window` field. For each, check liveness. Use first alive match.
+4. If no alive windows found → fall through to no-window behavior (position detection without window scoping)
+
+This prevents the JetBrains plugin from hitting persistent error balloons when a tmux window dies. The same fallback pattern is used in `sync.rs` for dead `--window` handling.
 
 **Notifications:**
 - `tmux display-message` — 3-second overlay on the target pane showing "Claimed {file} (pane {id})"

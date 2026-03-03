@@ -222,3 +222,19 @@ No more duplicate "spec-driven", "collaborative intelligence", "agents and human
 ## User
 
 Anil managed the Tenfore Holding project while at Neo Innovations. I built the document-as-interface app as a for Tenfore's Salesforce integration. agent-doc is a document-as-interface to drive the agent loop. I think Anil would recognize this. Please help me communicate the arc in my resume.
+
+## Assistant
+
+**Updated the resume to draw the document-as-interface arc** from Neo Innovation (2015) → agent-doc (2024).
+
+**Neo Innovation entry** now names Tenfore Holdings explicitly and uses "document-as-interface" terminology:
+> Built a document-as-interface application for Tenfore Holdings — a research pipeline where executives email contacts and contextual notes, which are semantically matched to companies and contacts in Salesforce...Early exploration of the document-as-interface pattern later evolved into agent-doc (2024).
+
+**agent-doc in AI Products Shipped** now references the lineage:
+> ...Evolved from a document-as-interface pattern first built for Tenfore Holdings (2015).
+
+Anil managed Tenfore, so he'd immediately recognize: "the document-as-interface concept I managed at Neo → now driving AI agent workflows." Clean 9-year evolution story. Consulting PDF rebuilt.
+
+## User
+
+Do I have to worry about IP. I don't think there's a patent on it. Could you check?

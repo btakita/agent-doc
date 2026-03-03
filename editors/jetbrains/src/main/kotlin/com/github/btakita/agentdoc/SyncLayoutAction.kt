@@ -38,7 +38,6 @@ class SyncLayoutAction : AnAction() {
                 return
             }
 
-            val split = detectSplitOrientation(project)
             val windowId = TerminalUtil.projectWindowId(project)
             EditorTabSyncListener.clearLastFileSet()
 
@@ -49,8 +48,18 @@ class SyncLayoutAction : AnAction() {
                     val cmd = if (visibleMdFiles.size == 1) {
                         listOf(agentDoc, "focus", visibleMdFiles[0])
                     } else {
-                        val splitFlag = if (split == "v") "v" else "h"
-                        listOf(agentDoc, "layout") + visibleMdFiles + listOf("--split", splitFlag) + windowArgs
+                        val editorLayout = LayoutDetector.detectEditorLayout(project)
+                        if (editorLayout != null && editorLayout.columns.size > 1) {
+                            // 2D layout: use sync --col format
+                            val colArgs = editorLayout.columns.flatMap { col ->
+                                listOf("--col", col.files.joinToString(","))
+                            }
+                            listOf(agentDoc, "sync") + colArgs + windowArgs
+                        } else {
+                            // Flat layout or detection failed: use sync with single column
+                            val colArg = visibleMdFiles.joinToString(",")
+                            listOf(agentDoc, "sync", "--col", colArg) + windowArgs
+                        }
                     }
                     val process = ProcessBuilder(cmd)
                         .directory(java.io.File(basePath))
@@ -70,30 +79,6 @@ class SyncLayoutAction : AnAction() {
                 }
             }.start()
         }
-
-        private fun detectSplitOrientation(project: com.intellij.openapi.project.Project): String {
-            try {
-                val managerEx = FileEditorManagerEx.getInstanceEx(project)
-                val splitters = managerEx.splitters
-                val root = (splitters as? java.awt.Container) ?: return "h"
-                return findSplitterOrientation(root) ?: "h"
-            } catch (_: Exception) {
-                return "h"
-            }
-        }
-
-        private fun findSplitterOrientation(component: Component): String? {
-            if (component is Splitter) {
-                return if (component.isVertical) "v" else "h"
-            }
-            if (component is java.awt.Container) {
-                for (child in component.components) {
-                    val result = findSplitterOrientation(child)
-                    if (result != null) return result
-                }
-            }
-            return null
-        }
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -109,5 +94,115 @@ class SyncLayoutAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread {
         return ActionUpdateThread.BGT
+    }
+}
+
+/**
+ * Represents a detected 2D editor layout.
+ */
+data class LayoutColumn(val files: List<String>)
+data class EditorLayout(val columns: List<LayoutColumn>)
+
+/**
+ * Detects the 2D columnar layout of .md files in the editor by walking
+ * the Swing Splitter tree recursively.
+ *
+ * - Horizontal Splitter (isVertical=false) → separate columns (left + right)
+ * - Vertical Splitter (isVertical=true) → merge files into same column (stacked)
+ * - Leaf → maps to an EditorWindow by order (splitter tree leaves correspond 1:1
+ *   with EditorWindow instances in left-to-right, top-to-bottom order)
+ */
+object LayoutDetector {
+
+    /**
+     * Detect the editor layout as a list of columns, each containing stacked files.
+     * Returns null if detection fails or there's only one editor window.
+     */
+    fun detectEditorLayout(project: com.intellij.openapi.project.Project): EditorLayout? {
+        try {
+            val managerEx = FileEditorManagerEx.getInstanceEx(project)
+            val windows = managerEx.windows
+            if (windows.size < 2) return null
+
+            // Collect selected .md files from each window, in window order.
+            // Each window represents one leaf in the splitter tree.
+            val windowFiles = windows.mapNotNull { window ->
+                val file = window.selectedFile
+                if (file != null && file.name.endsWith(".md")) {
+                    TerminalUtil.relativePath(project, file)
+                } else null
+            }
+            if (windowFiles.size < 2) return null
+
+            // Walk the splitter tree to get the column structure as leaf indices.
+            val splitters = managerEx.splitters
+            val root = (splitters as? java.awt.Container) ?: return null
+            val leafCounter = intArrayOf(0) // mutable counter for leaf assignment
+            val indexColumns = walkSplitterTree(root, leafCounter)
+            if (indexColumns.isEmpty()) return null
+
+            // Map leaf indices to file paths
+            val columns = indexColumns.mapNotNull { indices ->
+                val files = indices.mapNotNull { idx ->
+                    if (idx < windowFiles.size) windowFiles[idx] else null
+                }
+                if (files.isNotEmpty()) LayoutColumn(files) else null
+            }
+
+            return if (columns.size >= 2) EditorLayout(columns) else null
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
+    /**
+     * Recursively walk the Swing component tree and return column structure
+     * as lists of leaf indices.
+     *
+     * A horizontal splitter (isVertical=false) means left/right → separate columns.
+     * A vertical splitter (isVertical=true) means top/bottom → same column, merged indices.
+     * A leaf → assigns the next leaf index from the counter.
+     */
+    private fun walkSplitterTree(
+        component: Component,
+        leafCounter: IntArray
+    ): List<List<Int>> {
+        if (component is Splitter) {
+            val first = component.firstComponent
+            val second = component.secondComponent
+            val leftCols = if (first != null) walkSplitterTree(first, leafCounter) else emptyList()
+            val rightCols = if (second != null) walkSplitterTree(second, leafCounter) else emptyList()
+
+            return if (!component.isVertical) {
+                // Horizontal split → separate columns
+                leftCols + rightCols
+            } else {
+                // Vertical split → merge all indices into one column
+                val merged = (leftCols + rightCols).flatten()
+                if (merged.isEmpty()) emptyList() else listOf(merged)
+            }
+        }
+
+        // Check if this subtree contains any Splitter children
+        if (component is java.awt.Container) {
+            for (child in component.components) {
+                if (containsSplitter(child)) {
+                    return component.components.flatMap { walkSplitterTree(it, leafCounter) }
+                }
+            }
+        }
+
+        // Leaf: assign current index and increment
+        val idx = leafCounter[0]
+        leafCounter[0] = idx + 1
+        return listOf(listOf(idx))
+    }
+
+    private fun containsSplitter(component: Component): Boolean {
+        if (component is Splitter) return true
+        if (component is java.awt.Container) {
+            return component.components.any { containsSplitter(it) }
+        }
+        return false
     }
 }

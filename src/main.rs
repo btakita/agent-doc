@@ -19,6 +19,7 @@ mod skill;
 mod snapshot;
 mod start;
 mod submit;
+mod sync;
 mod upgrade;
 
 use anyhow::Context;
@@ -147,6 +148,18 @@ enum Commands {
         #[arg(long)]
         window: Option<String>,
     },
+    /// Sync tmux panes to a 2D columnar layout matching the editor
+    Sync {
+        /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
+        #[arg(long = "col", required = true)]
+        columns: Vec<String>,
+        /// Only operate on panes within this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
+        /// Focus this file's pane after arranging (defaults to first file)
+        #[arg(long)]
+        focus: Option<String>,
+    },
     /// Display markdown outline with section structure and token counts
     Outline {
         /// Path to the markdown document
@@ -223,6 +236,11 @@ fn main() -> anyhow::Result<()> {
             let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
             layout::run(&paths, split, pane.as_deref(), window.as_deref())
         }
+        Commands::Sync {
+            columns,
+            window,
+            focus,
+        } => sync::run(&columns, window.as_deref(), focus.as_deref()),
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {

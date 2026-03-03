@@ -404,3 +404,9 @@ Want me to implement the `extends` resolution now?
 ## User
 
 Yes...implement extends resolution now.
+
+Make sure we have ample documentation with examples.
+
+audit docs
+
+Do we have treesitter support for all languages? I only see a handful of languages in treesitter/mod.rs 

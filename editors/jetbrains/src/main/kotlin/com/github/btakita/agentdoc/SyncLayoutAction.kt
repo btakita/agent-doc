@@ -45,21 +45,20 @@ class SyncLayoutAction : AnAction() {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
-                    val cmd = if (visibleMdFiles.size == 1) {
-                        listOf(agentDoc, "focus", visibleMdFiles[0])
-                    } else {
-                        val editorLayout = LayoutDetector.detectEditorLayout(project)
-                        if (editorLayout != null && editorLayout.columns.size > 1) {
-                            // 2D layout: use sync --col format
-                            val colArgs = editorLayout.columns.flatMap { col ->
-                                listOf("--col", col.files.joinToString(","))
-                            }
-                            listOf(agentDoc, "sync") + colArgs + windowArgs
-                        } else {
-                            // Flat layout or detection failed: use sync with single column
-                            val colArg = visibleMdFiles.joinToString(",")
-                            listOf(agentDoc, "sync", "--col", colArg) + windowArgs
+                    // Always use sync --col (never focus) so that unwanted panes
+                    // are broken out and the entire window layout is managed.
+                    val editorLayout = if (visibleMdFiles.size > 1)
+                        LayoutDetector.detectEditorLayout(project) else null
+                    val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {
+                        // 2D layout: use sync --col format
+                        val colArgs = editorLayout.columns.flatMap { col ->
+                            listOf("--col", col.files.joinToString(","))
                         }
+                        listOf(agentDoc, "sync") + colArgs + windowArgs
+                    } else {
+                        // Single file or flat layout: sync with single column
+                        val colArg = visibleMdFiles.joinToString(",")
+                        listOf(agentDoc, "sync", "--col", colArg) + windowArgs
                     }
                     if (notify) {
                         val summary = TerminalUtil.formatLayoutSummary(cmd)

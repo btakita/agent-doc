@@ -288,3 +288,27 @@ version bump and release
 ## User
 
 Again..we got out of sync. Let's make a new rule. The tmux window should never change. All updates should happen within the same TMUX window.
+
+## Assistant
+
+**Fixed — sync no longer scatters wanted panes across windows.**
+
+Root cause: Step 3b did a **scatter-gather** — broke ALL wanted panes out of the target window (creating new windows), then Step 3e joined them back. Any interruption left panes orphaned in random windows. When all panes got broken out, the target window died, causing the plugin's `--window` to hit the dead-window fallback and pick a different target on the next sync — cascading the problem.
+
+**New rule enforced in `sync.rs`:** Never break wanted panes out of the target window. Only:
+1. Break out **unwanted** panes from the target window
+2. Join in **missing** wanted panes (isolating them from their current window first if shared)
+3. Skip panes already in the correct window
+
+The reconciliation now only modifies panes that need to move — panes already in the target window are untouched. The target window stays alive through the entire operation.
+
+- Clippy clean, 21 tests pass
+- Binary installed (`agent-doc 0.7.0`)
+
+## User
+
+There are now 3 panes in window 0. I had to manually delete windows in the tmux sessions.
+ 
+Please resync and make sure the agent-doc sync automation results in an accurate state.
+
+Can agent-doc sync verify that the tmux panes are correct? And iterate until it correctly matches the layout it was given? 

@@ -186,6 +186,33 @@ object TerminalUtil {
         return null
     }
 
+    /**
+     * Extracts a brief layout description from a command list.
+     * Returns a string like "--col a.md,b.md --col c.md" or "focus a.md",
+     * suitable for showing in a notification balloon.
+     */
+    fun formatLayoutSummary(cmd: List<String>): String {
+        // Find the subcommand (sync or focus)
+        val subcommand = cmd.getOrNull(1) ?: return cmd.joinToString(" ")
+        return when (subcommand) {
+            "sync" -> {
+                val parts = mutableListOf<String>()
+                var i = 2
+                while (i < cmd.size) {
+                    if (cmd[i] == "--col" && i + 1 < cmd.size) {
+                        parts.add("--col ${cmd[i + 1]}")
+                        i += 2
+                    } else {
+                        i++
+                    }
+                }
+                "Sync: ${parts.joinToString(" ")}"
+            }
+            "focus" -> "Focus: ${cmd.getOrNull(2) ?: ""}"
+            else -> cmd.drop(1).joinToString(" ")
+        }
+    }
+
     fun notifyInfo(project: Project, content: String) {
         try {
             val notification = NotificationGroupManager.getInstance()

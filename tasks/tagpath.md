@@ -663,3 +663,35 @@ Want me to implement it?
 ## User
 
 Yes
+
+## Assistant
+
+### Ada_Case — implemented
+
+**51/51 tests pass** (49 + 2 new), clippy clean.
+
+**Changes:**
+- `parser/mod.rs` — `AdaCase` enum variant, `Display` (`Ada_Case`), `FromStr` (`"Ada_Case" | "ada"`), detection heuristic (every `_`-separated segment starts with uppercase), namespace support
+- `lint/mod.rs` — `suggest_fix` generates Ada_Case output (`User_Name`, `Get_User_Profile`)
+- `README.md` — convention detection list updated
+- `SPEC.md` — convention table + detection order updated
+
+**CLI output:**
+```
+$ tagpath parse User_Name
+name:       User_Name
+convention: Ada_Case
+tags:       [user, name]
+
+$ tagpath parse Get_User_Profile
+name:       Get_User_Profile
+convention: Ada_Case
+tags:       [get, user, profile]
+role:       getter
+```
+
+Semantic equivalence confirmed: `Person_Name` (Ada_Case) = `person_name` (snake_case) = `personName` (camelCase) → `[person, name]`.
+
+## User
+
+version bump, release

@@ -391,6 +391,63 @@ impl Tmux {
             .context("failed to kill tmux server")?;
         Ok(())
     }
+
+    /// Kill a tmux pane. For test setup.
+    pub fn kill_pane(&self, pane_id: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["kill-pane", "-t", pane_id])
+            .status()
+            .context("failed to kill tmux pane")?;
+        if !status.success() {
+            anyhow::bail!("tmux kill-pane failed for {}", pane_id);
+        }
+        Ok(())
+    }
+
+    /// Run a raw tmux command. For test setup (e.g., kill-pane).
+    pub fn raw_cmd(&self, args: &[&str]) -> Result<String> {
+        let output = self.cmd().args(args).output().context("tmux raw_cmd")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+/// RAII guard that kills the isolated tmux server on drop.
+/// Available to all test modules in the crate.
+#[cfg(test)]
+pub(crate) struct IsolatedTmux {
+    tmux: Tmux,
+}
+
+#[cfg(test)]
+impl IsolatedTmux {
+    pub fn new(name: &str) -> Self {
+        IsolatedTmux {
+            tmux: Tmux::isolated(name),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for IsolatedTmux {
+    fn drop(&mut self) {
+        let _ = self.tmux.kill_server();
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Deref for IsolatedTmux {
+    type Target = Tmux;
+    fn deref(&self) -> &Tmux {
+        &self.tmux
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +542,23 @@ pub fn pane_window(pane_id: &str) -> Result<String> {
         anyhow::bail!("tmux display-message failed for pane {}", pane_id);
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Update the window field for all sessions whose pane matches the given pane_id.
+/// Called after break_pane or join_pane moves a pane to a different window.
+pub fn update_window_for_pane(pane_id: &str, new_window: &str) -> Result<()> {
+    let mut registry = load()?;
+    let mut changed = false;
+    for entry in registry.values_mut() {
+        if entry.pane == pane_id && entry.window != new_window {
+            entry.window = new_window.to_string();
+            changed = true;
+        }
+    }
+    if changed {
+        save(&registry)?;
+    }
+    Ok(())
 }
 
 /// Look up the pane ID for a session.
@@ -779,31 +853,7 @@ mod tests {
     // Tmux isolation tests — use `-L` to create independent tmux servers
     // -----------------------------------------------------------------------
 
-    /// RAII guard that kills the isolated tmux server on drop.
-    struct IsolatedTmux {
-        tmux: Tmux,
-    }
-
-    impl IsolatedTmux {
-        fn new(name: &str) -> Self {
-            IsolatedTmux {
-                tmux: Tmux::isolated(name),
-            }
-        }
-    }
-
-    impl Drop for IsolatedTmux {
-        fn drop(&mut self) {
-            let _ = self.tmux.kill_server();
-        }
-    }
-
-    impl std::ops::Deref for IsolatedTmux {
-        type Target = Tmux;
-        fn deref(&self) -> &Tmux {
-            &self.tmux
-        }
-    }
+    use super::IsolatedTmux;
 
     #[test]
     fn tmux_isolated_server_not_running_initially() {

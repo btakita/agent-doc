@@ -577,3 +577,27 @@ The dynamic grammar loading (runtime `.so` via `libloading`) was planned as a pa
 ## User
 
 Ok. Version bump and release.
+
+## Assistant
+
+### Released tagpath v0.3.0
+
+- **crates.io:** https://crates.io/crates/tagpath (`cargo install tagpath`)
+- **GitHub Release:** building now (5-target binary matrix) — https://github.com/btakita/tagpath/actions
+- **Git tag:** `v0.3.0` pushed
+
+**What's new in v0.3.0:**
+- Feature flags for all tree-sitter grammars (`lang-*` Cargo features)
+- 6 new tree-sitter grammars: Java, Ruby, PHP, C#, Swift, Kotlin (14 total)
+- Composable config with `extends` resolution
+- 49/49 tests, clippy clean
+
+## User
+
+clean task doc
+
+audit docs. I found incorrect examples in README:
+
+`convention: SnakeCase`
+
+Should be: `convention: snake_case`

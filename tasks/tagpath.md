@@ -244,3 +244,41 @@ Adding tree-sitter integration for context-aware extraction and lint:
 ## User
 
 Can we have tests for cross language matching?
+
+## Assistant
+
+### Phase 2b — complete
+
+**37/37 tests pass.** Phase 2b delivered:
+
+- **tree-sitter integration** — 8 language grammars (Rust, Python, JS, TS, TSX, Go, C, C++)
+- **`tagpath extract --ast`** — AST-aware extraction with context (function, variable, type, constant, import, parameter, field)
+- **`tagpath lint`** — validates identifiers against `.naming.toml` context rules, suggests fixes
+- **Config loading** wired up, dead_code warnings resolved
+
+### Cross-language matching tests — added
+
+Two new tests in `src/search/mod.rs` that prove the core thesis:
+
+**`test_cross_language_search`** — Creates the same concept (`validate_user`) in 5 languages:
+- Python: `validate_user` (snake_case)
+- TypeScript: `validateUser` (camelCase)
+- Go: `ValidateUser` (PascalCase)
+- Rust: `validate_user` (snake_case)
+- CSS: `validate-user` (kebab-case)
+
+Searching with ANY convention (`validate_user`, `validateUser`, or `ValidateUser`) finds ALL of them. One query, all conventions.
+
+**`test_cross_language_partial_tag_match`** — Searching for just `"user"` finds:
+- Python: `create_user_profile`
+- TypeScript: `fetchUserData`
+- Go: `GetUserByID`
+- CSS: `user-avatar`
+
+But does NOT find `fetchPostData` (no `user` tag). Semantic search, not textual.
+
+## User
+
+version bump and release
+
+Let's also setup 

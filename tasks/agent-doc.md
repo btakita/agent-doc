@@ -48,3 +48,8 @@ Please also have the plugin display the layout it sent to agent-doc sync...In th
 
 ## User
 
+agent-doc sync is not converting the 3 column layout back to the 2 column layout.
+
+> Fix: only delegate to splitter-containing children.
+
+This doesn't seem correct. The entire window should be managed. So there should only be 2 columns right now in the tmux window. There are 3 columns due to routing the layout to only the left child.|

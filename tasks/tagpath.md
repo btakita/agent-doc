@@ -454,3 +454,71 @@ Want me to update the docs now, or add more tree-sitter languages first?
 ## User
 
 Update the docs then add more tree-sitter languages. Does tree-sitter have a plugin architecture? Do we need a fat monolith of all of the supported languages, can we compose the language support, or can we use our toml rules to bind to the supported language?
+
+## Assistant
+
+### Docs — updated
+
+README, AGENTS.md, and SPEC.md all updated for Phase 2 completion:
+- Extract, search, lint command examples
+- `extends` composability docs with examples
+- Tree-sitter section (8 languages, `--ast` flag)
+- Updated architecture, module responsibilities, phases
+- SPEC now has sections 9.3-9.5 (extract/search/lint) and section 10 (extends resolution)
+
+### Tree-sitter plugin architecture — three approaches
+
+**No, we don't need a fat monolith.** Tree-sitter supports composable language loading:
+
+**1. Feature flags (compile-time, recommended first step)**
+
+Each grammar behind a Cargo feature. Users choose what to compile:
+
+```toml
+[features]
+default = ["lang-rust", "lang-python", "lang-javascript", "lang-typescript"]
+lang-rust = ["dep:tree-sitter-rust"]
+lang-python = ["dep:tree-sitter-python"]
+lang-java = ["dep:tree-sitter-java"]   # opt-in
+```
+
+`cargo install tagpath` gets the defaults. `cargo install tagpath --features lang-java` adds Java. This is what library-oriented tools (arborium, tree-sitter-languages-rs) do.
+
+**2. Dynamic loading (runtime, how Helix/Neovim do it)**
+
+Load grammar `.so`/`.dylib` files at runtime via `libloading` (wraps `dlopen`):
+- `tree-sitter build` compiles any grammar to a `.so`
+- tagpath loads from `~/.config/tagpath/grammars/` or a configured path
+- No recompilation needed to add languages
+- This is how Helix, Neovim, and the tree-sitter CLI work
+
+**3. WASM loading (runtime, sandboxed)**
+
+Load `.wasm` grammar files via `wasmtime`. Cross-platform, safe, but slower. Tree-sitter supports this with the `wasm` feature flag.
+
+### Binding via TOML rules — yes, composable
+
+The `.naming.toml` already defines per-context conventions. We can extend it to bind tree-sitter grammar loading:
+
+```toml
+# .naming.toml
+extends = ["rust"]
+
+[treesitter]
+grammars_dir = "./grammars"    # custom .so path
+# or use the built-in: the "rust" preset knows its grammar
+```
+
+The `extends = ["rust"]` already tells tagpath which language conventions to use. The grammar binding is implicit — if a `rust` preset is extended, tagpath knows to use `tree-sitter-rust`. Custom grammars (for DSLs or new languages) would use the `grammars_dir` path.
+
+### Recommended plan
+
+1. **Now:** Add feature flags for current 8 grammars (keeps binary lean)
+2. **Next:** Add more grammars as optional features (Java, Ruby, PHP, C#, Swift, Kotlin)
+3. **Later:** Add dynamic `.so` loading for extensibility without recompilation
+
+Want me to implement the feature flags now, or proceed with adding more grammar support first?
+
+## User
+
+Add feature flags. Add more grammars in a subagent. Add dynamic `.so` in another subagent. Make sure everything orchestrates together, tests pass, docs are consistent and up to date.

@@ -138,3 +138,20 @@ When I switch focus from left1 to right1, the tmux focus does not change. Why?
 left1 == agent-doc.md, right1 == tagpath.md
 
 agent-doc sync should include the focused pane in the sync.
+
+## Assistant
+
+**Fixed — sync now fast-paths focus changes instead of rebuilding the layout.**
+
+The plugin correctly sends `--focus <active-file>` on every sync. The problem was in `sync.rs`: every sync call did a **full layout rebuild** (break out all panes, re-join, equalize = ~10 tmux commands) even when the layout hadn't changed. The plugin's concurrency guard (`running` AtomicBoolean) would drop subsequent focus requests while a rebuild was still running.
+
+**Fix (sync.rs):** Added a fast path after resolving panes. If the target window already contains exactly the wanted panes (same set, same count), skip Phases 5-8 (break/join/equalize) and just call `tmux select-pane`. Focus switches now take 1 tmux command instead of ~10.
+
+- 104 tests pass, clippy clean
+- Binary installed (`agent-doc 0.6.6` with fast-path fix)
+
+If focus still doesn't switch after testing, the next suspect is IntelliJ's `selectionChanged` not firing for split-pane switches. Enable debug logging (`#com.github.btakita.agentdoc` in IDEA Debug Log Settings) and check `idea.log` for `selectionChanged` entries when switching columns.
+
+## User
+
+The claims are not working anymore. tagpath is in right1, but it was claimed by left1. Now there is only 1 tmux pane now.

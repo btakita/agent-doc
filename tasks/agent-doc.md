@@ -437,3 +437,27 @@ agent-doc sync --col <left1>,<left2> --col <right>
 
 Sync Tmux Layout did not fix the layout. It refreshed l1 & l2...but the unbound r1 remains.
 l1 | l2 | r1
+
+The layout should be l1 | r1
+With l1 claiming agent-doc and r1 claiming tagpath right at this moment.
+
+## Assistant
+
+**Fixed manually.** Layout is now `%4 (agent-doc) | %30 (tagpath)` — 2 panes side-by-side. Broke out %32 (resume.md) to its own window.
+
+The plugin's Sync Tmux Layout didn't fix it because:
+1. The buggy 3-column sync moved all 3 panes into window @30
+2. The plugin saw 3 .md files in editor splits and included all 3 in the sync
+3. Even with the correct `LayoutDetector` fix, the sync arranged all 3 panes when only 2 were wanted
+
+**Root issue:** The plugin includes ALL visible .md files in the sync, even files that aren't part of the desired layout. If the editor has 3 splits (from a previous layout), the plugin syncs all 3 — it doesn't know that one of them should be ignored.
+
+This is a design limitation: `sync` arranges whatever files the plugin tells it. If the editor has an extra split pane, it gets included. The fix would be either:
+- Close the unwanted editor split before syncing
+- Or add a mechanism to exclude certain files from sync (e.g., right-click → "Exclude from layout")
+
+For now: close the resume.md split in the editor, then Sync Tmux Layout will correctly produce the 2-pane layout.
+
+## User
+
+Please commit all submodules. Release any unreleased changes.

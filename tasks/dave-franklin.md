@@ -262,3 +262,6 @@ Even better — you **own the IP**. Tenfore has an unrestricted license, but the
 ## User
 
 Please proofread the resume. Is it ready to send to Dave?
+
+Please note approximately how many release I have made since working on the agentic loop open source projects? 
+I want to show rapid delivery of significant features.

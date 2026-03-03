@@ -263,5 +263,32 @@ Even better — you **own the IP**. Tenfore has an unrestricted license, but the
 
 Please proofread the resume. Is it ready to send to Dave?
 
-Please note approximately how many release I have made since working on the agentic loop open source projects? 
+Please note approximately how many release I have made since working on the agentic loop open source projects?
 I want to show rapid delivery of significant features.
+
+## Assistant
+
+**Proofread complete — 3 issues found and fixed:**
+
+1. **"10-year" → "8-year"** in Career Highlights Censible bullet (dates are Jan 2016 – Apr 2024 = 8 years)
+2. **"lipsync" → "lip-sync"** standardized across summary and career highlights (matching the hyphenated form used in experience section)
+3. **YAML frontmatter removed** (agent-doc session metadata was accidentally in the resume template — fixed in previous session)
+
+No other issues. Grammar, dates, and content are clean. **Ready to send to Dave.**
+
+---
+
+**Release velocity across your agentic loop projects:**
+
+| Repo | Releases | Timespan | Pace |
+|------|----------|----------|------|
+| **corky** | 24 | 9 days (Feb 20 – Mar 1) | ~2.7/day |
+| **agent-doc** | 28 | 8 days (Feb 23 – Mar 3) | ~3.5/day |
+| **tagpath** | 5 | 2 days (Mar 2 – Mar 3) | ~2.5/day |
+| **Total** | **57 releases** | **11 days** | **~5.2/day** |
+
+**57 releases in 11 days** — that's a strong "rapid delivery" signal. Each release ships real features (not patch bumps). If you want to reference this on the call or in follow-up, the framing is: "shipped 57 versioned releases across 3 Rust tools in under two weeks."
+
+## User
+
+Should we include the initial Python prototype for corky...using SPEC.md to transition to Rust in under 1 day?

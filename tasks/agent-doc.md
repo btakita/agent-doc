@@ -234,3 +234,44 @@ Binary installed, plugin built. Reinstall plugin to apply.
 Left and right sides are inverted between the editor & tmux.
 
 Let's do the snapshot and diff refactor.
+
+## Assistant
+
+**Done — sync.rs rewritten with snapshot-diff-apply architecture.**
+
+### Inversion fix
+Phase 6 was joining the anchor with `-h` (places right of target). Changed to `-bh` (before = left).
+
+### Refactor: 9 phases → 4 steps
+
+Old: 9 numbered phases + fast path. New:
+
+1. **Snapshot** — `list_panes_ordered()` queries tmux for pane positions (sorted by `#{pane_left}`, `#{pane_top}`). Returns panes in visual order.
+
+2. **Fast path** — Compare desired ordered list against current ordered list. If identical (same panes, same left-to-right order) → just `select-pane` and return. One tmux command.
+
+3. **Reconcile** — When layout differs:
+   - 3a: Break out unwanted session panes from target window
+   - 3b: Break out all non-anchor wanted panes (ensures each is in own window)
+   - 3c: Move anchor into target window if needed (with `-bh` for left placement)
+   - 3d: Clean up any remaining unwanted panes
+   - 3e: Join panes in column order (left→right, top→bottom)
+
+4. **Equalize + Focus** — Resize columns to 50/50, select the focused pane.
+
+### Verification
+
+```
+Before: %31(left) %4(right)  — inverted
+Sync:   "Sync: 2 panes in 2 columns"
+After:  %4(left,120w) %31(right,119w)  — correct
+
+Re-run: "Focus: %31 (layout unchanged)"  — fast path, 1 tmux command
+Focus:  "Focus: %4 (layout unchanged)"   — instant switch
+```
+
+104 tests pass, clippy clean, binary installed.
+
+## User
+
+version bump and release

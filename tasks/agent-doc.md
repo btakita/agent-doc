@@ -205,3 +205,5 @@ Root cause of the 3-pane bug: the old Phase 6 ("break ALL non-anchor wanted pane
 ## User
 
 Focusing on the opposite editor document is not changing the tmux pane focus.
+
+Running Claim for Tmux is showing an error:

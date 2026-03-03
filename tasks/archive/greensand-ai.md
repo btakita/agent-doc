@@ -1,3 +1,10 @@
+---
+session: ae20768e-ad57-4331-bb61-653817fdbb48
+resume: null
+agent: null
+model: null
+branch: null
+---
 service contracts
 - analysis
 - create 

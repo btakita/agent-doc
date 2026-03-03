@@ -5,8 +5,13 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import java.awt.datatransfer.StringSelection
+import java.io.File
 
 object TerminalUtil {
 
@@ -97,6 +102,11 @@ object TerminalUtil {
                     } else {
                         // Notify success and expire quickly
                         notifyInfo(project, "Agent $agent finished: $relativePath")
+                    }
+
+                    // For Junie agent, open the request file in the editor so the user (or Junie agent) sees the diff
+                    if (agent == "junie") {
+                        openJunieRequest(project)
                     }
                 } finally {
                     onComplete?.invoke()
@@ -189,6 +199,37 @@ object TerminalUtil {
             }.start()
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
+        }
+    }
+
+    /**
+     * Opens the ~/.cache/junie-bridge/request.md file in the editor.
+     * This file is written by junie-bridge.sh and contains the diff/prompt for Junie.
+     */
+    private fun openJunieRequest(project: Project) {
+        val home = System.getProperty("user.home") ?: return
+        val requestPath = "$home/.cache/junie-bridge/request.md"
+        val requestFile = File(requestPath)
+        if (!requestFile.exists()) return
+
+        ApplicationManager.getApplication().invokeLater {
+            val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(requestFile)
+            if (virtualFile != null) {
+                // Open and focus the file
+                FileEditorManager.getInstance(project).openTextEditor(
+                    OpenFileDescriptor(project, virtualFile),
+                    true
+                )
+                
+                // Copy the diff content to clipboard to make it even easier to send to Junie
+                try {
+                    val content = requestFile.readText()
+                    CopyPasteManager.getInstance().setContents(StringSelection(content))
+                    showHint(project, "Opened Junie request (diff copied to clipboard)")
+                } catch (e: Exception) {
+                    showHint(project, "Opened Junie request")
+                }
+            }
         }
     }
 }

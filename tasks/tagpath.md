@@ -221,3 +221,26 @@ Building Phase 2a now — `extract` module + `search` module + CLI commands.
 ## User
 
 Is Phase 2a complete? If yes, implement Phase 2b.
+
+## Assistant
+
+### Phase 2a — done
+
+- 18/18 tests pass (12 original + 6 new)
+- `tagpath extract <path> [--format text|json]` — regex-based extraction with tag decomposition
+- `tagpath search <query> <path> [--format text|json]` — semantic tag search (AND semantics)
+- New modules: `src/extract/mod.rs`, `src/search/mod.rs`
+- New deps: `walkdir`, `regex`
+
+### Phase 2b — building now
+
+Adding tree-sitter integration for context-aware extraction and lint:
+
+1. **tree-sitter deps** — `tree-sitter 0.26` + grammar crates for Rust, Python, JS, TS, Go, C, C++
+2. **AST-aware extraction** — enhance extract to tag identifiers with their AST context (function, variable, type, import)
+3. **`tagpath lint`** — validate identifiers against `.naming.toml` rules using AST context
+4. **Config loading** — wire up `NamingConfig` for lint rules (fixes dead_code warnings)
+
+## User
+
+Can we have tests for cross language matching?

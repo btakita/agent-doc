@@ -610,3 +610,36 @@ Config is resolved by walking up from the file to find `.agent-doc/` (not CWD). 
 ## User
 
 Is everything documented? Include some tutorial for the dashboard-as-document flow. And tutorials for components using hooks. And custom components.
+
+## Assistant
+
+**Documented.** Created two new guide pages and updated existing docs. 150 tests pass.
+
+**New docs:**
+
+1. **`docs/guide/components.md`** — Full component reference:
+   - Syntax (paired markers, naming rules, nesting)
+   - `agent-doc patch` usage (argument, stdin, piped from scripts)
+   - `.agent-doc/components.toml` configuration (modes, timestamp, max_entries)
+   - Shell hooks tutorial (`pre_patch` with stdin/stdout transform, `post_patch` fire-and-forget)
+   - Components vs regular comments (structural vs scratchpad)
+
+2. **`docs/guide/dashboard.md`** — End-to-end dashboard tutorial:
+   - Quick start: create document → configure components → update from scripts → watch
+   - Flow diagram: external script → patch → watch detects → run → agent responds
+   - Multi-component dashboard example (builds, tests, metrics, log)
+   - User interaction with dashboards (ask questions about component data)
+   - Loop prevention (bounded cycles, convergence detection)
+   - Tips section
+
+**Updated docs:**
+
+3. **`docs/guide/commands.md`** — Added `patch` and `watch` command references with flags, config options, and cross-links to component/dashboard guides
+
+4. **`docs/guide/document-format.md`** — Added Components section explaining component markers vs regular comments, with link to components guide
+
+5. **`docs/SUMMARY.md`** — Added Components and Dashboard-as-Document to the Guide section
+
+## User
+
+Release v0.9.0

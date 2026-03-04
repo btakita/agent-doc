@@ -167,3 +167,61 @@ What if we have an "operations dashboard" as a document? Using a document as a t
 Also allowing for the diff handling for agent loop inference.
 
 We could provide a file-based notification system. We could also have a general server or cli tool that realtime event system can interact with low latency.
+
+## Assistant
+
+Three interconnected ideas — here's how they fit together:
+
+**Operations Dashboard as a Document:**
+
+A markdown template where a watcher fills in fields; the agent responds to diffs:
+
+```markdown
+## Sessions
+| ID | Status | Last Check | Action |
+|----|--------|------------|--------|
+| ses-001 | active | 2m ago | — |
+| ses-002 | ⚠ flagged | 30s ago | needs recovery |
+
+## Alerts
+- [NEW] ses-002 flagged at 08:15 — proxy rotation failed
+```
+
+Watcher updates "active" → "flagged". Agent-doc sees the diff: `ses-002` status changed. The diff IS the trigger — the agent doesn't scan the whole doc, just responds to what changed. Template fields give structure; diffs give semantics.
+
+**File-based notification system:**
+
+Append-only notifications file. External events append structured entries:
+```
+2026-03-04T08:15:00 session.flagged ses-002 proxy_rotation_failed
+2026-03-04T08:16:30 session.recovered ses-002 auto_retry_succeeded
+```
+
+Agent polls or watches the file. Each line is a discrete event. Snapshot diff shows only new events since last read.
+
+**Real-time server/CLI:**
+
+For sub-second latency: a lightweight daemon that receives webhooks/events and either:
+1. Writes to the notification file (bridges into the file-based system)
+2. Directly triggers an `agent-doc submit` via CLI
+3. Pushes to a Unix socket that agent-doc listens on
+
+The layering: **real-time server → file write → agent-doc diff → agent inference**. Each layer is optional — start with file writes, add the server when latency matters.
+
+**Draft addition to the HN reply:**
+
+---
+
+We're thinking about this as a layered problem:
+
+**Dashboard-as-document:** A markdown template where a watcher process fills in operational fields (session status, health checks). When a field changes, the agent-doc diff pipeline sees exactly what changed — "session went from active to flagged" — and the agent responds to that diff. The template gives structure; the diff gives the trigger.
+
+**Event bridge:** External events append to a notification file. The agent sees new entries on each poll via snapshot diff. For sub-second latency, a lightweight daemon receives webhooks and either writes to the file or directly triggers an agent submit.
+
+The gap you're describing — "thing happened" to "agent knows about it" — is really about who writes the event into the file system. Once it's a file change, the diff pipeline handles the rest.
+
+---
+
+## User
+
+Could you write the entire reply as a draft?

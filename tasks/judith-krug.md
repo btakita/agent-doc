@@ -324,3 +324,16 @@ I'll use relementjs + rmemo for the components.
 
 ## User
 
+
+
+## Assistant
+
+Noted both corrections:
+- **CMS**: Keystatic stays on the radar — easy to add later since it layers on top of markdown content collections
+- **Components**: relementjs + rmemo instead of Preact for interactive islands
+
+**Updated stack: Astro + markdown + relementjs/rmemo + optional Keystatic**
+
+## User
+
+What is a good host for Astro? Judith is in LA

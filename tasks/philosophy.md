@@ -375,3 +375,5 @@ existential-kernel/exkernel
 ## User
 
 Can github pages run the api server via an action? Or would it need to be static with a service?
+
+Right now, I'm working on agent-doc. Can we get extential-kernel setup to a place to where it fits the current task outlined in tasks/agent-doc.md?

@@ -363,3 +363,38 @@ I will recommend Claude Code as well for her staff.
 Would the CRM workflow well with Claude Code + Cloudflare Pages? Can we make this somewhat error proof given that we are using git?
 
 Perhaps a cli tool for the staff that works with Claude Code?
+
+## Assistant
+
+**Yes — Claude Code becomes the git interface.** Staff never touch git directly.
+
+**Workflow:** Staff talks to Claude Code → Claude commits to a branch → pushes → Cloudflare Pages auto-deploys (or preview-deploys for review).
+
+**Error-proofing layers:**
+1. **Protected `main`** — no direct pushes. All changes go through PRs.
+2. **Claude Code creates branches** — "add a funded deal for $400K in Pasadena" → Claude makes the branch, adds markdown, opens PR.
+3. **Cloudflare preview deploys** — every PR gets a preview URL. Staff checks before going live.
+4. **CI validation** — GitHub Actions checks required fields, valid rates, proper images before merge.
+5. **Auto-merge or your review** — simple content auto-merges after CI. Structural changes need you.
+6. **Git revert** — any mistake is undone in seconds.
+
+**CLI tool (`efs`):**
+```bash
+efs deal add          # guided prompts for funded deal
+efs blog draft        # create blog post draft
+efs blog publish      # move draft → published
+efs site preview      # open preview URL
+efs site deploy       # merge PR → auto-deploy
+```
+
+Abstracts git completely. Validates content. Works alongside Claude Code — staff can use either. Claude Code is the "smart" path, CLI is the structured path.
+
+**Cloudflare email routing** — `contact@equityfundingsource.com` → Judith's Gmail. Free. No separate email hosting.
+
+**CRM fit:** Staff uses Claude Code to draft investor outreach, pulling deal data from the markdown content. MA handles loans. Claude helps with everything around MA — website, investor materials, follow-ups. If they use HubSpot, its API is accessible to Claude Code too.
+
+**Pitch to Judith:** "Your staff talks to Claude in plain English. Claude updates your website, drafts investor materials, manages content. Everything is version-controlled — nothing breaks permanently, you own all of it."
+
+## User
+
+If I use Cloudflare pages with Hono, are there any advantages to using Astro?

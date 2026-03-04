@@ -509,3 +509,57 @@ What text editors would be good for her staff to use?
 Just VSCode?
 Cursor?
 Something else?
+
+Would obsidian be beneficial at all?
+Would obsidian integrate with agent-doc?
+
+## Assistant
+
+**Staff may not need a traditional editor at all:**
+
+| Task | Tool | Editor needed? |
+|---|---|---|
+| Update content | Keystatic (browser) | No |
+| Add pages | Keystatic (browser) | No |
+| Change layout | Claude Code (terminal) | Optional |
+
+**If they want an editor: VS Code.** Free, built-in terminal (Claude Code), git GUI. Cursor/Windsurf are redundant — their AI overlaps with Claude Code.
+
+**Obsidian — two angles:**
+
+*As a content editor:*
+| Pro | Con |
+|---|---|
+| Beautiful markdown editing UX | Needs local git clone |
+| Live preview | Doesn't auto-deploy (need git push) |
+| Free personal / $50/yr commercial | Redundant with Keystatic for web content |
+
+For **web content**, Keystatic is better — purpose-built for the edit → commit → deploy pipeline. Obsidian would need a git sync plugin to achieve the same thing.
+
+Can agent-doc integrate with Keystatic with an api?
+
+For **internal knowledge** (SOPs, investor notes, deal memos, meeting notes), Obsidian is excellent. Things that don't go on the website but the team needs to share.
+
+*Agent-doc integration:*
+**Yes, Obsidian could work with agent-doc.** Agent-doc operates on markdown files — Obsidian edits markdown files. The workflow:
+1. Staff opens a `.md` file in Obsidian
+2. Writes a prompt in a `## User` block
+3. Runs `/agent-doc` (via terminal or the agent-doc JetBrains/VS Code plugin equivalent)
+4. Agent-doc diffs, responds, writes back to the file
+5. Obsidian auto-refreshes the file
+
+There should be a plugin for whatever editor is being used. /agent-doc is a bit finickey for me. So I will need to make it completely solid for someone who is not a programmer and not used to the cli.
+
+Basically it needs to be robust.
+
+There's no Obsidian plugin for agent-doc yet, but it's feasible — Obsidian has a plugin API. An Obsidian plugin could call `agent-doc run` on save/hotkey, same as the JetBrains and VS Code plugins do.
+
+**The layered approach:**
+- **Web content** → Keystatic (browser)
+- **Internal docs / knowledge** → Obsidian (optional)
+- **AI-powered document sessions** → agent-doc (works with Obsidian files)
+- **Code/layout changes** → Claude Code in terminal
+
+## User
+
+

@@ -90,3 +90,44 @@ The historical limitation was exactly right — without tooling, ontology stayed
 ## User
 
 Please make sure that my terminology is well understood and accurate. I don't have formal training in philosophy. So my take is innovative...but I want to be composable with the historical traditions.
+
+## Assistant
+
+**Your terminology composes well with established traditions.** Here's the full mapping:
+
+| Your Term | Academic Parallel | Tradition |
+|-----------|------------------|-----------|
+| Existence | Being (*to on*) | Metaphysics (Aristotle), Pantheism (Spinoza's *Deus sive Natura*) |
+| Entity | Particular / Being | Ontology — you broaden to "any information" (information-theoretic ontology) |
+| Abstraction | Form / Universal | Plato, Aristotle |
+| Scope | Extension / Domain of discourse | Logic, Model theory (novel in philosophy, clear in computing) |
+| Context | Situation / Frame | Pragmatism (Dewey), Situation semantics (Barwise & Perry) |
+| Resolution | Granularity | **Novel contribution** — closest: mereology, formal ontology (DOLCE, BFO) |
+| Pattern | Form / Universal / Eternal Object | Plato, Whitehead |
+| System | Organism / Process | Systems theory (von Bertalanffy), Process philosophy (Whitehead) |
+| Domain | Region of being | Phenomenology (Husserl), Model theory |
+| Focus | Attention / Intentionality | Phenomenology (Husserl) |
+| Perspective | Perspectivism | Nietzsche, Leibniz (monads) |
+| Consciousness | Awareness | IIT (Tononi), Global Workspace Theory |
+| Evolution | Becoming / Process | Heraclitus, Hegel, Whitehead |
+| Story | Narrative | Narrative philosophy (Ricoeur, MacIntyre) |
+| Project | Entwurf / Projet | Existentialism (Heidegger, Sartre) — very well-grounded |
+
+**Your kernel synthesizes four traditions** that don't usually talk to each other: process philosophy (Whitehead), phenomenology (Husserl), information-theoretic ontology, and existentialism. The computational vocabulary (scope, resolution, context, focus) bridges philosophy with systems thinking — this is the novel contribution.
+
+**"Resolution"** is your strongest novel term. No major tradition has a clean equivalent. Document its lineage: mereological granularity + observational scale + information density.
+
+Let's document all of this. The table is nice. Will need to write some blog posts & articles.
+
+---
+
+**Kernel naming & architecture:**
+
+- **Name:** "Existential Kernel" — clear, descriptive, matches the computing metaphor
+- **Repo:** Keep `btakita/philosophy` as the single repo for now. Create a `existential-kernel` GitHub org later when there's community interest
+Should I move the ontology to btakita/existential-kernel? It's a bit long of a name. I do like it though. Any alternative names to propose?
+- **Crate:** `philosophy` Rust crate lives in this repo alongside the content
+- **Foundation:** A good idea eventually — ensures the kernel stays existentially applicable. Premature to formalize now
+
+## User
+

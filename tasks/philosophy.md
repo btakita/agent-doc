@@ -450,3 +450,47 @@ existential-kernel/
 Should we name the config file to extkernel.toml or .extkernel.toml? ring.toml can be merged into the config.
 
 For the flat file navigation, should there be links to the configured extistential kernel or should we copy the entries from the existential kernel? Perhaps a search box could read from either overlaid scoping rules?
+
+## Assistant
+
+**Config: `exkernel.toml` (no dot).** Same convention as `Cargo.toml` — a primary project file, not hidden config. Merge `ring.toml` into it:
+
+```toml
+# exkernel.toml
+
+[meta]
+name = "existential-kernel/ontology"
+description = "Reference existential ontology"
+
+[rings.0]
+name = "kernel"
+description = "Universal terms, always loaded"
+terms = ["existence", "entity", "abstraction", ...]
+
+[rings.1]
+name = "software"
+description = "Software engineering bridge"
+terms = ["project", "model", "algorithm", ...]
+
+[sources]
+upstream = "github:existential-kernel/ontology"
+
+[overlay]
+chain = ["upstream", "local"]
+```
+
+Single file: ring declarations, source references, overlay chain. Drop `ring.toml`.
+
+**Navigation: links to upstream, not copies.**
+
+Copying creates divergence — when upstream updates, your copy is stale. Links maintain inheritance:
+
+- **Static site:** Term pages link to `existential-kernel/ontology/src/{term}.md` for Ring 0/1. Domain overlay terms rendered locally. Each page shows the resolved definition with a ring badge (`Ring 0`, `Ring 1`, `Domain`) and source link.
+
+- **Search: reads the full resolved scope.** `exkernel build-site` generates a single `search-index.json` combining Ring 0 + Ring 1 + domain overlay terms. Client-side search (pagefind) queries the unified index. User sees one search — no need to know which ring a term came from.
+
+- **Pattern:** Resolve at build time, link at display time. `exkernel build-site` pulls upstream + local overlays into one index/site, but each term page links back to its source repo for the canonical definition.
+
+## User
+
+Commit the existential kernel data. Next build the software. Let's get to an initial version with the cli arguments that you laid out earlier.

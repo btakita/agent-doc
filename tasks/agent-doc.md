@@ -315,5 +315,29 @@ Can we either prevent these new windows from being created or cleanup orphaned w
 
 The tmux tree logging is now active. Let me check what's happening.
 
+## Assistant
+
+**Removed auto-restart** (committed `2c3ec63`). Sync Phase 2 no longer creates new tmux windows for dead/missing panes. Instead, it logs a warning and skips the file:
+
+```
+skipping tasks/agent-doc.md — pane dead/missing (use `agent-doc claim` to re-register)
+```
+
+This prevents orphan windows entirely. If a pane dies, the user can re-register it with `agent-doc claim` or `agent-doc start`. The layout just shows fewer panes until then.
+
+**139 tests pass, clippy clean, binary installed.**
+
 ## User
 
+If you look at my last few interactions, I opened plugin.md on the left editor side.
+
+When I switch between agent-doc and plugin on the left side, the tmux windows now cycle between where * means selected.:
+
+0* | 1
+0* | 2
+1 | 2*
+0 | 2*
+1 | 2*
+1* | 2
+
+Both of the windows have 2 panes. Please ensure we have tests and full logging.

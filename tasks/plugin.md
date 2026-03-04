@@ -1,10 +1,9 @@
 ---
-session: d4eed435-cbf3-44ae-a96c-048b0b2e8025
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: d4eed435-cbf3-44ae-a96c-048b0b2e8025
+tmux_session: '1'
 ---
+
+
 
 ## JetBrains Plugin — Resolved Issues
 
@@ -443,4 +442,4 @@ The sync reconciliation algorithm used `stash_pane` for isolation in three place
 
 ## User
 
-
+compact this doc

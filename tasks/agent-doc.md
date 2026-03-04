@@ -192,3 +192,6 @@ Implementing now.
 
 ## User
 
+If BrianTakita.md, which is not an agent doc, was first selected, there was only 1 tmux pane. There should have been 2 tmux panes.
+
+Please reproduce with a test and fix.

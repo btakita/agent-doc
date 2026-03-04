@@ -176,7 +176,11 @@ pub fn run_with_tmux(
     let layout = Layout::parse(col_args)?;
     let all_files = layout.all_files();
 
-    // Log global tmux state at sync start
+    // Log comprehensive tmux tree at sync start
+    if let Ok(tree) = tmux.dump_tmux_tree() {
+        eprintln!("{}", tree);
+    }
+
     let mut global_log = SyncLog::new();
     global_log.log_global_state(tmux, "sync-start");
 
@@ -197,6 +201,8 @@ pub fn run_with_tmux(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut resolved: Vec<ResolvedFile> = Vec::new();
     let mut unresolved_files: Vec<PathBuf> = Vec::new();
+    let mut doc_tmux_session: Option<String> = None;
+    let mut files_needing_tmux_session: Vec<PathBuf> = Vec::new();
 
     for file in &all_files {
         if !file.exists() {
@@ -206,6 +212,18 @@ pub fn run_with_tmux(
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
+
+        // Collect tmux_session from first doc that has it
+        if doc_tmux_session.is_none() {
+            if let Some(ref ts) = fm.tmux_session {
+                doc_tmux_session = Some(ts.clone());
+                eprintln!("tmux_session={} (from {})", ts, file.display());
+            }
+        }
+        if fm.tmux_session.is_none() && fm.session.is_some() {
+            files_needing_tmux_session.push(file.to_path_buf());
+        }
+
         let session_id = match fm.session {
             Some(id) => id,
             None => {
@@ -319,13 +337,27 @@ pub fn run_with_tmux(
         .collect();
 
     // --- Phase 4: Pick target window (same tmux session only) ---
-    // Determine the target tmux session for affinity. If --window is given and alive,
-    // use its session. Otherwise derive from the first wanted pane.
-    let target_session = if let Some(w) = window {
+    // Priority: 1) tmux_session from frontmatter, 2) --window param, 3) first wanted pane
+    let target_session = if let Some(ref ts) = doc_tmux_session {
+        if tmux.session_alive(ts) {
+            Some(ts.clone())
+        } else {
+            eprintln!(
+                "warning: configured tmux_session '{}' is dead, falling back to --window",
+                ts
+            );
+            if let Some(w) = window {
+                tmux.pane_session(w).ok()
+            } else {
+                wanted.iter().find_map(|p| tmux.pane_session(p).ok())
+            }
+        }
+    } else if let Some(w) = window {
         tmux.pane_session(w).ok()
     } else {
         wanted.iter().find_map(|p| tmux.pane_session(p).ok())
     };
+    eprintln!("target_session={:?}", target_session);
 
     let mut best_window = String::new();
     let mut best_wanted = 0usize;
@@ -369,6 +401,23 @@ pub fn run_with_tmux(
     } else {
         best_window
     };
+
+    // Write tmux_session back to documents that don't have it yet
+    if let Some(ref session_name) = target_session {
+        for file in &files_needing_tmux_session {
+            if let Ok(content) = std::fs::read_to_string(file) {
+                if let Ok(updated) = frontmatter::set_tmux_session(&content, session_name) {
+                    if updated != content {
+                        if let Err(e) = std::fs::write(file, &updated) {
+                            eprintln!("warning: failed to write tmux_session to {}: {}", file.display(), e);
+                        } else {
+                            eprintln!("set tmux_session={} in {}", session_name, file.display());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let anchor_pane = pane_columns[0][0].clone();
 

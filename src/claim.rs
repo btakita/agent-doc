@@ -66,6 +66,22 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         sessions::current_pane()?
     };
 
+    // Detect tmux session name from the pane and write to frontmatter if not set
+    let tmux = sessions::Tmux::default_server();
+    if let Ok(pane_sess) = tmux.pane_session(&pane_id) {
+        let content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let (fm, _) = frontmatter::parse(&content)?;
+        if fm.tmux_session.is_none() || fm.tmux_session.as_deref() != Some(&pane_sess) {
+            let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
+            if updated != content {
+                std::fs::write(file, &updated)
+                    .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
+                eprintln!("set tmux_session={} in {}", pane_sess, file.display());
+            }
+        }
+    }
+
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let file_str = file.to_string_lossy();
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());

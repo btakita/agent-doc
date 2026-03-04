@@ -202,7 +202,7 @@ Please reproduce with a test and fix.
 
 Switching agent documents causes additional tmux windows to be attached.
 There should only be 1 tmux window with the attached claude sessions that is being managed.
-The rest of the tmux panes should be tmux detached.
+The rest of the tmux panes should be detached tmux sessions.
 
 ## Assistant
 

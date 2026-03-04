@@ -889,3 +889,7 @@ The route fix in tmux-router would be: `auto_start` queries the active window, c
 ## User
 
 Can we install agent-doc v0.8.0 locally so I can test it? This is a big change so I want to make sure it works as intended before releasing.
+
+Setup github actions for tmux-router. Similar to corky and agent-doc. Running tests and releasing.
+
+Set up mdbook gh pages site as well for tmux-router

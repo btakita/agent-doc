@@ -132,3 +132,38 @@ Please help me craft a response.
 > One thing we haven't solved cleanly: what happens when the external state change is what triggers the agent task in the first place? Like, a session getting flagged and needing recovery. The event comes from outside the doc system, so there's a gap between "thing happened" and "agent knows about it".
 
 Does agent-doc have a solution for this? What can we do to address this concern?
+Should we consider having watcher scripts?
+ 
+## Assistant
+
+CloakHQ's question is about the **event → agent bridge** — when something external happens, how does the agent get notified?
+
+**What we already have:**
+- `corky watch` is exactly a watcher script — polls IMAP for new emails, syncs to markdown files on disk. External event → file-system change → agent's native input format.
+- agent-doc is user-initiated (edit doc, submit), but the file-system diff pipeline is the foundation.
+
+**On watcher scripts:** Yes — that's the right pattern. The bridge between "thing happened" and "agent knows about it" is a process that listens for external events and writes them into the file system where agents operate. `corky watch` already proves this works.
+
+**Draft reply:**
+
+---
+
+Good question — this is the "event → agent" bridge problem.
+
+agent-doc is currently user-initiated (edit a doc, hit submit). But we've solved the same pattern in a different layer: corky (our email tool) runs a watch daemon that polls IMAP for new messages and syncs them to markdown files on disk. External event gets translated into a file-system change, which is the agent's native input format.
+
+The general pattern: **event → write to file system → agent picks up the change.** The bridge is a watcher process that listens for external events and writes them into the doc/file system where agents operate.
+
+For your session recovery case: monitoring process detects flagged session → writes a task file or appends to a doc → agent picks it up on next poll. The gap is really about who runs the monitoring process and how quickly the agent needs to react.
+
+Real-time reactivity (sub-second) would need event-driven agent dispatch. But for most operational tasks, a polling bridge with a reasonable interval (corky watch runs every 30 seconds) closes the gap well enough.
+
+---
+
+## User
+
+What if we have an "operations dashboard" as a document? Using a document as a template to fill in fields. How could that look?
+
+Also allowing for the diff handling for agent loop inference.
+
+We could provide a file-based notification system. We could also have a general server or cli tool that realtime event system can interact with low latency.

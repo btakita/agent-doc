@@ -451,3 +451,45 @@ This keeps the CLI simple and the prompt-handling logic in the skill where it ca
 ## User
 
 Good. Let's have the log "component" be part of the standard template. Let's also use the language of "component" as this is similar to web components or React component, etc.
+
+## Assistant
+
+**Adopting "component" terminology.** Range templates become **components** — bounded, named, re-renderable regions in a document. Aligns with web components / React: a component has a name, boundaries, and replaceable content.
+
+**Standard dashboard template with log component:**
+
+```markdown
+# Dashboard
+
+<!-- agent:log -->
+<!-- /agent:log -->
+
+<!-- agent:status -->
+| Field | Value |
+|-------|-------|
+<!-- /agent:status -->
+```
+
+The **log component** is a standard built-in. User prompts found inside other components get moved here before patching. It's append-only (other components are replace-only).
+
+**Updated terminology:**
+
+| Old | New |
+|-----|-----|
+| Range template | Component |
+| Section (CLI arg) | Component name |
+| `RangeTemplate` (struct) | Rename to `Component` for consistency |
+| `agent-doc patch <file> <section>` | `agent-doc patch <file> <component>` |
+
+The CLI arg name, struct name, and all docs should use "component." The markers stay `<!-- agent:name -->` — the syntax is unchanged, only the vocabulary.
+
+**Next steps to codify:**
+1. Rename `RangeTemplate` → `Component` in `range.rs` (or rename to `component.rs`)
+2. Rename `section` → `component` in `patch.rs` CLI arg
+3. Add "Component" to the Domain Ontology in `CLAUDE.md`
+4. Add `log` as a recognized built-in component name in the skill workflow
+5. `agent-doc init --dashboard` could scaffold the standard template with log + status components
+
+## User
+
+Should we have hooks for components. Allowing for custom component types. And to customize behavior on existing components such as the log.

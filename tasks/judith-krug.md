@@ -259,3 +259,39 @@ If Judith is going to have ownership...what technology would be the best for her
 Wordpress? Astro? Something else?
 
 I can use relysjs, but it's my own library. I wonder if there is a well designed efficient library that I can use.
+
+## Assistant
+
+**Key constraint: Judith needs to update content herself** — funded deals, blog posts, rates. She's not a developer.
+
+She doesn't need to update the content herself. But I promised that she will have custody of all of her services.
+
+| Stack | She can self-maintain? | Performance | Your DX |
+|---|---|---|---|
+| **WordPress (keep, optimize)** | Yes — familiar admin | Better with caching/lighter theme | Painful (Elementor) |
+| **Astro + headless CMS** | Yes — via CMS admin panel | Excellent (static) | Excellent |
+| **Astro + markdown only** | No — needs you | Excellent | Excellent |
+
+**Recommendation: Astro + Keystatic**
+
+Astro is the modern standard for content-heavy marketing sites — pre-renders to static HTML, island architecture for interactive components only where needed. Keystatic (by Thinkmill) gives Judith a clean web UI for editing content that commits to git. Free, first-class Astro integration.
+
+**Other CMS options if Keystatic doesn't fit:**
+- **Decap CMS** (formerly Netlify CMS) — free, git-based, proven
+- **Tina CMS** — visual editing, git-backed
+- **WordPress as headless** — keep her existing WP admin, fetch via REST API into Astro frontend. She keeps her familiar UI, you get a modern frontend.
+
+**Re: relysjs alternatives —** For this site, Astro's built-in features cover most needs. For interactive islands (loan calculator, intake form, investor portal), Astro supports any framework. **Preact** or **Solid** would be the efficient choices — tiny bundles, fast hydration, just for the few interactive widgets.
+
+**Hosting:** Netlify or Cloudflare Pages (free tier handles this traffic level easily). ~$0/mo.
+
+**The practical path:**
+1. Astro + Keystatic + Preact (for interactive islands)
+2. Deploy on Cloudflare Pages or Netlify
+3. Migrate existing content (5 pages + blog + funded deals)
+4. Add FAQ, llms.txt, sitemap as part of migration
+5. Judith edits content via Keystatic admin UI → auto-deploys
+
+## User
+
+Does Keystatic mean editing markdown files directly?

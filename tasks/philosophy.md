@@ -146,3 +146,36 @@ Or keep `existential-kernel` as the org and just rename the crate/CLI to `existe
 Yes! Rename the crate to existence. There is a github user https://github.com/existence
 
 So what should the org be named? existence-kernel, existence-org, something else?
+
+## Assistant
+
+**Recommendation: keep `existential-kernel` as the org.**
+
+| Option | Score | Notes |
+|--------|-------|-------|
+| **existential-kernel** (keep) | 9/10 | Already established with 5 repos, stars, releases. Descriptive. No migration cost. |
+| existence-kernel | 7/10 | Redundant — "existence" + "kernel" when the crate is just "existence" |
+| existence-dev | 6/10 | Generic `-dev` suffix adds nothing |
+| existence-org | 5/10 | `-org` is filler |
+
+**The case for keeping it:** The org is infrastructure — it shows up in GitHub URLs and `git clone` commands, rarely in daily use. What matters is the crate name (`existence`) and the CLI binary (`existence`/`exk`). Those are what users type every day.
+
+```
+cargo install existence          ← what users see (clean)
+git clone github.com/existential-kernel/existence  ← rare, background
+```
+
+`existential-kernel` as an org name is actually *good* — it's descriptive of the *project*, while `existence` is the *tool*. Different roles, different names is fine. Like how `rust-lang` is the org but `rustc` is the compiler.
+
+**Rename plan:**
+1. Rename crate `exkernel` → `existence` on crates.io (publish new crate, `exkernel` stays as redirect)
+2. Rename repo `existential-kernel/exkernel` → `existential-kernel/existence`
+3. Add `[[bin]] name = "existence"` + keep `[[bin]] name = "exk"` as alias
+4. Update all refs (CLAUDE.md, skills, submodules, README)
+5. Publish `existence` v0.3.0 to crates.io
+
+Keep `existential-kernel` org? Or do you prefer a different org name?
+
+## User
+
+existence-framework? Rate that vs existential-kernel

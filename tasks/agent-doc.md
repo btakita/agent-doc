@@ -457,3 +457,27 @@ This means:
 Whether it is simulated state or actual tmux state via integration tests. 
 
 I plan on extracting a tmux router cli & library project from this logic. What are your thoughts?
+
+## Assistant
+
+**Done.** Added comprehensive state assertions to 8 key tests — `snapshot_state()` captures target panes, window count, and active window at each step. Every multi-step test (stable_repeat, tab_switching) now verifies state after each reconcile call.
+
+**Re: pane content** — Integration tests run real shells. Options: `tmux capture-pane -t %X -p` (timing-dependent) or track via sessions.json metadata. The metadata approach is more reliable.
+
+**Re: selected pane** — Added `assert_active_window` at every step. Can add `active_pane_id` check too.
+
+**Re: extracting tmux-router** — Strong support. The `Tmux` struct, `SessionRegistry`, and `reconcile()` are already self-contained (only depend on `anyhow` + `serde`). Clean extraction:
+
+1. **`tmux-router` crate** (lib + CLI): Tmux operations, session registry, reconcile algorithm, stash window, IsolatedTmux test infra
+2. **`agent-doc` becomes consumer**: imports tmux-router, keeps frontmatter/snapshots/agents/skill
+3. **Boundary**: sync currently reads `tmux_session` from frontmatter — this becomes a config/callback parameter passed by agent-doc
+
+Benefits: reusable for other tools, clean API, test suite moves with the logic. The 120+ routing tests stay with the library where they belong.
+
+**141 tests pass, clippy clean.**
+
+## User
+
+When I switch between the 2 left editor agent docs, the tmux selected pane changes between the left and right panes. Only the left tmux pane should remain selected when switching between agent-doc and plugin on the left editor side.
+
+Make sure our tests cover this issue.

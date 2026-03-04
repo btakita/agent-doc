@@ -526,3 +526,5 @@ Added `Tmux::active_pane(session)` method and selected-pane logging at SNAPSHOT,
 **142 tests pass, clippy clean, binary installed.**
 
 ## User
+
+Switching between agent-doc and plugin **still** changes the tmux focused pane. Why have you not caught this issues yet? There should be a failing test to reproduce this issue.

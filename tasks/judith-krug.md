@@ -464,3 +464,48 @@ Eventually they will have more responsibility.
 
 Will Astro be beneficial or would it be yet another library to learn.
 Should I just focus on Hono with custom tooling?
+Custom agent loop tooling that integrates with the rest of her business.
+
+## Assistant
+
+**Skip Astro. Go Hono + Keystatic + relementjs/rmemo + custom tooling.**
+
+Staff never touches the framework — they use Keystatic for content and Claude Code for layout changes. The framework choice is about your velocity, not theirs.
+
+| Staff task | Their interface |
+|---|---|
+| Update content, add deals/posts | Keystatic browser UI |
+| Change layout, add page types | Claude Code ("move deals above investors") |
+| Eventually more responsibility | Claude Code grows with them |
+
+**Why skip Astro:**
+1. You already know Hono — no learning curve, ship faster
+2. Keystatic already gives you structured content — Astro's content collections are redundant
+3. One less build system to debug
+4. Claude Code works equally well with Hono templates
+5. You own the whole stack (relementjs/rmemo are yours)
+
+**What you'd build yourself** (that Astro gives free):
+- Sitemap — ~20 lines, one-time
+- Image optimization — Cloudflare Images or sharp in CI
+- RSS — ~30 lines
+- Markdown parsing — `marked` or `remark`
+
+~1 day of work total, then no framework conventions to fight.
+
+**Custom agent loop tooling** is the real differentiator. An `efs` CLI that integrates with MA, HubSpot, deal sourcing, investor outreach — all backed by the same git repo. Keystatic manages the public content, your tooling manages the business intelligence layer. That's the value prop no off-the-shelf framework provides.
+
+**Final stack:**
+- **Hono** — edge server on Cloudflare Workers/Pages
+- **Keystatic** — CMS UI for staff (GitHub mode)
+- **relementjs/rmemo** — interactive components
+- **Cloudflare Pages** — hosting + email routing
+- **`efs` CLI** — custom business tooling + Claude Code integration
+- **Claude Code** — staff's interface for anything beyond content
+
+## User
+
+What text editors would be good for her staff to use?
+Just VSCode?
+Cursor?
+Something else?

@@ -295,3 +295,32 @@ Astro is the modern standard for content-heavy marketing sites — pre-renders t
 ## User
 
 Does Keystatic mean editing markdown files directly?
+
+## Assistant
+
+No — Keystatic provides a **web-based admin UI** (form fields, rich text editor) that stores data as markdown/JSON/YAML in git. Judith would see a browser-based editor, not raw markdown. Under the hood it commits to git, so she owns everything with full history.
+
+**But given your correction** — she doesn't need self-service editing, just custody — **you can skip the CMS entirely.**
+
+A CMS doesn't hurt and may be beneficial. So I"ll keep it in mind.
+
+**Revised stack: Astro + markdown + Preact islands**
+- Content in markdown files (blog, FAQ, funded deals)
+- Astro renders static HTML
+- Preact for interactive islands (calculator, forms)
+- Deploy on Cloudflare Pages (she owns the account)
+- She owns the GitHub repo
+- Any developer can pick it up — no vendor lock, no database
+
+If she ever wants self-service editing later, Keystatic or Decap layers on top of the existing markdown files without changing the codebase.
+
+I'll use relementjs + rmemo for the components.
+
+**Custody checklist:**
+- Git repo in her GitHub/GitLab account (you're a collaborator)
+- Hosting account in her name (Cloudflare Pages, Netlify, or Vercel)
+- Domain DNS she controls
+- All credentials documented and handed over
+
+## User
+

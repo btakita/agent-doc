@@ -822,3 +822,7 @@ No test deletion during extraction — tests are copied/adapted, not moved. The 
 ## User
 
 Extract. Create btakita/tmux-router github project with README and description. Add a git submodule to agent-loop monorepo. Please update the tmux-router agent doc as well.
+
+Please also update agent-doc gh and readme description in light of extracting tmux-router.
+
+Use rust 2024 edition.

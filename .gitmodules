@@ -19,3 +19,6 @@
 [submodule "tagpath"]
 	path = tagpath
 	url = git@github.com:btakita/tagpath.git
+[submodule "tmux-router"]
+	path = tmux-router
+	url = git@github.com:btakita/tmux-router.git

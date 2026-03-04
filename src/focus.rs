@@ -34,7 +34,11 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (_updated, session_id) = frontmatter::ensure_session(&content)?;
+    let (fm, _) = frontmatter::parse(&content)?;
+    let session_id = match fm.session {
+        Some(id) => id,
+        None => anyhow::bail!("no session UUID in {} (use Claim to register)", file.display()),
+    };
 
     let pane = sessions::lookup(&session_id)?;
     match pane {

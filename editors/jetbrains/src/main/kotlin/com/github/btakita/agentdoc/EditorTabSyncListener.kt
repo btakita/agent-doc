@@ -10,14 +10,12 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Syncs tmux pane layout with editor tab switches.
  *
- * When the user switches editor tabs:
- * - Single visible .md file → `agent-doc focus <file>`
- * - Multiple visible .md files in splits → `agent-doc sync --col <files...>`
+ * The plugin is a thin layout reporter — all sync intelligence
+ * (dedup, fast-path, eviction) lives in `agent-doc sync`.
  *
  * Guards against rapid-fire events:
  * - 500ms debounce so only the final state is acted upon
  * - Concurrency guard: skips if a layout command is already running
- * - Dedup: skips if the column structure hasn't changed since the last execution
  *
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
  */
@@ -27,15 +25,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val DEBOUNCE_MS = 500L
         private val generation = AtomicLong(0)
         private val running = AtomicBoolean(false)
-        @Volatile private var lastColumnStructure: List<List<String>> = emptyList()
-        @Volatile private var lastActiveFile: String = ""
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
-
-        /** Clear the dedup cache so the next automatic sync runs unconditionally. */
-        fun clearLastFileSet() {
-            lastColumnStructure = emptyList()
-            lastActiveFile = ""
-        }
     }
 
     private fun log(msg: String) {
@@ -62,14 +52,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (visibleMdFiles.isEmpty()) return
 
         val activeFile = TerminalUtil.relativePath(project, file)
-
-        // Detect 2D layout structure for dedup comparison
         val editorLayout = LayoutDetector.detectEditorLayout(project)
-        val currentColumns: List<List<String>> = if (editorLayout != null && editorLayout.columns.size > 1) {
-            editorLayout.columns.map { it.files.sorted() }
-        } else {
-            listOf(visibleMdFiles.sorted())
-        }
 
         // Debounce: bump generation, wait, then check if we're still current.
         val myGen = generation.incrementAndGet()
@@ -82,15 +65,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     return@Thread
                 }
 
-                val columnStructureChanged = currentColumns != lastColumnStructure
-                val activeFileChanged = activeFile != lastActiveFile
-
-                // Dedup: skip if neither column structure nor active file changed.
-                if (!columnStructureChanged && !activeFileChanged) {
-                    log("dedup: unchanged columns=$currentColumns active=$activeFile")
-                    return@Thread
-                }
-
                 // Concurrency guard: skip if another layout command is running.
                 if (!running.compareAndSet(false, true)) {
                     log("guard: layout already running, skipping")
@@ -98,9 +72,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
 
                 try {
-                    lastColumnStructure = currentColumns
-                    lastActiveFile = activeFile
-
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowId = TerminalUtil.projectWindowId(project)
                     val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()

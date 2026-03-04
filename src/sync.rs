@@ -318,13 +318,32 @@ pub fn run_with_tmux(
         .flat_map(|col| col.iter().map(|s| s.as_str()))
         .collect();
 
-    // --- Phase 4: Pick target window ---
+    // --- Phase 4: Pick target window (same tmux session only) ---
+    // Determine the target tmux session for affinity. If --window is given and alive,
+    // use its session. Otherwise derive from the first wanted pane.
+    let target_session = if let Some(w) = window {
+        tmux.pane_session(w).ok()
+    } else {
+        wanted.iter().find_map(|p| tmux.pane_session(p).ok())
+    };
+
     let mut best_window = String::new();
     let mut best_wanted = 0usize;
     let mut best_total = 0usize;
     for pane_id in &wanted {
-        let win = tmux.pane_window(pane_id)?;
-        let window_panes = tmux.list_window_panes(&win)?;
+        let win = match tmux.pane_window(pane_id) {
+            Ok(w) => w,
+            Err(_) => continue,
+        };
+        // Only consider windows in the same tmux session
+        if let Some(ref ts) = target_session {
+            if let Ok(pane_sess) = tmux.pane_session(pane_id) {
+                if &pane_sess != ts {
+                    continue;
+                }
+            }
+        }
+        let window_panes = tmux.list_window_panes(&win).unwrap_or_default();
         let wanted_count = window_panes
             .iter()
             .filter(|p| wanted.contains(p.as_str()))

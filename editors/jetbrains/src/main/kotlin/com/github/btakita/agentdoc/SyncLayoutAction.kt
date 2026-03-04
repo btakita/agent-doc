@@ -43,8 +43,6 @@ class SyncLayoutAction : AnAction() {
             val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
                 if (it.name.endsWith(".md")) TerminalUtil.relativePath(project, it) else null
             }
-            EditorTabSyncListener.clearLastFileSet()
-
             Thread {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()

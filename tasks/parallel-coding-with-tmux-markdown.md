@@ -1,10 +1,8 @@
 ---
-session: fa2a5de1-dafd-421c-a264-844c0008e68b
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: fa2a5de1-dafd-421c-a264-844c0008e68b
+tmux_session: claude
 ---
+
 
 Help me draft a reply to https://news.ycombinator.com/reply?id=47224082&goto=threads%3Fid%3Dbriantakita%2347224082
 > The "don't sync, own" model makes a lot of sense. We were thinking about it wrong - trying to push state out to a shared file, when the cleaner move is to pull it in on demand.
@@ -101,3 +99,36 @@ Want me to adjust length, tone, or add/remove sections?
 Would a CRDT help with concurrent editing?
 
 See https://jakelazaroff.com/words/an-interactive-intro-to-crdts/
+
+## Assistant
+
+CRDTs solve a superset of agent-doc's problem at much higher complexity. Here's the tradeoff:
+
+**Why the git 3-way merge is the right fit now:**
+- agent-doc has at most 2 writers (agent appending at bottom, user editing anywhere)
+- They almost always edit different parts of the file — clean merges are the common case
+- When edits overlap, the conflict IS meaningful — you want to see both versions, not have them silently merged
+- Plain markdown files on disk, zero new dependencies
+
+**What CRDTs would add:**
+- Character-level merge granularity — never produces conflict markers
+- Designed for N concurrent writers with no central authority
+- But requires converting markdown to a CRDT-backed store (no longer plain files on disk)
+- Silently merges overlapping edits that might actually conflict semantically
+- Significant complexity for a rare edge case in the current architecture
+
+**When CRDTs would become worth it:** If agent-doc evolved toward real-time collaborative editing — multiple agents + user all editing the same doc simultaneously. The "one owner per doc" model makes that unnecessary today.
+
+The Jake Lazaroff article covers state-based CRDTs (Last Write Wins Register/Map) — good primitives, but text editing requires more specialized CRDTs (e.g., RGA, YATA from Yjs, or diamond-types in Rust). That's a whole layer of complexity on top.
+
+**For the HN reply:** I wouldn't mention CRDTs unless CloakHQ brings it up. The 3-way merge answer is more honest about where agent-doc actually is, and "we use git merge-file" is more relatable than "we're building a CRDT."
+
+## User
+
+CloakHQ responded https://news.ycombinator.com/item?id=47244988
+
+Please help me craft a response.
+
+> One thing we haven't solved cleanly: what happens when the external state change is what triggers the agent task in the first place? Like, a session getting flagged and needing recovery. The event comes from outside the doc system, so there's a gap between "thing happened" and "agent knows about it".
+
+Does agent-doc have a solution for this? What can we do to address this concern?

@@ -370,3 +370,40 @@ cd agent-doc/editors/jetbrains && ./gradlew buildPlugin signPlugin
 The cycling still happens. Are there tests? Do I have the correct iteration of the plugin installed?
 
 Can we reproduce the exact issue that I'm seeing in the automated tests?
+
+## Assistant
+
+**Yes — reproduced and fixed.** The cycling bug is in the CLI, not the plugin.
+
+**Root cause:** Every tab switch evicts an unwanted pane via `break_pane`, which creates a **new solo window**. When you switch back, the evicted pane gets rejoined but the *other* pane gets evicted into yet another new window. Window IDs keep incrementing (0, 1, 2, 0, 1, 2...).
+
+**Trace of the cycling:**
+1. Layout [agent-doc, dave-franklin] → %76 (plugin) evicted → new window @360
+2. Layout [plugin, dave-franklin] → %39 (agent-doc) evicted → new window @361 (@360 dies)
+3. Repeat → window ID climbs each cycle
+
+**Fix: Stash window.** Evicted panes now go to a named "stash" window via `join_pane` instead of `break_pane`. Only 2 windows ever exist: the canonical window + the stash. No more cycling.
+
+New methods on `Tmux` in `sessions.rs`:
+- `find_stash_window(session)` — finds window named "stash" in session
+- `ensure_stash_window(session)` — creates if missing, reuses if found
+- `stash_pane(pane, session)` — joins pane into stash window (falls back to `break_pane`)
+
+**Test:** `test_reconcile_tab_switching_no_window_cycling` — 3 panes, 4 alternating syncs between [A,C] and [B,C]. Asserts:
+- Window count stays stable after first sync (no growth)
+- All panes remain alive throughout
+- Correct panes in target window after each switch
+
+**141 tests pass, clippy clean, binary installed.**
+
+Your current tmux state still has @352 (orphan from before the fix). Run `agent-doc resync` to clean up stale sessions.json entries, or I can consolidate %76 into @315 manually.
+
+## User
+
+We are remaining on the correct tab but additional windows are still being created. When cycling through the 2 files on the left editor side we have:
+
+1*
+1* | 2
+0 | 1* | 2
+1* | 2
+

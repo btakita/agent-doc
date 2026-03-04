@@ -182,7 +182,8 @@ object TerminalUtil {
                 }
             }
             // Validate each candidate — return the first alive tmux window
-            for (window in candidates) {
+            // Sort for deterministic ordering (mutableSetOf has no guaranteed order)
+            for (window in candidates.sorted()) {
                 val alive = ProcessBuilder("tmux", "list-panes", "-t", window, "-F", "#{pane_id}")
                     .redirectErrorStream(true)
                     .start()

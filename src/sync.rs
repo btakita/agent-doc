@@ -160,6 +160,49 @@ impl Layout {
 }
 
 // =========================================================================
+// Helpers
+// =========================================================================
+
+/// Find the best window for consolidating wanted panes.
+/// Prefers the window (within the target session) that already contains the most wanted panes.
+fn find_best_window(
+    tmux: &Tmux,
+    wanted: &std::collections::HashSet<&str>,
+    target_session: Option<&str>,
+) -> String {
+    let mut best_window = String::new();
+    let mut best_wanted = 0usize;
+    let mut best_total = 0usize;
+    for pane_id in wanted {
+        let win = match tmux.pane_window(pane_id) {
+            Ok(w) => w,
+            Err(_) => continue,
+        };
+        // Only consider windows in the same tmux session
+        if let Some(ts) = target_session {
+            if let Ok(pane_sess) = tmux.pane_session(pane_id) {
+                if pane_sess != ts {
+                    continue;
+                }
+            }
+        }
+        let window_panes = tmux.list_window_panes(&win).unwrap_or_default();
+        let wanted_count = window_panes
+            .iter()
+            .filter(|p| wanted.contains(p.as_str()))
+            .count();
+        let total = window_panes.len();
+        if wanted_count > best_wanted || (wanted_count == best_wanted && total > best_total) {
+            best_wanted = wanted_count;
+            best_total = total;
+            best_window = win;
+        }
+    }
+    eprintln!("target_window={} (auto-detected, {} wanted panes)", best_window, best_wanted);
+    best_window
+}
+
+// =========================================================================
 // Public API
 // =========================================================================
 
@@ -335,47 +378,18 @@ pub fn run_with_tmux(
     };
     eprintln!("target_session={:?}", target_session);
 
-    let mut best_window = String::new();
-    let mut best_wanted = 0usize;
-    let mut best_total = 0usize;
-    for pane_id in &wanted {
-        let win = match tmux.pane_window(pane_id) {
-            Ok(w) => w,
-            Err(_) => continue,
-        };
-        // Only consider windows in the same tmux session
-        if let Some(ref ts) = target_session {
-            if let Ok(pane_sess) = tmux.pane_session(pane_id) {
-                if &pane_sess != ts {
-                    continue;
-                }
-            }
-        }
-        let window_panes = tmux.list_window_panes(&win).unwrap_or_default();
-        let wanted_count = window_panes
-            .iter()
-            .filter(|p| wanted.contains(p.as_str()))
-            .count();
-        let total = window_panes.len();
-        if wanted_count > best_wanted || (wanted_count == best_wanted && total > best_total) {
-            best_wanted = wanted_count;
-            best_total = total;
-            best_window = win;
-        }
-    }
-
+    // If --window is alive, use it directly (stable, deterministic).
+    // Only search for best_window when --window is missing or dead.
     let target_window = if let Some(w) = window {
-        if tmux.list_window_panes(w).unwrap_or_default().is_empty() {
-            eprintln!(
-                "warning: --window {} is dead, using auto-detected window",
-                w
-            );
-            best_window
-        } else {
+        if !tmux.list_window_panes(w).unwrap_or_default().is_empty() {
+            eprintln!("target_window={} (from --window)", w);
             w.to_string()
+        } else {
+            eprintln!("warning: --window {} is dead, searching for best window", w);
+            find_best_window(tmux, &wanted, target_session.as_deref())
         }
     } else {
-        best_window
+        find_best_window(tmux, &wanted, target_session.as_deref())
     };
 
     // Write tmux_session back to documents that don't have it yet
@@ -1634,6 +1648,72 @@ mod tests {
         assert!(!final_panes.contains(&pane_c), "C evicted from target");
         assert!(t.pane_alive(&pane_c), "C still alive");
         assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_stable_across_repeated_syncs() {
+        // Bug reproduction: switching between two files in the editor
+        // caused window cycling (0→1→2→0...) because reconcile would
+        // break/join panes each time, creating temporary windows.
+        // After fix: repeated reconcile with the same desired layout
+        // should be idempotent — no new windows, same target.
+        let t = IsolatedTmux::new("sync-test-stable-repeat");
+        let _tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", _tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", _tmp.path()).unwrap();
+
+        // Start: A in one window, B in another
+        let target_window = t.pane_window(&pane_a).unwrap();
+
+        let pane_columns = vec![vec![pane_a.clone(), pane_b.clone()]];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
+
+        // First reconcile: should consolidate A and B into target_window
+        let log1 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let panes1 = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(panes1.len(), 2, "first sync: 2 panes in target");
+        assert!(panes1.contains(&pane_a), "first sync: A present");
+        assert!(panes1.contains(&pane_b), "first sync: B present");
+        assert!(!log1.has_errors(), "first sync: no errors");
+
+        // Count total windows in the session
+        let windows_after_1 = t
+            .raw_cmd(&["list-windows", "-t", "test", "-F", "#{window_id}"])
+            .unwrap();
+        let win_count_1 = windows_after_1.lines().count();
+
+        // Second reconcile with SAME layout — should be a no-op
+        let log2 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let panes2 = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(panes2.len(), 2, "second sync: still 2 panes");
+        assert!(panes2.contains(&pane_a), "second sync: A present");
+        assert!(panes2.contains(&pane_b), "second sync: B present");
+        assert!(!log2.has_errors(), "second sync: no errors");
+        assert_eq!(
+            log2.mutation_count(),
+            0,
+            "second sync: no mutations (idempotent)"
+        );
+
+        // Verify no new windows were created
+        let windows_after_2 = t
+            .raw_cmd(&["list-windows", "-t", "test", "-F", "#{window_id}"])
+            .unwrap();
+        let win_count_2 = windows_after_2.lines().count();
+        assert_eq!(
+            win_count_1, win_count_2,
+            "no new windows from idempotent sync"
+        );
+
+        // Third reconcile — still stable
+        let log3 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        assert_eq!(
+            log3.mutation_count(),
+            0,
+            "third sync: still no mutations"
+        );
     }
 
     #[test]

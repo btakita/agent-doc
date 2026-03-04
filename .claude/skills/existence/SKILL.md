@@ -24,8 +24,8 @@ Arguments: `<command>` is required. Run `/existence` with no arguments to show t
 
 Before running any command, resolve the ontology path for the `--ontology` flag:
 
-1. Check if `exkernel.toml` exists in the current working directory — if so, use `.`
-2. Check if `existential-kernel/ontology/` exists relative to the project root — if so, use that path
+1. Check if `existence.toml` exists in the current working directory — if so, use `.`
+2. Check if `existence-lang/ontology/` exists relative to the project root — if so, use that path
 3. Fall back to `~/.existence/sources/` (the CLI's default resolution)
 
 If options 1 or 2 match, pass `--ontology <resolved-path>` to every `existence` command. If only option 3 applies, omit the flag (the CLI handles it).
@@ -35,9 +35,9 @@ If options 1 or 2 match, pass `--ontology <resolved-path>` to every `existence` 
 Locate the `existence` binary:
 
 1. Check `which existence` — use if found on PATH
-2. Check `existential-kernel/existence/target/release/existence` relative to the project root
-3. Check `existential-kernel/existence/target/debug/existence` relative to the project root
-4. If none found, suggest `cargo install --path existential-kernel/existence/` or `cargo build --release -p existence`
+2. Check `existence-lang/existence/target/release/existence` relative to the project root
+3. Check `existence-lang/existence/target/debug/existence` relative to the project root
+4. If none found, suggest `cargo install --path existence-lang/existence/` or `cargo build --release -p existence`
 
 ## Commands
 
@@ -119,7 +119,7 @@ This is the main interactive authoring workflow:
 #### Step 5: Commit
 
 - When the user confirms the term is ready, commit the new file within the ontology submodule
-- If the term should be assigned to a ring, note that ring assignment lives in `exkernel.toml`, not the node file
+- If the term should be assigned to a ring, note that ring assignment lives in `existence.toml`, not the node file
 
 ### lint — Validate ontology nodes
 
@@ -164,7 +164,7 @@ Each ontology node follows this structure (from SPEC.md):
 - External refs use HTML anchors: `<a href="..." target="_blank">`
 - External definitions are blockquoted (`>`)
 - Definitions start broad (Existence scope), narrow by context
-- Ring assignment is in `exkernel.toml`, not the node file
+- Ring assignment is in `existence.toml`, not the node file
 
 ## Ring Structure
 

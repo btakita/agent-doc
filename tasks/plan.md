@@ -116,3 +116,14 @@ Key work: Yolo mode enabled (`bypassPermissions`). Token efficiency discussion (
 ## User
 
 commit agent-loop and push
+
+## Assistant
+
+Done. Two commits pushed to main:
+
+1. `ecfd6ed` — Updated submodule pointers (corky, existential-kernel/exkernel) and 12 task docs (plugin.md, dave-franklin.md compacted; philosophy, gmail, agent-doc, corky, etc. updated).
+2. `58f1413` — Audit-docs cleanup: trailing whitespace and frontmatter normalization in 3 task files.
+
+## User
+
+

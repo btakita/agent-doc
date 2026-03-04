@@ -428,3 +428,32 @@ Binaries: `existence` (full) + `xist` (short). Old `exk` auto-removed on upgrade
 ## User
 
 Rename existential-kernel to existence-lang in this repo. Find any old references to existential-kernel and rename to existence or existence-lang
+
+## Assistant
+
+**Done.** Renamed all operational references in this repo.
+
+**Directory renames:**
+- `existential-kernel/` → `existence-lang/`
+- `existential-kernel/exkernel/` → `existence-lang/existence/`
+- `existential-kernel/existential-kernel.github.io/` → `existence-lang/existence-lang.github.io/`
+
+**File updates:**
+- `.gitmodules` — all 5 submodule section names + paths updated (`existential-kernel/*` → `existence-lang/*`)
+- `.claude/skills/existence/SKILL.md` — path references updated, `exkernel.toml` → `existence.toml`
+
+**Left unchanged (historical conversation text):**
+- `tasks/existence.md` — the naming discussion history references old names, which is correct as-is
+
+**Submodule internals** (`existence-lang/existence/src/config.rs`, `fetch.rs`) still reference `existential-kernel` in test fixtures — those should be updated inside the submodule separately.
+
+## User
+
+commit and push
+
+## Assistant
+
+**Done.** Committed (`df34621`) and pushed to `origin/main`. The rename of `existential-kernel/` → `existence-lang/` with all submodule path updates is now live.
+
+## User
+

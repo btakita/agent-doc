@@ -22,18 +22,18 @@
 [submodule "tmux-router"]
 	path = tmux-router
 	url = git@github.com:btakita/tmux-router.git
-[submodule "existential-kernel/.github"]
-	path = existential-kernel/.github
+[submodule "existence-lang/.github"]
+	path = existence-lang/.github
 	url = git@github.com:existence-lang/.github.git
-[submodule "existential-kernel/existential-kernel.github.io"]
-	path = existential-kernel/existential-kernel.github.io
+[submodule "existence-lang/existence-lang.github.io"]
+	path = existence-lang/existence-lang.github.io
 	url = git@github.com:existence-lang/existence-lang.github.io.git
-[submodule "existential-kernel/ontology"]
-	path = existential-kernel/ontology
+[submodule "existence-lang/ontology"]
+	path = existence-lang/ontology
 	url = git@github.com:existence-lang/ontology.git
-[submodule "existential-kernel/spec"]
-	path = existential-kernel/spec
+[submodule "existence-lang/spec"]
+	path = existence-lang/spec
 	url = git@github.com:existence-lang/spec.git
-[submodule "existential-kernel/exkernel"]
-	path = existential-kernel/exkernel
+[submodule "existence-lang/existence"]
+	path = existence-lang/existence
 	url = git@github.com:existence-lang/existence.git

@@ -1,10 +1,8 @@
 ---
-session: ce60bbc6-783f-40ac-9639-4e37af731520
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: ce60bbc6-783f-40ac-9639-4e37af731520
+tmux_session: '1'
 ---
+
 
 Please look in ctx-core-dev. Note the layout. Some of the docs are incorrect.
 

@@ -119,3 +119,11 @@ Done. Committed and pushed the agent-doc README (`e084ff3`) with components, das
 ## User
 
 Commit agent-doc pane-group
+
+## Assistant
+
+Done. Committed and pushed `specs/pane-groups.md` frontmatter update (`ffb5c53`) in agent-doc. Updated parent submodule pointer (`921a898`) and pushed both.
+
+## User
+
+

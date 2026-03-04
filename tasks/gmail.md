@@ -69,3 +69,13 @@ Ready for review at `mail/drafts/2026-03-04-re-regarding-application-for-senior-
 ## User
 
 I don't see the file
+
+## Assistant
+
+The draft is at the full path: `/home/brian/Documents/mail/drafts/2026-03-04-re-regarding-application-for-senior-python-software-engineer.md`
+
+That's where `corky draft new` placed it — the `~/Documents/mail/` directory (not inside the corky submodule). The file exists and has the correct content.
+
+## User
+
+Why is `in_reply_to: ""`?

@@ -396,3 +396,5 @@ Done. "Project" already existed in the kernel (Ring 1) as a general term. Added 
 ## User
 
 Implement.
+
+Add several functional tests and examples for dashboard-as-document

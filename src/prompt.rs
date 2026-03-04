@@ -81,7 +81,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         return Ok(());
     }
 
-    let pane_content = tmux.capture_pane(&pane_id)?;
+    let pane_content = sessions::capture_pane(tmux,&pane_id)?;
     let info = parse_prompt(&pane_content);
     println!("{}", serde_json::to_string(&info)?);
     Ok(())
@@ -110,7 +110,7 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
             continue;
         }
 
-        let prompt = match tmux.capture_pane(&entry.pane) {
+        let prompt = match sessions::capture_pane(tmux,&entry.pane) {
             Ok(content) => parse_prompt(&content),
             Err(_) => inactive(),
         };
@@ -147,7 +147,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Verify there's actually a prompt active
-    let pane_content = tmux.capture_pane(&pane_id)?;
+    let pane_content = sessions::capture_pane(tmux,&pane_id)?;
     let info = parse_prompt(&pane_content);
     if !info.active {
         anyhow::bail!("no active prompt detected");
@@ -171,20 +171,20 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     if target < current {
         // Move up
         for _ in 0..(current - target) {
-            tmux.send_key(&pane_id, "Up")?;
+            sessions::send_key(tmux,&pane_id, "Up")?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     } else if target > current {
         // Move down
         for _ in 0..(target - current) {
-            tmux.send_key(&pane_id, "Down")?;
+            sessions::send_key(tmux,&pane_id, "Down")?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
 
     // Brief pause then press Enter to confirm
     std::thread::sleep(std::time::Duration::from_millis(50));
-    tmux.send_key(&pane_id, "Enter")?;
+    sessions::send_key(tmux,&pane_id, "Enter")?;
 
     eprintln!(
         "Sent option {} to pane {}",

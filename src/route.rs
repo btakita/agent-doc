@@ -82,6 +82,14 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
 
     let new_pane = tmux.auto_start(TMUX_SESSION_NAME, &cwd)?;
 
+    // Join into the existing active window instead of leaving in a separate window.
+    // auto_start creates a new window; we want the pane alongside existing panes.
+    if let Some(active) = tmux.active_pane(TMUX_SESSION_NAME)
+        && active != new_pane
+    {
+        let _ = tmux.join_pane(&new_pane, &active, "-dh");
+    }
+
     // Register immediately so subsequent route calls find this pane
     sessions::register(session_id, &new_pane, file_path)?;
 

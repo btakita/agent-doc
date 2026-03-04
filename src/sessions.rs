@@ -344,6 +344,28 @@ impl Tmux {
         Ok(panes.into_iter().map(|(id, _, _)| id).collect())
     }
 
+    /// Get the tmux session name that contains a pane or window.
+    pub fn pane_session(&self, target: &str) -> Result<String> {
+        let output = self
+            .cmd()
+            .args([
+                "display-message",
+                "-t",
+                target,
+                "-p",
+                "#{session_name}",
+            ])
+            .output()
+            .context("failed to query tmux session name")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     /// List all windows across all sessions (for global state logging).
     pub fn list_all_windows(&self) -> Result<String> {
         let output = self

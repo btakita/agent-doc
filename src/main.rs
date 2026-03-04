@@ -10,7 +10,9 @@ mod git;
 mod init;
 mod layout;
 mod outline;
+mod patch;
 mod prompt;
+mod component;
 mod reset;
 mod resync;
 mod route;
@@ -21,6 +23,7 @@ mod start;
 mod submit;
 mod sync;
 mod upgrade;
+mod watch;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -160,6 +163,30 @@ enum Commands {
         #[arg(long)]
         focus: Option<String>,
     },
+    /// Replace content in a named component
+    Patch {
+        /// Path to the document
+        file: PathBuf,
+        /// Component name (e.g. "status", "log")
+        component: String,
+        /// Replacement content (reads from stdin if omitted)
+        content: Option<String>,
+    },
+    /// Watch session files for changes and auto-submit
+    Watch {
+        /// Stop the running watch daemon
+        #[arg(long)]
+        stop: bool,
+        /// Show watch daemon status
+        #[arg(long)]
+        status: bool,
+        /// Debounce delay in milliseconds
+        #[arg(long, default_value = "500")]
+        debounce: u64,
+        /// Maximum agent-triggered cycles per file
+        #[arg(long, default_value = "3")]
+        max_cycles: u32,
+    },
     /// Display markdown outline with section structure and token counts
     Outline {
         /// Path to the markdown document
@@ -241,6 +268,31 @@ fn main() -> anyhow::Result<()> {
             window,
             focus,
         } => sync::run(&columns, window.as_deref(), focus.as_deref()),
+        Commands::Patch {
+            file,
+            component,
+            content,
+        } => patch::run(&file, &component, content.as_deref()),
+        Commands::Watch {
+            stop,
+            status,
+            debounce,
+            max_cycles,
+        } => {
+            if stop {
+                watch::stop()
+            } else if status {
+                watch::status()
+            } else {
+                watch::start(
+                    &config,
+                    watch::WatchConfig {
+                        debounce_ms: debounce,
+                        max_cycles,
+                    },
+                )
+            }
+        }
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {

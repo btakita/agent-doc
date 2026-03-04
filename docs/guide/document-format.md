@@ -56,6 +56,24 @@ Annotations anywhere — blockquotes, edits to previous responses, comments in t
 
 Both modes work simultaneously because the run sends a diff, not a parsed structure.
 
+## Components
+
+Documents can contain **components** — named, re-renderable regions marked with HTML comment pairs:
+
+```markdown
+<!-- agent:status -->
+| Field | Value |
+|-------|-------|
+| build | passing |
+<!-- /agent:status -->
+```
+
+Components are updated via `agent-doc patch` or by agents/scripts. Their content can be replaced, appended to, or prepended to based on configuration in `.agent-doc/components.toml`.
+
+Regular HTML comments (`<!-- like this -->`) remain a private scratchpad — they're stripped during diff and never trigger responses. Component markers look like comments but are structural and preserved.
+
+See the [Components](components.md) guide for full details.
+
 ## History rewriting
 
 Delete anything from the document. On next run, the diff shows deletions and the agent sees the cleaned-up document as ground truth. This lets you:

@@ -136,3 +136,27 @@ The logic is generic though — prune dead panes from a registry file. It **shou
 ## User
 
 Yes. Move to tmux-router.
+
+## Assistant
+
+**Released both.**
+
+**tmux-router v0.1.1:**
+- Added `tmux_router::prune(registry_path, tmux)` in `registry.rs` — removes dead panes + deduplicates, saves if changed, returns count removed
+- Re-exported from `lib.rs`
+- crates.io: https://crates.io/crates/tmux-router/0.1.1
+- GitHub Release: https://github.com/btakita/tmux-router/releases/tag/v0.1.1
+
+**agent-doc v0.8.1:**
+- `resync.rs` rewritten to delegate to `tmux_router::prune()` — 145→65 lines
+- `prune()` calls `tmux_router::prune(&registry_path, &tmux)` + prints message if anything removed
+- `run()` (verbose) loads before/after to show what was removed
+- crates.io: https://crates.io/crates/agent-doc/0.8.1
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.8.1
+- Binary installed: `agent-doc 0.8.1`
+
+**All tests pass** (46 tmux-router, 106 agent-doc), clippy clean. Parent submodule pointers updated.
+
+## User
+
+Let's start ideating on the dashboard-as-document concept mentioned in tasks/parallel-coding-with-tmux-markdown.md

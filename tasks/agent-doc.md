@@ -826,3 +826,26 @@ Extract. Create btakita/tmux-router github project with README and description. 
 Please also update agent-doc gh and readme description in light of extracting tmux-router.
 
 Use rust 2024 edition.
+
+## Assistant
+
+**Done.** All steps completed:
+
+1. **Created `btakita/tmux-router`** on GitHub — https://github.com/btakita/tmux-router
+2. **Extracted crate** (`4cba1c8`):
+   - `src/tmux.rs` — `Tmux` + `IsolatedTmux` with all 30+ methods
+   - `src/registry.rs` — `RegistryEntry`, `Registry`, parameterized load/save/lookup
+   - `src/sync.rs` — `Layout`, `reconcile()`, `sync()` with `FileResolution` callback
+   - 46 tests pass (unit + integration + proptest)
+   - Rust 2024 edition
+3. **Added as submodule** to agent-loop monorepo
+4. **Updated tmux-router task doc** with extraction status and progress
+5. **Updated agent-doc README** — Tmux routing section now references tmux-router
+
+**Remaining:** Wire agent-doc to `use tmux_router::*` (step 3 in extraction plan). This will be the v0.8.0 release.
+
+## User
+
+Does agent-doc currently depend on tmux-router?
+
+BUG ALERT: I just did a agent-doc run on corky.md on the right-side editor pane. A separate window was created. Please review logs and fix.

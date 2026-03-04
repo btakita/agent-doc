@@ -508,3 +508,21 @@ I'm still seeing a full change with the tmux pane selection. Please log the curr
 ## User
 
 Please switch to Rust 2024 edition
+
+## Assistant
+
+**Both done.**
+
+**Pane selection fix** — Added `-d` flag to ALL `join-pane` calls during reconcile. Previously only `stash_pane` used `-d`. Now:
+- First-pane join: `-bh` → `-dbh`
+- `join_target()` returns: `-v` → `-dv`, `-h` → `-dh`
+
+No pane/window selection changes during reconcile. Only the final `select_pane` in Phase 6 sets the active pane.
+
+Added `Tmux::active_pane(session)` method and selected-pane logging at SNAPSHOT, after DETACH, and after ATTACH — stderr output shows the selected pane at each step.
+
+**Rust 2024 edition** — `Cargo.toml` updated from `edition = "2021"` to `edition = "2024"`. Fixed 1 explicit `ref mut` binding (2024 ergonomic patterns) and auto-fixed 12 `collapsible_if` warnings to use `if let` chains.
+
+**142 tests pass, clippy clean, binary installed.**
+
+## User

@@ -377,3 +377,39 @@ existential-kernel/exkernel
 Can github pages run the api server via an action? Or would it need to be static with a service?
 
 Right now, I'm working on agent-doc. Can we get extential-kernel setup to a place to where it fits the current task outlined in tasks/agent-doc.md?
+
+## Assistant
+
+**GitHub Pages — static only.** No server process. Start with pre-built static JSON (`exkernel build-site` generates `/api/v1/terms.json`, etc.). GitHub Action rebuilds on push. Add Cloudflare Workers/Vercel edge functions later for dynamic scoping. The exkernel CLI + web are future work.
+
+**What existential-kernel needs right now to serve agent-doc:**
+
+The agent-doc task is actively working on dashboard-as-document, `watch` daemon, range templates, `write`/`patch`, and the user asked to "document using the same ontology pattern as in philosophy." The exkernel CLI isn't needed yet — the **content** is.
+
+**Immediate actions:**
+
+1. **Create `existential-kernel/ontology` repo** — Ring 0 (14 kernel terms) + Ring 1 (~15 software terms) extracted from `btakita/philosophy`, with SPEC.md + ring metadata
+2. **Add `## Domain Ontology` to `agent-doc/CLAUDE.md`** — map agent-doc concepts to kernel terms:
+
+| agent-doc Concept | Derives From | Description |
+|-------------------|-------------|-------------|
+| Session | project + story | A bounded interaction with temporal arc |
+| Document | entity + context | The unit of conversation, holds state |
+| Pane | focus + scope | A tmux viewport — finite attention on a document |
+| Claim | scope + entity | Binding a document to a pane (scoping focus) |
+| Route | context + resolution | Resolving which pane handles a document |
+| Sync | pattern + system | Aligning tmux layout to editor state |
+| Watch | signal + evolution | Detecting changes, triggering responses |
+| Dashboard | system + focus | A document as a live system view |
+| Range Template | scope + abstraction | Bounded region for agent write-back |
+
+3. **Add ontology repo as submodule to agent-loop**
+4. **Document agent-doc's "project" concept** following SPEC.md template (Ontology/Axiology/Epistemology)
+
+This grounds the agent-doc documentation in the existential kernel. The CLI, web, and API come after the content exists.
+
+**Ready to create the ontology repo and extract terms?**
+
+## User
+
+Yes. Please create the repos, appropriate gh actions and pages. Make these repos a submodule in agent-loop

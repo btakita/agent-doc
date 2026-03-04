@@ -205,3 +205,24 @@ btakita/philosophy   ← Personal philosophical writings (extends exkernel/ontol
 ## User
 
 https://github.com/exkernel is taken. existential-kernel is available.
+
+## Assistant
+
+`existential-kernel` is actually better for the org — explicit, discoverable. The CLI binary stays `exkernel` (crate name ≠ org name).
+
+```
+existential-kernel (GitHub org)
+├── exkernel         ← Rust crate + CLI binary
+├── ontology         ← Reference existential ontology
+└── spec             ← Node format specification
+
+btakita/philosophy   ← Personal extensions
+```
+
+Ready to create the org when you are. You'll need to do it via the GitHub web UI (org creation requires browser auth). Or I can check if `gh` CLI supports it.
+
+## User
+
+What an undertaking. I setup existential-kernel. Please help me setup the org documents. Such as the README and gh pages for https://github.com/existential-kernel
+
+Add g

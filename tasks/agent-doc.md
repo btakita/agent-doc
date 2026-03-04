@@ -124,3 +124,15 @@ Existing `agent-doc resync` command stays as-is (verbose output with full sessio
 ## User
 
 Is prune in tmux-router or agent-doc?
+
+## Assistant
+
+**Currently in agent-doc** (`agent-doc/src/resync.rs`). It calls `sessions::load()` / `sessions::save()` which use agent-doc's `.agent-doc/sessions.json`.
+
+The logic is generic though — prune dead panes from a registry file. It **should live in tmux-router** as `tmux_router::prune(tmux, registry_path)` since tmux-router already owns the `Registry` type and load/save functions. Agent-doc would just call it with its registry path.
+
+**Proposal:** Move to tmux-router before releasing. That makes it tmux-router v0.1.1 + agent-doc v0.8.1.
+
+## User
+
+Yes. Move to tmux-router.

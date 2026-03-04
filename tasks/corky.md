@@ -1,10 +1,8 @@
 ---
-session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
+tmux_session: claude
 ---
+
 
 ## User
 
@@ -319,4 +317,4 @@ Filters in sync (2 filter(s)).
 
 ## User
 
-
+Convert corky to Rust 2024 edition

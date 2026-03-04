@@ -388,3 +388,4 @@ This will fix carousel, uuid, auth0-management (the `check-dts` part), and every
 
 ## User
 
+Why is there an error. How can we use the latest typescript instead of pinning?

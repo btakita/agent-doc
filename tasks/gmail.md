@@ -19,3 +19,11 @@ All done:
 **3. Agent-loop committed** (`f4ccab8`) — removed `agent-doc-jetbrains/`, updated resume submodule pointer + task documents
 
 sync filters
+
+## Assistant
+
+**Filters synced.** 2 filters pushed to Gmail. `corky filter check` confirms: "Filters in sync (2 filter(s))."
+
+## User
+
+sync filters...us.greenhouse-jobs.com

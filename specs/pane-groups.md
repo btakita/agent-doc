@@ -1,6 +1,6 @@
 ---
-status: planned
-created: 2026-03-02
+agent_doc_session: 25994048-f0c3-4796-bb42-2290a3318a71
+tmux_session: '1'
 ---
 
 # Pane Groups — Dynamic tmux layout for parallel sessions

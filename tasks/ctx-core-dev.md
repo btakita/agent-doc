@@ -538,3 +538,43 @@ The old `update-npm-packages.sh` in `lib/monorepo/bin/` should be deleted or upd
 ## User
 
 Yes. Fix it
+
+## Assistant
+
+Fixed `lib/monorepo/bin/update-npm-packages.sh` — now delegates to `monorepo_npm__dependencies__update.mjs`:
+
+```sh
+#!/bin/sh
+# Deprecated: use monorepo_npm__dependencies__update.mjs directly
+DIR="$(dirname "$0")"
+exec "$DIR/monorepo_npm__dependencies__update.mjs" "$@"
+```
+
+The `update-npm-packages` bin entry in `lib/monorepo/package.json` still works — it now calls the correct underlying script.
+
+**Note:** When testing, I hit `Cannot find package 'cli-cursor'` (dep of `ora`). This is a missing pnpm install in `lib/monorepo/`. Run `pnpm install` in ctx-core-dev to resolve.
+
+## User
+
+~/work/btakita/agent-loop/ctx-core-dev main +2 !8 ?58                                                                                                                                                                            ✘ INT 16:46:22
+❯ ctx_core__monorepo_pnpm__dependencies__update.sh
+node:internal/modules/run_main:107
+triggerUncaughtException(
+^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'cli-cursor' imported from /home/brian/work/ctx-core/ctx-core-dev/lib/monorepo/node_modules/ora/index.js
+Did you mean to import "cli-cursor/index.js"?
+at Object.getPackageJSONURL (node:internal/modules/package_json_reader:316:9)
+at packageResolve (node:internal/modules/esm/resolve:768:81)
+at moduleResolve (node:internal/modules/esm/resolve:858:18)
+at defaultResolve (node:internal/modules/esm/resolve:990:11)
+at #cachedDefaultResolve (node:internal/modules/esm/loader:712:20)
+at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:729:38)
+at ModuleLoader.resolveSync (node:internal/modules/esm/loader:758:52)
+at #resolve (node:internal/modules/esm/loader:694:17)
+at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:614:35)
+at ModuleJob.syncLink (node:internal/modules/esm/module_job:143:33) {
+code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v25.3.0

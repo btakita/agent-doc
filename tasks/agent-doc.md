@@ -256,4 +256,46 @@ If the agent doc has an expired tmux session name, there should be an option to:
 
 ## User
 
+I had 3 claude windows be created. Did you log the events?
+Can we have all tmux related activity logged so you can account for my manual commands?
+
+There should also be an option to always select the same tmux session for this editor session
+
+## Assistant
+
+**All three requests implemented.** Committed as `4f20240`.
+
+**1. Comprehensive tmux tree logging** — `dump_tmux_tree()` logs the full hierarchy at sync start:
+```
+tmux tree:
+  claude (attached, activity=1709524817)
+    @1 "agent-doc" [%39(claude), %62(claude)]
+    @2 "plugin" [%41(claude)]
+  0 (detached, activity=1709520000)
+    @3 "bash" [%5(bash)]
+```
+Shows sessions (attach state, last activity), windows, panes (with running command). Goes to stderr.
+
+**2. `tmux_session` in frontmatter** — New field per document:
+```yaml
+---
+session: 56f0c92a-...
+tmux_session: claude
+---
+```
+- `claim` auto-detects from pane and writes it
+- `sync` reads it for Phase 4 affinity, writes back to docs missing it
+- If configured session is dead → warns, falls back to `--window`
+
+**3. "Always select same tmux session"** — That's what `tmux_session` does. Once set (by claim or first sync), it persists across all future syncs. Panes stay in your configured session.
+
+**4. "3 claude windows created"** — The tree logging is now active. Next time, sync output will show full tmux state. The `tmux_session` affinity should prevent the scatter.
+
+**5. Logging manual commands** — Sync logs the tmux tree at start (showing state including any manual changes you made). Each tmux operation (break_pane, join_pane, select_pane) is already logged in the SyncLog.
+
+**Bonus: Clean YAML** — `skip_serializing_if` on all fields. No more `resume: null`, `model: null` noise. Only fields with values appear.
+
+**139 tests pass, clippy clean, binary installed.**
+
+## User
 

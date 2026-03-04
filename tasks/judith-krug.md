@@ -337,3 +337,29 @@ Noted both corrections:
 ## User
 
 What is a good host for Astro? Judith is in LA
+
+## Assistant
+
+**Cloudflare Pages** — best fit.
+
+| Host | Free tier | Why / Why not |
+|---|---|---|
+| **Cloudflare Pages** | Unlimited bandwidth, 500 builds/mo | Fastest edge (LAX PoP), free SSL + custom domain, Judith owns the account. Workers available if you need server-side later (auth, API proxy). |
+| **Netlify** | 100GB bandwidth, 300 build min/mo | Good DX, built-in form handling. Close second. |
+| **Vercel** | 100GB bandwidth | Works but optimized for Next.js, not Astro's focus |
+| **GitHub Pages** | Unlimited (public repos) | Simplest, but no build pipeline or edge functions |
+
+LA location doesn't matter for static sites — all major CDNs have LA PoPs. A mortgage brokerage site won't come close to any free tier limits.
+
+**If you ever need SSR** (investor portal, MA API bridge): Cloudflare Workers on the same account. No migration needed.
+
+## User
+
+Judith has somewhat technically skilled employees. Not exactly programmers but more administrator level...with limited if any git skills.
+
+Cloudflare Pages could serve the website and do email routing.
+
+I will recommend Claude Code as well for her staff.
+Would the CRM workflow well with Claude Code + Cloudflare Pages? Can we make this somewhat error proof given that we are using git?
+
+Perhaps a cli tool for the staff that works with Claude Code?

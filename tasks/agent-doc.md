@@ -104,3 +104,23 @@ I then lost the session. Not sure if it's running atm. Please help.
 ## User
 
 We should actively resync to avoid this issue. Contemplating having a daemon as well. For now, let's have resync happen where appropriate...such as before run or sync.
+
+## Assistant
+
+**Done.** Added `resync::prune()` — a quiet auto-resync that runs before every `route`, `sync`, and `claim` operation.
+
+**Changes:**
+- `resync.rs`: New `prune()` function — removes dead panes + deduplicates, prints 1 line if anything was pruned, silent otherwise
+- `route.rs`: Calls `prune()` at the start of `run_with_tmux` (before registry lookup)
+- `sync.rs`: Calls `prune()` at the start of `run_with_tmux` (before layout calculation)
+- `claim.rs`: Calls `prune()` at the start of `run` (before window resolution)
+
+Existing `agent-doc resync` command stays as-is (verbose output with full session listing).
+
+**106 tests pass, clippy clean, binary installed.**
+
+**Re: daemon** — good future addition. The lightweight `prune()` is ~1 `tmux list-panes` call, so the overhead per operation is negligible. A daemon would enable push-based cleanup (watch for pane exits) rather than poll-based.
+
+## User
+
+release prune

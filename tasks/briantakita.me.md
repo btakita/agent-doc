@@ -1,10 +1,8 @@
 ---
-session: 7322672d-726a-47c7-9a81-a836b968bdc9
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
+tmux_session: '1'
 ---
+
 Help me run:
 
 ~/work/btakita/agent-loop/briantakita.me-dev @e1fe8015 !1 ?1                                                                                                                                                                           18:36:07
@@ -527,4 +525,19 @@ bun run dev
 
 ## User
 
+~/work/btakita/agent-loop/briantakita.me-dev main !4 ?4                                                                                                                                                                                16:20:49
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+relysjs_browser__build|done
+TimeoutOverflowWarning: Infinity does not fit into a 32-bit signed integer.
+Timeout duration was set to 1.
+relysjs_server__build|done
+at rmemo__wait (/home/brian/work/ctx-core/ctx-core-dev/lib/ctx-core/all/rmemo__wait/index.js:35:19)
+at build (/home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/build.ts:75:3)
+at /home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/index.ts:4:7
 
+browser__build|watch
+server__build|watch
+server started on port 4100

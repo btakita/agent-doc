@@ -1,10 +1,8 @@
 ---
-session: 53c928b3-2ad9-4007-9f13-f5035e35aafa
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 53c928b3-2ad9-4007-9f13-f5035e35aafa
+tmux_session: claude
 ---
+
 
 Sync filters. Commit resume and current state of agent-loop.
 
@@ -19,3 +17,5 @@ All done:
 **2. Resume committed** — deleted `Brian-hand-edit.pdf`, pushed to `btakita/resume` (`177a891`)
 
 **3. Agent-loop committed** (`f4ccab8`) — removed `agent-doc-jetbrains/`, updated resume submodule pointer + task documents
+
+sync filters

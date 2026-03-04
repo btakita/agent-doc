@@ -69,7 +69,7 @@ invocation, JSON parsing, and session flags.
 
 ## Domain Ontology
 
-agent-doc extends the existential kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions. These terms map agent-doc concepts to the universal ontology they derive from.
+agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions. These terms map agent-doc concepts to the universal ontology they derive from.
 
 | Term | Derives From | Description |
 |------|-------------|-------------|
@@ -84,4 +84,5 @@ agent-doc extends the existential kernel vocabulary (defined in `~/.claude/philo
 | **Range Template** | scope + abstraction | Bounded region in a document for targeted agent write-back |
 | **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
 | **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
+| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
 | **Overlay** | context + resolution | Domain-specific terms extending the base kernel vocabulary |

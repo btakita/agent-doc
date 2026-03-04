@@ -300,3 +300,20 @@ We should support multiple editor projects. Where Project A files are claimed by
 ## User
 
 Should we have the dialog where the user can make the choices I listed above, or would editing the frontmatter be sufficient?
+
+There are also a total of 4 tmux windows in the tmux session. 3 were created while you were responding to my previous query.
+
+## Assistant
+
+**Multi-project support** already works. Each document has its own `tmux_session` field. Project A docs with `tmux_session: projA` stay in session A, Project B in session B.
+
+**Dialog vs frontmatter:** Frontmatter is sufficient. `claim` and `sync` auto-set it. Manual editing for overrides.
+
+**3 extra windows** — This is sync Phase 2 auto-restart. When a file's pane is dead/missing, sync creates a new window via `agent-doc start`. If the plugin fired multiple syncs during my response (500ms debounce), each may have auto-created panes.
+
+Can we either prevent these new windows from being created or cleanup orphaned windows?
+
+The tmux tree logging is now active. Let me check what's happening.
+
+## User
+

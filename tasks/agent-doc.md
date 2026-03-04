@@ -748,3 +748,46 @@ Want to proceed with the commit + release?
 Yes...let's go with the plan.
 
 Let's think about the api for tmux-router. I would like to have a cli if possible. So the commands should be coherent and designed for friendly cli usage.
+
+## Assistant
+
+**v0.7.2 released to all targets:**
+- crates.io: https://crates.io/crates/agent-doc/0.7.2
+- PyPI: published (source + wheel)
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.7.2
+
+**Re: tmux-router CLI API** — here's a draft design:
+
+```
+tmux-router sync --col a.md,b.md --col c.md [--window @1] [--focus a.md] [--session claude]
+tmux-router register <file> <pane-id> [--session claude]
+tmux-router unregister <file>
+tmux-router status                    # show registry + pane health
+tmux-router resync                    # prune dead panes from registry
+tmux-router focus <file>              # select pane for file
+```
+
+Key design decisions to make:
+
+1. **Registry location** — agent-doc uses `.agent-doc/sessions.json`. Should tmux-router use its own file (`.tmux-router/registry.json`)? Or accept `--registry <path>`?
+
+It should have it's own registry in case other tools use it.
+
+2. **File identity** — agent-doc uses UUID frontmatter. tmux-router could use file paths directly (simpler, no frontmatter dependency). The UUID mapping becomes agent-doc's concern.
+
+agreed
+
+3. **Library API** — `tmux_router::Tmux`, `tmux_router::Registry`, `tmux_router::reconcile()`. Agent-doc imports these and adds its frontmatter/UUID layer on top.
+
+agreed
+
+4. **Config** — `tmux_session` affinity, stash window behavior. CLI flags or config file?
+
+both
+
+What's your preference on these? The file-path-as-key approach would make tmux-router usable by any tool, not just agent-doc.
+
+yes...file-path-as-key
+
+## User
+

@@ -156,23 +156,18 @@ Override per-document via `agent:` in frontmatter, or per-invocation via `--agen
 
 ## Tmux Session Routing
 
-Route documents to persistent Claude sessions via tmux:
+Route documents to persistent Claude sessions via tmux. Pane management is powered by [tmux-router](https://github.com/btakita/tmux-router).
 
 ```sh
 agent-doc route plan.md    # send to existing pane, or auto-start one
+agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 ```
 
 **How it works:**
 1. Each document gets an `agent_doc_session` UUID in frontmatter (auto-generated if missing)
-2. A session registry (`sessions.json`) maps UUIDs to tmux pane IDs
+2. agent-doc maps UUIDs to file paths, then delegates to tmux-router for pane routing
 3. `route` checks if the pane is alive — if so, sends the command; if dead, auto-starts a new one
-
-**Auto-start cascade:**
-- No tmux server → create `"claude"` session
-- `"claude"` session missing → create it
-- `"claude"` session exists → create new window
-
-This enables a multi-document workflow where each document has its own Claude session in a dedicated tmux pane.
+4. `sync` mirrors editor split layout in tmux using attach-first reconciliation
 
 ## Editor Integration
 

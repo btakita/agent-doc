@@ -139,6 +139,51 @@ Manage the Claude Code skill definition.
 
 The skill content is embedded in the binary at build time. After `agent-doc upgrade`, run `agent-doc skill install` in each project to update the skill definition.
 
+## patch
+
+```
+agent-doc patch <FILE> <COMPONENT> [CONTENT]
+```
+
+Replace content in a named component. Components are bounded regions marked with `<!-- agent:name -->...<!-- /agent:name -->`.
+
+| Argument | Description |
+|----------|-------------|
+| `FILE` | Path to the document |
+| `COMPONENT` | Component name (e.g., `status`, `log`) |
+| `CONTENT` | Replacement content (reads from stdin if omitted) |
+
+Behavior depends on `.agent-doc/components.toml` config:
+
+| Config | Default | Description |
+|--------|---------|-------------|
+| `mode` | `replace` | `replace`, `append`, or `prepend` |
+| `timestamp` | `false` | Auto-prefix with ISO timestamp |
+| `max_entries` | `0` | Trim entries in append/prepend (0 = unlimited) |
+| `pre_patch` | none | Shell hook: transform content (stdin → stdout) |
+| `post_patch` | none | Shell hook: fire-and-forget after write |
+
+See [Components](components.md) for full configuration and hook documentation.
+
+## watch
+
+```
+agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]
+```
+
+Watch session files for changes and auto-submit.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--stop` | | Stop the running watch daemon |
+| `--status` | | Show daemon status |
+| `--debounce` | `500` | Debounce delay in milliseconds |
+| `--max-cycles` | `3` | Max agent-triggered cycles per file before pausing |
+
+The daemon watches all claimed files (from `sessions.json`), debounces per-file, and triggers `agent-doc run` on changes. PID stored in `.agent-doc/watch.pid`.
+
+Loop prevention: bounded cycles (default 3) and convergence detection (stop if agent response matches previous). See [Dashboard-as-Document](dashboard.md) for the full workflow.
+
 ## upgrade
 
 ```

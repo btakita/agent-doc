@@ -24,8 +24,11 @@ src/
   submit.rs         # Core loop: diff, send, merge-safe write, snapshot, git
   init.rs           # Scaffold session document
   reset.rs          # Clear session + snapshot
-  diff.rs           # Preview diff (dry run)
+  diff.rs           # Preview diff (dry run) + comment stripping
   clean.rs          # Squash git history
+  component.rs      # Component parser (<!-- agent:name --> markers) + name validation
+  patch.rs          # Replace/append/prepend component content, config + shell hooks
+  watch.rs          # Watch daemon: auto-submit on file change with debounce + loop prevention
   frontmatter.rs    # YAML frontmatter parse/write
   snapshot.rs       # Snapshot path/read/write
   git.rs            # Commit, branch, squash (includes `commit` subcommand)
@@ -81,7 +84,7 @@ agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philoso
 | **Sync** | pattern + system | Aligning tmux pane layout to editor split state; maintaining coherence |
 | **Watch** | consciousness + evolution | Detecting file changes and triggering agent responses; event-driven |
 | **Dashboard** | system + focus | A document used as a live system view with agent-maintained sections |
-| **Range Template** | scope + abstraction | Bounded region in a document for targeted agent write-back |
+| **Component** | scope + abstraction | Bounded, named, re-renderable region in a document (`<!-- agent:name -->...<!-- /agent:name -->`). Configurable mode (replace/append/prepend) and shell hooks. |
 | **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
 | **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
 | **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |

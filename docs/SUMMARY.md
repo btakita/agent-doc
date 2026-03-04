@@ -12,6 +12,8 @@
 
 - [Commands](guide/commands.md)
 - [Document Format](guide/document-format.md)
+- [Components](guide/components.md)
+- [Dashboard-as-Document](guide/dashboard.md)
 - [Run Flow](guide/submit-flow.md)
 - [Editor Integration](guide/editor-integration.md)
 - [Agent Backends](guide/agent-backends.md)

@@ -715,4 +715,34 @@ Can we please fix this issue with tests? This is my 4th attempt for you to fix t
 
 ## User
 
-It works. I want to have the next release. And to extract a new crate called `tmux-router`. Should we commit this change first. Then work on tmux-router. Is tmux-router a good name for the project or should we name it something else? 
+It works. I want to have the next release. And to extract a new crate called `tmux-router`. Should we commit this change first. Then work on tmux-router. Is tmux-router a good name for the project or should we name it something else?
+
+## Assistant
+
+**Yes, commit first.** The sync fix is self-contained and should be versioned before extraction.
+
+**Re: naming** — options:
+
+| Name | Pros | Cons |
+|------|------|------|
+| `tmux-router` | Short, implies mapping files→panes | "Router" sounds HTTP-like |
+| `tmux-sync` | Describes the editor→tmux sync model | Could confuse with tmux-resurrect/sync |
+| `tmux-layout` | Describes pane arrangement | Overlaps with tmux's own `select-layout` |
+| `tmux-conductor` | Evocative orchestration metaphor | Not immediately clear |
+
+I'd lean **`tmux-router`** — routing documents to panes IS the core abstraction. The session registry maps file→pane, sync reconciles the layout. It's a router.
+
+**Release plan:**
+1. Commit the sync fix as v0.7.2 (patch — bug fix only)
+2. Release v0.7.2 (crates.io + PyPI + GitHub Release)
+3. Extract `tmux-router` as a separate crate (v0.8.0 for agent-doc, v0.1.0 for tmux-router)
+
+What goes into `tmux-router`: `Tmux` struct, `SessionRegistry`, `reconcile()`, stash window, `IsolatedTmux` test infra, `find_column_pane`, `Layout`/`Column` types.
+
+What stays in `agent-doc`: frontmatter, snapshots, agents, skill, claim/focus/start (thin wrappers calling tmux-router).
+
+Want to proceed with the commit + release?
+
+## User
+
+Yes...let's go with the plan.

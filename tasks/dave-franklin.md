@@ -1,10 +1,8 @@
 ---
 session: 9c8a9b79-2d92-4000-8104-23c0606086a8
-resume: null
-agent: null
-model: null
-branch: null
+tmux_session: claude
 ---
+
 
 Dave sent me a message on LinkedIn. Does LinkedIn's api support syncing messages?
 
@@ -341,3 +339,16 @@ Proofread. Is this ready to send to Dave to review?
 ## User
 
 commit and push
+
+## Assistant
+
+**Committed and pushed.**
+
+- **resume** `8a58944` — proofread fixes, corky expansion, margin reduction (4→3 pages)
+- **agent-loop** `468c8dd` — updated submodule pointer
+
+Both pushed to origin.
+
+## User
+
+compact this doc

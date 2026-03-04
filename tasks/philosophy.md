@@ -847,3 +847,44 @@ The `/exkernel new` workflow is the interesting one — the agent reads existing
 ## User
 
 How do I upgrade this for my user?
+
+## Assistant
+
+**Three ways to upgrade:**
+
+```sh
+# 1. From local source (what you have now — includes unpublished changes)
+cargo install --path existential-kernel/exkernel
+
+# 2. From git (anyone with access, no crates.io publish needed)
+cargo install --git https://github.com/existential-kernel/exkernel
+
+# 3. From crates.io (after publishing a new version)
+cargo install exkernel
+```
+
+Right now, use **option 1** — the new commands (`search`, `completions`, `new`) aren't published to crates.io yet (still v0.1.0 there). I just ran it and your local install now has all the new commands.
+
+**To publish the update to crates.io** (so anyone can `cargo install exkernel`):
+1. Bump version in `Cargo.toml` (e.g., `0.2.0`)
+2. `cargo publish`
+3. Tag: `git tag v0.2.0 && git push origin v0.2.0`
+4. `gh release create v0.2.0 --generate-notes`
+
+**Shell completions setup** (one-time, after install):
+
+```sh
+# zsh — add to your fpath
+mkdir -p ~/.zsh/completions
+exkernel completions zsh > ~/.zsh/completions/_exkernel
+# then add to .zshrc: fpath=(~/.zsh/completions $fpath) && autoload -Uz compinit && compinit
+
+# bash
+exkernel completions bash > ~/.local/share/bash-completion/completions/exkernel
+```
+
+Want me to publish v0.2.0 now? Or keep iterating locally first?
+
+## User
+
+release

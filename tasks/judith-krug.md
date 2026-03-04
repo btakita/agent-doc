@@ -429,3 +429,38 @@ If I use Cloudflare pages with Hono, are there any advantages to using Astro?
 ## User
 
 I want an easy interface for editing the content. Does keystatic expect git commits or is it a database?
+
+## Assistant
+
+**Git-based, not a database.** Two modes:
+
+| Mode | How it works | Best for |
+|---|---|---|
+| **Local** | Reads/writes files on disk. No auto-commits — you commit when ready. | Development |
+| **GitHub mode** | Commits via GitHub API. Each save = a commit. No local clone needed. | Staff / production CMS |
+
+**For Judith's team: GitHub mode.** Staff opens a browser at `keystatic.cloud/your-project`, edits in form fields / rich text, hits save → Keystatic commits to GitHub → Cloudflare Pages auto-deploys in ~30 seconds. No git, no terminal, no deployment knowledge.
+
+**Staff workflow:**
+1. Open Keystatic in browser
+2. Click "Funded Deals" → "New Deal"
+3. Fill fields (property, amount, LTV, location, image)
+4. Save → auto-deploys
+
+**Git-based CMS advantage:** No database to manage, no hosting costs for CMS backend, full version history, content is plain markdown files. Drop Keystatic anytime — the content stays.
+
+**Works with both Astro and Hono** — Keystatic just manages files in the repo. Whatever reads those markdown files (Astro content collections or your own parser) works the same way.
+
+## User
+
+Effectively, her staff needs to be able to
+- update content
+- add pages
+- change layout
+
+I can do data integrations and help when needed.
+But minor changes should be done by her staff.
+Eventually they will have more responsibility.
+
+Will Astro be beneficial or would it be yet another library to learn.
+Should I just focus on Hono with custom tooling?

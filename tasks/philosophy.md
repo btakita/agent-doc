@@ -600,3 +600,29 @@ Do it please.
 ## User
 
 audit docs
+
+## Assistant
+
+**Audit complete. All 6 repos fixed and pushed.**
+
+| Repo | Fixes |
+|------|-------|
+| **ontology** | README/CLAUDE.md updated for 114 terms, Ring 2 added to `exkernel.toml` (85 terms), `ring.toml` → `exkernel.toml` refs fixed |
+| **spec** | SPEC.md/RINGS.md: `ring.toml` → `exkernel.toml`, Ring 1 terms corrected to actual list, Ring 2 count updated |
+| **exkernel** | Cargo.toml: added `homepage`, `keywords`, `categories`. README: improved command table. CLAUDE.md: documented stub commands |
+| **.github** | Profile: Layer → Ring terminology, added `.github` to project list, term counts updated to 114 |
+| **github.io** | Landing page: Layer → Ring, added exkernel CLI to projects, term counts updated |
+| **agent-doc** | Fixed Session derivation: `story + system` → `project + story` (more precise — project already means "system with temporal boundaries") |
+
+**Key finding from agent-doc audit:** The `project` kernel term (Ring 1) already encapsulates "system with temporal boundaries" and explicitly says "A project's story holds the state of decisions and changes." Using `project + story` is more precise than re-deriving from lower-level terms. All other 11 derivations checked out as accurate.
+
+**Term accounting:** 116 declared (14 Ring 0 + 17 Ring 1 + 85 Ring 2), 114 files exist (`qualitative` and `quantitative` still pending).
+
+## User
+
+Re: names...please rate the following
+- existential-kernel
+- weltenshauung
+- worldview
+- existenceview
+- any other candidates for a name

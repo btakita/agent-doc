@@ -569,3 +569,44 @@ Shall I implement the renames + config + hooks now?
 ## User
 
 yes...implement all
+
+## Assistant
+
+**Done.** All renames, component config, built-in modes, and shell hooks implemented. 150 tests pass, clippy clean.
+
+**Renames:**
+- `range.rs` → `component.rs`, `RangeTemplate` → `Component`
+- `section` → `component` in CLI arg (`agent-doc patch <file> <component>`)
+- All error messages updated ("component" not "range template")
+- `CLAUDE.md` Domain Ontology: `Range Template` → `Component`
+
+**Component config** (`.agent-doc/components.toml`):
+```toml
+[log]
+mode = "append"
+timestamp = true
+max_entries = 100
+
+[status]
+pre_patch = "scripts/validate.sh"
+post_patch = "scripts/notify.sh"
+```
+
+Config is resolved by walking up from the file to find `.agent-doc/` (not CWD). Thread-safe for parallel tests.
+
+**Built-in modes** (in `patch::run`):
+- `replace` — default, full replacement
+- `append` — content added at bottom
+- `prepend` — content added at top
+- `timestamp` — auto-prefix with ISO timestamp
+- `max_entries` — auto-trim in append/prepend
+
+**Shell hooks:**
+- `pre_patch` — stdin: content, stdout: transformed content. Can transform before write.
+- `post_patch` — fire-and-forget, runs after write. Env: `COMPONENT`, `FILE`.
+
+**New tests:** 14 in patch.rs (replace, preserve surrounding, not found, append mode, prepend mode, trim entries, no config defaults, pre_patch hook transforms, post_patch hook runs, snapshot updated).
+
+## User
+
+Is everything documented? Include some tutorial for the dashboard-as-document flow. And tutorials for components using hooks. And custom components.

@@ -532,3 +532,36 @@ Switching between agent-doc and plugin **still** changes the tmux focused pane. 
 The use case is I'm cycling the left column agent doc...and the tmux selected pane should not change.
 
 The plugin popup should prompt with the selected pane in addition to the --col arguments in my 2 column layout.
+
+## Assistant
+
+**Found the root cause and fixed it.** The previous DETACH→ATTACH order was fundamentally broken for pane selection:
+
+1. DETACH stashes the active pane (A) → tmux auto-selects C (right pane)
+2. ATTACH joins B with `-d` → C stays selected (right pane)
+3. `select_pane(B)` at the end fixes it, but the user sees C briefly selected
+
+**Fix: Reversed to ATTACH→SELECT→DETACH order.** Now:
+
+1. ATTACH joins B into window (with `-d`, no selection change)
+2. SELECT B (focus pane now selected)
+3. DETACH stashes A → B stays selected (B is not being stashed)
+
+The focus pane is never displaced. No flicker, no intermediate wrong selection.
+
+**New test:** `test_full_flow_2col_tab_switch_pane_selection` — covers the FULL production flow (reconcile with focus + equalize_sizes + select_pane). Asserts that:
+- After reconcile: focus pane is already selected (not just after the final select_pane)
+- After equalize_sizes: selection unchanged
+- After select_pane: selection confirmed
+
+**Plugin popup** now shows the focused file: `Sync: --col plugin.md --col dave-franklin.md [focus: plugin.md]`
+
+**Plugin rebuild needed:**
+```bash
+cd agent-doc/editors/jetbrains && ./gradlew buildPlugin signPlugin
+```
+Install from `build/distributions/agent-doc-jetbrains-0.1.0.zip`.
+
+**143 tests pass, clippy clean, binary installed.**
+
+## User

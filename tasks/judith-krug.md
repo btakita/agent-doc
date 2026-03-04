@@ -199,3 +199,63 @@ Judith is going with the Mortgage Automator. What are some next steps?
 
 What are some improvements that we can make to http://www.equityfundingsource.com/
 How is the seo and the llm integration?
+
+## Assistant
+
+**Site audit of equityfundingsource.com:**
+
+Stack: WordPress (Twenty Twenty-Four theme) + Elementor Pro + WPForms + Bookly + Infusionsoft CRM. Google Forms for loan applications.
+
+**SEO scorecard:**
+
+| Area | Grade | Notes |
+|---|---|---|
+| Schema.org | B+ | Organization, WebPage, BreadcrumbList present |
+| Meta descriptions | B | Basic coverage, not keyword-optimized |
+| Heading hierarchy | B | h1/h2/h3 used properly |
+| FAQ schema | F | Missing — huge opportunity |
+| Sitemap + robots.txt | F | Not referenced at all |
+| Page speed | C- | Bloated (Elementor + Twenty Twenty-Four CSS, multiple JS libraries) |
+| Internal linking | D | Minimal cross-page links |
+| Blog utilization | D | Exists ("Private Lending Blog") but underutilized |
+| Local SEO | D | DRE/NMLS shown but no Google Business Profile optimization |
+
+**LLM discoverability:**
+
+| Signal | Status |
+|---|---|
+| Structured business data | Good — name, address, phone, email, licenses in schema |
+| Service descriptions | Moderate — general, not granular |
+| FAQ content | Missing — LLMs pull heavily from FAQ sections |
+| llms.txt | Missing — no machine-readable site summary |
+| Funded deals as text | Missing — details are in images, not indexable text |
+
+**Improvements by priority:**
+
+**Quick wins (hours):**
+1. **robots.txt + XML sitemap** — basic SEO hygiene, currently missing entirely
+2. **FAQ page with schema** — "What is a hard money loan?", "What LTV ratios do you offer?", "What are your rates?", "How fast can you close?" — massive for both Google snippets and LLM citation
+3. **llms.txt at /llms.txt** — emerging standard for LLM discoverability. Plain text summary of business, services, rates, service area
+4. **Text-ify funded deals** — add structured text (location, amount, type, LTV, close time) alongside images so search engines and LLMs can index them
+
+**Medium effort (days):**
+5. **Page speed** — Elementor + Twenty Twenty-Four is heavy. Defer unused JS (Bookly loads on every page), purge unused CSS, or migrate to a lighter theme
+6. **Replace Google Forms** — loan application links to Google Forms. Embed WPForms (already installed) or build a proper intake flow. Keeps users on-site.
+7. **Testimonials** — none visible. Add investor and borrower testimonials with Review schema
+8. **Blog content strategy** — target long-tail: "hard money loans Los Angeles", "private money lender California", "bridge loan vs hard money", "how to invest in trust deeds"
+9. **Investor portal** — protected area for qualified investors to see deal details, RE 885 docs, opt in
+
+**Larger projects (weeks):**
+10. **Full redesign** — modern landing pages, loan calculator, application tracking, MA integration for live deal status
+11. **Local SEO campaign** — Google Business Profile, review generation, local citations
+12. **Content hub** — market reports, rate comparisons, borrower/investor guides (feeds both SEO and LLM training data)
+
+**Biggest ROI for your pitch to Judith:** Items 1-4 are quick, tangible, and demonstrate immediate value. The FAQ + llms.txt combo is particularly compelling — "your competitors aren't doing this yet, and it's how AI assistants will recommend lenders."
+
+## User
+
+If Judith is going to have ownership...what technology would be the best for her hosting?
+
+Wordpress? Astro? Something else?
+
+I can use relysjs, but it's my own library. I wonder if there is a well designed efficient library that I can use.

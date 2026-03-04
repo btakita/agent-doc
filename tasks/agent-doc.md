@@ -308,3 +308,55 @@ Let's have a "tips" section:
 Any other tips?
 
 I also have exkernel installed. So we can overload project for agent-doc.
+
+## Assistant
+
+**Re: document the project concept with ontology**
+
+The Domain Ontology table in `agent-doc/CLAUDE.md` has 12 terms but is missing "Project". Adding:
+
+| **Project** | system + scope | The bounded working context; identified by the `.agent-doc/` directory at its root |
+
+A project is a system (whole of relationships — documents, registry, snapshots) bounded by a scope (the directory tree). We can use `/exkernel` to formally register it as a domain overlay node.
+
+**Re: explain range-only in docs**
+
+The reasoning: a single marker `<!-- agent:x -->` has no boundary — after the first render inserts content, the next render can't know where it ends. Range markers (`<!-- agent:x -->...<!-- /agent:x -->`) create an unambiguous boundary. The closing marker makes re-rendering idempotent. Will document this in CLAUDE.md.
+
+**Re: `patch` instead of `write`**
+
+`patch` is better — communicates targeted modification of a bounded region, not a full file write. The verb pairing:
+
+- `agent-doc patch <file> <section>` — replace content between range markers
+- `agent-doc submit <file>` — conversational append (diff + respond)
+What about `agent-doc run`? I thought we switched from submit to run.
+
+**Re: tips section**
+
+- Agent documents can reference other files, including other agent documents — use relative paths from the project root
+- Inline annotations (editing within previous `## Assistant` blocks) are valid prompts — the agent responds to the diff
+- Comments (`<!-- -->` and `[//]: # (...)`) are a private scratchpad — they never trigger agent responses
+Comments are also used for templates.
+- Use frontmatter `tmux_session:` to bind a document to a specific tmux session for multi-project workflows
+- Snapshots are keyed by canonical file path — moving/renaming a file resets the diff baseline
+- Range templates are always paired — no single markers (closing marker required for idempotent re-rendering)
+- `agent-doc resync` cleans up stale pane references; `prune()` runs automatically before route/sync/claim
+
+**Re: exkernel for project**
+
+Ready to invoke `/exkernel` to create "Project" as a domain overlay term extending `system` + `scope` from the base kernel, scoped to agent-doc.
+
+Please do
+
+**Updated design summary:**
+
+| Component | Description |
+|-----------|-------------|
+| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
+| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested (innermost-first). No single markers (closing marker required for idempotent re-rendering) |
+| `agent-doc patch` | `agent-doc patch <file> <section> [content]` — replace range template content |
+| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
+| Project | Directory containing `.agent-doc/`; tmux-router is project-agnostic |
+
+## User
+

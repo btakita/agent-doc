@@ -986,6 +986,8 @@ Please set the secret on the gh action to allow for the gh action to publish.
 1. Go to https://github.com/btakita/tmux-router/settings/secrets/actions
 2. Add secret: Name = `CARGO_REGISTRY_TOKEN`, Value = your `CRATES_PUBLISH_TOKEN`
 
+Why is ours named CARGO_REGISTRY_TOKEN? Why not CRATES_PUBLISH_TOKEN?
+
 The `release.yml` workflow references `${{ secrets.CARGO_REGISTRY_TOKEN }}` so it'll work once the secret is added. Future releases will auto-publish on tag push.
 
 **Next:** Release agent-doc v0.8.0.
@@ -993,3 +995,29 @@ The `release.yml` workflow references `${{ secrets.CARGO_REGISTRY_TOKEN }}` so i
 ## User
 
 release agent-doc
+
+## Assistant
+
+**agent-doc v0.8.0 released.**
+
+- **crates.io**: https://crates.io/crates/agent-doc (v0.8.0)
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.8.0
+- **Binary installed**: `agent-doc 0.8.0` at `~/.cargo/bin/agent-doc`
+- **Parent submodule pointers updated**: both agent-doc and tmux-router
+
+**What shipped** (-3,133 lines net):
+- `sessions.rs`: 1312 → 413 lines — Tmux struct replaced with tmux-router re-export
+- `sync.rs`: 2518 → 64 lines — sync algorithm delegated to tmux-router
+- `route.rs`: auto_start now joins active window (bug fix)
+- Depends on tmux-router v0.1.0 (also published)
+
+### Updated Release History
+
+| Version | Key Changes |
+|---------|-------------|
+| v0.7.2 | Sync reconciliation fixes, focus improvements |
+| v0.8.0 | tmux-router extraction, -3133 lines, route auto_start fix |
+
+## User
+
+compact this doc

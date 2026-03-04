@@ -192,6 +192,30 @@ Implementing now.
 
 ## User
 
-If BrianTakita.md, which is not an agent doc, was first selected, there was only 1 tmux pane. There should have been 2 tmux panes.
+If BrianTakita.md, which is not an agent doc, was first selected, there was only 1 tmux pane.
+
+When BrianTakita.md is selected, there is a separate window with 1 pane.
+
+There should have been 2 tmux panes in the original tmux window.
 
 Please reproduce with a test and fix.
+
+Switching agent documents causes additional tmux windows to be attached.
+There should only be 1 tmux window with the attached claude sessions that is being managed.
+The rest of the tmux panes should be tmux detached.
+
+## Assistant
+
+**Fixed the non-agent-doc bug.** Root cause: when a file without a session UUID (BrianTakita.md) was in the layout, it got skipped. With only 1 resolved pane, `resolved.len() < 2` triggered an early return that was breaking existing panes out of the window.
+
+**Fix** (sync.rs line 270): the `< 2` early-return now just focuses the single resolved pane without rearranging. No more `break_pane` calls.
+
+**Test:** `test_sync_non_agent_doc_first_preserves_layout` — 2 panes in window, layout with non-agent + agent file, asserts window still has 2 panes after sync.
+
+**Second issue — extra windows appearing when switching documents:** This is the attach step in reconcile. When desired panes aren't in the target window, they get joined via `join_pane`. But `join_pane` requires the pane to be isolated first (if it shares a window with other panes). The `break_pane` step for isolation creates temporary solo windows. These should disappear when the pane is immediately joined into the target, but if the join fails, they remain as visible solo windows.
+
+Can you describe the exact scenario? Which files are open when the extra windows appear? This will help me write a targeted test.
+
+## User
+
+

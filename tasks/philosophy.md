@@ -909,3 +909,25 @@ Anyone can now install with: `cargo install exkernel`
 ## User
 
 Is the exk command used by any software?
+
+## Assistant
+
+**No.** `exk` is not used by any known software.
+
+- Not on crates.io (only `exkernel` appears in search results)
+- Not installed on your system (`which exk` → not found)
+- Not a system package in pacman/apt
+- Web search turns up no CLI tool named `exk`
+
+The closest things are `ex` (vi line editor) and Adobe's `ExManCmd`, neither of which conflict.
+
+If you're thinking of adding `exk` as a shorter alias or renaming the binary: it's free and clear. You could either:
+1. **Shell alias:** `alias exk=exkernel` in `.zshrc`
+2. **Binary alias in Cargo.toml:** add a second `[[bin]]` entry with `name = "exk"`
+3. **Symlink:** `ln -s ~/.cargo/bin/exkernel ~/.cargo/bin/exk`
+
+Option 2 is cleanest — ships both `exkernel` and `exk` from the same crate. Want me to add it?
+
+## User
+
+Option 2...release

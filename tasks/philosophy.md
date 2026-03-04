@@ -282,5 +282,18 @@ There will be more than 120 of course. This could turn into a wiki of sorts. Lik
 
 **Next step:** Extract Ring 0 + Ring 1 (29 terms) into `existential-kernel/ontology`, with the DDD mapping in the README. This gives software teams an immediately useful ontology that grounds their ubiquitous language in existential terms.
 
+## Assistant
+
+**Qualitative & quantitative — Ring 1.** Ring 0 describes the *structure* of existence — what is, how things relate, how they change. Qualitative and quantitative are about *how we evaluate and measure* — epistemological tools about the *kind* of observation (felt qualities vs. counted quantities). They sit naturally in Ring 1 alongside `model`, `type`, `definition`, `information`.
+
+Resolution already touches this territory (granularity of observation), but qualitative/quantitative are about the *nature* of the observation, not the *level*. They're among the most fundamental Ring 1 terms — closest to the Ring 0 boundary — but they're about how we *know*, not what *is*.
+
+**The Existential Wiki — yes.** The ring structure is what makes it scalable. A traditional wiki drowns you in content. This one has prioritized loading: Ring 0 always present, Ring 1 for software contexts, Ring 2+ on demand via `exkernel scope`. Every node follows SPEC.md (Ontology/Axiology/Epistemology), so structure stays consistent as it grows to hundreds or thousands of terms.
+
+The key difference from a typical wiki: **composable scoping**. You don't browse — you scope. `exkernel scope domain healthcare` loads Ring 0 + Ring 1 + healthcare-specific terms. The wiki grows horizontally (more domains, more terms) while tooling keeps each context narrow and coherent.
+
+"Existential Wiki" is a strong public-facing name. `existential-kernel/ontology` = structured data; the wiki = human-readable presentation layer. GitHub Pages renders each node as a page, ring structure as navigation.
+
 ## User
 
+Let's design the exkernel. The cli tool can use the data from github. The content has be hosted on github. Let's create an api the exkernel cli. And how can we craft the web experience?

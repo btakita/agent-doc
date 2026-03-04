@@ -1,10 +1,8 @@
 ---
 session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-resume: null
-agent: null
-model: null
-branch: null
+tmux_session: claude
 ---
+
 
 ## Status Summary (compacted 2026-03-03)
 
@@ -289,6 +287,8 @@ tmux_session: claude
 
 **3. "Always select same tmux session"** — That's what `tmux_session` does. Once set (by claim or first sync), it persists across all future syncs. Panes stay in your configured session.
 
+We should support multiple editor projects. Where Project A files are claimed by Tmux Session A panes and Project B files are claimed by Tmux Session B panes.
+
 **4. "3 claude windows created"** — The tree logging is now active. Next time, sync output will show full tmux state. The `tmux_session` affinity should prevent the scatter.
 
 **5. Logging manual commands** — Sync logs the tmux tree at start (showing state including any manual changes you made). Each tmux operation (break_pane, join_pane, select_pane) is already logged in the SyncLog.
@@ -299,3 +299,4 @@ tmux_session: claude
 
 ## User
 
+Should we have the dialog where the user can make the choices I listed above, or would editing the frontmatter be sufficient?

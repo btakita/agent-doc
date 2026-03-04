@@ -1,5 +1,7 @@
 # agent-doc
 
+> **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
+
 Interactive document sessions with AI agents.
 
 Edit a markdown document. Press a hotkey. The tool diffs your changes, sends
@@ -46,7 +48,7 @@ agent-doc upgrade                        # upgrade to latest version
 
 ```markdown
 ---
-session: 05304d74-90f1-46a1-8a79-55736341b193
+agent_doc_session: 05304d74-90f1-46a1-8a79-55736341b193
 agent: claude
 ---
 
@@ -71,7 +73,7 @@ Follow-up. You can also annotate inline:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `session` | no | (generated on first run) | Session ID for tmux routing |
+| `agent_doc_session` | no | (generated on first run) | Document UUID for tmux pane routing (legacy: `session`) |
 | `resume` | no | (none) | Claude conversation ID for `--resume` |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |
@@ -106,10 +108,10 @@ Both work simultaneously because the run sends a diff, not a parsed structure.
 
 ### Session continuity
 
-- **Empty `session:`** — forks from the most recent agent session in the
+- **Empty `agent_doc_session:`** — forks from the most recent agent session in the
   directory (inherits context)
-- **`session: <uuid>`** — resumes that specific session
-- **Delete `session:` value** — next run starts fresh
+- **`agent_doc_session: <uuid>`** — resumes that specific session
+- **Delete `agent_doc_session:` value** — next run starts fresh
 
 ### History rewriting
 
@@ -161,7 +163,7 @@ agent-doc route plan.md    # send to existing pane, or auto-start one
 ```
 
 **How it works:**
-1. Each document gets a `session` UUID in frontmatter (auto-generated if missing)
+1. Each document gets an `agent_doc_session` UUID in frontmatter (auto-generated if missing)
 2. A session registry (`sessions.json`) maps UUIDs to tmux pane IDs
 3. `route` checks if the pane is alive — if so, sends the command; if dead, auto-starts a new one
 

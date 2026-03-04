@@ -95,7 +95,7 @@ Session documents use YAML frontmatter:
 
 ```yaml
 ---
-session: <uuid or null>
+agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>

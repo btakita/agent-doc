@@ -207,16 +207,21 @@ object TerminalUtil {
         return when (subcommand) {
             "sync" -> {
                 val parts = mutableListOf<String>()
+                var focusFile: String? = null
                 var i = 2
                 while (i < cmd.size) {
                     if (cmd[i] == "--col" && i + 1 < cmd.size) {
                         parts.add("--col ${cmd[i + 1]}")
                         i += 2
+                    } else if (cmd[i] == "--focus" && i + 1 < cmd.size) {
+                        focusFile = cmd[i + 1]
+                        i += 2
                     } else {
                         i++
                     }
                 }
-                "Sync: ${parts.joinToString(" ")}"
+                val focusSuffix = if (focusFile != null) " [focus: $focusFile]" else ""
+                "Sync: ${parts.joinToString(" ")}$focusSuffix"
             }
             "focus" -> "Focus: ${cmd.getOrNull(2) ?: ""}"
             else -> cmd.drop(1).joinToString(" ")

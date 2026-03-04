@@ -299,8 +299,8 @@ fn strip_ansi(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\x1b' {
             // Consume the escape sequence
-            if let Some(next) = chars.next() {
-                if next == '[' {
+            if let Some(next) = chars.next()
+                && next == '[' {
                     // CSI sequence: consume until a letter is found
                     for c2 in chars.by_ref() {
                         if c2.is_ascii_alphabetic() {
@@ -309,7 +309,6 @@ fn strip_ansi(s: &str) -> String {
                     }
                 }
                 // Otherwise just skip the next char (two-byte escape)
-            }
         } else {
             result.push(c);
         }

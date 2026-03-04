@@ -4,8 +4,14 @@ use uuid::Uuid;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
-    /// Document/routing UUID — permanent identifier for tmux session routing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Document/routing UUID — permanent identifier for tmux pane routing.
+    /// Serialized as `agent_doc_session` in YAML; reads legacy `session` via alias.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_session",
+        alias = "session"
+    )]
     pub session: Option<String>,
     /// Agent conversation ID — used for `--resume` with agent backends.
     /// Separate from `session` so the routing key never changes.
@@ -249,10 +255,31 @@ mod tests {
 
     #[test]
     fn ensure_session_existing_session() {
-        let content = "---\nsession: existing-id\nagent: claude\n---\nBody\n";
+        let content = "---\nagent_doc_session: existing-id\nagent: claude\n---\nBody\n";
         let (updated, sid) = ensure_session(content).unwrap();
         assert_eq!(sid, "existing-id");
         // Content should be unchanged
         assert_eq!(updated, content);
+    }
+
+    #[test]
+    fn parse_legacy_session_field() {
+        // Old `session:` field should still parse via serde alias
+        let content = "---\nsession: legacy-id\nagent: claude\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(fm.session.as_deref(), Some("legacy-id"));
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+        assert!(body.contains("Body"));
+    }
+
+    #[test]
+    fn write_uses_new_field_name() {
+        let fm = Frontmatter {
+            session: Some("test-id".to_string()),
+            ..Default::default()
+        };
+        let result = write(&fm, "body\n").unwrap();
+        assert!(result.contains("agent_doc_session:"));
+        assert!(!result.contains("\nsession:"));
     }
 }

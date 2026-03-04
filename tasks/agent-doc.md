@@ -105,3 +105,32 @@ We don't seem to be making good progress. It seems that there is something funda
 The PLUGIN MUST BE SIMPLE. No deduping. ONLY send agent-doc sync the layout. THAT IS ALL.
 
 Please add tests for the current scenario. agent-doc sync should recover from this.
+
+## Assistant
+
+**Agreed — the plugin IS already simple.** It just sends `--col` args with file lists. The `.distinct()` is just deduping file paths (not panes). All intelligence belongs in the CLI.
+
+**The spec** for sync is now at `agent-doc/SPEC.md` §7.18.
+
+**Your current tmux state** (the real-world scenario):
+- 4 solo windows: %62 (plugin.md), %39 (agent-doc.md), %60 (greensand-ai.md), %61 (parallel-coding)
+- 1 stash window @206: %63 (seed) + %41 (5 files claimed this pane!)
+- sessions.json: 34 entries, ~20 dead panes, stale window IDs
+
+**3 new real-world scenario tests added** (all passing):
+
+1. **`test_reconcile_scattered_panes_with_stash`** — 4 solo panes + 2 in stash, desired is 3 panes from the solo ones. Consolidates into target, stash untouched.
+
+2. **`test_reconcile_target_has_unwanted_and_stash_exists`** — Target has [A, X1, X2], stash already has [S1, S2]. Desired: [A, B]. X1/X2 get stashed alongside S1/S2. B joins from solo window.
+
+3. **`test_reconcile_full_real_world_scenario`** — 4 solo windows + stash with 1 pane. Previous sync left A+C together. New desired: [B,D] col1, [A] col2. Evicts C, joins B and D from solo windows. Stash untouched.
+
+**Total: 123 tests pass, clippy clean, binary installed.**
+
+The fundamental issue you're hitting: `break_pane` during ANCHOR/JOIN isolation creates temporary solo windows (visible flicker). The stash catches EVICT but not the pre-join isolation step. Your revert of ANCHOR/JOIN back to break_pane was correct — stash_pane fails when the pane is already in the stash window.
+
+## User
+
+This pane management is causing too many problems.
+
+If a claude session is closed while running, will the running pause or will it only restart when the session is resumed?

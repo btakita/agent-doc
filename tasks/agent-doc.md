@@ -654,3 +654,42 @@ Yes. Also when `--focus` targets a file with no registered pane, a pane should b
 Can we have claude use `notify-send` whenever a task is done or the session is blocked on a prompt? 
 This can be in my personal session. Perhaps there is already a notify-send skill available?
 Use a claude hook for notify-send
+
+## Assistant
+
+**1. Auto-register + column-positional focus: Implemented** in `agent-doc/src/sync.rs`.
+
+- **Phase 1**: Non-agent-doc files (no `agent_doc_session` frontmatter) tracked separately
+- **Phase 1.5** (new): Unresolved agent-doc files get in-memory auto-registered to a donor pane in the same column. Ephemeral — not written to `sessions.json` — `claim` still controls persistent registration
+- **Focus resolution** → `Option<String>`:
+  1. Non-agent-doc file → `None` (preserve tmux selection)
+  2. In `file_to_pane` (includes auto-registered) → `Some(pane_id)`
+  3. Column-positional fallback → first resolved pane in same column
+  4. File not in layout → `None` (preserve selection)
+
+5 new unit tests, 150 total tests pass, clippy clean, binary installed.
+
+**2. `notify-send` hook** — Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Stop",
+        "command": "notify-send -u normal 'Claude Code' 'Task completed'"
+      }
+    ]
+  }
+}
+```
+
+`Stop` matches when Claude finishes its turn. For prompt detection (`AskUserQuestion`), add another `PostToolUse` entry with `"matcher": "AskUserQuestion"`. There's no built-in hook for the permission prompt UI — that's handled client-side before the hook system fires.
+
+## User
+
+Still having the issue with the unclaimed plugin.md causing the tmux focus to change to the right-side tmux pane:
+`--col tasks/agent-doc.md --col tasks/dave-franklin.md [focus: tasks/agent-doc.md]`: left-side TMUX pane selected
+`--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right-side TMUX pane selected
+ 
+Can we please fix this issue with tests? This is my 4th attempt for you to fix this.

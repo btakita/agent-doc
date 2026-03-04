@@ -178,5 +178,30 @@ Each zoom level inherits from above and adds domain-specific terms. The CLI trav
 
 **No placeholder ontology needed in existential-kernel.** The crate ships with SPEC.md template + validation rules. Actual content comes from the user's ontology repo. The tool is content-agnostic.
 
+## Assistant
+
+**The org solves the communication problem:**
+
+```
+exkernel (GitHub org)
+├── exkernel         ← Rust crate + CLI tool
+├── ontology         ← Reference existential ontology (14-term kernel + core nodes)
+└── spec             ← Node format specification (SPEC.md, templates)
+
+btakita/philosophy   ← Personal philosophical writings (extends exkernel/ontology)
+```
+
+- `exkernel/ontology` = shared existential starting point (community reference, not one person's philosophy)
+- `btakita/philosophy` = your personal extensions, essays, perspective-specific content
+- Your "close enough approximation" gets extracted to neutral ground under the org
+- Others contribute to or fork `exkernel/ontology` — the org signals community ownership
+
+**Migration path:**
+1. Create `exkernel` GitHub org (reserves the name)
+2. Extract 14-term kernel + core nodes → `exkernel/ontology`
+3. Create `exkernel/exkernel` for the Rust crate
+4. `btakita/philosophy` keeps personal extensions, references `exkernel/ontology` as upstream
+
 ## User
 
+https://github.com/exkernel is taken. existential-kernel is available.

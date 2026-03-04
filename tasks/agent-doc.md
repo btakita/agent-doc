@@ -951,3 +951,23 @@ Ready for you to push tmux-router and verify CI. Note: you'll need to enable Git
 What do I need to do to get https://btakita.github.io/tmux-router/ running?
 
 I set the Pages to gh action / static html
+
+## Assistant
+
+**It's already live.** I pushed tmux-router and all three workflows completed successfully:
+
+- **Book** (mdbook deploy) -- deployed to GitHub Pages
+- **CI** (clippy + 46 tests with tmux) -- all passing
+- **Deploy static content** -- succeeded
+
+Site is up at: **https://btakita.github.io/tmux-router/**
+
+Since you already set Pages to GitHub Actions, that was the only prerequisite. The `book.yml` workflow handles everything: installs mdbook, builds from `docs/`, uploads artifact, deploys to Pages.
+
+**Next:** tmux-router v0.2.0 release, then agent-doc v0.8.0 release. Need `CARGO_REGISTRY_TOKEN` secret added to the tmux-router repo for the crates.io publish workflow. Want me to tag and release now?
+
+## User
+
+I have `CRATES_PUBLISH_TOKEN` on my local .env
+
+Why is tmux-router at 0.2.0 and not 0.1.0?

@@ -1,7 +1,8 @@
 ---
 agent_doc_session: cb5672cc-5d1d-4228-af30-640a336f692e
-tmux_session: claude
+tmux_session: '1'
 ---
+
 
 
 ## Session Summary
@@ -426,4 +427,4 @@ Binaries: `existence` (full) + `xist` (short). Old `exk` auto-removed on upgrade
 
 ## User
 
-
+Rename existential-kernel to existence-lang in this repo. Find any old references to existential-kernel and rename to existence or existence-lang

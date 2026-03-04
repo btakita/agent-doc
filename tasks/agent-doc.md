@@ -207,6 +207,8 @@ The rest of the tmux panes should be detached tmux sessions.
 Now all of the windows are going to a different tmux session.
 There should be an affinity to the tmux session that I see on my screen.
 
+There should only be 1 tmux window for the active claimed documents. There are multiple right now.
+
 ## Assistant
 
 **Fixed the non-agent-doc bug.** Root cause: when a file without a session UUID (BrianTakita.md) was in the layout, it got skipped. With only 1 resolved pane, `resolved.len() < 2` triggered an early return that was breaking existing panes out of the window.
@@ -218,6 +220,17 @@ There should be an affinity to the tmux session that I see on my screen.
 **Second issue — extra windows appearing when switching documents:** This is the attach step in reconcile. When desired panes aren't in the target window, they get joined via `join_pane`. But `join_pane` requires the pane to be isolated first (if it shares a window with other panes). The `break_pane` step for isolation creates temporary solo windows. These should disappear when the pane is immediately joined into the target, but if the join fails, they remain as visible solo windows.
 
 Can you describe the exact scenario? Which files are open when the extra windows appear? This will help me write a targeted test.
+
+**Session affinity fix** — Root cause: Phase 4 "Pick target window" iterates all wanted panes and picks the window with the most wanted panes across ALL tmux sessions. Since you have multiple sessions (0, 5, claude, quant-science), `tmux join-pane` was moving panes across session boundaries.
+
+**Fix** (sync.rs Phase 4): Derive target tmux session from `--window` parameter (if alive) or first wanted pane. Only consider windows in the same tmux session when picking `best_window`. Re-added `pane_session()` to sessions.rs for querying session name from pane/window.
+
+**Additional cleanup in same commit:**
+- **resync dedup**: `agent-doc resync` now deduplicates sessions sharing the same pane (keeps newest)
+- **Plugin dedup removed**: Removed `lastColumnStructure`/`lastActiveFile` caching from `EditorTabSyncListener`. All sync intelligence belongs in the CLI per your direction.
+- **focus.rs**: Uses `parse()` instead of `ensure_session()` — no longer auto-creates session UUIDs on focus
+
+**118 tests pass, clippy clean, binary installed.**
 
 ## User
 

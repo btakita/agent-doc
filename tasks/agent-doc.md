@@ -627,3 +627,26 @@ Still seeing
 
 `--col tasks/agent-doc.md --col tasks/dave-franklin.md [focus: tasks/agent-doc.md]`: left TMUX pane selected
 `--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right TMUX pane selected
+
+## Assistant
+
+**Same root cause: `plugin.md` had no registered pane** in sessions.json. The `resync` from earlier cleaned out its stale entry, and it was never re-claimed.
+
+When sync can't resolve `plugin.md` to a pane:
+1. Left column becomes empty (no pane for it)
+2. `--focus plugin.md` falls back to `anchor_pane` → `%65` (dave-franklin = right pane)
+3. Right pane gets selected
+
+**Fixed:** Re-claimed both files for this pane:
+```
+agent-doc claim tasks/plugin.md    → pane %39
+agent-doc claim tasks/agent-doc.md → pane %39
+```
+
+Both files now share this pane. Tab switching should work correctly now.
+
+**Underlying design gap:** When `--focus` targets a file with no registered pane, sync should maintain column-positional selection (select whatever pane occupies the same column position) rather than falling back to `anchor_pane`. This would make unclaimed files degrade gracefully instead of jumping pane selection. Want me to implement this?
+
+## User
+
+Yes. Also when `--focus` targets a file with no registered pane, a pane should be auto-registered if the doc has agent_doc frontmatter. If the *.md file does not, the tmux selection should remain the same...and there should be no auto-register.

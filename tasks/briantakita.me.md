@@ -541,3 +541,34 @@ at /home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/index.ts:4:7
 browser__build|watch
 server__build|watch
 server started on port 4100
+
+## Assistant
+
+**Dev server running on port 4100.** All the fixes are working — mapResponse removal, postcss pin, postinstall symlinking.
+
+Two minor warnings to note:
+- **`baseline-browser-mapping` outdated** — run `bun add baseline-browser-mapping@latest -D` to silence
+Still having the baseline-browser-mapping error after the install. Can you investigate further?
+- **`TimeoutOverflowWarning: Infinity`** — rmemo's `rmemo__wait` passes Infinity to `setTimeout`, which Node/Bun clamps to 1ms. Harmless but noisy. Could be fixed in ctx-core-dev by using `Number.MAX_SAFE_INTEGER` instead of `Infinity`.
+
+## User
+
+TS2322: Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.plugins' are incompatible between these types.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin[] | undefined' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[] | undefined'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin[]' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[]'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.entryPoints' are incompatible between these types.
+Type 'Record<string, string> | (string | { in: string; out: string; })[] | undefined' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
+Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
+Type '{ in: string; out: string; }' is not assignable to type 'string'.

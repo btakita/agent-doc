@@ -245,3 +245,57 @@ Want me to implement these additions in the agent-doc codebase? (Note: your mess
 ## User
 
 Yes. Please implement.
+
+## Assistant
+
+**Implemented all four changes.** All 138 tests pass.
+
+### 1. Global Tmux State Logging (`sync.rs`)
+
+Added `log_global_state()` method to `SyncLog` that logs `list-panes -a` and `list-windows -a`. Called at sync start and end in `run_with_tmux()`.
+
+New Tmux methods in `sessions.rs`:
+- `list_all_windows()` — all windows across all sessions with pane counts
+- `list_all_panes()` — all panes with window IDs and session names
+
+Output example:
+```
+[sync:GLOBAL] [sync-start] windows: @187 claude:claude (3 panes)\n@206 claude:stash (3 panes)
+[sync:GLOBAL] [sync-start] panes: %62 @187 claude:claude\n%60 @187 claude:claude\n%41 @187 claude:claude
+[sync:GLOBAL] [sync-end] windows: ...
+[sync:GLOBAL] [sync-end] panes: ...
+```
+
+### 2. Single Session Per Pane (`sessions.rs`)
+
+`register_full()` now removes stale entries pointing to the same pane before inserting. When session-c claims pane `%42`, any existing sessions (`session-a`, `session-b`) pointing to `%42` are automatically cleaned up:
+
+```
+[registry] removing stale session session-a (was pane %42)
+[registry] removing stale session session-b (was pane %42)
+```
+
+**Answer to your question: yes, single session per pane is better.** The old behavior allowed N sessions to reference the same pane, causing ambiguous resolution during sync. Now it's enforced at registration time.
+
+### 3. Stash-Window Tests (`sync.rs`)
+
+Two new tests:
+- `test_reconcile_pane_from_stash_window` — desired pane starts in stash, sync pulls it into target
+- `test_reconcile_multiple_stash_panes` — multiple desired panes in stash, all pulled into target
+
+### 4. Resync Deduplication (`resync.rs`)
+
+`agent-doc resync` now also deduplicates: when multiple sessions point to the same pane, it keeps the newest (by `started` timestamp) and removes the rest. Run `agent-doc resync` to clean up your current stale registry.
+
+### 5. Registry Dedup Test (`sessions.rs`)
+
+`register_full_deduplicates_pane` — verifies that registering a new session for pane `%42` removes two pre-existing sessions that claimed the same pane.
+
+**Binary reinstalled.** Run `agent-doc resync` to clean up the 13+ stale duplicate entries in your current `sessions.json`.
+
+## User
+
+Please look at the current tmux window.
+
+There are 3 panes. When a agent-doc sync runs, the tmux window should be corrected.
+Why does 3 panes remain when there are only 2 documents open in the editor?

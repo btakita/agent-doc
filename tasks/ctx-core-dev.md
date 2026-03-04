@@ -219,3 +219,43 @@ npm error 404 Note that you can also install from a
 npm error 404 tarball, folder, http url, or git url.
 npm error A complete log of this run can be found in: /home/brian/.npm/_logs/2026-03-04T22_04_18_752Z-debug-0.log
 ETA: 0s Left: 0 AVG: 0.29s  local:0/192/100%/0.3s
+
+## Assistant
+
+Three categories of publish failures:
+
+### 1. `check-dts` + TypeScript `next` (carousel, others)
+
+`check-dts` defaults to `moduleResolution: "node10"` internally. TypeScript 6.0.0-dev (`"typescript": "next"`) deprecated `node10` and now errors on it. This affects every package using `check-dts`.
+
+Options:
+- **Quick:** Add `"ignoreDeprecations": "6.0"` to each package's `tsconfig.json`
+- **Better:** Pin `"typescript": "~5.8.0"` (latest stable) instead of `"next"` across all packages — `next` is inherently unstable for CI/publish
+
+### 2. `esbuild-plugin-esmfile` — missing esbuild
+
+Already fixed: ran `pnpm install --filter esbuild-plugin-esmfile`. Should succeed on next publish.
+
+### 3. npm auth expired (affects ALL packages)
+
+`@ctx-core/solid-nanostores` tests passed (14/14) but `npm publish` failed — "Access token expired or revoked." This blocks all publishes, not just this package.
+
+```bash
+npm login
+```
+
+Then re-run `pnpm-publish--force`.
+
+### Recommended sequence
+
+```bash
+npm login                           # fix auth first
+# then either:
+pnpm -r exec -- jq '.devDependencies.typescript = "~5.8.0"' package.json > tmp && mv tmp package.json
+# or add ignoreDeprecations to tsconfigs
+pnpm-publish--force                 # retry
+```
+
+## User
+
+Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.

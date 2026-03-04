@@ -79,3 +79,19 @@ That's where `corky draft new` placed it — the `~/Documents/mail/` directory (
 ## User
 
 Why is `in_reply_to: ""`?
+
+## Assistant
+
+The conversation markdown files don't store raw email headers (including Message-ID). When I ran `corky draft new --in-reply-to`, the grep for Message-ID in the conversation file came back empty, so it defaulted to `""`.
+
+**For Gmail threading, this is actually fine** — Gmail threads by subject line matching, not by `In-Reply-To` header. Since the subject is `Re: Regarding Application for Senior Python Software Engineer with Cast & Crew (Backstage)`, Gmail will thread it correctly with Jonathan's original email.
+
+However, if you want the `In-Reply-To` header set properly (for non-Gmail recipients), corky would need to either:
+1. Store Message-IDs during `corky sync` (enhancement)
+2. Look up the Message-ID via Gmail API at push time (enhancement)
+
+For now the draft will thread correctly in Gmail without it.
+
+## User
+
+Send the reply.

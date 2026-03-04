@@ -507,13 +507,4 @@ I'm still seeing a full change with the tmux pane selection. Please log the curr
 
 ## User
 
-Please add a github description to https://github.com/btakita/agent-doc
-
-## Assistant
-
-**Done.** Set the GitHub description to:
-
-> Interactive document sessions with AI agents — tmux pane routing, editor layout sync, and session management for Claude Code and other agent backends
-
-## User
-
+Please switch to Rust 2024 edition

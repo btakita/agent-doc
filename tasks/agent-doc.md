@@ -572,3 +572,31 @@ I'm still seeing the same issue with cycling between the 2 tabs...Note the left 
 `--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right TMUX pane selected
 
 Since we have moved over to 1 tmux pane per agent doc session, the left pane claude session should also change. But it is not changing. Neither is the right tmux pane claude session.
+
+In the agent doc frontmatter, please qualify/contextualize the field `session:` with whatever it is a session of. What kind of session is this? A claude session?
+
+## Assistant
+
+**Diagnosed: `plugin.md` has no registered pane.**
+
+```
+agent-doc.md:    pane=%39, window=@315  ← alive
+plugin.md:       NOT FOUND in sessions.json  ← no pane!
+dave-franklin.md: pane=%65, window=@315  ← alive
+```
+
+The `resync` cleaned up 33 dead sessions — plugin.md's pane was among them. When plugin.md is in the layout, sync resolves only 1 pane (dave-franklin → %65), hits the `resolved < 2` path, and just does `select_pane(%65)` — the RIGHT pane. No reconcile runs, no pane swap.
+
+**Fix:** Claim plugin.md for this tmux pane or start a new Claude session:
+```bash
+agent-doc claim tasks/plugin.md
+# or
+agent-doc start tasks/plugin.md
+```
+
+**Re: `session:` field** — It's the **agent-doc session UUID**. It's not a Claude session ID — it's a registry key that maps this document to its tmux pane in `.agent-doc/sessions.json`. The `claim` and `start` commands generate this UUID and register it with the pane. I'll rename it to `agent_session:` for clarity if you'd like, but it would require updating all documents and the registry format.
+
+## User
+
+Should it be the `agent_doc_session` instead. Please update the name.
+

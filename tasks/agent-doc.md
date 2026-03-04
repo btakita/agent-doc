@@ -8,53 +8,62 @@ tmux_session: claude
 
 ### Architecture
 
-**tmux-router crate**: Extracted standalone Rust library (`tmux-router` v0.1.0) from agent-doc. Contains `Tmux` struct (30+ tmux operations), `Registry` (persistent key-to-pane mappings), `reconcile()` (2D layout sync algorithm), `IsolatedTmux` (RAII test infra), stash window, `FileResolution` callback. Published to crates.io. 46 tests (unit + integration + proptest). GitHub Pages docs at https://btakita.github.io/tmux-router/.
+**tmux-router crate**: Extracted standalone Rust library (`tmux-router` v0.1.1) from agent-doc. Contains `Tmux` struct (30+ tmux operations), `Registry` (persistent key-to-pane mappings), `reconcile()` (2D layout sync algorithm), `IsolatedTmux` (RAII test infra), stash window, `FileResolution` callback, `prune()` (dead pane removal + dedup). Published to crates.io. 46 tests (unit + integration + proptest). GitHub Pages docs at https://btakita.github.io/tmux-router/.
 
-**agent-doc as consumer**: v0.8.0 depends on tmux-router. `sessions.rs` (1312→413 lines) re-exports `Tmux`, `IsolatedTmux`, `RegistryEntry`, `Registry` from tmux-router. `sync.rs` (2518→64 lines) is a thin adapter: resolves frontmatter to `FileResolution`, calls `tmux_router::sync()`, writes `tmux_session` back to files. Free functions `capture_pane()` and `send_key()` use `tmux.cmd()` (pub in tmux-router).
+**agent-doc v0.9.0**: Interactive document sessions with AI agents. Depends on tmux-router. Published to crates.io, PyPI, GitHub Releases.
 
-**Tmux routing**: Window-scoped routing resolved. `SessionEntry` stores window ID. Plugin passes `--window` on all sync/claim/layout ops. `route` auto-starts dead panes and now joins active window via `join-pane` instead of creating separate windows (v0.8.0 fix). `claim` recovers from dead windows by scanning sessions.json for alive alternatives.
+**Core features:**
+- **Session workflow** (`agent-doc run`): diff → send to agent → append response → 3-way merge-safe write → snapshot → git commit
+- **Components** (`<!-- agent:name -->...<!-- /agent:name -->`): Bounded, named, re-renderable document regions. Always paired markers (closing marker required for idempotent re-rendering). Nested supported (innermost-first). Parsed in `component.rs`.
+- **`agent-doc patch`**: Replace/append/prepend component content. Config-driven modes via `.agent-doc/components.toml`. Shell hooks (`pre_patch` transforms via stdin/stdout, `post_patch` fire-and-forget). Thread-safe project-root resolution via `find_project_root()`.
+- **`agent-doc watch`**: Daemon with `notify` crate, PID file, per-file debounce (500ms default), bounded cycle limiting (default 3), convergence detection via content hashing.
+- **Comment stripping**: `strip_comments()` in diff.rs — strips `<!-- -->` and `[//]: # (...)` but preserves component markers. Comments are user scratchpad, never trigger responses.
+- **Auto-resync**: `prune()` runs before route/sync/claim operations. Delegates to `tmux_router::prune()`.
 
-**2D sync** (`agent-doc sync --col`): Declarative columnar layout delegated to tmux-router. Plugin detects editor splits via `LayoutDetector` (walks Swing Splitter tree). CLI arranges tmux panes to match. Fast path for focus-only changes. Auto-creates Claude sessions for unclaimed docs. In-memory auto-registration for unresolved agent-doc files using same-column donor panes.
+**Tmux routing**: Window-scoped routing. Plugin passes `--window` on all sync/claim/layout ops. `route` auto-starts dead panes via `join-pane` into active window. 2D sync (`agent-doc sync --col`) with ATTACH-first reconciliation order.
 
-**Sync reconciliation**: ATTACH-first order (ATTACH→SELECT→DETACH). Joins desired panes before evicting unwanted ones. `-d` flag on ALL `join-pane` calls during reconcile prevents intermediate selection changes. Only final `select_pane` sets active pane. Same-column-only donor pane search (no cross-column spiral). Stash window for evicted panes (prevents orphan window creation).
+**Plugin (JetBrains + VS Code)**: Lives in `agent-doc/editors/`. Plugin detects editor splits via `LayoutDetector`, sends `sync --col --focus <active-file>`. Inline hints at cursor for sync notifications.
 
-**Focus resolution**: 4-tier fallback: (1) non-agent-doc file → preserve selection, (2) resolved in file_to_pane → select pane, (3) column-positional fallback → first resolved pane in same column, (4) file not in layout → preserve selection.
+### Component Config (`.agent-doc/components.toml`)
 
-**Frontmatter**: Renamed `session:` → `agent_doc_session:` with serde alias for backward compatibility. Old documents auto-upgrade on next write cycle. `tmux_session:` field for multi-project tmux session affinity.
+```toml
+[log]
+mode = "append"        # replace (default) | append | prepend
+timestamp = true       # auto-prefix with ISO timestamp
+max_entries = 100      # auto-trim in append/prepend (0 = unlimited)
 
-**Plugin**: Always sends `sync --col` (never bare focus). Passes `--focus <active-file>` for tmux pane selection. Inline hints at cursor for sync notifications. `projectWindowId()` validates windows via `tmux list-panes` to avoid stale references.
+[status]
+mode = "replace"
+pre_patch = "scripts/validate.sh"   # stdin: content, stdout: transformed
+post_patch = "scripts/notify.sh"    # fire-and-forget, env: COMPONENT, FILE
+```
 
-**Junie integration**: Fire-and-forget bridge (`junie-bridge.sh`). Plugin copies diff to clipboard + opens request.md. Direct API backend (`agent/api.rs`) designed but not built.
+### Domain Ontology (overlay of base kernel)
+
+| Term | Derives From | Description |
+|------|-------------|-------------|
+| **Session** | project + story | Bounded interaction with temporal arc; unit of agent-doc work |
+| **Document** | entity + context | Markdown file holding conversational state |
+| **Component** | scope + abstraction | Bounded, named, re-renderable region (`<!-- agent:name -->...<!-- /agent:name -->`). Configurable mode and shell hooks. |
+| **Project** | system + scope | Bounded working context; identified by `.agent-doc/` at root. Contains documents, registry, snapshots, daemon. |
+| **Pane** | focus + scope | Tmux viewport — finite attention applied to a single document |
 
 ### Release History
 
 | Version | Key Changes |
 |---------|-------------|
-| v0.5.5 | Window-scoped routing, `--pane`/`--window` flags |
-| v0.5.6 | Commit-doc linking (`agent-doc(doc-name): timestamp`) |
-| v0.6.0 | `agent-doc sync` — 2D columnar layout, `LayoutDetector` |
-| v0.6.1–v0.6.2 | Junie agent backend, fire-and-forget bridge |
-| v0.6.3–v0.6.4 | LayoutDetector fixes, layout equalization |
-| v0.6.5 | Plugin always sends `sync --col`, single-file cleanup |
-| v0.6.6 | `--focus` on SyncLayoutAction, inline hint at cursor |
-| v0.7.0 | Snapshot-diff-apply sync rewrite, column inversion fix, dead window fallback |
-| v0.7.1 | Convergent reconciliation loop, proptest, deferred eviction, resilient claim |
-| v0.7.2 | Sync reconciliation fixes: same-column-only donors, focus preservation for unclaimed files, ATTACH-first order |
-| v0.8.0 | tmux-router extraction (-3133 lines), route auto_start joins active window, frontmatter rename to `agent_doc_session` |
+| v0.5.5–v0.5.6 | Window-scoped routing, commit-doc linking |
+| v0.6.0–v0.6.6 | 2D sync, Junie backend, LayoutDetector, `--focus` |
+| v0.7.0–v0.7.2 | Snapshot-diff-apply sync, convergent reconciliation, ATTACH-first order |
+| v0.8.0 | tmux-router extraction (-3133 lines), frontmatter rename to `agent_doc_session` |
+| v0.8.1 | Auto-resync via `tmux_router::prune()` |
+| v0.9.0 | **Components**, `patch` (modes + hooks), `watch` daemon, comment stripping. 150 tests. |
 
-### tmux-router v0.1.0
+### Documentation
 
-| Item | Status |
-|------|--------|
-| Crate extraction | Done — `tmux-router` crate with Tmux, Registry, sync, IsolatedTmux |
-| crates.io | Published: https://crates.io/crates/tmux-router |
-| GitHub | https://github.com/btakita/tmux-router |
-| CI | GitHub Actions: clippy + 46 tests (installs tmux via apt) |
-| Release workflow | `cargo publish` + GitHub Release on tag push |
-| mdbook | Deployed to https://btakita.github.io/tmux-router/ |
-| Rust edition | 2024 |
-| Registry | `.tmux-router/registry.json`, file-path-as-key (no UUID dependency) |
-| Config | `~/.config/tmux-router/config.toml` + CLI flags override |
+- `docs/guide/components.md` — Component reference (syntax, config, hooks, nesting)
+- `docs/guide/dashboard.md` — Dashboard-as-document tutorial (end-to-end flow, multi-component, loop prevention)
+- `docs/guide/commands.md` — All CLI commands including `patch` and `watch`
 
 ### Pending / Not Built
 
@@ -63,610 +72,65 @@ tmux_session: claude
 - `agent-doc compact` — auto-summarize old exchanges
 - `agent/api.rs` — direct HTTP API backend (replace junie bridge)
 - tmux-router CLI binary — `tmux-router sync`, `tmux-router register`, etc.
-- `CARGO_REGISTRY_TOKEN` secret on tmux-router GitHub repo (for automated crates.io publish)
+- `agent-doc init --dashboard` — scaffold standard template with log + status components
+- Log component prompt extraction — skill-level intelligence to move user prompts from components to log before patching
 
 ### Key Lessons
 
-1. **Never break wanted panes** from the target window — scatter-gather destroys working state with no rollback
-2. **No registry dependency for eviction** — break ANY unwanted pane, not just session-tracked ones
-3. **Re-query tmux state before each operation** — cached state goes stale instantly
-4. **ATTACH before DETACH** — join new panes first, select focus, then stash unwanted. Prevents intermediate selection changes
-5. **`-d` on ALL join-pane during reconcile** — no pane/window selection changes until final explicit `select_pane`
-6. **Same-column-only donors** — cross-column spiral causes wrong pane selection when focus file is unresolved
-7. **Log every tmux command** — essential for debugging multi-step operations
-8. **Plugin must validate windows** — stale `sessions.json` entries cause cascading failures
-9. **Dual-layer test coverage** — algorithm tests in tmux-router, integration tests in agent-doc. Edge cases in both.
+1. **Always paired markers** — single markers unworkable for re-rendering (no boundary after first render)
+2. **Project root resolution** — walk up from file to find `.agent-doc/`, not CWD. Thread-safe for parallel tests.
+3. **Component terminology** — "component" (not "range template") aligns with web components/React
+4. **CLI is dumb, skill is smart** — `patch` replaces content; prompt extraction lives in skill workflow
+5. **ATTACH before DETACH** — join new panes first, then stash unwanted
+6. **Log every tmux command** — essential for debugging multi-step operations
+7. **Dual-layer test coverage** — algorithm tests in tmux-router, integration tests in agent-doc
 
 ## User
 
-I had an issue with agent-doc run on an old claim. I ran it on corky.md
+Let's add some docs for components and dashboard on the README.
 
-It create a 3rd column on the right side
+Also, let's make the log component have an optional name or field that allows for multiple log components.
 
-left1 | right1 | right2*
-
-I then lost the session. Not sure if it's running atm. Please help.
-
-## Assistant
-
-**Your corky.md session is alive and idle.** It's in pane %83, window @315, waiting at the Claude prompt.
-
-**Current tmux layout:**
-- **@315 (active window)**: %39 (agent-doc.md, this session) | %83 (corky.md, idle at prompt)
-- **@382**: %79 (parallel-coding-with-tmux-markdown.md)
-
-**What happened with the 3rd column:** `agent-doc route` (or `claim`) for corky.md created a new pane and `join-pane`'d it into the active window @315 alongside the existing 2 panes, making 3 columns. The layout has since settled back to 2 panes.
-
-**The corky.md session in %83 is not running anything** — it completed its last task and is at the idle prompt. You can send it a new command or use `/agent-doc tasks/corky.md` to interact via the document.
-
-**sessions.json has 34 entries, most pointing to dead panes.** Run `agent-doc resync` to clean up stale entries.
-
-## User
-
-We should actively resync to avoid this issue. Contemplating having a daemon as well. For now, let's have resync happen where appropriate...such as before run or sync.
-
-## Assistant
-
-**Done.** Added `resync::prune()` — a quiet auto-resync that runs before every `route`, `sync`, and `claim` operation.
-
-**Changes:**
-- `resync.rs`: New `prune()` function — removes dead panes + deduplicates, prints 1 line if anything was pruned, silent otherwise
-- `route.rs`: Calls `prune()` at the start of `run_with_tmux` (before registry lookup)
-- `sync.rs`: Calls `prune()` at the start of `run_with_tmux` (before layout calculation)
-- `claim.rs`: Calls `prune()` at the start of `run` (before window resolution)
-
-Existing `agent-doc resync` command stays as-is (verbose output with full session listing).
-
-**106 tests pass, clippy clean, binary installed.**
-
-**Re: daemon** — good future addition. The lightweight `prune()` is ~1 `tmux list-panes` call, so the overhead per operation is negligible. A daemon would enable push-based cleanup (watch for pane exits) rather than poll-based.
-
-## User
-
-Is prune in tmux-router or agent-doc?
-
-## Assistant
-
-**Currently in agent-doc** (`agent-doc/src/resync.rs`). It calls `sessions::load()` / `sessions::save()` which use agent-doc's `.agent-doc/sessions.json`.
-
-The logic is generic though — prune dead panes from a registry file. It **should live in tmux-router** as `tmux_router::prune(tmux, registry_path)` since tmux-router already owns the `Registry` type and load/save functions. Agent-doc would just call it with its registry path.
-
-**Proposal:** Move to tmux-router before releasing. That makes it tmux-router v0.1.1 + agent-doc v0.8.1.
-
-## User
-
-Yes. Move to tmux-router.
-
-## Assistant
-
-**Released both.**
-
-**tmux-router v0.1.1:**
-- Added `tmux_router::prune(registry_path, tmux)` in `registry.rs` — removes dead panes + deduplicates, saves if changed, returns count removed
-- Re-exported from `lib.rs`
-- crates.io: https://crates.io/crates/tmux-router/0.1.1
-- GitHub Release: https://github.com/btakita/tmux-router/releases/tag/v0.1.1
-
-**agent-doc v0.8.1:**
-- `resync.rs` rewritten to delegate to `tmux_router::prune()` — 145→65 lines
-- `prune()` calls `tmux_router::prune(&registry_path, &tmux)` + prints message if anything removed
-- `run()` (verbose) loads before/after to show what was removed
-- crates.io: https://crates.io/crates/agent-doc/0.8.1
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.8.1
-- Binary installed: `agent-doc 0.8.1`
-
-**All tests pass** (46 tmux-router, 106 agent-doc), clippy clean. Parent submodule pointers updated.
-
-## User
-
-Let's start ideating on the dashboard-as-document concept mentioned in tasks/parallel-coding-with-tmux-markdown.md
-
-## Assistant
-
-From the parallel-coding discussion, three features are needed for dashboard-as-document. Here's the ideation:
-
-**1. `agent-doc watch <file>` — auto-submit on change**
-
-The simplest feature. An inotify/polling loop that triggers `agent-doc route <file>` when the file changes. Could use the `notify` crate (Rust-native file watching, cross-platform). Closes the trigger gap — external watchers write to the file, agent-doc auto-responds.
-
-Would I need a new process for each file? Can there be a background daemon that is explicitly started or auto-starts on the first call?
-
-Debounce is critical (500ms–1s) to avoid firing mid-write. The JetBrains plugin already has this problem solved.
-
-Should we move the debounce logic to agent-doc? agent-doc should fully work independently of the Jetbrains plugin.
-
-**2. Sectional write-back — agent edits specific sections**
-
-The core architectural change. Today agents only append `## Assistant` blocks. A dashboard needs inline updates. Two approaches:
-
-- **HTML comment markers**: `<!-- agent:status-table -->...<!-- /agent:status-table -->` — agent replaces content between markers
-We have range templates. Presumably it would be for a full replacement of the status-table?
-Can we have nested templates?
-Can we also have in-place templates (just the template itself rather than open template/close template)?
-
-- **Section targeting**: `## Status` heading → agent replaces content under that heading until next heading
-
-The marker approach is simpler and doesn't require heading parsing. It also works inside any section, not just top-level headings. The snapshot diff needs to understand "this section was modified by the watcher" vs "this section was last written by the agent."
-
-**3. Structured field awareness (future)**
-
-Parse template fields: `{{session.status}}` → typed changes. The diff becomes "field `ses-002.status` changed from `active` to `flagged`" rather than raw text. Skip for now — raw diff + section markers covers 80% of dashboard use cases.
-
-**Proposed MVP:**
-- `agent-doc watch` using `notify` crate with debounce
-- HTML comment markers for sectional write-back
-- Dashboard template is just a markdown file with marker regions
-- Watcher process (external) writes to the file → `agent-doc watch` auto-submits → agent updates marked sections
-
-**Open questions:**
-- Should `watch` be a long-running daemon or a one-shot triggered by inotify? (daemon is simpler for users)
-I addressed it above. Explicitly started daemon or lazy-started daemon.
-- Should sectional write-back be in the skill instructions or in the CLI? (CLI is more reliable — `agent-doc write-section <file> <section-name>`)
-cli
-- How do we prevent infinite loops? (watcher writes → agent responds → file changes → watcher writes again)
-Can we pass the upstream reason as an argument for the change?
-
-It may be possible for the document to initiate a change that causes a self-update. But it's ok if the cycle is bounded. Need a way to detect unbounded infinite loops. Having an infinite loop may be ok? If the agent document can be in a steady state.
-
-## Assistant
-
-Addressing your inline annotations:
-
-**Re: daemon model for watch**
-
-A single daemon per project. `agent-doc watch` starts a background process that watches all claimed files. Auto-start on first `claim` or `route`, explicit start via `agent-doc watch --start`. Holds one `notify` watcher, routes file changes to the correct tmux pane. No per-file process.
-
-How does agent-doc know what a project is? Related to the tmux pane? Is a project the same as tmux_session?
-Does tmux-router know about the project?
-
-**Re: debounce in agent-doc**
-
-Yes — debounce belongs in agent-doc, not the plugin. The daemon debounces per-file (500ms default, configurable). The plugin can fire immediately — agent-doc coalesces.
-
-Good. Let's stage for implementation.
-
-**Re: range templates**
-
-Three template flavors:
-
-1. **Range template** (open/close): `<!-- agent:status -->...<!-- /agent:status -->` — full replacement of content between markers
-2. **Nested templates**: Yes — `<!-- agent:outer -->` can contain `<!-- agent:inner -->`. Inner markers updated independently. Parse innermost first.
-3. **In-place template**: `<!-- agent:timestamp -->` (single marker, no close) — replaced with a single inline value. Works for scalars: timestamps, status badges, counters.
-
-Would we always need range templates? How would a single marker work for multiple renders? How would the next render replace the content from the first render using a single marker? How would we know exactly what is template and what is data?
-
-**Re: CLI for sectional write-back**
-
-`agent-doc write-section <file> <section-name> [content]` — reads from stdin or argument. Skill instructions just say "use `agent-doc write-section` to update dashboard fields."
-
-Would write work instead of write-section? Is the impulse for contextualizing write-section due to supporting other types of writes?
-
-**Re: infinite loops**
-
-Three mechanisms:
-
-1. **Change source tracking**: `--source watcher` vs `--source agent`. Agent sees where the change came from and decides whether to respond.
-2. **Bounded cycles**: `--max-cycles 3` — after 3 consecutive agent-triggered re-submits with no external change, pause.
-3. **Steady state detection**: If agent's response produces no diff from previous response (idempotent), stop re-triggering. Convergence = done.
-
-Bounded cycles as the safe default. Infinite loops that converge are fine; divergent loops caught by counter.
-
-**Revised design summary:**
-
-| Component | Description |
-|-----------|-------------|
-| `agent-doc watch` | Single daemon per project, `notify` crate, per-file debounce, lazy or explicit start |
-| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` for sections, single marker for scalars |
-| Nested templates | Supported — innermost-first parsing |
-| `write-section` CLI | `agent-doc write-section <file> <section> [content]` |
-| Loop prevention | Source tracking + bounded cycles (default 3) + steady state detection |
-
-## Assistant
-
-Addressing your second round of annotations:
-
-**Re: project identity**
-
-A "project" = the directory containing `.agent-doc/`. Same pattern as git (`.git/`), cargo (`.cargo/`). tmux-router is project-agnostic — it operates on registry paths and tmux sessions passed in by the caller. agent-doc resolves the project root and passes paths to tmux-router. Not the same as `tmux_session` — that's session affinity (multiple projects can share one tmux session, or one project can span multiple).
-
-Let's document this concept. In making the docs, let's follow the same ontology pattern as in philosophy.
-project is scoped to the context of agent-doc of course.
-
-
-**Re: range templates only**
-
-Always range templates. Single markers are unworkable for re-rendering — after the first render, there's no way to distinguish the marker from rendered data. You'd need a second marker to delimit the boundary. Range templates solve this cleanly: everything between `<!-- agent:name -->` and `<!-- /agent:name -->` gets replaced. The markers themselves are preserved. Drop in-place templates from the design.
-
-Explain reason in documentation.
-
-**Re: `write` vs `write-section`**
-
-`write` is cleaner. Section name is just an argument:
-
-How about `patch` instead of `write`? I think that is a good distinction.
-
-- `agent-doc write <file> <section>` — replace content between range markers (reads from stdin)
-- `agent-doc submit <file>` — existing append mode (diff → respond → append)
-
-Two verbs, two modes. `write` for targeted section updates, `submit` for conversational flow.
-
-**Updated design summary:**
-
-| Component | Description |
-|-----------|-------------|
-| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
-| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested supported (innermost-first) |
-| `agent-doc write` | `agent-doc write <file> <section> [content]` — replace range template content |
-| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
-| Project identity | Directory containing `.agent-doc/`; tmux-router is project-agnostic |
-
-## User
-
-Let's have a "tips" section:
-- Agent documents can reference other files including other agent documents
-
-Any other tips?
-
-I also have exkernel installed. So we can overload project for agent-doc.
-
-## Assistant
-
-**Re: document the project concept with ontology**
-
-The Domain Ontology table in `agent-doc/CLAUDE.md` has 12 terms but is missing "Project". Adding:
-
-| **Project** | system + scope | The bounded working context; identified by the `.agent-doc/` directory at its root |
-
-A project is a system (whole of relationships — documents, registry, snapshots) bounded by a scope (the directory tree). We can use `/exkernel` to formally register it as a domain overlay node.
-
-**Re: explain range-only in docs**
-
-The reasoning: a single marker `<!-- agent:x -->` has no boundary — after the first render inserts content, the next render can't know where it ends. Range markers (`<!-- agent:x -->...<!-- /agent:x -->`) create an unambiguous boundary. The closing marker makes re-rendering idempotent. Will document this in CLAUDE.md.
-
-**Re: `patch` instead of `write`**
-
-`patch` is better — communicates targeted modification of a bounded region, not a full file write. The verb pairing:
-
-- `agent-doc patch <file> <section>` — replace content between range markers
-- `agent-doc submit <file>` — conversational append (diff + respond)
-What about `agent-doc run`? I thought we switched from submit to run.
-
-**Re: tips section**
-
-- Agent documents can reference other files, including other agent documents — use relative paths from the project root
-- Inline annotations (editing within previous `## Assistant` blocks) are valid prompts — the agent responds to the diff
-- Comments (`<!-- -->` and `[//]: # (...)`) are a private scratchpad — they never trigger agent responses
-Comments are also used for templates.
-- Use frontmatter `tmux_session:` to bind a document to a specific tmux session for multi-project workflows
-- Snapshots are keyed by canonical file path — moving/renaming a file resets the diff baseline
-- Range templates are always paired — no single markers (closing marker required for idempotent re-rendering)
-- `agent-doc resync` cleans up stale pane references; `prune()` runs automatically before route/sync/claim
-
-**Re: exkernel for project**
-
-Ready to invoke `/exkernel` to create "Project" as a domain overlay term extending `system` + `scope` from the base kernel, scoped to agent-doc.
-
-Please do
-
-**Updated design summary:**
-
-| Component | Description |
-|-----------|-------------|
-| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
-| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested (innermost-first). No single markers (closing marker required for idempotent re-rendering) |
-| `agent-doc patch` | `agent-doc patch <file> <section> [content]` — replace range template content |
-| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
-| Project | Directory containing `.agent-doc/`; tmux-router is project-agnostic |
-
-## Assistant
-
-**Re: `run` not `submit`**
-
-You're right — the CLI command is `agent-doc run`, not `submit`. Corrected verb pairing:
-
-- `agent-doc run <file>` — conversational mode (diff + respond + append)
-- `agent-doc patch <file> <section>` — targeted range template replacement
-
-**Re: comments vs template markers**
-
-Good catch. Range template markers (`<!-- agent:name -->`) use HTML comment syntax but are structural, not scratchpad. The comment-stripping logic for diff comparison needs to distinguish:
-
-- `<!-- arbitrary text -->` — scratchpad (stripped for diff, never triggers response)
-- `<!-- agent:name -->` / `<!-- /agent:name -->` — structural markers (preserved for diff, define replacement boundaries)
-
-Updated tip: "Regular HTML comments are a private scratchpad. Range template markers (`<!-- agent:name -->`) look like comments but are structural — they define replacement boundaries and are preserved during diff."
-
-**Re: exkernel for Project**
-
-Done. "Project" already existed in the kernel (Ring 1) as a general term. Added the domain overlay to `agent-doc/CLAUDE.md`:
-
-| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
-
-**Final design summary:**
-
-| Component | Description |
-|-----------|-------------|
-| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
-| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested (innermost-first). Structural, not scratchpad. |
-| `agent-doc patch` | `agent-doc patch <file> <section> [content]` — replace range template content |
-| `agent-doc run` | Conversational mode (diff + respond + append) — the existing flow |
-| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
-| Project | Directory containing `.agent-doc/`; domain overlay of kernel term |
-
-## User
-
-Implement.
-
-Add several functional tests and examples for dashboard-as-document
-
-How would we handle a scenario of a field changing in value...and the user prompts inline near the value?
-
-Would the prompt remain until removed by default? Can we have some affordances to move it to a log area or something else?
-
-## Assistant
-
-**Implemented in agent-doc v0.9.0.** All three features built, 143 tests pass, clippy clean.
-
-**Range Templates** (`src/range.rs`) — 14 tests:
-- `<!-- agent:name -->...<!-- /agent:name -->` markers, stack-based nesting, no regex
-- `RangeTemplate` with `content()` and `replace_content()`
-
-**Comment Stripping** (`src/diff.rs`) — 8 new tests:
-- `strip_comments()` strips `<!-- -->` and `[//]: # (...)`, preserves agent markers
-- Applied in `compute()` before comparison
-
-**`agent-doc patch`** (`src/patch.rs`) — 5 tests:
-- `agent-doc patch <file> <section> [content]` — replace range template content, update snapshot
-
-**`agent-doc watch`** (`src/watch.rs`) — 8 tests:
-- Single daemon, `notify` crate, PID file, per-file debounce, cycle limiting, convergence detection
-
-**Re: inline prompts near changing values**
-
-Good question. When a user writes an inline prompt (blockquote, annotation) inside a range template section, and then `patch` replaces the section content — the user's prompt gets destroyed. Two approaches:
-
-1. **Prompt remains until removed (default)** — `patch` only replaces content *outside* of inline prompts. This requires parsing the section content for user annotations before replacing. Complex.
-
-2. **Move prompts to a log section** — better. The `patch` command (or the agent via the skill) moves user prompts from inside range templates to a dedicated `<!-- agent:log -->` section before replacing. The log preserves context:
-
-```markdown
-<!-- agent:log -->
-[2026-03-04 13:15] (from status section) > Why is ses-002 flagged?
-Agent: ses-002 was flagged because...
-<!-- /agent:log -->
-
+```
+<!-- agent:capture:my-section -->
+The Answer:
 <!-- agent:status -->
-| Session | State |
-|---------|-------|
-| ses-002 | flagged |
+42
+I can write an inline prompt here.
 <!-- /agent:status -->
+<!-- agent:log:my-section -->
+The log of inline prompt + answer goes here.
+<!-- /agent:log:my-section -->
+<!-- /agent:capture:my-section -->
 ```
 
-This keeps range templates clean for data while preserving the conversation. The log section is itself a range template — the agent appends to it rather than replacing.
+If we do have a capture, we wouldn't need to explicitly define a name...but can use scoping rules.
 
-**Recommended approach:** User prompts inside range templates are extracted to the log section by the skill workflow (not the CLI). The CLI (`patch`) is dumb — it replaces content between markers. The skill handles the intelligence of "move prompts before patching."
-
-This keeps the CLI simple and the prompt-handling logic in the skill where it can evolve without binary releases.
-
-## User
-
-Good. Let's have the log "component" be part of the standard template. Let's also use the language of "component" as this is similar to web components or React component, etc.
-
-## Assistant
-
-**Adopting "component" terminology.** Range templates become **components** — bounded, named, re-renderable regions in a document. Aligns with web components / React: a component has a name, boundaries, and replaceable content.
-
-**Standard dashboard template with log component:**
-
-```markdown
-# Dashboard
-
-<!-- agent:log -->
-<!-- /agent:log -->
-
+```
+<!-- agent:capture -->
+The Answer:
 <!-- agent:status -->
-| Field | Value |
-|-------|-------|
+42
+I can write an inline prompt here.
 <!-- /agent:status -->
+<!-- agent:log -->
+The log of inline prompt + answer goes here.
+<!-- /agent:log -->
+<!-- /agent:capture -->
 ```
 
-The **log component** is a standard built-in. User prompts found inside other components get moved here before patching. It's append-only (other components are replace-only).
+However we could have sibling captures or "forms" using the name:
 
-**Updated terminology:**
-
-| Old | New |
-|-----|-----|
-| Range template | Component |
-| Section (CLI arg) | Component name |
-| `RangeTemplate` (struct) | Rename to `Component` for consistency |
-| `agent-doc patch <file> <section>` | `agent-doc patch <file> <component>` |
-
-The CLI arg name, struct name, and all docs should use "component." The markers stay `<!-- agent:name -->` — the syntax is unchanged, only the vocabulary.
-
-**Next steps to codify:**
-1. Rename `RangeTemplate` → `Component` in `range.rs` (or rename to `component.rs`)
-2. Rename `section` → `component` in `patch.rs` CLI arg
-3. Add "Component" to the Domain Ontology in `CLAUDE.md`
-4. Add `log` as a recognized built-in component name in the skill workflow
-5. `agent-doc init --dashboard` could scaffold the standard template with log + status components
-
-## User
-
-Should we have hooks for components. Allowing for custom component types. And to customize behavior on existing components such as the log.
-
-## Assistant
-
-**Yes — component hooks are the right extensibility model.** Two-layer approach: config-driven modes for common behavior, shell hooks as escape hatch.
-
-**Component config** (`.agent-doc/components.toml`):
-
-```toml
-[log]
-mode = "append"        # append | replace (default) | prepend
-timestamp = true       # auto-prefix with ISO timestamp
-max_entries = 100      # auto-trim for append/prepend modes
-
-[status]
-mode = "replace"       # default — full content replacement
-pre_patch = "scripts/validate-status.sh"   # shell hook (future)
-post_patch = "scripts/notify-change.sh"    # shell hook (future)
 ```
+<!-- agent:capture:my-section -->
+The Answer:
+<!-- agent:status -->
+42
+I can write an inline prompt here.
+<!-- /agent:status -->
+<!-- /agent:capture:my-section -->
 
-**Built-in modes** (no scripts needed):
-- `replace` — default, full content replacement (current `patch` behavior)
-- `append` — new content added at bottom (log component default)
-- `prepend` — new content added at top (newest-first)
-- `timestamp` — auto-prefix entries with ISO timestamp
-- `max_entries` — auto-trim old entries in append/prepend modes
-
-**Shell hook lifecycle** (future, v0.10+):
-
-| Hook | When | Receives |
-|------|------|----------|
-| `pre-patch` | Before replacement | stdin: new content, env: `COMPONENT`, `FILE` |
-| `post-patch` | After write | env: `COMPONENT`, `FILE`, `PREV_HASH`, `NEW_HASH` |
-
-**Recommended phasing:**
-- **v0.9.x**: Config file with built-in modes (`replace`, `append`, `prepend`, `timestamp`, `max_entries`). Covers log and most dashboard components.
-- **v0.10+**: Shell hooks (`pre_patch`, `post_patch`) for custom validation, side effects, cross-component triggers.
-
-This means custom component types are just config — define a name, set its mode, done. No code changes needed for new component behaviors.
-
-## User
-
-Would shell hooks be ok to implement for 0.9.0?
-
-## Assistant
-
-**Yes.** Shell hooks are trivial to add — just `std::process::Command` with env vars and stdin piping, same pattern agent-doc already uses for git. Maybe 50 lines on top of what's built.
-
-**Full 0.9.0 component scope:**
-
-1. **Rename** `RangeTemplate` → `Component`, `section` → `component` in CLI
-2. **Components config** (`.agent-doc/components.toml`) — parse with existing `toml` dep
-3. **Built-in modes** in `patch`: `replace` (default), `append`, `prepend`, `timestamp`, `max_entries`
-4. **Shell hooks** in `patch`: `pre_patch` and `post_patch` scripts
-
-```rust
-// Hook execution — straightforward
-fn run_hook(script: &str, component: &str, file: &Path, content: &str) -> Result<String> {
-    let output = Command::new("sh")
-        .args(["-c", script])
-        .env("COMPONENT", component)
-        .env("FILE", file.to_string_lossy().as_ref())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()?;
-    // write content to stdin, read transformed content from stdout
-    ...
-}
+<!-- agent:log:my-section -->
+The log of inline prompt + answer goes here.
+<!-- /agent:log:my-section -->
 ```
-
-`pre_patch` can transform content (stdout replaces input). `post_patch` is fire-and-forget (notification, side effects).
-
-Shall I implement the renames + config + hooks now?
-
-## User
-
-yes...implement all
-
-## Assistant
-
-**Done.** All renames, component config, built-in modes, and shell hooks implemented. 150 tests pass, clippy clean.
-
-**Renames:**
-- `range.rs` → `component.rs`, `RangeTemplate` → `Component`
-- `section` → `component` in CLI arg (`agent-doc patch <file> <component>`)
-- All error messages updated ("component" not "range template")
-- `CLAUDE.md` Domain Ontology: `Range Template` → `Component`
-
-**Component config** (`.agent-doc/components.toml`):
-```toml
-[log]
-mode = "append"
-timestamp = true
-max_entries = 100
-
-[status]
-pre_patch = "scripts/validate.sh"
-post_patch = "scripts/notify.sh"
-```
-
-Config is resolved by walking up from the file to find `.agent-doc/` (not CWD). Thread-safe for parallel tests.
-
-**Built-in modes** (in `patch::run`):
-- `replace` — default, full replacement
-- `append` — content added at bottom
-- `prepend` — content added at top
-- `timestamp` — auto-prefix with ISO timestamp
-- `max_entries` — auto-trim in append/prepend
-
-**Shell hooks:**
-- `pre_patch` — stdin: content, stdout: transformed content. Can transform before write.
-- `post_patch` — fire-and-forget, runs after write. Env: `COMPONENT`, `FILE`.
-
-**New tests:** 14 in patch.rs (replace, preserve surrounding, not found, append mode, prepend mode, trim entries, no config defaults, pre_patch hook transforms, post_patch hook runs, snapshot updated).
-
-## User
-
-Is everything documented? Include some tutorial for the dashboard-as-document flow. And tutorials for components using hooks. And custom components.
-
-## Assistant
-
-**Documented.** Created two new guide pages and updated existing docs. 150 tests pass.
-
-**New docs:**
-
-1. **`docs/guide/components.md`** — Full component reference:
-   - Syntax (paired markers, naming rules, nesting)
-   - `agent-doc patch` usage (argument, stdin, piped from scripts)
-   - `.agent-doc/components.toml` configuration (modes, timestamp, max_entries)
-   - Shell hooks tutorial (`pre_patch` with stdin/stdout transform, `post_patch` fire-and-forget)
-   - Components vs regular comments (structural vs scratchpad)
-
-2. **`docs/guide/dashboard.md`** — End-to-end dashboard tutorial:
-   - Quick start: create document → configure components → update from scripts → watch
-   - Flow diagram: external script → patch → watch detects → run → agent responds
-   - Multi-component dashboard example (builds, tests, metrics, log)
-   - User interaction with dashboards (ask questions about component data)
-   - Loop prevention (bounded cycles, convergence detection)
-   - Tips section
-
-**Updated docs:**
-
-3. **`docs/guide/commands.md`** — Added `patch` and `watch` command references with flags, config options, and cross-links to component/dashboard guides
-
-4. **`docs/guide/document-format.md`** — Added Components section explaining component markers vs regular comments, with link to components guide
-
-5. **`docs/SUMMARY.md`** — Added Components and Dashboard-as-Document to the Guide section
-
-## User
-
-Release v0.9.0
-
-## Assistant
-
-**Released agent-doc v0.9.0.** All targets published.
-
-| Target | Status |
-|--------|--------|
-| crates.io | Published: https://crates.io/crates/agent-doc/0.9.0 |
-| PyPI | Published via maturin |
-| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.9.0 |
-| Binary | Installed: `agent-doc 0.9.0` |
-| Skill | Up to date (v0.9.0) |
-| Parent submodule | Updated to v0.9.0 |
-
-**What's in v0.9.0:**
-- Components (`<!-- agent:name -->...<!-- /agent:name -->`) — bounded, named, re-renderable regions
-- `agent-doc patch` — replace/append/prepend component content with config + shell hooks
-- `agent-doc watch` — daemon with debounce, loop prevention, convergence detection
-- Comment stripping in diffs (preserves component markers)
-- New docs: components guide, dashboard-as-document tutorial
-- 150 tests, clippy clean
-
-**Verification:** 150 tests pass (129 unit + 21 integration), clippy clean with `-D warnings`, all three publish targets succeeded.
-
-## User
-
-compact this file

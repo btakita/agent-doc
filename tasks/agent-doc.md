@@ -110,3 +110,4 @@ Component names support colon-separated namespacing: `agent:type:scope` (e.g., `
 
 ## User
 
+Commit the agent-doc README

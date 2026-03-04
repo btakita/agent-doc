@@ -398,3 +398,34 @@ Abstracts git completely. Validates content. Works alongside Claude Code — sta
 ## User
 
 If I use Cloudflare pages with Hono, are there any advantages to using Astro?
+
+## Assistant
+
+**Astro's advantages over Hono alone:**
+
+| What Astro adds | Without Astro (Hono) |
+|---|---|
+| Content collections — typed markdown schemas, auto slugs, query API | Parse frontmatter, build slug logic yourself |
+| Static pre-rendering — zero JS by default, pages built at build time | Server-render every request (or implement caching) |
+| Island architecture — `client:load`, `client:visible` directives | Wire up hydration manually |
+| Image optimization — built-in `<Image>` with sharp | Add manually |
+| Sitemap + RSS — one-line integrations | Build them |
+| Markdown/MDX pipeline with remark/rehype | Manual parsing |
+
+**Hono's advantages:**
+
+| What Hono gives | Astro equivalent |
+|---|---|
+| First-class API routes, middleware, full request control | Has API routes but secondary |
+| Edge-native (~14KB), built for Workers | Needs adapter |
+| Full control, minimal abstractions | Framework conventions |
+
+**Bottom line:** For a mostly-static marketing site (5 pages, blog, deals, FAQ), Astro saves significant boilerplate — content collections alone are worth it. But if you're already comfortable with Hono and using relementjs/rmemo, you control everything and skip the framework overhead.
+
+**Hybrid:** Astro with Cloudflare adapter uses Workers under the hood. Content collections for static content, Workers for dynamic endpoints (investor portal, API proxy). Best of both, but you're in Astro's world.
+
+**If this is a portfolio piece** for future clients: Astro's polish (sitemaps, image optimization, SEO defaults) matters. If you're optimizing for your own velocity: Hono + your libraries ships faster.
+
+## User
+
+I want an easy interface for editing the content. Does keystatic expect git commits or is it a database?

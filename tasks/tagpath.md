@@ -1,10 +1,8 @@
 ---
-session: 4602f467-ef2a-4094-a750-5eb533368988
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
+tmux_session: '1'
 ---
+
 
 ## Project Summary
 

@@ -86,3 +86,21 @@ It create a 3rd column on the right side
 left1 | right1 | right2*
 
 I then lost the session. Not sure if it's running atm. Please help.
+
+## Assistant
+
+**Your corky.md session is alive and idle.** It's in pane %83, window @315, waiting at the Claude prompt.
+
+**Current tmux layout:**
+- **@315 (active window)**: %39 (agent-doc.md, this session) | %83 (corky.md, idle at prompt)
+- **@382**: %79 (parallel-coding-with-tmux-markdown.md)
+
+**What happened with the 3rd column:** `agent-doc route` (or `claim`) for corky.md created a new pane and `join-pane`'d it into the active window @315 alongside the existing 2 panes, making 3 columns. The layout has since settled back to 2 panes.
+
+**The corky.md session in %83 is not running anything** — it completed its last task and is at the idle prompt. You can send it a new command or use `/agent-doc tasks/corky.md` to interact via the document.
+
+**sessions.json has 34 entries, most pointing to dead panes.** Run `agent-doc resync` to clean up stale entries.
+
+## User
+
+We should actively resync to avoid this issue. Contemplating having a daemon as well. For now, let's have resync happen where appropriate...such as before run or sync.

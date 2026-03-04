@@ -48,3 +48,16 @@ tmux_session: claude
 ## User
 
 Use the corky logo in all of the docs. Such as the readme, mdbook, etc.
+
+## Assistant
+
+Added the corky logo (SVG, 128px) to:
+
+- **README.md** — centered `<img>` above the `# Corky` heading
+- **docs/introduction.md** — same centered logo at the top of the mdbook landing page
+- **docs/assets → ../assets** — symlink so mdbook can serve the logo from the existing `assets/` directory
+
+The logo assets already existed (`assets/logo.svg`, `assets/logo-64.png`, `assets/logo-128.png`) — just weren't referenced anywhere.
+
+## User
+

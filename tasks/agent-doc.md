@@ -746,3 +746,5 @@ Want to proceed with the commit + release?
 ## User
 
 Yes...let's go with the plan.
+
+Let's think about the api for tmux-router. I would like to have a cli if possible. So the commands should be coherent and designed for friendly cli usage.

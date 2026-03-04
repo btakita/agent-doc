@@ -368,3 +368,5 @@ cd agent-doc/editors/jetbrains && ./gradlew buildPlugin signPlugin
 ## User
 
 The cycling still happens. Are there tests? Do I have the correct iteration of the plugin installed?
+
+Can we reproduce the exact issue that I'm seeing in the automated tests?

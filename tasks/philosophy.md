@@ -675,3 +675,46 @@ Release existential-kernel
 ## User
 
 Install locally
+
+## Assistant
+
+**Installed from crates.io.**
+
+```
+$ cargo install exkernel
+  Installing exkernel v0.1.0
+    Finished `release` profile [optimized] in 5.19s
+   Replacing /home/brian/.cargo/bin/exkernel
+```
+
+Binary at `~/.cargo/bin/exkernel`. Verified working:
+
+```
+$ exkernel --version
+exkernel 0.1.0
+
+$ exkernel --ontology existential-kernel/ontology scope 0
+Ring 0 — kernel (14 universal terms, always loaded. The existential scope.)
+  existence, entity, abstraction, scope, context, resolution,
+  pattern, system, domain, focus, perspective, consciousness,
+  evolution, story
+```
+
+**Note:** `~/.cargo/bin` needs to be in your `$PATH`. If `exkernel` isn't found directly, add to your shell profile:
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+**Ontology discovery:** The CLI looks for ontology content in this order:
+1. `--ontology <path>` flag
+2. Current directory (if it contains `exkernel.toml`)
+3. `~/.exkernel/sources/` (populated by `exkernel fetch`)
+
+From within `agent-loop/`, use: `exkernel --ontology existential-kernel/ontology <command>`
+
+Or run `exkernel fetch github:existential-kernel/ontology` to cache it globally.
+
+## User
+
+Please add path to ~/.mise.toml or to a .zsh path. Whichever one seems better

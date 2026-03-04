@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, sessions};
+use crate::{frontmatter, resync, sessions};
 
 use tmux_router::FileResolution;
 
@@ -27,6 +27,7 @@ pub fn run_with_tmux(
     focus: Option<&str>,
     tmux: &Tmux,
 ) -> Result<()> {
+    let _ = resync::prune(); // Clean stale entries before layout calculation
     let registry_path = sessions::registry_path();
     let files_needing_session = RefCell::new(Vec::new());
 

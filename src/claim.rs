@@ -23,9 +23,10 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-use crate::{frontmatter, sessions};
+use crate::{frontmatter, resync, sessions};
 
 pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>) -> Result<()> {
+    let _ = resync::prune(); // Clean stale entries before window resolution
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }

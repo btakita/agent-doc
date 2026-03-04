@@ -652,3 +652,26 @@ If you ever want something shorter for marketing: "exkernel" as the informal/spo
 
 ## User
 Release existential-kernel
+
+## Assistant
+
+**Released. All three repos tagged v0.1.0.**
+
+| Repo | Release | Links |
+|------|---------|-------|
+| **exkernel** | v0.1.0 | [crates.io](https://crates.io/crates/exkernel) · [GitHub Release](https://github.com/existential-kernel/exkernel/releases/tag/v0.1.0) |
+| **ontology** | v0.1.0 | [GitHub Release](https://github.com/existential-kernel/ontology/releases/tag/v0.1.0) |
+| **spec** | v0.1.0 | [GitHub Release](https://github.com/existential-kernel/spec/releases/tag/v0.1.0) |
+
+**Install:** `cargo install exkernel`
+
+**What shipped:**
+- CLI with 5 working commands: `lookup`, `scope`, `lint`, `graph`, `fetch`
+- 114 term ontology across 3 rings, lint-clean
+- Node format spec + ring structure spec
+- DDD mapping, domain overlay pattern
+- Apache-2.0 across all repos
+
+## User
+
+Install locally

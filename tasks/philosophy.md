@@ -148,7 +148,35 @@ I like this. So exkernel would also allow composable data...starting with the ex
 
 Recommendation: **`existential-kernel`** repo, **`exkernel`** CLI binary. Or keep `btakita/philosophy` and rename when the org forms — GitHub handles redirects.
 
-Let's rename to existential-kernel. I may want to reserve my personal scoped philosophy later. So would the executable be in btakita/existential-kernel while the ontology lives in btakita/philosophy? Or would a placeholder existential ontology live in btakita/existential-kernel? 
+Let's rename to existential-kernel. I may want to reserve my personal scoped philosophy later. So would the executable be in btakita/existential-kernel while the ontology lives in btakita/philosophy? Or would a placeholder existential ontology live in btakita/existential-kernel?
+
+## Assistant
+
+**Recommended split:**
+
+```
+btakita/existential-kernel    ← Rust crate + CLI (exkernel binary)
+btakita/philosophy            ← Your personal ontology content (152 nodes + kernel)
+```
+
+I do need some existential ontology for other people to use. btakita/philosophy kindof represents that. But it is scoped a bit to my perspective and experience. Ideally, an existential ontology would be truly existential. But I have a close enough approximation for now. I think the existential ontology may be unclear to other people, especially if it is in btakita/philosophy. Need a better project name...or org to better communicate the symbol of the existential ontology.
+
+**Why separate:**
+- `existential-kernel` is the *tool* — works with any ontology, not just yours
+- `philosophy` is your *content* — personal kernel + extended nodes
+- Others fork `philosophy` for their own kernels, use the same `exkernel` CLI
+- Tool references content by path: `exkernel --ontology ~/philosophy lint`
+
+**Composable scoping (your insight):**
+```
+exkernel scope existence          # broadest — all kernel terms
+exkernel scope domain agent-doc   # narrows to agent-doc's domain ontology
+exkernel scope project corky      # narrows to corky project's terms
+```
+
+Each zoom level inherits from above and adds domain-specific terms. The CLI traverses: kernel → domain overlay → project scope.
+
+**No placeholder ontology needed in existential-kernel.** The crate ships with SPEC.md template + validation rules. Actual content comes from the user's ontology repo. The tool is content-agnostic.
 
 ## User
 

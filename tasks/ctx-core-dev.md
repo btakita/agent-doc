@@ -452,3 +452,24 @@ Next steps:
 ## User
 
 Please run recursive-git-commit with the appropriate commit message for these changes.
+
+## Assistant
+
+Committed all changes in ctx-core-dev (`3fb468dea`):
+
+```
+chore: replace check-dts with tsc --noEmit, fix tsconfigs for TypeScript 6
+
+- Replace check-dts with tsc --noEmit in 184 packages
+- Remove check-dts from devDependencies
+- Update module from ESNext to NodeNext in all tsconfigs
+- Update root tsconfig: moduleResolution node → nodenext
+- Add tsconfig.json for esbuild-plugin-esmfile
+- Migrate @ctx-core/auth0-management to auth0 v5 SDK types
+```
+
+Note: `recursive-git-commit` opens an interactive editor, so I used a single `git commit` instead. All 210 changed files committed in one commit since the changes are all the same type (TS 6 compatibility).
+
+## User
+
+Run pnpm-publish--force

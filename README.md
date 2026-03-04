@@ -36,6 +36,8 @@ agent-doc focus session.md               # focus tmux pane for a session
 agent-doc layout a.md b.md --split h [--window W]  # arrange panes (window-scoped)
 agent-doc outline session.md             # section structure + token counts
 agent-doc outline session.md --json      # JSON output for tooling
+agent-doc patch dashboard.md status "new content"  # update a component
+agent-doc watch                          # auto-submit on file change
 agent-doc resync                         # validate sessions, remove dead panes
 agent-doc commit session.md              # git add + commit with timestamp
 agent-doc prompt session.md              # detect permission prompts → JSON
@@ -117,6 +119,55 @@ Both work simultaneously because the run sends a diff, not a parsed structure.
 
 Delete anything from the document. On next run, the diff shows deletions
 and the agent sees the cleaned-up doc as ground truth.
+
+## Components
+
+Components are bounded, named regions in a document that can be updated independently:
+
+```markdown
+<!-- agent:status -->
+| Service | State   |
+|---------|---------|
+| api     | healthy |
+<!-- /agent:status -->
+```
+
+Update a component:
+
+```sh
+agent-doc patch dashboard.md status "| api | healthy |"
+echo "deploy complete" | agent-doc patch dashboard.md log
+```
+
+### Component config
+
+Configure modes and hooks in `.agent-doc/components.toml`:
+
+```toml
+[log]
+mode = "append"        # append | replace (default) | prepend
+timestamp = true       # auto-prefix with ISO timestamp
+max_entries = 100      # trim old entries
+
+[status]
+pre_patch = "scripts/validate.sh"   # transform content (stdin → stdout)
+post_patch = "scripts/notify.sh"    # fire-and-forget after write
+```
+
+### Dashboard-as-document
+
+A dashboard is a markdown document with agent-maintained components. External scripts update components via `agent-doc patch`, and the watch daemon can auto-trigger agent responses:
+
+```sh
+# Start watching for changes
+agent-doc watch
+
+# Update from CI scripts
+agent-doc patch monitor.md builds "$(./format-builds.sh)"
+agent-doc patch monitor.md log "Build #${BUILD_ID}: ${STATUS}"
+```
+
+See [Components guide](docs/guide/components.md) and [Dashboard tutorial](docs/guide/dashboard.md) for full documentation.
 
 ## Git Integration
 
@@ -206,6 +257,8 @@ agent-doc prompt --answer N <file>  # answer prompt option N
 agent-doc commit <file>             # git add + commit with timestamp
 agent-doc skill install             # install Claude Code skill definition
 agent-doc skill check               # check if installed skill is up to date
+agent-doc patch <file> <component> [content]  # update component (stdin if no content)
+agent-doc watch [--stop] [--status]          # watch daemon (debounce + loop prevention)
 agent-doc audit-docs                # audit instruction files for staleness
 agent-doc upgrade                   # upgrade to latest version
 ```

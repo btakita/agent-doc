@@ -79,3 +79,29 @@ existential-kernel (8/10, kept) > existview (6/10) > weltanschauung (5/10) > wor
 ## User
 
 What name would be a 10/10?
+
+## Assistant
+
+A 10/10 probably doesn't exist — naming is always tradeoffs. The gap between 8 and 10 for "existential-kernel" is *length* (19 chars, hyphenated) and *jargon density* (both words are loaded).
+
+A 10/10 would be: short, unique, evocative, pronounceable, and memorable after hearing it once.
+
+**Candidates that push toward 10:**
+
+| Name | Score | Why |
+|------|-------|-----|
+| **exo** | 9/10 | Greek prefix for "outside/beyond." Short (3 chars). Evokes existence without spelling it out. CLI: `exo lookup scope`. Problem: `exo` is taken (Exoscale CLI). |
+| **kern** | 8.5/10 | Short, punchy, literally "kernel." `kern lookup scope`. Problem: typography term (letter spacing), may confuse. |
+| **ousia** | 9/10 | Greek *ousia* (οὐσία) = "essence/being/substance." Aristotle's central metaphysical term. 5 chars, unique, pronounceable (OO-see-ah). `ousia lookup scope`. Rich philosophical lineage. Problem: obscure to non-philosophers. |
+| **nous** | 8.5/10 | Greek *nous* (νοῦς) = "mind/intellect/reason." 4 chars. `nous lookup scope`. Problem: in casual English, "nous" means common sense (British slang). |
+| **ontos** | 8.5/10 | From Greek *on/ontos* = "being." `ontos lookup scope`. Clear link to ontology. 5 chars. Problem: sounds like a plural. |
+
+**The honest answer:** "existential-kernel" at 8/10 is probably optimal *for what it actually is*. The perfect name would be a single evocative word that immediately communicates "composable ontological framework rooted in existence" — but that concept is inherently multi-word. Any shorter name trades precision for brevity.
+
+The `exk` alias already solves the typing problem. The full name communicates clearly in docs and conversation. That's a good split: `exk` for hands, `existential-kernel` for minds.
+
+## User
+
+Of those names, only ontos is available on crates.io. existential-kernel is difficult to remember.
+
+existence is available

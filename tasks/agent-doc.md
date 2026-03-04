@@ -221,9 +221,31 @@ There should only be 1 tmux window for the active claimed documents. There are m
 
 Can you describe the exact scenario? Which files are open when the extra windows appear? This will help me write a targeted test.
 
+I can, but let's have comprensive logging to detect the conditions.
+This logging should include the entire tmux tree including:
+- tmux sessions with attach state
+- windows in the sessions
+- panes in the windows
+- last access time of the tmux session
+
 **Session affinity fix** — Root cause: Phase 4 "Pick target window" iterates all wanted panes and picks the window with the most wanted panes across ALL tmux sessions. Since you have multiple sessions (0, 5, claude, quant-science), `tmux join-pane` was moving panes across session boundaries.
 
+Let's have the tmux session be logged in the document.
+So in our case, all claim should be in the claude tmux session.
+This should be configurable per agent document.
+
 **Fix** (sync.rs Phase 4): Derive target tmux session from `--window` parameter (if alive) or first wanted pane. Only consider windows in the same tmux session when picking `best_window`. Re-added `pane_session()` to sessions.rs for querying session name from pane/window.
+
+See above re: the configured tmux session name per agent doc.
+
+If the agent doc has no tmux session name:
+- The last picked tmux session name should be used and set to the agent doc's configuration
+- If there is no active last picked tmux session name, the user should be prompted with a choice of the running tmux sessions or to create a new tmux session
+
+If the agent doc has an expired tmux session name, there should be an option to:
+- pick the previously used tmux session name (default option)
+- select another running tmux session name
+- create a new tmux session
 
 **Additional cleanup in same commit:**
 - **resync dedup**: `agent-doc resync` now deduplicates sessions sharing the same pane (keeps newest)

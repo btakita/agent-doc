@@ -105,3 +105,44 @@ The `exk` alias already solves the typing problem. The full name communicates cl
 Of those names, only ontos is available on crates.io. existential-kernel is difficult to remember.
 
 existence is available
+
+## Assistant
+
+**`existence` is the 10/10 name.**
+
+| | `existence` | `ontos` | `existential-kernel` |
+|---|---|---|---|
+| Memorable | Instantly — everyone knows the word | Requires explanation | Two loaded words |
+| Precise | IS the root concept of the whole framework | Adjacent (Greek for "being") | Descriptive but clinical |
+| CLI feel | `existence lookup scope` | `ontos lookup scope` | `exkernel lookup scope` |
+| Short alias | `exs` (3 chars) | `ontos` (already short) | `exk` (3 chars) |
+| Searchable | High — unique in tech context | High — unique | Medium — generic words |
+| Available | crates.io yes, GitHub org likely | crates.io yes | Already established |
+
+**Why `existence` works where `worldview` didn't:** "worldview" is vague — it could be a blog, a framework, anything. "existence" is *specific to this project* because Existence IS the first term, the universal set, the root of the ontology chain. The name isn't generic when the tool literally models Existence.
+
+```
+$ existence lookup scope
+$ existence search "pattern"
+$ existence new domain-model --ring 1
+$ existence scope 0
+```
+
+Reads like natural language. "Look up scope in existence." "Search existence for pattern."
+
+**Migration cost if you rename:**
+- Rename GitHub org `existential-kernel` → `existence` (or create new)
+- Rename crate `exkernel` → `existence` on crates.io
+- Update all submodule URLs, CLAUDE.md refs, skill files
+- Old `cargo install exkernel` still works (crates.io doesn't delete)
+- Significant but one-time effort
+
+**My recommendation:** If you're going to rename, do it now while the project is young (v0.2.1, low adoption). `existence` is genuinely better — it's the name the project *should* have had from the start.
+
+Or keep `existential-kernel` as the org and just rename the crate/CLI to `existence`. The org name matters less (people interact with the CLI daily, the org rarely).
+
+## User
+
+Yes! Rename the crate to existence. There is a github user https://github.com/existence
+
+So what should the org be named? existence-kernel, existence-org, something else?

@@ -225,4 +225,23 @@ Ready to create the org when you are. You'll need to do it via the GitHub web UI
 
 What an undertaking. I setup existential-kernel. Please help me setup the org documents. Such as the README and gh pages for https://github.com/existential-kernel
 
-Add g
+Add git submodules into agent-loop
+
+## Assistant
+
+**Org setup complete:**
+
+- **Org profile** (https://github.com/existential-kernel) — `.github` repo with `profile/README.md` showing the 14-term kernel table, 3-layer architecture, philosophical lineage, and project links
+- **GitHub Pages** (https://existential-kernel.github.io) — dark-themed landing page with the kernel table, composable scoping chain (`Existence → Domain → Project → Focus`), and project directory
+- **Submodules** added to agent-loop:
+  - `existential-kernel/.github`
+  - `existential-kernel/existential-kernel.github.io`
+
+**Next repos to create** (when ready):
+- `existential-kernel/ontology` — extract 14-term kernel + core nodes from `btakita/philosophy`
+- `existential-kernel/exkernel` — Rust crate + CLI
+- `existential-kernel/spec` — node format specification
+
+## User
+
+Should we add more of the ontology from btakita/philosophy? The 14 node kernel is good for a short list, but the rest of the terms are useful. Let's also make the existential-kernel immediately apply to software projects. Referencing Domain Driven Design to create the "Ubiquitous Language" https://martinfowler.com/bliki/UbiquitousLanguage.html

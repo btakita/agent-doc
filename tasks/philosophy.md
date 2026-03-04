@@ -299,4 +299,40 @@ The `-lang` name is a commitment to a direction. If you're serious about making 
 
 ## User
 lets go with existence-lang
-existence for crates, existence-lang f
+existence for crates, existence-lang for github org
+
+## Assistant
+
+**Migration plan:**
+
+```
+existential-kernel (old)          →  existence-lang (new)
+├── exkernel → existence          ←  CLI crate, renamed
+├── ontology → ontology           ←  term definitions, same name
+├── spec → spec                   ←  node format, same name
+├── .github → .github             ←  org profile, updated
+└── *.github.io → *.github.io    ←  landing page, updated
+```
+
+**You need to do first:** Create the `existence-lang` org at https://github.com/organizations/plan — GitHub requires browser auth for org creation.
+
+**Once created, I'll handle:**
+1. Create repos under `existence-lang` (existence, ontology, spec, .github, existence-lang.github.io)
+2. Push all content with updated refs (`existential-kernel` → `existence-lang`, `exkernel` → `existence`)
+3. Rename crate to `existence`, publish v0.3.0 to crates.io
+4. Update submodules in agent-loop (`existential-kernel/` → TBD directory name)
+5. Update all CLAUDE.md, skills, README, landing page refs
+6. The old `existential-kernel` repos stay as archives with redirect notes
+
+**Question:** Should the submodule directory in agent-loop be `existence-lang/` or just `existence/`?
+
+Let me know once the org is created and I'll execute the full migration.
+
+## User
+
+I renamed the org.
+https://github.com/organizations/existence-lang
+
+Please update docs
+
+and 

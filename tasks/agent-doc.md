@@ -72,3 +72,34 @@ I'm having issues syncing tmux in it's current state with the layout. Please add
 Also, can we have a hidden window that is a "stash" of all of the document sessions that are not currently open?
 
 There was another tmux session that the inactive panes were going to. I wonder if the hidden single window session would fix the problem.
+
+## Assistant
+
+**Implementing both.** Here's the plan:
+
+**Stash window** — 3 new methods on `Tmux` in `sessions.rs`:
+- `find_stash_window()` — finds existing stash window by name in the tmux session
+- `ensure_stash_window()` — creates one if missing, reuses if found
+- `stash_pane()` — moves evicted panes to the stash window via `join_pane` instead of `break_pane` (which scatters into random new windows)
+
+The EVICT phase of `reconcile()` now uses `stash_pane()`. ANCHOR and JOIN isolation steps also stash instead of scattering. REORDER keeps `break_pane` since those panes are immediately re-joined.
+
+**6 new integration tests** simulating real-world state:
+1. **Stale sessions** — 5 panes, kill 2, reconcile with 3 survivors
+2. **Multi-file same pane** — multiple files claim same pane (like %41 with 5 files)
+3. **Dead panes in desired** — some desired panes are dead, reconcile skips them gracefully
+4. **Stash collects evicted** — evict 3 panes, verify all end up in stash window
+5. **Stash reuse** — reconcile twice with different layouts, stash window reused not duplicated
+6. **Large layout** — 8 panes in 3-column grid simulating real editor state
+
+Implementation in progress in this session.
+
+## User
+
+Where is the spec file for agent-doc sync?
+
+Now there are multiple windows in the tmux session.
+
+We don't seem to be making good progress. It seems that there is something fundamentally wrong with the articture.
+
+The PLUGIN MUST BE SIMPLE. No deduping. ONLY send agent-doc sync the layout. THAT IS ALL.

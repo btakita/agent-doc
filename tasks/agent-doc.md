@@ -358,5 +358,41 @@ Please do
 | Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
 | Project | Directory containing `.agent-doc/`; tmux-router is project-agnostic |
 
+## Assistant
+
+**Re: `run` not `submit`**
+
+You're right — the CLI command is `agent-doc run`, not `submit`. Corrected verb pairing:
+
+- `agent-doc run <file>` — conversational mode (diff + respond + append)
+- `agent-doc patch <file> <section>` — targeted range template replacement
+
+**Re: comments vs template markers**
+
+Good catch. Range template markers (`<!-- agent:name -->`) use HTML comment syntax but are structural, not scratchpad. The comment-stripping logic for diff comparison needs to distinguish:
+
+- `<!-- arbitrary text -->` — scratchpad (stripped for diff, never triggers response)
+- `<!-- agent:name -->` / `<!-- /agent:name -->` — structural markers (preserved for diff, define replacement boundaries)
+
+Updated tip: "Regular HTML comments are a private scratchpad. Range template markers (`<!-- agent:name -->`) look like comments but are structural — they define replacement boundaries and are preserved during diff."
+
+**Re: exkernel for Project**
+
+Done. "Project" already existed in the kernel (Ring 1) as a general term. Added the domain overlay to `agent-doc/CLAUDE.md`:
+
+| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
+
+**Final design summary:**
+
+| Component | Description |
+|-----------|-------------|
+| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
+| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested (innermost-first). Structural, not scratchpad. |
+| `agent-doc patch` | `agent-doc patch <file> <section> [content]` — replace range template content |
+| `agent-doc run` | Conversational mode (diff + respond + append) — the existing flow |
+| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
+| Project | Directory containing `.agent-doc/`; domain overlay of kernel term |
+
 ## User
 
+Implement.

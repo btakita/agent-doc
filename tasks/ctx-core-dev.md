@@ -259,3 +259,62 @@ pnpm-publish--force                 # retry
 ## User
 
 Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.
+
+## Assistant
+
+npm requires 2FA or a granular access token with 2FA bypass for publishing. Two options:
+
+1. **Granular access token (best for automation):**
+   - npmjs.com → Access Tokens → Generate New Token → Granular Access Token
+   - Enable "Bypass 2FA for automation"
+   - Scope to `@ctx-core` packages (and unscoped packages like `rebuildjs`, `rmemo`, etc.)
+   - Then: `npm config set //registry.npmjs.org/:_authToken=<token>`
+
+2. **Interactive `npm login`** with authenticator app — will prompt for OTP during each publish (blocks parallel publishing)
+
+Option 1 is better since `pnpm-publish--force` runs publishes in parallel — interactive 2FA prompts would block.
+
+## User
+
+> @ctx-core/auth0-management@10.0.177 test /home/brian/work/ctx-core/ctx-core-dev/lib/auth0-management
+> pnpm run /^test:/
+
+. test:types$ check-dts
+. test:unit$ tsx node_modules/uvu/bin.js . '\.test\.(ts|js)$'
+. test:types: - Check types
+. test:unit: auth0__user/index.test.ts
+. test:unit: •   (1 / 1)
+. test:unit:
+. test:unit: auth0__v2_user__GET__fetch/index.test.ts
+. test:unit: • •   (2 / 2)
+. test:unit:
+. test:unit: auth0__v2_users_by_email__GET__fetch/index.test.ts
+. test:unit: • •   (2 / 2)
+. test:unit:
+. test:unit: auth0_management__token__new/index.test.ts
+. test:unit: •   (1 / 1)
+. test:unit:
+. test:unit:   Total:     6
+. test:unit:   Passed:    6
+. test:unit:   Skipped:   0
+. test:unit:   Duration:  27.70ms
+. test:unit: Done
+. test:types: ✖ Check types
+. test:types: Option 'moduleResolution=node10' is deprecated and will stop functioning in TypeScript 7.0. Specify compilerOption '"ignoreDeprecations": "6.0"' to silence this error.
+. test:types: ✖ auth0__user/index.test.ts:1:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserProfile'.
+. test:types: ✖ auth0__v2_client__GET__fetch/index.d.ts:1:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'Client'.
+. test:types: ✖ auth0__v2_client_grants__GET__fetch/index.d.ts:1:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'ClientGrant'.
+. test:types: ✖ auth0__v2_user__GET__fetch/index.d.ts:1:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserProfile'.
+. test:types: ✖ auth0__v2_user__PATCH__fetch/index.d.ts:1:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserProfile'.
+. test:types: ✖ auth0__v2_user__PATCH__fetch/index.d.ts:1:28: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserUpdate'.
+. test:types: ✖ auth0__user/index.d.ts:2:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserProfile'.
+. test:types: ✖ auth0__v2_user__GET__fetch/index.test.ts:2:15: Type error TS2305
+. test:types:   Module '"auth0"' has no exported member 'UserProfile'.
+. test:types: Failed

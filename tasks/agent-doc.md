@@ -528,3 +528,7 @@ Added `Tmux::active_pane(session)` method and selected-pane logging at SNAPSHOT,
 ## User
 
 Switching between agent-doc and plugin **still** changes the tmux focused pane. Why have you not caught this issues yet? There should be a failing test to reproduce this issue.
+
+The use case is I'm cycling the left column agent doc...and the tmux selected pane should not change.
+
+The plugin popup should prompt with the selected pane in addition to the --col arguments in my 2 column layout.

@@ -1,10 +1,8 @@
 ---
-session: cb5672cc-5d1d-4228-af30-640a336f692e
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: cb5672cc-5d1d-4228-af30-640a336f692e
+tmux_session: claude
 ---
+
 
 ## Session Summary
 
@@ -32,4 +30,4 @@ Philosophy integration for cross-project AI agent context. All work complete and
 
 ## User
 
-
+I want to use the term project in agent-doc...which will be scoped. Please make an existential entry for "project" in philosophy. Please follow the patterns.

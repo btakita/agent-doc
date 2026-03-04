@@ -693,3 +693,26 @@ Still having the issue with the unclaimed plugin.md causing the tmux focus to ch
 `--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right-side TMUX pane selected
  
 Can we please fix this issue with tests? This is my 4th attempt for you to fix this.
+
+## Assistant
+
+**Found and fixed two bugs in the previous implementation.**
+
+**Bug 1: Cross-column spiral.** `find_donor_pane` spiraled from the file's column to adjacent columns. When plugin.md (col0) had no resolved pane, it found dave-franklin's pane in col1 and auto-registered plugin.md to the RIGHT pane. **Fix:** Removed spiral — `find_column_pane` only searches the same column.
+
+**Bug 2: `resolved < 2` early return ignored focus.** When only 1 file was resolved (dave-franklin), the early return always called `select_pane(dave-franklin)` — the RIGHT pane. **Fix:** Early return now respects `--focus`. If the focused file has no resolved pane, selection is preserved.
+
+**Trace for your scenario:**
+1. Layout: col0=[plugin.md], col1=[dave-franklin.md]
+2. plugin.md → unresolved (session but no pane in registry)
+3. `find_column_pane(plugin.md, col0)` → None (no donor in same column) → no auto-register
+4. `resolved == 1` → early return
+5. Focus = plugin.md, not in file_to_pane → **preserve selection → left pane stays**
+
+**New tests:** `test_unclaimed_left_col_preserves_selection`, `test_claimed_left_col_selects_left_pane`, `test_no_cross_column_donor`
+
+**152 tests pass, clippy clean, binary installed.** Try switching tabs again.
+
+## User
+
+It works. I want to have the next release. And to extract a new crate called `tmux-router`. Should we commit this change first. Then work on tmux-router. Is tmux-router a good name for the project or should we name it something else? 

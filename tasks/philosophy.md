@@ -796,6 +796,54 @@ The CLI path is good for terms you already understand. The agent loop path is be
 
 Yes and yes.
 
+## Assistant
+
+**Both done.**
+
+**`exkernel new <term>` — implemented and pushed.**
+
+```
+$ exkernel new domain-model --no-edit
+Created src/domain-model.md
+
+$ exkernel new domain-model --ring 1 --description "A representation of a domain's concepts"
+Created src/domain-model.md
+# opens $EDITOR
+```
+
+Flags: `--ring <N>` (adds to exkernel.toml), `--no-edit` (skip editor), `--description "<text>"` (pre-fill ontology section). 36 tests pass.
+
+**`/exkernel` Claude skill — created.**
+
+At `.claude/skills/exkernel/SKILL.md`. Five commands:
+
+| Invocation | What it does |
+|-----------|-------------|
+| `/exkernel lookup <term>` | Read a term's full definition |
+| `/exkernel search <query>` | Search terms by relevance |
+| `/exkernel new <term>` | Interactive authoring — scaffold, draft with existential lens, iterate with user |
+| `/exkernel lint` | Validate ontology, offer to fix issues |
+| `/exkernel scope [ring]` | Show ring structure |
+
+The `/exkernel new` workflow is the interesting one — the agent reads existing nodes to absorb the voice and linking patterns, drafts all three sections (Ontology/Axiology/Epistemology), and iterates with you until the definition is right. Much more productive than editing a blank template.
+
+**exkernel CLI summary (v0.1.0 + local changes):**
+
+| Command | Status |
+|---------|--------|
+| `lookup` | Done |
+| `scope` | Done |
+| `lint` | Done |
+| `graph` | Done |
+| `fetch` | Done |
+| `search` | **New** |
+| `completions` | **New** |
+| `new` | **New** |
+| `install` | Stub |
+| `serve` | Stub |
+| `build-site` | Stub |
+| `context` | Stub |
+
 ## User
 
-
+How do I upgrade this for my user?

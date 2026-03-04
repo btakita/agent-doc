@@ -5,18 +5,22 @@ use uuid::Uuid;
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux session routing.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     /// Agent conversation ID — used for `--resume` with agent backends.
     /// Separate from `session` so the routing key never changes.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// Tmux session name for pane affinity (e.g., "claude").
+    /// Set by `claim` or `sync` on first use; used to keep panes in the same session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -58,6 +62,13 @@ pub fn set_session_id(content: &str, session_id: &str) -> Result<String> {
 pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.resume = Some(resume_id.to_string());
+    write(&fm, body)
+}
+
+/// Update the tmux_session name in a document string.
+pub fn set_tmux_session(content: &str, session_name: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.tmux_session = Some(session_name.to_string());
     write(&fm, body)
 }
 
@@ -153,6 +164,7 @@ mod tests {
             agent: Some("claude".to_string()),
             model: Some("opus".to_string()),
             branch: Some("dev".to_string()),
+            tmux_session: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

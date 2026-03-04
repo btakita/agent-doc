@@ -366,6 +366,123 @@ impl Tmux {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Check if a tmux session with the given name exists.
+    pub fn session_alive(&self, name: &str) -> bool {
+        self.cmd()
+            .args(["has-session", "-t", name])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// List all tmux sessions with their names and attached state.
+    /// Used for interactive prompting when tmux_session is not configured.
+    #[allow(dead_code)]
+    pub fn list_sessions(&self) -> Result<Vec<(String, bool)>> {
+        let output = self
+            .cmd()
+            .args([
+                "list-sessions",
+                "-F",
+                "#{session_name}\t#{session_attached}",
+            ])
+            .output()
+            .context("failed to list tmux sessions")?;
+        if !output.status.success() {
+            anyhow::bail!("tmux list-sessions failed");
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (name, attached) = line.split_once('\t')?;
+                Some((name.to_string(), attached == "1"))
+            })
+            .collect())
+    }
+
+    /// Dump the full tmux tree: sessions -> windows -> panes.
+    /// Returns a formatted string for logging.
+    pub fn dump_tmux_tree(&self) -> Result<String> {
+        use std::collections::BTreeMap;
+
+        // Get sessions with attach state and last activity
+        let sess_out = self
+            .cmd()
+            .args([
+                "list-sessions",
+                "-F",
+                "#{session_name}\t#{?session_attached,attached,detached}\t#{session_activity}",
+            ])
+            .output()
+            .context("failed to list tmux sessions")?;
+        if !sess_out.status.success() {
+            anyhow::bail!("tmux list-sessions failed");
+        }
+
+        // Get all panes with full context
+        let panes_out = self
+            .cmd()
+            .args([
+                "list-panes",
+                "-a",
+                "-F",
+                "#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_current_command}",
+            ])
+            .output()
+            .context("failed to list tmux panes")?;
+        if !panes_out.status.success() {
+            anyhow::bail!("tmux list-panes -a failed");
+        }
+
+        // Parse sessions
+        type WindowMap = BTreeMap<String, (String, Vec<(String, String)>)>;
+        let mut sessions: BTreeMap<String, (String, String, WindowMap)> = BTreeMap::new();
+        for line in String::from_utf8_lossy(&sess_out.stdout).lines() {
+            let parts: Vec<&str> = line.splitn(3, '\t').collect();
+            if parts.len() >= 3 {
+                sessions
+                    .entry(parts[0].to_string())
+                    .or_insert_with(|| {
+                        (parts[1].to_string(), parts[2].to_string(), BTreeMap::new())
+                    });
+            }
+        }
+
+        // Parse panes into tree
+        for line in String::from_utf8_lossy(&panes_out.stdout).lines() {
+            let parts: Vec<&str> = line.splitn(5, '\t').collect();
+            if parts.len() >= 5 {
+                if let Some((_, _, ref mut windows)) = sessions.get_mut(parts[0]) {
+                    windows
+                        .entry(parts[1].to_string())
+                        .or_insert_with(|| (parts[2].to_string(), Vec::new()))
+                        .1
+                        .push((parts[3].to_string(), parts[4].to_string()));
+                }
+            }
+        }
+
+        // Format tree
+        let mut output = String::from("tmux tree:\n");
+        for (name, (attach, activity, windows)) in &sessions {
+            output.push_str(&format!("  {} ({}, activity={})\n", name, attach, activity));
+            for (win_id, (win_name, panes)) in windows {
+                let pane_list: Vec<String> = panes
+                    .iter()
+                    .map(|(id, cmd)| format!("{}({})", id, cmd))
+                    .collect();
+                output.push_str(&format!(
+                    "    {} \"{}\" [{}]\n",
+                    win_id,
+                    win_name,
+                    pane_list.join(", ")
+                ));
+            }
+        }
+
+        Ok(output)
+    }
+
     /// List all windows across all sessions (for global state logging).
     pub fn list_all_windows(&self) -> Result<String> {
         let output = self

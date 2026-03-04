@@ -893,3 +893,33 @@ Can we install agent-doc v0.8.0 locally so I can test it? This is a big change s
 Setup github actions for tmux-router. Similar to corky and agent-doc. Running tests and releasing.
 
 Set up mdbook gh pages site as well for tmux-router
+
+## Assistant
+
+**agent-doc v0.8.0 is installed and ready for testing.**
+
+```
+$ agent-doc --version
+agent-doc 0.8.0
+```
+
+**What changed in v0.8.0:**
+- `sessions.rs`: 1312 → 413 lines. `Tmux` struct replaced with re-export from `tmux-router`
+- `sync.rs`: 2518 → 64 lines. Full sync algorithm replaced with thin adapter to `tmux_router::sync()`
+- `route.rs`: Fixed auto_start bug — new panes now `join-pane` into active window instead of creating separate windows
+- All 106 tests pass (85 unit + 21 integration), clippy clean
+
+**Manual test checklist:**
+1. `agent-doc sync --col plan.md --col agent-doc.md --focus plan.md` — panes arrange correctly
+2. `agent-doc route <unclaimed-file>` — joins active window, no separate window
+3. Switch tabs in IDE — focus stays in correct column
+
+**Re: GitHub Actions for tmux-router** — separate task. Needs CI with tmux available for the 46 integration tests that create isolated tmux servers. Will model on agent-doc's workflow.
+
+**Re: mdbook for tmux-router** — separate task. Will set up docs site structure with GitHub Pages deployment.
+
+## User
+
+Please setup the gh actions and mdbook first.
+
+Then we will release tmux-router. Then release agent-doc.

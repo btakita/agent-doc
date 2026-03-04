@@ -86,6 +86,28 @@ impl SyncLog {
         self.entries.iter().any(|e| !e.ok)
     }
 
+    /// Log the global tmux state (all windows and panes across all sessions).
+    fn log_global_state(&mut self, tmux: &Tmux, label: &str) {
+        // Log all windows
+        match tmux.list_all_windows() {
+            Ok(windows) => {
+                self.log("GLOBAL", format!("[{}] windows: {}", label, windows));
+            }
+            Err(e) => {
+                self.log_err("GLOBAL", format!("[{}] failed to list windows: {}", label, e));
+            }
+        }
+        // Log all panes
+        match tmux.list_all_panes() {
+            Ok(panes) => {
+                self.log("GLOBAL", format!("[{}] panes: {}", label, panes));
+            }
+            Err(e) => {
+                self.log_err("GLOBAL", format!("[{}] failed to list panes: {}", label, e));
+            }
+        }
+    }
+
     /// Return all entries (for testing assertions).
     #[cfg(test)]
     fn entries(&self) -> &[SyncEntry] {
@@ -97,7 +119,7 @@ impl SyncLog {
     fn mutation_count(&self) -> usize {
         self.entries
             .iter()
-            .filter(|e| matches!(e.phase, "ANCHOR" | "EVICT" | "JOIN" | "ORDER"))
+            .filter(|e| matches!(e.phase, "DETACH" | "ATTACH" | "REORDER"))
             .count()
     }
 }
@@ -154,8 +176,20 @@ pub fn run_with_tmux(
     let layout = Layout::parse(col_args)?;
     let all_files = layout.all_files();
 
-    // Single file without --window: just focus.
+    // Log global tmux state at sync start
+    let mut global_log = SyncLog::new();
+    global_log.log_global_state(tmux, "sync-start");
+
+    // Single file without --window: just focus (only if it has a session UUID).
     if all_files.len() == 1 && window.is_none() {
+        if all_files[0].exists() {
+            let content = std::fs::read_to_string(all_files[0])?;
+            let (fm, _) = frontmatter::parse(&content)?;
+            if fm.session.is_none() {
+                eprintln!("skipping {} — no session UUID (use Claim to register)", all_files[0].display());
+                return Ok(());
+            }
+        }
         return crate::focus::run_with_tmux(all_files[0], None, tmux);
     }
 
@@ -166,16 +200,19 @@ pub fn run_with_tmux(
 
     for file in &all_files {
         if !file.exists() {
-            eprintln!(
-                "warning: file not found: {}, will auto-create session",
-                file.display()
-            );
-            unresolved_files.push(file.to_path_buf());
+            eprintln!("warning: file not found: {}, skipping", file.display());
             continue;
         }
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        let (_updated, session_id) = frontmatter::ensure_session(&content)?;
+        let (fm, _) = frontmatter::parse(&content)?;
+        let session_id = match fm.session {
+            Some(id) => id,
+            None => {
+                // No session UUID — not an agent-doc file. Skip silently.
+                continue;
+            }
+        };
         match sessions::lookup(&session_id)? {
             Some(pane_id) if tmux.pane_alive(&pane_id) => {
                 resolved.push(ResolvedFile {
@@ -185,7 +222,7 @@ pub fn run_with_tmux(
             }
             Some(pane_id) => {
                 eprintln!(
-                    "warning: pane {} is dead for {}, will auto-create session",
+                    "warning: pane {} is dead for {}, will auto-restart session",
                     pane_id,
                     file.display()
                 );
@@ -197,16 +234,17 @@ pub fn run_with_tmux(
         }
     }
 
-    // --- Phase 2: Auto-create sessions for unresolved files ---
+    // --- Phase 2: Auto-restart sessions for files with dead/missing panes ---
+    // Only files that already have a session UUID reach here (Phase 1 skips files without one).
     for file in &unresolved_files {
         if file.exists() {
             let content = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {}", file.display()))?;
-            let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
-            if updated_content != content {
-                std::fs::write(file, &updated_content)
-                    .with_context(|| format!("failed to write {}", file.display()))?;
-            }
+            let (fm, _) = frontmatter::parse(&content)?;
+            let session_id = match fm.session {
+                Some(id) => id,
+                None => continue, // shouldn't happen, but be safe
+            };
 
             let pane_id = tmux.auto_start("claude", &cwd)?;
             let file_str = file.to_string_lossy();
@@ -216,7 +254,7 @@ pub fn run_with_tmux(
             tmux.send_keys(&pane_id, &start_cmd)?;
 
             eprintln!(
-                "Auto-created session for {} → pane {}",
+                "Auto-restarted session for {} → pane {}",
                 file.display(),
                 pane_id
             );
@@ -340,11 +378,19 @@ pub fn run_with_tmux(
     };
 
     // --- Phase 5: Reconcile ---
-    let log = reconcile(tmux, &target_window, &pane_columns, &desired_ordered)?;
+    let log = reconcile(
+        tmux,
+        &target_window,
+        &pane_columns,
+        &desired_ordered,
+    )?;
 
     // --- Phase 6: Resize + Focus ---
     equalize_sizes(tmux, &pane_columns);
     tmux.select_pane(&focus_pane)?;
+
+    // Log global tmux state at sync end
+    global_log.log_global_state(tmux, "sync-end");
 
     if log.has_errors() {
         eprintln!(
@@ -368,25 +414,18 @@ pub fn run_with_tmux(
 
 /// Reconcile pane layout in target_window to match desired_ordered.
 ///
-/// # Algorithm: Additive reconciliation with convergent loop
+/// # Algorithm: Simple 2-step detach/attach
 ///
 /// ```text
-/// for attempt in 0..3:
-///   PHASE 0: SNAPSHOT + FAST PATH
-///   PHASE 1: ENSURE ANCHOR in target window
-///   PHASE 2: EVICT unwanted panes (defer if last pane)
-///   PHASE 3: JOIN MISSING + break deferred unwanted
-///   PHASE 4: REORDER (if all wanted present but wrong order)
-/// VERIFY + REGISTRY UPDATE (after loop)
+/// SNAPSHOT — query current panes
+/// FAST PATH — if already correct, done
+/// DETACH — break_pane unwanted panes out of target window
+/// ATTACH — join_pane missing desired panes into target window
+///          (isolate from shared windows first, then join with correct split direction)
+/// VERIFY — confirm final layout
 /// ```
 ///
-/// # Invariants
-///
-/// - **I1**: Target window always has ≥1 pane (anchor never broken out)
-/// - **I2**: Only unwanted panes are evicted; wanted panes stay (except Phase 4 reorder)
-/// - **I3**: Every tmux command is logged
-/// - **I4**: Individual failures are non-fatal (logged, algorithm continues)
-/// - **I5**: Registry is updated after every move
+/// If all desired panes are present but in wrong order, detach non-first + reattach.
 fn reconcile(
     tmux: &Tmux,
     target_window: &str,
@@ -396,250 +435,171 @@ fn reconcile(
     let mut log = SyncLog::new();
 
     let wanted: HashSet<&str> = desired_ordered.iter().copied().collect();
-    let anchor = desired_ordered[0];
+    let first_pane = desired_ordered[0];
 
-    for attempt in 0..3 {
-        // --- PHASE 0: SNAPSHOT ---
-        let current = tmux.list_panes_ordered(target_window).unwrap_or_default();
-        let current_refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
-        log.log(
-            "SNAPSHOT",
-            format!(
-                "attempt={}, window={}, current={:?}, desired={:?}",
-                attempt, target_window, current_refs, desired_ordered
-            ),
-        );
+    // --- SNAPSHOT ---
+    let current = tmux.list_panes_ordered(target_window).unwrap_or_default();
+    let current_refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
+    log.log(
+        "SNAPSHOT",
+        format!(
+            "window={}, current={:?}, desired={:?}",
+            target_window, current_refs, desired_ordered
+        ),
+    );
 
-        // --- FAST PATH ---
-        if current_refs == desired_ordered {
-            log.log("FAST_PATH", "layout already correct");
-            return Ok(log);
+    // --- FAST PATH ---
+    if current_refs == desired_ordered {
+        log.log("FAST_PATH", "layout already correct");
+        return Ok(log);
+    }
+
+    // --- DETACH unwanted panes ---
+    let current_panes = tmux.list_window_panes(target_window).unwrap_or_default();
+    let unwanted: Vec<String> = current_panes
+        .into_iter()
+        .filter(|p| !wanted.contains(p.as_str()))
+        .collect();
+    // Detach unwanted, but never the very last pane in the window.
+    for pane in &unwanted {
+        let window_count = tmux.list_window_panes(target_window).unwrap_or_default().len();
+        if window_count <= 1 {
+            log.log("DETACH", format!("deferred {} — last pane in window", pane));
+            continue;
         }
-
-        let present: HashSet<&str> = current_refs.iter().copied().collect();
-
-        // --- PHASE 1: ENSURE ANCHOR ---
-        if !present.contains(anchor) {
-            let existing = tmux.list_window_panes(target_window).unwrap_or_default();
-            if let Some(first) = existing.first() {
-                // Isolate anchor from its current window if it shares one
-                if let Ok(anchor_win) = tmux.pane_window(anchor) {
-                    let anchor_siblings =
-                        tmux.list_window_panes(&anchor_win).unwrap_or_default();
-                    if anchor_siblings.len() > 1 {
-                        if let Err(e) = tmux.break_pane(anchor) {
-                            log.log_err(
-                                "ANCHOR",
-                                format!("failed to isolate anchor {}: {}", anchor, e),
-                            );
-                        }
-                    }
-                }
-                match tmux.join_pane(anchor, first, "-bh") {
-                    Ok(()) => {
-                        log.log(
-                            "ANCHOR",
-                            format!("joined {} into {}", anchor, target_window),
-                        );
-                        update_registry(tmux, anchor, &mut log);
-                    }
-                    Err(e) => {
-                        log.log_err(
-                            "ANCHOR",
-                            format!(
-                                "failed to join anchor {} into {}: {}",
-                                anchor, target_window, e
-                            ),
-                        );
-                        continue; // retry on next attempt
-                    }
-                }
-            } else {
-                log.log_err(
-                    "ANCHOR",
-                    format!("target window {} has no panes", target_window),
-                );
-                continue;
+        match tmux.break_pane(pane) {
+            Ok(()) => {
+                log.log("DETACH", format!("broke {} from {}", pane, target_window));
+                update_registry(tmux, pane, &mut log);
+            }
+            Err(e) => {
+                log.log_err("DETACH", format!("failed to break {}: {}", pane, e));
             }
         }
+    }
 
-        // --- PHASE 2: EVICT unwanted panes (defer last-pane case) ---
-        let mut deferred_unwanted: Vec<String> = Vec::new();
-        let current_after_anchor =
-            tmux.list_window_panes(target_window).unwrap_or_default();
-        for pane in &current_after_anchor {
-            if wanted.contains(pane.as_str()) {
-                continue;
+    // --- ATTACH desired panes ---
+    // First, ensure the first desired pane is in the target window.
+    let present_now: HashSet<String> = tmux
+        .list_window_panes(target_window)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    if !present_now.contains(first_pane) {
+        // Isolate first_pane if it shares a window with others
+        if let Ok(pane_win) = tmux.pane_window(first_pane) {
+            let siblings = tmux.list_window_panes(&pane_win).unwrap_or_default();
+            if siblings.len() > 1 {
+                let _ = tmux.break_pane(first_pane);
             }
-            let window_count =
-                tmux.list_window_panes(target_window).unwrap_or_default().len();
-            if window_count <= 1 {
-                deferred_unwanted.push(pane.clone());
-                log.log(
-                    "EVICT",
-                    format!("deferred {} — last pane in window", pane),
-                );
-                continue;
-            }
-            match tmux.break_pane(pane) {
+        }
+        // Join into target window (before the first existing pane)
+        let existing = tmux.list_window_panes(target_window).unwrap_or_default();
+        if let Some(target) = existing.first() {
+            match tmux.join_pane(first_pane, target, "-bh") {
                 Ok(()) => {
-                    log.log(
-                        "EVICT",
-                        format!("broke {} out of {}", pane, target_window),
-                    );
-                    update_registry(tmux, pane, &mut log);
+                    log.log("ATTACH", format!("joined first {} into {}", first_pane, target_window));
+                    update_registry(tmux, first_pane, &mut log);
                 }
                 Err(e) => {
-                    log.log_err("EVICT", format!("failed to break {}: {}", pane, e));
+                    log.log_err("ATTACH", format!("failed to join first {}: {}", first_pane, e));
                 }
             }
         }
-
-        // --- PHASE 3: JOIN MISSING wanted panes ---
-        let present_after_evict: HashSet<String> = tmux
-            .list_window_panes(target_window)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-        for (col_idx, column) in pane_columns.iter().enumerate() {
-            for (row_idx, pane) in column.iter().enumerate() {
-                if present_after_evict.contains(pane.as_str()) {
-                    continue;
-                }
-                if pane.as_str() == anchor {
-                    continue;
-                }
-
-                // Isolate pane from its current window if it shares one
-                let pane_win = match tmux.pane_window(pane) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        log.log_err(
-                            "JOIN",
-                            format!("pane {} not found (dead?): {}", pane, e),
-                        );
-                        continue;
-                    }
-                };
-                let siblings = tmux.list_window_panes(&pane_win).unwrap_or_default();
-                if siblings.len() > 1 {
-                    if let Err(e) = tmux.break_pane(pane) {
-                        log.log_err(
-                            "JOIN",
-                            format!("failed to isolate {}: {}", pane, e),
-                        );
-                        continue;
-                    }
-                }
-
-                let (target_pane, flag) = join_target(pane_columns, col_idx, row_idx);
-                match tmux.join_pane(pane, &target_pane, flag) {
+        // Now break deferred unwanted (window has a wanted pane now)
+        let refreshed = tmux.list_window_panes(target_window).unwrap_or_default();
+        for pane in &unwanted {
+            if refreshed.contains(pane) && refreshed.len() > 1 {
+                match tmux.break_pane(pane) {
                     Ok(()) => {
-                        log.log(
-                            "JOIN",
-                            format!("{} → {} ({})", pane, target_pane, flag),
-                        );
+                        log.log("DETACH", format!("broke deferred {} from {}", pane, target_window));
                         update_registry(tmux, pane, &mut log);
                     }
                     Err(e) => {
-                        log.log_err(
-                            "JOIN",
-                            format!(
-                                "failed to join {} → {}: {}",
-                                pane, target_pane, e
-                            ),
-                        );
+                        log.log_err("DETACH", format!("failed to break deferred {}: {}", pane, e));
                     }
                 }
             }
         }
+    }
 
-        // Break deferred unwanted panes (window now has wanted panes)
-        for pane in &deferred_unwanted {
-            let window_count =
-                tmux.list_window_panes(target_window).unwrap_or_default().len();
-            if window_count <= 1 {
-                log.log_err(
-                    "EVICT",
-                    format!("cannot break deferred {} — still last pane", pane),
-                );
+    // Re-check what's present after ensuring first pane
+    let present_after: HashSet<String> = tmux
+        .list_window_panes(target_window)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    // Check if we need a full reorder (all desired present but wrong order)
+    let current_order = tmux.list_panes_ordered(target_window).unwrap_or_default();
+    let current_order_refs: Vec<&str> = current_order.iter().map(|s| s.as_str()).collect();
+    let current_set: HashSet<&str> = current_order_refs.iter().copied().collect();
+
+    let need_reorder = current_set == wanted && current_order_refs != desired_ordered;
+    if need_reorder {
+        // Break all non-first panes out, then rejoin in order
+        log.log("REORDER", format!("current={:?}, desired={:?}", current_order_refs, desired_ordered));
+        for pane in desired_ordered.iter().skip(1) {
+            if present_after.contains(*pane) {
+                let _ = tmux.break_pane(pane);
+                log.log("REORDER", format!("broke {} for reorder", pane));
+            }
+        }
+    }
+
+    // Join remaining desired panes in column order
+    for (col_idx, column) in pane_columns.iter().enumerate() {
+        for (row_idx, pane) in column.iter().enumerate() {
+            if pane.as_str() == first_pane {
                 continue;
             }
-            match tmux.break_pane(pane) {
+            // Skip if already in target window (and not reordering)
+            let in_target = tmux
+                .list_window_panes(target_window)
+                .unwrap_or_default()
+                .contains(pane);
+            if in_target && !need_reorder {
+                continue;
+            }
+            if in_target {
+                // Already handled by reorder break above
+                // If somehow still present, skip
+                let still_there = tmux
+                    .list_window_panes(target_window)
+                    .unwrap_or_default()
+                    .contains(pane);
+                if still_there {
+                    continue;
+                }
+            }
+
+            // Isolate pane from its current window if shared
+            if let Ok(pane_win) = tmux.pane_window(pane) {
+                let siblings = tmux.list_window_panes(&pane_win).unwrap_or_default();
+                if siblings.len() > 1 {
+                    if let Err(e) = tmux.break_pane(pane) {
+                        log.log_err("ATTACH", format!("failed to isolate {}: {}", pane, e));
+                        continue;
+                    }
+                }
+            } else {
+                log.log_err("ATTACH", format!("pane {} not found (dead?)", pane));
+                continue;
+            }
+
+            let (target_pane, flag) = join_target(pane_columns, col_idx, row_idx);
+            match tmux.join_pane(pane, &target_pane, flag) {
                 Ok(()) => {
-                    log.log(
-                        "EVICT",
-                        format!("broke deferred {} out of {}", pane, target_window),
-                    );
+                    log.log("ATTACH", format!("{} → {} ({})", pane, target_pane, flag));
                     update_registry(tmux, pane, &mut log);
                 }
                 Err(e) => {
-                    log.log_err(
-                        "EVICT",
-                        format!("failed to break deferred {}: {}", pane, e),
-                    );
+                    log.log_err("ATTACH", format!("failed to join {} → {}: {}", pane, target_pane, e));
                 }
             }
         }
-
-        // --- PHASE 4: REORDER (if all wanted present but wrong order) ---
-        let after_join = tmux.list_panes_ordered(target_window).unwrap_or_default();
-        let after_refs: Vec<&str> = after_join.iter().map(|s| s.as_str()).collect();
-        let after_set: HashSet<&str> = after_refs.iter().copied().collect();
-
-        if after_set == wanted && after_refs != desired_ordered {
-            log.log(
-                "ORDER",
-                format!(
-                    "reordering: current={:?}, desired={:?}",
-                    after_refs, desired_ordered
-                ),
-            );
-            // Break all non-anchor wanted panes out
-            for pane in desired_ordered.iter().skip(1) {
-                match tmux.break_pane(pane) {
-                    Ok(()) => {
-                        log.log("ORDER", format!("broke {} for reorder", pane));
-                    }
-                    Err(e) => {
-                        log.log_err(
-                            "ORDER",
-                            format!("failed to break {} for reorder: {}", pane, e),
-                        );
-                    }
-                }
-            }
-            // Rejoin in correct column structure
-            for (col_idx, column) in pane_columns.iter().enumerate() {
-                for (row_idx, pane) in column.iter().enumerate() {
-                    if pane.as_str() == anchor {
-                        continue;
-                    }
-                    let (target_pane, flag) =
-                        join_target(pane_columns, col_idx, row_idx);
-                    match tmux.join_pane(pane, &target_pane, flag) {
-                        Ok(()) => {
-                            log.log(
-                                "ORDER",
-                                format!("{} → {} ({})", pane, target_pane, flag),
-                            );
-                            update_registry(tmux, pane, &mut log);
-                        }
-                        Err(e) => {
-                            log.log_err(
-                                "ORDER",
-                                format!(
-                                    "failed reorder join {} → {}: {}",
-                                    pane, target_pane, e
-                                ),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    } // end convergent loop
+    }
 
     // --- VERIFY ---
     let final_state = tmux.list_panes_ordered(target_window).unwrap_or_default();
@@ -786,12 +746,12 @@ mod tests {
     fn sync_log_collects_entries() {
         let mut log = SyncLog::new();
         log.log("SNAPSHOT", "test message");
-        log.log_err("EVICT", "something failed");
+        log.log_err("DETACH", "something failed");
         assert_eq!(log.entries().len(), 2);
         assert!(log.entries()[0].ok);
         assert_eq!(log.entries()[0].phase, "SNAPSHOT");
         assert!(!log.entries()[1].ok);
-        assert_eq!(log.entries()[1].phase, "EVICT");
+        assert_eq!(log.entries()[1].phase, "DETACH");
     }
 
     #[test]
@@ -799,7 +759,7 @@ mod tests {
         let mut log = SyncLog::new();
         log.log("SNAPSHOT", "ok");
         assert!(!log.has_errors());
-        log.log_err("EVICT", "bad");
+        log.log_err("DETACH", "bad");
         assert!(log.has_errors());
     }
 
@@ -808,15 +768,15 @@ mod tests {
         let mut log = SyncLog::new();
         log.log("SNAPSHOT", "snapshot");
         log.log("FAST_PATH", "fast");
-        log.log("EVICT", "broke pane");
-        log.log("JOIN", "joined pane");
+        log.log("DETACH", "broke pane");
+        log.log("ATTACH", "joined pane");
         log.log("VERIFY", "ok");
-        assert_eq!(log.mutation_count(), 2); // EVICT + JOIN
+        assert_eq!(log.mutation_count(), 2); // DETACH + ATTACH
     }
 
     // --- Helper: set up N panes in separate windows within an isolated tmux ---
 
-    fn setup_panes(tmux: &Tmux, n: usize) -> (String, Vec<String>) {
+    fn setup_panes(tmux: &Tmux, n: usize) -> (String, Vec<String>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let first_pane = tmux.new_session("test", tmp.path()).unwrap();
         let target_window = tmux.pane_window(&first_pane).unwrap();
@@ -827,7 +787,7 @@ mod tests {
             let pane = tmux.new_window("test", tmp.path()).unwrap();
             panes.push(pane);
         }
-        (target_window, panes)
+        (target_window, panes, tmp)
     }
 
     // --- Integration tests using IsolatedTmux ---
@@ -835,7 +795,7 @@ mod tests {
     #[test]
     fn test_sync_2col_happy_path() {
         let t = IsolatedTmux::new("sync-test-2col-happy");
-        let (target_window, panes) = setup_panes(&t, 3);
+        let (target_window, panes, _tmp) = setup_panes(&t, 3);
 
         // panes[0] is already in target_window, panes[1] and [2] are in separate windows
         let pane_columns = vec![
@@ -950,7 +910,7 @@ mod tests {
         assert!(t.pane_alive(&pane_x), "X should still be alive");
 
         assert!(
-            log.entries().iter().any(|e| e.phase == "EVICT" && e.ok),
+            log.entries().iter().any(|e| e.phase == "DETACH" && e.ok),
             "should have evict entry"
         );
     }
@@ -958,7 +918,7 @@ mod tests {
     #[test]
     fn test_sync_missing_pane_joined() {
         let t = IsolatedTmux::new("sync-test-missing-join");
-        let (target_window, panes) = setup_panes(&t, 2);
+        let (target_window, panes, _tmp) = setup_panes(&t, 2);
 
         // panes[0] is in target_window. panes[1] is in another window.
         let pane_columns = vec![vec![panes[0].clone()], vec![panes[1].clone()]];
@@ -971,7 +931,7 @@ mod tests {
         assert!(final_panes.contains(&panes[0]));
         assert!(final_panes.contains(&panes[1]));
         assert!(
-            log.entries().iter().any(|e| e.phase == "JOIN" && e.ok),
+            log.entries().iter().any(|e| e.phase == "ATTACH" && e.ok),
             "should have join entry"
         );
     }
@@ -1008,7 +968,7 @@ mod tests {
         assert!(
             log.entries()
                 .iter()
-                .any(|e| e.phase == "JOIN" && !e.ok && e.message.contains(&pane_b)),
+                .any(|e| e.phase == "ATTACH" && !e.ok && e.message.contains(&pane_b)),
             "should have error entry mentioning dead pane"
         );
     }
@@ -1044,7 +1004,7 @@ mod tests {
     #[test]
     fn test_sync_3col_layout() {
         let t = IsolatedTmux::new("sync-test-3col");
-        let (target_window, panes) = setup_panes(&t, 5);
+        let (target_window, panes, _tmp) = setup_panes(&t, 5);
 
         let pane_columns = vec![
             vec![panes[0].clone(), panes[1].clone()],
@@ -1073,7 +1033,7 @@ mod tests {
     #[test]
     fn test_sync_single_column_stacked() {
         let t = IsolatedTmux::new("sync-test-single-col-stack");
-        let (target_window, panes) = setup_panes(&t, 3);
+        let (target_window, panes, _tmp) = setup_panes(&t, 3);
 
         // Single column with 3 panes stacked vertically
         let pane_columns = vec![vec![
@@ -1123,7 +1083,7 @@ mod tests {
         assert!(t.pane_alive(&pane_b), "B should still be alive");
 
         assert!(
-            log.entries().iter().any(|e| e.phase == "ANCHOR" && e.ok),
+            log.entries().iter().any(|e| e.phase == "ATTACH" && e.ok),
             "should have anchor move entry"
         );
     }
@@ -1162,11 +1122,11 @@ mod tests {
         assert!(t.pane_alive(&pane_x), "X should still be alive");
 
         assert!(
-            log.entries().iter().any(|e| e.phase == "EVICT" && e.ok),
+            log.entries().iter().any(|e| e.phase == "DETACH" && e.ok),
             "should have evict"
         );
         assert!(
-            log.entries().iter().any(|e| e.phase == "JOIN" && e.ok),
+            log.entries().iter().any(|e| e.phase == "ATTACH" && e.ok),
             "should have join"
         );
     }
@@ -1198,11 +1158,11 @@ mod tests {
 
         // Anchor should have been moved in, and X evicted
         assert!(
-            log.entries().iter().any(|e| e.phase == "ANCHOR" && e.ok),
+            log.entries().iter().any(|e| e.phase == "ATTACH" && e.ok),
             "should have anchor entry"
         );
         assert!(
-            log.entries().iter().any(|e| e.phase == "EVICT" && e.ok),
+            log.entries().iter().any(|e| e.phase == "DETACH" && e.ok),
             "should have evict entry"
         );
     }
@@ -1239,12 +1199,12 @@ mod tests {
         assert!(t.pane_alive(&pane_x1), "X1 should still be alive");
         assert!(t.pane_alive(&pane_x2), "X2 should still be alive");
 
-        let evict_count = log
+        let detach_count = log
             .entries()
             .iter()
-            .filter(|e| e.phase == "EVICT" && e.ok && e.message.starts_with("broke"))
+            .filter(|e| e.phase == "DETACH" && e.ok && e.message.starts_with("broke"))
             .count();
-        assert!(evict_count >= 2, "should have evicted at least 2 panes, got {}", evict_count);
+        assert!(detach_count >= 2, "should have detached at least 2 panes, got {}", detach_count);
     }
 
     #[test]
@@ -1281,6 +1241,365 @@ mod tests {
         assert!(!log.has_errors(), "should have no errors: {:?}", log.entries());
     }
 
+    // --- Real-world simulation tests ---
+
+    #[test]
+    fn test_reconcile_with_stale_sessions() {
+        // Simulate: 5 panes created, 2 die, reconcile with the 3 survivors
+        let t = IsolatedTmux::new("sync-test-stale-sessions");
+        let (target_window, panes, _tmp) = setup_panes(&t, 5);
+
+        // Kill panes 3 and 4
+        t.kill_pane(&panes[3]).unwrap();
+        t.kill_pane(&panes[4]).unwrap();
+
+        // Desired layout uses only the 3 survivors
+        let pane_columns = vec![
+            vec![panes[0].clone(), panes[1].clone()],
+            vec![panes[2].clone()],
+        ];
+        let desired: Vec<&str> = pane_columns
+            .iter()
+            .flat_map(|col| col.iter().map(|s| s.as_str()))
+            .collect();
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        for pane in &desired {
+            assert!(
+                final_panes.contains(&pane.to_string()),
+                "survivor {} should be in target",
+                pane
+            );
+        }
+        // Dead panes should not appear
+        assert!(!final_panes.contains(&panes[3]));
+        assert!(!final_panes.contains(&panes[4]));
+        assert!(!log.has_errors(), "no errors for survivors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_multi_file_same_pane() {
+        // Simulate: multiple files claim the same pane (deduplication)
+        let t = IsolatedTmux::new("sync-test-multi-file-same-pane");
+        let (target_window, panes, _tmp) = setup_panes(&t, 3);
+
+        // Two columns, but panes[1] appears twice (like two files claiming same pane)
+        // After dedup, we should get [panes[0], panes[1], panes[2]]
+        let pane_columns = vec![
+            vec![panes[0].clone(), panes[1].clone()],
+            vec![panes[2].clone()],
+        ];
+        let desired: Vec<&str> = pane_columns
+            .iter()
+            .flat_map(|col| col.iter().map(|s| s.as_str()))
+            .collect();
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 3, "should have 3 unique panes");
+        assert!(!log.has_errors());
+    }
+
+    #[test]
+    fn test_reconcile_dead_panes_in_desired() {
+        // Some desired panes are dead — reconcile should skip them gracefully
+        let t = IsolatedTmux::new("sync-test-dead-desired");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+        let pane_d = t.new_window("test", tmp.path()).unwrap();
+
+        // Kill B and D
+        t.kill_pane(&pane_b).unwrap();
+        t.kill_pane(&pane_d).unwrap();
+
+        // Desired: [A, B, C, D] — B and D are dead
+        let pane_columns = vec![
+            vec![pane_a.clone(), pane_b.clone()],
+            vec![pane_c.clone(), pane_d.clone()],
+        ];
+        let desired: Vec<&str> = vec![
+            pane_a.as_str(),
+            pane_b.as_str(),
+            pane_c.as_str(),
+            pane_d.as_str(),
+        ];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        // A and C should be arranged; B and D silently skipped
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert!(final_panes.contains(&pane_a), "A should be in target");
+        assert!(final_panes.contains(&pane_c), "C should be in target");
+        assert!(!final_panes.contains(&pane_b), "dead B should not be present");
+        assert!(!final_panes.contains(&pane_d), "dead D should not be present");
+
+        // Should have logged errors for dead panes
+        assert!(log.has_errors(), "should have errors for dead panes");
+    }
+
+    #[test]
+    fn test_reconcile_large_layout() {
+        // 8 panes in a 3-column grid simulating real editor state
+        let t = IsolatedTmux::new("sync-test-large-layout");
+        let (target_window, panes, _tmp) = setup_panes(&t, 8);
+
+        // 3 columns: [0,1,2], [3,4,5], [6,7]
+        let pane_columns = vec![
+            vec![panes[0].clone(), panes[1].clone(), panes[2].clone()],
+            vec![panes[3].clone(), panes[4].clone(), panes[5].clone()],
+            vec![panes[6].clone(), panes[7].clone()],
+        ];
+        let desired: Vec<&str> = pane_columns
+            .iter()
+            .flat_map(|col| col.iter().map(|s| s.as_str()))
+            .collect();
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 8, "all 8 panes should be in window");
+        for pane in &desired {
+            assert!(
+                final_panes.contains(&pane.to_string()),
+                "pane {} should be in target window",
+                pane
+            );
+        }
+        assert!(!log.has_errors(), "should have no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_sync_3_panes_to_2_evicts_extra() {
+        // Real-world scenario: window has 3 panes from previous sync,
+        // editor now has only 2 files open → 3rd pane must be evicted.
+        let t = IsolatedTmux::new("sync-test-3to2-evict");
+        let tmp = TempDir::new().unwrap();
+
+        // Create A in target window, then split to add B and C (3 panes in same window)
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+        let pane_b = t
+            .raw_cmd(&["split-window", "-t", &pane_a, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+        let pane_c = t
+            .raw_cmd(&["split-window", "-t", &pane_b, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+
+        // Verify setup: 3 panes in target window
+        let initial = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(initial.len(), 3, "should start with 3 panes");
+
+        // Desired: only [A, B] — C should be evicted
+        let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 2, "should have exactly 2 panes after sync");
+        assert!(final_panes.contains(&pane_a), "A should remain");
+        assert!(final_panes.contains(&pane_b), "B should remain");
+        assert!(!final_panes.contains(&pane_c), "C should be evicted");
+        assert!(t.pane_alive(&pane_c), "C should still be alive (detached, not killed)");
+        assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+
+        // Verify C was detached
+        let detach_count = log
+            .entries()
+            .iter()
+            .filter(|e| e.phase == "DETACH" && e.ok)
+            .count();
+        assert!(detach_count >= 1, "should have detached at least 1 pane");
+    }
+
+    #[test]
+    fn test_sync_3_panes_to_2_with_external_join() {
+        // Window has 3 panes, desired has 2 — one of the desired is in a different window.
+        // This is the exact scenario: @187 has [%62, %60, %41], desired is [%62, %39]
+        // where %39 is in @206.
+        let t = IsolatedTmux::new("sync-test-3to2-external");
+        let tmp = TempDir::new().unwrap();
+
+        // Create A in target, split to add X1 and X2 (3 panes in window)
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+        let pane_x1 = t
+            .raw_cmd(&["split-window", "-t", &pane_a, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+        let pane_x2 = t
+            .raw_cmd(&["split-window", "-t", &pane_x1, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+
+        // Create B in a separate window
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+
+        // Verify: target has 3 panes, B is elsewhere
+        let initial = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(initial.len(), 3);
+        assert!(!initial.contains(&pane_b));
+
+        // Desired: [A, B] — X1 and X2 must be evicted, B must be joined
+        let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 2, "should have exactly 2 panes");
+        assert!(final_panes.contains(&pane_a), "A in target");
+        assert!(final_panes.contains(&pane_b), "B joined into target");
+        assert!(!final_panes.contains(&pane_x1), "X1 evicted");
+        assert!(!final_panes.contains(&pane_x2), "X2 evicted");
+        assert!(t.pane_alive(&pane_x1), "X1 still alive");
+        assert!(t.pane_alive(&pane_x2), "X2 still alive");
+        assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_pane_from_shared_window() {
+        // Desired pane shares a window with other panes — sync should isolate and join it
+        let t = IsolatedTmux::new("sync-test-pane-from-shared");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+
+        // Create B and C in a shared window (not the target)
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let shared_window = t.pane_window(&pane_b).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &shared_window, "-x", "200", "-y", "60"]);
+        let pane_c = t
+            .raw_cmd(&["split-window", "-t", &pane_b, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+
+        // Desired layout: [A, B] — B must be pulled from shared window
+        let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert!(final_panes.contains(&pane_a), "A should be in target");
+        assert!(final_panes.contains(&pane_b), "B should be in target");
+        assert!(t.pane_alive(&pane_c), "C should still be alive");
+        assert!(!log.has_errors(), "should have no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_scattered_panes() {
+        // 4 panes scattered across solo windows. Desired: [A, B] col1, [C] col2
+        let t = IsolatedTmux::new("sync-test-scattered");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+        let pane_d = t.new_window("test", tmp.path()).unwrap();
+
+        let target_window = t.pane_window(&pane_a).unwrap();
+
+        let pane_columns = vec![
+            vec![pane_a.clone(), pane_b.clone()],
+            vec![pane_c.clone()],
+        ];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str(), pane_c.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 3, "should have exactly 3 panes");
+        assert!(final_panes.contains(&pane_a), "A in target");
+        assert!(final_panes.contains(&pane_b), "B in target");
+        assert!(final_panes.contains(&pane_c), "C in target");
+        assert!(!final_panes.contains(&pane_d), "D not in target");
+        assert!(t.pane_alive(&pane_d), "D still alive");
+        assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_evict_and_join_external() {
+        // Target has [A, X1, X2], desired is [A, B] where B is in separate window.
+        let t = IsolatedTmux::new("sync-test-evict-join-ext");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+
+        let pane_x1 = t
+            .raw_cmd(&["split-window", "-t", &pane_a, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+        let pane_x2 = t
+            .raw_cmd(&["split-window", "-t", &pane_x1, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+
+        let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
+        let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(final_panes.len(), 2, "should have exactly A and B");
+        assert!(final_panes.contains(&pane_a), "A in target");
+        assert!(final_panes.contains(&pane_b), "B in target");
+        assert!(t.pane_alive(&pane_x1), "X1 still alive");
+        assert!(t.pane_alive(&pane_x2), "X2 still alive");
+        assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    fn test_reconcile_full_real_world_scenario() {
+        // 4 solo windows (A, B, C, D). Previous sync left A+C together.
+        // Desired: col1=[B, D], col2=[A]. C evicted, B and D joined.
+        let t = IsolatedTmux::new("sync-test-full-realworld");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+        let pane_d = t.new_window("test", tmp.path()).unwrap();
+
+        // Put A and C into the same window (simulating a previous sync)
+        let target_window = t.pane_window(&pane_a).unwrap();
+        t.join_pane(&pane_c, &pane_a, "-h").unwrap();
+
+        let initial = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(initial.len(), 2);
+        assert!(initial.contains(&pane_a));
+        assert!(initial.contains(&pane_c));
+
+        let pane_columns = vec![
+            vec![pane_b.clone(), pane_d.clone()],
+            vec![pane_a.clone()],
+        ];
+        let desired: Vec<&str> = vec![pane_b.as_str(), pane_d.as_str(), pane_a.as_str()];
+
+        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert!(final_panes.contains(&pane_a), "A in target");
+        assert!(final_panes.contains(&pane_b), "B in target");
+        assert!(final_panes.contains(&pane_d), "D in target");
+        assert!(!final_panes.contains(&pane_c), "C evicted from target");
+        assert!(t.pane_alive(&pane_c), "C still alive");
+        assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
     // --- Property-based tests ---
 
     mod proptest_reconcile {
@@ -1312,7 +1631,7 @@ mod tests {
                 num_cols in 1..4usize,
             ) {
                 let t = IsolatedTmux::new(&unique_socket("pt-comp"));
-                let (target_window, panes) = setup_panes(&t, num_panes);
+                let (target_window, panes, _tmp) = setup_panes(&t, num_panes);
 
                 let pane_columns = distribute_into_columns(&panes, num_cols);
                 let desired: Vec<&str> = pane_columns
@@ -1348,7 +1667,7 @@ mod tests {
                 num_cols in 1..3usize,
             ) {
                 let t = IsolatedTmux::new(&unique_socket("pt-idemp"));
-                let (target_window, panes) = setup_panes(&t, num_panes);
+                let (target_window, panes, _tmp) = setup_panes(&t, num_panes);
 
                 let pane_columns = distribute_into_columns(&panes, num_cols);
                 let desired: Vec<&str> = pane_columns
@@ -1375,7 +1694,7 @@ mod tests {
                 num_cols in 1..4usize,
             ) {
                 let t = IsolatedTmux::new(&unique_socket("pt-noloss"));
-                let (_, panes) = setup_panes(&t, num_panes);
+                let (_, panes, _tmp) = setup_panes(&t, num_panes);
 
                 let pane_columns = distribute_into_columns(&panes, num_cols);
                 let desired: Vec<&str> = pane_columns

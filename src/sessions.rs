@@ -344,6 +344,42 @@ impl Tmux {
         Ok(panes.into_iter().map(|(id, _, _)| id).collect())
     }
 
+    /// List all windows across all sessions (for global state logging).
+    pub fn list_all_windows(&self) -> Result<String> {
+        let output = self
+            .cmd()
+            .args([
+                "list-windows",
+                "-a",
+                "-F",
+                "#{window_id} #{session_name}:#{window_name} (#{window_panes} panes)",
+            ])
+            .output()
+            .context("failed to list all tmux windows")?;
+        if !output.status.success() {
+            anyhow::bail!("tmux list-windows -a failed");
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// List all panes across all sessions (for global state logging).
+    pub fn list_all_panes(&self) -> Result<String> {
+        let output = self
+            .cmd()
+            .args([
+                "list-panes",
+                "-a",
+                "-F",
+                "#{pane_id} #{window_id} #{session_name}:#{window_name}",
+            ])
+            .output()
+            .context("failed to list all tmux panes")?;
+        if !output.status.success() {
+            anyhow::bail!("tmux list-panes -a failed");
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     /// Break a pane out of its window into a new window.
     /// Used by `layout` to disassemble a mirror window before rebuilding.
     pub fn break_pane(&self, pane_id: &str) -> Result<()> {
@@ -517,6 +553,20 @@ pub fn register_full(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     let started = chrono_now();
+
+    // Enforce single session per pane: remove stale entries pointing to same pane
+    let stale_keys: Vec<String> = registry
+        .iter()
+        .filter(|(k, e)| e.pane == pane_id && k.as_str() != session_id)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in &stale_keys {
+        eprintln!(
+            "[registry] removing stale session {} (was pane {})",
+            key, pane_id
+        );
+        registry.remove(key);
+    }
 
     registry.insert(
         session_id.to_string(),
@@ -962,5 +1012,51 @@ mod tests {
         assert_ne!(pane1, pane2, "should be a different pane (new window)");
         assert!(t.pane_alive(&pane1));
         assert!(t.pane_alive(&pane2));
+    }
+
+    #[test]
+    #[ignore] // uses set_current_dir which is not thread-safe with other tests
+    fn register_full_deduplicates_pane() {
+        // When a new session claims a pane, old sessions pointing to the same pane are removed
+        let dir = TempDir::new().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(".agent-doc").unwrap();
+
+        // Seed registry with two sessions pointing to the same pane
+        let mut reg = SessionRegistry::new();
+        reg.insert(
+            "session-a".to_string(),
+            SessionEntry {
+                pane: "%42".to_string(),
+                pid: 100,
+                cwd: "/tmp".to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                file: "old-file.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        reg.insert(
+            "session-b".to_string(),
+            SessionEntry {
+                pane: "%42".to_string(),
+                pid: 100,
+                cwd: "/tmp".to_string(),
+                started: "2026-01-01T00:01:00Z".to_string(),
+                file: "another-old.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        save(&reg).unwrap();
+
+        // Now register session-c with the same pane %42
+        register_full("session-c", "%42", "new-file.md", 200, "@1").unwrap();
+
+        let loaded = load().unwrap();
+        // Only session-c should remain for pane %42
+        assert!(loaded.contains_key("session-c"), "new session should exist");
+        assert!(!loaded.contains_key("session-a"), "old session-a should be removed");
+        assert!(!loaded.contains_key("session-b"), "old session-b should be removed");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded["session-c"].file, "new-file.md");
     }
 }

@@ -218,6 +218,20 @@ Default output: indented text table. `--json` outputs a JSON array of section ob
 
 > **Startup version check:** On every invocation (except `upgrade` itself), `warn_if_outdated` queries crates.io (with a 24h cache at `~/.cache/agent-doc/version-cache.json`) and prints a one-line stderr warning if a newer version is available. Errors are silently ignored so normal operation is never blocked.
 
+### 7.18 sync
+
+`agent-doc sync --col <FILES>,... [--col <FILES>,...] [--window W] [--focus FILE]` — declarative 2D layout sync.
+
+Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
+
+**Reconciliation algorithm** (simple 2-step detach/attach):
+1. **SNAPSHOT** — query current pane order in target window
+2. **FAST PATH** — if current order matches desired, done
+3. **DETACH** — `break-pane` unwanted panes out of target window (panes stay alive in solo windows)
+4. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
+5. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
+6. **VERIFY** — confirm final layout matches desired order
+
 ## 8. Session Routing
 
 ### 8.1 Registry

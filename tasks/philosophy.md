@@ -568,5 +568,35 @@ I'm ready once we have the content cleaned up this session.
 
 Do it please.
 
+## Assistant
+
+**All three done. Lint clean. Both repos pushed.**
+
+**1. Authored 3 missing terms** — `abstract-system.md`, `conceptual-existence.md`, `physical-existence.md`. Full SPEC.md template with Ontology/Axiology/Epistemology sections. Committed to ontology repo.
+
+**Re: confidence authoring terms as an LLM** — I can produce structurally correct nodes that follow the template, link patterns, and existential lens (starting from Existence scope, narrowing by context). The 3 new terms are grounded in their referencing context and standard philosophical usage. But I'm working from your corpus, not lived experience. Review them — adjust where they don't ring true. The existing 150+ nodes gave me a strong style guide.
+
+**2. Fixed all 36 missing section errors** — added `## [Axiology]` to 34 nodes, `## [Ontology]` to `state.md`, both to `tool.md`. Lint now passes clean: `All nodes pass lint checks.`
+
+**3. Added `## Domain Ontology` to `agent-doc/CLAUDE.md`** — 12-term mapping:
+
+| Term | Derives From | Description |
+|------|-------------|-------------|
+| Session | project + story | Bounded interaction with temporal arc |
+| Document | entity + context | Markdown file holding conversational state |
+| Pane | focus + scope | Tmux viewport for a single document |
+| Claim | scope + entity | Binding document to pane |
+| Route | context + resolution | Context-aware pane dispatch |
+| Sync | pattern + system | Layout alignment (editor → tmux) |
+| Watch | consciousness + evolution | File change detection + agent triggering |
+| Dashboard | system + focus | Live system view as document |
+| Range Template | scope + abstraction | Bounded region for agent write-back |
+| Registry | system + perspective | Persistent document-to-pane mappings |
+| Snapshot | state + story | Point-in-time document capture for diff |
+| Overlay | context + resolution | Domain-specific kernel extensions |
+
+**Ready for release.** Ontology is lint-clean, exkernel CLI works, agent-doc has its domain ontology. What do you want to release first — `exkernel` to crates.io, or the ontology content only?
+
 ## User
 
+audit docs

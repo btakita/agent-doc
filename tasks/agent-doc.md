@@ -430,3 +430,21 @@ The active window may be a different window in different sessions. Should we als
 
 The tmux session window is now stable. But the tmux selected window now cycles.
 Please update the test and ensure that the selected pane is logged.
+
+## Assistant
+
+**Fixed window selection cycling.** Three changes:
+
+1. **`stash_pane` uses `-dv`** — the `-d` flag prevents tmux from changing the active pane when joining into the stash window
+2. **`select_window` after DETACH** — explicitly re-selects the target window after stash operations, in case `join-pane` changed the active window
+3. **`select_window` after deferred DETACH** — same protection after the second stash pass
+
+New method: `Tmux::select_window(window_id)` — `tmux select-window -t <id>`.
+
+**Test updated** with `active_window()` helper. After all 4 alternating syncs, asserts the target window is still the active window (not the stash or any other window).
+
+**141 tests pass, clippy clean, binary installed.** Try switching tabs again.
+
+## User
+
+In all of our automated tests related to the tmux routing...let's make sure each step has the fully correct tmux state.

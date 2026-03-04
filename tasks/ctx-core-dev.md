@@ -473,3 +473,25 @@ Note: `recursive-git-commit` opens an interactive editor, so I used a single `gi
 ## User
 
 Run pnpm-publish--force
+
+## Assistant
+
+Ran `pnpm-publish--force` but two blockers:
+
+1. **"Unclean working tree"** — pnpm's `git-checks` prevents publishing with uncommitted changes. The lockfile and possibly other files changed after `pnpm install`.
+
+2. **npm auth expired** — still needs `npm login` or granular access token.
+
+Fix:
+```bash
+cd /home/brian/work/ctx-core/ctx-core-dev
+git add -A && git commit -m "chore: pnpm lockfile update"
+npm login  # or set granular access token
+pnpm-publish--force
+```
+
+Note: `pnpm-publish--force` needs to be in PATH (via mise/shell profile) or run as `./node_modules/.bin/pnpm-publish--force`. The earlier invocation from Claude's sandbox couldn't find it because mise wasn't loaded.
+
+## User
+
+Run pnpm-publish--force again. Debug the failures

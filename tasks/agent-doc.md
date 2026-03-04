@@ -809,3 +809,16 @@ Please extract tmux-router related topics from this agent doc into tasks/tmux-ro
 ## User
 
 Please keep extensive testing in agent-doc in addition to the comprehensive testing in tmux-router. I want to make sure there are no regressions. And any edge cases can be tested and fixed without regressions.
+
+## Assistant
+
+**Agreed — dual-layer test coverage.** Updated the tmux-router task doc with this requirement:
+
+- **tmux-router**: all reconciliation integration tests + proptests + unit tests (algorithm correctness)
+- **agent-doc**: integration tests for the full flow (frontmatter → path mapping → tmux-router). Contract tests verifying correct API usage. Edge cases get tests in BOTH crates.
+
+No test deletion during extraction — tests are copied/adapted, not moved. The extraction must pass all existing tests before and after.
+
+## User
+
+Extract. Create btakita/tmux-router github project with README and description. Add a git submodule to agent-loop monorepo. Please update the tmux-router agent doc as well.

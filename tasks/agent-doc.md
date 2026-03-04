@@ -154,3 +154,26 @@ This is the core tension: sync needs to move panes around, but moving an active 
 ## User
 
 The problem is the layout is incorrect. Can we simply detach inactive panes? Then reattach the pane to the active window when the bound document is visible in the editor?
+
+## Assistant
+
+**You're right — moving tmux panes does NOT kill processes.** I was wrong. `break_pane` and `join_pane` just rearrange the visual layout; the process inside keeps running. Sorry for the confusion.
+
+**Yes, detach/reattach is exactly the right model.** That's what the current code already does conceptually — `break_pane` detaches (moves to a solo window), `join_pane` reattaches. The stash window just collects the detached panes in one place instead of scattering them.
+
+The stash window seems to be causing problems. We need to simplify so there are less potential problems causing confusion and weird states. Let's try just attaching when the claimed document is visible and detaching when the claimed document is not visible. 
+
+The real problem is simpler than I made it: **the layout comes out wrong.** The reconciliation algorithm is producing incorrect pane arrangements. The detach/reattach mechanics work fine — the bug is in the ordering/joining logic.
+
+What specifically is wrong with the layout right now? Is it:
+1. Panes in wrong order (e.g., columns swapped)?
+2. Wrong panes showing (panes that shouldn't be there)?
+3. Too many/few panes in the window?
+4. Something else?
+
+All of the above with different scenarios. The model seems to be too complex and wrong which causes general drift.
+
+If you can describe what the editor shows vs what tmux shows, I can write a targeted test that reproduces the exact mismatch and fix the reconciliation logic.
+
+## User
+

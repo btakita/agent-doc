@@ -123,4 +123,4 @@ Existing `agent-doc resync` command stays as-is (verbose output with full sessio
 
 ## User
 
-release prune
+Is prune in tmux-router or agent-doc?

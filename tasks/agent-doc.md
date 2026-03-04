@@ -1,7 +1,8 @@
 ---
-session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: claude
+agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
+tmux_session: '1'
 ---
+
 
 
 ## Status Summary (compacted 2026-03-04)
@@ -134,3 +135,68 @@ I can write an inline prompt here.
 The log of inline prompt + answer goes here.
 <!-- /agent:log:my-section -->
 ```
+
+## Assistant
+
+**README updated** with Components and Dashboard-as-Document sections. Added `patch` and `watch` to Quick Start and CLI Reference.
+
+**Re: namespaced components and capture**
+
+The colon-separated naming (`agent:type:scope`) is a clean extension. Three layers emerge:
+
+1. **Simple names** (current): `agent:status` — a single component
+2. **Namespaced names**: `agent:log:my-section` — the full string `log:my-section` is the component name. This already works conceptually — we just need to allow colons in the name validator.
+3. **Capture semantics** — skill-level intelligence that understands the relationship between `capture:X`, inner components, and `log:X`
+
+**Parser change needed:** The current `is_valid_name()` only allows `[a-zA-Z0-9][a-zA-Z0-9-]*`. To support colons: `[a-zA-Z0-9][a-zA-Z0-9:-]*` — allow colons as namespace separators. The CLI treats the full namespaced string as the component name (`agent-doc patch file.md "log:my-section" "entry"`).
+
+**Capture design — three patterns:**
+
+**Pattern 1: Capture wraps log (your first example)**
+```markdown
+<!-- agent:capture:my-section -->
+<!-- agent:status -->42<!-- /agent:status -->
+<!-- agent:log:my-section -->...<!-- /agent:log:my-section -->
+<!-- /agent:capture:my-section -->
+```
+Log is inside capture. Patching `status` triggers prompt extraction to sibling `log:my-section`.
+
+**Pattern 2: Anonymous capture (your second example)**
+```markdown
+<!-- agent:capture -->
+<!-- agent:status -->42<!-- /agent:status -->
+<!-- agent:log -->...<!-- /agent:log -->
+<!-- /agent:capture -->
+```
+Scoping rule: unnamed capture uses unnamed log. Simple, works for single-capture documents.
+
+**Pattern 3: Sibling capture + log (your third example)**
+```markdown
+<!-- agent:capture:my-section -->
+<!-- agent:status -->42<!-- /agent:status -->
+<!-- /agent:capture:my-section -->
+
+<!-- agent:log:my-section -->...<!-- /agent:log:my-section -->
+```
+Capture and log are siblings, linked by shared scope name. This is the most flexible — log can live anywhere in the document, not nested inside capture.
+
+**Recommendation:** Pattern 3 (siblings) is cleanest:
+- Capture defines a region where inline prompts are intercepted
+- Log is a separate component that receives those prompts
+- They're linked by naming convention (`capture:X` → `log:X`), not nesting
+- Log can be at the bottom of the document, in a sidebar section, etc.
+- Multiple captures with different names coexist naturally
+
+**Implementation layers:**
+1. **v0.9.1 (parser):** Allow colons in component names. Pure parser change, no semantic meaning at CLI level.
+2. **Skill-level:** Capture/log relationship is defined in the skill workflow. Before patching a component inside a `capture:X` scope, the skill extracts inline prompts and appends them to `log:X`.
+
+The CLI stays dumb — it doesn't know what "capture" means. The skill provides the intelligence. This follows the "CLI is dumb, skill is smart" principle from our lessons.
+
+Shall I implement the parser change (allow colons in names) now?
+
+## User
+
+compact this doc
+
+commit and push

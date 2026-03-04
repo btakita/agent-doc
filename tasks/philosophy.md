@@ -542,3 +542,31 @@ existential-kernel/
 
 Fix the broken links please.
 Is agent-doc's project term unblocked with the current tooling? Or do I need to release the 1st version?
+
+## Assistant
+
+**Broken links fixed.** Copied 82 Ring 2 term files from `btakita/philosophy` into `existential-kernel/ontology`, iterating through transitive dependencies until links resolved. Pushed.
+
+**Remaining lint issues:**
+- **3 broken links** — `abstract-system.md`, `conceptual-existence.md`, `physical-existence.md` don't exist in philosophy either. These need to be authored.
+Author those. Are you confident in authoring any term...being an LLM and all...Adopting the existential lens?
+- **36 missing section errors** — structural (missing `## [Axiology]`). These were written before SPEC.md required it. Low priority — lint catches them for gradual cleanup.
+Please add.
+
+**Agent-doc's project term is unblocked now.** No release needed. The content exists:
+- `existential-kernel/ontology/src/project.md` defines "project"
+- `exkernel` is installed locally (`~/.cargo/bin/exkernel`)
+- You can add `## Domain Ontology` to `agent-doc/CLAUDE.md` right now, referencing kernel terms
+
+Do it please. Scope it according to the agent-doc project.
+
+A crates.io release is for distribution to others. For your own projects, the local install + submodule content is sufficient. Release when you're ready to share.
+
+I'm ready once we have the content cleaned up this session.
+
+**Next step when you return to agent-doc:** Add `## Domain Ontology` to `agent-doc/CLAUDE.md` with the term mapping table (session, document, pane, claim, route, sync, watch, dashboard, range template → kernel terms).
+
+Do it please.
+
+## User
+

@@ -198,7 +198,6 @@ pub fn run_with_tmux(
     }
 
     // --- Phase 1: Resolve each file to its session pane ---
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut resolved: Vec<ResolvedFile> = Vec::new();
     let mut unresolved_files: Vec<PathBuf> = Vec::new();
     let mut doc_tmux_session: Option<String> = None;
@@ -252,37 +251,14 @@ pub fn run_with_tmux(
         }
     }
 
-    // --- Phase 2: Auto-restart sessions for files with dead/missing panes ---
-    // Only files that already have a session UUID reach here (Phase 1 skips files without one).
+    // --- Phase 2: Log unresolved files (no auto-restart) ---
+    // Auto-restart was creating orphan tmux windows. Instead, skip dead/missing panes.
+    // The user can manually start sessions with `agent-doc claim` or `agent-doc start`.
     for file in &unresolved_files {
-        if file.exists() {
-            let content = std::fs::read_to_string(file)
-                .with_context(|| format!("failed to read {}", file.display()))?;
-            let (fm, _) = frontmatter::parse(&content)?;
-            let session_id = match fm.session {
-                Some(id) => id,
-                None => continue, // shouldn't happen, but be safe
-            };
-
-            let pane_id = tmux.auto_start("claude", &cwd)?;
-            let file_str = file.to_string_lossy();
-            sessions::register(&session_id, &pane_id, &file_str)?;
-
-            let start_cmd = format!("agent-doc start {}", file.display());
-            tmux.send_keys(&pane_id, &start_cmd)?;
-
-            eprintln!(
-                "Auto-restarted session for {} → pane {}",
-                file.display(),
-                pane_id
-            );
-            resolved.push(ResolvedFile {
-                path: file.to_path_buf(),
-                pane_id,
-            });
-        } else {
-            eprintln!("warning: skipping {} — file not found", file.display());
-        }
+        eprintln!(
+            "skipping {} — pane dead/missing (use `agent-doc claim` to re-register)",
+            file.display()
+        );
     }
 
     if resolved.len() < 2 {

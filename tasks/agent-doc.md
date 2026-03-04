@@ -208,6 +208,57 @@ Can we pass the upstream reason as an argument for the change?
 
 It may be possible for the document to initiate a change that causes a self-update. But it's ok if the cycle is bounded. Need a way to detect unbounded infinite loops. Having an infinite loop may be ok? If the agent document can be in a steady state.
 
+## Assistant
+
+Addressing your inline annotations:
+
+**Re: daemon model for watch**
+
+A single daemon per project. `agent-doc watch` starts a background process that watches all claimed files. Auto-start on first `claim` or `route`, explicit start via `agent-doc watch --start`. Holds one `notify` watcher, routes file changes to the correct tmux pane. No per-file process.
+
+How does agent-doc know what a project is? Related to the tmux pane? Is a project the same as tmux_session?
+Does tmux-router know about the project?
+
+**Re: debounce in agent-doc**
+
+Yes — debounce belongs in agent-doc, not the plugin. The daemon debounces per-file (500ms default, configurable). The plugin can fire immediately — agent-doc coalesces.
+
+Good. Let's stage for implementation.
+
+**Re: range templates**
+
+Three template flavors:
+
+1. **Range template** (open/close): `<!-- agent:status -->...<!-- /agent:status -->` — full replacement of content between markers
+2. **Nested templates**: Yes — `<!-- agent:outer -->` can contain `<!-- agent:inner -->`. Inner markers updated independently. Parse innermost first.
+3. **In-place template**: `<!-- agent:timestamp -->` (single marker, no close) — replaced with a single inline value. Works for scalars: timestamps, status badges, counters.
+
+Would we always need range templates? How would a single marker work for multiple renders? How would the next render replace the content from the first render using a single marker? How would we know exactly what is template and what is data?
+
+**Re: CLI for sectional write-back**
+
+`agent-doc write-section <file> <section-name> [content]` — reads from stdin or argument. Skill instructions just say "use `agent-doc write-section` to update dashboard fields."
+
+Would write work instead of write-section? Is the impulse for contextualizing write-section due to supporting other types of writes?
+
+**Re: infinite loops**
+
+Three mechanisms:
+
+1. **Change source tracking**: `--source watcher` vs `--source agent`. Agent sees where the change came from and decides whether to respond.
+2. **Bounded cycles**: `--max-cycles 3` — after 3 consecutive agent-triggered re-submits with no external change, pause.
+3. **Steady state detection**: If agent's response produces no diff from previous response (idempotent), stop re-triggering. Convergence = done.
+
+Bounded cycles as the safe default. Infinite loops that converge are fine; divergent loops caught by counter.
+
+**Revised design summary:**
+
+| Component | Description |
+|-----------|-------------|
+| `agent-doc watch` | Single daemon per project, `notify` crate, per-file debounce, lazy or explicit start |
+| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` for sections, single marker for scalars |
+| Nested templates | Supported — innermost-first parsing |
+| `write-section` CLI | `agent-doc write-section <file> <section> [content]` |
+| Loop prevention | Source tracking + bounded cycles (default 3) + steady state detection |
+
 ## User
-
-

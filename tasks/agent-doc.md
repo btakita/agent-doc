@@ -4,7 +4,6 @@ tmux_session: '1'
 ---
 
 
-
 ## Status Summary (compacted 2026-03-04)
 
 ### Architecture
@@ -39,6 +38,27 @@ pre_patch = "scripts/validate.sh"   # stdin: content, stdout: transformed
 post_patch = "scripts/notify.sh"    # fire-and-forget, env: COMPONENT, FILE
 ```
 
+### Namespaced Components & Capture (designed, not built)
+
+Component names support colon-separated namespacing: `agent:type:scope` (e.g., `agent:log:my-section`). Parser change: `is_valid_name()` regex from `[a-zA-Z0-9][a-zA-Z0-9-]*` to `[a-zA-Z0-9][a-zA-Z0-9:-]*`.
+
+**Three naming layers:**
+1. **Simple**: `agent:status` — single component
+2. **Namespaced**: `agent:log:my-section` — full string is the name, CLI treats it opaquely
+3. **Capture semantics** — skill-level intelligence linking `capture:X` ↔ `log:X`
+
+**Chosen pattern: Sibling capture + log** — capture and log are siblings linked by shared scope name (not nesting). Most flexible: log can live anywhere in the document.
+
+```markdown
+<!-- agent:capture:my-section -->
+<!-- agent:status -->42<!-- /agent:status -->
+<!-- /agent:capture:my-section -->
+
+<!-- agent:log:my-section -->...<!-- /agent:log:my-section -->
+```
+
+**Implementation:** v0.9.1 parser allows colons in names (CLI stays dumb). Capture/log relationship lives in skill workflow only.
+
 ### Domain Ontology (overlay of base kernel)
 
 | Term | Derives From | Description |
@@ -58,23 +78,25 @@ post_patch = "scripts/notify.sh"    # fire-and-forget, env: COMPONENT, FILE
 | v0.7.0–v0.7.2 | Snapshot-diff-apply sync, convergent reconciliation, ATTACH-first order |
 | v0.8.0 | tmux-router extraction (-3133 lines), frontmatter rename to `agent_doc_session` |
 | v0.8.1 | Auto-resync via `tmux_router::prune()` |
-| v0.9.0 | **Components**, `patch` (modes + hooks), `watch` daemon, comment stripping. 150 tests. |
+| v0.9.0 | **Components**, `patch` (modes + hooks), `watch` daemon, comment stripping. README updated with component/dashboard docs. 150 tests. |
 
 ### Documentation
 
 - `docs/guide/components.md` — Component reference (syntax, config, hooks, nesting)
 - `docs/guide/dashboard.md` — Dashboard-as-document tutorial (end-to-end flow, multi-component, loop prevention)
 - `docs/guide/commands.md` — All CLI commands including `patch` and `watch`
+- `README.md` — Components and Dashboard-as-Document sections added
 
 ### Pending / Not Built
 
+- **v0.9.1**: Allow colons in component names (parser change)
 - `TmuxBatch` — command batching to reduce flicker
 - `agent-doc deep` — fan-out parallel subagents
 - `agent-doc compact` — auto-summarize old exchanges
 - `agent/api.rs` — direct HTTP API backend (replace junie bridge)
 - tmux-router CLI binary — `tmux-router sync`, `tmux-router register`, etc.
 - `agent-doc init --dashboard` — scaffold standard template with log + status components
-- Log component prompt extraction — skill-level intelligence to move user prompts from components to log before patching
+- Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
 
 ### Key Lessons
 
@@ -88,115 +110,3 @@ post_patch = "scripts/notify.sh"    # fire-and-forget, env: COMPONENT, FILE
 
 ## User
 
-Let's add some docs for components and dashboard on the README.
-
-Also, let's make the log component have an optional name or field that allows for multiple log components.
-
-```
-<!-- agent:capture:my-section -->
-The Answer:
-<!-- agent:status -->
-42
-I can write an inline prompt here.
-<!-- /agent:status -->
-<!-- agent:log:my-section -->
-The log of inline prompt + answer goes here.
-<!-- /agent:log:my-section -->
-<!-- /agent:capture:my-section -->
-```
-
-If we do have a capture, we wouldn't need to explicitly define a name...but can use scoping rules.
-
-```
-<!-- agent:capture -->
-The Answer:
-<!-- agent:status -->
-42
-I can write an inline prompt here.
-<!-- /agent:status -->
-<!-- agent:log -->
-The log of inline prompt + answer goes here.
-<!-- /agent:log -->
-<!-- /agent:capture -->
-```
-
-However we could have sibling captures or "forms" using the name:
-
-```
-<!-- agent:capture:my-section -->
-The Answer:
-<!-- agent:status -->
-42
-I can write an inline prompt here.
-<!-- /agent:status -->
-<!-- /agent:capture:my-section -->
-
-<!-- agent:log:my-section -->
-The log of inline prompt + answer goes here.
-<!-- /agent:log:my-section -->
-```
-
-## Assistant
-
-**README updated** with Components and Dashboard-as-Document sections. Added `patch` and `watch` to Quick Start and CLI Reference.
-
-**Re: namespaced components and capture**
-
-The colon-separated naming (`agent:type:scope`) is a clean extension. Three layers emerge:
-
-1. **Simple names** (current): `agent:status` — a single component
-2. **Namespaced names**: `agent:log:my-section` — the full string `log:my-section` is the component name. This already works conceptually — we just need to allow colons in the name validator.
-3. **Capture semantics** — skill-level intelligence that understands the relationship between `capture:X`, inner components, and `log:X`
-
-**Parser change needed:** The current `is_valid_name()` only allows `[a-zA-Z0-9][a-zA-Z0-9-]*`. To support colons: `[a-zA-Z0-9][a-zA-Z0-9:-]*` — allow colons as namespace separators. The CLI treats the full namespaced string as the component name (`agent-doc patch file.md "log:my-section" "entry"`).
-
-**Capture design — three patterns:**
-
-**Pattern 1: Capture wraps log (your first example)**
-```markdown
-<!-- agent:capture:my-section -->
-<!-- agent:status -->42<!-- /agent:status -->
-<!-- agent:log:my-section -->...<!-- /agent:log:my-section -->
-<!-- /agent:capture:my-section -->
-```
-Log is inside capture. Patching `status` triggers prompt extraction to sibling `log:my-section`.
-
-**Pattern 2: Anonymous capture (your second example)**
-```markdown
-<!-- agent:capture -->
-<!-- agent:status -->42<!-- /agent:status -->
-<!-- agent:log -->...<!-- /agent:log -->
-<!-- /agent:capture -->
-```
-Scoping rule: unnamed capture uses unnamed log. Simple, works for single-capture documents.
-
-**Pattern 3: Sibling capture + log (your third example)**
-```markdown
-<!-- agent:capture:my-section -->
-<!-- agent:status -->42<!-- /agent:status -->
-<!-- /agent:capture:my-section -->
-
-<!-- agent:log:my-section -->...<!-- /agent:log:my-section -->
-```
-Capture and log are siblings, linked by shared scope name. This is the most flexible — log can live anywhere in the document, not nested inside capture.
-
-**Recommendation:** Pattern 3 (siblings) is cleanest:
-- Capture defines a region where inline prompts are intercepted
-- Log is a separate component that receives those prompts
-- They're linked by naming convention (`capture:X` → `log:X`), not nesting
-- Log can be at the bottom of the document, in a sidebar section, etc.
-- Multiple captures with different names coexist naturally
-
-**Implementation layers:**
-1. **v0.9.1 (parser):** Allow colons in component names. Pure parser change, no semantic meaning at CLI level.
-2. **Skill-level:** Capture/log relationship is defined in the skill workflow. Before patching a component inside a `capture:X` scope, the skill extracts inline prompts and appends them to `log:X`.
-
-The CLI stays dumb — it doesn't know what "capture" means. The skill provides the intelligence. This follows the "CLI is dumb, skill is smart" principle from our lessons.
-
-Shall I implement the parser change (allow colons in names) now?
-
-## User
-
-compact this doc
-
-commit and push

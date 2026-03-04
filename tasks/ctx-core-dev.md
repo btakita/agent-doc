@@ -514,3 +514,7 @@ NAMING.md now frames immutable tagging as a **composable property you add to any
 - **snake_case repo**: Native compatibility — already immutable
 
 The core insight: `_` is the universal join that preserves any existing name. camelCase names stay camelCase. PascalCase stays PascalCase. Your tags stay lowercase singular.
+
+~/work/btakita/agent-loop/ctx-core-dev main +2 !8 ?58                                                                                                                                                                                  16:34:14
+❯ update-npm-packages
+/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/update-npm-packages.sh: line 4: /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/monorepo-npm-check-updates/index.mjs: No such file or directory

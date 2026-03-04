@@ -1,97 +1,61 @@
 //! Resync — validate sessions.json against live tmux panes.
 //!
-//! Removes stale entries whose tmux panes no longer exist,
-//! and reports the current state of the registry.
+//! Delegates to `tmux_router::prune()` for the core prune logic.
+//! The `run()` function adds verbose output for the standalone `agent-doc resync` command.
 
 use anyhow::Result;
 
 use crate::sessions::{self, Tmux};
 
+/// Quietly prune dead panes and deduplicate entries in sessions.json.
+/// Called automatically before route, sync, and claim operations.
+/// Returns the number of entries removed.
+pub fn prune() -> Result<usize> {
+    let tmux = Tmux::default_server();
+    let registry_path = sessions::registry_path();
+    let removed = tmux_router::prune(&registry_path, &tmux)?;
+    if removed > 0 {
+        eprintln!("resync: pruned {} stale session(s)", removed);
+    }
+    Ok(removed)
+}
+
+/// Verbose resync for the standalone `agent-doc resync` command.
 pub fn run() -> Result<()> {
     let tmux = Tmux::default_server();
-    let mut registry = sessions::load()?;
-    let before = registry.len();
+    let registry_path = sessions::registry_path();
 
-    // Partition into alive and dead entries.
-    let mut dead: Vec<(String, String, String)> = Vec::new();
-    registry.retain(|session_id, entry| {
-        let alive = tmux.pane_alive(&entry.pane);
-        if !alive {
-            dead.push((
-                session_id.clone(),
-                entry.pane.clone(),
-                entry.file.clone(),
-            ));
-        }
-        alive
-    });
+    // Show what's being removed (verbose)
+    let registry_before = sessions::load()?;
+    let before = registry_before.len();
 
-    let removed = before - registry.len();
+    let removed = tmux_router::prune(&registry_path, &tmux)?;
 
     if removed > 0 {
+        // Show which entries were removed by diffing before/after
+        let registry_after = sessions::load()?;
         eprintln!("Removed {} stale session(s):", removed);
-        for (session_id, pane, file) in &dead {
-            let label = if file.is_empty() {
-                session_id.as_str()
-            } else {
-                file.as_str()
-            };
-            eprintln!("  {} (pane {} dead)", label, pane);
+        for (key, entry) in &registry_before {
+            if !registry_after.contains_key(key) {
+                let label = if entry.file.is_empty() {
+                    key.as_str()
+                } else {
+                    entry.file.as_str()
+                };
+                eprintln!("  {} (pane {} removed)", label, entry.pane);
+            }
         }
     } else {
-        eprintln!("All {} session(s) have live panes.", registry.len());
+        eprintln!("All {} session(s) have live panes.", before);
     }
 
-    // Deduplicate: if multiple sessions point to the same pane, keep the most recent
-    let mut pane_to_sessions: std::collections::HashMap<String, Vec<(String, String)>> =
-        std::collections::HashMap::new();
-    for (session_id, entry) in &registry {
-        pane_to_sessions
-            .entry(entry.pane.clone())
-            .or_default()
-            .push((session_id.clone(), entry.started.clone()));
-    }
-    let mut dedup_removed = 0usize;
-    for (pane, mut sessions) in pane_to_sessions {
-        if sessions.len() <= 1 {
-            continue;
-        }
-        // Sort by started timestamp descending — keep the newest
-        sessions.sort_by(|a, b| b.1.cmp(&a.1));
-        let keeper = &sessions[0].0;
-        for (session_id, _) in &sessions[1..] {
-            let label = registry
-                .get(session_id)
-                .map(|e| {
-                    if e.file.is_empty() {
-                        session_id.as_str()
-                    } else {
-                        e.file.as_str()
-                    }
-                })
-                .unwrap_or(session_id.as_str());
-            eprintln!(
-                "  dedup: removing {} (pane {} shared with {})",
-                label, pane, keeper
-            );
-            registry.remove(session_id);
-            dedup_removed += 1;
-        }
-    }
-    if dedup_removed > 0 {
-        eprintln!("Deduplicated {} session(s) sharing the same pane.", dedup_removed);
-    }
-
-    if removed > 0 || dedup_removed > 0 {
-        sessions::save(&registry)?;
-    }
-
-    // Show current state.
+    // Show current state
+    let registry = sessions::load()?;
     if !registry.is_empty() {
         eprintln!("\nActive sessions:");
-        for (session_id, entry) in &registry {
+        for (key, entry) in &registry {
             let label = if entry.file.is_empty() {
-                session_id.as_str()
+                key.as_str()
             } else {
                 entry.file.as_str()
             };

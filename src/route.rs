@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, sessions};
+use crate::{frontmatter, resync, sessions};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
@@ -20,6 +20,7 @@ pub fn run(file: &Path) -> Result<()> {
 }
 
 pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
+    let _ = resync::prune(); // Clean stale entries before lookup
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }

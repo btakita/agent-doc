@@ -625,4 +625,30 @@ Re: names...please rate the following
 - weltenshauung
 - worldview
 - existenceview
+- existview
 - any other candidates for a name
+
+## Assistant
+
+| Name | Score | Pros | Cons |
+|------|-------|------|------|
+| **existential-kernel** | 8/10 | Precise, descriptive, unique. "Kernel" = computing (minimal core). "Existential" = philosophical grounding. Already established. SEO-friendly. | Long (19 chars). Hyphenated. |
+| **weltanschauung** | 5/10 | Deep philosophical resonance — German for "worldview" but implies *comprehensive* philosophical framework. Academic credibility. | Hard to spell/pronounce/type for English speakers. Hurts adoption. Bad CLI name. (Note: correct spelling is *Weltanschauung*, not *weltenshauung*.) |
+| **worldview** | 4/10 | Simple, intuitive, universal. | Too generic — can't own it as a brand. Doesn't convey tooling/kernel aspect. Sounds like a blog, not a tool. Almost certainly taken on GitHub. |
+| **existenceview** | 3/10 | Combines your core concept with "view." | Compound word that doesn't exist naturally. Awkward. Doesn't convey tooling. |
+| **existview** | 6/10 | Short, punchy, unique. "Exist" + "view" = viewing existence. Good CLI name. | Doesn't convey the "kernel" (minimal core) concept. Could be mistaken for a UI library. |
+
+**Additional candidates:**
+
+| Name | Score | Notes |
+|------|-------|-------|
+| **exkernel** | 7/10 | Short, unique, already the CLI name. But taken on GitHub as org. |
+| **ontokernel** | 6/10 | Ontology + kernel. Specific. But less evocative than "existential." |
+| **kernos** | 6/10 | Short, memorable. Greek *kernos* = ritual vessel holding many offerings. Fits metaphorically. Obscure. |
+
+**Recommendation: keep `existential-kernel`.** It's the best balance of meaning + usability. Already established (org, 4 repos, docs, submodules). The CLI stays `exkernel` (6 chars) regardless. The org name communicates exactly what it is. Renaming now means moving repos, updating all refs, re-creating submodules — cost with no clear gain.
+
+If you ever want something shorter for marketing: "exkernel" as the informal/spoken name, "existential-kernel" as the formal/org name. Same pattern as "kubernetes" / "k8s".
+
+## User
+Release existential-kernel

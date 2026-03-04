@@ -337,3 +337,35 @@ The gap you're describing — "thing happened" to "agent knows about it" — is 
 ## User
 
 Can agent-doc support dashboard-as-document right now? Would we need to add features to better support that use case?
+
+## Assistant
+
+**Partially — the diff pipeline works, but the interaction model has gaps.**
+
+**What works today:**
+- External process can modify the markdown file (watcher updates fields)
+- Snapshot-based diff detects exactly what changed
+- 3-way merge protects concurrent edits
+- `agent-doc route <file>` can trigger submission from external scripts
+
+**What's missing:**
+
+1. **Auto-submit on file change** — agent-doc is user-initiated only. No `agent-doc watch`. You'd need to manually run `/agent-doc` or use `agent-doc route` from a cron/watch script.
+
+2. **Sectional editing** — the agent can only *append* `## Assistant` blocks at the bottom. A dashboard needs the agent to *update specific sections* (e.g., fill in an "Actions" column). Today the agent can't write to arbitrary doc locations.
+
+3. **Template field awareness** — diffs are raw text, not structured fields. "active → flagged" shows as a text diff, not a typed field change.
+
+**What would need to be built:**
+
+| Feature | Effort | Impact |
+|---------|--------|--------|
+| `agent-doc watch <file>` — auto-submit on file change | Small | Closes the trigger gap |
+| Sectional write-back — agent edits specific sections | Medium | Enables dashboard pattern |
+| Template syntax — `{{field}}` interpolation | Medium | Structured field awareness |
+
+**Minimum viable dashboard today:** A watch script that runs `agent-doc route <file>` when the file changes (sends the submit keystroke to the owning pane). The agent response appends at the bottom — for an operational dashboard, the latest status is always the last section. Not ideal, but functional.
+
+## User
+
+In the reply, let's mention that the dashboard-as-document is planned. With partial support today.

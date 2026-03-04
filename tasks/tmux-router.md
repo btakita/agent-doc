@@ -83,11 +83,22 @@ Tests are copied/adapted, not just moved. Both crates must pass independently.
 
 ## Extraction Plan
 
-1. Create `tmux-router/` crate in agent-loop workspace (or standalone repo)
-2. Move `Tmux`, `Registry`, `reconcile()` + types
-3. Update agent-doc to `use tmux_router::*`
-4. Ensure all 152 tests pass in both crates
-5. Release tmux-router v0.1.0, agent-doc v0.8.0
+1. ~~Create `tmux-router/` crate in agent-loop workspace (or standalone repo)~~ **Done** — `btakita/tmux-router` on GitHub
+2. ~~Move `Tmux`, `Registry`, `reconcile()` + types~~ **Done** — 46 tests pass
+3. Update agent-doc to `use tmux_router::*` — **Pending**
+4. Ensure all tests pass in both crates — **Pending**
+5. Release tmux-router v0.1.0, agent-doc v0.8.0 — **Pending**
+
+## Status
+
+**v0.1.0 extracted** (`4cba1c8`):
+- `src/tmux.rs` — `Tmux` + `IsolatedTmux` with all methods
+- `src/registry.rs` — `RegistryEntry`, `Registry`, load/save/lookup/prune (parameterized path)
+- `src/sync.rs` — `Layout`, `reconcile()`, `sync()` with callback-based `FileResolution`
+- 46 tests pass (unit + integration + proptest)
+- Added as submodule to agent-loop
+
+**Next:** Wire agent-doc to depend on tmux-router and delegate sync/sessions to the library.
 
 ## User
 

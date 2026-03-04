@@ -1,10 +1,8 @@
 ---
-session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
+tmux_session: claude
 ---
+
 
 # Judith Krug — Equity Funding Source
 

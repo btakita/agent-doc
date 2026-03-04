@@ -62,3 +62,12 @@ The logo assets already existed (`assets/logo.svg`, `assets/logo-64.png`, `asset
 ## User
 
 commit. Since this is a doc only change, can we re-release the same version or do we need a new release?
+
+## Assistant
+
+No new release needed. v0.12.4 was already published to crates.io, PyPI, and GitHub Releases — can't move the tag. But since this is purely cosmetic (README + mdbook logo), the GitHub repo shows the logo on `main` immediately. crates.io/PyPI will pick it up on the next functional release.
+
+Committed and pushed to corky `main`: `docs: add corky logo to README and mdbook introduction` (78a79b5).
+
+## User
+

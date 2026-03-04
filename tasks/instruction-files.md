@@ -16,3 +16,18 @@ Migration: change `edition = "2021"` → `"2024"` in Cargo.toml, run `cargo chec
 ## User
 
 version bump and release
+
+## Assistant
+
+**instruction-files v0.1.4 released** — Rust 2024 edition.
+
+- **Commit:** `10bc621` — edition bump, zero code changes
+- **Tag:** `v0.1.4`
+- **crates.io:** published
+- **GitHub Release:** https://github.com/btakita/instruction-files/releases/tag/v0.1.4
+- **Parent submodule:** updated (`c5862f3`)
+- **Tests:** 47 pass, clean
+
+## User
+
+

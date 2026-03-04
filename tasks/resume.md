@@ -1,10 +1,8 @@
 ---
-session: db08a891-c339-4a49-9f49-2d8a1f30ed10
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: db08a891-c339-4a49-9f49-2d8a1f30ed10
+tmux_session: claude
 ---
+
 # Resume Session
 
 ## Status

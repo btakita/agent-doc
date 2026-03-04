@@ -19,3 +19,13 @@ Ready to push if you'd like.
 ## User
 
 audit docs
+
+## Assistant
+
+**agent-loop:** `agent-doc audit-docs` — clean, no issues. 521 lines / 1000 budget.
+
+**corky:** `corky audit-docs` — 5 staleness warnings. All docs flagged as older than `src/transcribe/model.rs` (recently touched by the Rust 2024 `unsafe {}` wrapping). False positives — no real content drift. Touch the docs or commit to clear.
+
+## User
+
+

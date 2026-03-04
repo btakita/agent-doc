@@ -95,3 +95,14 @@ For now the draft will thread correctly in Gmail without it.
 ## User
 
 Send the reply.
+
+## Assistant
+
+**Sent.** Reply to Jonathan Martinez at castandcrew.com sent from brian.takita@gmail.com.
+
+Subject: Re: Regarding Application for Senior Python Software Engineer with Cast & Crew (Backstage)
+
+Note: The draft had to be moved to `/home/brian/work/btakita/mail/drafts/` for `corky draft push` to find the `.corky.toml` credentials. The `~/Documents/mail/` location was outside the credential bubbling path. The original `~/Documents/mail/` directory also disappeared between sessions — might be a tmpfs or symlink issue.
+
+## User
+

@@ -369,3 +369,33 @@ Can agent-doc support dashboard-as-document right now? Would we need to add feat
 ## User
 
 In the reply, let's mention that the dashboard-as-document is planned. With partial support today.
+
+## Assistant
+
+**Updated draft — copy-paste ready for HN:**
+
+```
+The pre-submit commit as an immutable baseline is the key design decision — every agent interaction is an atomic transaction with a known rollback point, exactly right.
+
+On the "event → agent" gap: we've been thinking about this as a layered problem.
+
+*The bridge is a file write.* agent-doc is user-initiated (edit a doc, hit submit), but the diff pipeline doesn't care who writes the file. A watcher process — or any external system — can write to the file system, and the agent sees the change on next poll.
+
+We already do this in a different layer: corky (https://github.com/btakita/corky), our email tool, runs a watch daemon that polls IMAP for new messages and syncs them to markdown files on disk. External event (email arrives) gets translated into a file-system change, which is the agent's native input format. Same pattern would work for session recovery: monitoring process detects flagged session → writes to a task file → agent picks it up.
+
+*Dashboard-as-document* is something we're actively planning. The idea: a markdown template where a watcher fills in operational fields — session status, health checks, proxy assignments. When the watcher updates "active" → "flagged", the diff pipeline sees exactly what changed. The template gives structure; the diff gives the trigger.
+
+The snapshot diff already works for this — partial support exists today via agent-doc's routing layer (external scripts can trigger submission when a file changes). What we're building next is auto-submit on file change and sectional write-back so the agent can update specific dashboard fields rather than only appending.
+
+For sub-second latency, a lightweight daemon that receives webhooks and writes to the notification file or directly triggers an agent submit. But for most operational tasks, a polling interval (ours runs every 30 seconds) closes the gap well enough.
+
+The gap you're describing — "thing happened" to "agent knows about it" — is really about who writes the event into the file system. Once it's a file change, the diff pipeline handles the rest.
+```
+
+Changes from previous draft:
+- Dashboard-as-document framed as "actively planning" with "partial support today"
+- Added concrete detail: "routing layer (external scripts can trigger submission)"
+- Added roadmap signal: "auto-submit on file change and sectional write-back"
+
+## User
+

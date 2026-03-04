@@ -111,3 +111,11 @@ Component names support colon-separated namespacing: `agent:type:scope` (e.g., `
 ## User
 
 Commit the agent-doc README
+
+## Assistant
+
+Done. Committed and pushed the agent-doc README (`e084ff3`) with components, dashboard, and patch/watch CLI docs. Updated the parent submodule pointer (`6c8b825`) and pushed both.
+
+## User
+
+

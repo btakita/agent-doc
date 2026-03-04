@@ -404,3 +404,26 @@ Want me to add `xist` as a third binary alias alongside `existence` and `exk`?
 ## User
 
 Yes. xist.
+
+## Assistant
+
+**Done. `xist` replaces `exk`. Released v0.3.1.**
+
+```
+$ cargo install existence
+  Installing existence + xist
+
+$ xist --version
+existence 0.3.1
+
+$ xist search "scope"
+scope (Ring 0) — The breadth, depth or reach of an Entity...
+```
+
+Binaries: `existence` (full) + `xist` (short). Old `exk` auto-removed on upgrade.
+
+[crates.io](https://crates.io/crates/existence) · [v0.3.1](https://github.com/existence-lang/existence/releases/tag/v0.3.1)
+
+## User
+
+

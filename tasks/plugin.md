@@ -354,3 +354,34 @@ Removed the dedup cache entirely from `EditorTabSyncListener`. The plugin's only
 Why is there still 3 panes open when there are only 2 documents open in the editor?
 Please add tests for this scenario.
 sync should reset to 2 panes in the window.
+
+## Assistant
+
+**The CLI sync algorithm is correct — the issue is the plugin hasn't been reinstalled yet.**
+
+The old plugin (with the dedup cache) is still running. It blocked the re-sync after you closed the 3rd tab. The new plugin (without dedup cache) will fix this, but you need to install the rebuilt zip first.
+ 
+Explain why the plugin needed to be changed.
+
+**Proof: 2 new tests pass confirming the sync algorithm works:**
+
+1. **`test_sync_3_panes_to_2_evicts_extra`** — 3 panes in same window, sync with 2 desired → 3rd evicted to stash, window ends with exactly 2 panes.
+
+2. **`test_sync_3_panes_to_2_with_external_join`** — 3 panes in target window + 1 desired pane in a different window. Sync evicts 2 unwanted panes and joins the external one → window ends with exactly 2 panes.
+
+Both tests verify:
+- Final window has exactly 2 panes
+- Only the desired panes remain
+- Evicted panes are alive (stashed, not killed)
+- No errors in the sync log
+
+**To fix the 3-pane issue right now:**
+1. Install the rebuilt plugin: `build/distributions/agent-doc-jetbrains-0.1.0.zip`
+2. Restart IDEA
+3. Switch tabs — the new plugin will trigger sync without a dedup cache, evicting the extra pane
+
+Or manually run: `agent-doc sync --col tasks/plugin.md --col <other-open-file>.md --window @187`
+
+## User
+
+

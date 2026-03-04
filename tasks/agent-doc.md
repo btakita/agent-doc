@@ -849,3 +849,29 @@ Use rust 2024 edition.
 Does agent-doc currently depend on tmux-router?
 
 BUG ALERT: I just did a agent-doc run on corky.md on the right-side editor pane. A separate window was created. Please review logs and fix.
+
+## Assistant
+
+**No, agent-doc does not depend on tmux-router yet.** The extraction was a copy — agent-doc still has its own `sessions.rs` and `sync.rs`. Wiring `use tmux_router::*` is step 3 in the extraction plan (v0.8.0).
+
+**Re: corky.md creating a separate window:**
+
+`agent-doc run` (submit.rs) does NOT interact with tmux — it reads the file, sends the diff to the Claude API headlessly, and writes the response back. The window creation came from `agent-doc route` (either via the JetBrains plugin hotkey or a manual invocation).
+
+**What happened:**
+1. `route corky.md` looked up the session UUID in `.agent-doc/sessions.json`
+2. No pane was registered (or the registered pane was dead)
+3. `auto_start()` → `new_window("claude", cwd)` → created a new tmux window
+4. Later, `sync --col` moved the pane into @315 alongside agent-doc.md
+
+**Root cause:** `route`'s `auto_start()` always creates a new window. It should prefer joining into the existing active window (where related files are already arranged).
+
+**Possible fix:** Add `--window` to `agent-doc route`, or have `auto_start` detect the active window and use `join-pane` instead of `new-window` when a related window exists.
+
+Should I fix this now, or defer it to v0.8.0 when we wire agent-doc to tmux-router?
+
+I see tmux-router as a submodule. Since we have extracted, can we include the bug fix in v0.8.0? 
+
+## User
+
+

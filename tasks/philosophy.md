@@ -204,3 +204,27 @@ existence-framework? Rate that vs existential-kernel
 ## User
 
 existence-kernel vs existential-kernel
+
+## Assistant
+
+**`existence-kernel` is better.**
+
+| | `existence-kernel` | `existential-kernel` |
+|---|---|---|
+| **Score** | 8.5/10 | 8/10 |
+| **Cohesion** | Direct match — `existence` crate in `existence-kernel` org | Adjective form — related but not matching |
+| **Shorter** | 16 chars | 19 chars |
+| **Clearer** | Noun + noun — "the kernel of existence" | Adjective + noun — "the existential kind of kernel" |
+| **Memorable** | Easier — both are common words | Harder — "existential" is 5 syllables |
+
+`existence-kernel` reads as "the kernel of existence" — exactly what the project is. It pairs perfectly with the `existence` crate. And it's 3 characters shorter.
+
+The only downside: migration cost (rename org, move 5 repos, update submodule URLs). But since you're already renaming the crate, you're doing a big rename anyway — might as well do both at once.
+
+**If you want to rename, I'd go with `existence-kernel`.** Want me to execute the full rename (org + crate + repos + submodules)?
+
+## User
+
+The org will be named existence-kernel? It sounds more like a software layer. But it could also be a technique with a better description than existence-framework.
+
+Are there better variations? I don't mind renaming, so let's find the best name available.

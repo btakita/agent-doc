@@ -600,5 +600,8 @@ BROWSERSLIST_IGNORE_OLD_DATA=true
 
 2. **Update @rebuildjs/tailwindcss** (you maintain it) — bump its esbuild dep to `^0.27.0` and fix any breaking API changes. Proper fix.
 
+Update esbuild
+
 ## User
+
 

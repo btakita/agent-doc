@@ -228,3 +228,34 @@ The only downside: migration cost (rename org, move 5 repos, update submodule UR
 The org will be named existence-kernel? It sounds more like a software layer. But it could also be a technique with a better description than existence-framework.
 
 Are there better variations? I don't mind renaming, so let's find the best name available.
+
+## Assistant
+
+You're right — "kernel" sounds like software infrastructure. The org should communicate *what the project is about*, not how it's architected. All these are available on GitHub:
+
+| Name | Score | What it communicates |
+|------|-------|---------------------|
+| **existence-ontology** | 9/10 | "An ontology of existence." Precise, academic, exactly what it is. Pairs perfectly with `existence` crate. Natural for the repos: `existence-ontology/existence`, `existence-ontology/ontology`, `existence-ontology/spec`. |
+| **existence-lang** | 8/10 | "A language of existence." Evocative — the project IS a language (ubiquitous language for defining domains). Short. But could be confused with a programming language. |
+It sounds like a programming language...but with agent loops it is a language.
+| **existence-foundation** | 7.5/10 | Implies permanence and community stewardship. But "foundation" is overused (Apache Foundation, Linux Foundation, etc.) and premature for a young project. |
+| **existence-kernel** | 7.5/10 | "The kernel of existence." But you're right — sounds like a software layer, not a technique/discipline. |
+| **existence-spec** | 7/10 | Clear but narrow — implies just a specification, not the tooling and content. |
+| **existence-protocol** | 6.5/10 | Too buzzwordy. Implies networking/blockchain. |
+
+**My pick: `existence-ontology`.** It's the most honest description. The project IS an ontology of existence — term definitions, ring structure, composable scoping. The `existence` crate is the CLI for working with the `existence-ontology`. Clean hierarchy:
+
+```
+existence-ontology (org)
+├── existence    ← CLI tool (crate name)
+├── ontology     ← 114 term definitions
+├── spec         ← node format + ring spec
+├── .github      ← org profile
+└── *.github.io  ← landing page
+```
+
+`existence-lang` is the compelling alternative if you want something shorter and more evocative.
+
+## User
+
+existence-lang is nice as well. With agent loops & the cli it is semi-executable. I wonder if we can actually make a programming language out of it.

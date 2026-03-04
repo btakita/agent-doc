@@ -541,3 +541,4 @@ existential-kernel/
 ## User
 
 Fix the broken links please.
+Is agent-doc's project term unblocked with the current tooling? Or do I need to release the 1st version?

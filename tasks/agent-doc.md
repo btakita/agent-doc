@@ -791,3 +791,21 @@ yes...file-path-as-key
 
 ## User
 
+Please extract tmux-router related topics from this agent doc into tasks/tmux-router.md. Create a new claude session as well.
+
+## Assistant
+
+**Design locked.** All decisions confirmed:
+
+| Decision | Choice |
+|----------|--------|
+| Registry | Own file: `.tmux-router/registry.json` |
+| File identity | File-path-as-key (no UUID) |
+| Library API | `tmux_router::{Tmux, Registry, reconcile()}` |
+| Config | `~/.config/tmux-router/config.toml` + CLI flags override |
+
+**Extracting tmux-router content to `tasks/tmux-router.md`** with a new session UUID. This will include the CLI API design, design decisions, and extraction plan.
+
+## User
+
+Please keep extensive testing in agent-doc in addition to the comprehensive testing in tmux-router. I want to make sure there are no regressions. And any edge cases can be tested and fixed without regressions.

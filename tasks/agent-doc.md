@@ -448,3 +448,12 @@ New method: `Tmux::select_window(window_id)` — `tmux select-window -t <id>`.
 ## User
 
 In all of our automated tests related to the tmux routing...let's make sure each step has the fully correct tmux state.
+
+This means:
+- tmux session, window, pane layout
+- content of the panes
+- selected pane
+
+Whether it is simulated state or actual tmux state via integration tests. 
+
+I plan on extracting a tmux router cli & library project from this logic. What are your thoughts?

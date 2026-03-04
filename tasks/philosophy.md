@@ -931,3 +931,25 @@ Option 2 is cleanest — ships both `exkernel` and `exk` from the same crate. Wa
 ## User
 
 Option 2...release
+
+## Assistant
+
+**Released exkernel v0.2.1 with `exk` alias.**
+
+```
+$ cargo install exkernel
+  Installing /home/brian/.cargo/bin/exk
+  Replacing /home/brian/.cargo/bin/exkernel
+
+$ exk --version
+exkernel 0.2.1
+
+$ exk search "scope"
+scope (Ring 0) — The breadth, depth or reach of an Entity...
+```
+
+Both `exkernel` and `exk` ship from the same crate — same binary, two names. Published to [crates.io](https://crates.io/crates/exkernel), tagged [v0.2.1](https://github.com/existential-kernel/exkernel/releases/tag/v0.2.1), installed locally.
+
+## User
+
+compact this doc

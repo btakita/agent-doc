@@ -73,7 +73,7 @@ agent-doc extends the existential kernel vocabulary (defined in `~/.claude/philo
 
 | Term | Derives From | Description |
 |------|-------------|-------------|
-| **Session** | story + system | A bounded interaction with temporal arc; the unit of agent-doc work |
+| **Session** | project + story | A bounded interaction with temporal arc; the unit of agent-doc work |
 | **Document** | entity + context | A markdown file that holds conversational state between user and agent |
 | **Pane** | focus + scope | A tmux viewport — finite attention applied to a single document |
 | **Claim** | scope + entity | Binding a document to a pane; scoping focus to a specific file |

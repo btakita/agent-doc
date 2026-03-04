@@ -600,3 +600,8 @@ agent-doc start tasks/plugin.md
 
 Should it be the `agent_doc_session` instead. Please update the name.
 
+Add Alpha Software in the README. we are starting to get some users of this library.
+
+If an agent doc has an old version of the frontmatter, the frontmatter should automatically update to the current version. Reconcile whatever fields you can. But forcing a reclaim is ok.
+
+If I run several `agent-doc run` commands on a single document while previous run(s) are still going...will the responses be queued up? Or does Claude manage merging in the requests together? 

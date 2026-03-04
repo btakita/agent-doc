@@ -870,8 +870,22 @@ BUG ALERT: I just did a agent-doc run on corky.md on the right-side editor pane.
 
 Should I fix this now, or defer it to v0.8.0 when we wire agent-doc to tmux-router?
 
-I see tmux-router as a submodule. Since we have extracted, can we include the bug fix in v0.8.0? 
+I see tmux-router as a submodule. Since we have extracted, can we include the bug fix in v0.8.0?
+
+## Assistant
+
+**Yes — the route auto_start fix goes into v0.8.0.** It fits naturally since we're refactoring the tmux interaction layer when wiring `use tmux_router::*`.
+
+**v0.8.0 scope:**
+1. Wire agent-doc → tmux-router dependency (`Cargo.toml` + imports)
+2. Replace `sessions.rs` tmux operations with `tmux_router::Tmux`
+3. Replace `sync.rs` with `tmux_router::sync()`
+4. Fix route's `auto_start` — join existing window via `join-pane` instead of always `new_window()`
+5. Dual-layer test coverage: all existing agent-doc tests pass + tmux-router tests pass independently
+6. Registry migration: `.agent-doc/sessions.json` → `.tmux-router/registry.json` (or both, with agent-doc delegating)
+
+The route fix in tmux-router would be: `auto_start` queries the active window, checks if it has room, and uses `join-pane -t <window>` instead of `new-window`. This way new sessions appear alongside existing ones in the same window.
 
 ## User
 
-
+Can we install agent-doc v0.8.0 locally so I can test it? This is a big change so I want to make sure it works as intended before releasing.

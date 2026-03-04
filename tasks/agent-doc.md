@@ -501,8 +501,19 @@ Setup: 3 panes (A=agent-doc, B=plugin, C=dave-franklin). 2-column layout:
 
 **If you're still seeing the selection jump**, the issue is likely a brief intermediate state during reconcile — `join-pane` changes the active pane before `select_pane` runs at the end. The fix would be to add `-d` to ALL `join-pane` calls during reconcile (not just stash), so no intermediate pane gets selected until the explicit `select_pane` at the end. Want me to do this?
 
+I'm still seeing a full change with the tmux pane selection. Please log the currently selected tmux pane so you can review as well. The inconsistent state should be logged.
+
 **142 tests pass, clippy clean, binary installed.**
 
 ## User
 
 Please add a github description to https://github.com/btakita/agent-doc
+
+## Assistant
+
+**Done.** Set the GitHub description to:
+
+> Interactive document sessions with AI agents — tmux pane routing, editor layout sync, and session management for Claude Code and other agent backends
+
+## User
+

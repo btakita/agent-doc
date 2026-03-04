@@ -741,3 +741,61 @@ Verified: `exkernel --version` → `exkernel 0.1.0` after sourcing. New terminal
 It's somewhat difficult to find terms. Can we add autocomplete for zsh and bash. Also add a search feature, which searches the name, tags, and description ordered by relevance.
 
 Also make it "easy" to generate and edit scoped or novel terms. Either with an agent loop or with the standalone cli.
+
+## Assistant
+
+**Shell completions and search — done.** Pushed to exkernel.
+
+**1. Shell completions:**
+
+```sh
+exkernel completions zsh > ~/.zsh/completions/_exkernel
+exkernel completions bash > /etc/bash_completion.d/exkernel
+exkernel completions fish > ~/.config/fish/completions/exkernel.fish
+```
+
+Generates full completion scripts via `clap_complete`. Covers all subcommands and flags.
+
+**2. Search command:**
+
+```
+$ exkernel search "change"
+evolution (Ring 0) — The altering of an Entity...
+abstraction (Ring 0) — An abstraction is a concept that models...
+
+$ exkernel search "scope" --limit 3
+scope (Ring 0) — The breadth, depth or reach of an Entity...
+explicit-scope (Ring 2) — A Scope that is Expressed in a clear way...
+implicit-scope (Ring 2) — The Implicit Scope is an unmentioned scope...
+
+$ exkernel search "scope" --json
+[{"term":"scope","ring":0,"score":100,"definition":"..."},...]
+```
+
+Relevance scoring: name exact (100) > name substring (60) > definition match (30) > body match (10). 23 tests pass, clippy clean.
+
+**3. Easy term generation and editing — design:**
+
+Two paths, complementary:
+
+**CLI path (`exkernel new <term>`):**
+- Scaffolds a new term file from the SPEC.md template
+- Pre-fills `## [Ontology]` with the term name and related links
+- Opens in `$EDITOR` for immediate editing
+- `exkernel new --ring 1 project` → creates `src/project.md` with template, adds to `exkernel.toml` ring
+
+**Agent loop path (`/exkernel` skill or agent-doc):**
+- Agent reads existing nodes to understand the style/lens
+- User describes the concept; agent drafts the full node (Ontology/Axiology/Epistemology)
+- User reviews and edits in the document; agent refines
+- Final version gets written to `src/<term>.md` and committed
+
+The CLI path is good for terms you already understand. The agent loop path is better for exploring/authoring — the back-and-forth helps clarify the definition. Both should exist.
+
+**Next:** Should I implement `exkernel new` now? And do you want a `/exkernel` Claude skill alongside it?
+
+Yes and yes.
+
+## User
+
+

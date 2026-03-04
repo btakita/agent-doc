@@ -493,3 +493,45 @@ The CLI arg name, struct name, and all docs should use "component." The markers 
 ## User
 
 Should we have hooks for components. Allowing for custom component types. And to customize behavior on existing components such as the log.
+
+## Assistant
+
+**Yes — component hooks are the right extensibility model.** Two-layer approach: config-driven modes for common behavior, shell hooks as escape hatch.
+
+**Component config** (`.agent-doc/components.toml`):
+
+```toml
+[log]
+mode = "append"        # append | replace (default) | prepend
+timestamp = true       # auto-prefix with ISO timestamp
+max_entries = 100      # auto-trim for append/prepend modes
+
+[status]
+mode = "replace"       # default — full content replacement
+pre_patch = "scripts/validate-status.sh"   # shell hook (future)
+post_patch = "scripts/notify-change.sh"    # shell hook (future)
+```
+
+**Built-in modes** (no scripts needed):
+- `replace` — default, full content replacement (current `patch` behavior)
+- `append` — new content added at bottom (log component default)
+- `prepend` — new content added at top (newest-first)
+- `timestamp` — auto-prefix entries with ISO timestamp
+- `max_entries` — auto-trim old entries in append/prepend modes
+
+**Shell hook lifecycle** (future, v0.10+):
+
+| Hook | When | Receives |
+|------|------|----------|
+| `pre-patch` | Before replacement | stdin: new content, env: `COMPONENT`, `FILE` |
+| `post-patch` | After write | env: `COMPONENT`, `FILE`, `PREV_HASH`, `NEW_HASH` |
+
+**Recommended phasing:**
+- **v0.9.x**: Config file with built-in modes (`replace`, `append`, `prepend`, `timestamp`, `max_entries`). Covers log and most dashboard components.
+- **v0.10+**: Shell hooks (`pre_patch`, `post_patch`) for custom validation, side effects, cross-component triggers.
+
+This means custom component types are just config — define a name, set its mode, done. No code changes needed for new component behaviors.
+
+## User
+
+Would shell hooks be ok to implement for 0.9.0?

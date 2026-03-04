@@ -327,3 +327,30 @@ override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
 ## User
 
 Should agent-doc handle this syncing instead? The plugin should only send the layout of the editor tabs.
+
+## Assistant
+
+**Yes — implemented. The plugin is now a thin layout reporter.**
+
+Removed the dedup cache entirely from `EditorTabSyncListener`. The plugin's only job is to detect the editor layout and call `agent-doc sync` — all sync intelligence (fast-path, eviction, dedup) lives in the CLI.
+
+**What was removed:**
+- `lastColumnStructure` / `lastActiveFile` volatile fields
+- `clearLastFileSet()` method
+- `fileClosed()` handler (no longer needed)
+- Dedup comparison logic (lines 85-101)
+- `SyncLayoutAction.clearLastFileSet()` call
+
+**What stays:**
+- 500ms debounce (coalesces rapid tab switches)
+- Concurrency guard (prevents overlapping sync processes)
+
+**Why this is correct:** `agent-doc sync` already has a FAST_PATH check — if the layout is already correct, it returns with zero tmux mutations in <10ms. The CLI-side fast path is strictly more correct than the plugin-side cache because it checks actual tmux state, not a cached assumption.
+
+**Plugin rebuilt** (both zips). This replaces the previous `fileClosed()` fix with a cleaner architecture.
+
+## User
+
+Why is there still 3 panes open when there are only 2 documents open in the editor?
+Please add tests for this scenario.
+sync should reset to 2 panes in the window.

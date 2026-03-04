@@ -971,3 +971,25 @@ Since you already set Pages to GitHub Actions, that was the only prerequisite. T
 I have `CRATES_PUBLISH_TOKEN` on my local .env
 
 Why is tmux-router at 0.2.0 and not 0.1.0?
+Please set the secret on the gh action to allow for the gh action to publish.
+
+## Assistant
+
+**Good catch — reverted to v0.1.0.** The SyncResult addition was made before any release, so there's no breaking change to version for. Per convention: "If a version was never published, don't bump — use the original version."
+
+**tmux-router v0.1.0 released:**
+- crates.io: https://crates.io/crates/tmux-router
+- GitHub Release: https://github.com/btakita/tmux-router/releases/tag/v0.1.0
+- Updated agent-doc's dependency to `version = "0.1"`
+
+**Re: GitHub Actions secret for crates.io** — I can't set GitHub repository secrets programmatically (requires admin web access). You'll need to:
+1. Go to https://github.com/btakita/tmux-router/settings/secrets/actions
+2. Add secret: Name = `CARGO_REGISTRY_TOKEN`, Value = your `CRATES_PUBLISH_TOKEN`
+
+The `release.yml` workflow references `${{ secrets.CARGO_REGISTRY_TOKEN }}` so it'll work once the secret is added. Future releases will auto-publish on tag push.
+
+**Next:** Release agent-doc v0.8.0.
+
+## User
+
+release agent-doc

@@ -259,3 +259,44 @@ existence-ontology (org)
 ## User
 
 existence-lang is nice as well. With agent loops & the cli it is semi-executable. I wonder if we can actually make a programming language out of it.
+
+## Assistant
+
+It already *is* a language — and it's already semi-executable. You're closer than you think.
+
+**What you have today:**
+- **Vocabulary:** 114 defined terms with precise semantics
+- **Scoping rules:** Ring 0 → Ring 1 → Ring 2 → domain overlay (composable inheritance)
+- **Type system:** Each term has Ontology (what it IS), Axiology (what it's WORTH), Epistemology (how it's KNOWN)
+- **Linking:** Terms reference each other via `[term](./term.md)` — a dependency graph
+- **Validation:** `existence lint` checks structural correctness
+- **Query:** `existence search`, `existence lookup`, `existence scope`
+- **The interpreter:** An LLM in an agent loop. It reads the definitions and *applies* them.
+
+**What makes it "semi-executable" right now:**
+```
+existence scope domain agent-doc
+```
+This is already a program. It says: "Resolve the terms relevant to agent-doc's domain, starting from the existential kernel, through the software ring, into the domain overlay." The CLI executes it deterministically. The agent loop executes the *meaning*.
+
+**To make it a full language, you'd add:**
+
+1. **Assertions** — `existence assert "A Session derives from project + story"` — validates derivation chains
+2. **Transforms** — `existence derive healthcare` — given a domain, generate a domain overlay by analyzing which kernel terms apply
+3. **Constraints** — define invariants between terms: "if scope narrows, resolution must increase" — enforceable in code reviews
+4. **Composition** — `existence compose agent-doc + corky` — merge two domain overlays, detect conflicts
+5. **Execution via agent** — `existence run "Given a new entity in domain X, classify it using kernel terms"` — LLM interprets the ontology as rules
+
+The insight is that the LLM is the runtime. Traditional languages need compilers because machines can't interpret natural language. With LLMs, natural language definitions *become* executable specifications. The ontology terms are the instruction set; the agent loop is the CPU.
+
+**`existence-lang` as an org name would be aspirational but honest** — it signals where this is going: from a static ontology toward an executable language for modeling existence. If you believe the agent-loop-as-runtime thesis, it's not even aspirational — it's descriptive.
+
+**My updated recommendation:**
+- **`existence-ontology`** if you want to describe what it is *today* (9/10)
+- **`existence-lang`** if you want to describe what it's *becoming* (9.5/10)
+
+The `-lang` name is a commitment to a direction. If you're serious about making it executable, claim the name now.
+
+## User
+lets go with existence-lang
+existence for crates, existence-lang f

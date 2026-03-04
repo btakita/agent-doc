@@ -70,3 +70,5 @@ Removed all resolved bug reports, intermediate fix attempts, test output logs, a
 I'm having issues syncing tmux in it's current state with the layout. Please add tests simulating what we have right now with tmux and the editors.
 
 Also, can we have a hidden window that is a "stash" of all of the document sessions that are not currently open?
+
+There was another tmux session that the inactive panes were going to. I wonder if the hidden single window session would fix the problem.

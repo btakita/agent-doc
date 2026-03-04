@@ -36,3 +36,22 @@ sync filters...us.greenhouse-jobs.com
 ## User
 
 Draft a reply to Jonathan Martinez at castandcrew.com for tomorrow Thursday, Friday, or Monday afternoon.
+
+## Assistant
+
+**Draft created** at `mail/drafts/2026-03-04-re-regarding-application-for-senior-python-software-engineer.md`.
+
+Replying to Jonathan Martinez (Recruiter at Cast & Crew, Burbank CA) who reached out about the **Senior Python Software Engineer** position. He wants to set up a video call.
+
+**Draft offers three afternoon windows (ET):**
+- Thursday, March 6 — 1:00–5:00 PM
+- Friday, March 7 — 1:00–5:00 PM
+- Monday, March 10 — 1:00–5:00 PM
+
+Note: There was already an empty reply sent from your Gmail at 15:17 today (just quoted text, no body). This draft will create a new follow-up in the same thread.
+
+Review and set status to `review` when ready, then `corky draft push` to save as Gmail draft.
+
+## User
+
+I have Friday would need to happen 4-5 ET. 1-5 for the other days.

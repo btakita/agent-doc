@@ -888,3 +888,24 @@ Want me to publish v0.2.0 now? Or keep iterating locally first?
 ## User
 
 release
+
+## Assistant
+
+**Released exkernel v0.2.0.**
+
+| Target | Status | Link |
+|--------|--------|------|
+| **crates.io** | Published | [crates.io/crates/exkernel](https://crates.io/crates/exkernel) |
+| **GitHub Release** | Created | [v0.2.0](https://github.com/existential-kernel/exkernel/releases/tag/v0.2.0) |
+| **Local install** | Updated | `exkernel 0.2.0` via `cargo install exkernel` |
+
+**What's new in v0.2.0:**
+- `exkernel search <query>` — relevance-scored search across all terms
+- `exkernel completions <shell>` — bash/zsh/fish/elvish/powershell completions
+- `exkernel new <term>` — scaffold term files from SPEC.md template
+
+Anyone can now install with: `cargo install exkernel`
+
+## User
+
+Is the exk command used by any software?

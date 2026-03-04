@@ -718,3 +718,24 @@ Or run `exkernel fetch github:existential-kernel/ontology` to cache it globally.
 ## User
 
 Please add path to ~/.mise.toml or to a .zsh path. Whichever one seems better
+
+## Assistant
+
+**Added to `~/.zshenv`.**
+
+```sh
+# cargo
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Chose `.zshenv` over mise because:
+- `~/.cargo/bin` is a system-wide tool path, not project-specific
+- `.zshenv` is sourced by all zsh invocations (interactive + non-interactive + scripts)
+- Already had PATH setup there (`.local/bin` for uv)
+- mise's `env._.path` is for per-project paths
+
+Verified: `exkernel --version` → `exkernel 0.1.0` after sourcing. New terminal sessions will pick it up automatically.
+
+## User
+
+It's somewhat difficult to find terms. Can we add autocomplete for zsh and bash. Also add a search feature, which searches the name, tags, and description ordered by relevance.

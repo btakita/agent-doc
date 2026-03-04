@@ -55,3 +55,17 @@ Review and set status to `review` when ready, then `corky draft push` to save as
 ## User
 
 I have Friday would need to happen 4-5 ET. 1-5 for the other days.
+
+## Assistant
+
+**Updated.** Friday narrowed to 4:00–5:00 PM ET. Draft now reads:
+
+- Thursday, March 6 — 1:00 PM – 5:00 PM ET
+- Friday, March 7 — 4:00 PM – 5:00 PM ET
+- Monday, March 10 — 1:00 PM – 5:00 PM ET
+
+Ready for review at `mail/drafts/2026-03-04-re-regarding-application-for-senior-python-software-engineer.md`.
+
+## User
+
+I don't see the file

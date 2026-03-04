@@ -1,14 +1,15 @@
 ---
 agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
-tmux_session: claude
+tmux_session: '1'
 ---
+
 
 
 # Judith Krug — Equity Funding Source
 
 **Contact:** `mail/contacts/judith-krug/CLAUDE.md`
 **LinkedIn:** https://www.linkedin.com/in/judith-krug-a4b71b15/
-**Company:** http://www.equityfundingsource.com/
+**Company:** http://www.equityfundingsource.com/4
 **Email:** judithkrug@gmail.com
 **Referral:** Robert Ward (`mail/contacts/robert-ward/`)
 
@@ -196,3 +197,5 @@ Judith is going with the Mortgage Automator. What are some next steps?
 
 ## User
 
+What are some improvements that we can make to http://www.equityfundingsource.com/
+How is the seo and the llm integration?

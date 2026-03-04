@@ -643,3 +643,30 @@ Is everything documented? Include some tutorial for the dashboard-as-document fl
 ## User
 
 Release v0.9.0
+
+## Assistant
+
+**Released agent-doc v0.9.0.** All targets published.
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published: https://crates.io/crates/agent-doc/0.9.0 |
+| PyPI | Published via maturin |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.9.0 |
+| Binary | Installed: `agent-doc 0.9.0` |
+| Skill | Up to date (v0.9.0) |
+| Parent submodule | Updated to v0.9.0 |
+
+**What's in v0.9.0:**
+- Components (`<!-- agent:name -->...<!-- /agent:name -->`) — bounded, named, re-renderable regions
+- `agent-doc patch` — replace/append/prepend component content with config + shell hooks
+- `agent-doc watch` — daemon with debounce, loop prevention, convergence detection
+- Comment stripping in diffs (preserves component markers)
+- New docs: components guide, dashboard-as-document tutorial
+- 150 tests, clippy clean
+
+**Verification:** 150 tests pass (129 unit + 21 integration), clippy clean with `-D warnings`, all three publish targets succeeded.
+
+## User
+
+compact this file

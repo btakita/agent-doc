@@ -134,3 +134,23 @@ The fundamental issue you're hitting: `break_pane` during ANCHOR/JOIN isolation 
 This pane management is causing too many problems.
 
 If a claude session is closed while running, will the running pause or will it only restart when the session is resumed?
+
+## Assistant
+
+**It stops. It doesn't pause or restart.**
+
+When a tmux pane running Claude Code is killed:
+- The in-flight API call completes server-side but the response is **lost** (no client to receive it)
+- The session transcript (`.claude/projects/` JSONL) is saved up to the last **completed** turn
+- `claude --resume <session-id>` loads the history as context and waits for new input — it does **not** retry the interrupted action
+- **Partial work is lost** — if Claude was mid-tool-call (writing a file, running a command), completion depends on timing
+
+This means **killing/moving panes is destructive to active Claude sessions.** The stash/break approach is only safe for idle panes. An active session that gets broken/stashed mid-response will lose that response.
+
+Why would moving a tmux pane cause work to stop on the tmux pane? That's not how other programs work with tmux.
+
+This is the core tension: sync needs to move panes around, but moving an active pane kills its in-flight work. The safe approach would be to only move panes that are idle (waiting for input at the `>` prompt), but sync currently has no way to detect pane state.
+
+## User
+
+The problem is the layout is incorrect. Can we simply detach inactive panes? Then reattach the pane to the active window when the bound document is visible in the editor?

@@ -398,3 +398,56 @@ Done. "Project" already existed in the kernel (Ring 1) as a general term. Added 
 Implement.
 
 Add several functional tests and examples for dashboard-as-document
+
+How would we handle a scenario of a field changing in value...and the user prompts inline near the value?
+
+Would the prompt remain until removed by default? Can we have some affordances to move it to a log area or something else?
+
+## Assistant
+
+**Implemented in agent-doc v0.9.0.** All three features built, 143 tests pass, clippy clean.
+
+**Range Templates** (`src/range.rs`) — 14 tests:
+- `<!-- agent:name -->...<!-- /agent:name -->` markers, stack-based nesting, no regex
+- `RangeTemplate` with `content()` and `replace_content()`
+
+**Comment Stripping** (`src/diff.rs`) — 8 new tests:
+- `strip_comments()` strips `<!-- -->` and `[//]: # (...)`, preserves agent markers
+- Applied in `compute()` before comparison
+
+**`agent-doc patch`** (`src/patch.rs`) — 5 tests:
+- `agent-doc patch <file> <section> [content]` — replace range template content, update snapshot
+
+**`agent-doc watch`** (`src/watch.rs`) — 8 tests:
+- Single daemon, `notify` crate, PID file, per-file debounce, cycle limiting, convergence detection
+
+**Re: inline prompts near changing values**
+
+Good question. When a user writes an inline prompt (blockquote, annotation) inside a range template section, and then `patch` replaces the section content — the user's prompt gets destroyed. Two approaches:
+
+1. **Prompt remains until removed (default)** — `patch` only replaces content *outside* of inline prompts. This requires parsing the section content for user annotations before replacing. Complex.
+
+2. **Move prompts to a log section** — better. The `patch` command (or the agent via the skill) moves user prompts from inside range templates to a dedicated `<!-- agent:log -->` section before replacing. The log preserves context:
+
+```markdown
+<!-- agent:log -->
+[2026-03-04 13:15] (from status section) > Why is ses-002 flagged?
+Agent: ses-002 was flagged because...
+<!-- /agent:log -->
+
+<!-- agent:status -->
+| Session | State |
+|---------|-------|
+| ses-002 | flagged |
+<!-- /agent:status -->
+```
+
+This keeps range templates clean for data while preserving the conversation. The log section is itself a range template — the agent appends to it rather than replacing.
+
+**Recommended approach:** User prompts inside range templates are extracted to the log section by the skill workflow (not the CLI). The CLI (`patch`) is dumb — it replaces content between markers. The skill handles the intelligence of "move prompts before patching."
+
+This keeps the CLI simple and the prompt-handling logic in the skill where it can evolve without binary releases.
+
+## User
+
+Good. Let's have the log "component" be part of the standard template. Let's also use the language of "component" as this is similar to web components or React component, etc.

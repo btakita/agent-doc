@@ -69,5 +69,24 @@ But this is low priority. The repo has 152 nodes and changes rarely. A skill + `
 I plan on expanding the usage of philosophy and scoping according to project.
 A historical limitation is lack of tooling. With agent loops and supporting software, this can make context ontologies practical and powerful.
 
+## Assistant
+
+You're right — this isn't low priority. The agent loop is what changes the equation. Before, ontology was a static reference. Now it's an active context system.
+
+**The three pieces, in order:**
+
+1. **`/philosophy` skill** (immediate) — node lookup, scaffolding, scoping analysis. Makes ontology *usable* in every Claude session. Reads `~/.claude/philosophy/src/`, applies kernel contextually.
+
+I have my own kernel which others can use. I forsee that there could be a foundation dedicated to ensuring the existential applicability of the kernel. But others can use their own kernels as well.
+
+Please document. I plan on making a philosophy rust crate & cli. What should my personal existential kernel be called? Should it remain in this repo as documents rather than in src? Should it be in another repo? Should I setup an github organization?
+
+2. **`philosophy` CLI** (near-term) — `lint`, `graph`, `install`, `context <domain>`. Makes the ontology *maintainable* as it grows. Validates structure, visualizes relationships, generates domain overlays.
+
+3. **Agent-doc project scoping** (the payoff) — projects declare their ontological terms in a `## Domain Ontology` section. The agent reads relevant nodes and maintains coherence across sessions. Philosophy becomes the scoping language for agent-doc.
+
+The historical limitation was exactly right — without tooling, ontology stayed theoretical. Agent loops + CLI + skill makes contextual ontology operational.
+
 ## User
 
+Please make sure that my terminology is well understood and accurate. I don't have formal training in philosophy. So my take is innovative...but I want to be composable with the historical traditions.

@@ -261,4 +261,50 @@ Bounded cycles as the safe default. Infinite loops that converge are fine; diver
 | `write-section` CLI | `agent-doc write-section <file> <section> [content]` |
 | Loop prevention | Source tracking + bounded cycles (default 3) + steady state detection |
 
+## Assistant
+
+Addressing your second round of annotations:
+
+**Re: project identity**
+
+A "project" = the directory containing `.agent-doc/`. Same pattern as git (`.git/`), cargo (`.cargo/`). tmux-router is project-agnostic — it operates on registry paths and tmux sessions passed in by the caller. agent-doc resolves the project root and passes paths to tmux-router. Not the same as `tmux_session` — that's session affinity (multiple projects can share one tmux session, or one project can span multiple).
+
+Let's document this concept. In making the docs, let's follow the same ontology pattern as in philosophy.
+project is scoped to the context of agent-doc of course.
+
+
+**Re: range templates only**
+
+Always range templates. Single markers are unworkable for re-rendering — after the first render, there's no way to distinguish the marker from rendered data. You'd need a second marker to delimit the boundary. Range templates solve this cleanly: everything between `<!-- agent:name -->` and `<!-- /agent:name -->` gets replaced. The markers themselves are preserved. Drop in-place templates from the design.
+
+Explain reason in documentation.
+
+**Re: `write` vs `write-section`**
+
+`write` is cleaner. Section name is just an argument:
+
+How about `patch` instead of `write`? I think that is a good distinction.
+
+- `agent-doc write <file> <section>` — replace content between range markers (reads from stdin)
+- `agent-doc submit <file>` — existing append mode (diff → respond → append)
+
+Two verbs, two modes. `write` for targeted section updates, `submit` for conversational flow.
+
+**Updated design summary:**
+
+| Component | Description |
+|-----------|-------------|
+| `agent-doc watch` | Single daemon per project (`.agent-doc/` root), `notify` crate, per-file debounce, lazy or explicit start |
+| Range templates | `<!-- agent:name -->...<!-- /agent:name -->` — always paired, nested supported (innermost-first) |
+| `agent-doc write` | `agent-doc write <file> <section> [content]` — replace range template content |
+| Loop prevention | Source tracking (`--source`) + bounded cycles (default 3) + steady state detection |
+| Project identity | Directory containing `.agent-doc/`; tmux-router is project-agnostic |
+
 ## User
+
+Let's have a "tips" section:
+- Agent documents can reference other files including other agent documents
+
+Any other tips?
+
+I also have exkernel installed. So we can overload project for agent-doc.

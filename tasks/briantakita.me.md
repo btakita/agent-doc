@@ -638,3 +638,37 @@ server__build|watch
 error: It looks like you're trying to use `tailwindcss` directly as a PostCSS plugin. The PostCSS plugin has moved to a separate package, so to continue using Tailwind CSS with PostCSS you'll need to install `@tailwindcss/postcss` and update your PostCSS configuration.
 at so (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.pnpm/tailwindcss@4.2.1/node_modules/tailwindcss/dist/chunk-L5IEUH3R.mjs:38:1647)
 at output__process (/home/brian/work/ctx-core/ctx-core-dev/lib/rebuildjs-tailwindcss/rebuild_tailwind_plugin/index.js:166:35)
+
+## Assistant
+
+**Tailwind v4 breaking change.** The ctx-core-dev dependency update bumped tailwindcss from `^3.4.18` to `^4.2.1`. In v4, the PostCSS plugin moved to `@tailwindcss/postcss` — `@rebuildjs/tailwindcss` imports `tailwindcss` directly as a PostCSS plugin (line 38, 166-179), which no longer works.
+
+**Fixed — pinned tailwindcss back to v3:**
+
+Changed `@rebuildjs/tailwindcss` package.json: `"tailwindcss": "^4.2.1"` → `"^3.4.18"`. Now resolves to 3.4.19.
+
+Also added `link-workspace-packages=true` to `.npmrc` — the changeset-version had bumped inter-workspace dep versions (e.g., `@ctx-core/email@^9.2.12`) beyond what's published on npm. This setting makes pnpm resolve workspace packages locally instead of from the registry.
+
+A proper Tailwind v4 migration for `@rebuildjs/tailwindcss` would be a larger task — the v4 API changes how PostCSS integration works, plus config format changes.
+
+## User
+
+TS2322: Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.plugins' are incompatible between these types.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin[] | undefined' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[] | undefined'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin[]' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[]'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/@rebuildjs/tailwindcss/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.entryPoints' are incompatible between these types.
+Type 'Record<string, string> | (string | { in: string; out: string; })[] | undefined' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
+Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
+Type '{ in: string; out: string; }' is not assignable to type 'string'.

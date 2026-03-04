@@ -318,3 +318,50 @@ Option 1 is better since `pnpm-publish--force` runs publishes in parallel — in
 . test:types: ✖ auth0__v2_user__GET__fetch/index.test.ts:2:15: Type error TS2305
 . test:types:   Module '"auth0"' has no exported member 'UserProfile'.
 . test:types: Failed
+
+> @ctx-core/uuid@8.3.141 prepublishOnly /home/brian/work/ctx-core/ctx-core-dev/lib/uuid
+> pnpm clean && pnpm build && pnpm test
+
+
+> @ctx-core/uuid@8.3.141 clean /home/brian/work/ctx-core/ctx-core-dev/lib/uuid
+> :
+
+
+> @ctx-core/uuid@8.3.141 build /home/brian/work/ctx-core/ctx-core-dev/lib/uuid
+> :
+
+
+> @ctx-core/uuid@8.3.141 test /home/brian/work/ctx-core/ctx-core-dev/lib/uuid
+> pnpm run /^test:/
+
+. test:types$ check-dts
+. test:unit$ tsx node_modules/uvu/bin.js . '\.test\.(ts|js)$'
+. test:unit:   Total:     0
+. test:unit:   Passed:    0
+. test:unit:   Skipped:   0
+. test:unit:   Duration:  0.47ms
+. test:unit: Done
+. test:types: - Check types
+. test:types: ✖ Check types
+. test:types: Option 'moduleResolution=node10' is deprecated and will stop functioning in TypeScript 7.0. Specify compilerOption '"ignoreDeprecations": "6.0"' to silence this error.
+. test:types: Failed
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Test failed. See above for more details.
+ ELIFECYCLE  Command failed with exit code 1.
+
+## Assistant
+
+Two issues in `@ctx-core/auth0-management`:
+
+**1. `check-dts` + TypeScript `next`** — same `moduleResolution=node10` deprecation as carousel.
+
+**2. auth0 v5 SDK breaking types** — `auth0@^5.4.0` completely restructured its type exports. The old types (`UserProfile`, `Client`, `ClientGrant`, `UserUpdate`) no longer exist at the top-level export. In v5 these are auto-generated from the OpenAPI spec with names like `GetUsers200ResponseOneOfInner`.
+
+Options:
+- **Quick:** Pin `"auth0": "^4.12.0"` (last v4 that has these types) — defers migration
+- **Proper:** Update all imports to v5 API types — requires mapping old names to new generated types
+
+This is a real API migration issue, not just a config fix. If auth0-management isn't actively used, pinning to v4 is the pragmatic choice.
+
+## User
+

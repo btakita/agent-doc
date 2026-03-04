@@ -12,9 +12,9 @@ branch: null
 
 **Tmux routing**: Window-scoped routing resolved. `SessionEntry` stores window ID. Plugin passes `--window` on all sync/claim/layout ops. `route` auto-starts dead panes. `claim` recovers from dead windows by scanning sessions.json for alive alternatives (v0.7.1).
 
-**2D sync** (`agent-doc sync --col`): Declarative columnar layout with convergent reconciliation loop. Plugin detects editor splits via `LayoutDetector` (walks Swing Splitter tree). CLI arranges tmux panes to match: `-h` for columns, `-v` for stacking within columns. Fast path for focus-only changes (1 tmux command). Auto-creates Claude sessions for unclaimed docs.
+**2D sync** (`agent-doc sync --col`): Declarative columnar layout with simple detach/attach reconciliation. Plugin detects editor splits via `LayoutDetector` (walks Swing Splitter tree). CLI arranges tmux panes to match: `-h` for columns, `-v` for stacking within columns. Fast path for focus-only changes (1 tmux command). Auto-creates Claude sessions for unclaimed docs.
 
-**Sync reconciliation** (`sync.rs`): Additive algorithm — never breaks wanted panes from target window. Phases: SNAPSHOT → ANCHOR → EVICT unwanted → JOIN missing → REORDER if needed → VERIFY (convergent loop, max 3 attempts). Deferred eviction when unwanted is last pane. 14 integration tests + 3 proptest property-based tests covering horizontal, vertical, and 2D grid layouts.
+**Sync reconciliation** (`sync.rs`): Simple 2-step algorithm. DETACH unwanted panes (`break_pane`), ATTACH missing desired panes (`join_pane` with correct split direction). Reorder if all present but wrong order. No stash window, no convergent loop, no anchor concept. 25 integration tests + 3 proptest property-based tests.
 
 **Plugin**: Always sends `sync --col` (never bare focus). Passes `--focus <active-file>` for tmux pane selection. Inline hints at cursor for sync notifications. `projectWindowId()` validates windows via `tmux list-panes` to avoid stale references.
 
@@ -174,6 +174,21 @@ What specifically is wrong with the layout right now? Is it:
 All of the above with different scenarios. The model seems to be too complex and wrong which causes general drift.
 
 If you can describe what the editor shows vs what tmux shows, I can write a targeted test that reproduces the exact mismatch and fix the reconciliation logic.
+
+## Assistant
+
+**Agreed — the 4-phase reconciliation is over-engineered.** Anchor/evict/join/reorder with convergent loop and stash window has too many interacting edge cases. Each fix introduces new failure modes.
+
+**New model: simple 2-step reconcile.**
+
+1. **DETACH** — for each pane in target window NOT in the desired set → `break_pane` (solo window, process keeps running)
+2. **ATTACH** — for each desired pane NOT in target window → isolate if shared, then `join_pane` with correct split direction (`-h` for columns, `-v` for stacking)
+
+That's it. No anchor, no stash, no convergent loop, no reorder phase. If the order is wrong, detach all non-first + re-attach in order. The join direction logic stays.
+
+Removing: `stash_pane`, `find_stash_window`, `ensure_stash_window`, `pane_session` from sessions.rs. Removing deferred eviction, the 3-attempt loop, and ANCHOR/REORDER phases from sync.rs.
+
+Implementing now.
 
 ## User
 

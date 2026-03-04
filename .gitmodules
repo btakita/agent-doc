@@ -34,3 +34,6 @@
 [submodule "existential-kernel/spec"]
 	path = existential-kernel/spec
 	url = git@github.com:existential-kernel/spec.git
+[submodule "existential-kernel/exkernel"]
+	path = existential-kernel/exkernel
+	url = git@github.com:existential-kernel/exkernel.git

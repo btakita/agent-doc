@@ -494,3 +494,50 @@ Copying creates divergence — when upstream updates, your copy is stale. Links 
 ## User
 
 Commit the existential kernel data. Next build the software. Let's get to an initial version with the cli arguments that you laid out earlier.
+
+## Assistant
+
+**Done. All three repos created and operational.**
+
+**Data updates:**
+- `existential-kernel/ontology`: renamed `ring.toml` → `exkernel.toml` with `[meta]` section. Pushed.
+
+**New repo — `existential-kernel/exkernel` v0.1.0** (https://github.com/existential-kernel/exkernel)
+
+Rust 2024 edition CLI. 14 tests pass, clippy clean. Installed to `~/.cargo/bin/exkernel`.
+
+**Working commands:**
+
+| Command | Status | Description |
+|---------|--------|-------------|
+| `exkernel lookup <term>` | Done | Read node definition. `--json` for structured output |
+| `exkernel scope [ring]` | Done | List terms by ring level |
+| `exkernel lint [path]` | Done | Validate nodes: required sections, broken links |
+| `exkernel graph [ring]` | Done | DOT or JSON relationship graph (`--format dot\|json`) |
+| `exkernel fetch [source]` | Done | Clone/pull from `github:org/repo` to `~/.exkernel/sources/` |
+| `exkernel install` | Stub | Not yet implemented |
+| `exkernel serve` | Stub | Not yet implemented |
+| `exkernel build-site` | Stub | Not yet implemented |
+| `exkernel context <domain>` | Stub | Not yet implemented |
+
+**Tested against ontology repo:**
+- `exkernel scope 0` — lists all 14 Ring 0 terms
+- `exkernel lookup scope` — prints full scope definition
+- `exkernel lint` — correctly reports broken links (Ring 2 refs not in this repo) and missing sections
+- `exkernel graph 0` — generates DOT graph of Ring 0 term relationships
+
+**Submodules in agent-loop:**
+```
+existential-kernel/
+├── .github                          # Org profile
+├── existential-kernel.github.io     # Landing page
+├── ontology                         # Ring 0 + Ring 1 terms
+├── spec                             # Node format + ring spec
+└── exkernel                         # NEW — CLI tool v0.1.0
+```
+
+**Lint note:** 29 broken links found — these reference Ring 2 terms (epistemology, ontology, axiology, etc.) that exist in `btakita/philosophy` but weren't extracted. Expected. These resolve when Ring 2 terms are added or when `exkernel` supports overlay resolution across sources.
+
+## User
+
+Fix the broken links please.

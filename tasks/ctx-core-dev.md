@@ -578,3 +578,31 @@ code: 'ERR_MODULE_NOT_FOUND'
 }
 
 Node.js v25.3.0
+
+~/work/btakita/agent-loop/ctx-core-dev main +2 !8 ?67                                                                                                                                                                                  16:47:48
+❯ changeset-version-COMMIT_EDITMSG
+🦋  All files have been updated. Review them and commit at your leisure
+/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/CHANGELOG-diff-COMMIT_EDITMSG.sh: line 20: cd: null directory
+/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/CHANGELOG-diff-COMMIT_EDITMSG.sh: line 20: cd: null directory
+/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/CHANGELOG-diff-COMMIT_EDITMSG.sh: line 20: cd: null directory
+
+## Assistant
+
+Fixed. Ran `pnpm install --recursive` in ctx-core-dev — installed 11 missing packages (including `cli-cursor` and other `ora` deps).
+
+Verified: `monorepo_npm__dependencies__update.mjs --help` now works. You can run:
+
+```bash
+ctx_core__monorepo_pnpm__dependencies__update
+```
+
+or equivalently:
+
+```bash
+update-npm-packages
+```
+
+Both should work now.
+
+## User
+

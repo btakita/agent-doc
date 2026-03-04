@@ -66,3 +66,22 @@ editors/
 Each agent backend implements: take a prompt string, return (response_text, session_id).
 The prompt includes the diff and full document. The agent backend handles CLI
 invocation, JSON parsing, and session flags.
+
+## Domain Ontology
+
+agent-doc extends the existential kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions. These terms map agent-doc concepts to the universal ontology they derive from.
+
+| Term | Derives From | Description |
+|------|-------------|-------------|
+| **Session** | story + system | A bounded interaction with temporal arc; the unit of agent-doc work |
+| **Document** | entity + context | A markdown file that holds conversational state between user and agent |
+| **Pane** | focus + scope | A tmux viewport — finite attention applied to a single document |
+| **Claim** | scope + entity | Binding a document to a pane; scoping focus to a specific file |
+| **Route** | context + resolution | Resolving which pane handles a document; context-aware dispatch |
+| **Sync** | pattern + system | Aligning tmux pane layout to editor split state; maintaining coherence |
+| **Watch** | consciousness + evolution | Detecting file changes and triggering agent responses; event-driven |
+| **Dashboard** | system + focus | A document used as a live system view with agent-maintained sections |
+| **Range Template** | scope + abstraction | Bounded region in a document for targeted agent write-back |
+| **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
+| **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
+| **Overlay** | context + resolution | Domain-specific terms extending the base kernel vocabulary |

@@ -407,3 +407,26 @@ We are remaining on the correct tab but additional windows are still being creat
 0 | 1* | 2
 1* | 2
 
+The selection also quickly goes to another window before landing on window 1.
+Pleases modify the test and behavior to keep only the active window 1 open.
+
+The active window may be a different window in different sessions. Should we also make the active window an agent doc frontmatter config along with the tmux session name?
+
+## Assistant
+
+**Fixed two remaining sources of extra windows.**
+
+**Source 1: ATTACH phase isolation.** When joining a pane from the stash into the target window, the code was calling `break_pane` first (to "isolate" it), creating a temporary solo window. But `tmux join-pane` can move panes directly between windows — no intermediate break needed. **Removed** all isolation `break_pane` calls in ATTACH. `join-pane -s %src -t %dst` handles cross-window moves natively.
+
+**Source 2: Deferred DETACH.** When the first desired pane needs to replace the only pane in the target, deferred unwanted panes were evicted with `break_pane`. Now uses `stash_pane` too.
+
+**The brief selection flicker** you see (window 0 appearing and disappearing) was from the temporary solo window during isolation. With direct `join-pane`, no intermediate window is created.
+
+**Re: active window in frontmatter** — Yes, this makes sense. The plugin already sends `--window @N` but derives it by scanning `sessions.json` (non-deterministic when stale entries exist). Storing it in frontmatter would be stable. I can add `tmux_window: @N` alongside `tmux_session: claude`. The plugin would read it directly instead of scanning. Want me to implement this?
+
+**141 tests pass, clippy clean, binary installed.**
+
+## User
+
+The tmux session window is now stable. But the tmux selected window now cycles.
+Please update the test and ensure that the selected pane is logged.

@@ -179,3 +179,28 @@ Keep `existential-kernel` org? Or do you prefer a different org name?
 ## User
 
 existence-framework? Rate that vs existential-kernel
+
+## Assistant
+
+| | `existence-framework` | `existential-kernel` |
+|---|---|---|
+| **Score** | 7.5/10 | 8/10 |
+| **Clarity** | Immediately clear — it's a framework about existence | Clear but denser — two philosophical/technical terms |
+| **Memorability** | Easy — common words | Harder — "existential" is a mouthful |
+| **Cohesion with crate** | Strong — `existence` (crate) lives in `existence-framework` (org) | Weaker — `existence` (crate) lives in `existential-kernel` (org) |
+| **Migration cost** | Full rename — new org, move 5 repos, update all refs | Zero — already established |
+| **Tone** | Approachable, modern | Academic, technical |
+
+**`existential-kernel` wins slightly** because:
+1. "Kernel" is more precise than "framework" — the project IS a kernel (minimal core that everything else builds on), not a framework (which implies scaffolding/conventions/boilerplate)
+2. The mismatch between `existence` (crate) and `existential-kernel` (org) is actually fine — they're related words, not unrelated brands
+3. Zero migration cost
+
+**But** if memorability is the priority, `existence-framework` is easier to recall. The word "framework" is overused in tech, though — every JS library calls itself a framework.
+
+
+**My vote:** Keep `existential-kernel`. The org name is background noise. Save your naming energy for things users touch daily (the crate name, which is already perfect).
+
+## User
+
+existence-kernel vs existential-kernel

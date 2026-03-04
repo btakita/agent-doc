@@ -481,3 +481,28 @@ Benefits: reusable for other tools, clean API, test suite moves with the logic. 
 When I switch between the 2 left editor agent docs, the tmux selected pane changes between the left and right panes. Only the left tmux pane should remain selected when switching between agent-doc and plugin on the left editor side.
 
 Make sure our tests cover this issue.
+
+## Assistant
+
+**New test: `test_reconcile_2col_tab_switch_selects_left_pane`** — reproduces exact scenario.
+
+Setup: 3 panes (A=agent-doc, B=plugin, C=dave-franklin). 2-column layout:
+- Layout 1: [[A], [C]] (A left, C right, focus A)
+- Layout 2: [[B], [C]] (B left, C right, focus B)
+
+4 alternating syncs. After each:
+1. `active_pane()` verifies the LEFT pane is selected
+2. `list_panes_ordered()` verifies the focus pane is physically leftmost
+3. Window count stays stable
+
+**Test passes.** The reconcile correctly places the new left pane with `join-pane -bh` (before, horizontal = left of existing) and `select_pane` at the end selects it.
+
+**Added logging**: `focus_pane=%X (from --focus or anchor)` prints at every sync so you can see what pane is being selected.
+
+**If you're still seeing the selection jump**, the issue is likely a brief intermediate state during reconcile — `join-pane` changes the active pane before `select_pane` runs at the end. The fix would be to add `-d` to ALL `join-pane` calls during reconcile (not just stash), so no intermediate pane gets selected until the explicit `select_pane` at the end. Want me to do this?
+
+**142 tests pass, clippy clean, binary installed.**
+
+## User
+
+Please add a github description to https://github.com/btakita/agent-doc

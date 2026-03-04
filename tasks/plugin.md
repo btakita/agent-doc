@@ -299,3 +299,31 @@ Please look at the current tmux window.
 
 There are 3 panes. When a agent-doc sync runs, the tmux window should be corrected.
 Why does 3 panes remain when there are only 2 documents open in the editor?
+
+## Assistant
+
+**Root cause: the plugin doesn't re-sync when a tab is closed.**
+
+`EditorTabSyncListener` only implements `selectionChanged()`. When you close a `.md` tab, IntelliJ fires `selectionChanged()` for the remaining focused file — but the **dedup cache blocks it** because the active file hasn't changed (same file stays focused). The column structure should change (3→2 files), but IntelliJ may still report the old file set in `manager.selectedFiles` at the moment `selectionChanged` fires during the close event.
+
+**Current window @187 state:**
+- `%62` — tasks/plugin.md (this session)
+- `%60` — tasks/archive/greensand-ai.md
+- `%41` — shared by 5 sessions (dave-franklin, gmail, tagpath, resume, judith-krug)
+
+Only 2 of these correspond to open editor tabs. The 3rd pane was arranged by a previous sync and never evicted.
+
+**Fix applied:** Added `fileClosed()` handler to `EditorTabSyncListener.kt` that clears the dedup cache when a `.md` tab is closed. This ensures the next `selectionChanged()` event fires unconditionally, running sync with the reduced file set and evicting the extra pane.
+
+```kotlin
+override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+    if (!file.name.endsWith(".md")) return
+    clearLastFileSet()
+}
+```
+
+**Plugin rebuilt** (both unsigned and signed zips). Reinstall + restart to pick up the fix.
+
+## User
+
+Should agent-doc handle this syncing instead? The plugin should only send the layout of the editor tabs.

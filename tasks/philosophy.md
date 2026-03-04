@@ -129,5 +129,26 @@ Should I move the ontology to btakita/existential-kernel? It's a bit long of a n
 - **Crate:** `philosophy` Rust crate lives in this repo alongside the content
 - **Foundation:** A good idea eventually — ensures the kernel stays existentially applicable. Premature to formalize now
 
+## Assistant
+
+**Documentation plan:**
+- **Post 1:** "The Existential Kernel" — the 14-term table + synthesis of four traditions (Whitehead, Husserl, information theory, existentialism)
+- **Post 2:** "Resolution: a novel ontological concept" — your strongest original contribution, mereology/granularity lineage
+- **Post 3:** "Making ontology operational with agent loops" — the tooling story
+
+**Repo naming alternatives:**
+
+| Name | CLI | Notes |
+|------|-----|-------|
+| `existential-kernel` | `exkernel` | Precise, unique, my recommendation |
+I like this. So exkernel would also allow composable data...starting with the existential scope and then zooming into a contextual scope of the term.
+| `exkernel` | `exkernel` | Short but made-up word |
+| `ontology` | `ontology` | Too generic |
+| `philosophy` | `philosophy` | Current name, too broad for the kernel concept specifically |
+
+Recommendation: **`existential-kernel`** repo, **`exkernel`** CLI binary. Or keep `btakita/philosophy` and rename when the org forms — GitHub handles redirects.
+
+Let's rename to existential-kernel. I may want to reserve my personal scoped philosophy later. So would the executable be in btakita/existential-kernel while the ontology lives in btakita/philosophy? Or would a placeholder existential ontology live in btakita/existential-kernel? 
+
 ## User
 

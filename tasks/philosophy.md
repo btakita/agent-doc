@@ -739,3 +739,5 @@ Verified: `exkernel --version` → `exkernel 0.1.0` after sourcing. New terminal
 ## User
 
 It's somewhat difficult to find terms. Can we add autocomplete for zsh and bash. Also add a search feature, which searches the name, tags, and description ordered by relevance.
+
+Also make it "easy" to generate and edit scoped or novel terms. Either with an agent loop or with the standalone cli.

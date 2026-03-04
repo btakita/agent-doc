@@ -413,3 +413,40 @@ This grounds the agent-doc documentation in the existential kernel. The CLI, web
 ## User
 
 Yes. Please create the repos, appropriate gh actions and pages. Make these repos a submodule in agent-loop
+
+## Assistant
+
+**Done. Two new repos created, pushed, and added as submodules.**
+
+**existential-kernel/ontology** (https://github.com/existential-kernel/ontology)
+- 29 term files in `src/` — all 14 Ring 0 + 15 of 17 Ring 1 terms
+- `qualitative` and `quantitative` are pending (listed in `ring.toml`, nodes not yet authored)
+- `ring.toml` — ring metadata declaring Ring 0 (kernel) and Ring 1 (software)
+- `README.md` — ring tables with definitions, DDD mapping, SPEC.md link
+- `CLAUDE.md` — agent context with term tables
+- `SPEC.md` — node format specification
+- GitHub Pages enabled (workflow-based, Jekyll renders markdown)
+- License: Apache-2.0
+
+**existential-kernel/spec** (https://github.com/existential-kernel/spec)
+- `SPEC.md` — enhanced node format spec with ring metadata and domain overlay sections
+- `RINGS.md` — ring structure specification (Ring 0/1/2+ criteria, `ring.toml` format, domain overlay pattern)
+- `CLAUDE.md` — agent context
+- License: Apache-2.0
+
+**Submodules in agent-loop:**
+```
+existential-kernel/
+├── .github                          # Org profile (existing)
+├── existential-kernel.github.io     # Landing page (existing)
+├── ontology                         # NEW — Ring 0 + Ring 1 terms
+└── spec                             # NEW — Node format + ring spec
+```
+
+**Next:** Add `## Domain Ontology` to `agent-doc/CLAUDE.md` to connect agent-doc concepts to the kernel.
+
+## User
+
+Should we name the config file to extkernel.toml or .extkernel.toml? ring.toml can be merged into the config.
+
+For the flat file navigation, should there be links to the configured extistential kernel or should we copy the entries from the existential kernel? Perhaps a search box could read from either overlaid scoping rules?

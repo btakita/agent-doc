@@ -28,3 +28,9 @@
 [submodule "existential-kernel/existential-kernel.github.io"]
 	path = existential-kernel/existential-kernel.github.io
 	url = git@github.com:existential-kernel/existential-kernel.github.io.git
+[submodule "existential-kernel/ontology"]
+	path = existential-kernel/ontology
+	url = git@github.com:existential-kernel/ontology.git
+[submodule "existential-kernel/spec"]
+	path = existential-kernel/spec
+	url = git@github.com:existential-kernel/spec.git

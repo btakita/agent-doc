@@ -604,4 +604,26 @@ Add Alpha Software in the README. we are starting to get some users of this libr
 
 If an agent doc has an old version of the frontmatter, the frontmatter should automatically update to the current version. Reconcile whatever fields you can. But forcing a reclaim is ok.
 
-If I run several `agent-doc run` commands on a single document while previous run(s) are still going...will the responses be queued up? Or does Claude manage merging in the requests together? 
+If I run several `agent-doc run` commands on a single document while previous run(s) are still going...will the responses be queued up? Or does Claude manage merging in the requests together?
+
+## Assistant
+
+**1. Renamed `session:` → `agent_doc_session:`.** Done — implemented with `#[serde(rename = "agent_doc_session", alias = "session")]` on the Frontmatter struct. Writes `agent_doc_session:` in all new/updated documents. Reads both `agent_doc_session:` AND old `session:` via alias. No migration needed — old documents auto-upgrade on next write cycle (any claim, sync, set_session_id, or ensure_session that writes frontmatter). Files changed: `frontmatter.rs`, `init.rs`, `SPEC.md`, `SKILL.md`, `README.md`. 145 tests pass.
+ 
+**2. Alpha Software in README.** Added banner at the top of `agent-doc/README.md`. Also updated all `session` references in the README to `agent_doc_session`.
+
+**3. Old frontmatter auto-upgrade.** Already handled by the serde alias. When agent-doc reads `session: <uuid>`, it parses into `fm.session`. When it writes back, serde outputs `agent_doc_session: <uuid>`. The Rust field name stays `session` internally — zero code changes outside frontmatter.rs. No reclaim needed.
+
+**4. Concurrent `agent-doc run` — no queuing, they clobber.** Each run independently reads snapshot → computes diff → sends to agent → appends response. Two overlapping runs would:
+- Each see the same (or partially different) diff
+- Both append responses, possibly interleaving
+- The 3-way merge in `submit.rs` prevents data loss from concurrent *file writes*, but the agent prompts would be confused
+
+**One run per document at a time.** Parallel runs across different documents is fine — each has its own snapshot. The `/agent-doc` skill naturally serializes (one skill invocation at a time per Claude session).
+
+## User
+
+Still seeing
+
+`--col tasks/agent-doc.md --col tasks/dave-franklin.md [focus: tasks/agent-doc.md]`: left TMUX pane selected
+`--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right TMUX pane selected

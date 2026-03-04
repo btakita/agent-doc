@@ -397,3 +397,50 @@ plugin | parallel-coding-with-tmux-markdown (selected)
 ```
 
 Please write automated tests in agent-doc and fix.
+
+Would it be better to just have detached panes instead of stashing them?
+
+Why is the work being done in the plugin? agent-doc should handle the bulk of this logic.
+
+The plugin should only send the sync command to agent-doc with it's layout. No caching. No other logic.
+
+## Assistant
+
+**Fixed.** The bug was in the `agent-doc` CLI, not the plugin. All 142 tests pass (121 unit + 21 integration).
+
+### Root Cause
+
+`stash_pane` uses `tmux join-pane` to move a pane into the stash window. This fails with "pane too small" when:
+1. The pane is already in the stash window (can't join a pane to a sibling in the same window)
+2. The stash window is too small for another split
+
+The sync reconciliation algorithm used `stash_pane` for isolation in three places — Phase 1 (ANCHOR), Phase 2 (EVICT), and Phase 3 (JOIN). When any of these failed, the pane stayed put and sync couldn't correct the layout.
+
+### Fixes (2 changes, both in CLI)
+
+**1. Phase 1 ANCHOR + Phase 3 JOIN isolation** (`sync.rs`): Changed from `stash_pane` to `break_pane`. When isolating a pane before joining it to the target window, `break_pane` gives it its own temporary window — always works, regardless of stash state.
+
+**2. `stash_pane` fallback** (`sessions.rs`): `stash_pane` now falls back to `break_pane` when `join_pane` fails. This fixes Phase 2 EVICT and any other callers — if stashing fails, the pane gets its own window instead of being silently skipped.
+
+### To your questions
+
+**"Would it be better to just have detached panes instead of stashing them?"** — The stash window is still useful as a visual grouping for background sessions. The fix ensures that when stashing fails (pane already in stash, window too small), we fall back to `break_pane` which creates a detached window. So now we get the best of both: stash when possible, detach when not.
+
+**"Why is the work being done in the plugin?"** — It's not. All sync logic lives in the `agent-doc` CLI. The plugin was already simplified to a thin layout reporter (just detects editor splits, calls `agent-doc sync`). This fix was entirely in the Rust CLI.
+
+**"The plugin should only send the sync command..."** — Correct, and that's exactly the current state. The plugin has no caching, no dedup logic — just a 500ms debounce (to coalesce rapid tab switches), a concurrency guard (prevent overlapping processes), and the layout detection (which columns have which files). Everything else is in `agent-doc sync`.
+
+### New Tests (4 added)
+
+| Test | Scenario |
+|------|----------|
+| `test_reconcile_pane_from_crowded_stash` | Desired pane in stash window with 3 siblings → sync pulls it into target |
+| `test_reconcile_evict_and_join_from_stash` | 3 panes in window, 2 unwanted, 1 desired in stash → evicts extras, joins from stash |
+| `test_sync_3_panes_to_2_evicts_extra` | 3→2 pane reduction, extra evicted to stash |
+| `test_sync_3_panes_to_2_with_external_join` | 3 panes + 1 external desired → evicts 2, joins 1 |
+
+**Binary reinstalled.** Plugin unchanged — no rebuild needed. Switch tabs to trigger a sync and the 3rd pane will be evicted.
+
+## User
+
+

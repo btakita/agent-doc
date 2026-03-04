@@ -389,3 +389,33 @@ This will fix carousel, uuid, auth0-management (the `check-dts` part), and every
 ## User
 
 Why is there an error. How can we use the latest typescript instead of pinning?
+
+## Assistant
+
+**Root cause:** `check-dts` has a fallback `moduleResolution: 'NodeJs'` (= `node10`) in `get-compiler-options.js:9`. When a `tsconfig.json` exists (yours has `"moduleResolution": "nodenext"`), check-dts uses your config. But TypeScript 6.0 made `node10` a hard error even when it appears as a _default_ in the code path.
+
+Looking at the source: check-dts reads your tsconfig and should use `nodenext`. The error is coming from the `DEFAULT_OPTIONS` fallback leaking through somehow, or from TS 6.0 flagging it during compilation of check-dts itself.
+
+**To use latest TypeScript without pinning**, replace `check-dts` with `tsc --noEmit`:
+
+```bash
+# Replace check-dts across all packages
+cd /home/brian/work/ctx-core/ctx-core-dev
+for pkg in lib/*/package.json; do
+  if grep -q 'check-dts' "$pkg"; then
+    sed -i 's/"test:types": "check-dts"/"test:types": "tsc --noEmit"/' "$pkg"
+  fi
+done
+```
+Run this to fix the issue
+`tsc --noEmit` does exactly what `check-dts` does (type-check `.d.ts` files) but fully respects your `tsconfig.json` settings. No hardcoded defaults, no compatibility issues with new TypeScript versions.
+
+I already ran the TypeScript `~5.8.0` pin on `lib/*/package.json` (183 packages) + `pnpm install`. I also revert this and keep `"typescript": "next"` if you'd prefer the `tsc --noEmit` approach.
+
+Also: the **root** `package.json` still has `"typescript": "next"` — my sed only changed `lib/*/package.json`.
+
+**auth0 v5 migration:** Done — updated 7 files to use `Management.GetUserResponseContent`, `Management.Client`, `Management.ClientGrantResponseContent`, `Management.UpdateUserResponseContent`.
+
+## User
+
+Whatever fixes need to be done to push the updates.

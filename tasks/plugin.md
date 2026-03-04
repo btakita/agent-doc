@@ -171,3 +171,36 @@ The plugin is overeager in making any & all markdown files opened in the editor 
 For example, BrianTakita.md is not an agent doc, but was claimed when I opened it.
 
 Please help in making the plugin more selective about which markdown files it claims. Perhaps requiring an explicit command if the markdown file doesn't have the claim frontmatter?
+
+## Assistant
+
+**Fixed.** `agent-doc sync` now skips `.md` files that don't already have a `session:` UUID in frontmatter.
+
+**Root cause:** `EditorTabSyncListener` passes ALL visible `.md` files to `agent-doc sync`. The sync command then called `ensure_session()` which unconditionally generated a UUID for files without one, wrote frontmatter to disk, created a tmux pane, and registered the session. Any `.md` file you opened (like `BrianTakita.md`) got auto-claimed.
+
+**Fix:** Two files changed in `agent-doc/src/`:
+
+| File | Change |
+|------|--------|
+| `sync.rs` | Phase 1: use `frontmatter::parse()` instead of `ensure_session()`. Files without a `session:` UUID are silently skipped. Phase 2: only restarts dead panes for files that already had a UUID — no new UUID generation. |
+| `focus.rs` | Same pattern: parse frontmatter, bail with "use Claim to register" if no session UUID. |
+
+**Behavior now:**
+- **Files with `session:` UUID** — sync/focus work as before (layout sync, pane restart)
+- **Files without `session:` UUID** — silently skipped by sync. No frontmatter injection, no pane creation.
+- **To register a new file** — explicit `Claim for Tmux Pane` (Ctrl+Shift+Alt+C or Alt+Enter menu)
+
+Binary reinstalled. No plugin rebuild needed — this is a CLI-only fix.
+
+## User
+
+When I selected greensand-ai.md and parallel-coding-with-tmux-markdown.md, the tmux panes got out of sync.
+
+There was a new window with 1 pane that opened.
+
+At this moment, there are 3 panes.
+
+Please write tests for all of the scenarios.
+
+If there is not logging of the sync commands, create logging for them.
+Also create logging of the tmux state.

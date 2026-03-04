@@ -379,3 +379,28 @@ Ring 0 — kernel (14 terms)
 ## User
 
 Is there a better abbreviation than exk available? Is exc available? exis? xist? xst? extc? any other good abbreviations available?
+
+## Assistant
+
+Checked crates.io and system commands:
+
+| Name | crates.io | Feel | Score |
+|------|-----------|------|-------|
+| **xist** | Available | Punchy, memorable. "X-ist." Sounds like "exist" when spoken. 4 chars. | 9/10 |
+| **exis** | Available | Sounds like "exist" truncated. 4 chars. Clear derivation. | 8/10 |
+| **exi** | Available | 3 chars, minimal. But doesn't evoke "existence" strongly — could be anything. | 7/10 |
+| **xst** | Available | Ultra-short (3 chars). But unpronounceable — just consonants. | 6/10 |
+| `exc` | **Taken** | — | — |
+| `ext` | **Taken** | — | — |
+| **extc** | Available | 4 chars but doesn't read as "existence." Looks like "extract-c." | 5/10 |
+| **exst** | Available | 4 chars. Looks like a typo of "exist." Not bad but awkward. | 6/10 |
+
+**My pick: `xist`.** It's the best balance of short + evocative + memorable. Spoken aloud it sounds like "exist." Typed, it's distinctive and unlikely to conflict. `xist search scope` reads well.
+
+Runner-up: `exis` — more obvious derivation from "existence" but less punchy.
+
+Want me to add `xist` as a third binary alias alongside `existence` and `exk`?
+
+## User
+
+Yes. xist.

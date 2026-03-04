@@ -268,17 +268,9 @@ pub fn run_with_tmux(
     }
 
     if resolved.len() < 2 {
-        // Not enough panes for 2D layout, but still clean the target window.
-        if let Some(target_win) = window {
-            let wanted: HashSet<String> =
-                resolved.iter().map(|r| r.pane_id.clone()).collect();
-            let window_panes = tmux.list_window_panes(target_win).unwrap_or_default();
-            for existing_pane in &window_panes {
-                if !wanted.contains(existing_pane.as_str()) && window_panes.len() > 1 {
-                    tmux.break_pane(existing_pane)?;
-                }
-            }
-        }
+        // Not enough resolved panes for 2D layout — just focus, don't rearrange.
+        // This happens when non-agent-doc files are in the layout (no session UUID).
+        // Breaking existing panes out of the window would be destructive.
         if let Some(r) = resolved.first() {
             tmux.select_pane(&r.pane_id)?;
         }
@@ -1598,6 +1590,84 @@ mod tests {
         assert!(!final_panes.contains(&pane_c), "C evicted from target");
         assert!(t.pane_alive(&pane_c), "C still alive");
         assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+    }
+
+    #[test]
+    #[ignore] // uses set_current_dir which is not thread-safe
+    fn test_sync_non_agent_doc_first_preserves_layout() {
+        // Bug reproduction: editor sends 2 files where the first has no session UUID.
+        // The non-agent-doc file is skipped, leaving only 1 resolved pane.
+        // Previously, the < 2 path would break existing panes out of the window.
+        // Fix: just focus the resolved pane without rearranging.
+        let t = IsolatedTmux::new("sync-test-non-agent-first");
+        let tmp = TempDir::new().unwrap();
+
+        // Create 2 panes in the same window (simulating an existing layout)
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let target_window = t.pane_window(&pane_a).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-t", &target_window, "-x", "200", "-y", "60"]);
+        let pane_b = t
+            .raw_cmd(&["split-window", "-t", &pane_a, "-h", "-P", "-F", "#{pane_id}"])
+            .unwrap();
+
+        // Verify: 2 panes in window
+        let initial = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(initial.len(), 2, "should start with 2 panes");
+
+        // Create files: one non-agent-doc (no UUID), one agent-doc (with UUID)
+        let non_agent_file = tmp.path().join("BrianTakita.md");
+        std::fs::write(&non_agent_file, "# Brian Takita\n\nNo frontmatter here.\n").unwrap();
+
+        let session_id = "test-session-123";
+        let agent_file = tmp.path().join("plugin.md");
+        std::fs::write(
+            &agent_file,
+            format!("---\nsession: {}\n---\n\n## User\n\nHello\n", session_id),
+        )
+        .unwrap();
+
+        // Register the agent-doc session → pane_b
+        let sessions_dir = tmp.path().join(".agent-doc");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        let registry = format!(
+            r#"{{"{session_id}": {{"pane": "{pane_b}", "pid": 1, "cwd": "{cwd}", "started": "2026-01-01T00:00:00Z", "file": "plugin.md", "window": "{target_window}"}}}}"#,
+            session_id = session_id,
+            pane_b = pane_b,
+            cwd = tmp.path().display(),
+            target_window = target_window,
+        );
+        std::fs::write(sessions_dir.join("sessions.json"), &registry).unwrap();
+
+        // Save current dir and change to temp dir (sessions.json is CWD-relative)
+        let orig_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        // Call run_with_tmux with non-agent-doc file first
+        let col_args = [
+            non_agent_file.to_string_lossy().to_string(),
+            agent_file.to_string_lossy().to_string(),
+        ];
+        let result = run_with_tmux(
+            &col_args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            Some(&target_window),
+            None,
+            &t,
+        );
+
+        // Restore CWD
+        std::env::set_current_dir(&orig_dir).unwrap();
+
+        assert!(result.is_ok(), "run_with_tmux should succeed: {:?}", result);
+
+        // The key assertion: the window should still have 2 panes.
+        // Before the fix, the < 2 path would break_pane the unwanted panes,
+        // leaving only 1 pane.
+        let final_panes = t.list_window_panes(&target_window).unwrap();
+        assert_eq!(
+            final_panes.len(),
+            2,
+            "window should still have 2 panes (non-agent-doc file should not break layout)"
+        );
     }
 
     // --- Property-based tests ---

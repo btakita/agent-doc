@@ -360,8 +360,10 @@ sync should reset to 2 panes in the window.
 **The CLI sync algorithm is correct — the issue is the plugin hasn't been reinstalled yet.**
 
 The old plugin (with the dedup cache) is still running. It blocked the re-sync after you closed the 3rd tab. The new plugin (without dedup cache) will fix this, but you need to install the rebuilt zip first.
- 
-Explain why the plugin needed to be changed.
+
+**Why the plugin needed to change:** The old plugin had a dedup cache (`lastColumnStructure`, `lastActiveFile`) that compared the current editor state against the last sync. When you closed a tab, `selectionChanged()` fired — but the dedup check saw the active file hadn't changed (`activeFileChanged = false`). If `columnStructureChanged` was also false (timing issue with IntelliJ's layout detection during close), the sync was skipped entirely. The tmux window kept the stale 3-pane layout.
+
+The fix: remove the plugin-side dedup cache. Now every `selectionChanged()` event (after debounce) calls `agent-doc sync`. The CLI's FAST_PATH check (`sync.rs:438`) handles dedup correctly by comparing actual tmux pane state — if the layout is already correct, it returns in <10ms with zero mutations.
 
 **Proof: 2 new tests pass confirming the sync algorithm works:**
 
@@ -384,4 +386,14 @@ Or manually run: `agent-doc sync --col tasks/plugin.md --col <other-open-file>.m
 
 ## User
 
+There are still 3 tmux panes with:
+```
+plugin (selected) | parallel-coding-with-tmux-markdown
+```
 
+The stash pane is selected with:
+```
+plugin | parallel-coding-with-tmux-markdown (selected)
+```
+
+Please write automated tests in agent-doc and fix.

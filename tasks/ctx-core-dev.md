@@ -604,5 +604,14 @@ update-npm-packages
 
 Both should work now.
 
+## Assistant
+
+The `cd: null directory` warnings come from `CHANGELOG-diff-COMMIT_EDITMSG.sh` line 20. The script parses `pnpm list -r --depth -1` output where blank lines between entries cause `awk '{print $2}'` to yield empty string.
+
+**The changeset versioning itself succeeded** (the butterfly confirms it). The warnings are from the COMMIT_EDITMSG generation step and are non-fatal.
+
+**Fixed** — added a guard to skip empty/invalid dirs in the while loop. The 3 warnings should be gone on next run.
+
 ## User
 
+compact this file

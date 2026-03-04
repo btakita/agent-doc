@@ -923,3 +923,31 @@ agent-doc 0.8.0
 Please setup the gh actions and mdbook first.
 
 Then we will release tmux-router. Then release agent-doc.
+
+## Assistant
+
+**Done.** GitHub Actions and mdbook are set up for tmux-router. Committed as `16c29b9`.
+
+**GitHub Actions workflows:**
+- **ci.yml** — clippy + `cargo test` on push/PR to main. Installs tmux via apt for the 46 integration tests.
+- **release.yml** — `cargo publish` to crates.io + GitHub Release on tag push (`v*`).
+- **book.yml** — mdbook build + deploy to GitHub Pages on push to main.
+
+**mdbook documentation:**
+- `book.toml` — project metadata
+- `docs/SUMMARY.md` — table of contents
+- Pages: Introduction, Getting Started, Concepts (Registry, Sync Algorithm), API Reference
+- Verified: `mdbook build` succeeds locally
+
+**Release order:**
+1. Push tmux-router to GitHub, verify CI passes
+2. Tag + release tmux-router v0.2.0
+3. Then release agent-doc v0.8.0 (depends on tmux-router v0.2)
+
+Ready for you to push tmux-router and verify CI. Note: you'll need to enable GitHub Pages (Settings > Pages > Source: GitHub Actions) and add `CARGO_REGISTRY_TOKEN` secret for the release workflow.
+
+## User
+
+What do I need to do to get https://btakita.github.io/tmux-router/ running?
+
+I set the Pages to gh action / static html

@@ -61,3 +61,4 @@ The logo assets already existed (`assets/logo.svg`, `assets/logo-64.png`, `asset
 
 ## User
 
+commit. Since this is a doc only change, can we re-release the same version or do we need a new release?

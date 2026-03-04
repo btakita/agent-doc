@@ -535,3 +535,37 @@ This means custom component types are just config — define a name, set its mod
 ## User
 
 Would shell hooks be ok to implement for 0.9.0?
+
+## Assistant
+
+**Yes.** Shell hooks are trivial to add — just `std::process::Command` with env vars and stdin piping, same pattern agent-doc already uses for git. Maybe 50 lines on top of what's built.
+
+**Full 0.9.0 component scope:**
+
+1. **Rename** `RangeTemplate` → `Component`, `section` → `component` in CLI
+2. **Components config** (`.agent-doc/components.toml`) — parse with existing `toml` dep
+3. **Built-in modes** in `patch`: `replace` (default), `append`, `prepend`, `timestamp`, `max_entries`
+4. **Shell hooks** in `patch`: `pre_patch` and `post_patch` scripts
+
+```rust
+// Hook execution — straightforward
+fn run_hook(script: &str, component: &str, file: &Path, content: &str) -> Result<String> {
+    let output = Command::new("sh")
+        .args(["-c", script])
+        .env("COMPONENT", component)
+        .env("FILE", file.to_string_lossy().as_ref())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    // write content to stdin, read transformed content from stdout
+    ...
+}
+```
+
+`pre_patch` can transform content (stdout replaces input). `post_patch` is fire-and-forget (notification, side effects).
+
+Shall I implement the renames + config + hooks now?
+
+## User
+
+yes...implement all

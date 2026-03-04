@@ -650,3 +650,7 @@ Both files now share this pane. Tab switching should work correctly now.
 ## User
 
 Yes. Also when `--focus` targets a file with no registered pane, a pane should be auto-registered if the doc has agent_doc frontmatter. If the *.md file does not, the tmux selection should remain the same...and there should be no auto-register.
+
+Can we have claude use `notify-send` whenever a task is done or the session is blocked on a prompt? 
+This can be in my personal session. Perhaps there is already a notify-send skill available?
+Use a claude hook for notify-send

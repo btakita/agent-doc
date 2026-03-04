@@ -15,7 +15,7 @@ and git commits.
 ### 2.1 Session Document
 
 Frontmatter fields:
-- `session`: Agent session ID (set after first run, used for `--resume`)
+- `agent_doc_session`: Document/routing UUID — permanent identifier for tmux pane routing. Legacy alias: `session` (read but not written).
 - `agent`: Agent backend name (overrides config default)
 - `model`: Model override (passed to agent backend)
 - `branch`: Reserved for branch tracking

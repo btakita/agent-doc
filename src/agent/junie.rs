@@ -34,14 +34,13 @@ fn resolve_junie_bridge() -> String {
     }
 
     // Check next to the agent-doc binary
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent() {
             let bridge = dir.join("junie-bridge.sh");
             if bridge.exists() {
                 return bridge.to_string_lossy().to_string();
             }
         }
-    }
 
     // Check common locations
     if let Ok(home) = std::env::var("HOME") {

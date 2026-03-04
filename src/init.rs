@@ -16,15 +16,14 @@ pub fn run(file: &Path, title: Option<&str>, agent: Option<&str>, config: &Confi
     let session_id = Uuid::new_v4();
 
     let content = format!(
-        "---\nsession: {}\nagent: {}\n---\n\n# Session: {}\n\n## User\n\n",
+        "---\nagent_doc_session: {}\nagent: {}\n---\n\n# Session: {}\n\n## User\n\n",
         session_id, agent, title
     );
 
-    if let Some(parent) = file.parent() {
-        if !parent.exists() {
+    if let Some(parent) = file.parent()
+        && !parent.exists() {
             std::fs::create_dir_all(parent)?;
         }
-    }
     std::fs::write(file, content)?;
     eprintln!("Created {}", file.display());
     Ok(())

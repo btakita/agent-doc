@@ -157,11 +157,34 @@ impl Layout {
             .flat_map(|col| col.files.iter().map(|f| f.as_path()))
             .collect()
     }
+
+    /// Which column index contains this file, if any.
+    fn column_of(&self, file: &Path) -> Option<usize> {
+        self.columns
+            .iter()
+            .position(|col| col.files.iter().any(|f| f == file))
+    }
 }
 
 // =========================================================================
 // Helpers
 // =========================================================================
+
+/// Find a donor pane in the same column as `file` (same-column only, no spiral).
+/// Returns the pane_id of a resolved file in the same column.
+fn find_column_pane(
+    layout: &Layout,
+    file: &Path,
+    file_to_pane: &std::collections::HashMap<PathBuf, String>,
+) -> Option<String> {
+    let col_idx = layout.column_of(file)?;
+    for f in &layout.columns[col_idx].files {
+        if let Some(pane) = file_to_pane.get(f) {
+            return Some(pane.clone());
+        }
+    }
+    None
+}
 
 /// Find the best window for consolidating wanted panes.
 /// Prefers the window (within the target session) that already contains the most wanted panes.
@@ -179,13 +202,11 @@ fn find_best_window(
             Err(_) => continue,
         };
         // Only consider windows in the same tmux session
-        if let Some(ts) = target_session {
-            if let Ok(pane_sess) = tmux.pane_session(pane_id) {
-                if pane_sess != ts {
+        if let Some(ts) = target_session
+            && let Ok(pane_sess) = tmux.pane_session(pane_id)
+                && pane_sess != ts {
                     continue;
                 }
-            }
-        }
         let window_panes = tmux.list_window_panes(&win).unwrap_or_default();
         let wanted_count = window_panes
             .iter()
@@ -243,6 +264,7 @@ pub fn run_with_tmux(
     // --- Phase 1: Resolve each file to its session pane ---
     let mut resolved: Vec<ResolvedFile> = Vec::new();
     let mut unresolved_files: Vec<PathBuf> = Vec::new();
+    let mut non_agent_doc_files: Vec<PathBuf> = Vec::new();
     let mut doc_tmux_session: Option<String> = None;
     let mut files_needing_tmux_session: Vec<PathBuf> = Vec::new();
 
@@ -256,12 +278,11 @@ pub fn run_with_tmux(
         let (fm, _) = frontmatter::parse(&content)?;
 
         // Collect tmux_session from first doc that has it
-        if doc_tmux_session.is_none() {
-            if let Some(ref ts) = fm.tmux_session {
+        if doc_tmux_session.is_none()
+            && let Some(ref ts) = fm.tmux_session {
                 doc_tmux_session = Some(ts.clone());
                 eprintln!("tmux_session={} (from {})", ts, file.display());
             }
-        }
         if fm.tmux_session.is_none() && fm.session.is_some() {
             files_needing_tmux_session.push(file.to_path_buf());
         }
@@ -269,7 +290,8 @@ pub fn run_with_tmux(
         let session_id = match fm.session {
             Some(id) => id,
             None => {
-                // No session UUID — not an agent-doc file. Skip silently.
+                // No session UUID — not an agent-doc file. Track and skip.
+                non_agent_doc_files.push(file.to_path_buf());
                 continue;
             }
         };
@@ -304,21 +326,47 @@ pub fn run_with_tmux(
         );
     }
 
+    // Build a lookup from file path → pane_id (mutable for Phase 1.5 auto-register)
+    let mut file_to_pane: std::collections::HashMap<PathBuf, String> = resolved
+        .iter()
+        .map(|r| (r.path.clone(), r.pane_id.clone()))
+        .collect();
+
+    // --- Phase 1.5: In-memory auto-register unclaimed agent-doc files ---
+    // For unresolved files (have session UUID but no pane), find a donor pane in the
+    // SAME column only. This is ephemeral — not written to sessions.json.
+    // Same-column-only prevents cross-column focus jumps.
+    for file in &unresolved_files {
+        if let Some(donor_pane) = find_column_pane(&layout, file, &file_to_pane) {
+            eprintln!(
+                "auto-register {} → {} (in-memory, same column)",
+                file.display(),
+                donor_pane
+            );
+            file_to_pane.insert(file.clone(), donor_pane.clone());
+            resolved.push(ResolvedFile {
+                path: file.clone(),
+                pane_id: donor_pane,
+            });
+        }
+    }
+
     if resolved.len() < 2 {
         // Not enough resolved panes for 2D layout — just focus, don't rearrange.
-        // This happens when non-agent-doc files are in the layout (no session UUID).
-        // Breaking existing panes out of the window would be destructive.
-        if let Some(r) = resolved.first() {
+        // Respect --focus: only select a pane if the focus file has a resolved pane.
+        // Otherwise, preserve the current tmux selection.
+        if let Some(focus_file) = focus {
+            let focus_path = PathBuf::from(focus_file);
+            if !non_agent_doc_files.contains(&focus_path)
+                && let Some(pane) = file_to_pane.get(&focus_path) {
+                    tmux.select_pane(pane)?;
+                }
+            // else: non-agent-doc or no pane → preserve selection
+        } else if let Some(r) = resolved.first() {
             tmux.select_pane(&r.pane_id)?;
         }
         return Ok(());
     }
-
-    // Build a lookup from file path → pane_id
-    let file_to_pane: std::collections::HashMap<PathBuf, String> = resolved
-        .iter()
-        .map(|r| (r.path.clone(), r.pane_id.clone()))
-        .collect();
 
     // --- Phase 3: Build the 2D column structure with resolved panes ---
     let mut pane_columns: Vec<Vec<String>> = Vec::new();
@@ -395,17 +443,15 @@ pub fn run_with_tmux(
     // Write tmux_session back to documents that don't have it yet
     if let Some(ref session_name) = target_session {
         for file in &files_needing_tmux_session {
-            if let Ok(content) = std::fs::read_to_string(file) {
-                if let Ok(updated) = frontmatter::set_tmux_session(&content, session_name) {
-                    if updated != content {
+            if let Ok(content) = std::fs::read_to_string(file)
+                && let Ok(updated) = frontmatter::set_tmux_session(&content, session_name)
+                    && updated != content {
                         if let Err(e) = std::fs::write(file, &updated) {
                             eprintln!("warning: failed to write tmux_session to {}: {}", file.display(), e);
                         } else {
                             eprintln!("set tmux_session={} in {}", session_name, file.display());
                         }
                     }
-                }
-            }
         }
     }
 
@@ -416,28 +462,42 @@ pub fn run_with_tmux(
         .flat_map(|col| col.iter().map(|s| s.as_str()))
         .collect();
 
-    // Resolve --focus to a pane ID
-    let focus_pane = if let Some(focus_file) = focus {
+    // Resolve --focus to a pane ID (Option: None preserves current tmux selection)
+    let focus_pane: Option<String> = if let Some(focus_file) = focus {
         let focus_path = PathBuf::from(focus_file);
-        file_to_pane
-            .get(&focus_path)
-            .cloned()
-            .unwrap_or_else(|| anchor_pane.clone())
+        if non_agent_doc_files.contains(&focus_path) {
+            // Non-agent-doc file → preserve tmux selection
+            None
+        } else if let Some(pane) = file_to_pane.get(&focus_path) {
+            // Directly resolved (includes auto-registered)
+            Some(pane.clone())
+        } else {
+            // Column-positional fallback: find first pane in same column
+            find_column_pane(&layout, &focus_path, &file_to_pane)
+        }
     } else {
-        anchor_pane.clone()
+        Some(anchor_pane.clone())
     };
 
-    // --- Phase 5: Reconcile ---
+    // --- Phase 5: Reconcile (attach-first: attach → select → detach) ---
     let log = reconcile(
         tmux,
         &target_window,
         &pane_columns,
         &desired_ordered,
+        target_session.as_deref(),
+        focus_pane.as_deref(),
     )?;
 
-    // --- Phase 6: Resize + Focus ---
+    // --- Phase 6: Resize + re-select ---
+    // Reconcile already selected focus_pane before detach.
+    // Equalize sizes, then re-confirm selection.
     equalize_sizes(tmux, &pane_columns);
-    tmux.select_pane(&focus_pane)?;
+    if let Some(ref fp) = focus_pane {
+        tmux.select_pane(fp)?;
+    }
+    let sel = target_session.as_deref().and_then(|s| tmux.active_pane(s)).unwrap_or_default();
+    eprintln!("phase6: focus={:?}, selected={}", focus_pane, sel);
 
     // Log global tmux state at sync end
     global_log.log_global_state(tmux, "sync-end");
@@ -464,23 +524,28 @@ pub fn run_with_tmux(
 
 /// Reconcile pane layout in target_window to match desired_ordered.
 ///
-/// # Algorithm: Simple 2-step detach/attach
+/// # Algorithm: Attach-first (prevents pane selection flicker)
 ///
 /// ```text
 /// SNAPSHOT — query current panes
 /// FAST PATH — if already correct, done
-/// DETACH — break_pane unwanted panes out of target window
-/// ATTACH — join_pane missing desired panes into target window
-///          (isolate from shared windows first, then join with correct split direction)
+/// ATTACH — join missing desired panes into target window (all with -d)
+/// SELECT — select the focus pane (now in window after attach)
+/// DETACH — stash unwanted panes (focus pane survives, no selection jump)
+/// REORDER — if needed, break non-first + rejoin in correct order
 /// VERIFY — confirm final layout
 /// ```
 ///
-/// If all desired panes are present but in wrong order, detach non-first + reattach.
+/// By attaching BEFORE detaching, the focus pane is in the window when
+/// unwanted panes are stashed, preventing tmux from auto-selecting a
+/// different pane.
 fn reconcile(
     tmux: &Tmux,
     target_window: &str,
     pane_columns: &[Vec<String>],
     desired_ordered: &[&str],
+    session_name: Option<&str>,
+    focus_pane: Option<&str>,
 ) -> Result<SyncLog> {
     let mut log = SyncLog::new();
 
@@ -490,11 +555,12 @@ fn reconcile(
     // --- SNAPSHOT ---
     let current = tmux.list_panes_ordered(target_window).unwrap_or_default();
     let current_refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
+    let sel = session_name.and_then(|s| tmux.active_pane(s)).unwrap_or_default();
     log.log(
         "SNAPSHOT",
         format!(
-            "window={}, current={:?}, desired={:?}",
-            target_window, current_refs, desired_ordered
+            "window={}, current={:?}, desired={:?}, selected={}",
+            target_window, current_refs, desired_ordered, sel
         ),
     );
 
@@ -504,50 +570,15 @@ fn reconcile(
         return Ok(log);
     }
 
-    // --- DETACH unwanted panes ---
     let current_panes = tmux.list_window_panes(target_window).unwrap_or_default();
-    let unwanted: Vec<String> = current_panes
-        .into_iter()
-        .filter(|p| !wanted.contains(p.as_str()))
-        .collect();
-    // Detach unwanted, but never the very last pane in the window.
-    for pane in &unwanted {
-        let window_count = tmux.list_window_panes(target_window).unwrap_or_default().len();
-        if window_count <= 1 {
-            log.log("DETACH", format!("deferred {} — last pane in window", pane));
-            continue;
-        }
-        match tmux.break_pane(pane) {
-            Ok(()) => {
-                log.log("DETACH", format!("broke {} from {}", pane, target_window));
-                update_registry(tmux, pane, &mut log);
-            }
-            Err(e) => {
-                log.log_err("DETACH", format!("failed to break {}: {}", pane, e));
-            }
-        }
-    }
+    let current_set: HashSet<String> = current_panes.iter().cloned().collect();
 
-    // --- ATTACH desired panes ---
+    // --- ATTACH missing desired panes ---
     // First, ensure the first desired pane is in the target window.
-    let present_now: HashSet<String> = tmux
-        .list_window_panes(target_window)
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    if !present_now.contains(first_pane) {
-        // Isolate first_pane if it shares a window with others
-        if let Ok(pane_win) = tmux.pane_window(first_pane) {
-            let siblings = tmux.list_window_panes(&pane_win).unwrap_or_default();
-            if siblings.len() > 1 {
-                let _ = tmux.break_pane(first_pane);
-            }
-        }
-        // Join into target window (before the first existing pane)
+    if !current_set.contains(first_pane) {
         let existing = tmux.list_window_panes(target_window).unwrap_or_default();
         if let Some(target) = existing.first() {
-            match tmux.join_pane(first_pane, target, "-bh") {
+            match tmux.join_pane(first_pane, target, "-dbh") {
                 Ok(()) => {
                     log.log("ATTACH", format!("joined first {} into {}", first_pane, target_window));
                     update_registry(tmux, first_pane, &mut log);
@@ -555,45 +586,6 @@ fn reconcile(
                 Err(e) => {
                     log.log_err("ATTACH", format!("failed to join first {}: {}", first_pane, e));
                 }
-            }
-        }
-        // Now break deferred unwanted (window has a wanted pane now)
-        let refreshed = tmux.list_window_panes(target_window).unwrap_or_default();
-        for pane in &unwanted {
-            if refreshed.contains(pane) && refreshed.len() > 1 {
-                match tmux.break_pane(pane) {
-                    Ok(()) => {
-                        log.log("DETACH", format!("broke deferred {} from {}", pane, target_window));
-                        update_registry(tmux, pane, &mut log);
-                    }
-                    Err(e) => {
-                        log.log_err("DETACH", format!("failed to break deferred {}: {}", pane, e));
-                    }
-                }
-            }
-        }
-    }
-
-    // Re-check what's present after ensuring first pane
-    let present_after: HashSet<String> = tmux
-        .list_window_panes(target_window)
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    // Check if we need a full reorder (all desired present but wrong order)
-    let current_order = tmux.list_panes_ordered(target_window).unwrap_or_default();
-    let current_order_refs: Vec<&str> = current_order.iter().map(|s| s.as_str()).collect();
-    let current_set: HashSet<&str> = current_order_refs.iter().copied().collect();
-
-    let need_reorder = current_set == wanted && current_order_refs != desired_ordered;
-    if need_reorder {
-        // Break all non-first panes out, then rejoin in order
-        log.log("REORDER", format!("current={:?}, desired={:?}", current_order_refs, desired_ordered));
-        for pane in desired_ordered.iter().skip(1) {
-            if present_after.contains(*pane) {
-                let _ = tmux.break_pane(pane);
-                log.log("REORDER", format!("broke {} for reorder", pane));
             }
         }
     }
@@ -604,40 +596,17 @@ fn reconcile(
             if pane.as_str() == first_pane {
                 continue;
             }
-            // Skip if already in target window (and not reordering)
             let in_target = tmux
                 .list_window_panes(target_window)
                 .unwrap_or_default()
                 .contains(pane);
-            if in_target && !need_reorder {
+            if in_target {
                 continue;
             }
-            if in_target {
-                // Already handled by reorder break above
-                // If somehow still present, skip
-                let still_there = tmux
-                    .list_window_panes(target_window)
-                    .unwrap_or_default()
-                    .contains(pane);
-                if still_there {
-                    continue;
-                }
-            }
-
-            // Isolate pane from its current window if shared
-            if let Ok(pane_win) = tmux.pane_window(pane) {
-                let siblings = tmux.list_window_panes(&pane_win).unwrap_or_default();
-                if siblings.len() > 1 {
-                    if let Err(e) = tmux.break_pane(pane) {
-                        log.log_err("ATTACH", format!("failed to isolate {}: {}", pane, e));
-                        continue;
-                    }
-                }
-            } else {
+            if tmux.pane_window(pane).is_err() {
                 log.log_err("ATTACH", format!("pane {} not found (dead?)", pane));
                 continue;
             }
-
             let (target_pane, flag) = join_target(pane_columns, col_idx, row_idx);
             match tmux.join_pane(pane, &target_pane, flag) {
                 Ok(()) => {
@@ -649,6 +618,78 @@ fn reconcile(
                 }
             }
         }
+    }
+
+    let sel = session_name.and_then(|s| tmux.active_pane(s)).unwrap_or_default();
+    log.log("ATTACH", format!("done — selected={}", sel));
+
+    // --- SELECT focus pane (before detach, so stash won't change selection) ---
+    let select_target = focus_pane.unwrap_or(first_pane);
+    let _ = tmux.select_pane(select_target);
+    log.log("SELECT", format!("pre-selected {} before detach", select_target));
+
+    // --- DETACH unwanted panes ---
+    let refreshed = tmux.list_window_panes(target_window).unwrap_or_default();
+    for pane in &refreshed {
+        if wanted.contains(pane.as_str()) {
+            continue;
+        }
+        let window_count = tmux.list_window_panes(target_window).unwrap_or_default().len();
+        if window_count <= 1 {
+            log.log("DETACH", format!("skipped {} — last pane in window", pane));
+            continue;
+        }
+        let (result, verb) = if let Some(sess) = session_name {
+            (tmux.stash_pane(pane, sess), "stashed")
+        } else {
+            (tmux.break_pane(pane), "broke")
+        };
+        match result {
+            Ok(()) => {
+                log.log("DETACH", format!("{} {} from {}", verb, pane, target_window));
+                update_registry(tmux, pane, &mut log);
+            }
+            Err(e) => {
+                log.log_err("DETACH", format!("failed to detach {}: {}", pane, e));
+            }
+        }
+    }
+
+    // Re-select target window after stash operations
+    let _ = tmux.select_window(target_window);
+    let sel = session_name.and_then(|s| tmux.active_pane(s)).unwrap_or_default();
+    log.log("DETACH", format!("done — selected={}", sel));
+
+    // --- REORDER if needed ---
+    let current_order = tmux.list_panes_ordered(target_window).unwrap_or_default();
+    let current_order_refs: Vec<&str> = current_order.iter().map(|s| s.as_str()).collect();
+    let final_set: HashSet<&str> = current_order_refs.iter().copied().collect();
+
+    if final_set == wanted && current_order_refs != desired_ordered {
+        log.log("REORDER", format!("current={:?}, desired={:?}", current_order_refs, desired_ordered));
+        for pane in desired_ordered.iter().skip(1) {
+            let _ = tmux.break_pane(pane);
+            log.log("REORDER", format!("broke {} for reorder", pane));
+        }
+        for (col_idx, column) in pane_columns.iter().enumerate() {
+            for (row_idx, pane) in column.iter().enumerate() {
+                if pane.as_str() == first_pane {
+                    continue;
+                }
+                let in_target = tmux
+                    .list_window_panes(target_window)
+                    .unwrap_or_default()
+                    .contains(pane);
+                if in_target {
+                    continue;
+                }
+                let (target_pane, flag) = join_target(pane_columns, col_idx, row_idx);
+                let _ = tmux.join_pane(pane, &target_pane, flag);
+                log.log("REORDER", format!("rejoined {} → {} ({})", pane, target_pane, flag));
+            }
+        }
+        // Re-select focus after reorder
+        let _ = tmux.select_pane(select_target);
     }
 
     // --- VERIFY ---
@@ -675,16 +716,17 @@ fn reconcile(
 }
 
 /// Determine join target and split direction for a pane at (col_idx, row_idx).
+/// All flags include `-d` to prevent changing the active pane during reconcile.
 fn join_target(pane_columns: &[Vec<String>], col_idx: usize, row_idx: usize) -> (String, &'static str) {
     if col_idx == 0 {
         // Same column as anchor: stack below previous pane
-        (pane_columns[0][row_idx - 1].clone(), "-v")
+        (pane_columns[0][row_idx - 1].clone(), "-dv")
     } else if row_idx == 0 {
         // First pane of new column: horizontal split right of previous column's first pane
-        (pane_columns[col_idx - 1][0].clone(), "-h")
+        (pane_columns[col_idx - 1][0].clone(), "-dh")
     } else {
         // Stack below previous pane in this column
-        (pane_columns[col_idx][row_idx - 1].clone(), "-v")
+        (pane_columns[col_idx][row_idx - 1].clone(), "-dv")
     }
 }
 
@@ -712,11 +754,10 @@ fn update_registry(tmux: &Tmux, pane: &str, log: &mut SyncLog) {
 fn equalize_sizes(tmux: &Tmux, pane_columns: &[Vec<String>]) {
     if pane_columns.len() == 2 {
         let _ = tmux.resize_pane(&pane_columns[0][0], "-x", 50);
-    } else if pane_columns.len() > 2 {
-        if let Ok(win) = tmux.pane_window(&pane_columns[0][0]) {
+    } else if pane_columns.len() > 2
+        && let Ok(win) = tmux.pane_window(&pane_columns[0][0]) {
             let _ = tmux.select_layout(&win, "even-horizontal");
         }
-    }
     for col in pane_columns {
         if col.len() > 1 {
             let pct = 100 / col.len() as u32;
@@ -824,7 +865,52 @@ mod tests {
         assert_eq!(log.mutation_count(), 2); // DETACH + ATTACH
     }
 
-    // --- Helper: set up N panes in separate windows within an isolated tmux ---
+    // --- Helpers ---
+
+    /// Full tmux state snapshot for assertions.
+    #[derive(Debug)]
+    struct TmuxState {
+        /// Panes in the target window (ordered).
+        target_panes: Vec<String>,
+        /// Total windows in the session.
+        window_count: usize,
+        /// Currently selected window ID.
+        active_window: String,
+    }
+
+    /// Capture the full tmux state for a session.
+    fn snapshot_state(tmux: &IsolatedTmux, session: &str, target_window: &str) -> TmuxState {
+        let target_panes = tmux.list_panes_ordered(target_window).unwrap_or_default();
+        let window_count = count_windows(tmux, session);
+        let active_window = active_window(tmux, session);
+        TmuxState {
+            target_panes,
+            window_count,
+            active_window,
+        }
+    }
+
+    /// Assert the target window contains exactly the expected panes (in order).
+    fn assert_target_panes(state: &TmuxState, expected: &[&str], msg: &str) {
+        let actual: Vec<&str> = state.target_panes.iter().map(|s| s.as_str()).collect();
+        assert_eq!(actual, expected, "{}: target panes mismatch", msg);
+    }
+
+    /// Assert the active window is the target window.
+    fn assert_active_window(state: &TmuxState, target_window: &str, msg: &str) {
+        assert_eq!(
+            state.active_window, target_window,
+            "{}: active window should be target",
+            msg
+        );
+    }
+
+    /// Assert that all given panes are alive.
+    fn assert_all_alive(tmux: &IsolatedTmux, panes: &[String], msg: &str) {
+        for pane in panes {
+            assert!(tmux.pane_alive(pane), "{}: pane {} should be alive", msg, pane);
+        }
+    }
 
     fn setup_panes(tmux: &Tmux, n: usize) -> (String, Vec<String>, TempDir) {
         let tmp = TempDir::new().unwrap();
@@ -857,7 +943,7 @@ mod tests {
             .flat_map(|col| col.iter().map(|s| s.as_str()))
             .collect();
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         // Verify all panes are in the target window
         let final_panes = t.list_window_panes(&target_window).unwrap();
@@ -869,6 +955,14 @@ mod tests {
             );
         }
         assert!(!log.has_errors(), "should have no errors: {:?}", log.entries());
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "2col happy path");
+        assert_active_window(&state, &target_window, "2col happy path");
+        // 3 panes started in 3 windows; after joining 2 into target, only 1 window remains
+        assert_eq!(state.window_count, 1, "2col happy path: all panes consolidated into 1 window");
+        assert_all_alive(&t, &panes, "2col happy path");
     }
 
     #[test]
@@ -902,13 +996,20 @@ mod tests {
         let current_refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
         assert_eq!(current_refs, desired, "setup should produce correct order");
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         assert!(
             log.entries().iter().any(|e| e.phase == "FAST_PATH"),
             "should take fast path"
         );
         assert_eq!(log.mutation_count(), 0, "should have zero mutations");
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "already correct");
+        assert_active_window(&state, &target_window, "already correct");
+        assert_eq!(state.window_count, 1, "already correct: window count unchanged");
+        assert_all_alive(&t, &[pane_a, pane_b], "already correct");
     }
 
     #[test]
@@ -946,7 +1047,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(
@@ -963,6 +1064,13 @@ mod tests {
             log.entries().iter().any(|e| e.phase == "DETACH" && e.ok),
             "should have evict entry"
         );
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "unwanted evicted");
+        assert_active_window(&state, &target_window, "unwanted evicted");
+        // Started with 1 window (all panes via split). X evicted to solo window → 2 windows.
+        assert_eq!(state.window_count, 2, "unwanted evicted: target + X's solo window");
     }
 
     #[test]
@@ -974,7 +1082,7 @@ mod tests {
         let pane_columns = vec![vec![panes[0].clone()], vec![panes[1].clone()]];
         let desired: Vec<&str> = vec![panes[0].as_str(), panes[1].as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 2);
@@ -1006,7 +1114,7 @@ mod tests {
         ];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str(), pane_c.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         // A and C should be in the window; B should have failed
         let final_panes = t.list_window_panes(&target_window).unwrap();
@@ -1041,7 +1149,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         // Both panes should be in the window
         let final_panes = t.list_window_panes(&target_window).unwrap();
@@ -1066,7 +1174,7 @@ mod tests {
             .flat_map(|col| col.iter().map(|s| s.as_str()))
             .collect();
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 5, "all 5 panes should be in window");
@@ -1093,7 +1201,7 @@ mod tests {
         ]];
         let desired: Vec<&str> = vec![panes[0].as_str(), panes[1].as_str(), panes[2].as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 3);
@@ -1119,7 +1227,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_c.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_c.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a), "anchor A should be in target");
@@ -1163,7 +1271,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a));
@@ -1179,6 +1287,14 @@ mod tests {
             log.entries().iter().any(|e| e.phase == "ATTACH" && e.ok),
             "should have join"
         );
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "mixed evict and join");
+        assert_active_window(&state, &target_window, "mixed evict and join");
+        // Started: 2 windows (target with A+X, B solo). After: target (A+B), X solo → 2 windows.
+        assert_eq!(state.window_count, 2, "mixed evict and join: target + X's solo window");
+        assert_all_alive(&t, &[pane_a, pane_b], "mixed evict and join");
     }
 
     #[test]
@@ -1198,7 +1314,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a), "A should be in target");
@@ -1241,7 +1357,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 1, "only A should remain");
@@ -1279,7 +1395,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a), "A should be in target");
@@ -1313,7 +1429,7 @@ mod tests {
             .flat_map(|col| col.iter().map(|s| s.as_str()))
             .collect();
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         for pane in &desired {
@@ -1346,7 +1462,7 @@ mod tests {
             .flat_map(|col| col.iter().map(|s| s.as_str()))
             .collect();
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 3, "should have 3 unique panes");
@@ -1382,7 +1498,7 @@ mod tests {
             pane_d.as_str(),
         ];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         // A and C should be arranged; B and D silently skipped
         let final_panes = t.list_window_panes(&target_window).unwrap();
@@ -1412,7 +1528,7 @@ mod tests {
             .flat_map(|col| col.iter().map(|s| s.as_str()))
             .collect();
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 8, "all 8 panes should be in window");
@@ -1452,7 +1568,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 2, "should have exactly 2 panes after sync");
@@ -1469,6 +1585,14 @@ mod tests {
             .filter(|e| e.phase == "DETACH" && e.ok)
             .count();
         assert!(detach_count >= 1, "should have detached at least 1 pane");
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "3 to 2 evict");
+        assert_active_window(&state, &target_window, "3 to 2 evict");
+        // Started: 1 window (all splits). C evicted to solo → 2 windows.
+        assert_eq!(state.window_count, 2, "3 to 2 evict: target + C's solo window");
+        assert_all_alive(&t, &[pane_a, pane_b], "3 to 2 evict");
     }
 
     #[test]
@@ -1502,7 +1626,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 2, "should have exactly 2 panes");
@@ -1537,7 +1661,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a), "A should be in target");
@@ -1566,7 +1690,7 @@ mod tests {
         ];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str(), pane_c.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 3, "should have exactly 3 panes");
@@ -1600,7 +1724,7 @@ mod tests {
         let pane_columns = vec![vec![pane_a.clone()], vec![pane_b.clone()]];
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert_eq!(final_panes.len(), 2, "should have exactly A and B");
@@ -1639,7 +1763,7 @@ mod tests {
         ];
         let desired: Vec<&str> = vec![pane_b.as_str(), pane_d.as_str(), pane_a.as_str()];
 
-        let log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
         let final_panes = t.list_window_panes(&target_window).unwrap();
         assert!(final_panes.contains(&pane_a), "A in target");
@@ -1648,6 +1772,14 @@ mod tests {
         assert!(!final_panes.contains(&pane_c), "C evicted from target");
         assert!(t.pane_alive(&pane_c), "C still alive");
         assert!(!log.has_errors(), "no errors: {:?}", log.entries());
+
+        // Snapshot-based state assertions
+        let state = snapshot_state(&t, "test", &target_window);
+        assert_target_panes(&state, &desired, "full real world");
+        assert_active_window(&state, &target_window, "full real world");
+        // Started: 3 windows (A+C, B, D). After: target (A+B+D), C solo → 2 windows.
+        assert_eq!(state.window_count, 2, "full real world: target + C's solo window");
+        assert_all_alive(&t, &[pane_a.clone(), pane_b, pane_d], "full real world");
     }
 
     #[test]
@@ -1671,12 +1803,16 @@ mod tests {
         let desired: Vec<&str> = vec![pane_a.as_str(), pane_b.as_str()];
 
         // First reconcile: should consolidate A and B into target_window
-        let log1 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log1 = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
         let panes1 = t.list_window_panes(&target_window).unwrap();
         assert_eq!(panes1.len(), 2, "first sync: 2 panes in target");
         assert!(panes1.contains(&pane_a), "first sync: A present");
         assert!(panes1.contains(&pane_b), "first sync: B present");
         assert!(!log1.has_errors(), "first sync: no errors");
+
+        // Verify active window after first sync
+        let state1 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state1, &target_window, "first sync");
 
         // Count total windows in the session
         let windows_after_1 = t
@@ -1685,7 +1821,7 @@ mod tests {
         let win_count_1 = windows_after_1.lines().count();
 
         // Second reconcile with SAME layout — should be a no-op
-        let log2 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log2 = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
         let panes2 = t.list_window_panes(&target_window).unwrap();
         assert_eq!(panes2.len(), 2, "second sync: still 2 panes");
         assert!(panes2.contains(&pane_a), "second sync: A present");
@@ -1707,13 +1843,317 @@ mod tests {
             "no new windows from idempotent sync"
         );
 
+        // Verify active window after second sync
+        let state2 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state2, &target_window, "second sync");
+
         // Third reconcile — still stable
-        let log3 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+        let log3 = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
         assert_eq!(
             log3.mutation_count(),
             0,
             "third sync: still no mutations"
         );
+
+        // Verify active window after third sync
+        let state3 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state3, &target_window, "third sync");
+    }
+
+    #[test]
+    fn test_reconcile_tab_switching_no_window_cycling() {
+        // Bug reproduction: switching between two documents in the editor
+        // causes window cycling (0→1→2→0...) because each sync evicts
+        // the unwanted pane via break_pane into a NEW solo window.
+        //
+        // Scenario: 3 panes (A=agent-doc, B=plugin, C=dave-franklin).
+        // Editor alternates between [A,C] and [B,C] as user switches tabs.
+        // With stash window: evicted panes go to stash, no new windows created.
+        let t = IsolatedTmux::new("sync-test-tab-cycling");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+
+        // Pick A's window as canonical
+        let target_window = t.pane_window(&pane_a).unwrap();
+
+        // --- Sync 1: layout = [A, C] ---
+        let cols1 = vec![vec![pane_a.clone(), pane_c.clone()]];
+        let desired1: Vec<&str> = vec![pane_a.as_str(), pane_c.as_str()];
+        let log1 = reconcile(&t, &target_window, &cols1, &desired1, Some("test"), None).unwrap();
+        assert!(!log1.has_errors(), "sync1 errors: {:?}", log1.entries());
+        let panes1 = t.list_window_panes(&target_window).unwrap();
+        assert!(panes1.contains(&pane_a), "sync1: A in target");
+        assert!(panes1.contains(&pane_c), "sync1: C in target");
+        assert!(!panes1.contains(&pane_b), "sync1: B not in target");
+
+        // Verify active window after sync 1
+        let state1 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state1, &target_window, "sync1");
+
+        // Count windows after sync 1
+        let win_count_1 = count_windows(&t, "test");
+
+        // --- Sync 2: layout = [B, C] (user switched left tab) ---
+        let cols2 = vec![vec![pane_b.clone(), pane_c.clone()]];
+        let desired2: Vec<&str> = vec![pane_b.as_str(), pane_c.as_str()];
+        let log2 = reconcile(&t, &target_window, &cols2, &desired2, Some("test"), None).unwrap();
+        assert!(!log2.has_errors(), "sync2 errors: {:?}", log2.entries());
+        let panes2 = t.list_window_panes(&target_window).unwrap();
+        assert!(panes2.contains(&pane_b), "sync2: B in target");
+        assert!(panes2.contains(&pane_c), "sync2: C in target");
+        assert!(!panes2.contains(&pane_a), "sync2: A not in target");
+
+        // Verify active window after sync 2
+        let state2 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state2, &target_window, "sync2");
+
+        // A should be in the stash, NOT in a new solo window
+        let win_count_2 = count_windows(&t, "test");
+        // Allow at most +1 window (the stash). No growing.
+        assert!(
+            win_count_2 <= win_count_1 + 1,
+            "sync2: windows should not grow unbounded ({} → {})",
+            win_count_1,
+            win_count_2
+        );
+
+        // --- Sync 3: back to [A, C] (user switched back) ---
+        let log3 = reconcile(&t, &target_window, &cols1, &desired1, Some("test"), None).unwrap();
+        assert!(!log3.has_errors(), "sync3 errors: {:?}", log3.entries());
+        let panes3 = t.list_window_panes(&target_window).unwrap();
+        assert!(panes3.contains(&pane_a), "sync3: A in target");
+        assert!(panes3.contains(&pane_c), "sync3: C in target");
+
+        // Verify active window after sync 3
+        let state3 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state3, &target_window, "sync3");
+
+        let win_count_3 = count_windows(&t, "test");
+        // Window count must NOT keep growing with each switch
+        assert_eq!(
+            win_count_2, win_count_3,
+            "sync3: no new windows from switching back ({} → {})",
+            win_count_2, win_count_3
+        );
+
+        // --- Sync 4: [B, C] again ---
+        let log4 = reconcile(&t, &target_window, &cols2, &desired2, Some("test"), None).unwrap();
+        assert!(!log4.has_errors(), "sync4 errors: {:?}", log4.entries());
+
+        // Verify active window after sync 4
+        let state4 = snapshot_state(&t, "test", &target_window);
+        assert_active_window(&state4, &target_window, "sync4");
+
+        let win_count_4 = count_windows(&t, "test");
+        assert_eq!(
+            win_count_3, win_count_4,
+            "sync4: window count stable ({} → {})",
+            win_count_3, win_count_4
+        );
+
+        // All panes still alive (no process killed)
+        assert!(t.pane_alive(&pane_a), "A still alive");
+        assert!(t.pane_alive(&pane_b), "B still alive");
+        assert!(t.pane_alive(&pane_c), "C still alive");
+
+        // Verify the TARGET WINDOW stays selected throughout all syncs
+        // (the window selection should never cycle to stash or other windows)
+        let active_win = active_window(&t, "test");
+        assert_eq!(
+            active_win, target_window,
+            "target window should be selected after all syncs"
+        );
+    }
+
+    /// Count windows in a tmux session.
+    fn count_windows(tmux: &IsolatedTmux, session: &str) -> usize {
+        tmux.raw_cmd(&["list-windows", "-t", session, "-F", "#{window_id}"])
+            .unwrap_or_default()
+            .lines()
+            .count()
+    }
+
+    /// Get the active window ID in a tmux session.
+    fn active_window(tmux: &IsolatedTmux, session: &str) -> String {
+        tmux.raw_cmd(&[
+            "display-message",
+            "-t",
+            session,
+            "-p",
+            "#{window_id}",
+        ])
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+    }
+
+    /// Get the active pane ID in a tmux session.
+    fn active_pane(tmux: &IsolatedTmux, session: &str) -> String {
+        tmux.raw_cmd(&[
+            "display-message",
+            "-t",
+            session,
+            "-p",
+            "#{pane_id}",
+        ])
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+    }
+
+    #[test]
+    fn test_reconcile_2col_tab_switch_selects_left_pane() {
+        // Bug reproduction: 2-column editor layout. User switches between
+        // agent-doc.md and plugin.md on the LEFT side. dave-franklin.md
+        // stays on the RIGHT. After each switch, the LEFT pane should be selected.
+        //
+        // Layout 1: [A] [C]  (agent-doc left, dave-franklin right)
+        // Layout 2: [B] [C]  (plugin left, dave-franklin right)
+        // In both cases, the focus file is the left-column file.
+        let t = IsolatedTmux::new("sync-test-2col-focus");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+
+        let target_window = t.pane_window(&pane_a).unwrap();
+
+        // --- Sync 1: layout = [[A], [C]], focus = A ---
+        let cols1 = vec![vec![pane_a.clone()], vec![pane_c.clone()]];
+        let desired1: Vec<&str> = vec![pane_a.as_str(), pane_c.as_str()];
+        let log1 = reconcile(&t, &target_window, &cols1, &desired1, Some("test"), Some(&pane_a)).unwrap();
+        assert!(!log1.has_errors(), "sync1 errors: {:?}", log1.entries());
+        let sel1 = active_pane(&t, "test");
+        assert_eq!(sel1, pane_a, "sync1: A (left) should be selected after reconcile");
+
+        // --- Sync 2: layout = [[B], [C]], focus = B ---
+        let cols2 = vec![vec![pane_b.clone()], vec![pane_c.clone()]];
+        let desired2: Vec<&str> = vec![pane_b.as_str(), pane_c.as_str()];
+        let log2 = reconcile(&t, &target_window, &cols2, &desired2, Some("test"), Some(&pane_b)).unwrap();
+        assert!(!log2.has_errors(), "sync2 errors: {:?}", log2.entries());
+        // After reconcile: focus pane (B) should already be selected (attach→select→detach)
+        let sel2 = active_pane(&t, "test");
+        assert_eq!(sel2, pane_b, "sync2: B (left) should be selected after reconcile");
+
+        // Verify B is actually on the left (first in pane order)
+        let ordered = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered[0], pane_b, "sync2: B should be leftmost pane");
+        assert_eq!(ordered[1], pane_c, "sync2: C should be rightmost pane");
+
+        // --- Sync 3: back to [[A], [C]], focus = A ---
+        let log3 = reconcile(&t, &target_window, &cols1, &desired1, Some("test"), Some(&pane_a)).unwrap();
+        assert!(!log3.has_errors(), "sync3 errors: {:?}", log3.entries());
+        let sel3 = active_pane(&t, "test");
+        assert_eq!(sel3, pane_a, "sync3: A (left) should be selected after reconcile");
+
+        let ordered3 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered3[0], pane_a, "sync3: A should be leftmost pane");
+        assert_eq!(ordered3[1], pane_c, "sync3: C should be rightmost pane");
+
+        // --- Sync 4: [[B], [C]] again ---
+        let log4 = reconcile(&t, &target_window, &cols2, &desired2, Some("test"), Some(&pane_b)).unwrap();
+        assert!(!log4.has_errors(), "sync4 errors: {:?}", log4.entries());
+        let sel4 = active_pane(&t, "test");
+        assert_eq!(sel4, pane_b, "sync4: B (left) should be selected after reconcile");
+
+        let ordered4 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered4[0], pane_b, "sync4: B should be leftmost pane");
+        assert_eq!(ordered4[1], pane_c, "sync4: C should be rightmost pane");
+
+        // All alive
+        assert_all_alive(&t, &[pane_a.clone(), pane_b, pane_c], "end");
+
+        // Window count stable
+        let win_count = count_windows(&t, "test");
+        // Expect: target + stash (2), possibly + dead B/A window shells
+        assert!(win_count <= 3, "at most 3 windows: target + stash + 1 shell");
+    }
+
+    #[test]
+    fn test_full_flow_2col_tab_switch_pane_selection() {
+        // Bug reproduction: full sync flow (reconcile + equalize_sizes + select_pane).
+        // When switching between 2 left-column files, the LEFT pane should remain
+        // selected after the full flow — including equalize_sizes which might
+        // interfere with pane selection.
+        let t = IsolatedTmux::new("sync-full-flow");
+        let tmp = TempDir::new().unwrap();
+
+        let pane_a = t.new_session("test", tmp.path()).unwrap();
+        let _ = t.raw_cmd(&["resize-window", "-x", "200", "-y", "60"]);
+        let pane_b = t.new_window("test", tmp.path()).unwrap();
+        let pane_c = t.new_window("test", tmp.path()).unwrap();
+
+        let target_window = t.pane_window(&pane_a).unwrap();
+
+        // Helper: full sync flow (reconcile with focus + equalize_sizes + select_pane)
+        let full_sync = |cols: &[Vec<String>], desired: &[&str], focus: &str, label: &str| {
+            // reconcile now includes SELECT before DETACH, so focus pane
+            // should already be selected after reconcile returns.
+            let log = reconcile(&t, &target_window, cols, desired, Some("test"), Some(focus)).unwrap();
+            assert!(!log.has_errors(), "{}: reconcile errors: {:?}", label, log.entries());
+
+            let sel_after_reconcile = active_pane(&t, "test");
+            eprintln!("{}: after reconcile, selected={}", label, sel_after_reconcile);
+            // Key assertion: reconcile should have already selected the focus pane
+            assert_eq!(sel_after_reconcile, focus,
+                "{}: reconcile should pre-select focus pane (attach→select→detach)", label);
+
+            equalize_sizes(&t, cols);
+
+            let sel_after_equalize = active_pane(&t, "test");
+            eprintln!("{}: after equalize_sizes, selected={}", label, sel_after_equalize);
+            // equalize_sizes should NOT change the selected pane
+            assert_eq!(sel_after_equalize, focus,
+                "{}: equalize_sizes should not change selected pane", label);
+
+            // Final select_pane (as sync_layout does)
+            t.select_pane(focus).unwrap();
+            let sel_final = active_pane(&t, "test");
+            assert_eq!(sel_final, focus, "{}: final selected pane", label);
+
+            // Verify the focus pane is in the target window
+            let ordered = t.list_panes_ordered(&target_window).unwrap();
+            assert!(ordered.contains(&focus.to_string()),
+                "{}: focus pane {} not in target window {:?}", label, focus, ordered);
+        };
+
+        // --- Sync 1: [[A], [C]], focus = A (left) ---
+        let cols1 = vec![vec![pane_a.clone()], vec![pane_c.clone()]];
+        let desired1: Vec<&str> = vec![pane_a.as_str(), pane_c.as_str()];
+        full_sync(&cols1, &desired1, &pane_a, "sync1");
+
+        // Verify A is leftmost
+        let ordered1 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered1[0], pane_a, "sync1: A should be leftmost");
+
+        // --- Sync 2: [[B], [C]], focus = B (left) ---
+        let cols2 = vec![vec![pane_b.clone()], vec![pane_c.clone()]];
+        let desired2: Vec<&str> = vec![pane_b.as_str(), pane_c.as_str()];
+        full_sync(&cols2, &desired2, &pane_b, "sync2");
+
+        let ordered2 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered2[0], pane_b, "sync2: B should be leftmost");
+
+        // --- Sync 3: back to [[A], [C]], focus = A ---
+        full_sync(&cols1, &desired1, &pane_a, "sync3");
+
+        let ordered3 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered3[0], pane_a, "sync3: A should be leftmost");
+
+        // --- Sync 4: [[B], [C]] again ---
+        full_sync(&cols2, &desired2, &pane_b, "sync4");
+
+        let ordered4 = t.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(ordered4[0], pane_b, "sync4: B should be leftmost");
+
+        // All panes alive
+        assert_all_alive(&t, &[pane_a, pane_b, pane_c], "end");
     }
 
     #[test]
@@ -1833,7 +2273,7 @@ mod tests {
                     .flat_map(|col| col.iter().map(|s| s.as_str()))
                     .collect();
 
-                let _log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+                let _log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
                 // After reconcile, all desired panes must be in the target window
                 let final_panes = t.list_window_panes(&target_window).unwrap();
@@ -1870,10 +2310,10 @@ mod tests {
                     .collect();
 
                 // First reconcile
-                let _log1 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+                let _log1 = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
                 // Second reconcile — should be fast path (zero mutations)
-                let log2 = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+                let log2 = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
                 prop_assert!(
                     log2.entries().iter().any(|e| e.phase == "FAST_PATH"),
@@ -1897,7 +2337,7 @@ mod tests {
                     .collect();
                 let target_window = t.pane_window(&panes[0]).unwrap();
 
-                let _log = reconcile(&t, &target_window, &pane_columns, &desired).unwrap();
+                let _log = reconcile(&t, &target_window, &pane_columns, &desired, None, None).unwrap();
 
                 // All panes must still be alive (no pane was destroyed)
                 for pane in &panes {
@@ -1909,5 +2349,170 @@ mod tests {
                 }
             }
         }
+    }
+
+    // --- Auto-register and focus resolution tests ---
+
+    #[test]
+    fn test_auto_register_shares_column_pane() {
+        // Layout: col0=[a.md, b.md], col1=[c.md]
+        // a.md resolved to %1, b.md unresolved, c.md resolved to %2
+        // After find_column_pane, b.md should map to %1 (same column as a.md)
+        let layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("c.md")],
+                },
+            ],
+        };
+
+        let mut file_to_pane = std::collections::HashMap::new();
+        file_to_pane.insert(PathBuf::from("a.md"), "%1".to_string());
+        file_to_pane.insert(PathBuf::from("c.md"), "%2".to_string());
+
+        let donor = find_column_pane(&layout, Path::new("b.md"), &file_to_pane);
+        assert_eq!(donor, Some("%1".to_string()), "b.md should get a.md's pane (same column)");
+    }
+
+    #[test]
+    fn test_no_cross_column_donor() {
+        // Layout: col0=[a.md], col1=[b.md]
+        // b.md unresolved, a.md resolved to %1. No resolved pane in col1.
+        // Should NOT spiral to col0 — same-column only to prevent focus jumps.
+        let layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("a.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("b.md")],
+                },
+            ],
+        };
+
+        let mut file_to_pane = std::collections::HashMap::new();
+        file_to_pane.insert(PathBuf::from("a.md"), "%1".to_string());
+
+        let donor = find_column_pane(&layout, Path::new("b.md"), &file_to_pane);
+        assert_eq!(donor, None, "should NOT fall back to adjacent column");
+    }
+
+    #[test]
+    fn test_focus_non_agent_doc_preserves_selection() {
+        // find_column_pane returns None for a file not in layout
+        let layout = Layout {
+            columns: vec![Column {
+                files: vec![PathBuf::from("a.md")],
+            }],
+        };
+        let file_to_pane = std::collections::HashMap::new();
+        let result = find_column_pane(&layout, Path::new("readme.txt"), &file_to_pane);
+        assert_eq!(result, None, "non-layout file should return None");
+    }
+
+    #[test]
+    fn test_focus_column_positional_fallback() {
+        // Layout: col0=[a.md, b.md], col1=[c.md]
+        // a.md resolved to %1, b.md NOT in file_to_pane
+        // find_column_pane for b.md should return %1 (first resolved pane in same column)
+        let layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("c.md")],
+                },
+            ],
+        };
+
+        let mut file_to_pane = std::collections::HashMap::new();
+        file_to_pane.insert(PathBuf::from("a.md"), "%1".to_string());
+        file_to_pane.insert(PathBuf::from("c.md"), "%2".to_string());
+
+        let result = find_column_pane(&layout, Path::new("b.md"), &file_to_pane);
+        assert_eq!(result, Some("%1".to_string()), "should fall back to a.md's pane in same column");
+    }
+
+    #[test]
+    fn test_unclaimed_left_col_preserves_selection() {
+        // Exact user scenario:
+        // - 2-column layout: col0=[plugin.md], col1=[dave-franklin.md]
+        // - plugin.md has agent_doc_session but no registered pane (unclaimed)
+        // - dave-franklin.md has a registered pane (right column)
+        // - Focus: plugin.md
+        // Expected: tmux selection stays on the LEFT pane (preserve selection)
+        //
+        // This is a unit test of the focus resolution + early return logic.
+        // When plugin.md has no same-column donor, resolved.len() < 2 triggers
+        // early return. The early return should preserve selection, NOT select
+        // dave-franklin's pane.
+        let layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("plugin.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("dave-franklin.md")],
+                },
+            ],
+        };
+
+        let mut file_to_pane = std::collections::HashMap::new();
+        file_to_pane.insert(PathBuf::from("dave-franklin.md"), "%65".to_string());
+
+        // Phase 1.5: find_column_pane for plugin.md in col0 — no donor
+        let donor = find_column_pane(&layout, Path::new("plugin.md"), &file_to_pane);
+        assert_eq!(donor, None, "no donor in same column → no auto-register");
+
+        // Focus resolution: plugin.md not in file_to_pane → column fallback
+        let focus_pane = file_to_pane
+            .get(&PathBuf::from("plugin.md"))
+            .cloned()
+            .or_else(|| find_column_pane(&layout, Path::new("plugin.md"), &file_to_pane));
+        assert_eq!(focus_pane, None, "focus should be None → preserve tmux selection");
+    }
+
+    #[test]
+    fn test_claimed_left_col_selects_left_pane() {
+        // Counterpart: when agent-doc.md IS claimed (col0), focus should select it.
+        let _layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("agent-doc.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("dave-franklin.md")],
+                },
+            ],
+        };
+
+        let mut file_to_pane = std::collections::HashMap::new();
+        file_to_pane.insert(PathBuf::from("agent-doc.md"), "%39".to_string());
+        file_to_pane.insert(PathBuf::from("dave-franklin.md"), "%65".to_string());
+
+        let focus_pane = file_to_pane.get(&PathBuf::from("agent-doc.md")).cloned();
+        assert_eq!(focus_pane, Some("%39".to_string()), "claimed left file → select left pane");
+    }
+
+    #[test]
+    fn test_column_of() {
+        let layout = Layout {
+            columns: vec![
+                Column {
+                    files: vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+                },
+                Column {
+                    files: vec![PathBuf::from("c.md")],
+                },
+            ],
+        };
+        assert_eq!(layout.column_of(Path::new("a.md")), Some(0));
+        assert_eq!(layout.column_of(Path::new("b.md")), Some(0));
+        assert_eq!(layout.column_of(Path::new("c.md")), Some(1));
+        assert_eq!(layout.column_of(Path::new("d.md")), None);
     }
 }

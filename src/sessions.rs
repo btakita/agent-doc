@@ -216,6 +216,26 @@ impl Tmux {
         Ok(())
     }
 
+    /// Get the currently active pane in a session.
+    pub fn active_pane(&self, session_name: &str) -> Option<String> {
+        let output = self
+            .cmd()
+            .args([
+                "display-message",
+                "-t",
+                session_name,
+                "-p",
+                "#{pane_id}",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if pane.is_empty() { None } else { Some(pane) }
+    }
+
     /// Get the window ID that contains a pane.
     pub fn pane_window(&self, pane_id: &str) -> Result<String> {
         let output = self
@@ -451,15 +471,14 @@ impl Tmux {
         // Parse panes into tree
         for line in String::from_utf8_lossy(&panes_out.stdout).lines() {
             let parts: Vec<&str> = line.splitn(5, '\t').collect();
-            if parts.len() >= 5 {
-                if let Some((_, _, ref mut windows)) = sessions.get_mut(parts[0]) {
+            if parts.len() >= 5
+                && let Some((_, _, windows)) = sessions.get_mut(parts[0]) {
                     windows
                         .entry(parts[1].to_string())
                         .or_insert_with(|| (parts[2].to_string(), Vec::new()))
                         .1
                         .push((parts[3].to_string(), parts[4].to_string()));
                 }
-            }
         }
 
         // Format tree
@@ -529,6 +548,98 @@ impl Tmux {
             .context("failed to run tmux break-pane")?;
         if !status.success() {
             anyhow::bail!("tmux break-pane failed for {}", pane_id);
+        }
+        Ok(())
+    }
+
+    /// Find a window named "stash" in the given tmux session.
+    pub fn find_stash_window(&self, session_name: &str) -> Option<String> {
+        let output = self
+            .cmd()
+            .args([
+                "list-windows",
+                "-t",
+                session_name,
+                "-F",
+                "#{window_id} #{window_name}",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let mut parts = line.splitn(2, ' ');
+            let window_id = parts.next()?;
+            let window_name = parts.next().unwrap_or("");
+            if window_name == "stash" {
+                return Some(window_id.to_string());
+            }
+        }
+        None
+    }
+
+    /// Ensure a stash window exists in the session. Creates if missing.
+    pub fn ensure_stash_window(&self, session_name: &str) -> Result<String> {
+        if let Some(w) = self.find_stash_window(session_name) {
+            return Ok(w);
+        }
+        // Create a new detached window named "stash"
+        let output = self
+            .cmd()
+            .args([
+                "new-window",
+                "-t",
+                session_name,
+                "-n",
+                "stash",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_id}",
+            ])
+            .output()
+            .context("failed to create stash window")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux new-window (stash) failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Move a pane to the stash window instead of scattering via break_pane.
+    /// Falls back to break_pane if stash creation fails.
+    pub fn stash_pane(&self, pane_id: &str, session_name: &str) -> Result<()> {
+        let stash_window = match self.ensure_stash_window(session_name) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("warning: stash window failed ({}), falling back to break_pane", e);
+                return self.break_pane(pane_id);
+            }
+        };
+        let stash_panes = self.list_window_panes(&stash_window).unwrap_or_default();
+        if let Some(target) = stash_panes.first() {
+            // Use -dv: -d prevents changing the active pane, -v stacks vertically
+            self.join_pane(pane_id, target, "-dv")
+        } else {
+            // Empty stash window shouldn't happen (new-window creates a shell pane),
+            // but fall back to break_pane just in case.
+            self.break_pane(pane_id)
+        }
+    }
+
+    /// Select a tmux window (make it the active window in its session).
+    pub fn select_window(&self, window_id: &str) -> Result<()> {
+        let status = self
+            .cmd()
+            .args(["select-window", "-t", window_id])
+            .status()
+            .context("failed to run tmux select-window")?;
+        if !status.success() {
+            anyhow::bail!("tmux select-window failed for {}", window_id);
         }
         Ok(())
     }

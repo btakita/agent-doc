@@ -160,3 +160,54 @@ Yes. Move to tmux-router.
 ## User
 
 Let's start ideating on the dashboard-as-document concept mentioned in tasks/parallel-coding-with-tmux-markdown.md
+
+## Assistant
+
+From the parallel-coding discussion, three features are needed for dashboard-as-document. Here's the ideation:
+
+**1. `agent-doc watch <file>` — auto-submit on change**
+
+The simplest feature. An inotify/polling loop that triggers `agent-doc route <file>` when the file changes. Could use the `notify` crate (Rust-native file watching, cross-platform). Closes the trigger gap — external watchers write to the file, agent-doc auto-responds.
+
+Would I need a new process for each file? Can there be a background daemon that is explicitly started or auto-starts on the first call?
+
+Debounce is critical (500ms–1s) to avoid firing mid-write. The JetBrains plugin already has this problem solved.
+
+Should we move the debounce logic to agent-doc? agent-doc should fully work independently of the Jetbrains plugin.
+
+**2. Sectional write-back — agent edits specific sections**
+
+The core architectural change. Today agents only append `## Assistant` blocks. A dashboard needs inline updates. Two approaches:
+
+- **HTML comment markers**: `<!-- agent:status-table -->...<!-- /agent:status-table -->` — agent replaces content between markers
+We have range templates. Presumably it would be for a full replacement of the status-table?
+Can we have nested templates?
+Can we also have in-place templates (just the template itself rather than open template/close template)?
+
+- **Section targeting**: `## Status` heading → agent replaces content under that heading until next heading
+
+The marker approach is simpler and doesn't require heading parsing. It also works inside any section, not just top-level headings. The snapshot diff needs to understand "this section was modified by the watcher" vs "this section was last written by the agent."
+
+**3. Structured field awareness (future)**
+
+Parse template fields: `{{session.status}}` → typed changes. The diff becomes "field `ses-002.status` changed from `active` to `flagged`" rather than raw text. Skip for now — raw diff + section markers covers 80% of dashboard use cases.
+
+**Proposed MVP:**
+- `agent-doc watch` using `notify` crate with debounce
+- HTML comment markers for sectional write-back
+- Dashboard template is just a markdown file with marker regions
+- Watcher process (external) writes to the file → `agent-doc watch` auto-submits → agent updates marked sections
+
+**Open questions:**
+- Should `watch` be a long-running daemon or a one-shot triggered by inotify? (daemon is simpler for users)
+I addressed it above. Explicitly started daemon or lazy-started daemon.
+- Should sectional write-back be in the skill instructions or in the CLI? (CLI is more reliable — `agent-doc write-section <file> <section-name>`)
+cli
+- How do we prevent infinite loops? (watcher writes → agent responds → file changes → watcher writes again)
+Can we pass the upstream reason as an argument for the change?
+
+It may be possible for the document to initiate a change that causes a self-update. But it's ok if the cycle is bounded. Need a way to detect unbounded infinite loops. Having an infinite loop may be ok? If the agent document can be in a steady state.
+
+## User
+
+

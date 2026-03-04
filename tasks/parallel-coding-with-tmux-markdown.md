@@ -311,3 +311,29 @@ The gap you're describing — "thing happened" to "agent knows about it" — is 
 ## User
 
 This is hacker news. Here are the [formatting options](https://news.ycombinator.com/formatdoc).
+
+## Assistant
+
+Good catch — HN only supports *italics*, code blocks (2-space indent), and bare URLs. No bold, tables, or markdown links. Here's the reformatted draft:
+
+**Copy-paste ready for HN:**
+
+```
+The pre-submit commit as an immutable baseline is the key design decision — every agent interaction is an atomic transaction with a known rollback point, exactly right.
+
+On the "event → agent" gap: we've been thinking about this as a layered problem.
+
+*The bridge is a file write.* agent-doc is user-initiated (edit a doc, hit submit), but the diff pipeline doesn't care who writes the file. A watcher process — or any external system — can write to the file system, and the agent sees the change on next poll.
+
+We already do this in a different layer: corky (https://github.com/btakita/corky), our email tool, runs a watch daemon that polls IMAP for new messages and syncs them to markdown files on disk. External event (email arrives) gets translated into a file-system change, which is the agent's native input format. Same pattern would work for session recovery: monitoring process detects flagged session → writes to a task file → agent picks it up.
+
+*Dashboard-as-document* is the more structured version. A markdown template where a watcher fills in operational fields — session status, health checks, proxy assignments. When the watcher updates "active" → "flagged", the diff pipeline sees exactly what changed. The template gives structure; the diff gives the trigger. The agent doesn't scan the whole doc — it responds to the delta.
+
+For sub-second latency, a lightweight daemon that receives webhooks and writes to the notification file or directly triggers an agent submit. But for most operational tasks, a polling interval (ours runs every 30 seconds) closes the gap well enough.
+
+The gap you're describing — "thing happened" to "agent knows about it" — is really about who writes the event into the file system. Once it's a file change, the diff pipeline handles the rest.
+```
+
+## User
+
+Can agent-doc support dashboard-as-document right now? Would we need to add features to better support that use case?

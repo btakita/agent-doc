@@ -518,3 +518,23 @@ The core insight: `_` is the universal join that preserves any existing name. ca
 ~/work/btakita/agent-loop/ctx-core-dev main +2 !8 ?58                                                                                                                                                                                  16:34:14
 ❯ update-npm-packages
 /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/update-npm-packages.sh: line 4: /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bin/../@ctx-core/monorepo/bin/monorepo-npm-check-updates/index.mjs: No such file or directory
+
+## Assistant
+
+**`update-npm-packages` is a stale script.** It references `monorepo-npm-check-updates/index.mjs` which was renamed to `monorepo_npm__dependencies__update.mjs` during the tag-path naming migration.
+
+**Use the correct command instead:**
+```bash
+ctx_core__monorepo_pnpm__dependencies__update
+```
+
+Or the underlying script directly:
+```bash
+node lib/monorepo/bin/monorepo_npm__dependencies__update.mjs
+```
+
+The old `update-npm-packages.sh` in `lib/monorepo/bin/` should be deleted or updated. Want me to fix it?
+
+## User
+
+Yes. Fix it

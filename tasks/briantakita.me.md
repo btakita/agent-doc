@@ -672,3 +672,26 @@ Type '(string | { in: string; out: string; })[]' is not assignable to type 'stri
 Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
 Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
 Type '{ in: string; out: string; }' is not assignable to type 'string'.
+
+## Assistant
+
+**Same version, different paths = TypeScript treats them as incompatible.** Both esbuild copies are 0.27.3 with identical `.d.ts` files, but TypeScript uses nominal module identity — types from different physical paths are distinct.
+
+The nested `node_modules/esbuild` inside `@rebuildjs/tailwindcss` comes from pnpm's store in ctx-core-dev (via symlink). Root esbuild is from bun. Two copies → two `Plugin` types → TS2322.
+
+**Fixed** — updated `ctx-core--link.sh` to remove nested esbuild/postcss after symlinking:
+
+```
+Deduplicating nested dependencies...
+  removed @rebuildjs/tailwindcss/node_modules/esbuild
+  removed @rebuildjs/tailwindcss/node_modules/postcss
+  removed rebuildjs/node_modules/esbuild
+  removed esbuild-plugin-esmfile/node_modules/esbuild
+  removed esbuild-plugin-esmcss/node_modules/esbuild
+```
+
+This runs automatically as part of `ctx-core--link` (and `postinstall`). The TS2322 should be gone now — all packages resolve to the single root esbuild.
+
+## User
+
+compact this file

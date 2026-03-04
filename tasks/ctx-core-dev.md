@@ -363,5 +363,28 @@ Options:
 
 This is a real API migration issue, not just a config fix. If auth0-management isn't actively used, pinning to v4 is the pragmatic choice.
 
+Fix the package to be compatible with auth0 v5
+
+## User
+
+`@ctx-core/uuid` — same `check-dts` + TypeScript `next` issue. No other problems.
+
+## Assistant
+
+Confirmed systemic. The fix needs to be monorepo-wide:
+
+```bash
+# Pin typescript to stable across all packages
+cd /home/brian/work/ctx-core/ctx-core-dev
+for pkg in lib/*/package.json; do
+  if grep -q '"typescript": "next"' "$pkg"; then
+    sed -i 's/"typescript": "next"/"typescript": "~5.8.0"/' "$pkg"
+  fi
+done
+pnpm install --recursive
+```
+run this
+This will fix carousel, uuid, auth0-management (the `check-dts` part), and every other package hitting this. The auth0 type issues are separate and need their own migration.
+
 ## User
 

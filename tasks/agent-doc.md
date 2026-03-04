@@ -341,3 +341,29 @@ When I switch between agent-doc and plugin on the left side, the tmux windows no
 1* | 2
 
 Both of the windows have 2 panes. Please ensure we have tests and full logging.
+
+There should only be 1 canonical window being used in the tmux session. We should not cycle between any other windows. The active tmux panes should cycle in and out of the canonical window for the editor session.
+
+Other editor instance sessions can have a other canonical tmux windows at the same time.
+
+## Assistant
+
+**Fixed the window cycling bug** (committed `f6f6af6`). Two root causes:
+
+**1. Plugin non-deterministic window selection** — `projectWindowId()` used a hash set (undefined iteration order). **Fix:** Sort candidates for consistent ordering.
+
+**2. CLI searched for "best" window even when `--window` was alive** — Could pick a different window than what the plugin sent. **Fix:** When `--window` is alive, use it directly as the canonical window. Only search as fallback.
+
+**Your canonical window model is exactly right.** Each editor project session has ONE canonical tmux window (`--window`). Panes cycle in/out. Multiple editor instances each have their own canonical window. The fix ensures sync always respects the plugin's `--window`.
+
+**Test:** `test_reconcile_stable_across_repeated_syncs` — 3 consecutive reconciles, verifies 2nd and 3rd are no-ops (0 mutations, no new windows).
+
+**Plugin needs rebuild:**
+```bash
+cd agent-doc/editors/jetbrains && ./gradlew buildPlugin signPlugin
+```
+
+**140 tests pass, clippy clean, binary installed.**
+
+## User
+

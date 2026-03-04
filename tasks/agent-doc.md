@@ -103,3 +103,5 @@ Now there are multiple windows in the tmux session.
 We don't seem to be making good progress. It seems that there is something fundamentally wrong with the articture.
 
 The PLUGIN MUST BE SIMPLE. No deduping. ONLY send agent-doc sync the layout. THAT IS ALL.
+
+Please add tests for the current scenario. agent-doc sync should recover from this.

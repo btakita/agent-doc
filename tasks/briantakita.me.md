@@ -572,3 +572,33 @@ Type '(string | { in: string; out: string; })[]' is not assignable to type 'stri
 Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
 Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
 Type '{ in: string; out: string; }' is not assignable to type 'string'.
+
+## Assistant
+
+### baseline-browser-mapping — already at latest, data is genuinely stale
+
+v2.10.0 is the latest on npm, but the bundled browser data is from **August 2023**. There's no newer version — the warning is baked into the package's staleness check.
+
+**Suppress with env var** in `.env`:
+```
+BROWSERSLIST_IGNORE_OLD_DATA=true
+```
+
+### esbuild type mismatch — root 0.27.3 vs @rebuildjs/tailwindcss's 0.23.1
+
+`@rebuildjs/tailwindcss@0.10.58` declares `"esbuild": "^0.23.1"`, so Bun installs a nested copy. The `Plugin` type changed between 0.23 and 0.27 (`entryPoints` union type was split), making them structurally incompatible.
+
+**Fix options:**
+
+1. **Pin esbuild** — quick fix, holds you to 0.23.x:
+   ```json
+   "overrides": {
+     "esbuild": "^0.23.1",
+     "postcss": "~8.4.49"
+   }
+   ```
+
+2. **Update @rebuildjs/tailwindcss** (you maintain it) — bump its esbuild dep to `^0.27.0` and fix any breaking API changes. Proper fix.
+
+## User
+

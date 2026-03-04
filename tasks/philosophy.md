@@ -31,3 +31,43 @@ Philosophy integration for cross-project AI agent context. All work complete and
 ## User
 
 I want to use the term project in agent-doc...which will be scoped. Please make an existential entry for "project" in philosophy. Please follow the patterns.
+
+Should the philosophy repo have an associated Claude skill to use the scoping rules and to section documents with an ontological template?
+
+Would it make sense to have a cli tool for philosophy? To support contextual ontology?
+
+## Assistant
+
+**Created `philosophy/src/project.md`** — committed and pushed (2bf4b7c).
+
+**Definition:** A scoped endeavor within a domain to achieve a specific outcome. A system with temporal boundaries — begins, evolves, resolves. Creates context for entities within it. Nestable (sub-projects). Its story holds the state of decisions and changes.
+
+**For agent-doc:** "Project" gives you a scoped container concept — a project has a defined scope, a story (the session documents), entities within it (files, agents, configs), and temporal bounds. This maps cleanly to agent-doc's per-project session management.
+
+---
+
+**Claude skill for philosophy?**
+
+Yes — a `/philosophy` skill would be useful for:
+- **Node lookup:** `/philosophy scope` → reads `src/scope.md`, returns the Ontology/Axiology summary
+- **Ontological scaffolding:** `/philosophy new <term>` → creates a new node from the SPEC.md template
+- **Scoping analysis:** Given a document or domain, identify which ontological terms apply and how they relate
+- **Domain overlay generation:** Suggest a `## Domain Ontology` section for a repo's CLAUDE.md based on its codebase patterns
+
+Light touch — the skill reads existing nodes and templates, not a new abstraction layer.
+
+**CLI tool for contextual ontology?**
+
+The skill covers the interactive use case. A CLI would add value for:
+- **`philosophy lint`** — validate node format against SPEC.md (all required sections present, links resolve)
+- **`philosophy graph`** — visualize the ontology as a dependency graph (which terms link to which)
+- **`philosophy install`** — already exists as `install.sh`, could be promoted to a proper CLI
+- **`philosophy context <domain>`** — suggest relevant ontological terms for a domain (contextual ontology)
+
+But this is low priority. The repo has 152 nodes and changes rarely. A skill + `install.sh` covers the real workflow. A CLI makes sense when the ontology grows large enough that navigation/validation becomes a burden, or when "contextual ontology" needs programmatic support (domain analysis, term suggestions, overlay generation).
+
+I plan on expanding the usage of philosophy and scoping according to project.
+A historical limitation is lack of tooling. With agent loops and supporting software, this can make context ontologies practical and powerful.
+
+## User
+

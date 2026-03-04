@@ -358,7 +358,26 @@ yes
 
 **Follow-up opportunity:** 48 `collapsible_if` instances across 21 files can be refactored to `if let` chains (stable in 2024). The lint is currently allowed.
 
+Yes...do it
+
 ## User
 
 Note that instruction-files had an update.
 version bump and release.
+
+## Assistant
+
+**corky v0.12.4 released** — Rust 2024 edition migration with instruction-files v0.1.4.
+
+- **PR**: https://github.com/btakita/corky/pull/19 (squash merged)
+- **Tag**: `v0.12.4`
+- **crates.io**: published
+- **PyPI**: published
+- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.12.4 (with x86_64 Linux binary)
+- **Local**: `cargo install --path .` updated v0.12.3 → v0.12.4
+- **VERSIONS.md**: added v0.12.4 entry
+- **Parent repo**: submodule pointer updated
+
+## User
+
+compact this doc

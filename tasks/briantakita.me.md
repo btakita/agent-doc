@@ -602,6 +602,39 @@ BROWSERSLIST_IGNORE_OLD_DATA=true
 
 Update esbuild
 
+## Assistant
+
+Done. Updated esbuild to `^0.27.3` in all 4 ctx-core-dev packages:
+
+- `@rebuildjs/tailwindcss` — `^0.23.1` → `^0.27.3`
+- `rebuildjs` — `^0.23.1` → `^0.27.3`
+- `esbuild-plugin-esmfile` — `^0.23.1` → `^0.27.3`
+- `esbuild-plugin-esmcss` — `^0.23.1` → `^0.27.3`
+
+**No source code changes needed** — all esbuild Plugin API usage is compatible with 0.27.
+
+Also updated `ctx-core--link.sh` to symlink `@rebuildjs/tailwindcss`, `esbuild-plugin-esmfile`, and `esbuild-plugin-esmcss` from ctx-core-dev. Now 17 packages linked total.
+
+**Result:** `bun run dev` no longer throws TS2322. The nested esbuild (which was 0.23.1) now resolves to 0.27.3 through ctx-core-dev's pnpm symlink. Both copies are the same version — no type conflict.
+
+Remaining blocker: `ASSETS_BRIANTAKITA_ME__BUCKET_URL|missing` — mise `.env` not loaded. Run `mise trust && cd .. && cd briantakita.me-dev && bun run dev`.
+
 ## User
 
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+relysjs_browser__build|done
+relysjs_server__build|done
+browser__build|watch
+server__build|watch
+33 | `).map((Y,q,le)=>`${q===0||q>=le.length-2?" ":">"} ${Y}`).join(`
+34 | `);throw new Error(`\`@theme\` blocks must only contain custom properties or \`@keyframes\`.
+35 |
+36 | ${j}`)}),d?R.ReplaceSkip([]):(d=G(":root, :host",[]),d.src=k.src,R.ReplaceSkip(d))}});let A=$i(c,p?.src);if(l&&(A.important=l),x.length>0)for(let k of x)A.invalidCandidates.add(k);s|=await Fi({designSystem:A,base:r,ast:t,loadModule:e,sources:h});for(let k of u.keys())A.variants.static(k,()=>{});for(let k of Yi(f,{onCircularDependency(U,N){let O=ie(U.map((L,_)=>F("@custom-variant",L,[F("@variant",U[_+1]??N,[])]))).replaceAll(";"," { \u2026 }").replace(`@custom-variant ${N} {`,`@custom-variant ${N} { /* \u2190 */`);throw new Error(`Circular dependency detected in custom variants:
+37 |
+38 | ${O}`)}}))u.get(k)?.(A);for(let k of g)k(A);if(d){let k=[];for(let[N,O]of A.theme.entries()){if(O.options&2)continue;let L=o(ke(N),O.value);L.src=O.src,k.push(L)}let U=A.theme.getKeyframes();for(let N of U)t.push(ce({theme:!0},[W([N])]));d.nodes=[ce({theme:!0},k)]}if(s|=Qe(t,A),s|=De(t,A),s|=Ce(t,A),p){let k=p;k.kind="context",k.context={}}return I(t,k=>{if(k.kind==="at-rule")return k.name==="@utility"?R.Replace([]):R.Skip}),{designSystem:A,ast:t,sources:h,root:$,utilitiesNode:p,features:s,inlineCandidates:y}}async function ao(t,r={}){let{designSystem:i,ast:e,sources:n,root:s,utilitiesNode:l,features:c,inlineCandidates:u}=await Gi(t,r);e.unshift(ot(`! tailwindcss v${lr} | MIT License | https://tailwindcss.com `));function f(h){i.invalidCandidates.add(h)}let g=new Set,d=null,p=0,w=!1;for(let h of u)i.invalidCandidates.has(h)||(g.add(h),w=!0);return{sources:n,root:s,features:c,build(h){if(c===0)return t;if(!l)return d??=Te(e,i,r.polyfills),d;let y=w,x=!1;w=!1;let $=g.size;for(let k of h)if(!i.invalidCandidates.
 
+error: It looks like you're trying to use `tailwindcss` directly as a PostCSS plugin. The PostCSS plugin has moved to a separate package, so to continue using Tailwind CSS with PostCSS you'll need to install `@tailwindcss/postcss` and update your PostCSS configuration.
+at so (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.pnpm/tailwindcss@4.2.1/node_modules/tailwindcss/dist/chunk-L5IEUH3R.mjs:38:1647)
+at output__process (/home/brian/work/ctx-core/ctx-core-dev/lib/rebuildjs-tailwindcss/rebuild_tailwind_plugin/index.js:166:35)

@@ -565,3 +565,10 @@ Install from `build/distributions/agent-doc-jetbrains-0.1.0.zip`.
 **143 tests pass, clippy clean, binary installed.**
 
 ## User
+
+I'm still seeing the same issue with cycling between the 2 tabs...Note the left `--col` and `[focused tab]` state:
+
+`--col tasks/agent-doc.md --col tasks/dave-franklin.md [focus: tasks/agent-doc.md]`: left TMUX pane selected
+`--col tasks/plugin.md --col tasks/dave-franklin.md [focus: tasks/plugin.md]`: right TMUX pane selected
+
+Since we have moved over to 1 tmux pane per agent doc session, the left pane claude session should also change. But it is not changing. Neither is the right tmux pane claude session.

@@ -335,4 +335,47 @@ https://github.com/organizations/existence-lang
 
 Please update docs
 
-and 
+and references to point to new repo location
+
+## Assistant
+
+**Migration complete. `existence` v0.3.0 published.**
+
+**What changed:**
+
+| Before | After |
+|--------|-------|
+| Org: `existential-kernel` | Org: `existence-lang` |
+| Crate: `exkernel` | Crate: `existence` |
+| Binary: `exkernel` + `exk` | Binary: `existence` + `exk` |
+| Config: `exkernel.toml` | Config: `existence.toml` |
+| Data dir: `~/.exkernel/` | Data dir: `~/.existence/` |
+
+**Published:** [existence v0.3.0 on crates.io](https://crates.io/crates/existence) · [GitHub Release](https://github.com/existence-lang/existence/releases/tag/v0.3.0)
+
+**Install:** `cargo install existence`
+
+**Repos updated:**
+- `existence-lang/existence` — crate renamed, all refs updated, 36 tests pass
+- `existence-lang/ontology` — config file renamed, meta/README/CLAUDE updated
+- `existence-lang/spec` — SPEC.md, RINGS.md, README updated
+- `existence-lang/.github` — org profile updated
+- `existence-lang/existence-lang.github.io` — landing page updated
+- `agent-doc/CLAUDE.md` — domain ontology refs updated
+- `.claude/skills/existence/` — skill renamed from exkernel
+- `.gitmodules` — submodule URLs updated to `existence-lang`
+
+```
+$ existence --version
+existence 0.3.0
+
+$ existence --ontology existential-kernel/ontology scope 0
+Ring 0 — kernel (14 terms)
+  existence, entity, abstraction, scope, context, resolution,
+  pattern, system, domain, focus, perspective, consciousness,
+  evolution, story
+```
+
+## User
+
+Is there a better abbreviation than exk available? Is exc available? exis? xist? xst? extc? any other good abbreviations available?

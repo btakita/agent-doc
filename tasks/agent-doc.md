@@ -204,6 +204,9 @@ Switching agent documents causes additional tmux windows to be attached.
 There should only be 1 tmux window with the attached claude sessions that is being managed.
 The rest of the tmux panes should be detached tmux sessions.
 
+Now all of the windows are going to a different tmux session.
+There should be an affinity to the tmux session that I see on my screen.
+
 ## Assistant
 
 **Fixed the non-agent-doc bug.** Root cause: when a file without a session UUID (BrianTakita.md) was in the layout, it got skipped. With only 1 resolved pane, `resolved.len() < 2` triggered an early return that was breaking existing panes out of the window.

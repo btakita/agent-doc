@@ -1063,3 +1063,11 @@ Recommendation: Send both — PDF for the clean read, and share as a Google Doc 
 ## User
 
 How about a quick text stating that I'll have the proposal ready tomorrow morning.
+
+## Assistant
+
+> Judith — I'm putting together a detailed proposal for TMO + custom automation. I'll have it ready for you tomorrow morning. The short version: $8,000 covers 80+ hours of development, two milestone payments, and you own everything when it's done. More details in the morning.
+
+## User
+
+I need to look into TMO api integration as well. Not sure about scope yet. Do you remember the link to TMO api?

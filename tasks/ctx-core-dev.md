@@ -541,3 +541,23 @@ Changes not staged for commit:
 
 no changes added to commit (use "git add" and/or "git commit -a")
 ```
+
+## Assistant
+
+Done. Modified `lib/monorepo/bin/recursive-git-commit.sh` — added a `git submodule foreach` line after `pnpm recursive exec` to also commit in git submodules not covered by pnpm workspaces (like `dormant/`).
+
+**Change:**
+```sh
+# After pnpm recursive exec (handles workspace packages):
+git submodule foreach --quiet 'sh '"$TEMP"' || true'
+```
+
+This iterates all registered git submodules and runs the same commit script. The `|| true` ensures failures in individual submodules don't stop the rest. Already live via pnpm symlink — no rebuild needed.
+
+The dormant submodules all have modified `package.json` files (from the `check-dts` → `tsc --noEmit` changes). Running `recursive-git-commit` now will commit those too.
+
+**Note:** There's also `git-commit--submodules.sh` in the same directory which does something similar (interactive commits in all submodules), but it's a separate script with different semantics (opens editor per submodule).
+
+## User
+
+compact this file

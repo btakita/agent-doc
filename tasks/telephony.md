@@ -274,3 +274,56 @@ Dialpad + Cloudflare looks good. Depending on GHL costs. Is there a better solut
 ## User
 
 I want Cloudflare for hosting. What are the costs for diarized transcription compute?
+Do I need vector storage or can I just have the agents query SQLite?
+
+## Assistant
+
+### Diarized transcription compute costs
+
+Cloudflare Workers AI runs Whisper but does **not** offer speaker diarization. Diarization requires separate models (pyannote, resemblyzer) that need more compute.
+
+| Approach | Diarized? | Cost/mo | Complexity | Latency |
+|---|---|---|---|---|
+| **CF Workers AI (Whisper only)** | No | ~$8/mo | Low | Minutes |
+| **CF Worker → Deepgram API** | Yes | ~$14/mo ($9 Deepgram + $5 Workers) | Low | Minutes |
+| **CF Worker → AssemblyAI** | Yes | ~$18/mo ($13 AssemblyAI + $5 Workers) | Low | Minutes |
+| **CF Worker → Hetzner (corky)** | Yes (your pipeline) | ~$23/mo ($18 VPS + $5 Workers) | Medium | Hours (batch) |
+| **CF Worker → GPU burst** | Yes (your pipeline) | ~$10-15/mo | High | Minutes |
+
+**Deepgram** ($0.0043/min) is the simplest — built-in diarization, just call their API from a Worker. **Hetzner** ($18/mo) is best for your corky pipeline — unlimited minutes, full control, CPU batch processing (~3-7 hours/day for 2K min).
+
+### Vector storage vs SQLite
+
+**You don't need vector storage.** D1 (SQLite) with FTS5 handles mortgage brokerage call search very well:
+
+```sql
+-- FTS5 full-text search (built into D1)
+CREATE VIRTUAL TABLE transcripts_fts USING fts5(speaker, text, call_date);
+SELECT * FROM transcripts_fts WHERE transcripts_fts MATCH 'refinancing AND credit score';
+```
+
+**SQLite/D1 handles well:**
+- Keyword search across all calls ("refinancing", "credit score", borrower name)
+- Date/time filtering ("calls from last week")
+- Speaker-specific search ("what did John say about...")
+- Structured queries (call duration, phone number, contact lookup)
+
+**Vector storage only matters for:**
+- Semantic/fuzzy search: "calls where client seemed hesitant" (no exact keyword)
+- Finding similar calls without shared keywords
+- RAG-style retrieval for AI agents doing open-ended analysis
+
+For mortgage calls, the domain vocabulary is specific — loan amounts, rates, property addresses, borrower names. **Keyword search works great.** Start with D1 + FTS5 (free, built-in). Add Vectorize later only if agents can't find what they need via keywords.
+
+### Revised total cost (Cloudflare + Dialpad)
+
+| Component | Cost/mo |
+|---|---|
+| **Dialpad** (5 users, recording + basic transcript) | $75 |
+| **CF Workers** (webhook, orchestration) | $5 |
+| **Diarized transcription** (Deepgram or Hetzner corky) | $9-$18 |
+| **D1** (transcript storage + FTS5 search) | $0 (free tier) |
+| **R2** (audio recording storage) | ~$1 |
+| **Total** | **$90-$99/mo** |
+
+## User

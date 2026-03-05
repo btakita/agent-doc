@@ -432,3 +432,59 @@ Source names (after `imports.sources.`) are arbitrary — name them whatever mak
 
 This looks good. Please extensively document the "enum" values such as format.
 Please perform validation as well.
+
+## Assistant
+
+**Format enum values:**
+
+| `format` value | Description | Input type | Parser |
+|----------------|-------------|------------|--------|
+| `sms-backup-restore` | SMS Backup & Restore XML (Android standard) | Single `.xml` file | `src/sync/sms_import.rs` |
+| `telegram-json` | Telegram Desktop JSON export | Directory with `result.json` | `src/sync/telegram_import.rs` |
+| `slack-zip` | Slack workspace export | `.zip` file | `src/sync/slack_import.rs` |
+
+**Config fields per source:**
+
+| Field | Required | Type | Description | Default |
+|-------|----------|------|-------------|---------|
+| `path` | Yes | String | Path to import file/dir, relative to `base_path` or absolute | — |
+| `format` | Yes | Enum | One of the format values above | — |
+| `label` | No | String | Label for imported conversations | format stem (`sms`, `telegram`, `slack`) |
+| `account` | No | String | Account name for imported conversations | same as label default |
+
+**`[imports]` section fields:**
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `base_path` | No | String | Common prefix for relative paths. Supports `~`. If omitted, paths must be absolute. |
+
+**Validation rules (on `corky sync imports`):**
+
+1. **Format is valid** — reject unknown values with error listing valid options
+2. **Path exists** — `base_path` + `path` must resolve to existing file/directory
+3. **Path type matches format** — `sms-backup-restore` → `.xml` file, `slack-zip` → `.zip` file, `telegram-json` → directory containing `result.json`
+4. **No duplicate source names** — TOML enforces this natively
+5. **`~` expansion** — home directory expanded, env vars not supported
+6. **Missing optional fields** — defaults applied silently
+
+**Error examples:**
+```
+Error: imports.sources.sms-backup: unknown format "sms-xml"
+  Valid formats: sms-backup-restore, telegram-json, slack-zip
+
+Error: imports.sources.tg-alice: path not found: ~/Google Drive/telegram/alice
+  Resolved: /home/brian/Google Drive/telegram/alice
+
+Error: imports.sources.sms-backup: format "sms-backup-restore" expects an XML file, got directory
+```
+
+**Future format values** (not implemented, reserved names):
+- `whatsapp-txt` — WhatsApp chat export
+- `signal-backup` — Signal encrypted backup
+- `imessage-db` — macOS iMessage SQLite
+
+Shall I implement `corky sync imports` with this config parsing and validation now?
+
+## User
+
+

@@ -31,7 +31,10 @@ pnpm i --recursive                               # install
 changeset-version-COMMIT_EDITMSG                 # version + CHANGELOG diffs
 recursive-git-commit                             # commit per package (incl. dormant submodules)
 pnpm-publish--force                              # parallel publish (needs npm granular token with 2FA bypass)
+git push --recurse-submodules=on-demand          # push all (submodules first, then parent)
 ```
+
+**Recursive push config:** `git config push.recurseSubmodules on-demand` — auto-pushes submodule commits before parent; aborts if any submodule push fails (prevents orphaned refs). Alternative: `git submodule foreach --recursive 'git push origin HEAD'` for explicit control.
 
 ### All 192 Packages Published (2026-03-05)
 
@@ -70,54 +73,4 @@ pnpm-publish--force                              # parallel publish (needs npm g
 
 ## User
 
-How do i perform a recursive git push?
 
-How do I ensure that the root repo does not orphan any submodule version by not pushing the submodule to the origin?
-
-## Assistant
-
-### Recursive Git Push
-
-There's no built-in `git push --recursive`. You push submodules first, then the parent:
-
-```bash
-git submodule foreach --recursive 'git push origin HEAD 2>/dev/null || true'
-git push origin HEAD
-```
-
-### Preventing Orphaned Submodule References
-
-Git has `push.recurseSubmodules` for this:
-
-```bash
-# Automatically push referenced submodule commits before the parent
-git push --recurse-submodules=on-demand
-
-# Make it the default (recommended — set once per repo):
-git config push.recurseSubmodules on-demand
-```
-
-With `on-demand`, git pushes any submodule commits the parent references that haven't been pushed yet. If any submodule push fails, the parent push is aborted — no orphaned references.
-
-There's also `check` mode (errors instead of auto-pushing):
-
-```bash
-git push --recurse-submodules=check
-```
-
-### For ctx-core-dev
-
-Since `recursive-git-commit` already handles submodule commits via `git submodule foreach`, you could either:
-
-1. **Set the config once** (simplest): `git config push.recurseSubmodules on-demand` — then plain `git push` handles everything.
-2. **Add a `recursive-git-push` script** matching the existing commit pattern:
-   ```bash
-   git submodule foreach --recursive 'git push origin HEAD 2>/dev/null || true'
-   git push origin HEAD
-   ```
-
-Option 1 is recommended — it's a single config change and prevents orphans automatically.
-
-## User
-
-compact this file

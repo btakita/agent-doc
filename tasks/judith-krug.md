@@ -662,3 +662,30 @@ Whisper medium model was used (no diarization — speaker labels not automatical
 ## User
 
 Please diarize the transcript.
+
+## Assistant
+
+Diarized transcript created with speaker labels for all three participants:
+
+**File:** `mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-waldman-diarized.txt`
+
+Organized into timestamped sections with `[Judith]`, `[Robert]`, `[Brian]` labels. Key sections:
+
+1. **Call Setup** (0:00–2:00) — Judith connecting Brian and Robert
+2. **Robert's MA Pitch** (5:30–10:00) — OCR, portals, loan-type routing
+3. **Pricing** (10:00–12:00) — MA $1,137/mo vs TMO $600/mo
+4. **Claude Code & Custom Tooling** (12:00–14:00) — Brian's approach
+5. **OCR Discussion** (14:00–18:00) — PDF extraction, handwritten apps
+6. **GoHighLevel** (24:00–26:00) — Robert's enterprise access
+7. **Website** (30:30–35:00) — Takeover from current host, GoDaddy DNS
+8. **Site Structure** (44:00–46:00) — Borrower vs investor vs broker portals
+9. **Three Bottlenecks** (60:00–65:00) — Data input, chasing docs, producing docs
+10. **Notebook LM** (75:00–80:00) — Robert's consulting workflow
+
+Note: Speaker attribution is manual based on conversational context (who responds to questions, references to "my staff", "my business", etc.). Some short interjections ("OK", "Right") may be mis-attributed. Whisper doesn't do native diarization — for future calls, consider using a diarization-capable service (pyannote, Otter, or assembly.ai).
+
+## User
+
+Please provide notes on judith-krug/recordings/20260304-judith-krug-robert-waldman-diarized.txt for any useful context and information to clarify understanding of the conversation, fill in missing info, and list action items.
+
+Write the notes into a

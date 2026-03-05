@@ -106,3 +106,6 @@ Note: The draft had to be moved to `/home/brian/work/btakita/mail/drafts/` for `
 
 ## User
 
+Please remove this reoccurring weekly calendar event from my google calendar.
+
+Tues 10:30 AM Eastern

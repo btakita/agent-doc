@@ -97,3 +97,30 @@ Verified. `corky doc build` is fully functional.
 
 Fill in the gaps
 Are there crates for pandoc and weasyprint. If not, are there equivalents crates? Or should we shell out the commands?
+
+## Assistant
+
+**Gaps filled:**
+- **SPEC.md § 14** "Document Building" added — subsections 14.1–14.6 with CLI interface, format pipelines, template resolution, tool checking, and edge case table (D1–D9)
+- **VERSIONS.md v0.13.0** entry added for `doc build`
+- **CSS warnings** — not a corky issue. The template CSS is user-provided (`mail/templates/proposal.css`), so those weasyprint warnings are in your stylesheet, not corky's code
+
+**Rust crate alternatives vs shelling out:**
+
+| Tool | Crate Alternative | Viability |
+|------|-------------------|-----------|
+| pandoc | `pulldown-cmark`, `comrak` (md→HTML) | Good for HTML. No native DOCX. |
+| weasyprint | `printpdf`, `genpdf`, `typst` | Low-level PDF. No CSS support. |
+| DOCX | `docx-rs` | Builds DOCX programmatically — no markdown parsing. |
+
+**Recommendation: keep shelling out.** Reasons:
+1. pandoc is battle-tested for md→HTML/DOCX with tables, footnotes, frontmatter. Replacing with `pulldown-cmark` + `docx-rs` = 500+ lines for a worse result.
+2. weasyprint handles CSS properly — Rust PDF crates don't support CSS (you'd lose the template system).
+3. Zero maintenance — system packages update independently.
+4. Current code is 152 lines — native crates would be 1000+ lines and more fragile.
+
+Only reason to switch: single-binary distribution without system deps. In that case, `typst` is the best option but uses its own markup, not CSS.
+
+## User
+
+How do we support install external dependencies such as pandoc and weasyprint? Is there at least a friendly error message of the executables are missing from PATH?

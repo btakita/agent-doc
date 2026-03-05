@@ -873,3 +873,29 @@ After the next CI deploy, the iframes will point to Pages-served files instead o
 ## User
 
 Let's use this deployment to change the url to point to briantakita.me...Cloudflare RC2.
+
+## Assistant
+
+### Done — deployed with briantakita.me asset URLs
+
+Triggered deployment (run `22741647140`) — succeeded.
+
+**Verified:**
+- Lighthouse iframe URLs now point to `https://briantakita.me/lighthouse/...` (was Contabo)
+- Zero `contabostorage` references in the deployed site
+- Lighthouse HTML files load successfully from Pages (200)
+
+**Contabo is now fully disconnectable:**
+- DNS → Cloudflare Pages
+- CI → R2 for assets
+- Asset URLs → briantakita.me (self-hosted on Pages)
+- Container → already stopped
+
+No remaining dependencies on Contabo for briantakita.me.
+
+## User
+
+The iframe urls in https://briantakita.me/posts/squarespace-site-lighthouse-scores/ are incorrect.
+See https://briantakita.me/lighthouse/dodropshipping.html
+
+Please fix

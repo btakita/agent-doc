@@ -900,3 +900,35 @@ The $5K number works if you prefer a lower sticker shock and are comfortable bil
 ## User
 
 How about $7000 with extra work if I achieve task earlier than 70 hours?
+
+## Assistant
+
+$7,000 / 70 hours works well:
+
+- **Same $100/hr rate** — consistent, no surprises
+- **Covers the full scope** — 70 hours handles nearly all scenarios (estimate was 55-76)
+- **"Extra work" sweetener** — if core phases finish in 55-60 hours, remaining 10-15 hours go toward polish, additional features, or onboarding support. Judith gets more value.
+- **Savings still strong** — ~$14.4K year one vs MA's ~$18K = ~$3,600 saved. Ongoing $6K/year savings unchanged. By year two: $9,600 cumulative saved.
+
+Updated the proposal (`20260305-tmo-proposal.md`) — changed to $7,000/70hrs, removed the "may extend" caveat, added language about surplus hours going to polish and extras.
+
+## User
+
+Please draft a text message that I can send now for the proposal tomorrow.
+
+How about 2 40 hour weeks. $8000 commitment. $4000 paid after week 1. $4000 paid upon completion of:
+- Website
+- Email links + Upload to Dropbox or Google Drive
+- Schedule Notifications & Reminders with Google Calendar integration
+- OCR
+
+AND at least 80 hours of consulting work. If work goes over 80 hours, I will ensure it will be done for the $8000.
+
+Included scope for extra hours can include:
+- Phone recording + transcripts
+  - Telephony service
+    - Office line with 2 party recording message
+    - Cell phones with recording app + 2 party consent
+  - Phone call volume may require more AI expenses
+- Additional website work
+- Scraping county records for lenders

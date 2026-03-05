@@ -187,4 +187,4 @@ Parent submodule pointers updated and pushed.
 
 ## User
 
-Let's release the jetbrains plugin to the store.
+Let's release the jetbrains plugin to the store. Should the plugin install agent-doc and ensure that the latest version is being used?

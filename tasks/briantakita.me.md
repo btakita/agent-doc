@@ -824,3 +824,28 @@ AWS_ACCESS_KEY_ID_R="$(pass briantakita.me/r/AWS_ACCESS_KEY_ID")"
 AWS_SECRET_ACCESS_KEY_R="$(pass briantakita.me/r/AWS_SECRET_ACCESS_KEY")"
 AWS_ACCESS_KEY_ID_RW="$(pass briantakita.me/rw/AWS_ACCESS_KEY_ID")"
 AWS_SECRET_ACCESS_KEY_RW="$(pass briantakita.me/rw/AWS_SECRET_ACCESS_KEY")"
+
+## Assistant
+
+### GitHub secrets updated and deployment succeeded
+
+**Fixed an issue:** The `pass` entry `briantakita.me/r/AWS_ACCESS_KEY_ID` had the wrong value (contained the secret key instead of the access key). Fixed both the pass entry and the GitHub secret.
+
+**GitHub secrets set:**
+- `AWS_ACCESS_KEY_ID` → R2 read-only access key (`8ad4...`)
+- `AWS_SECRET_ACCESS_KEY` → R2 read-only secret key (`0961...`)
+- `AWS_ENDPOINT_URL` → `https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com`
+- `AWS_BUCKET` → `briantakita-assets`
+
+**CI deployment from R2 — success.** Run `22741180314` completed — assets downloaded from R2, built, prerendered, deployed to Cloudflare Pages.
+
+### Contabo Object Store
+
+Safe to delete `assets.briantakita.me` on Contabo now. The CI pipeline no longer references it — all asset downloads come from R2.
+
+**Note:** The local `.env` still has `ASSETS_BRIANTAKITA_ME__BUCKET_URL=https://usc1.contabostorage.com/assets.briantakita.me`. This is only used at build time for asset URL generation, but since the prerender replaces all URLs with `briantakita.me`, it doesn't affect the deployed site. You can update it later or leave it.
+
+## User
+
+Can we delete all references to ASSETS_BRIANTAKITA_ME__BUCKET_URL?
+What url is used to serve the assets?

@@ -1288,6 +1288,8 @@ Template selection via frontmatter: `template: proposal` → looks up `mail/temp
 
 Please implement
 
+Only work on corky doc build. stash the upload feature for later.
+
 ## User
 
 5-10 calls/day
@@ -1318,6 +1320,8 @@ Self-hosted wins at 5+ calls/day and scales without per-minute cost. The telepho
 | Heavy | + document intelligence + investor matching | $80-150 |
 
 Much tighter than the earlier $80-500 range. Self-hosted transcription is the key savings. Want me to update the proposal with these revised numbers?
+
+Yes
 
 ## User
 

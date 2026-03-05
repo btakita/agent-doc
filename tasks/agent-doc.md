@@ -316,3 +316,49 @@ Options:
 ## User
 
 C
+
+## Assistant
+
+Launched both in parallel:
+
+1. **Plugin install** — `src/plugin.rs` + Cargo deps + main.rs wiring. Uses `ureq` for HTTP, `zip` for extraction.
+2. **VS Code parity** — Full rewrite of `extension.ts` + `package.json` updates. All 9 SPEC features.
+
+Will report results when both complete.
+
+### Results — Both Complete
+
+**1. `agent-doc plugin install/update/list`** — `src/plugin.rs` (307 lines)
+- `agent-doc plugin install jetbrains` — downloads signed zip from GitHub Releases, auto-detects IDE plugins dir, extracts, prompts restart
+- `agent-doc plugin install vscode` — downloads `.vsix`, runs `code --install-extension`
+- `agent-doc plugin update <editor>` — skips if already at latest version
+- `agent-doc plugin list` — shows installed plugins + versions
+- Supports aliases: `jb`/`idea`/`code`/`codium`
+- Dependencies added: `ureq`, `zip`, `tempfile`
+- All 21 tests pass, compiles clean
+
+**2. VS Code Extension — Full Feature Parity** — `extension.ts` (570 lines)
+- All 9 SPEC features implemented (was 1/9):
+
+| Feature | Implementation |
+|---------|---------------|
+| Submit | `Ctrl+Shift+Alt+A` → save + `agent-doc route` |
+| Claim | `Ctrl+Shift+Alt+C` → `agent-doc claim --position` with split detection |
+| Sync Layout | `Ctrl+Shift+Alt+L` → `agent-doc sync --col` with focus |
+| Tab Sync | Auto on tab/editor change, 500ms debounce, signature dedup |
+| Prompt Polling | 1.5s interval, `prompt --all`, QuickPick UI, auto-save tracked files |
+| Popup Menu | `Alt+Enter` → QuickPick with Run/Claim/Sync |
+| Notifications | Status bar hints (auto-dismiss) + error messages (persistent) |
+| File Filtering | `.md` only on all actions |
+| CLI Resolution | `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin` |
+
+- `package.json` updated with 4 commands + 4 keybindings + `onLanguage:markdown` activation
+- Compiles clean with `tsc`
+
+**Next steps:**
+- Build VS Code `.vsix` package for GitHub Release
+- Publish JetBrains plugin (needs marketplace token)
+- Test both plugins live in their respective editors
+
+## User
+

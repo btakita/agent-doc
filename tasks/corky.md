@@ -317,3 +317,61 @@ Can we have corky work with this integration?
 Note that this sms backup file along with other exports such as TeleGram and Slack exports may also be transferred in Google Drive.
 
 Please allow for configuration in .corky.toml. Do you need credentials for Google or can we use the existing browser session?
+
+## Assistant
+
+**Two-phase approach — Phase 1 needs zero credentials:**
+
+**Phase 1: Local sync path (recommended now)**
+
+No Google API needed. You sync Google Drive locally (Google Drive for Desktop, `rclone mount`, or manual download), then point corky at the local path. Config in `.corky.toml`:
+
+```toml
+[imports]
+base_path = "~/Google Drive"  # or wherever Drive is mounted/synced
+
+[imports.sources.sms]
+path = "sms_backup"             # relative to base_path
+format = "sms-backup-restore"
+label = "sms"
+account = "sms"
+
+[imports.sources.telegram]
+path = "telegram_export"
+format = "telegram-json"
+label = "telegram"
+account = "telegram"
+
+[imports.sources.slack]
+path = "slack_export"
+format = "slack-zip"
+label = "slack"
+account = "slack"
+```
+
+Then `corky sync imports` walks the configured sources, detects new/changed files, and runs the appropriate importer (sms-import, telegram-import, slack import). File tracking via mtime to avoid re-importing unchanged files.
+
+**Why this works:**
+- Zero new dependencies or OAuth scopes
+- Works with any cloud sync tool (Drive, Dropbox, Syncthing, manual copy)
+- Google Drive for Desktop or `rclone mount` handle auth transparently
+- The import commands already exist — just need a config layer + dispatcher
+- ~150 lines of new code
+
+**Phase 2: Google Drive API (future, if needed)**
+
+Corky already has Google OAuth in `src/filter/gmail_auth.rs` (for Gmail filter management). Could add `drive.readonly` scope to download files directly. Same token store (`~/.config/corky/tokens.json`), same local callback flow. But this is only needed if you don't want to run a local sync tool.
+
+**Auth answer:** You can't use the browser session from CLI — Google Drive API requires OAuth2 tokens. But with Phase 1, you don't need credentials at all. The sync app (Google Drive for Desktop / rclone) handles auth separately.
+
+**On Linux (CachyOS):** `rclone mount gdrive: ~/Google\ Drive --daemon` gives you a FUSE mount. Or `rclone sync gdrive:sms_backup ~/sms_backup` for one-shot pulls.
+
+Shall I implement Phase 1?
+
+## User
+
+Can I have multiple sms, telegram, slack configurations?
+Basically, I will have several contacts with their own sms, telegram, and slack.
+The sms may also contain several conversations with different contacts.
+
+I'm not sure if 

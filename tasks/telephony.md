@@ -113,3 +113,95 @@ For your corky Whisper pipeline: Twilio is cheapest, Dialpad/OpenPhone are most 
 ## User
 
 Compare with processing transcripts with recording in house on Cloudflare or another cloud service. Saving transcripts in Cloudflare database or CRM.
+
+## Assistant
+
+### In-House Transcription Pipeline vs Vendor-Provided
+
+Architecture: Phone Service (recording only) → Webhook → Worker → Whisper → Storage → AI Agents
+
+### Cost comparison (5 users, ~2,000 min/mo call volume)
+
+| Component | Vendor (Dialpad) | In-House (Cloudflare) | In-House (GPU VPS) |
+|---|---|---|---|
+| **Phone service** | $75/mo (includes transcription) | $33-$75/mo (recording-only: Twilio or Dialpad) | Same |
+| **Transcription** | Included | Whisper API: ~$12/mo (2K min × $0.006/min) | Self-hosted Whisper: $0 (included in VPS) |
+| **Compute** | — | Workers: ~$5/mo (webhook + orchestration) | GPU VPS: ~$30-$80/mo (Hetzner/Lambda) |
+| **Storage** | Vendor-hosted | D1: ~$1/mo (transcripts); R2: ~$1/mo (recordings) | Same or local |
+| **Total** | **$75/mo** | **$51-$93/mo** | **$63-$155/mo** |
+
+### Whisper transcription options
+
+| Option | Cost/min | Diarization | Quality | Latency |
+|---|---|---|---|---|
+| **OpenAI Whisper API** | $0.006 | No (need post-processing) | Best | ~30s/min |
+| **Groq Whisper** | $0.0028 | No | Good | ~5s/min (fastest) |
+| **Deepgram** | $0.0043 | Yes (built-in) | Good | Real-time |
+| **Self-hosted Whisper** | $0 (GPU cost) | Yes (your corky pipeline) | Best + diarized | Depends on GPU |
+Self-hosted would be CPU. With some delay to process phone calls on cloud instance(s).
+| **Cloudflare Workers AI** | $0.019/1K neurons | Limited models | Moderate | Workers edge |
+
+### Storage options on Cloudflare
+
+| Storage | Best for | Cost | Query capability |
+|---|---|---|---|
+| **D1** (SQLite) | Transcript text, metadata, search | $0.75/mo per 1M reads | Full SQL — best for AI agent queries |
+What are the storage fees?
+| **R2** | Audio file storage (recordings) | $0.015/GB/mo, no egress fees | Object storage only |
+| **KV** | Fast key-value lookups | $5/mo (10M reads) | Key-based only |
+| **Vectorize** | Semantic search across transcripts | $0.01/1K vectors stored | Embedding similarity search |
+
+Best Cloudflare stack: D1 for transcripts + metadata (searchable) + R2 for audio files + Vectorize for semantic AI agent queries.
+
+### Architecture comparison
+
+**Vendor (Dialpad):**
+```
+Call → Dialpad records + transcribes → API query → AI agent
+```
+- Pro: Zero infrastructure, works immediately
+- Con: Vendor lock-in, basic transcription (no diarization), transcript format limited to their schema
+
+**In-House (Cloudflare + corky Whisper):**
+```
+Call → Phone service records → Webhook → CF Worker →
+  → Download recording → R2 storage
+  → corky Whisper (diarized) → D1 transcript + Vectorize embedding
+  → AI agent queries D1/Vectorize
+```
+- Pro: Diarized transcripts, full control, semantic search, no vendor lock-in on data
+- Con: Dev work upfront, pipeline maintenance
+
+**Hybrid (recommended):**
+```
+Call → Dialpad (records + basic transcript) → Webhook →
+  → CF Worker downloads recording → R2
+  → corky Whisper (diarized, higher quality) → D1 + Vectorize
+  → AI agents query both Dialpad API (quick) and D1/Vectorize (deep)
+```
+- Dialpad's built-in transcript for immediate/basic needs
+- Your Whisper pipeline for diarized, searchable, AI-ready transcripts
+- Best of both worlds
+
+### CRM integration
+
+| CRM | Transcript storage | AI agent access | Notes |
+|---|---|---|---|
+| **GoHighLevel** | Custom fields on contact/call records | GHL API | Robert already uses; push transcripts via API |
+| **Cloudflare D1** | Full SQL database | Workers API / direct query | Most flexible for custom AI agents |
+| **Both** | D1 as primary + sync to GHL | Query either | Recommended if Robert's CRM is central |
+
+### Bottom line
+
+| Approach | Monthly cost | Dev effort | Quality | AI agent readiness |
+|---|---|---|---|---|
+| **Dialpad only** | $75 | None | Basic transcript | Good (API search) |
+| **Dialpad + CF Whisper** | ~$90-$95 | Medium (one-time) | Diarized + semantic search | Best |
+| **Twilio + CF Whisper** | ~$50-$55 | Higher (no phone UX) | Diarized + semantic search | Best |
+| **GHL + CF Whisper** | ~$110-$135 | Medium | Diarized + CRM integrated | Best |
+
+**Recommendation:** Dialpad ($75) + Cloudflare in-house pipeline (~$18/mo extra). You get immediate working phone system with basic transcripts, plus your corky Whisper pipeline produces superior diarized transcripts stored in D1/Vectorize for AI agent access. The Cloudflare infrastructure cost is minimal — most of the value comes from the dev work you've already done in corky.
+
+## User
+
+

@@ -94,3 +94,25 @@ Saved to auto memory. The forum thread URL, plugin page, source location, and ve
 ## User
 
 Is there any info in https://plugins.jetbrains.com/docs/intellij/developing-plugins.html#gradle-plugin that can help up?
+
+## Assistant
+
+Researched the JetBrains docs thoroughly. Short answer: **no** — there's no way to control the marketplace's server-side verification IDE selection. The marketplace and local `./gradlew verifyPlugin` use the same underlying Plugin Verifier tool, but:
+
+- **Local verification**: You control IDEs via `pluginVerification { ides { ... } }` (already configured for PyCharm)
+- **Marketplace verification**: Server-side, no author configuration. It picks IDEs automatically based on your `<depends>` declarations
+
+The `pluginVerification` block I added only affects local/CI verification. The marketplace will continue showing IU false positives for any plugin with `<depends>com.intellij.modules.python</depends>`.
+
+One potentially useful config from the docs: the `failureLevel` property controls what counts as a failure. Default is `COMPATIBILITY_PROBLEMS`. But again, this only affects local verification, not marketplace.
+
+**Bottom line**: The forum thread is the right path. These are known false positives that JetBrains needs to handle on their end.
+
+Sources:
+- [Plugin Compatibility](https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html)
+- [Verifying Plugin Compatibility](https://plugins.jetbrains.com/docs/intellij/verifying-plugin-compatibility.html)
+- [Gradle Plugin Extension](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html)
+
+## User
+
+Please show me other discussions about the false positive. Perhaps I should chime in.

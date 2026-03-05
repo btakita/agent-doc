@@ -1249,3 +1249,21 @@ The proposal is ready to send:
 ## User
 
 Phase 5 & 6 are cross-cutting and will be done inline with the other phases.
+
+## Assistant
+
+Done. Restructured to 4 delivery phases + cross-cutting concerns:
+
+- **Phase 1:** Website migration (15-20 hrs, Week 1-2)
+- **Phase 2:** Document upload portal (12-16 hrs, Week 2-3)
+- **Phase 3:** OCR + TMO integration (16-26 hrs, Week 3-4)
+- **Phase 4:** Notification system (10-14 hrs, Week 4-5)
+- **Cross-cutting:** Event logging, testing, documentation, and handoff — included in all phases
+
+Timeline back to ~5 weeks. M2 updated to "OCR/TMO integration + notification system (Phases 3-4)". Both proposals and PDF regenerated.
+
+## User
+
+Reduce the margins on the pdf.
+
+Please make a proposal template which has the styling rules along with a build script.

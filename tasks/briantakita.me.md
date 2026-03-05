@@ -420,5 +420,17 @@ github actions secret? Or a cloudflare secret?
 
 Let me implement the prerender script and test locally first.
 
+## Assistant
+
+**GitHub Actions secret.** Create the API token in Cloudflare, store it as a GitHub Actions secret:
+
+1. **Cloudflare:** Dashboard → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template
+2. **GitHub:** `github.com/btakita/briantakita.me-dev` → Settings → Secrets → Actions → New → name: `CLOUDFLARE_API_TOKEN`, value: the token
+
+The `${{ secrets.CLOUDFLARE_API_TOKEN }}` in the workflow reads from GitHub secrets at deploy time. Never in code or logs.
+
+Now let me implement the prerender script and test locally.
+
 ## User
 
+done

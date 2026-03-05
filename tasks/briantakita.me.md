@@ -92,3 +92,58 @@ make deploy                   # manual VPS deploy
 
 If I were to host briantakita.me on Cloudflare workers, what would that look like?
 Should I use hono instead of elysia?
+
+## Assistant
+
+### Cloudflare Workers for briantakita.me
+
+Your site is full SSR with no database — a good fit for Workers. Main changes:
+
+1. **Runtime**: Replace Bun/Docker with Workers `fetch()` handler. RelysJS's `app__start()`, `static_middleware_()`, and `compression_middleware_()` assume a long-running server with filesystem access — those abstractions need replacement.
+
+2. **Static assets**: Move from RelysJS disk-serving to **Cloudflare Pages** (or Workers Static Assets). Browser bundles are already hashed/immutable — deploy as static files with automatic CDN caching.
+
+3. **Build**: RebuildJS (esbuild) stays for browser build. Server build changes to "bundle for Workers" — single output, all deps inlined, no externals.
+
+4. **S3 assets**: Contabo Object Storage assets could stay (fetched at build time) or migrate to **R2** (Cloudflare S3-compatible — free egress).
+
+5. **Deployment**: Replace Docker + GitHub Actions SSH with `wrangler deploy`. Much simpler CI/CD.
+
+### Hono vs Elysia
+
+**Yes, Hono is the better choice for Workers.**
+
+| | Elysia | Hono |
+|--|--------|------|
+| Workers support | Experimental adapter | First-class, built for it |
+| Runtime | Bun-native, others are afterthoughts | Runs everywhere (Workers, Bun, Node, Deno) |
+| Bundle size | Larger (Bun-specific) | ~14KB, edge-optimized |
+| Middleware | Rich but Bun-coupled | Clean, portable, Workers-native |
+| SSR | Via RelysJS | Built-in JSX/HTML streaming |
+| Community | Growing | Large, Cloudflare-endorsed |
+
+### Migration Cost
+
+Your app depends on RelysJS + RebuildJS (both from ctx-core). Moving to Hono + Workers means:
+
+- Replace RelysJS middleware composition with Hono middleware
+- Replace `static_middleware_()` with Workers Static Assets / Pages
+- Drop `compression_middleware_()` (Cloudflare handles compression at the edge)
+- Adapt RebuildJS build output to target Workers
+- Rewrite `start.ts` as a Workers `fetch` handler
+
+### What You'd Gain
+
+- No Docker, no VPS management, no Traefik config
+- Global edge deployment (faster worldwide)
+- Free tier handles most blog traffic
+- Simpler CI/CD (`wrangler deploy` vs Docker → GHCR → SSH)
+- R2 for assets (free egress vs Contabo S3 costs)
+
+### Incremental Approach
+
+Keep local dev on Bun + Elysia, add a Workers adapter as an alternative deployment target, migrate to Hono later if Workers becomes the primary platform.
+
+## User
+
+How can we simulate cloudflare pages on local dev?

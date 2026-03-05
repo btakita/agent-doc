@@ -273,3 +273,21 @@ I don't see my device...which is connected to USB
 List of devices attached
 
 ~                                                                                                                                                                                                                                      09:54:19
+
+## Assistant
+
+ADB not detecting your device — checklist:
+
+1. **Enable USB debugging**: Settings → Developer Options → USB Debugging (ON). If no Developer Options: Settings → About Phone → tap "Build Number" 7 times.
+2. **USB mode**: Pull down notification shade, change from "Charging only" to **File Transfer (MTP)**.
+I don't see this setting. Where is it?
+3. **Authorize**: Accept the "Allow USB debugging?" popup on the phone.
+4. **Restart ADB**: `adb kill-server && adb start-server && adb devices -l`
+5. **Linux udev rules** (Arch/CachyOS): `sudo pacman -S android-udev` then replug.
+6. **Cable**: Some USB cables are charge-only — try a different one.
+
+Most likely cause: USB debugging not enabled or phone in charging-only mode.
+
+**But for SMS export, you don't need ADB at all.** The simpler path: install SMS Backup & Restore on the phone, back up to local storage, then share/transfer the XML file to your computer via any method (Google Drive, email to self, USB file transfer, etc.).
+
+## User

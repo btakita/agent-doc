@@ -363,3 +363,26 @@ Will report results when both complete.
 ## User
 
 release
+
+## Assistant
+
+Released **agent-doc v0.9.2**:
+
+- [crates.io](https://crates.io/crates/agent-doc/0.9.2)
+- [PyPI](https://pypi.org/project/agent-doc/0.9.2/)
+- [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.9.2) — with 4 assets:
+  - `agent-doc-x86_64-linux` (prebuilt binary)
+  - `agent-doc-jetbrains-0.1.0-signed.zip`
+  - `agent-doc-jetbrains-0.1.0.zip`
+  - `agent-doc-0.1.0.vsix` (VS Code extension)
+
+**What's new:**
+- `agent-doc plugin install jetbrains|vscode` — download + install editor plugins from GitHub Releases
+- `agent-doc plugin update/list` — version check + inventory
+- VS Code extension: full 9/9 SPEC feature parity
+
+Parent submodule pointer updated (`a18b4df`). Local binary installed (`~/.cargo/bin/agent-doc` v0.9.2).
+
+## User
+
+Does `agent-doc plugin install vscode` work with vscodium?

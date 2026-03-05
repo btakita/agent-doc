@@ -37,3 +37,6 @@
 [submodule "existence-lang/existence"]
 	path = existence-lang/existence
 	url = git@github.com:existence-lang/existence.git
+[submodule "cloudflare"]
+	path = cloudflare
+	url = git@github.com:btakita/cloudflare.git

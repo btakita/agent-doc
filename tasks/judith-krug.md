@@ -1006,3 +1006,20 @@ Want me to add this to the proposal?
 ## User
 
 yes. Working on a detailed telephony plan in tasks/telephony.md. But I can follow up with that in another email.
+
+## Assistant
+
+Done. Added to the proposal:
+
+- **AI costs:** Updated to tiered estimates ($30-500/mo depending on usage) with a note to size it during the Zoom
+- **Support:** "1 month free support included after project completion. After that: $100/hr as needed, billed monthly. No retainer required."
+
+Good call keeping telephony as a separate follow-up — it's a distinct scope with its own cost drivers (carrier fees, compliance, volume). Reference it in the proposal as bonus scope but save the details for a separate conversation.
+
+The proposal at `mail/contacts/judith-krug/20260305-tmo-proposal.md` is ready for review and sending.
+
+## User
+
+Proposal looks good. Let's add GoHighLevel or Hubspot integration in the bonus section.
+
+There as a lot of work for 80 hours. If I do well, do you think Judith will extend hours? How can we set expectations?

@@ -116,3 +116,33 @@ Sources:
 ## User
 
 Please show me other discussions about the false positive. Perhaps I should chime in.
+
+## Assistant
+
+Here are the most relevant forum discussions about this exact false positive pattern:
+
+**Best place to chime in:**
+
+1. **[Missing/failed module dependencies in plugin.xml](https://platform.jetbrains.com/t/missing-failed-module-dependencies-in-plugin-xml/510)** — The canonical thread. A developer reports the same pattern: plugin depends on `com.intellij.modules.python`, marketplace verifier flags it as missing when testing against bare IntelliJ IDEA Ultimate. This is your exact issue.
+
+Here is a draft reply:
+
+I’m having the same issue. See
+
+This is my first plugin, so I think I need a resolution for this plugin to be released.
+
+Thank you.
+
+**Related threads:**
+
+2. **[Plugin Verifier: package com.jetbrains.python is not found](https://platform.jetbrains.com/t/plugin-verifier-package-com-jetbrains-python-is-not-found/1780)** — Another developer hitting the same verifier behavior with Python-dependent plugins. Discusses the "package not found" errors you're seeing.
+
+3. **[How does the 2025.1 PyCharm merge affect plugins?](https://platform.jetbrains.com/t/how-does-the-2025-1-pycharm-merge-affect-plugins/1364)** — Related to the PyCharm/IntelliJ platform merge in 2025.1, which changes how Python plugin dependencies are resolved. Could affect future verification behavior.
+
+4. **[Waiting for first time approval](https://platform.jetbrains.com/t/waiting-for-first-time-approval/3602)** — A developer waiting on approval, discussing whether verification errors block the process.
+
+**Recommendation:** Thread #1 is the best match. Your experience with Python Intentions adds a concrete data point — you could link to [your thread](https://platform.jetbrains.com/t/verification-errors-for-python-dependent-plugin-false-positives-against-iu-builds/3813) and note that local verification against PyCharm passes cleanly while the marketplace shows false positives for all IU builds.
+
+## User
+
+

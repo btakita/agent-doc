@@ -1403,7 +1403,32 @@ I don't see the development costs in the proposal.
 
 **Development costs are in the Pricing section** — 63–90 hours at $100/hr = $6,300–9,000, structured as two $4,000 milestone payments. The comparison table's "Year one" ($16,800) includes both ongoing (~$8,800) and development (~$8,000 midpoint), but it's not broken out explicitly in the cost summary table. Want me to add a "One-time development" row to make it more visible?
 
-Yes. Also provide an estimate for ongoing support costs.
+Yes. Also provide an estimate for ongoing support costs. Does the mortgage automator charge for support as well?
+
+## Assistant
+
+**Proposal restructured with explicit cost breakdown:**
+
+- Added "Cost Summary" section with one-time development ($6,300–9,000) at the top
+- Added ongoing support line item ($0–500/mo, as-needed at $100/hr)
+- Updated comparison table to show setup, monthly operating, and support separately
+- Post-launch support section now has monthly estimates: 3–5 hrs/mo early on, tapering to 0–2 hrs/mo
+- PDF regenerated
+
+**Mortgage Automator support costs:** MA's $13,000/year ongoing fee ($1,137/mo) includes support, updates, and hosting. There's no separate support charge — it's bundled into the annual subscription. Their $18,000 Y1 includes a $5,000 setup/coding fee, then $13,000 for the first year of service.
+
+So the comparison is:
+- **MA:** Support included in $1,137/mo subscription (you pay whether you use it or not)
+- **This plan:** Support is pay-as-you-go ($100/hr, only when needed). Most months post-stabilization will be $0–200.
+
+The custom plan wins on ongoing costs because you're not paying for a subscription that bundles features you may not use.
 
 ## User
 
+The Pricing section is confusing.
+
+$100/hr is the base rate for additional work.
+
+The $8000 covers at least 80 hours of work. More hours if the core features take longer.
+
+Remove the `(~$6,300–9,000)` beside the time estimate. That is not relevant and is confusing.

@@ -188,3 +188,35 @@ Parent submodule pointers updated and pushed.
 ## User
 
 Let's release the jetbrains plugin to the store. Should the plugin install agent-doc and ensure that the latest version is being used?
+
+## Assistant
+
+### Publishing the JetBrains Plugin
+
+The plugin (`agent-doc-jetbrains` v0.1.0) is fully built and signed. To publish:
+
+1. **Get a JetBrains Marketplace token** — sign in at https://plugins.jetbrains.com/ > Hub profile > Authentication > create a permanent token
+2. Run: `PUBLISH_TOKEN=<token> ./gradlew publishPlugin` from `agent-doc/editors/jetbrains/`
+
+JetBrains review takes 1-2 business days for first submission.
+
+### Should the plugin install/update agent-doc?
+
+**Recommendation: No auto-install.** Detect and warn instead.
+
+**Why not auto-install:**
+- CLI installs via `cargo install`, `pip install`, or prebuilt binary — plugin doesn't know user's preference
+- Auto-installing binaries from a JetBrains plugin is a security concern (reviewers may reject)
+- Version management belongs to user's package manager
+
+**Better approach — version check on startup:**
+- On project open, run `agent-doc --version`
+- If missing: notification balloon with install instructions (cargo/pip/binary links)
+- If outdated: "agent-doc X.Y.Z available, you have A.B.C" with update link
+- Store minimum compatible version as a constant in the plugin
+
+Publish as-is (v0.1.0) or add version check first (v0.1.0 with check)?
+
+## User
+
+Is there a way to make agent-doc install the JetBrains plugin without having to go through the JetBrains marketplace?

@@ -250,3 +250,33 @@ Error: Calendar API returned 403 Forbidden: {
   }
 }
 ```
+
+## Assistant
+
+Confirmed — Calendar API is disabled for your project. Enable it at the URL in the error:
+
+https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295
+
+Click **Enable**, wait ~1 min, then:
+1. `corky cal auth`
+2. `corky cal list`
+
+## User
+
+
+```
+❯ corky cal list
+Error: Calendar API error (HTTP 400): {
+ "error": {
+  "errors": [
+   {
+    "domain": "global",
+    "reason": "badRequest",
+    "message": "Bad Request"
+   }
+  ],
+  "code": 400,
+  "message": "Bad Request"
+ }
+}
+```

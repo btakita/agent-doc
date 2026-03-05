@@ -1392,3 +1392,18 @@ How much would 5 seats of Google Workspace cost?
 Yes
 
 I don't see the development costs in the proposal.
+
+## Assistant
+
+**Proposal updated to 5 seats:**
+- Google Workspace: 3 seats ($21/mo) → 5 seats ($35/mo)
+- Monthly total: ~$670–845/mo
+- Comparison: Year one savings ~$1,200, ongoing savings ~$4,800/year
+- PDF regenerated
+
+**Development costs are in the Pricing section** — 63–90 hours at $100/hr = $6,300–9,000, structured as two $4,000 milestone payments. The comparison table's "Year one" ($16,800) includes both ongoing (~$8,800) and development (~$8,000 midpoint), but it's not broken out explicitly in the cost summary table. Want me to add a "One-time development" row to make it more visible?
+
+Yes. Also provide an estimate for ongoing support costs.
+
+## User
+

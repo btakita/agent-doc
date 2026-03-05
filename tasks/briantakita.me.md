@@ -653,3 +653,30 @@ The AWS/S3 secrets are still needed for asset downloads in the new workflow.
 ## User
 
 Would it make sense to have the canonical object store be R2 instead of S3 on contabo?
+
+## Assistant
+
+**Yes.** Benefits:
+
+- **Zero egress fees** — R2 has no bandwidth charges
+- **Same network** — CI fetches assets within Cloudflare's network (faster builds)
+- **One fewer vendor** — eliminates Contabo storage dependency
+- **S3-compatible API** — `aws s3 cp` commands work unchanged, just different endpoint URL + credentials
+- **Free tier** — 10GB storage, 10M reads/month (plenty for your assets)
+
+Also: the CI pipeline already passed. The new Cloudflare Pages workflow completed in 51 seconds — all 7 steps successful.
+
+### Migration steps
+
+1. Create R2 bucket: `npx wrangler r2 bucket create briantakita-assets`
+2. Generate R2 API token: Dashboard → R2 → Manage R2 API Tokens → Create
+3. Sync assets: `aws s3 sync s3://assets.briantakita.me/ s3://briantakita-assets/ --source-endpoint-url https://usc1.contabostorage.com --endpoint-url https://<account-id>.r2.cloudflarestorage.com`
+4. Update GitHub secrets: `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`
+5. Update local `.env` with new R2 credentials
+6. Cancel Contabo storage when confirmed working
+
+Want me to start the R2 migration?
+
+## User
+
+Which plan is more economical for large amounts of data? Contabo S3 or R2?

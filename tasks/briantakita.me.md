@@ -899,3 +899,23 @@ The iframe urls in https://briantakita.me/posts/squarespace-site-lighthouse-scor
 See https://briantakita.me/lighthouse/dodropshipping.html
 
 Please fix
+
+## Assistant
+
+### Fixed — lighthouse reports now loading correctly
+
+**Root cause:** The lighthouse HTML files from R2 are referenced at runtime via URL construction (`url__join(bucket_url, 'lighthouse/...')`), not build-time imports. They were never included in the esbuild output or `dist/static/`. Pages was serving the homepage HTML as a fallback for the missing routes.
+
+**Fix:** Added `cp -r ../../public/assets/* dist/static/` to the CI workflow after the build step. This copies the downloaded R2 assets (lighthouse HTML, images, fonts) into the static deployment output.
+
+**Verified — all lighthouse reports load correctly:**
+- `briantakita.me/lighthouse/dodropshipping.html` → Google Lighthouse report
+- `briantakita.me/lighthouse/artipsstudio.html` → Google Lighthouse report
+- `briantakita.me/lighthouse/briantakita.me.html` → Google Lighthouse report
+- `briantakita.me/lighthouse/shoptimizer.html` → Google Lighthouse report
+
+Committed (`c95d2ad`) and deployed via CI.
+
+## User
+
+should .wrangler be in .gitignore? I only see .wrangler/cache 

@@ -403,3 +403,68 @@ Aliases `vscode`, `code`, `vscodium`, `codium` all work.
 Compare agent-doc and tmux-router with https://github.com/njbrake/agent-of-empires
 
 Is there anything we can learn from this project?
+
+## Assistant
+
+### agent-doc/tmux-router vs Agent of Empires (1,008 stars)
+
+Both are Rust + tmux tools for AI agent session management, but with fundamentally different philosophies.
+
+| Aspect | agent-doc + tmux-router | Agent of Empires |
+|--------|----------------------|------------------|
+| **Philosophy** | Document-centric (markdown is the UI) | Agent-centric (TUI dashboard) |
+| **tmux usage** | Library crate for routing/layout | Direct wrapper for session lifecycle |
+| **Agent support** | Claude Code | Claude, OpenCode, Mistral Vibe, Codex, Gemini |
+| **Isolation** | Per-pane via tmux | Git worktrees + optional Docker |
+| **UI** | Editor plugins (JetBrains, VS Code) | Ratatui TUI + CLI |
+| **Async** | Sync (sequential per-run) | Tokio async |
+
+**AoE has, we don't:**
+1. **Multi-agent backends** — detects/manages Claude, Codex, Gemini, etc.
+2. **TUI dashboard** — Ratatui visual session manager with real-time status
+Should we adopt a TUI interface to fix some of our syncing issues?
+3. **Docker sandboxing** — containerized agent execution
+4. **Git worktree isolation** — parallel agents on different branches
+5. **Diff viewer** — built-in git change review UI
+6. **Profile management** — separate workspaces per project/client
+
+**We have, AoE doesn't:**
+1. **Document-as-UI** — markdown file IS the conversation (diff → respond → write)
+2. **Component system** — re-renderable regions with config-driven modes/hooks
+3. **Editor integration** — JetBrains + VS Code plugins with split detection, tab sync
+4. **Prompt polling** — permission prompt forwarding to editor
+5. **2D layout sync** — reconcile tmux panes to mirror editor splits
+6. **Watch daemon** — auto-submit on file change with loop prevention
+
+### What We Can Learn
+
+1. **Multi-agent backends** — AoE's `agents.rs` auto-detects available agents. Our `agent/` trait could support Codex CLI, Gemini CLI, etc. Low effort, high value.
+
+Let's do it.
+
+2. **Git worktree isolation** — parallel agents on separate branches via `git worktree`. Our planned `agent-doc deep` (fan-out subagents) should use worktrees instead of sharing the working directory.
+
+Ok. How do we manage the fan out task? When will the work fan in? At the end of all of the parallel tasks?
+
+3. **TUI status dashboard** — real-time session monitoring. A lightweight `agent-doc status` could show all active sessions, prompt states, and agent status in a Ratatui TUI.
+
+Yes. But also allow for direct cli interaction with the agent loop.
+
+4. **Docker sandboxing** — optional containerized execution for untrusted agent actions (`agent-doc run --sandboxed`).
+
+Interesting. Let's plan for this. If we can implement, go ahead.
+
+5. **Profile system** — grouping sessions by project/client. Our per-project `.agent-doc/` config could be extended with named profiles.
+
+Is the project effectively already a named profile? Are there sub profiles as well? Like in the case of agent-loop, there are many submodules with different workflows. Would the named profile help with managing the workflows? 
+
+### Key Differentiator
+
+AoE is a **session manager** — it launches agents and monitors them. agent-doc is a **document workflow** — the document IS the interface. These are complementary rather than competing: you could run agent-doc sessions inside AoE-managed tmux panes.
+
+True. What would it take to propertly integrate?
+For now let's iterate on the existing tumx-manager.
+
+## User
+
+

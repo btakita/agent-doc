@@ -932,3 +932,30 @@ Included scope for extra hours can include:
   - Phone call volume may require more AI expenses
 - Additional website work
 - Scraping county records for lenders
+
+Another benefit is ownership of software automation.
+
+## Assistant
+
+Great structure. Here's the draft text:
+
+> Judith — here's what I'm thinking for TMO + custom tooling:
+>
+> $8,000 total for 80+ hours of development and consulting, split into two payments:
+> - $4,000 after Week 1 (website live on Cloudflare)
+> - $4,000 upon completion of: document upload portal, notification system with Google Calendar, and OCR
+>
+> If the core work finishes early, remaining hours cover extras like:
+> - Phone call recording + transcripts (office line + cell, with 2-party consent)
+> - Additional website features
+> - County record scraping for finding lenders/investors
+>
+> Monthly costs after that: ~$620/mo (TMO + minimal AI/hosting). You own everything — code, accounts, domain. Another benefit is ownership of the software automation itself — no ongoing SaaS fees for portals and notifications, and any developer can maintain or extend it.
+>
+> I'll send a detailed proposal tomorrow with the full breakdown. Let me know if this direction works for you.
+
+Updated the proposal file with $8,000 / 80+ hours, two $4,000 milestone payments, bonus scope items, and the ownership angle you mentioned.
+
+## User
+
+The AI hosting seems too low. Especially if we will be integrating AI into their operations. Need to discuss how much AI they will want.

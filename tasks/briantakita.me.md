@@ -75,3 +75,28 @@ Scripts: `app/-briantakita.me-dev-bin/bin/ctx-core--link.sh`, `ctx-core--unlink.
 
 How much would it cost me to run this site. I have the $5/month plan right now on Cloudflare.
 I have 2 apps relating to email routing. Please login to Cloudflare and see what I have and advise.
+
+## Assistant
+
+### Cost: Your $5/month plan already covers it
+
+The Workers Paid plan ($5/month) includes:
+- **Workers requests**: 10M/month (blog traffic is a fraction of this)
+- **Pages**: Unlimited sites, 500 builds/month, unlimited bandwidth
+- **R2 storage**: 10GB free, then $0.015/GB/month (no egress fees)
+- **KV**: 1GB free storage, 10M reads/month
+
+You'd likely **save money** by dropping the Contabo VPS and running briantakita.me on Workers/Pages under your existing plan.
+
+### Cloudflare Account Access
+
+I can't log into your Cloudflare account directly. Could you share what you see under:
+1. **Workers & Pages** dashboard — list of projects/workers
+2. **Email Routing** — the 2 email routing apps you mentioned
+3. **R2** — any existing buckets
+
+A screenshot or copy-paste of the dashboard would work. Then I can advise on what to keep, consolidate, or change for the migration.
+
+## User
+
+Please use wrangler to discover what I have running

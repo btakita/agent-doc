@@ -328,3 +328,37 @@ Do we actually need a http server? Can we just simulate the http request using f
 I'm planning on using Hono for Judith's app for the Equity Funding Source backoffice and loan document collection.
 
 Should we begin converting briantakita.me over to Hono? Or is pure cloudflare functions sufficient? Or would that create lock-in to Cloudflare?
+
+## Assistant
+
+### 1. HTTP server for prerendering — not strictly needed, but simpler
+
+Relysjs has `app__attach(app)` which wires up routes without calling `.listen()`. You could call `app.handle(new Request(...))` directly. But that means importing relysjs internals — fragile across updates.
+
+The HTTP server approach is 3 lines (`bun run server &`, crawl, `kill $PID`) and guaranteed to work. Start there, optimize later if needed.
+
+### 2. Hono — yes, and no lock-in
+
+**Hono is the right choice** for both projects:
+
+- **No lock-in** — runs on Workers, Deno, Bun, Node, Lambda, Vercel. Uses standard `Request`/`Response` Web API. Switching platforms = changing the adapter (one line).
+- **Pure Cloudflare `export default { fetch() }` creates lock-in** — Workers-specific bindings/env patterns only run on Cloudflare.
+- **Hono gives you Cloudflare features** (R2, KV, D1 bindings) behind a portable API.
+
+For briantakita.me: since we're prerendering to static HTML, **you don't need Hono for the deployed site**. It only matters if you later add dynamic endpoints.
+
+### 3. Don't convert briantakita.me to Hono now
+
+The migration plan:
+
+1. **Phase 1 (now):** Prerender with existing Elysia/relysjs → deploy static to Pages
+2. **Phase 2 (optional):** If you need dynamic endpoints, add a Hono Worker alongside static Pages
+3. **Phase 3 (when ready):** Convert build system away from relysjs (Hono + esbuild directly)
+
+Converting now = rewrite with zero benefit — the deployed site is static HTML either way. Save Hono for Judith's app (fresh start), then backport patterns if needed.
+
+**Recommendation:** Let's get prerender + Pages deploy working today. Want me to proceed?
+
+## User
+
+Yes. Let's have pre-render be part of the deployment. Should the html files be triggered in github actions or should it be committed into the repo? 

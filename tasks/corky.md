@@ -96,3 +96,4 @@ Verified. `corky doc build` is fully functional.
 ## User
 
 Fill in the gaps
+Are there crates for pandoc and weasyprint. If not, are there equivalents crates? Or should we shell out the commands?

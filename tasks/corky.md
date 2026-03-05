@@ -149,3 +149,20 @@ Current state is fine for v0.13.0. The error message catches it early and tells 
 ## User
 
 release
+
+## Assistant
+
+**v0.13.0 released.** Full pipeline completed:
+
+1. Version bumped in `Cargo.toml` + `pyproject.toml` (0.12.4 → 0.13.0)
+2. `make check` — clippy clean, all 30 tests pass
+3. Committed: `v0.13.0: document building (corky doc build)` (5af4168)
+4. Tagged `v0.13.0`, pushed to `origin/main`
+5. Published to [crates.io](https://crates.io/crates/corky/0.13.0)
+6. Published to [PyPI](https://pypi.org/project/corky/0.13.0/)
+7. [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.13.0) created
+8. Binary installed: `~/.cargo/bin/corky` → v0.13.0
+
+## User
+
+What are options to have corky manage sms. I'm running Pulse SMS locally, but I don't expect many other people to. How can we import the SMS threads as a basic catch-all feature.

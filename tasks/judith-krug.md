@@ -1267,3 +1267,6 @@ Timeline back to ~5 weeks. M2 updated to "OCR/TMO integration + notification sys
 Reduce the margins on the pdf.
 
 Please make a proposal template which has the styling rules along with a build script.
+
+Should Corky have general support for generating pdf, word, and google office docs?
+

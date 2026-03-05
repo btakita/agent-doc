@@ -86,3 +86,11 @@ Adjust the sign-off as needed. Want me to modify anything?
 
 Please save this somewhere
 https://platform.jetbrains.com/t/verification-errors-for-python-dependent-plugin-false-positives-against-iu-builds/3813
+
+## Assistant
+
+Saved to auto memory. The forum thread URL, plugin page, source location, and verification context are now persisted across sessions.
+
+## User
+
+Is there any info in https://plugins.jetbrains.com/docs/intellij/developing-plugins.html#gradle-plugin that can help up?

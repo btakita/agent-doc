@@ -127,3 +127,16 @@ Done. Two commits pushed to main:
 ## User
 
 commit agent-loop
+
+## Assistant
+
+Committed:
+
+1. `80c597c` — agent-doc plan.md timestamp
+2. `2f0bcb6` — Task docs compacted + corky submodule updated (7 files, -1836/+311 lines)
+
+Working tree clean. 132 commits ahead of origin. Push?
+
+## User
+
+audit docs

@@ -145,3 +145,46 @@ Delete wholly-trinity.
 Enable R2. Please add instructions.
 
 Let's begin migrating briantakita.me over to cloudflare workers. Let's use the wrangler dev environment to verify. This app seems static. Are there any dynamic api endpoints?
+
+## Assistant
+
+### wholly-trinity Deletion
+
+Deleting in background — the project has too many deployments to delete directly. A background agent is iterating through all deployments and deleting them via the API, then will delete the project.
+
+### Enable R2
+
+R2 can't be enabled via wrangler CLI — it requires the Cloudflare Dashboard:
+
+1. Go to https://dash.cloudflare.com → select your account
+2. Click **R2 Object Storage** in the left sidebar
+3. Click **Get Started** or **Enable R2**
+4. No credit card needed for free tier (10GB storage, 10M reads/month, 1M writes/month)
+5. Once enabled, create a bucket: `npx wrangler r2 bucket create briantakita-assets`
+
+### Dynamic Endpoints — None
+
+The app is **purely static/SSR with zero dynamic API endpoints**. All routes are GET-only:
+
+- `/`, `/about`, `/open-source`, `/portfolio`, `/tags`, `/tags/:tag`
+- `/posts`, `/posts/:slug_or_page_num`
+- `/search`, `/rss`, `/rss.xml`, `/sitemap.xml`, `/robots.txt`
+
+All 40+ blog posts are statically imported at build time. No databases, no runtime API calls, no form submissions. The server just renders pre-built HTML.
+
+**This is a perfect fit for Cloudflare Pages** — no Workers SSR needed. The entire site can be pre-built and served as static files with zero server-side logic at request time.
+
+### Migration Plan
+
+Since it's fully static, the simplest migration is **Cloudflare Pages (static)** rather than Workers SSR:
+
+1. **Build locally** → produces `dist/browser/` with all HTML/CSS/JS
+2. **Deploy to Pages**: `npx wrangler pages deploy dist/browser --project-name briantakita-me`
+3. **Assets**: Download from S3 at build time (as Dockerfile already does), include in `dist/browser/`
+4. **DNS**: Point `briantakita.me` to Pages via CNAME
+
+Want me to start with a test deployment to Pages using the existing build output?
+
+## User
+
+If my assets are http cached, would that count against E2 bandwidth? 

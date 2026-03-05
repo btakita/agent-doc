@@ -1434,3 +1434,21 @@ The $8000 covers at least 80 hours of work. More hours if the core features take
 Remove the `(~$6,300–9,000)` beside the time estimate. That is not relevant and is confusing.
 
 Re: ownership, Judith will have a royalty free license in perpetuity. She does not have exclusivity on the software however. So I can use it for other projects. Should that be included in the estimate or is it already implied?
+
+I will give her the opportunity for exclusive rights to resell the software to other mortgage brokers/lenders if she so chooses.
+
+## Assistant
+
+**Pricing rewritten** — $8,000 flat (80+ hrs), two $4,000 milestones, $100/hr for additional work. Removed confusing hourly estimates. PDF regenerated.
+
+**Licensing & Ownership section added to proposal:**
+- Royalty-free, perpetual license for Judith to use, modify, and maintain
+- Non-exclusive — you retain rights to reuse for other projects, with the restriction that it won't be provided to her direct competitors without her consent
+- Optional: exclusive reseller rights for the mortgage broker/lender market available separately if she's interested
+- All accounts, credentials, and data remain hers
+
+No additional cost impact — standard custom development terms. PDF regenerated.
+
+## User
+
+Please draft an email to Judith and Robert with the attached proposal.

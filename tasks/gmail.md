@@ -492,3 +492,19 @@ corky cal delete 'National Grid Autopay' --all
 ## User
 
 Release this
+
+## Assistant
+
+**Released v0.13.1.**
+
+- Bumped version in Cargo.toml + pyproject.toml
+- Updated VERSIONS.md, SPEC.md (sections 15-16), AGENTS.md
+- `make precommit` passed (clippy, tests, audit-docs)
+- Committed, tagged `v0.13.1`, pushed
+- Published to crates.io, PyPI, GitHub Releases
+
+https://github.com/btakita/corky/releases/tag/v0.13.1
+
+## User
+
+compact this file

@@ -386,3 +386,20 @@ Parent submodule pointer updated (`a18b4df`). Local binary installed (`~/.cargo/
 ## User
 
 Does `agent-doc plugin install vscode` work with vscodium?
+
+## Assistant
+
+Yes. `detect_code_cmd()` in `plugin.rs:192-202` checks for `codium` first — if `codium --version` succeeds, it uses `codium` instead of `code`.
+
+So `agent-doc plugin install vscode` will:
+1. Download the `.vsix` from GitHub Releases
+2. Detect if `codium` is available (prefers it over `code`)
+3. Run `codium --install-extension` or `code --install-extension`
+
+Aliases `vscode`, `code`, `vscodium`, `codium` all work.
+
+## User
+
+Compare agent-doc and tmux-router with https://github.com/njbrake/agent-of-empires
+
+Is there anything we can learn from this project?

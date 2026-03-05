@@ -1467,3 +1467,16 @@ Covers the key points: $8,000 project fee, monthly costs, timeline, savings vs M
 ## User
 
 send it
+
+## Assistant
+
+**Draft pushed to Gmail.** Open your Gmail drafts to review and send — the PDF is attached. Per safety rules, corky saves to drafts rather than sending directly.
+
+- To: judithkrug@gmail.com
+- CC: rwaldman100@gmail.com
+- Subject: Proposal — TMO + Custom Automation for Equity Funding Source
+- Attachment: 20260305-tmo-proposal.pdf
+
+## User
+
+compact this file

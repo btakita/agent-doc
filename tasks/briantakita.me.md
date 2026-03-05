@@ -801,3 +801,26 @@ The current deployment on Cloudflare Pages works fine — it bundles all assets 
 ## User
 
 Saved to $AWS_ACCESS_KEY_ID_RW and $AWS_SECRET_ACCESS_KEY_RW
+
+## Assistant
+
+I can't access those variables — they're not in my shell session. Can you run these commands to set the GitHub secrets? (Replace with your actual values or paste the `pass` path if they're in your password store):
+
+```bash
+cd ~/work/btakita/briantakita.me-dev
+
+# Set R2 credentials
+gh secret set AWS_ACCESS_KEY_ID --body "$AWS_ACCESS_KEY_ID_RW"
+gh secret set AWS_SECRET_ACCESS_KEY --body "$AWS_SECRET_ACCESS_KEY_RW"
+gh secret set AWS_ENDPOINT_URL --body "https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com"
+gh secret set AWS_BUCKET --body "briantakita-assets"
+```
+
+Once you've run those, let me know and I'll trigger a test deployment.
+
+## User
+
+AWS_ACCESS_KEY_ID_R="$(pass briantakita.me/r/AWS_ACCESS_KEY_ID")"
+AWS_SECRET_ACCESS_KEY_R="$(pass briantakita.me/r/AWS_SECRET_ACCESS_KEY")"
+AWS_ACCESS_KEY_ID_RW="$(pass briantakita.me/rw/AWS_ACCESS_KEY_ID")"
+AWS_SECRET_ACCESS_KEY_RW="$(pass briantakita.me/rw/AWS_SECRET_ACCESS_KEY")"

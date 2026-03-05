@@ -26,6 +26,20 @@ All fields are optional and default to null. The body alternates `## User` and `
 
 Delimited by `---\n` at file start and closing `\n---\n`. If absent, all fields default to null and entire content is the body.
 
+### 2.3 Components
+
+Documents can contain named, re-renderable regions called components:
+
+```html
+<!-- agent:status -->
+content here
+<!-- /agent:status -->
+```
+
+Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
+
+Per-component behavior is configured in `.agent-doc/components.toml` (see §7.19).
+
 ## 3. Snapshot System
 
 ### 3.1 Storage
@@ -231,6 +245,45 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 4. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
 5. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
 6. **VERIFY** — confirm final layout matches desired order
+
+### 7.19 patch
+
+`agent-doc patch <FILE> <COMPONENT> [CONTENT]` — replace content in a named component.
+
+1. Read the document and parse component markers (`<!-- agent:name -->...<!-- /agent:name -->`)
+2. Find the named component (error if not found)
+3. Read replacement content from the positional argument or stdin
+4. Load component config from `.agent-doc/components.toml` (if present)
+5. Apply `pre_patch` hook (stdin: content, stdout: transformed content; receives `COMPONENT` and `FILE` env vars)
+6. Apply mode: `replace` (default), `append` (add after existing), or `prepend` (add before existing)
+7. If `timestamp` is true, prefix entry with ISO 8601 UTC timestamp
+8. If `max_entries > 0` (append/prepend only), trim to last N non-empty lines
+9. Write updated document
+10. Save snapshot relative to project root
+11. Run `post_patch` hook (fire-and-forget; receives `COMPONENT` and `FILE` env vars)
+
+**Component markers:** `<!-- agent:name -->...<!-- /agent:name -->`. Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`.
+
+**Component config** (`.agent-doc/components.toml`):
+```toml
+[component-name]
+mode = "replace"       # "replace" (default), "append", "prepend"
+timestamp = false      # Auto-prefix with ISO timestamp
+max_entries = 0        # Trim old entries (0 = unlimited)
+pre_patch = "cmd"      # Shell command: stdin→stdout transform
+post_patch = "cmd"     # Shell command: fire-and-forget
+```
+
+### 7.20 watch
+
+`agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.
+
+- Watches files registered in `sessions.json` for modifications (via `notify` crate)
+- On file change (after debounce), runs `submit::run()` on the changed file
+- **Loop prevention:** changes within the debounce window after a submit are treated as agent-triggered; agent-triggered changes increment a cycle counter; if content hash matches previous submit, stop (convergence); hard cap at `--max-cycles` (default 3)
+- `--stop` sends SIGTERM to the running daemon (via `.agent-doc/watch.pid`)
+- `--status` reports whether the daemon is running
+- `--debounce` sets the debounce delay in milliseconds (default 500)
 
 ## 8. Session Routing
 

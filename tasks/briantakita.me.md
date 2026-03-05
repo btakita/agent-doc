@@ -618,3 +618,38 @@ The Contabo server is still running but nobody is reaching it — all traffic go
 Let's convert the github actions to render the pages and deploy to cloudflare if not done yet.
 
 How do I decommission it on Contabo? Can you ssh into the server and decommission the site?
+
+## Assistant
+
+### GitHub Actions — replaced with Cloudflare Pages deploy
+
+Updated `.github/workflows/deploy.yml` — replaced Docker build + Contabo SSH deploy with:
+
+1. `bun install --frozen-lockfile --ignore-scripts`
+2. `aws s3 cp` to download assets
+3. `bun ./build-and-serve.ts` + `bun ./prerender.ts` → static HTML
+4. `wrangler pages deploy` to Cloudflare Pages
+
+Committed and pushed (`078a7cc`). CI is running now (run `22739445144`).
+
+### Contabo — decommissioned
+
+SSHed into Contabo and stopped the briantakita container:
+
+```
+docker compose -p briantakita -f d.deploy.docker-compose.yml down
+```
+
+- `briantakita-www-1` — stopped and removed
+- All 8 other containers still running (cogov, herbaliciosbliss, brookebrodack, peakexistence, prescience-notes, traefik, mi-www, mi-redis)
+
+### Remaining Contabo secrets
+
+You can remove these GitHub secrets when ready (no longer needed):
+- `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`
+
+The AWS/S3 secrets are still needed for asset downloads in the new workflow.
+
+## User
+
+Would it make sense to have the canonical object store be R2 instead of S3 on contabo?

@@ -147,3 +147,61 @@ Keep local dev on Bun + Elysia, add a Workers adapter as an alternative deployme
 ## User
 
 How can we simulate cloudflare pages on local dev?
+
+## Assistant
+
+### Simulating Cloudflare Pages Locally
+
+**`wrangler pages dev` (recommended)** — Cloudflare's official local dev tool runs miniflare (local Workers runtime):
+
+```bash
+# Static site only
+wrangler pages dev dist/browser --port 4100
+
+# With SSR Worker entry point
+wrangler pages dev dist/browser --script-path dist/_worker.js --port 4100
+```
+
+This gives you: local Workers runtime with same APIs (KV, R2, D1), static asset serving matching Pages behavior, `env.ASSETS.fetch()` for accessing static files from your Worker, and hot reload.
+
+**During migration — run both side by side:**
+
+```bash
+# Terminal 1: existing Bun dev server
+bun run dev                    # port 4100
+
+# Terminal 2: Workers simulation
+wrangler pages dev dist/browser --script-path dist/_worker.js --port 4200
+```
+
+**Pages + Worker SSR architecture:**
+
+```
+dist/
+├── browser/          # Static assets → Pages serves automatically
+│   ├── *.js          # Hashed bundles
+│   ├── *.css
+│   └── assets/       # Images, fonts
+└── _worker.js        # SSR Worker → handles dynamic routes
+```
+
+Pages serves static files first; non-matching requests fall through to `_worker.js`:
+
+```typescript
+// _worker.js
+export default {
+  async fetch(request, env) {
+    // Try static assets first
+    const asset = await env.ASSETS.fetch(request)
+    if (asset.status !== 404) return asset
+    // SSR for dynamic routes
+    return handleSSR(request, env)
+  }
+}
+```
+
+**Recommendation:** Start with `wrangler pages dev` pointed at your existing `dist/browser` output. Develop the `_worker.js` SSR entry point separately. This gives production-faithful local dev with minimal setup.
+
+## User
+
+I presume that we will need to remove relysjs. Can we create a new library using wranger pages dev along with rebuildjs?

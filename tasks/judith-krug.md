@@ -1124,3 +1124,23 @@ Sources: [TMO Developer Portal](https://developers.themortgageoffice.com/), [API
 ## User
 
 What is the estimated hours to complete the OCR->TMO integration?
+
+## Assistant
+
+**Estimated: 16-26 hours** (up from the original 8-12 for OCR alone)
+
+Breakdown:
+
+| Subtask | Hours | Details |
+|---------|-------|---------|
+| OCR extraction (Claude vision) | 6-10 | Prompt engineering per doc type, structured JSON output, confidence scoring |
+| TMO API integration | 6-10 | Auth, NewLoan/UpdateLoan field mapping, NewLender, AddFunding, error handling, sandbox→prod |
+| Admin review workflow | 4-6 | Upload→OCR→review screen, side-by-side view, correct fields before push, status tracking |
+
+**Impact on proposal:** Core phases go from 55-76 to ~63-90 hours. Fits within 80+ hour commitment but leaves less room for bonus scope. The tradeoff is worth it — OCR that feeds directly into TMO is far more valuable than OCR that just extracts to a screen.
+
+Want me to update Phase 3 in the proposal?
+
+## User
+
+Yes

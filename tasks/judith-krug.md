@@ -1023,3 +1023,25 @@ The proposal at `mail/contacts/judith-krug/20260305-tmo-proposal.md` is ready fo
 Proposal looks good. Let's add GoHighLevel or Hubspot integration in the bonus section.
 
 There as a lot of work for 80 hours. If I do well, do you think Judith will extend hours? How can we set expectations?
+
+## Assistant
+
+Added GoHighLevel/HubSpot integration to the bonus scope in the proposal.
+
+On extending hours — yes, very likely if you deliver well:
+
+- Robert is already pushing for more automation. Once he sees results, he'll want more.
+- The bonus items (GoHighLevel, phone recording, county scraping) are each 10-20 hour projects. 80 hours won't cover core + all bonuses.
+- More automation = more loans processed = clear ROI for Judith.
+
+**Setting expectations:** Frame $8K as Phase 1, not "everything forever." The proposal already does this implicitly — bonus scope is stretch goals, not guarantees. The 1-month free support creates a natural bridge where Judith discovers what else she wants, leading to Phase 2 scoping.
+
+Suggested framing:
+
+> The $8,000 covers the core platform plus bonus features if time allows. As your business grows, additional tools and integrations are available at the same $100/hr rate.
+
+Also noted your edits to the proposal — good additions: AGENTS.md/CLAUDE.md/SPEC.md/skills handover, and "agent loops" framing for maintainability. That's a real differentiator.
+
+## User
+
+Is this tmo proposal ready to go? Can we have it in pdf format? 

@@ -24,4 +24,19 @@ Extracted the verification errors from the pasted HTML. Here's what's happening:
 
 ## User
 
-Should this be a "Pycharm" plugin instead? 
+Should this be a "Pycharm" plugin instead?
+
+## Assistant
+
+No — the current setup is better. The plugin works in **any JetBrains IDE with the Python plugin**, not just PyCharm:
+
+- **PyCharm Community/Professional** — PythonCore bundled
+- **IntelliJ IDEA Ultimate** — Python plugin installed from marketplace
+
+By targeting `com.intellij.modules.python` (not PyCharm specifically), IU users with the Python plugin can also install it. Restricting to PyCharm would exclude those users.
+
+The verification "errors" are a known false positive — the marketplace verifier tests against bare IU which lacks PythonCore. Every plugin with `<depends>com.intellij.modules.python</depends>` shows the same pattern. The plugin is correctly configured.
+
+## User
+
+Is there any configuration that can be done to make these tests pass?

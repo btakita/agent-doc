@@ -563,3 +563,51 @@ There's no Obsidian plugin for agent-doc yet, but it's feasible — Obsidian has
 ## User
 
 
+
+## Assistant
+
+**Agent-doc + Keystatic API:**
+
+They already integrate at the **file level** — both read/write the same markdown files in the same git repo. No API needed. Keystatic writes content, agent-doc can read/respond to it, and vice versa.
+
+An API-level integration (using Keystatic's content API for schema validation) is possible but only valuable if you need agent-doc responses to respect Keystatic's field schemas. For plain markdown, file-level sharing is simpler and already works.
+
+**Robustness for non-programmers — you're right, this is the critical gap.**
+
+Current agent-doc friction points that need fixing before non-programmer use:
+- Snapshot desync
+- Git state issues (uncommitted changes, merge conflicts)
+- Diff edge cases
+- Plugin pane/session detection
+
+**v1.0 robustness targets:**
+- **Zero-config** — works out of the box, no `.agent-doc/` setup needed
+- **Error recovery** — graceful git conflicts, stale snapshots auto-rebuild, dead sessions auto-clean
+- **One-button operation** — single hotkey in any editor
+- **Human error messages** — not stack traces
+- **Idempotent operations** — running the same command twice doesn't break things
+
+**Plugin coverage needed:**
+- JetBrains (exists, needs polish)
+- VS Code (exists, needs polish)
+- Obsidian (not built — feasible via plugin API)
+
+This is a v1.0 maturity milestone. Current v0.9.x is power-user grade. Getting it non-programmer-solid is the path to deploying it for teams like Judith's.
+
+## User
+
+Judith works with Robert (not Robert Ward). His last name is in the audio at:
+
+mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-.amr
+
+Please make a diarized transcript of the audio. Get Robert's last name from the transcript.
+
+Some notes from the meeting:
+
+It would be beneficial to scrape county record websites for beneficiaries:
+- we pitched scraping the county record for borrowers
+
+different requirements for types of loans:
+- mortgage automator does well with doc generator and routing for the loan type
+
+gohighlevel: Robert 

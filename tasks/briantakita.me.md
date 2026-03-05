@@ -770,3 +770,34 @@ briantakita-assets is fine. Anything else needed?
 
 Can we commit and try another deployment?
 Can the contabo Object Store for assets.briantakita.me be deleted after deployment?
+
+## Assistant
+
+### Before deploying from R2 — one manual step needed
+
+You need to create R2 S3 API credentials. The GitHub secrets still point to Contabo (timestamps from before the migration):
+
+1. **Cloudflare Dashboard** → R2 Object Storage → **Manage R2 API Tokens** → **Create API Token**
+   - Permissions: **Object Read & Write**
+   - Scope: Apply to bucket `briantakita-assets`
+2. Copy the **Access Key ID** and **Secret Access Key** it generates
+3. Update GitHub secrets:
+
+```bash
+gh secret set AWS_ACCESS_KEY_ID --body "<R2 access key>"
+gh secret set AWS_SECRET_ACCESS_KEY --body "<R2 secret key>"
+gh secret set AWS_ENDPOINT_URL --body "https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com"
+gh secret set AWS_BUCKET --body "briantakita-assets"
+```
+
+Once you've done that, let me know and I'll trigger a deployment.
+
+### Contabo Object Store
+
+**Yes, it can be deleted after the R2 deployment is verified.** The assets are fully mirrored in R2 (95 objects, 31MB). Once a CI deployment succeeds pulling from R2, the Contabo `assets.briantakita.me` bucket is no longer needed.
+
+The current deployment on Cloudflare Pages works fine — it bundles all assets into the static output. No runtime dependency on either object store. The bucket is only used during CI builds to download source images.
+
+## User
+
+Saved to $AWS_ACCESS_KEY_ID_RW and $AWS_SECRET_ACCESS_KEY_RW

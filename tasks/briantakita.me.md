@@ -849,3 +849,27 @@ Safe to delete `assets.briantakita.me` on Contabo now. The CI pipeline no longer
 
 Can we delete all references to ASSETS_BRIANTAKITA_ME__BUCKET_URL?
 What url is used to serve the assets?
+
+## Assistant
+
+**Can't delete it** — it's used at runtime in one blog post. The lighthouse scores post (`2024-03-05-squarespace-site-lighthouse-scores.md.ts`) uses `ASSETS_BRIANTAKITA_ME__BUCKET_URL` to construct iframe URLs for lighthouse report HTML files.
+
+The deployed site currently has **hardcoded Contabo URLs**:
+```
+https://usc1.contabostorage.com/assets.briantakita.me/lighthouse/artipsstudio.html
+```
+
+These would break when Contabo storage is deleted.
+
+**Fix:** The lighthouse HTML files are already served from Pages at `https://briantakita.me/assets/lighthouse/...` (verified — 200). So I changed:
+
+- **`.env`**: `ASSETS_BRIANTAKITA_ME__BUCKET_URL=https://briantakita.me`
+- **GitHub secret**: Updated to `https://briantakita.me`
+
+After the next CI deploy, the iframes will point to Pages-served files instead of Contabo. No code changes needed — just the URL value change.
+
+**Assets are served from:** `https://briantakita.me/assets/...` — the same Cloudflare Pages deployment that serves the HTML. All assets (images, fonts, lighthouse reports) are bundled into the static output during build.
+
+## User
+
+Let's use this deployment to change the url to point to briantakita.me...Cloudflare RC2.

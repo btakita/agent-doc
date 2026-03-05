@@ -1382,3 +1382,11 @@ Are there other online office software that can be used instead? It should be us
 ## User
 
 How much would 5 seats of Google Workspace cost?
+
+## Assistant
+
+**$35/mo** ($7/user/month x 5 seats, Business Starter). That's $14/mo more than the current 3-seat estimate. Updated monthly total would be ~$670–845/mo. Want me to update the proposal to 5 seats?
+
+## User
+
+Yes

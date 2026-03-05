@@ -1213,3 +1213,25 @@ Ok...please draft a text that I can send tonight. I will send the detailed propo
 
 The first milestone seems like compared to the 2nd. Can we balance it a bit with the document upload portal?
 Or is the website only with admin section ok for 1st milestone?
+
+## Assistant
+
+Moving the upload portal to M1 makes sense — current split is ~20/70 hours, way unbalanced.
+
+**Revised milestones:**
+- **M1 ($4,000):** Website + document upload portal (Phases 1-2, ~27-36 hours). Judith gets a fully functional site with document intake she can use immediately.
+- **M2 ($4,000):** OCR/TMO integration + notifications + logging + testing (Phases 3-6, ~36-54 hours).
+
+That's roughly 35/45 — much better. The website and portal are naturally coupled anyway.
+
+Updated text for tonight:
+
+Judith — I've been working on a detailed proposal for the TMO + custom automation approach. I'll have the full document ready for you tomorrow morning.
+
+Quick summary: $100/hr, two milestone payments of $4,000 each. First milestone: your new website on Cloudflare plus the document upload portal (secure links for borrowers/investors to submit docs). Second milestone: AI-powered OCR that feeds directly into TMO, plus a notification system tied to Google Calendar.
+
+Monthly costs after that are just TMO (~$600) plus AI/hosting and support as needed. You own everything — code, accounts, domain. I'll walk through the full breakdown tomorrow. If you want to hold off on the MA payment until you've seen the proposal, that would make sense.
+
+## User
+
+Is the proposal ready to send to Judith?

@@ -180,3 +180,124 @@ Can you rediscover how I deployed to contabo?
 ## User
 
 Can we automate the deployment? Is there a better way to do this automation?
+
+## Assistant
+
+### Current State
+
+You already have solid building blocks — the zero-downtime restart script (`app--docker-compose--restart.sh`) is well-designed, and the env validation catches misconfigurations early. But the deployment is fully manual: SSH in, pull, build, restart.
+
+**No CI/CD exists** — no `.github/workflows/`, no Makefile, no automated deployment trigger.
+
+### Recommended Approach: GitHub Actions + SSH Deploy
+
+The simplest automation that fits your existing setup:
+
+**Option A: SSH-based deploy (minimal change)**
+
+A single GitHub Actions workflow that SSHs to the Contabo VPS and runs your existing scripts:
+
+```yaml
+# .github/workflows/deploy.yml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Contabo
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 213.173.111.134
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /path/to/briantakita.me-dev
+            git pull --recurse-submodules
+            bun install
+            bun run build
+            docker-compose--build
+            app--docker-compose--restart
+```
+
+Pros: Reuses existing scripts, minimal new code, zero-downtime already works.
+Cons: Build happens on VPS (uses server resources).
+
+**Option B: Build in CI, push image, deploy (cleaner)**
+
+Build the Docker image in GitHub Actions, push to GitHub Container Registry (ghcr.io), then SSH to pull and restart:
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Build & push image
+        run: |
+          docker build -f d.briantakita.me.Dockerfile -t ghcr.io/btakita/briantakita.me:latest .
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u btakita --password-stdin
+          docker push ghcr.io/btakita/briantakita.me:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: 213.173.111.134
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            docker pull ghcr.io/btakita/briantakita.me:latest
+            cd /path/to/briantakita.me-dev
+            app--docker-compose--restart
+```
+
+Pros: Build doesn't tax the VPS, reproducible images, rollback by re-tagging.
+Cons: More setup (GHCR auth, update docker-compose to use registry image).
+
+### Also Recommended: Makefile
+
+A Makefile ties everything together for both CI and manual use:
+
+```makefile
+.PHONY: dev build deploy restart
+
+dev:
+	set -a && source .env && set +a && bun run dev
+
+build:
+	set -a && source .env && set +a && bun run build
+
+docker-build:
+	docker compose -f d.briantakita.me.docker-compose.yml build
+
+deploy: build docker-build restart
+
+restart:
+	./app/-briantakita.me-dev-bin/bin/app--docker-compose--restart.sh
+
+assets-upload:
+	./app/-briantakita.me-dev-bin/bin/assets--upload--sync.sh
+```
+
+### My Recommendation
+
+**Start with Option A** — it's 15 minutes of work, reuses everything you have, and gives you push-to-deploy immediately. Upgrade to Option B later if VPS build times become a problem.
+
+Add the Makefile regardless — it documents the workflow and makes both manual and CI usage consistent.
+
+Want me to implement one of these?
+
+## User
+
+Let's do Action B. I want to see if we can have a deployment work. I'm not certain if my ssh keys work with the Contabo instance. Please help me troubleshoot.
+

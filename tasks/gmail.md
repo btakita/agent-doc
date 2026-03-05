@@ -109,3 +109,34 @@ Note: The draft had to be moved to `/home/brian/work/btakita/mail/drafts/` for `
 Please remove this reoccurring weekly calendar event from my google calendar.
 
 Tues 10:30 AM Eastern
+
+Please add a calendar management feature to Corky
+
+## Assistant
+
+### Calendar Event Removal
+
+**Can't delete the "Sprint Review" event directly** — no authenticated Google Calendar API access is set up. `gcalcli` is now installed but needs OAuth credentials (interactive browser flow).
+
+**Quick manual removal:** Open Google Calendar → click "Sprint Review" (Tues 10:30 AM) → trash icon → "All events" to delete the series.
+
+### Calendar Management in Corky
+
+This is a natural extension. Corky already has Gmail OAuth — Calendar just needs the `https://www.googleapis.com/auth/calendar` scope added. Proposed feature set:
+
+**Commands:**
+- `corky cal list` — list upcoming events
+- `corky cal delete <query>` — delete event(s) by search
+- `corky cal add` — create event from TOML/frontmatter
+- `corky cal sync` — sync calendar to local files (like mail sync)
+
+**Implementation:**
+1. Add `google-calendar3` crate (or extend existing `google-gmail1` OAuth with Calendar scope)
+2. Store Calendar OAuth token alongside existing Gmail token
+3. Event CRUD via Google Calendar API v3
+
+**To unblock right now:** Set up `gcalcli` with OAuth, then I can delete the Sprint Review event. Run `gcalcli list` in a terminal with a browser available to complete the auth flow.
+
+## User
+
+Implement in corky please.

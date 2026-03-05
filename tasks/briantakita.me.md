@@ -187,4 +187,23 @@ Want me to start with a test deployment to Pages using the existing build output
 
 ## User
 
-If my assets are http cached, would that count against E2 bandwidth? 
+If my assets are http cached, would that count against E2 bandwidth?
+
+## Assistant
+
+No — **R2 has zero egress fees**, period. Caching doesn't even matter for cost:
+
+- **R2 egress**: Always free (unlike S3/GCS which charge per GB)
+- **CDN caching**: Cloudflare's CDN caches assets at edge nodes automatically. Cached requests don't hit R2 at all — but even if they did, egress is still free
+- **R2 costs**: Only **storage** ($0.015/GB/month after 10GB free) and **operations** (Class A writes: $4.50/M after 1M free; Class B reads: $0.36/M after 10M free)
+
+For a blog with maybe 1-2GB of images/assets, you'd be well within the free tier. And your hashed browser bundles (`*.js`, `*.css`) get immutable cache headers, so they're served from CDN cache on repeat visits — R2 reads are minimal.
+
+**Bottom line**: R2 is effectively free for your use case.
+
+## User
+
+R2 activated
+
+> Want me to start with a test deployment to Pages using the existing build output?
+yes

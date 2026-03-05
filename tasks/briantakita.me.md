@@ -324,3 +324,7 @@ Want me to implement this and do a test deployment?
 ## User
 
 Do we actually need a http server? Can we just simulate the http request using function calls?
+
+I'm planning on using Hono for Judith's app for the Equity Funding Source backoffice and loan document collection.
+
+Should we begin converting briantakita.me over to Hono? Or is pure cloudflare functions sufficient? Or would that create lock-in to Cloudflare?

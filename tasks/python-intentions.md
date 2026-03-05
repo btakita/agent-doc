@@ -146,3 +146,25 @@ Thank you.
 ## User
 
 
+
+## Assistant
+
+Good draft — concise and to the point. Your "See" is missing the link though. Here's a polished version:
+
+---
+
+I'm having the same issue with my plugin **Python Intentions** ([marketplace page](https://plugins.jetbrains.com/plugin/30074-python-intentions)).
+
+See my thread: [Verification errors for Python-dependent plugin (false positives against IU builds)](https://platform.jetbrains.com/t/verification-errors-for-python-dependent-plugin-false-positives-against-iu-builds/3813)
+
+This is my first plugin, so I believe I need a resolution for the plugin to be approved and released.
+
+Thank you.
+
+---
+
+The key addition is linking both your thread and plugin page so JetBrains staff can cross-reference. Want to use this version or adjust?
+
+## User
+
+compact this file

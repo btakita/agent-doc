@@ -140,3 +140,19 @@ Working tree clean. 132 commits ahead of origin. Push?
 ## User
 
 audit docs
+
+## Assistant
+
+Ran `audit-docs` across all submodules:
+
+- **corky**: Clean — no issues
+- **instruction-files**: Library crate, no audit binary (skipped)
+- **agent-doc**: 4 issues:
+  - `SKILL.md`, `CLAUDE.md`, `SPEC.md` — older than `src/patch.rs` (potentially stale)
+  - `CLAUDE.md:77-91` — large table warning (14 rows)
+
+Want me to review and update the 3 stale agent-doc docs?
+
+## User
+
+yes

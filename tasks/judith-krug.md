@@ -242,7 +242,7 @@ Stack: WordPress (Twenty Twenty-Four theme) + Elementor Pro + WPForms + Bookly +
 5. **Page speed** — Elementor + Twenty Twenty-Four is heavy. Defer unused JS (Bookly loads on every page), purge unused CSS, or migrate to a lighter theme
 6. **Replace Google Forms** — loan application links to Google Forms. Embed WPForms (already installed) or build a proper intake flow. Keeps users on-site.
 7. **Testimonials** — none visible. Add investor and borrower testimonials with Review schema
-8. **Blog content strategy** — target long-tail: "hard money loans Los Angeles", "private money lender California", "bridge loan vs hard money", "how to invest in trust deeds"
+8. **Blog content strategy** — target long-tail: "hard money loans Los Angeles", "private moneylender California", "bridge loan vs hard money", "how to invest in trust deeds"
 9. **Investor portal** — protected area for qualified investors to see deal details, RE 885 docs, opt in
 
 **Larger projects (weeks):**
@@ -256,9 +256,9 @@ Stack: WordPress (Twenty Twenty-Four theme) + Elementor Pro + WPForms + Bookly +
 
 If Judith is going to have ownership...what technology would be the best for her hosting?
 
-Wordpress? Astro? Something else?
+WordPress? Astro? Something else?
 
-I can use relysjs, but it's my own library. I wonder if there is a well designed efficient library that I can use.
+I can use relysjs, but it's my own library. I wonder if there is a well-designed efficient library that I can use.
 
 ## Assistant
 
@@ -294,25 +294,25 @@ Astro is the modern standard for content-heavy marketing sites — pre-renders t
 
 ## User
 
-Does Keystatic mean editing markdown files directly?
+Does Keystatic mean editing Markdown files directly?
 
 ## Assistant
 
-No — Keystatic provides a **web-based admin UI** (form fields, rich text editor) that stores data as markdown/JSON/YAML in git. Judith would see a browser-based editor, not raw markdown. Under the hood it commits to git, so she owns everything with full history.
+No — Keystatic provides a **web-based admin UI** (form fields, rich text editor) that stores data as markdown/JSON/YAML in git. Judith would see a browser-based editor, not raw Markdown. Under the hood it commits to git, so she owns everything with full history.
 
 **But given your correction** — she doesn't need self-service editing, just custody — **you can skip the CMS entirely.**
 
-A CMS doesn't hurt and may be beneficial. So I"ll keep it in mind.
+A CMS doesn't hurt and may be beneficial. So I’ll keep it in mind.
 
-**Revised stack: Astro + markdown + Preact islands**
-- Content in markdown files (blog, FAQ, funded deals)
+**Revised stack: Astro + Markdown + Preact islands**
+- Content in Markdown files (blog, FAQ, funded deals)
 - Astro renders static HTML
 - Preact for interactive islands (calculator, forms)
 - Deploy on Cloudflare Pages (she owns the account)
 - She owns the GitHub repo
 - Any developer can pick it up — no vendor lock, no database
 
-If she ever wants self-service editing later, Keystatic or Decap layers on top of the existing markdown files without changing the codebase.
+If she ever wants self-service editing later, Keystatic or Decap layers on top of the existing Markdown files without changing the codebase.
 
 I'll use relementjs + rmemo for the components.
 
@@ -329,10 +329,10 @@ I'll use relementjs + rmemo for the components.
 ## Assistant
 
 Noted both corrections:
-- **CMS**: Keystatic stays on the radar — easy to add later since it layers on top of markdown content collections
+- **CMS**: Keystatic stays on the radar — easy to add later since it layers on top of Markdown content collections
 - **Components**: relementjs + rmemo instead of Preact for interactive islands
 
-**Updated stack: Astro + markdown + relementjs/rmemo + optional Keystatic**
+**Updated stack: Astro + Markdown + relementjs/rmemo + optional Keystatic**
 
 ## User
 
@@ -372,7 +372,7 @@ Perhaps a cli tool for the staff that works with Claude Code?
 
 **Error-proofing layers:**
 1. **Protected `main`** — no direct pushes. All changes go through PRs.
-2. **Claude Code creates branches** — "add a funded deal for $400K in Pasadena" → Claude makes the branch, adds markdown, opens PR.
+2. **Claude Code creates branches** — "add a funded deal for $400K in Pasadena" → Claude makes the branch, adds Markdown, opens PR.
 3. **Cloudflare preview deploys** — every PR gets a preview URL. Staff checks before going live.
 4. **CI validation** — GitHub Actions checks required fields, valid rates, proper images before merge.
 5. **Auto-merge or your review** — simple content auto-merges after CI. Structural changes need you.
@@ -391,7 +391,7 @@ Abstracts git completely. Validates content. Works alongside Claude Code — sta
 
 **Cloudflare email routing** — `contact@equityfundingsource.com` → Judith's Gmail. Free. No separate email hosting.
 
-**CRM fit:** Staff uses Claude Code to draft investor outreach, pulling deal data from the markdown content. MA handles loans. Claude helps with everything around MA — website, investor materials, follow-ups. If they use HubSpot, its API is accessible to Claude Code too.
+**CRM fit:** Staff uses Claude Code to draft investor outreach, pulling deal data from the Markdown content. MA handles loans. Claude helps with everything around MA — website, investor materials, follow-ups. If they use HubSpot, its API is accessible to Claude Code too.
 
 **Pitch to Judith:** "Your staff talks to Claude in plain English. Claude updates your website, drafts investor materials, manages content. Everything is version-controlled — nothing breaks permanently, you own all of it."
 
@@ -447,9 +447,9 @@ I want an easy interface for editing the content. Does keystatic expect git comm
 3. Fill fields (property, amount, LTV, location, image)
 4. Save → auto-deploys
 
-**Git-based CMS advantage:** No database to manage, no hosting costs for CMS backend, full version history, content is plain markdown files. Drop Keystatic anytime — the content stays.
+**Git-based CMS advantage:** No database to manage, no hosting costs for CMS backend, full version history, content is plain Markdown files. Drop Keystatic anytime — the content stays.
 
-**Works with both Astro and Hono** — Keystatic just manages files in the repo. Whatever reads those markdown files (Astro content collections or your own parser) works the same way.
+**Works with both Astro and Hono** — Keystatic just manages files in the repo. Whatever reads those Markdown files (Astro content collections or your own parser) works the same way.
 
 ## User
 
@@ -530,7 +530,7 @@ Would obsidian integrate with agent-doc?
 *As a content editor:*
 | Pro | Con |
 |---|---|
-| Beautiful markdown editing UX | Needs local git clone |
+| Beautiful Markdown editing UX | Needs local git clone |
 | Live preview | Doesn't auto-deploy (need git push) |
 | Free personal / $50/yr commercial | Redundant with Keystatic for web content |
 
@@ -541,7 +541,7 @@ Can agent-doc integrate with Keystatic with an api?
 For **internal knowledge** (SOPs, investor notes, deal memos, meeting notes), Obsidian is excellent. Things that don't go on the website but the team needs to share.
 
 *Agent-doc integration:*
-**Yes, Obsidian could work with agent-doc.** Agent-doc operates on markdown files — Obsidian edits markdown files. The workflow:
+**Yes, Obsidian could work with agent-doc.** Agent-doc operates on Markdown files — Obsidian edits Markdown files. The workflow:
 1. Staff opens a `.md` file in Obsidian
 2. Writes a prompt in a `## User` block
 3. Runs `/agent-doc` (via terminal or the agent-doc JetBrains/VS Code plugin equivalent)
@@ -568,9 +568,9 @@ There's no Obsidian plugin for agent-doc yet, but it's feasible — Obsidian has
 
 **Agent-doc + Keystatic API:**
 
-They already integrate at the **file level** — both read/write the same markdown files in the same git repo. No API needed. Keystatic writes content, agent-doc can read/respond to it, and vice versa.
+They already integrate at the **file level** — both read/write the same Markdown files in the same git repo. No API needed. Keystatic writes content, agent-doc can read/respond to it, and vice versa.
 
-An API-level integration (using Keystatic's content API for schema validation) is possible but only valuable if you need agent-doc responses to respect Keystatic's field schemas. For plain markdown, file-level sharing is simpler and already works.
+An API-level integration (using Keystatic's content API for schema validation) is possible but only valuable if you need agent-doc responses to respect Keystatic's field schemas. For plain Markdown, file-level sharing is simpler and already works.
 
 **Robustness for non-programmers — you're right, this is the critical gap.**
 
@@ -753,18 +753,18 @@ Ready to review and send. Let me know if you want any changes before sharing.
 
 ## User
 
-Please make sure that the tables are all lined up. We need to make sure that the file is read with monospaced fonts...on windows
+Please make sure that the tables are all lined up. We need to make sure that the file is read with monospaced fonts...on Windows
 
 ## Assistant
 
 Reformatted `mail/contacts/judith-krug/recordings/20260304-meeting-notes-for-sharing.md` with:
 
-- **Fixed-width tables** using aligned columns (no markdown pipe tables — plain text with spacing for monospaced rendering)
-- **Side-by-side comparison table** added comparing MA vs TMO vs TMO+Custom across 11 features
+- **Fixed-width tables** using aligned columns (no Markdown pipe tables — plain text with spacing for monospaced rendering)
+- **Side-by-side comparison table** added comparing MA vs TMO+Custom across 11 features
 - **All text wrapped at ~75 chars** for readability in Notepad/monospaced editors on Windows
 - **Next Steps table** reformatted with aligned columns
 
-The file renders cleanly in any monospaced font (Notepad, VS Code, terminal). No markdown rendering required.
+The file renders cleanly in any monospaced font (Notepad, VS Code, terminal). No Markdown rendering required.
 
 ## User
 
@@ -775,3 +775,78 @@ Here is the transcript and meetings notes. I'll follow up with a breakdown of ta
 --Brian Takita
 
 Attached 20260304-meeting-notes-for-sharingnd 20260304-judith-krug-robert-waldman-diarized
+
+## Assistant
+
+Email looks good. Suggested revision:
+
+Hi Judith and Robert,
+
+Here are the transcript and meeting notes from our call today. I'll follow up with a breakdown of tasks, implementation time estimates, and operational costs.
+
+Best,
+Brian Takita
+>
+> Attached:
+> - 20260304-meeting-notes-for-sharing.md
+> - 20260304-judith-krug-robert-waldman-diarized.txt
+
+Changes:
+- Added names ("Hi Judith and Robert")
+- "meetings notes" → "meeting notes"
+- Fixed "sharingnd" typo in attachment listing
+- "operation costs" → "operational costs"
+- Attachments listed on separate lines for clarity
+
+## User
+
+Judith sent me a text:
+
+I just looked at my bank account and it looks like Mortgage Automator has a pending withdrawal for about 1800. I sent an email to my banker to not put it through but it looks like the pending charge is too late but he can recall it tomorrow he said so I really do have to decide I would think by tomorrow morning if you have a chance, maybe you could give me your thoughts on what your fees might be for the other automations that we would need if I take the mortgage office.
+
+I'm thinking of responding with:
+
+Yes...I'll send you a proposal tomorrow morning. So far it looks straightforward. Normally my rate is $100/hr but I'm flexible for this project. If you want to commit to $5000, I can ensure that at least the web hosting, OCR, Uploads, and notifications are done. I'll probably have time leftover to do some additional work as well. Will have a full list of tasks. Monthly costs will be below MA. But there will be some costs on top of TMO. For AI and web hosting.
+
+---
+
+Given what we know about the requirements, let's figure out what needs to be done if Judith goes with TMO. What I am aware of are:
+- Lender and Borrower portal to upload documents over https web app
+  - Goes into Google Drive or Dropbox
+  - Can be a secure link sent by email
+    - A document to be filled out and/or uploaded can be assigned via the email link
+    - Uploading the documents will populate the Google Drive or Dropbox
+    - Security vulnerablity if shared with 3rd parties
+  - Can be an account with login
+- OCR (Claude, OpenAI, Gemini, or Grok)
+  - Not a high volume (1-5 documents/day)
+  - Broad range of documents including
+    - Hand filled forms
+    - Tax Returns
+    - Bank Account Statements
+    - Company financials
+  - Must be accurately read with data fields filled out
+- Reminder Notifications on a schedule
+  - Fill out forms
+  - Drip Marketing
+    - Managed via Google Calendar
+      - Makes schedule visible and allows to override scheduled notifications
+  - Must be based on state.
+    - Do not send reminder to fill out a form if the form is filled out.
+- Event Logging
+  - Verify that the system events are running as planned
+  - Expose bugs to fix
+
+Architecture
+- Cloudflare workers for server hosting
+  - Transfer public website to Cloudflare
+  - Admin section with login
+- Admin system to send emails for document uploads using a secure link
+- Onboarding and events begin schedule for notifications
+  - All notifications are scheduled on Google Calendar
+  - Satisfying requirements removes associated notification from schedule
+- Document uploads go into Dropbox or Google Drive
+- AI service for OCR and knowledge work on documents.
+  - Triggered by office staff and/or automated
+
+Please draft a text and begin with the implementation plan along with cost and time estimates.

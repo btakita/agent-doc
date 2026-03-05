@@ -207,3 +207,37 @@ R2 activated
 
 > Want me to start with a test deployment to Pages using the existing build output?
 yes
+
+## Assistant
+
+### Correction: SSR Required, Not Pure Static
+
+After building, the output reveals this is **SSR at request time**, not pre-rendered static HTML:
+
+- `dist/browser--dev/` — JS/CSS bundles + images (static assets)
+- `dist/server--dev/` — Server JS bundles (Elysia SSR entry point) + same images
+- **No HTML files** — HTML is rendered per-request by the server bundle
+
+While data is static (all posts imported at build time), the HTML rendering happens at request time. This means we need **Workers SSR** (not just static Pages).
+
+### Build Fixed
+
+Had to fix two issues:
+1. **Missing `fdir` package** — installed in ctx-core-dev's rebuildjs: `bun install` in `ctx-core-dev/lib/relysjs/node_modules/rebuildjs/`
+2. **Env vars** — must `source .env` before build (the `.env` file has values directly, not `$(pass ...)` refs)
+
+Build succeeds: `set -a && source .env && set +a && cd app/briantakita.me && bun ./build.ts`
+
+### Updated Migration Plan
+
+Since SSR is required, we need the **Workers + Pages** approach (not pure static):
+
+1. **Static assets** → Cloudflare Pages serves `dist/browser--dev/` (JS, CSS, images)
+2. **SSR Worker** → `_worker.js` handles HTML rendering (replaces Elysia server)
+3. This requires the `rebuildjs-pages` library discussed earlier to adapt the server build for Workers
+
+This is a bigger lift than a pure static deploy. Want to proceed with the Workers SSR migration, or explore pre-rendering the site as static HTML first (which would be simpler)?
+
+## User
+
+Since we know all of the pages, why can't we generate the static html?

@@ -1451,4 +1451,19 @@ No additional cost impact — standard custom development terms. PDF regenerated
 
 ## User
 
-Please draft an email to Judith and Robert with the attached proposal.
+Please draft an email to Judith CCing Robert with the attached proposal.
+CC Robert Waldman, not Robert Ward.
+
+## Assistant
+
+**Draft created:** `mail/drafts/20260305-judith-proposal.md`
+- To: judithkrug@gmail.com
+- CC: rwaldman100@gmail.com (Robert Waldman)
+- Attachment: `20260305-tmo-proposal.pdf`
+- Subject: Proposal — TMO + Custom Automation for Equity Funding Source
+
+Covers the key points: $8,000 project fee, monthly costs, timeline, savings vs MA, and an offer to do a Zoom walkthrough. Review the draft and let me know if you want changes before pushing.
+
+## User
+
+send it

@@ -60,4 +60,56 @@ I can do transcription with custom software. I already have diarized whisper int
 
 ## User
 
+Which service(s) are easy to transition existing office phone system + cell phone plans? Which services have a good api to access recordings? Which services provide reasonable transcription that can be saved and accessed via AI agents?
 
+## Assistant
+
+### 1. Easy transition (number porting + onboarding)
+
+| Service | Office port | Cell port | Desk phones | Mobile app | Transition ease |
+|---|---|---|---|---|---|
+| **Dialpad** | Free | Yes | IP phones optional | iOS/Android | Easy — port, install app, done |
+| **RingCentral** | Free | Yes | Ships pre-configured | iOS/Android | Easy — white-glove setup |
+| **OpenPhone/Quo** | Free | Yes | App-only | iOS/Android | Easiest — app-only |
+| **GoHighLevel** | Yes | Limited | App/browser | iOS/Android | Moderate — CRM-first |
+| **Google Voice** | Free | **No cell porting** | No | iOS/Android | Limited |
+
+All major services port existing numbers. Staff keeps personal cell separate — business number runs as a second line through the app.
+
+### 2. Best API for recording access
+
+| Service | API | Recording download | Webhook on call end | Notes |
+|---|---|---|---|---|
+| **Twilio** | Best | RecordingUrl in callback | Yes (StatusCallback) | ~$33/mo. No phone UX — needs softphone |
+| **Dialpad** | Good | REST API v2, recording endpoints | Yes (call.completed) | $75/mo. Clean docs |
+| **GoHighLevel** | Good | REST API, call log recordings | Yes | ~$97-$125/mo. Robert already uses |
+| **OpenPhone/Quo** | Good | Recording URL in call object | Yes | $75/mo. Clean REST API |
+
+For your corky Whisper pipeline: Twilio is cheapest, Dialpad/OpenPhone are most practical (good API + good phone app).
+
+### 3. Searchable transcription for AI agents
+
+| Service | Transcription | Searchable? | AI agent access | Cost |
+|---|---|---|---|---|
+| **Dialpad** | Included (all plans) | Full text search across all calls | API: transcript text in call objects | $15/user |
+| **Zoom Phone** | AI Companion included | Searchable transcripts | API: transcript download | $15/user |
+| **RingCentral** | Included | Searchable call logs | API: transcript content endpoint | $20/user; RingSense $60/user extra |
+| **GoHighLevel** | $0.024/min add-on | Via CRM search | API: call transcription data | Variable |
+| **OpenPhone/Quo** | Business+ ($23/user) | Yes | API: transcript in call objects | $23/user |
+
+**For AI agent access:** Dialpad and OpenPhone expose transcript text directly in their API call objects — your agents can query call history, search by keyword, and pull context without downloading audio. Dialpad does this on the $15/user plan.
+
+### Recommendation
+
+**Dialpad at $15/user ($75/mo for 5 users):**
+- Easy transition (port all numbers, install apps)
+- Good API with recording download + transcript text
+- Built-in searchable transcription for quick access
+- Your corky Whisper pipeline for higher-quality diarized transcription
+- AI agents query Dialpad API for call context
+
+**GoHighLevel as complement** (Robert already uses): CRM workflows + call routing. Can coexist with Dialpad or replace it if GHL's phone features are sufficient.
+
+## User
+
+Compare with processing transcripts with recording in house on Cloudflare or another cloud service. Saving transcripts in Cloudflare database or CRM.

@@ -20,350 +20,58 @@ bun run dev                                    # build + start on port 4100
 
 ### ctx-core-dev Symlinking (17 packages)
 
-`ctx-core--link` (runs via `postinstall`) symlinks local ctx-core-dev packages into `node_modules/`. This means local builds use **unreleased** versions vs Docker/CI which installs **published npm versions**.
-
-**Bridge step:** symlinks esbuild/postcss into `ctx-core-dev/node_modules/` pointing to root copies.
-**Dedup step:** replaces nested copies with symlinks to root (prevents TS2322 type mismatches).
+`ctx-core--link` (runs via `postinstall`) symlinks local ctx-core-dev packages into `node_modules/`. Local builds use **unreleased** versions vs Docker/CI which installs **published npm versions**.
 
 Scripts: `app/-briantakita.me-dev-bin/bin/ctx-core--link.sh`, `ctx-core--unlink.sh`
 
-### Contabo VPS
+### Infrastructure
 
-| Field | Value |
-|-------|-------|
-| IP | `207.244.234.186` |
-| User | `admin` |
-| SSH alias | `ssh contabo` |
-| OS | Arch Linux (kernel 6.9.2) |
-| Docker | v26.1.3 |
+**Contabo VPS:** IP `207.244.234.186`, user `admin`, SSH alias `ssh contabo`, Arch Linux, Docker v26.1.3. Containers: briantakita-www-1, traefik, + 6 other sites.
 
-**Docker containers:** briantakita-www-1, traefik, + 6 other sites (cogov, herbaliciosbliss, brookebrodack, peakexistence, prescience-notes, mi-www_site)
-
-**Contabo API creds:** `pass contabo/{client_id,client_secret,password,username}` + env vars in `.env`
-
-### CI/CD Pipeline (Option B — live)
-
-Push to `main` → GitHub Actions builds Docker image → pushes to GHCR → SSH deploys to Contabo VPS.
-
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | Multi-stage: bun install → S3 asset download → app build → slim runtime |
-| `.github/workflows/deploy.yml` | Build/push to GHCR + SSH deploy |
-| `d.deploy.docker-compose.yml` | Deploy compose with `ghcr.io/btakita/briantakita.me-dev:latest` + Traefik labels |
-| `Makefile` | `make dev`, `make docker-build`, `make deploy`, `make restart`, `make stop`, `make assets-upload/download` |
-| `.dockerignore` | Excludes node_modules, .git, ctx-core-dev, letsencrypt, tmp |
+**CI/CD:** Push to `main` → GitHub Actions → Docker image → GHCR → SSH deploy to Contabo. Traefik handles HTTPS + www→non-www redirect.
 
 **GitHub Secrets:** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `ASSETS_BRIANTAKITA_ME__BUCKET_URL`, `LINKUMENT_PUB__BUCKET_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `AWS_BUCKET`
-
-**Traefik routing:** `Host('briantakita.me') || Host('www.briantakita.me')`, HTTPS redirect, www→non-www, Let's Encrypt ACME
-
-```bash
-git push origin main          # auto deploy
-gh workflow run deploy.yml    # manual trigger
-make docker-build             # local build
-make deploy                   # manual VPS deploy
-```
-
-### Blog Post Created
-
-`app/briantakita.me/post/content/2026-03-05-introducing-agent-doc.md.ts` — "Introducing agent-doc: Documents as the UI for AI Agents" (13 sections)
 
 ### Fixes Applied
 
 | Issue | Fix |
 |-------|-----|
 | S3 401 Unauthorized | `.env` needs `source` or mise — `$(pass ...)` not expanded by dotenv |
-| elysia mapResponse removed | Updated relysjs 1.21.73→1.21.74 (uses elysia ^1.4.27) |
+| elysia mapResponse removed | Updated relysjs 1.21.73→1.21.74 |
 | ctx-core MAX_INT32 missing | Updated ctx-core 7.2.32→7.2.33 |
 | postcss@8.5.6 circular import | Pinned `"postcss": "~8.4.49"` in root overrides |
 | esbuild TS2322 type mismatch | Updated ctx-core-dev esbuild `^0.23.1` → `^0.27.3`; dedup with symlinks |
 | tailwindcss v4 PostCSS breakage | Pinned `"tailwindcss": "^3.4.18"` in @rebuildjs/tailwindcss |
-| ctx-core dedup breaks resolution | Bridge esbuild/postcss into ctx-core-dev/node_modules; dedup with symlinks instead of rm |
-| Docker `public` symlink | `app/briantakita.me/public → ../../public`; Dockerfile writes to `public/assets` directly |
-| Docker local vs npm versions | ctx-core-dev symlinks use unreleased versions; pin lockfile to latest published |
+| Docker `public` symlink | Dockerfile writes to `public/assets` directly |
+| Sticky heading truncation | Removed `whitespace-nowrap`, overflow constraints; changed fixed heights to `min-h-*` in `lib/ui--server--briantakita/sticky/index.ts` |
+
+### Blog Post
+
+`app/briantakita.me/post/content/2026-03-05-introducing-agent-doc.md.ts` — "Introducing agent-doc: Documents as the UI for AI Agents"
+
+### Cloudflare Workers Migration (explored, not started)
+
+**Architecture:** Replace Bun/Docker/RelysJS with Workers `fetch()` handler + Cloudflare Pages for static assets. RebuildJS (esbuild) stays for browser build.
+
+**Hono > Elysia** for Workers: first-class Workers support, ~14KB, edge-optimized, Cloudflare-endorsed.
+
+**Proposed library: `rebuildjs-pages`** (~150-200 lines in ctx-core-dev):
+- Server build: bundle everything for Workers (`outfile: 'dist/_worker.js'`, no externals)
+- Port `html_response__new` and `request_ctx` from relysjs (framework-agnostic)
+- Dev: `wrangler pages dev dist/browser --script-path dist/_worker.js`
+
+**What you'd gain:** No Docker/VPS/Traefik, global edge CDN, free tier, simpler CI/CD (`wrangler deploy`), R2 for assets (free egress).
+
+**Local dev:** `wrangler pages dev` runs miniflare (local Workers runtime) with same APIs (KV, R2, D1), static asset serving, hot reload.
 
 ### Pending
 
 - `.env` must be sourced manually (mise doesn't propagate to `bun run` subshells)
 - Tailwind v4 migration for @rebuildjs/tailwindcss (v3 pinned for now)
 - baseline-browser-mapping stale data warning (cosmetic)
+- Cloudflare Workers migration (when ready to move off Contabo)
 
 ## User
 
-If I were to host briantakita.me on Cloudflare workers, what would that look like?
-Should I use hono instead of elysia?
-
-## Assistant
-
-### Cloudflare Workers for briantakita.me
-
-Your site is full SSR with no database — a good fit for Workers. Main changes:
-
-1. **Runtime**: Replace Bun/Docker with Workers `fetch()` handler. RelysJS's `app__start()`, `static_middleware_()`, and `compression_middleware_()` assume a long-running server with filesystem access — those abstractions need replacement.
-
-2. **Static assets**: Move from RelysJS disk-serving to **Cloudflare Pages** (or Workers Static Assets). Browser bundles are already hashed/immutable — deploy as static files with automatic CDN caching.
-
-3. **Build**: RebuildJS (esbuild) stays for browser build. Server build changes to "bundle for Workers" — single output, all deps inlined, no externals.
-
-4. **S3 assets**: Contabo Object Storage assets could stay (fetched at build time) or migrate to **R2** (Cloudflare S3-compatible — free egress).
-
-5. **Deployment**: Replace Docker + GitHub Actions SSH with `wrangler deploy`. Much simpler CI/CD.
-
-### Hono vs Elysia
-
-**Yes, Hono is the better choice for Workers.**
-
-| | Elysia | Hono |
-|--|--------|------|
-| Workers support | Experimental adapter | First-class, built for it |
-| Runtime | Bun-native, others are afterthoughts | Runs everywhere (Workers, Bun, Node, Deno) |
-| Bundle size | Larger (Bun-specific) | ~14KB, edge-optimized |
-| Middleware | Rich but Bun-coupled | Clean, portable, Workers-native |
-| SSR | Via RelysJS | Built-in JSX/HTML streaming |
-| Community | Growing | Large, Cloudflare-endorsed |
-
-### Migration Cost
-
-Your app depends on RelysJS + RebuildJS (both from ctx-core). Moving to Hono + Workers means:
-
-- Replace RelysJS middleware composition with Hono middleware
-- Replace `static_middleware_()` with Workers Static Assets / Pages
-- Drop `compression_middleware_()` (Cloudflare handles compression at the edge)
-- Adapt RebuildJS build output to target Workers
-- Rewrite `start.ts` as a Workers `fetch` handler
-
-### What You'd Gain
-
-- No Docker, no VPS management, no Traefik config
-- Global edge deployment (faster worldwide)
-- Free tier handles most blog traffic
-- Simpler CI/CD (`wrangler deploy` vs Docker → GHCR → SSH)
-- R2 for assets (free egress vs Contabo S3 costs)
-
-### Incremental Approach
-
-Keep local dev on Bun + Elysia, add a Workers adapter as an alternative deployment target, migrate to Hono later if Workers becomes the primary platform.
-
-## User
-
-How can we simulate cloudflare pages on local dev?
-
-## Assistant
-
-### Simulating Cloudflare Pages Locally
-
-**`wrangler pages dev` (recommended)** — Cloudflare's official local dev tool runs miniflare (local Workers runtime):
-
-```bash
-# Static site only
-wrangler pages dev dist/browser --port 4100
-
-# With SSR Worker entry point
-wrangler pages dev dist/browser --script-path dist/_worker.js --port 4100
-```
-
-This gives you: local Workers runtime with same APIs (KV, R2, D1), static asset serving matching Pages behavior, `env.ASSETS.fetch()` for accessing static files from your Worker, and hot reload.
-
-**During migration — run both side by side:**
-
-```bash
-# Terminal 1: existing Bun dev server
-bun run dev                    # port 4100
-
-# Terminal 2: Workers simulation
-wrangler pages dev dist/browser --script-path dist/_worker.js --port 4200
-```
-
-**Pages + Worker SSR architecture:**
-
-```
-dist/
-├── browser/          # Static assets → Pages serves automatically
-│   ├── *.js          # Hashed bundles
-│   ├── *.css
-│   └── assets/       # Images, fonts
-└── _worker.js        # SSR Worker → handles dynamic routes
-```
-
-Pages serves static files first; non-matching requests fall through to `_worker.js`:
-
-```typescript
-// _worker.js
-export default {
-  async fetch(request, env) {
-    // Try static assets first
-    const asset = await env.ASSETS.fetch(request)
-    if (asset.status !== 404) return asset
-    // SSR for dynamic routes
-    return handleSSR(request, env)
-  }
-}
-```
-
-**Recommendation:** Start with `wrangler pages dev` pointed at your existing `dist/browser` output. Develop the `_worker.js` SSR entry point separately. This gives production-faithful local dev with minimal setup.
-
-## User
-
-I presume that we will need to remove relysjs. Can we create a new library using wranger pages dev along with rebuildjs?
-
-## Assistant
-
-### Yes — Replace RelysJS with a Workers-Compatible Library
-
-RelysJS is ~800 lines. Half is build orchestration (reusable via rebuildjs), half is Elysia-specific runtime. The browser build, esbuild plugins, metafile tracking, and ctx-core/rmemo all stay unchanged.
-
-**What relysjs provides today vs Workers replacement:**
-
-| RelysJS Feature | Workers Replacement |
-|----------------|-------------------|
-| `app__start()` — Elysia lifecycle | Workers `export default { fetch }` |
-| `app__attach()` — load middleware | Direct imports in `_worker.js` |
-| `static_middleware_()` — serve from disk | Pages serves static automatically |
-| `compression_middleware_()` — gzip | Cloudflare edge handles this |
-| `html_response__new()` — HTML Response | Keep — already framework-agnostic |
-| `request_ctx__ensure()` — request state | Adapt to Workers `env` model |
-| Hot-reload plugin | `wrangler pages dev --live-reload` |
-
-**Proposed library: `rebuildjs-pages`**
-
-```
-rebuildjs-pages/
-├── server/
-│   ├── build/      # esbuild config targeting Workers (single bundled output)
-│   ├── route/      # html_route_, html_response__new (portable from relysjs)
-│   └── context/    # request_ctx adapted for Workers env
-├── browser/        # re-export from rebuildjs/browser (unchanged)
-└── dev/
-    └── index.ts    # esbuild watch + wrangler pages dev orchestration
-```
-
-**Key server build change:**
-
-```typescript
-// relysjs: externalizes node_modules for Node/Bun
-relysjs_server__build({ external: ['node_modules/...'] })
-
-// rebuildjs-pages: bundles everything for Workers
-rebuildjs_pages_server__build({
-  bundle: true,              // no externals
-  outfile: 'dist/_worker.js',
-  conditions: ['worker'],
-})
-```
-
-**Dev workflow:**
-
-```bash
-# rebuildjs-pages dev orchestrates:
-# 1. esbuild watch → browser bundles to dist/browser/
-# 2. esbuild watch → server bundle to dist/_worker.js
-# 3. wrangler pages dev dist/browser --script-path dist/_worker.js
-```
-
-**Migration path for briantakita.me:**
-
-1. Create `rebuildjs-pages` package in ctx-core-dev
-2. Port `html_response__new` and `request_ctx` from relysjs (mostly framework-agnostic)
-3. Write Workers-targeted server build config
-4. Write `_worker.js` entry using Hono (or raw `fetch`)
-5. Update `build.ts` to use `rebuildjs_pages_server__build`
-6. Test with `wrangler pages dev`
-
-**Estimated scope:** ~150-200 lines of new library code. The bulk of rebuildjs stays unchanged.
-
-## User
-
-Help me with this styling issue
-
-## Assistant
-
-### Styling Issues in the Blog Post
-
-I see two issues in the screenshot:
-
-1. **H1 title truncated** — "Introducing agent-doc: Documents as the UI ..." is cut off with ellipsis
-2. **H2 dark overlay bar** — "The Problem with AI Chat" has a solid background band covering it
-
-**Root cause:** `lib/ui--server--briantakita/sticky/index.ts`
-
-The `sticky__base_class` applies `whitespace-nowrap` + `[&>*]:sm:text-ellipsis` + `bg-skin-fill` to all sticky headings. This forces single-line display with ellipsis truncation, and the `bg-skin-fill` creates the dark background bar for sticky positioning.
-
-**Questions to decide the fix:**
-- Should h1 titles wrap instead of truncate?
-Yes. But I still want to keep the sticky behavior.
-- Is the h2 dark bar a z-index/height issue, or do you want a different visual treatment for sticky h2s?
-- Or should this specific post just have a shorter title?
-
-## Assistant
-
-### Fix: Allow H1 Wrapping While Keeping Sticky
-
-In `lib/ui--server--briantakita/sticky/index.ts`:
-
-1. Remove `whitespace-nowrap` and `[&>*]:sm:text-ellipsis` from `sticky__base_class`
-2. Remove `[&>*]:overflow-x-auto` and `[&>*]:overflow-y-hidden`
-3. Change `h-[2.75rem]` to `min-h-[2.75rem]` on level entries
-
-```typescript
-// Before
-const sticky__base_class = class_('sticky', 'bg-skin-fill', 'text-skin-base', 'whitespace-nowrap',
-	'relative',
-	'[&>*]:w-full',
-	'[&>*]:overflow-x-auto',
-	'[&>*]:overflow-y-hidden',
-	'[&>*]:sm:text-ellipsis',
-	'[&>*]:m-0',
-	'[&>*]:p-0',)
-
-// After
-const sticky__base_class = class_('sticky', 'bg-skin-fill', 'text-skin-base',
-	'relative',
-	'[&>*]:w-full',
-	'[&>*]:m-0',
-	'[&>*]:p-0',)
-```
-
-Sticky positioning and `bg-skin-fill` stay. Shall I make these edits now?
-
-## User
-
-Yes
-
-## Assistant
-
-Done. Edited `lib/ui--server--briantakita/sticky/index.ts`:
-
-1. Removed `whitespace-nowrap`, `[&>*]:overflow-x-auto`, `[&>*]:overflow-y-hidden`, `[&>*]:sm:text-ellipsis` from `sticky__base_class`
-2. Changed `h-[2.75rem]` to `min-h-[2.75rem]` and `h-[1.75rem]` to `min-h-[1.75rem]` on level entries
-
-Titles will now wrap naturally while staying sticky with opaque background. Rebuild and check the result.
-
-## User
-
-commit and push
-
-Will the CI/CD automatically deploy? Can I get a notification if CI has a failure or when the site is deployed
-
-## Assistant
-
-### Committed and Pushed
-
-1. Committed sticky fix in `lib/ui--server--briantakita` submodule and pushed
-2. Updated submodule pointer in `briantakita.me-dev` and pushed to `main`
-
-**CI/CD is running** — Deploy workflow queued (run #22733736741). Yes, pushing to `main` automatically triggers the GitHub Actions deploy pipeline.
-
-### Notifications
-
-GitHub Actions sends email notifications for failed workflows by default (to your GitHub email). For more options:
-
-- **GitHub Settings** > Notifications > Actions: configure email for failed/successful runs
-- **GitHub Mobile app**: push notifications for workflow failures
-- **Slack integration**: Add the GitHub Actions Slack app to get real-time deploy notifications in a channel
-- **`gh` CLI polling**: `gh run watch 22733736741` will wait and report the result in terminal
-
-Want me to monitor this run and report back?
-
-## User
-
-compact this file
+How much would it cost me to run this site. I have the $5/month plan right now on Cloudflare.
+I have 2 apps relating to email routing. Please login to Cloudflare and see what I have and advise.

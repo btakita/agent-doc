@@ -1144,3 +1144,37 @@ Want me to update Phase 3 in the proposal?
 ## User
 
 Yes
+
+I wonder if I should just charge hourly. Would need a way to derisk for Judith.
+
+## Assistant
+
+Updated Phase 3 in both proposals to "AI-Powered OCR + TMO Integration" (16-26 hours). Timeline extended to ~6 weeks. PDF regenerated.
+
+On hourly vs fixed: hourly is more honest given the scope uncertainty, but Judith needs risk protection. Options to de-risk:
+
+**Option A: Hourly with a cap**
+- $100/hr, billed weekly, capped at $8,000 total
+- Judith never pays more than $8K regardless of hours
+- If it takes 60 hours ($6K), she saves $2K
+- If it takes 90 hours, you absorb 10 hours free
+- De-risk: the cap IS the protection
+
+**Option B: Hourly with milestone gates**
+- $100/hr, billed at each milestone
+- Judith can stop after any milestone if she's not satisfied
+- De-risk: she's never locked in beyond the current phase
+- Risk for you: she could stop after the website ($1.5-2K) and not continue
+
+**Option C: Keep the fixed $8K with milestone payments (current proposal)**
+- Simplest to communicate
+- Judith knows exactly what she's paying
+- You absorb overrun risk but benefit if you're efficient
+
+**Recommendation:** Option A (hourly with $8K cap) is the best of both worlds. Judith gets the protection of a fixed price with the fairness of hourly billing. Frame it as: "You pay for actual hours at $100/hr, but never more than $8,000 total." If you finish in 65 hours, she pays $6,500 — that builds trust for the next engagement.
+
+## User
+
+I'm also concerned about the Investor Portal. Not sure how much work to commit to it.
+
+Judith didn't explicitly state that she wanted it capped. But she shared the MA costs, so I want to save her money.

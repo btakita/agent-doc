@@ -293,3 +293,27 @@ Most likely cause: USB debugging not enabled or phone in charging-only mode.
 ## User
 
 Please write the response back to tasks/corky.md
+
+## Assistant
+
+Re: your inline annotation on "I don't see this setting. Where is it!?!" (USB mode):
+
+The USB mode notification only appears **when plugged in via USB**. Location varies by Android version:
+
+- **Android 12+**: Swipe down notification shade → look for "Charging this device via USB" or "USB Preferences" → tap → select **File Transfer / Android Auto**
+- **Samsung**: Settings → Connections → scroll bottom. Or plug in USB, notification shade shows "USB for charging"
+- **Pixel / Stock Android**: Notification appears automatically when plugged in. If not: Settings → Connected devices → USB
+- **Can't find it at all**: Settings → search "USB" in the search bar
+
+If the notification never appears, your cable may be **charge-only** (no data lines). Try a different cable.
+
+**Recommendation: skip ADB entirely.** Install SMS Backup & Restore on the phone, back up locally, then transfer the XML via Google Drive, email to self, or any cloud service. No USB debugging or cable troubleshooting needed.
+
+## User
+
+I have the conversations stored in the Google Drive directory named sms_backup.
+
+Can we have corky work with this integration?
+Note that this sms backup file along with other exports such as TeleGram and Slack exports may also be transferred in Google Drive.
+
+Please allow for configuration in .corky.toml. Do you need credentials for Google or can we use the existing browser session?

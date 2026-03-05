@@ -301,3 +301,62 @@ Want me to implement one of these?
 
 Let's do Action B. I want to see if we can have a deployment work. I'm not certain if my ssh keys work with the Contabo instance. Please help me troubleshoot.
 
+## Assistant
+
+### SSH Troubleshooting Results
+
+**The VPS was likely reinstalled.** Here's what I found:
+
+| Check | Result |
+|-------|--------|
+| Port 25539 (old) | Dead — no response |
+| Port 22 (standard) | Responds with new host keys |
+| Host keys match known_hosts? | No — different keys (old: port 25539, new: port 22) |
+| SSH key offered | `~/.ssh/id_ed25519` (SHA256:prEBP68XvjbYVy+hCCQX5mFYFlctsSyBMXgeMo8AfnU) |
+| Auth result | **Permission denied** — key not in server's `authorized_keys` |
+
+**Diagnosis:** The VPS has been reinstalled or reconfigured since the last deployment. The SSH port changed from 25539 to 22, host keys are different, and your ed25519 public key needs to be re-added.
+
+### To Fix SSH Access
+
+You need to log in via Contabo's web console (VNC/KVM) or their Customer Panel to add your key:
+
+1. **Get your public key:**
+   ```bash
+   cat ~/.ssh/id_ed25519.pub
+   ```
+
+2. **Log into Contabo Customer Panel** → VPS Control → VNC Console (or use the password they sent when the VPS was provisioned)
+
+3. **Add your key on the server:**
+   ```bash
+   mkdir -p ~/.ssh && chmod 700 ~/.ssh
+   echo "YOUR_PUBLIC_KEY_HERE" >> ~/.ssh/authorized_keys
+   chmod 600 ~/.ssh/authorized_keys
+   ```
+
+4. **Clean up stale known_hosts entries locally:**
+   ```bash
+   ssh-keygen -R "[213.173.111.134]:25539"
+   ssh-keyscan 213.173.111.134 >> ~/.ssh/known_hosts
+   ```
+
+5. **Test:**
+   ```bash
+   ssh 213.173.111.134 'echo ok'
+   ```
+
+### Once SSH Works — Next Steps
+
+I'll implement the full Option B pipeline:
+
+1. **Makefile** — `make build`, `make deploy`, `make dev`
+2. **GitHub Actions workflow** — build Docker image, push to GHCR, SSH deploy
+3. **Docker Compose update** — reference GHCR image instead of local build
+4. **SSH config cleanup** — remove old port 25539 reference
+
+Can you access the Contabo Customer Panel to re-add your SSH key? Or do you have the VPS root password?
+
+## User
+
+I have a private ssh key in the contabe secrets. Should I try using the private key?

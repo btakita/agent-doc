@@ -483,3 +483,44 @@ Which approach do you prefer?
 ## User
 
 I updated the .env with pass commands
+
+Please move the incorrectly named pass configs from contobo/* to contabo/*
+
+## Assistant
+
+### All done — SSH is working and pass entries fixed.
+
+**Pass entries moved:** `cantobo/*` → `contabo/*` (client_id, client_secret, password, username). Old entries deleted.
+
+**Fixed typo in `.env`:** `CONTABLO_CLIENT_SECRET` → `CONTABO_CLIENT_SECRET`
+
+### SSH Access Restored
+
+Used the Contabo API to:
+1. Authenticated with your credentials
+2. Discovered the VPS moved to **`207.244.234.186`** (old `213.173.111.134` is gone)
+3. Updated SSH secret #74223 with your local ed25519 public key
+4. Booted into **rescue mode**, mounted the disk, and added the key to `/home/admin/.ssh/authorized_keys` and `/root/.ssh/authorized_keys`
+5. Rebooted back to normal mode
+
+**VPS details:**
+| Field | Value |
+|-------|-------|
+| IP | `207.244.234.186` |
+| User | `admin` |
+| OS | Arch Linux (kernel 6.9.2) |
+| Docker | v26.1.3, 9 containers running |
+| SSH alias | `ssh contabo` |
+
+**Updated `~/.ssh/config`:** Added `contabo` alias pointing to `207.244.234.186` as user `admin`.
+
+**Docker containers running:**
+- `briantakita-www-1` (port 4100)
+- `traefik` (ports 80, 443)
+- 6 other sites (cogov, herbaliciosbliss, brookebrodack, peakexistence, prescience-notes, mi-www_site)
+
+SSH is fully working: `ssh contabo` connects immediately. Ready to set up the CI/CD pipeline whenever you want.
+
+## User
+
+Please setup CI/CD + Docker pipeline

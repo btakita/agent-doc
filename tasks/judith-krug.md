@@ -1270,3 +1270,22 @@ Please make a proposal template which has the styling rules along with a build s
 
 Should Corky have general support for generating pdf, word, and google office docs?
 
+## Assistant
+
+**Margins reduced** — `@page` margins changed from 0.5in/0.6in → 0.35in/0.4in in `mail/templates/proposal.css`. PDF regenerated.
+
+**Template already exists** — `mail/templates/` has `proposal.css` (styling) and `build-pdf.sh` (build script). This IS the template system. Any future proposal: write markdown, run `build-pdf.sh input.md output.pdf`, done. The CSS handles all formatting.
+
+**Corky document generation — yes, scoped as follows:**
+
+| Command | What | How |
+|---------|------|-----|
+| `corky doc build <file.md>` | PDF (default) | pandoc + weasyprint, template CSS via frontmatter |
+| `corky doc build --format docx <file.md>` | Word | pandoc native docx output |
+| `corky doc upload <file>` | Google Docs | Upload PDF/docx to Drive via API → shareable link |
+
+Template selection via frontmatter: `template: proposal` → looks up `mail/templates/proposal.css`. This keeps Corky as a thin orchestrator over pandoc/weasyprint rather than building a document renderer. Google Docs is upload-only (Google Docs API formatting is a rabbit hole).
+
+## User
+
+5-10 calls/day

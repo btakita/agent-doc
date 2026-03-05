@@ -560,4 +560,29 @@ When you're ready, point `briantakita.me` to Pages:
 
 ## User
 
-Please check on the progress of the DNS change. Have I done it correctly?g
+Please check on the progress of the DNS change. Have I done it correctly?
+
+## Assistant
+
+### DNS migration — complete and working
+
+Everything looks correct:
+
+| Check | Result |
+|-------|--------|
+| Nameservers | `dion.ns.cloudflare.com`, `tegan.ns.cloudflare.com` (Cloudflare) |
+| A records | `104.21.33.12`, `172.67.139.162` (Cloudflare IPs) |
+| Custom domain | `briantakita.me` attached to `briantakita-me` Pages project |
+| HTTPS | Valid SSL certificate |
+| Homepage | 200, `<title>Home | Brian Takita</title>` |
+| CSS | `text/css` — correct content type |
+| Server header | `cloudflare` |
+| CF-Ray | Active (serving from EWR edge) |
+
+The site is live on Cloudflare Pages at `https://briantakita.me/`. No longer hitting Contabo.
+
+**Contabo can be decommissioned** whenever you're ready — the DNS is fully pointing to Cloudflare Pages now.
+
+## User
+
+How can you tell that it is being served from Cloudflare edge and not Contabo?

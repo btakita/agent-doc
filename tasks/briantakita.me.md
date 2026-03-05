@@ -531,3 +531,33 @@ But for now, `build-and-serve.ts` with relysjs works. The Hono simplification is
 The site seems to be working. Is app currently being tested using wrangler dev?
 
 Please commit and deploy to Cloudflare. Will work on migrating DNS over to cloudflare after.
+
+## Assistant
+
+### Committed and deployed
+
+**Commits pushed:**
+
+1. **briantakita.me** (submodule): `2f5a027` — Added `prerender.ts` and `build-and-serve.ts`
+2. **briantakita.me-dev** (parent): `dfc228f` — Added `fdir` dependency, updated submodule pointer
+
+**Deployed to Cloudflare Pages:** `https://briantakita-me.pages.dev/` — 171 files, all assets cached from previous deploy.
+
+**Not using wrangler dev** — the site is prerendered static HTML served directly by Cloudflare Pages CDN. No Workers runtime, no dev server in production. The build flow is:
+
+```
+bun ./build-and-serve.ts → bun ./prerender.ts → cp assets → wrangler pages deploy
+```
+
+### DNS migration
+
+When you're ready, point `briantakita.me` to Pages:
+
+1. **Add custom domain in Cloudflare:** Dashboard → Pages → briantakita-me → Custom domains → Add `briantakita.me`
+2. **DNS:** If domain is on Cloudflare DNS, it auto-creates the CNAME. Otherwise, create a CNAME: `briantakita.me → briantakita-me.pages.dev`
+3. **Verify:** Pages will provision an SSL certificate automatically
+4. **Decommission Contabo** once DNS propagates and site is confirmed working
+
+## User
+
+Please check on the progress of the DNS change. Have I done it correctly?g

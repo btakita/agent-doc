@@ -1293,3 +1293,23 @@ Only work on corky doc build. stash the upload feature for later.
 ## User
 
 Annotate 5-10 calls as 5-10 calls/day
+
+## Assistant
+
+**`corky doc build` — implemented.** New CLI command working:
+- `corky doc build <file.md>` → PDF via pandoc + weasyprint (default)
+- `corky doc build --format docx <file.md>` → DOCX via pandoc
+- `--template NAME` for CSS template selection, frontmatter `template:` as fallback (defaults to "proposal")
+- `corky doc upload` stubbed with "coming soon" message
+- Files: `corky/src/doc/{mod,build}.rs`, updated `cli.rs`, `main.rs`, `lib.rs`, `resolve.rs`
+
+**"5-10 calls" → "5-10 calls/day"** — annotated in both proposal files:
+- `mail/contacts/judith-krug/20260305-tmo-proposal.md` (plain text version)
+- `mail/contacts/judith-krug/20260305-tmo-proposal-pdf.md` (PDF source)
+- PDF regenerated via `corky doc build`
+
+## User
+
+Why is there a separate 20260305-tmo-proposal.md and 20260305-tmo-proposal-pdf.md?
+
+20260305-tmo-proposal-pdf.pdf is redundant. I renamed it but let's try to consolidate to a single markdown and basename.

@@ -524,3 +524,60 @@ SSH is fully working: `ssh contabo` connects immediately. Ready to set up the CI
 ## User
 
 Please setup CI/CD + Docker pipeline
+
+## Assistant
+
+### CI/CD Pipeline — Complete and Deployed
+
+The full Option B pipeline is live and working. Push to `main` → GitHub Actions builds Docker image → pushes to GHCR → SSH deploys to Contabo VPS.
+
+**Pipeline run:** https://github.com/btakita/briantakita.me-dev/actions/runs/22726827533
+- **build-and-push:** 3m28s (Docker build + push to GHCR)
+- **deploy:** 1m10s (SSH pull + docker compose up on Contabo)
+- **Site live:** `https://briantakita.me/` returning 200
+
+#### Files Created
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage build: bun install → S3 asset download → app build → slim runtime |
+| `.github/workflows/deploy.yml` | GitHub Actions: build/push to GHCR + SSH deploy to Contabo |
+| `d.deploy.docker-compose.yml` | Deploy compose referencing `ghcr.io/btakita/briantakita.me-dev:latest` |
+| `Makefile` | Local dev, Docker build, VPS deploy/restart/stop, asset sync |
+| `.dockerignore` | Excludes node_modules, .git, ctx-core-dev, etc. |
+
+#### Issues Resolved During Setup
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| `mapResponse` not found in elysia | relysjs@1.21.73 imports removed export from elysia 1.4.x | Updated relysjs to 1.21.74 (npm published) |
+| `MAX_INT32` not found in ctx-core | ctx-core@7.2.32 missing export | Updated ctx-core to 7.2.33 |
+| `mkdir: cannot create directory 'public'` | `app/briantakita.me/public` is a symlink to `../../public` | Changed Dockerfile to write to `public/assets` directly |
+| `ASSETS_BRIANTAKITA_ME__BUCKET_URL` empty | GitHub secret not set properly | Re-set with `gh secret set --body` |
+| GitHub secrets missing | Previous session's `gh secret set` didn't persist | Set all 9 secrets via `gh secret set -R btakita/briantakita.me-dev` |
+
+#### Key Insight: ctx-core-dev Symlinks vs Docker
+
+Locally, `ctx-core--link.sh` symlinks 17 packages from `ctx-core-dev/` into `node_modules/`. This means local builds use **unreleased** versions. Docker uses `bun install --frozen-lockfile` which installs **published npm versions**. Several npm packages were behind the local symlinked versions, causing export-not-found errors. Fix: update lockfile to pull latest published versions.
+
+#### GitHub Secrets Configured
+
+`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `ASSETS_BRIANTAKITA_ME__BUCKET_URL`, `LINKUMENT_PUB__BUCKET_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `AWS_BUCKET`
+
+#### Usage
+
+```bash
+# Automatic: push to main triggers deploy
+git push origin main
+
+# Manual trigger from CLI
+gh workflow run deploy.yml
+
+# Local Docker build + test
+make docker-build
+
+# Manual VPS deploy
+make deploy
+```
+
+## User

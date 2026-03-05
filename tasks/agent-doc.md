@@ -220,3 +220,33 @@ Publish as-is (v0.1.0) or add version check first (v0.1.0 with check)?
 ## User
 
 Is there a way to make agent-doc install the JetBrains plugin without having to go through the JetBrains marketplace?
+
+## Assistant
+
+### Installing Without the Marketplace
+
+Yes, several options:
+
+**1. `agent-doc plugin install` CLI command (best for automation)**
+- Download the signed zip from GitHub Releases
+- Copy to the IDE's plugins directory (auto-detect from `~/.local/share/JetBrains/*/` or `~/Library/Application Support/JetBrains/*/`)
+- Prompt user to restart IDE
+- Could also handle updates: `agent-doc plugin update`
+
+**2. Custom Plugin Repository**
+Host `updatePlugins.xml` on GitHub Pages. Users add the URL once in `Settings > Plugins > Manage Plugin Repositories`. Plugin then appears in the Plugins tab with auto-updates — no marketplace needed.
+
+**3. Direct zip install**
+`Settings > Plugins > Install Plugin from Disk...` — manual, but always works.
+
+**Recommended strategy:**
+- Ship plugin zip as a GitHub Release asset alongside the CLI binary
+- Add `agent-doc plugin install` command for one-liner setup
+- Also publish to Marketplace for discoverability (users who find it there get auto-updates)
+- Both channels coexist — marketplace for discovery, CLI for automation
+
+Want me to implement the `agent-doc plugin install` command?
+
+## User
+
+I would need a separate Jetbrains and vs-code plugin install

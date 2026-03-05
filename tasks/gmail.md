@@ -477,3 +477,18 @@ Deleted 25 event(s).
   2030-07-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300725
   2030-08-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300825
 ```
+
+## Assistant
+
+**Fixed `--all` behavior.** The bug: without `--all`, delete was removing 25 individual instances at a time, but the recurring series keeps generating new ones forever. With `--all`, it was still iterating instances instead of deleting the series root.
+
+**Now `--all` deduplicates by `recurring_event_id` and deletes the series root event** — one API call per series, removes all past and future instances.
+
+Rebuilt and installed. Use:
+```bash
+corky cal delete 'National Grid Autopay' --all
+```
+
+## User
+
+Release this

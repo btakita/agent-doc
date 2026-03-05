@@ -190,3 +190,63 @@ Ensure Google Calendar API is enabled in your Cloud Console project before runni
 ## User
 
 corky cal list 403 response
+
+## Assistant
+
+The 403 means the **Google Calendar API is not enabled** in your Cloud Console project. Fix:
+
+1. Go to https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
+2. Select the same project used for Gmail OAuth
+3. Click **Enable**
+4. Re-authenticate: `corky cal auth` (needed to get a token with Calendar scope)
+5. Retry: `corky cal list`
+
+## User
+
+
+```
+❯ corky cal list
+Error: Calendar API returned 403 Forbidden: {
+  "error": {
+    "code": 403,
+    "message": "Google Calendar API has not been used in project 873280095295 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.",
+    "errors": [
+      {
+        "message": "Google Calendar API has not been used in project 873280095295 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.",
+        "domain": "usageLimits",
+        "reason": "accessNotConfigured",
+        "extendedHelp": "https://console.developers.google.com"
+      }
+    ],
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "SERVICE_DISABLED",
+        "domain": "googleapis.com",
+        "metadata": {
+          "service": "calendar-json.googleapis.com",
+          "serviceTitle": "Google Calendar API",
+          "activationUrl": "https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295",
+          "consumer": "projects/873280095295",
+          "containerInfo": "873280095295"
+        }
+      },
+      {
+        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",
+        "locale": "en-US",
+        "message": "Google Calendar API has not been used in project 873280095295 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry."
+      },
+      {
+        "@type": "type.googleapis.com/google.rpc.Help",
+        "links": [
+          {
+            "description": "Google developers console API activation",
+            "url": "https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=873280095295"
+          }
+        ]
+      }
+    ]
+  }
+}
+```

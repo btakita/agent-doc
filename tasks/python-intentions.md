@@ -40,3 +40,17 @@ The verification "errors" are a known false positive — the marketplace verifie
 ## User
 
 Is there any configuration that can be done to make these tests pass?
+
+## Assistant
+
+No — the marketplace verification runs server-side and there's no way to control which IDEs it tests against. The IU tests *correctly* fail because bare IntelliJ IDEA genuinely lacks PythonCore.
+
+**These errors don't block approval.** JetBrains has already addressed this pattern — the marketplace handles `<depends>com.intellij.modules.python</depends>` correctly. The plugin shows as available in IDEA/CLion/GoLand/etc. and the marketplace suggests installing the Python plugin alongside it. The verification "errors" for IU builds are informational only.
+
+For **local CI**, I already added the `pluginVerification` block targeting PyCharm builds — `./gradlew verifyPlugin` passes cleanly. That's the verification you can control.
+
+If the plugin is actually stuck in approval, file a support request at [JetBrains Platform](https://platform.jetbrains.com/) — but based on the marketplace behavior, these errors should be auto-ignored.
+
+## User
+
+Please help me with a message for the plugin

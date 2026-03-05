@@ -359,4 +359,57 @@ Can you access the Contabo Customer Panel to re-add your SSH key? Or do you have
 
 ## User
 
-I have a private ssh key in the contabe secrets. Should I try using the private key?
+I have a private ssh key in the Contabo secrets. Should I try using the private key?
+
+## Assistant
+
+Yes — if Contabo generated an SSH key pair when provisioning the VPS, the corresponding private key would let you log in. This is different from your local `~/.ssh/id_ed25519` key.
+
+### How to use it
+
+1. **Download the private key from Contabo Customer Panel** (Secrets section)
+
+2. **Save it locally:**
+   ```bash
+   # Save the key (e.g., to ~/.ssh/contabo_key)
+   # Make sure the file has the right permissions:
+   chmod 600 ~/.ssh/contabo_key
+   ```
+
+3. **Test with that key:**
+   ```bash
+   ssh -i ~/.ssh/contabo_key root@213.173.111.134 'echo ok'
+   ```
+   Note: Contabo-provisioned keys usually go to the `root` user, not `brian`.
+
+4. **If that works, add your ed25519 key to the server:**
+   ```bash
+   ssh -i ~/.ssh/contabo_key root@213.173.111.134 \
+     "mkdir -p /home/brian/.ssh && \
+      echo '$(cat ~/.ssh/id_ed25519.pub)' >> /home/brian/.ssh/authorized_keys && \
+      chmod 700 /home/brian/.ssh && chmod 600 /home/brian/.ssh/authorized_keys && \
+      chown -R brian:brian /home/brian/.ssh"
+   ```
+
+5. **Then test with your normal key:**
+   ```bash
+   ssh 213.173.111.134 'echo ok'
+   ```
+
+### Also: clean up known_hosts
+
+The old port 25539 entries will cause issues. Run:
+```bash
+ssh-keygen -R "[213.173.111.134]:25539"
+```
+
+Go ahead and download the key from Contabo — once you have SSH working, I'll set up the full CI/CD pipeline.
+
+## User
+
+❯ ssh -i ~/.ssh/contabo_key root@213.173.111.134 'echo ok'
+root@213.173.111.134's password:
+Permission denied, please try again.
+root@213.173.111.134's password:
+Permission denied, please try again.
+root@213.173.111.134's password:

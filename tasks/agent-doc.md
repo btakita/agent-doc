@@ -142,3 +142,18 @@ Please look at the current tmux pane layout being out of sync with the editor la
 ## User
 
 Do we need to have a window? What if we just detach the inactive panes?
+
+## Assistant
+
+The stash window exists purely for cosmetics — grouping idle panes into one window so `tmux list-windows` isn't cluttered. But it introduces complexity and caused this bug.
+
+**Tradeoffs:**
+- **Stash window**: Clean window list, but size limits and this "pane too small" bug
+- **break_pane only**: Simple, always works, no size limits. Each detached pane gets a solo window (more window clutter)
+
+Reconcile already handles re-joining panes from any window, so scattered solo windows don't affect correctness. We could simplify by removing the stash entirely and always using `break_pane`. Want me to do that, or keep the current fix (stash with break_pane fallback)?
+
+## User
+
+I don't want to see extra windows in the session.
+It would be better to hide the stashed panes.

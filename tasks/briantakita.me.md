@@ -476,3 +476,58 @@ Please verify all of the content in the page. Add tests if you have to.
 Can hono run without runnnig a http server?
 I'm wondering if we can simplify the rendering of all pages if we don't need a full http server.
 
+## Assistant
+
+### CSS bug fixed — redeployed
+
+**Root cause:** The prerender was crawling the **dev server** (watch mode) which generates different CSS hashes than `dist/browser--dev/`. The HTML referenced `index.server-I2PUZEQI_ZZC7W6FR.css` but we copied `index.server-FX34QR2D.css` from the build output. Hash mismatch → CSS not found → Pages served HTML for the 404 fallback.
+
+**Fix:** Created `build-and-serve.ts` which builds then starts the server from the same build output. Now the prerendered HTML and `dist/browser--dev/` assets have matching hashes.
+
+**Verification — all passing:**
+
+| Check | Result |
+|-------|--------|
+| Homepage | 200 |
+| CSS (`text/css`) | 200 |
+| JS (`application/javascript`) | 200 |
+| Blog post (introducing-agent-doc) | 200 |
+| Tags page | 200 |
+| Sitemap, RSS, robots.txt | 200 |
+| OG URL | `https://briantakita.me/` |
+| localhost references | 0 |
+
+**Updated prerender flow:**
+```bash
+# Build AND start server (matching hashes)
+bun ./build-and-serve.ts &
+# Wait for server...
+bun ./prerender.ts
+cp -r dist/browser--dev/* dist/static/
+kill %1
+wrangler pages deploy dist/static --project-name briantakita-me
+```
+
+### Hono without HTTP server — yes
+
+`app.fetch(request)` works without `.listen()`. This is exactly how Workers operate — no HTTP server, just a `fetch()` handler:
+
+```typescript
+import { Hono } from 'hono'
+const app = new Hono()
+app.get('/', (c) => c.html('<h1>Hello</h1>'))
+
+// No server needed — call directly
+const res = await app.fetch(new Request('http://localhost/'))
+const html = await res.text() // "<h1>Hello</h1>"
+```
+
+For briantakita.me, when you eventually convert to Hono, the prerender could call `app.fetch()` directly — no HTTP server, no port, no process management. Much simpler.
+
+But for now, `build-and-serve.ts` with relysjs works. The Hono simplification is for Phase 3.
+
+## User
+
+The site seems to be working. Is app currently being tested using wrangler dev?
+
+Please commit and deploy to Cloudflare. Will work on migrating DNS over to cloudflare after.

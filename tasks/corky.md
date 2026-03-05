@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-tmux_session: claude
+tmux_session: '1'
 ---
+
 
 ## Session History
 
@@ -71,3 +72,4 @@ Committed and pushed to corky `main`: `docs: add corky logo to README and mdbook
 
 ## User
 
+tasks/judith-krug.md just implemented pdf and docx generation support. Please verify.

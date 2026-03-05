@@ -1044,4 +1044,22 @@ Also noted your edits to the proposal — good additions: AGENTS.md/CLAUDE.md/SP
 
 ## User
 
-Is this tmo proposal ready to go? Can we have it in pdf format? 
+Is this tmo proposal ready to go? Can we have it in pdf format?
+Should it be in libreoffice, ms office, or Google doc format so Judith can comment and make changes?|
+
+## Assistant
+
+PDF generated at `mail/contacts/judith-krug/20260305-tmo-proposal.pdf` (6 pages, clean formatting with tables, architecture diagram, and all sections).
+
+Created a PDF-optimized version (`20260305-tmo-proposal-pdf.md`) using proper markdown tables instead of fixed-width blocks — renders correctly through pandoc + weasyprint.
+
+On format for Judith to comment: PDF is good for a "final" look but not editable. If you want her to comment and make changes, options:
+
+- **Google Docs** — easiest for collaboration. Upload the PDF or paste the markdown, share with Judith and Robert. They can comment and suggest edits. This is probably best given Judith uses Gmail/Google already.
+- **Word (.docx)** — pandoc can convert directly: `pandoc proposal.md -o proposal.docx`. She can open in Word or LibreOffice. Good for email attachment.
+
+Recommendation: Send both — PDF for the clean read, and share as a Google Doc for comments. Want me to generate a .docx as well?
+
+## User
+
+How about a quick text stating that I'll have the proposal ready tomorrow morning.

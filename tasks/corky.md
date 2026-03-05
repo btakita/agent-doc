@@ -204,3 +204,39 @@ Fields: `address` (phone), `date` (ms epoch), `type` (1=received, 2=sent), `body
 ## User
 
 Implement sms import.
+
+## Assistant
+
+Done. `corky sync sms-import` is implemented, tested, and passing.
+
+**New files:**
+- `src/sync/sms_import.rs` — 270 lines: XML parser, phone normalization, SMS + MMS import, 5 unit tests
+
+**Modified:**
+- `src/sync/mod.rs` — added `pub mod sms_import`
+- `src/cli.rs` — added `SmsImport` variant to `SyncCommands`
+- `src/main.rs` — dispatch to `sms_import::run()`
+- `Cargo.toml` — added `quick-xml` 0.39.2 with serde feature
+
+**Usage:**
+```sh
+corky sync sms-import backup.xml
+corky sync sms-import backup.xml --label sms --account my-phone
+```
+
+**Features:**
+- Parses SMS (`<sms>`) and MMS (`<mms>`) entries
+- Groups by normalized phone number (strips formatting)
+- MMS text parts extracted, binary attachments skipped (base64 images not decoded yet)
+- Thread key: `sms:{normalized_phone}` (e.g., `sms:+15551234567`)
+- Contact names preserved from XML `contact_name` attribute
+- Sent messages (type=2) show as "Me", received (type=1) show contact name
+- Java ms timestamps → RFC 2822 dates
+
+**Tests:** 5 passing — timestamp conversion, phone normalization, XML parsing, and full disk import roundtrip.
+
+`make check` passes: clippy clean, all 35 tests green.
+
+## User
+
+How do I export a conversation with pulsesms?

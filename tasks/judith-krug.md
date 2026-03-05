@@ -1344,3 +1344,19 @@ Would Google Office shared calendar be necessary for this system?
 Would the 3 seats work if there is a single admin account, office account, and a judith account?
 
 Can multiple people use the same login from different locations?
+
+## Assistant
+
+**3 seats: admin + office + judith — yes, works perfectly.** Google Workspace Business Starter is per-user, so 3 seats = 3 separate accounts (e.g. admin@, office@, judith@equityfundingsource.com). Each gets their own email, calendar, and Drive. The admin account would be the super admin for domain management.
+
+**Multiple people on one login — technically yes, but limited.** Google doesn't enforce single-session, so multiple people can log in simultaneously from different locations. However:
+- Security alerts / CAPTCHA for unusual login patterns
+- No audit trail distinguishing who did what
+- Password changes lock everyone else out
+- Google TOS says accounts are for individual use
+
+**Recommended setup:** Use accounts as intended — Judith has hers, office staff share the "office" account (or add seats later at $7/mo each), admin account for system-level access (API keys, calendar service account). Clean audit trails, no login conflicts.
+
+## User
+
+Are there other online office software that can be used instead? It should be user friendly. Do any of the services we are looking at provide calendar, emails, etc?

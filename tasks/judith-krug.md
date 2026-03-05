@@ -688,4 +688,31 @@ Note: Speaker attribution is manual based on conversational context (who respond
 
 Please provide notes on judith-krug/recordings/20260304-judith-krug-robert-waldman-diarized.txt for any useful context and information to clarify understanding of the conversation, fill in missing info, and list action items.
 
-Write the notes into a
+Write the notes into a separate txt file.
+
+## Assistant
+
+Notes written to: `mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-waldman-notes.md`
+
+Contents:
+
+1. **Whisper corrections** — 8 transcription errors identified (e.g., "adopt generation" → doc generation, "retribes" → retirees, "$37" → $1,137)
+
+2. **Key clarifications:**
+   - Robert Waldman ≠ Robert Ward (Ward is the referral, Waldman is Judith's tech/marketing consultant)
+   - Judith worked for Waldman's family's company — that's the TMO familiarity connection
+   - MA $5K setup fee reconciled with the $21K Y1 figure
+   - GoHighLevel: Robert has free enterprise access via a client
+   - Current website host is a third party Judith wants to leave ("control freak")
+   - Judith pushes back on OCR importance — repeat borrowers/lenders already in system
+   - Her #1 concern: doc generation accuracy (TMO is trusted, MA is unproven)
+
+3. **14 action items** with owners and status (contact info exchange, MA website specs, site takeover, Cloudflare setup, Zoom scheduling, transcript delivery, GoHighLevel eval, portal build, OCR research, county record scraping for beneficiaries)
+
+4. **Relationship map** — Robert Ward (referral) → Brian → Judith ← Robert Waldman (advisor)
+
+5. **Platform decision tree** — MA vs TMO comparison as discussed during the call
+
+## User
+
+To clarify, the initial cost is $18,000 including the coding. Please remove the separate $3,000 coding line item.

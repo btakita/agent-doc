@@ -1095,4 +1095,32 @@ For scope: TMO API integration could be part of Phase 3 (OCR) or a standalone ph
 
 Please look through https://developers.themortgageoffice.com/
 
-The OCR -> automated data entry is going to be part of the scope of work 
+The OCR -> automated data entry is going to be part of the scope of work
+
+## Assistant
+
+TMO API is comprehensive. Key endpoints from the test interface at `api.themortgageoffice.com/APITest.html`:
+
+**Loan CRUD:** `NewLoan`, `UpdateLoan`, `GetLoan`, `DeleteLoan`, `GridView`
+**Lender CRUD:** `NewLender`, `GetLender`, `GetLenders`, `GetLenderHistory`
+**Funding:** `AddFunding`, `AddFundingsAsync`
+**Documents:** `GetLoanAttachments`
+**Notes/Comms:** `NewConversation`, `GetLoanConversations`
+**Property/Insurance/Escrow:** Full management endpoints
+
+**OCR → TMO data entry pipeline:**
+1. Document uploaded (PDF/photo/scan)
+2. Claude API (vision) extracts fields → loan app data, borrower info, financial figures
+3. Staff reviews extracted data in admin panel
+4. On approval → `NewLoan` or `UpdateLoan` pushes directly into TMO
+5. Original document stored in Drive/Dropbox
+
+Auth is token-based (`Token` + `Database` headers). Sandbox available for development.
+
+This is a clean integration — TMO's API covers everything needed. The OCR phase in the proposal should reference TMO API integration as the data destination, not just file storage.
+
+Sources: [TMO Developer Portal](https://developers.themortgageoffice.com/), [API Test Interface](https://api.themortgageoffice.com/APITest.html), [Lightning Docs Integration Announcement](https://www.themortgageoffice.com/lightning-docs-and-the-mortgage-office-announce-seamless-api-integration/)
+
+## User
+
+What is the estimated hours to complete the OCR->TMO integration?

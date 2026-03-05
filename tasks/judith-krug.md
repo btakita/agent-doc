@@ -1070,4 +1070,29 @@ How about a quick text stating that I'll have the proposal ready tomorrow mornin
 
 ## User
 
-I need to look into TMO api integration as well. Not sure about scope yet. Do you remember the link to TMO api?
+I need to look into TMO api integration as well. Not sure about scope yet. Do you remember the link to TMO api
+
+https://www.themortgageoffice.com/
+https://www.themortgageoffice.com/resources/
+https://www.themortgageoffice.com/lightning-docs/
+https://www.themortgageoffice.com/knowledge-hub/
+
+## Assistant
+
+TMO has a full API:
+
+- **Developer Portal:** https://developers.themortgageoffice.com/
+- **API Endpoint (US):** https://api.themortgageoffice.com
+- **Test Interface:** https://api.themortgageoffice.com/APITest.html
+- **Sandbox credentials:** Token "TMO", Database "API Sandbox"
+- **Auth:** `Token` and `Database` headers on every request, JSON responses
+
+Your earlier pitch (`20260226-tmo-pitch.md`) already proposed an "intelligence layer" integrating with TMO via API. This means OCR-extracted data could push directly into TMO's loan system — not just into Drive/Dropbox. That's a significant value-add.
+
+For scope: TMO API integration could be part of Phase 3 (OCR) or a standalone phase. Worth exploring the developer portal and sandbox to see what endpoints are available (loan creation, document attachment, borrower/lender lookup, etc.) before committing to scope in the proposal.
+
+## User
+
+Please look through https://developers.themortgageoffice.com/
+
+The OCR -> automated data entry is going to be part of the scope of work 

@@ -1178,3 +1178,25 @@ On hourly vs fixed: hourly is more honest given the scope uncertainty, but Judit
 I'm also concerned about the Investor Portal. Not sure how much work to commit to it.
 
 Judith didn't explicitly state that she wanted it capped. But she shared the MA costs, so I want to save her money.
+
+## Assistant
+
+**Investor Portal** — scope ranges widely:
+
+| Level | What | Hours |
+|-------|------|-------|
+| Minimal | Login-protected page with current offerings, static content | 2-4 |
+| Medium | + view funded loans, payment history via TMO API | 8-14 |
+| Full | + browse offerings, express interest, sign docs, distributions | 20-30+ |
+
+Judith's current workflow is personal (calls/emails investors directly). The portal is aspirational, not an immediate bottleneck. Start with Minimal (2-4 hours) in Phase 1 as a gated section of the main site. Scope Medium for later once core automation is working and TMO API is understood.
+
+**On pricing:** You don't need a cap to save her money — milestone structure gives her control. Frame it as:
+
+> $100/hr, billed weekly. I estimate 63-90 hours. Two milestone payments of $4,000 — review progress at each before proceeding. If work goes faster, you pay less.
+
+Even at 90 hours ($9K), she breaks even vs MA by month 8 and saves $5K+/year after. The MA comparison does the selling. The milestones are the de-risk mechanism — she can pause after Phase 1 if unsatisfied.
+
+## User
+
+Ok...please draft a text that I can send tonight. I will send the detailed proposal tomorrow morning.

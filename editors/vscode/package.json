@@ -15,19 +15,48 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "agentDoc.submit",
-        "title": "Agent Doc: Submit"
+        "title": "Agent Doc: Run (Submit)"
+      },
+      {
+        "command": "agentDoc.claim",
+        "title": "Agent Doc: Claim"
+      },
+      {
+        "command": "agentDoc.syncLayout",
+        "title": "Agent Doc: Sync Layout"
+      },
+      {
+        "command": "agentDoc.popupMenu",
+        "title": "Agent Doc: Menu"
       }
     ],
     "keybindings": [
       {
         "command": "agentDoc.submit",
         "key": "ctrl+shift+alt+a",
+        "when": "editorTextFocus && editorLangId == markdown"
+      },
+      {
+        "command": "agentDoc.claim",
+        "key": "ctrl+shift+alt+c",
+        "when": "editorTextFocus && editorLangId == markdown"
+      },
+      {
+        "command": "agentDoc.syncLayout",
+        "key": "ctrl+shift+alt+l",
+        "when": "editorTextFocus && editorLangId == markdown"
+      },
+      {
+        "command": "agentDoc.popupMenu",
+        "key": "alt+enter",
         "when": "editorTextFocus && editorLangId == markdown"
       }
     ]

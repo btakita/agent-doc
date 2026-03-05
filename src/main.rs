@@ -11,6 +11,7 @@ mod init;
 mod layout;
 mod outline;
 mod patch;
+mod plugin;
 mod prompt;
 mod component;
 mod reset;
@@ -202,8 +203,29 @@ enum Commands {
         #[command(subcommand)]
         command: SkillCommands,
     },
+    /// Manage editor plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+}
+
+#[derive(Subcommand)]
+enum PluginAction {
+    /// Download and install an editor plugin
+    Install {
+        /// Editor: jetbrains, vscode
+        editor: String,
+    },
+    /// Update an installed plugin to the latest version
+    Update {
+        /// Editor: jetbrains, vscode
+        editor: String,
+    },
+    /// List installed editor plugins
+    List,
 }
 
 #[derive(Subcommand)]
@@ -298,6 +320,11 @@ fn main() -> anyhow::Result<()> {
         Commands::Skill { command } => match command {
             SkillCommands::Install => skill::install(),
             SkillCommands::Check => skill::check(),
+        },
+        Commands::Plugin { action } => match action {
+            PluginAction::Install { editor } => plugin::install(&editor),
+            PluginAction::Update { editor } => plugin::update(&editor),
+            PluginAction::List => plugin::list(),
         },
         Commands::Upgrade => upgrade::run(),
     }

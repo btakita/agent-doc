@@ -1286,6 +1286,38 @@ Should Corky have general support for generating pdf, word, and google office do
 
 Template selection via frontmatter: `template: proposal` → looks up `mail/templates/proposal.css`. This keeps Corky as a thin orchestrator over pandoc/weasyprint rather than building a document renderer. Google Docs is upload-only (Google Docs API formatting is a rabbit hole).
 
+Please implement
+
 ## User
 
 5-10 calls/day
+
+## Assistant
+
+**5-10 calls/day → transcription is cheap with self-hosted Whisper.**
+
+At ~15-20 min avg per call:
+- **5 calls/day:** ~1,650-2,200 min/month
+- **10 calls/day:** ~3,300-4,400 min/month
+
+Cost comparison:
+
+| Method | 5 calls/day | 10 calls/day |
+|--------|-------------|--------------|
+| Whisper API ($0.006/min) | $10-13/mo | $20-26/mo |
+| Self-hosted Whisper (Hetzner) | ~$18/mo flat | ~$18/mo flat |
+
+Self-hosted wins at 5+ calls/day and scales without per-minute cost. The telephony research (`tasks/telephony.md`) already validated this — Hetzner CPX41 ($18/mo) handles ~2,000 min/month via CPU-based whisper.cpp at 0.3-0.5x real-time.
+
+**Revised AI cost tiers for proposal:**
+
+| Tier | Includes | Est. cost/mo |
+|------|----------|-------------|
+| Light | OCR only | $10-30 |
+| Moderate | OCR + phone transcription (5-10 calls/day) | $40-70 |
+| Heavy | + document intelligence + investor matching | $80-150 |
+
+Much tighter than the earlier $80-500 range. Self-hosted transcription is the key savings. Want me to update the proposal with these revised numbers?
+
+## User
+

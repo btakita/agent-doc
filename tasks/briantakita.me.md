@@ -707,3 +707,47 @@ Which plan is more economical for large amounts of data? Contabo S3 or R2?
 ## User
 
 Let's migrate to R2
+
+## Assistant
+
+### R2 migration — assets uploaded
+
+**Bucket created:** `briantakita-assets`
+
+**All 95 objects synced** from Contabo S3 → R2 (31MB). Includes images, fonts, lighthouse reports.
+
+### Remaining step: R2 S3 API credentials
+
+The CI workflow uses `aws s3 cp` to download assets during build. R2 is S3-compatible but needs its own API credentials. You need to create these in the Cloudflare Dashboard:
+
+1. Go to **R2 Object Storage** → **Manage R2 API Tokens** → **Create API Token**
+2. Permissions: **Object Read** on bucket `briantakita-assets`
+3. Save the **Access Key ID** and **Secret Access Key**
+
+Then update GitHub secrets:
+
+```bash
+# Update these secrets in github.com/btakita/briantakita.me-dev → Settings → Secrets
+AWS_ACCESS_KEY_ID     → new R2 Access Key ID
+AWS_SECRET_ACCESS_KEY → new R2 Secret Access Key
+AWS_ENDPOINT_URL      → https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com
+AWS_BUCKET            → briantakita-assets
+```
+
+Also update your local `.env`:
+
+```
+AWS_ACCESS_KEY_ID=<R2 access key>
+AWS_SECRET_ACCESS_KEY=<R2 secret key>
+AWS_ENDPOINT_URL=https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com
+AWS_BUCKET=briantakita-assets
+```
+
+The `ASSETS_BRIANTAKITA_ME__BUCKET_URL` secret also needs updating to the R2 public URL (or you can keep it as-is if assets are served via Pages).
+
+Once you create the R2 API token and update the secrets, the CI workflow will pull from R2 instead of Contabo. No code changes needed — same `aws s3 cp` command, different endpoint.
+
+## User
+
+AWS_REGION should be blank?
+Can we rename briantakita-assets to briantakita.me/assets?

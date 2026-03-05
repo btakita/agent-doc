@@ -586,3 +586,35 @@ The site is live on Cloudflare Pages at `https://briantakita.me/`. No longer hit
 ## User
 
 How can you tell that it is being served from Cloudflare edge and not Contabo?
+
+## Assistant
+
+Three indicators:
+
+**1. DNS no longer resolves to Contabo:**
+```
+briantakita.me → 172.67.139.162, 104.21.33.12  (Cloudflare IPs)
+Contabo IP   → 207.244.234.186               (not in DNS)
+```
+
+**2. Response headers are Cloudflare Pages, not Traefik:**
+```
+server: cloudflare
+cf-ray: 9d7c7ac66fb70571-IAD
+cf-cache-status: DYNAMIC
+```
+Contabo runs Traefik, which doesn't add `cf-ray` or `cf-cache-status` headers.
+
+**3. Direct Contabo connection returns empty content:**
+```bash
+curl --connect-to briantakita.me:443:207.244.234.186:443 https://briantakita.me/
+# → content-length: 0  (Traefik still running but serving nothing useful)
+```
+
+The Contabo server is still running but nobody is reaching it — all traffic goes through Cloudflare's edge network now.
+
+## User
+
+Let's convert the github actions to render the pages and deploy to cloudflare if not done yet.
+
+How do I decommission it on Contabo? Can you ssh into the server and decommission the site?

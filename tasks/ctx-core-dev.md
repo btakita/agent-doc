@@ -520,3 +520,24 @@ All 192 packages published successfully (exit code 0).
 
 ## User
 
+Please modify recursive-git-commit to go through all submodules including the dormant:
+
+```
+❯ gs
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+  (commit or discard the untracked or modified content in submodules)
+	modified:   dormant/dist (modified content)
+	modified:   dormant/dormant-catch-all (modified content)
+	modified:   dormant/markdown (modified content)
+	modified:   dormant/polka-types (modified content)
+	modified:   dormant/shell (modified content)
+	modified:   dormant/strip__logger (modified content)
+	modified:   dormant/style (modified content)
+
+no changes added to commit (use "git add" and/or "git commit -a")
+```

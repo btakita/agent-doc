@@ -140,3 +140,37 @@ This is a natural extension. Corky already has Gmail OAuth — Calendar just nee
 ## User
 
 Implement in corky please.
+
+## Assistant
+
+**Implemented.** New `corky cal` module with 3 subcommands:
+
+```bash
+corky cal auth              # OAuth2 flow for Google Calendar scope
+corky cal list              # List upcoming events (--limit, --query)
+corky cal delete "Sprint Review" --all  # Delete recurring series by name
+corky cal delete "Sprint Review" --dry-run  # Preview without deleting
+```
+
+**Files created:**
+- `src/cal/mod.rs` — module exports
+- `src/cal/auth.rs` — OAuth2 flow (reuses Gmail [gmail] credentials from .corky.toml, stores under `calendar:*` token keys)
+- `src/cal/list.rs` — list events via Calendar API v3 with query/limit
+- `src/cal/delete.rs` — delete events by search, with `--all` for recurring series and `--dry-run`
+
+**Files modified:**
+- `src/cli.rs` — added `CalCommands` enum and `Cal` variant
+- `src/main.rs` — dispatch for cal subcommands
+- `src/lib.rs` — added `pub mod cal`
+
+All 30 tests pass. `cargo check` clean.
+
+**To delete the Sprint Review event:**
+1. First authenticate: `corky cal auth` (opens browser for Google Calendar OAuth)
+2. Then: `corky cal delete "Sprint Review" --all` (deletes the entire recurring series)
+
+Note: Calendar API must be enabled in your Google Cloud Console project (same project as Gmail OAuth).
+
+## User
+
+install for testing

@@ -883,3 +883,20 @@ The proposal is ready to attach or reference when texting/emailing Judith.
 ## User
 
 Should I propose $6000 instead of $5000?
+
+## Assistant
+
+$6,000 is reasonable and arguably better positioning:
+
+- Your hour estimate is 55-76 hours. At $100/hr, $5K only covers 50 — the low end of phases 1-4 alone. Phases 5-6 would push past 50.
+- $6,000 = 60 hours, comfortably in the middle of your range. Covers all 6 phases without the "we'll discuss if it goes over" caveat.
+- Still a strong savings story: ~$13.4K year one vs MA's ~$18K = ~$4,600 saved.
+- Psychologically, $6K signals you've budgeted for contingencies — builds confidence.
+
+The $5K number works if you prefer a lower sticker shock and are comfortable billing overages at $100/hr with approval. But $6K is more honest given the scope.
+
+**Recommendation:** Go with $6,000. I can update the proposal to reflect it.
+
+## User
+
+How about $7000 with extra work if I achieve task earlier than 70 hours?

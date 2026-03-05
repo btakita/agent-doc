@@ -1235,3 +1235,17 @@ Monthly costs after that are just TMO (~$600) plus AI/hosting and support as nee
 ## User
 
 Is the proposal ready to send to Judith?
+
+Remove the `If work goes faster than estimated, you pay less.` phrase. I'll just work complete additional work.
+
+## Assistant
+
+Done. Removed that phrase from both proposals and regenerated the PDF. Also fixed a duplicate line in the plain text version.
+
+The proposal is ready to send:
+- `mail/contacts/judith-krug/20260305-tmo-proposal.pdf` — PDF attachment
+- Pricing now just says "If core features complete early, remaining time covers: [bonus scope list]"
+
+## User
+
+Phase 5 & 6 are cross-cutting and will be done inline with the other phases.

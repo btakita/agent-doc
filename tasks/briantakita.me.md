@@ -88,3 +88,34 @@ Done. All libraries updated, build verified, committed, and pushed.
 ## User
 
 Write a detailed blog post about agent-doc
+
+## Assistant
+
+Blog post created, built, committed, and pushed.
+
+**File:** `app/briantakita.me/post/content/2026-03-05-introducing-agent-doc.md.ts`
+
+**Title:** "Introducing agent-doc: Documents as the UI for AI Agents"
+
+**Sections covered:**
+1. The Problem with AI Chat — ephemeral conversations, no editing, disconnected from dev environment
+2. Documents as the UI — markdown files as conversation interface, edit/delete/reorganize/annotate
+3. How It Works — snapshot → diff → send → append → merge → commit loop
+4. Comment Stripping — private scratchpad via HTML/link-ref comments
+5. Concurrent Edit Merging — 3-way merge with `git merge-file` for editing during responses
+6. Components — re-renderable regions with paired markers, patch CLI, modes (replace/append/prepend)
+7. tmux Routing — persistent sessions, multi-document, layout sync, auto-start cascade
+8. Editor Integration — JetBrains + VS Code plugins, hotkeys, permission prompt overlays
+9. Claude Code Integration — `/agent-doc` skill for interactive use
+10. Built with Rust — fast startup, `similar` crate, single binary, 150+ tests
+11. Design Philosophy — documents over chat, diffs over messages, CLI dumb / skill smart, git-native
+12. Getting Started — `cargo install`, `init`, `run`
+13. What's Next — compact, deep, API backend, dashboard templates
+
+**Tags:** agent-doc, ai, developer-tools, open-source, rust, tmux
+
+Build verified, index regenerated, committed to `briantakita.me` submodule, pushed to GitHub.
+
+## User
+
+Can you rediscover how I deployed to contabo?

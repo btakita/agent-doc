@@ -1327,3 +1327,20 @@ Why is there a separate 20260305-tmo-proposal.md and 20260305-tmo-proposal-pdf.m
 Let's add a basic Google Office with 3 seats to the estimate. Remove the GoDaddy line item as well.
 
 Would Google Office shared calendar be necessary for this system?
+
+## Assistant
+
+**Proposal updated:**
+- Added Google Workspace Business Starter (3 seats, $21/mo) — covers email, calendar, Drive
+- Removed GoDaddy line item
+- Updated total: ~$656–831/mo
+- Comparison updated: Year one savings ~$1,350, ongoing savings ~$4,950/year
+- PDF regenerated
+
+**On shared calendar:** The proposal already uses Google Calendar API for the notification system (Phase 4 — schedules visible in Calendar, override by editing events). Google Workspace gives shared calendars across all 3 seats. Not strictly required — could use a service account calendar instead — but since Workspace is already included for email and Drive, shared calendar comes free and makes the notification system more transparent (staff see reminders in their own calendar, can override directly). I'd keep it.
+
+## User
+
+Would the 3 seats work if there is a single admin account, office account, and a judith account?
+
+Can multiple people use the same login from different locations?

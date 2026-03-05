@@ -434,3 +434,5 @@ Now let me implement the prerender script and test locally.
 ## User
 
 done
+
+Can we make the tool introspect the routes rather than having to hard code the routes?

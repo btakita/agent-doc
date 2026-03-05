@@ -413,3 +413,32 @@ Permission denied, please try again.
 root@213.173.111.134's password:
 Permission denied, please try again.
 root@213.173.111.134's password:
+
+## Assistant
+
+**Problem found:** `~/.ssh/contabo_key` contains a **public key**, not a private key. It starts with `ssh-rsa AAAA...` — that's the public half. SSH needs the private half (which starts with `-----BEGIN OPENSSH PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----`).
+
+What Contabo gave you is the public key that's already installed on the server. The private key counterpart is what you need locally.
+
+### Options to get in:
+
+1. **Check Contabo Customer Panel again** — look for a "Private Key" download, separate from the public key. Some providers let you download the private key only once at provisioning time.
+
+2. **Use Contabo's VPS password** — Contabo sends a root password via email when provisioning. Check your email for the original setup email from Contabo. Then:
+   ```bash
+   ssh root@213.173.111.134
+   # Enter the password from the Contabo email
+   ```
+
+3. **Contabo VNC Console** — Log into the Customer Panel → Your Services → Manage → VNC. This gives you console access regardless of SSH. From there, add your key:
+   ```bash
+   echo 'ssh-ed25519 AAAAC3NzaC1...' >> /root/.ssh/authorized_keys
+   ```
+
+4. **Contabo API / Panel SSH key reset** — Some panels let you inject a new SSH key and reboot.
+
+**Most likely path:** Find the original Contabo provisioning email — it has the root password. That's the fastest way in.
+
+## User
+
+I added CONTABO_CLIENT_ID and CONTABLO_CLIENT_SECRET to .env

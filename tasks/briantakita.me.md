@@ -119,3 +119,64 @@ Build verified, index regenerated, committed to `briantakita.me` submodule, push
 ## User
 
 Can you rediscover how I deployed to contabo?
+
+## Assistant
+
+### Contabo Deployment Architecture
+
+**Server:** Contabo VPS at `213.173.111.134` (SSH via `~/.ssh/config`, `ForwardAgent yes`)
+
+**Stack:** Docker + Traefik reverse proxy + Bun app server
+
+#### Infrastructure
+
+| Component | Details |
+|-----------|---------|
+| **App Container** | `oven/bun` base, `NODE_ENV=production`, port 4100 |
+| **Reverse Proxy** | Traefik `beaufort`, ports 80/443, auto HTTPS via Let's Encrypt |
+| **Docker Network** | `web` (shared between app and Traefik) |
+| **Asset Storage** | Contabo Object Storage (S3-compatible) at `usc1.contabostorage.com/assets.briantakita.me` |
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `d.briantakita.me.Dockerfile` | App container build (Bun runtime) |
+| `d.briantakita.me.docker-compose.yml` | App service with Traefik labels |
+| `d.traefik.docker-compose.yml` | Traefik reverse proxy service |
+| `app/vps/fs/etc/traefik/traefik.yml` | Traefik config (ACME, HTTP-01 challenge) |
+| `.env` | AWS/S3 credentials, bucket URL, port |
+
+#### Deployment Scripts (`app/-briantakita.me-dev-bin/bin/`)
+
+| Script | Function |
+|--------|----------|
+| `app--build.sh` | Validates env, installs deps, builds with `NODE_ENV=production` |
+| `docker-compose--build.sh` | Builds Docker images |
+| `docker-compose--init.sh` | Creates `web` Docker network |
+| `docker-compose--up.sh` | Validates env, `docker compose up -d` |
+| `docker-compose--restart.sh` | Stops + restarts containers |
+| `docker-compose--stop.sh` | Stops containers |
+| `traefik--docker-compose--up.sh` | Starts Traefik |
+| `app--docker-compose--restart.sh` | **Zero-downtime restart**: scales up new instance, waits 5s, stops old |
+| `assets--download.sh` / `assets--upload.sh` | Sync assets to/from Contabo S3 |
+
+#### Traefik Routing
+
+- **Rule:** `Host('briantakita.me') || Host('www.briantakita.me')`
+- **TLS:** Let's Encrypt ACME (HTTP-01), cert stored at `/letsencrypt/acme.json`
+- **Middleware:** HTTPS redirect, www → non-www strip, retry (4 attempts, 100ms interval)
+- **ACME Email:** brian.takita@gmail.com
+
+#### Deployment Flow
+
+1. SSH to Contabo VPS (`213.173.111.134`)
+2. `app--build.sh` — validate env, install deps, build to `dist/`
+3. `docker-compose--build.sh` — build Docker image
+4. `docker-compose--up.sh` or `app--docker-compose--restart.sh` (zero-downtime)
+5. Traefik auto-detects container via Docker socket, routes traffic
+6. Assets synced separately via `assets--upload.sh` (S3 CLI)
+
+## User
+
+Can we automate the deployment? Is there a better way to do this automation?

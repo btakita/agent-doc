@@ -124,3 +124,28 @@ Only reason to switch: single-binary distribution without system deps. In that c
 ## User
 
 How do we support install external dependencies such as pandoc and weasyprint? Is there at least a friendly error message of the executables are missing from PATH?
+
+## Assistant
+
+Already handled. `check_tool()` in `src/doc/build.rs` runs `which <tool>` before conversion and fails with install links:
+
+```
+Error: weasyprint not found. Install it:
+  pandoc: https://pandoc.org/installing.html
+  weasyprint: pip install weasyprint
+```
+
+Verified by hiding weasyprint from PATH — the error fires correctly before any conversion attempt.
+
+**Minor improvement opportunity:** The error currently shows both install links regardless of which tool is missing. Could show only the relevant one. Low priority — the message is already clear enough.
+
+**Install support options (if you want to go further):**
+- `corky doc setup` — auto-install via `brew install pandoc` / `pip install weasyprint` (platform-detected)
+- README docs — already sufficient for dev users
+- `install.sh` — could add a `--with-doc` flag to install optional deps
+
+Current state is fine for v0.13.0. The error message catches it early and tells the user exactly what to do.
+
+## User
+
+release

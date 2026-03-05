@@ -728,3 +728,29 @@ Also updated the notes file at `mail/contacts/judith-krug/recordings/20260304-ju
 ## User
 
 Please write notes from the conversation for me to send to Robert & Judith.
+
+Anything that can help Judith line up the facts for her decision would be helpful.
+
+Pros/cons & scenarios would be helpful
+
+## Assistant
+
+Written to: `mail/contacts/judith-krug/recordings/20260304-meeting-notes-for-sharing.md`
+
+Includes meeting summary, website plan, CRM discussion, bottlenecks, next steps, plus a **Platform Comparison** section with three scenarios:
+
+1. **Stay with MA** — $18K Y1, $13K/yr ongoing. Turnkey automations but unproven doc gen, higher cost.
+2. **Switch to TMO** — $600/mo, no setup. Proven doc gen, Judith knows it, but no automations.
+3. **TMO + Custom Tooling** — $600/mo + Brian's dev time. Judith owns the tools, TMO's trusted doc gen, custom-fit automations built incrementally.
+
+Key factors highlighted:
+- Doc generation accuracy is Judith's #1 concern (favors TMO)
+- Repeat borrowers/lenders reduce OCR urgency (weakens MA's main advantage)
+- GoHighLevel (free via Robert) fills CRM/drip/SMS gaps regardless of platform choice
+- Ownership vs. subscription preference favors custom tooling
+
+Ready to review and send. Let me know if you want any changes before sharing.
+
+## User
+
+Please make sure that the tables are all lined up. We need to make sure that the file is read with monospaced fonts.

@@ -1390,3 +1390,5 @@ How much would 5 seats of Google Workspace cost?
 ## User
 
 Yes
+
+I don't see the development costs in the proposal.

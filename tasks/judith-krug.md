@@ -38,7 +38,7 @@ tmux_session: '1'
 Interested in investor outreach with private individuals to expand business (doctors, lawyers, etc.).
 
 **Mortgage Automator pricing:**
-- $18,000 Y1 + $3,000 coding = $21K
+- $18,000 Y1 (includes setup + coding)
 - $13,000/year ongoing ($1,137/month)
 - Unlimited seats, notifications, portals, Hubspot, servicing, RE 855 disclosure
 
@@ -716,3 +716,15 @@ Contents:
 ## User
 
 To clarify, the initial cost is $18,000 including the coding. Please remove the separate $3,000 coding line item.
+
+## Assistant
+
+Fixed. Updated MA pricing in the Meeting Notes section:
+- **Before:** `$18,000 Y1 + $3,000 coding = $21K`
+- **After:** `$18,000 Y1 (includes setup + coding)`
+
+Also updated the notes file at `mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-waldman-notes.md` to reflect the corrected pricing.
+
+## User
+
+Please write notes from the conversation for me to send to Robert & Judith.

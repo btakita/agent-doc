@@ -73,3 +73,26 @@ Committed and pushed to corky `main`: `docs: add corky logo to README and mdbook
 ## User
 
 tasks/judith-krug.md just implemented pdf and docx generation support. Please verify.
+
+## Assistant
+
+Verified. `corky doc build` is fully functional.
+
+**Build:** compiles clean on current `main`.
+
+**PDF test:** `corky doc build /tmp/test.md` → 5.9 KB PDF via pandoc + weasyprint. CSS template system works (reads `template:` from YAML frontmatter, loads `{data_dir}/templates/{name}.css`). Minor weasyprint warnings on responsive CSS properties — cosmetic only.
+
+**DOCX test:** `corky doc build --format docx /tmp/test.md` → 10.5 KB DOCX via pandoc native. Clean output, no warnings.
+
+**Implementation:** `src/doc/build.rs` handles both pipelines. CLI wired in `src/cli.rs` (DocCommands enum). `corky doc upload` is stashed with a "coming soon" message — correct per the judith-krug session scope.
+
+**Gaps to address before release:**
+- SPEC.md needs a `doc build` section (no § exists yet)
+- VERSIONS.md needs an entry for this feature
+- weasyprint CSS warnings could be cleaned up in the proposal template
+
+**Dependencies:** pandoc 3.5 and weasyprint 68.1 — both already installed. No new Rust crate dependencies; the feature shells out to external tools.
+
+## User
+
+Fill in the gaps

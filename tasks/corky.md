@@ -374,4 +374,61 @@ Can I have multiple sms, telegram, slack configurations?
 Basically, I will have several contacts with their own sms, telegram, and slack.
 The sms may also contain several conversations with different contacts.
 
-I'm not sure if 
+I'm not sure if Telegram or Slack exports are per thread or can have multiple threads with different contacts...but I assume they can.
+
+## Assistant
+
+Yes — multiple configurations are fully supported. Here's how each format works:
+
+**SMS:** One XML file contains ALL conversations across all contacts. The existing `sms_import` groups by phone number automatically — one import creates many conversation files (one per contact). No per-contact config needed.
+
+**Telegram:** Desktop export is **per chat** — you export one conversation at a time (Settings → Advanced → Export Chat). Each export is a `result.json` with messages from that one chat. So you'd have one source entry per contact/group.
+
+**Slack:** Workspace export contains **all channels and DMs** in one ZIP. One import = all conversations from that workspace split into separate files.
+
+```toml
+[imports]
+base_path = "~/Google Drive"
+
+# SMS — one file, many conversations inside (splits by phone number)
+[imports.sources.sms-backup]
+path = "sms_backup/sms-20260305.xml"
+format = "sms-backup-restore"
+label = "sms"
+account = "sms"
+
+# Telegram — one entry per chat export
+[imports.sources.tg-alice]
+path = "telegram/alice"
+format = "telegram-json"
+label = "telegram"
+account = "telegram"
+
+[imports.sources.tg-bob]
+path = "telegram/bob"
+format = "telegram-json"
+label = "telegram"
+account = "telegram"
+
+# Slack — one entry per workspace (contains all channels/DMs)
+[imports.sources.slack-work]
+path = "slack/acme-corp.zip"
+format = "slack-zip"
+label = "slack"
+account = "slack-work"
+```
+
+**Summary:**
+
+| Format | Export scope | One import creates |
+|--------|------------|--------------------|
+| SMS B&R XML | All contacts | Many conversations (by phone #) |
+| Telegram JSON | One chat | One conversation |
+| Slack ZIP | Whole workspace | Many conversations (by channel) |
+
+Source names (after `imports.sources.`) are arbitrary — name them whatever makes sense. Each can have its own `label` and `account` for mailbox routing.
+
+## User
+
+This looks good. Please extensively document the "enum" values such as format.
+Please perform validation as well.

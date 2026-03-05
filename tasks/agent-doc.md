@@ -127,3 +127,4 @@ Done. Committed and pushed `specs/pane-groups.md` frontmatter update (`ffb5c53`)
 ## User
 
 
+Please look at the current tmux pane layout being out of sync with the editor layout. Create an automated test for what happened and fix.

@@ -361,4 +361,64 @@ Converting now = rewrite with zero benefit — the deployed site is static HTML 
 
 ## User
 
-Yes. Let's have pre-render be part of the deployment. Should the html files be triggered in github actions or should it be committed into the repo? 
+Yes. Let's have pre-render be part of the deployment. Should the html files be generated in github actions or should it be committed into the repo?
+
+## Assistant
+
+**Generate in CI, don't commit HTML to the repo.**
+
+- **Generated HTML is a build artifact** — committing bloats the repo with 50+ files that change on every edit
+- **CI ensures consistency** — HTML always matches source, no stale files
+- **Simpler workflow** — push → CI builds → prerenders → deploys
+
+The CI pipeline replaces the current Docker-based workflow:
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Cloudflare Pages
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: true }
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+
+      - run: assets--download--sync
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+          AWS_BUCKET: ${{ secrets.AWS_BUCKET }}
+
+      - run: cd app/briantakita.me && bun ./build.ts
+        env:
+          ASSETS_BRIANTAKITA_ME__BUCKET_URL: ${{ secrets.ASSETS_BRIANTAKITA_ME__BUCKET_URL }}
+
+      - run: |
+          cd app/briantakita.me
+          bun run dist/server--dev/index.js &
+          sleep 2
+          bun ./prerender.ts
+          kill %1
+          cp -r dist/browser--dev/* dist/static/
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: pages deploy app/briantakita.me/dist/static --project-name briantakita-me
+```
+
+New secret needed: `CLOUDFLARE_API_TOKEN` (Dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template).
+
+github actions secret? Or a cloudflare secret?
+
+Let me implement the prerender script and test locally first.
+
+## User
+

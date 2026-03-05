@@ -328,3 +328,18 @@ Sticky positioning and `bg-skin-fill` stay. Shall I make these edits now?
 ## User
 
 Yes
+
+## Assistant
+
+Done. Edited `lib/ui--server--briantakita/sticky/index.ts`:
+
+1. Removed `whitespace-nowrap`, `[&>*]:overflow-x-auto`, `[&>*]:overflow-y-hidden`, `[&>*]:sm:text-ellipsis` from `sticky__base_class`
+2. Changed `h-[2.75rem]` to `min-h-[2.75rem]` and `h-[1.75rem]` to `min-h-[1.75rem]` on level entries
+
+Titles will now wrap naturally while staying sticky with opaque background. Rebuild and check the result.
+
+## User
+
+commit and push
+
+Will the CI/CD automatically deploy? Can I get a notification if CI has a failure or when the site is deployed

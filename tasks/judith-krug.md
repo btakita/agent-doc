@@ -850,3 +850,36 @@ Architecture
   - Triggered by office staff and/or automated
 
 Please draft a text and begin with the implementation plan along with cost and time estimates.
+
+## Assistant
+
+Here's a tightened version of your text to Judith:
+
+> Judith — I can build the automation pieces that TMO doesn't include (document upload portal, AI-powered OCR, notification system, event logging) and migrate your website to Cloudflare. Monthly operating costs would be ~$620/mo (TMO ~$600 + AI/hosting ~$20-35). Development: $5,000 flat covering ~50 hours at $100/hr. You'd own everything — source code, hosting account, domain. Year one total ~$12,400 vs MA's ~$18,000. Happy to walk through the details whenever you're ready.
+
+I've created a full proposal at `mail/contacts/judith-krug/20260305-tmo-proposal.md` with:
+
+**Monthly costs:** ~$615-635/mo total (TMO ~$600, Cloudflare $0-5, AI/OCR $10-30, Google Workspace $0, domain $0)
+
+**Development plan (55-76 hours, ~5 weeks):**
+
+| Phase | Deliverable | Hours |
+|-------|------------|-------|
+| 1 | Website migration to Cloudflare (Hono + Workers) | 15-20 |
+| 2 | Document upload portal (secure links, Drive/Dropbox) | 12-16 |
+| 3 | AI-powered OCR (Claude API vision) | 8-12 |
+| 4 | Notification system (Google Calendar-based) | 10-14 |
+| 5 | Event logging & monitoring | 4-6 |
+| 6 | Testing, polish, handoff | 6-8 |
+
+**Savings vs MA:**
+- Year one: ~$5,600 saved ($12.4K vs $18K)
+- Ongoing: ~$6,000/year saved ($7.4K vs $13.6K)
+
+**Ownership:** Judith owns Cloudflare account, GitHub repo, GoDaddy domain, Drive/Dropbox storage, all credentials. Any developer can maintain or extend.
+
+The proposal is ready to attach or reference when texting/emailing Judith.
+
+## User
+
+Should I propose $6000 instead of $5000?

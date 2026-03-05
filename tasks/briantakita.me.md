@@ -274,3 +274,25 @@ rebuildjs_pages_server__build({
 ## User
 
 Help me with this styling issue
+
+## Assistant
+
+### Styling Issues in the Blog Post
+
+I see two issues in the screenshot:
+
+1. **H1 title truncated** — "Introducing agent-doc: Documents as the UI ..." is cut off with ellipsis
+2. **H2 dark overlay bar** — "The Problem with AI Chat" has a solid background band covering it
+
+**Root cause:** `lib/ui--server--briantakita/sticky/index.ts`
+
+The `sticky__base_class` applies `whitespace-nowrap` + `[&>*]:sm:text-ellipsis` + `bg-skin-fill` to all sticky headings. This forces single-line display with ellipsis truncation, and the `bg-skin-fill` creates the dark background bar for sticky positioning.
+
+**Questions to decide the fix:**
+- Should h1 titles wrap instead of truncate?
+Yes. But I still want to keep the sticky behavior.
+- Is the h2 dark bar a z-index/height issue, or do you want a different visual treatment for sticky h2s?
+- Or should this specific post just have a shorter title?
+
+## User
+

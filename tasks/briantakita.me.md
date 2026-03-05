@@ -100,3 +100,48 @@ A screenshot or copy-paste of the dashboard would work. Then I can advise on wha
 ## User
 
 Please use wrangler to discover what I have running
+
+Please symlink ~/work/btakita/cloudflare into this repo
+Please add a git submodule to the same repo as ~/work/btakita/cloudflare. Move the .env and gitignored files into this local copy.
+
+Please symlink this submodule to  ~/work/btakita/cloudflare
+
+## Assistant
+
+### Cloudflare Account Inventory (via wrangler)
+
+**Workers (2):**
+1. **`email-gateway-worker`** — Email handler (created Feb 5, modified Feb 7)
+2. **`email-to-slack-worker`** — Email-to-Slack forwarder (created Feb 5, modified Feb 13)
+
+**Pages (1):**
+- **`wholly-trinity`** — at `wholly-trinity.pages.dev`, last modified 2 years ago. All 24+ deployments show **Failure**. This project appears dead — safe to delete.
+
+**R2:** Not enabled (needs dashboard activation)
+**KV:** No namespaces
+**D1:** No databases
+
+### Submodule Setup — Done
+
+1. Added `cloudflare` as git submodule (`git@github.com:btakita/cloudflare.git`)
+2. Copied `.env` and `.env.production` into the submodule
+3. Ran `bun install` (244 packages)
+4. Replaced standalone `~/work/btakita/cloudflare` with symlink → `agent-loop/cloudflare`
+
+```
+~/work/btakita/cloudflare -> /home/brian/work/btakita/agent-loop/cloudflare
+```
+
+### Recommendations
+
+- **Delete `wholly-trinity`** — dead project, all builds failed
+- **Keep email workers** — active and functional
+- **Enable R2** via dashboard when ready to migrate S3 assets
+- Your **$5/month plan covers everything** for briantakita.me migration
+
+## User
+
+Delete wholly-trinity.
+Enable R2. Please add instructions.
+
+Let's begin migrating briantakita.me over to cloudflare workers. Let's use the wrangler dev environment to verify. This app seems static. Are there any dynamic api endpoints?

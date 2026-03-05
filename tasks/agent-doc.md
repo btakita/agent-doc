@@ -284,3 +284,35 @@ Want me to implement this? ~200 lines of Rust in a new `src/plugin.rs` module.
 ## User
 
 Yes...implement. Need to test VSCode integration as well. Does VSCode have the same SPEC and features as the JetBrains plugin?
+
+## Assistant
+
+### VS Code Extension Status — Far Behind
+
+The VS Code extension only has **1 of 9 features** (submit command, ~45 lines). JetBrains has all 9.
+
+| Feature | JetBrains | VS Code |
+|---------|-----------|---------|
+| Submit | Yes | Yes |
+| Claim | Yes | No |
+| Sync Layout | Yes | No |
+| Tab Sync (auto) | Yes | No |
+| Prompt Polling | Yes | No |
+| Popup Menu | Yes | No |
+| Junie Agent | Yes | No |
+| Auto-save | Yes | No |
+| Split Detection | Yes | No |
+
+### Two Independent Tasks
+
+1. **`agent-doc plugin install`** — Rust module (~200 lines). Useful now for JetBrains.
+2. **VS Code feature parity** — ~500-600 lines TypeScript to match the shared SPEC (`editors/SPEC.md`).
+
+Options:
+- **A)** Plugin install first (quick win)
+- **B)** VS Code parity first (bigger effort)
+- **C)** Both in parallel via subagents
+
+## User
+
+C

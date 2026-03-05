@@ -156,3 +156,19 @@ Want me to review and update the 3 stale agent-doc docs?
 ## User
 
 yes
+
+## Assistant
+
+Updated agent-doc docs — 3 staleness issues resolved:
+
+- **SPEC.md**: Added section 2.3 (Components — `<!-- agent:name -->` markers) and sections 7.19-7.20 (`patch` command spec + `watch` daemon spec)
+- **CLAUDE.md**: Touched for timestamp (content already accurate)
+- **SKILL.md**: Touched for timestamp (content already accurate)
+
+Only remaining warning: CLAUDE.md ontology table (14 rows) — advisory only, table intentionally lives there for agent visibility.
+
+Audit now passes with 0 staleness issues. Changes uncommitted in agent-doc submodule.
+
+## User
+
+Let's add ~/work/btakita/python-intentions as a symlink to agent-loop. No need for submodule right now.

@@ -1200,3 +1200,16 @@ Even at 90 hours ($9K), she breaks even vs MA by month 8 and saves $5K+/year aft
 ## User
 
 Ok...please draft a text that I can send tonight. I will send the detailed proposal tomorrow morning.
+
+## Assistant
+
+> Judith — I've been working on a detailed proposal for the TMO + custom automation approach. I'll have the full document ready for you tomorrow morning.
+>
+> Quick summary: $100/hr, two milestone payments of $4,000 each. First milestone: your new website live on Cloudflare. Second milestone: document upload portal, AI-powered OCR that feeds directly into TMO via their API, and a notification system tied to Google Calendar. Monthly costs after that are just TMO (~$600) plus minimal AI/hosting.
+>
+> You own everything — code, accounts, domain. I'll walk through the full breakdown tomorrow. If you want to hold off on the MA payment until you've seen the proposal, that would make sense.
+
+## User
+
+The first milestone seems like compared to the 2nd. Can we balance it a bit with the document upload portal?
+Or is the website only with admin section ok for 1st milestone?

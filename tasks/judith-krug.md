@@ -1360,3 +1360,25 @@ Can multiple people use the same login from different locations?
 ## User
 
 Are there other online office software that can be used instead? It should be user friendly. Do any of the services we are looking at provide calendar, emails, etc?
+
+## Assistant
+
+**Alternatives comparison (3 seats):**
+
+| Suite | Cost/mo | Calendar | Email | Storage | User-friendly | API support |
+|-------|---------|----------|-------|---------|---------------|-------------|
+| Google Workspace | $21 | Yes | Yes | 30GB/user | Very | Excellent |
+| Microsoft 365 Basic | $18 | Outlook | Outlook | 1TB/user | Very | Good (Graph API) |
+| Zoho Workplace | $9 | Yes | Yes | 30GB/user | Good | Decent |
+| Free Gmail | $0 | Yes | Personal Gmail | 15GB/user | Very | Same APIs, no custom domain |
+
+**Do existing services in the stack provide this?**
+- **TMO** — No. Loan management only.
+- **Cloudflare** — Email routing (forwarding) but no mailboxes or calendar.
+- **GoHighLevel** (bonus CRM) — Has a calendar and email, but CRM-focused (appointment booking, marketing campaigns). Not general office use.
+
+**Recommendation: Stick with Google Workspace.** Judith likely uses Gmail already (minimal learning curve). The notification system is already architected around Google Calendar API. Document portal uses Google Drive. $21/mo is cheap for everything with excellent API support. Switching to Microsoft 365 would mean rewriting Calendar and Drive integrations to Microsoft Graph API. Zoho saves $12/mo but has worse APIs and is less familiar.
+
+## User
+
+How much would 5 seats of Google Workspace cost?

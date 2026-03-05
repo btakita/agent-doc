@@ -602,6 +602,8 @@ mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-.amr
 
 Please make a diarized transcript of the audio. Get Robert's last name from the transcript.
 
+The participants in the conversation were Judith, Robert, and me.
+
 Some notes from the meeting:
 
 It would be beneficial to scrape county record websites for beneficiaries:
@@ -610,4 +612,53 @@ It would be beneficial to scrape county record websites for beneficiaries:
 different requirements for types of loans:
 - mortgage automator does well with doc generator and routing for the loan type
 
-gohighlevel: Robert 
+gohighlevel: Robert
+
+## Assistant
+
+**Robert's last name: Waldman** — identified at 0:34 in the recording ("Hi, Robert Waldman").
+
+### Transcript Summary (51 min, 3-way call: Brian, Judith, Robert Waldman)
+
+**Participants:**
+- **Judith Krug** — CEO, Equity Funding Source
+- **Robert Waldman** — consultant helping Judith with tech stack; family taught Judith the mortgage business; based in Texas; has enterprise GoHighLevel access
+- **Brian Takita** — developer (you)
+
+**Key decisions & facts:**
+
+| Topic | Detail |
+|---|---|
+| **MA status** | Signed agreement, gave account info. 1-2 days to back out. Start: March 24. 45-min orientation + 13 hrs training. |
+| **MA pricing** | ~$1,137/mo + $5,000 setup (doc gen coding). TMO: ~$600/mo, no setup. |
+| **Three bottlenecks** | (1) Data input, (2) chasing documents, (3) producing loan docs. Both systems handle #3. MA automates #1 + #2. |
+| **OCR** | MA's key edge: upload handwritten apps/PDFs → auto-extract to fields. TMO doesn't do OCR. |
+| **County records** | Confirmed: scrape for **beneficiaries** (lenders/investors), not just borrowers. |
+| **GoHighLevel** | Robert has enterprise access (free via client). CRM, funnels, SMS, email, chatbots. Could replace HubSpot. |
+| **Website** | Take control from current person. Domain on GoDaddy. Robert: "start from scratch." |
+| **Site structure** | Main site → borrowers + referring brokers. Separate portal → investors. Separate portal → referring brokers. |
+| **MA integration** | MA will embed links/forms. MA wants to talk to Brian about website specs. |
+| **Staff tech level** | Not sophisticated. Robert could handle tech tasks remotely. |
+| **Loan workflow** | Request → due diligence → offering to investor list → investor takes at a rate → docs → close. Per-deal pricing (no matrix). |
+| **Notebook LM** | Robert uses heavily. Suggested Judith create investor offering decks from loan data. |
+| **Recording consent** | Brian disclosed recording. California two-party consent discussed. |
+
+**Action items from the call:**
+1. Judith finalizes MA decision (1-2 days)
+2. Brian to talk to MA about website integration specs
+3. Robert to send Brian his contact info (email + phone)
+4. Schedule Zoom call to go deeper on requirements
+5. Brian to provide call transcript to Judith and Robert
+
+### Full Transcript
+
+Saved to: `mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-.txt`
+
+Whisper medium model was used (no diarization — speaker labels not automatically assigned). The transcript is ~950 lines covering the full 51-minute call. Key speaker identification points:
+- Judith: discusses her business, staff, mortgage office familiarity
+- Robert Waldman: pitches MA features, discusses GoHighLevel, Notebook LM
+- Brian: discusses Claude Code, website hosting, OCR, county record scraping
+
+## User
+
+Please diarize the transcript.

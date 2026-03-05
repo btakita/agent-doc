@@ -680,3 +680,30 @@ Want me to start the R2 migration?
 ## User
 
 Which plan is more economical for large amounts of data? Contabo S3 or R2?
+
+## Assistant
+
+**Contabo wins on raw storage cost; R2 wins on egress.**
+
+| | Contabo S3 | Cloudflare R2 |
+|---|---|---|
+| **Storage** | 250GB for $2.49/mo (Object Storage S) | $0.015/GB/mo (10GB free) |
+| **1TB storage** | ~$10/mo | $15/mo |
+| **250GB storage** | $2.49/mo | $3.60/mo |
+| **Egress** | 250GB included, then metered | **Always free** |
+| **Operations** | Included | Class A: $4.50/M (1M free), Class B: $0.36/M (10M free) |
+
+**At scale:**
+- **< 250GB storage, high traffic**: R2 wins (free egress offsets higher storage cost)
+- **> 250GB storage, low traffic**: Contabo wins ($2.49 flat for 250GB is hard to beat)
+- **Any amount, high egress**: R2 wins decisively (Contabo charges after 250GB egress)
+
+**For briantakita.me specifically** (1-2GB of images, low traffic): both are effectively free tier. R2 is better because you consolidate on one vendor and get zero egress forever.
+
+**For a future media-heavy project** (100GB+ of video/assets with heavy downloads): Contabo's $2.49/250GB is cheaper on storage, but you'd still want R2 or a CDN in front to avoid egress charges.
+
+**Recommendation:** Use R2 for briantakita.me. If you ever need bulk cheap storage (backups, archives), keep Contabo as an option.
+
+## User
+
+Let's migrate to R2

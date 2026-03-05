@@ -280,3 +280,200 @@ Error: Calendar API error (HTTP 400): {
  }
 }
 ```
+
+## Assistant
+
+**Bug fix:** The `timeMin` parameter wasn't URL-encoded — the `+` in `+00:00` (RFC3339 timezone) was interpreted as a space, causing the 400.
+
+Fixed in `list.rs`, rebuilt and installed. Try `corky cal list` again.
+
+## User
+
+I have a reoccurring series. How do I remove the series entirely?
+
+```
+❯ corky cal delete 'National Grid Autopay'
+Found 25 event(s) matching 'National Grid Autopay':
+  2026-03-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-04-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-05-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-06-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-07-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-08-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-09-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-10-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-11-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2026-12-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-01-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-02-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-03-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-04-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-05-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-06-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-07-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-08-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-09-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-10-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-11-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2027-12-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-01-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-02-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-03-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+
+Deleted 25 event(s).
+~/work/btakita/agent-loop main ⇡126 *8 !8                                                                                                                                                                                          25s 13:14:11
+❯ corky cal list
+  Mon Mar 09, 2026 03:30 PM -04:00 | Senior Python Software Engineer Interview: Brian and Jonathan/Cast & Crew (Backstage) | id:_60q30c1g60o30e1i60o4ac1g60rj8gpl88rj2c1h84s34h9g60s30c1g60o30c1g74o38e1k8grk4hhi85148gpg64o30c1g60o30c1g60o30c1g60o32c1g60o30c1g6d1k2h2574s3cg9l6cp32d9k84s48h218h2kcca16spj4h1m8930
+  Tue Mar 10, 2026 01:00 PM -04:00 | Brian Takita and Jon Gould | id:60p2dm46dmm23tkc8d2r8jd99k
+  2026-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20260911
+  2027-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20270911
+  2028-04-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20280425
+  2028-05-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20280525
+  2028-06-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20280625
+  2028-07-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20280725
+  2028-08-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20280825
+  2028-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20280911
+
+10 event(s).
+~/work/btakita/agent-loop main ⇡126 *8 !8                                                                                                                                                                                              13:14:20
+❯ corky cal delete 'National Grid Autopay'
+Found 25 event(s) matching 'National Grid Autopay':
+  2028-04-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-05-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-06-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-07-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-08-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-09-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-10-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-11-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2028-12-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-01-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-02-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-03-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-04-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-05-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-06-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-07-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-08-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-09-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-10-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-11-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2029-12-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2030-01-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2030-02-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2030-03-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  2030-04-25 | National Grid Autopay
+    (recurring series: 7c39lmbkcl2batggvss3r5kge5)
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+  Deleted: National Grid Autopay
+
+Deleted 25 event(s).
+❯ corky cal list
+  Mon Mar 09, 2026 03:30 PM -04:00 | Senior Python Software Engineer Interview: Brian and Jonathan/Cast & Crew (Backstage) | id:_60q30c1g60o30e1i60o4ac1g60rj8gpl88rj2c1h84s34h9g60s30c1g60o30c1g74o38e1k8grk4hhi85148gpg64o30c1g60o30c1g60o30c1g60o32c1g60o30c1g6d1k2h2574s3cg9l6cp32d9k84s48h218h2kcca16spj4h1m8930
+  Tue Mar 10, 2026 01:00 PM -04:00 | Brian Takita and Jon Gould | id:60p2dm46dmm23tkc8d2r8jd99k
+  2026-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20260911
+  2027-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20270911
+  2028-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20280911
+  2029-09-11 | Happy birthday! | id:g0t54n2q2kmv3rv4rg873vqu6o_20290911
+  2030-05-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300525
+  2030-06-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300625
+  2030-07-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300725
+  2030-08-25 | National Grid Autopay | id:7c39lmbkcl2batggvss3r5kge5_20300825
+```

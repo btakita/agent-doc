@@ -196,3 +196,4 @@ Implemented during this session:
 
 ## User
 
+Judith has not gotten back to me. Should I follow up to see what she decided to do?

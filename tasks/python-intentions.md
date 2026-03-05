@@ -54,3 +54,35 @@ If the plugin is actually stuck in approval, file a support request at [JetBrain
 ## User
 
 Please help me with a message for the plugin
+
+## Assistant
+
+Here's a message you can post on the JetBrains Platform forum or submit via support:
+
+---
+
+**Subject:** Verification errors for Python-dependent plugin (false positives against IU builds)
+
+Hi,
+
+My plugin **Python Intentions** (ID: `com.github.btakita.python-intentions`, version 0.5.0) is showing verification errors on the marketplace page, but they all appear to be false positives from testing against bare IntelliJ IDEA Ultimate builds.
+
+The plugin declares `<depends>com.intellij.modules.python</depends>` in `plugin.xml` and targets PyCharm Community (`sinceBuild = 241`, no `untilBuild`). The verification results show "1 missing mandatory dependency" and "2 compatibility problems" for each IU build (242 through 261) — all caused by PythonCore not being present in the IU test environment.
+
+Local verification using `./gradlew verifyPlugin` against PyCharm Community (PC-241 through PC-252) and PyCharm Professional (PY-253, PY-261) passes with no errors — all builds report "Compatible."
+
+Could you confirm whether these IU verification errors block approval, or are they informational only? If they block approval, is there a way to configure the marketplace verifier to test against PyCharm builds for plugins that depend on `com.intellij.modules.python`?
+
+Plugin page: https://plugins.jetbrains.com/plugin/30074-python-intentions
+Source: https://github.com/btakita/python-intentions
+
+Thanks!
+
+---
+
+Adjust the sign-off as needed. Want me to modify anything?
+
+## User
+
+Please save this somewhere
+https://platform.jetbrains.com/t/verification-errors-for-python-dependent-plugin-false-positives-against-iu-builds/3813

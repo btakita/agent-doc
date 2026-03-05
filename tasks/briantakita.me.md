@@ -751,3 +751,22 @@ Once you create the R2 API token and update the secrets, the CI workflow will pu
 
 AWS_REGION should be blank?
 Can we rename briantakita-assets to briantakita.me/assets?
+
+## Assistant
+
+**AWS_REGION:** Set to `auto` or leave blank. R2 is globally distributed — no region needed. The `aws` CLI works fine with `AWS_REGION=auto`.
+
+**Bucket rename:** R2 bucket names can't contain dots or slashes, so `briantakita.me/assets` isn't valid. Options:
+
+- `briantakita-me-assets`
+- `briantakita-me`
+- `assets-briantakita-me`
+
+Want me to recreate the bucket with one of these names? (R2 doesn't support rename — I'd create a new bucket, copy the 95 objects, and delete the old one.) Or keep `briantakita-assets` as-is?
+
+## User
+
+briantakita-assets is fine. Anything else needed?
+
+Can we commit and try another deployment?
+Can the contabo Object Store for assets.briantakita.me be deleted after deployment?

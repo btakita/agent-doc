@@ -240,3 +240,36 @@ corky sync sms-import backup.xml --label sms --account my-phone
 ## User
 
 How do I export a conversation with pulsesms?
+
+## Assistant
+
+Pulse SMS doesn't have its own export — but it syncs to the Android system SMS database, so you use **SMS Backup & Restore** to read that database.
+
+**Steps:**
+1. Install **SMS Backup & Restore** from Google Play (free, by SyncTech)
+2. Open the app → tap **Back Up Now**
+3. Choose **local backup** (saves XML to phone storage)
+4. Transfer the XML file to your computer (USB, cloud, or ADB)
+5. Import:
+   ```sh
+   corky sync sms-import ~/Downloads/sms-backup.xml
+   ```
+
+All your Pulse SMS messages are in the system `mmssms.db` — SMS B&R reads that directly.
+
+**Alternative (rooted phone, no app):**
+```sh
+adb pull /data/data/com.android.providers.telephony/databases/mmssms.db
+```
+Requires root + a separate SQLite→XML conversion. The app is simpler.
+
+**Note:** Pulse's cloud/web backups are end-to-end encrypted and cannot be exported. Only the local system database works.
+
+## User
+
+I don't see my device...which is connected to USB
+
+❯ adb devices -l
+List of devices attached
+
+~                                                                                                                                                                                                                                      09:54:19

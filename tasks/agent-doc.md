@@ -157,3 +157,17 @@ Reconcile already handles re-joining panes from any window, so scattered solo wi
 
 I don't want to see extra windows in the session.
 It would be better to hide the stashed panes.
+
+## Assistant
+
+Updated the fix to keep panes in the stash window instead of breaking them out. The root cause was that `stash_pane()` tried to join into the stash window but it was too small (15 rows, 4 existing panes). tmux enforces per-pane minimum heights that vary by content.
+
+**Fix** (`tmux-router/src/tmux.rs:stash_pane`): Before each join, resize the stash window to 200 rows. Since the stash is never displayed, this costs nothing. Falls back to `break_pane` only if the join still fails after resize.
+
+**Verified live**: Sync from 4 panes to 2 — both evicted panes go into the stash (now 6 panes), no extra solo windows. 47/47 tests pass.
+
+Also discovered the `.bin/agent-doc` symlink points to the local `target/release/` build, not `~/.cargo/bin/`. Used `cargo build --release` instead of `cargo install`.
+
+## User
+
+release tmux-router and agent-doc

@@ -471,4 +471,8 @@ The page is unstyled. Looks like the css didn't render properly.
 
 https://briantakita-me.pages.dev/index.server-I2PUZEQI_ZZC7W6FR.css renders html...not css
 
-Please verify all of the content in 
+Please verify all of the content in the page. Add tests if you have to.
+
+Can hono run without runnnig a http server?
+I'm wondering if we can simplify the rendering of all pages if we don't need a full http server.
+

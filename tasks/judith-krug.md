@@ -1313,3 +1313,17 @@ Annotate 5-10 calls as 5-10 calls/day
 Why is there a separate 20260305-tmo-proposal.md and 20260305-tmo-proposal-pdf.md?
 
 20260305-tmo-proposal-pdf.pdf is redundant. I renamed it but let's try to consolidate to a single markdown and basename.
+
+## Assistant
+
+**History:** The `-pdf.md` variant was created as a reformatted version with proper Markdown tables and subsection headers (better for PDF rendering). The plain `.md` was the original with indented text blocks. Same content, different formatting.
+
+**Consolidated.** Replaced `20260305-tmo-proposal.md` with the better-formatted `-pdf.md` content, deleted `-pdf.md`. Now just two files:
+- `mail/contacts/judith-krug/20260305-tmo-proposal.md` — single source
+- `mail/contacts/judith-krug/20260305-tmo-proposal.pdf` — generated via `corky doc build`
+
+## User
+
+Let's add a basic Google Office with 3 seats to the estimate. Remove the GoDaddy line item as well.
+
+Would Google Office shared calendar be necessary for this system?

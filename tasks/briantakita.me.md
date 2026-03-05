@@ -343,3 +343,27 @@ Titles will now wrap naturally while staying sticky with opaque background. Rebu
 commit and push
 
 Will the CI/CD automatically deploy? Can I get a notification if CI has a failure or when the site is deployed
+
+## Assistant
+
+### Committed and Pushed
+
+1. Committed sticky fix in `lib/ui--server--briantakita` submodule and pushed
+2. Updated submodule pointer in `briantakita.me-dev` and pushed to `main`
+
+**CI/CD is running** — Deploy workflow queued (run #22733736741). Yes, pushing to `main` automatically triggers the GitHub Actions deploy pipeline.
+
+### Notifications
+
+GitHub Actions sends email notifications for failed workflows by default (to your GitHub email). For more options:
+
+- **GitHub Settings** > Notifications > Actions: configure email for failed/successful runs
+- **GitHub Mobile app**: push notifications for workflow failures
+- **Slack integration**: Add the GitHub Actions Slack app to get real-time deploy notifications in a channel
+- **`gh` CLI polling**: `gh run watch 22733736741` will wait and report the result in terminal
+
+Want me to monitor this run and report back?
+
+## User
+
+compact this file

@@ -241,3 +241,86 @@ This is a bigger lift than a pure static deploy. Want to proceed with the Worker
 ## User
 
 Since we know all of the pages, why can't we generate the static html?
+
+## Assistant
+
+You absolutely can — and it's the simplest migration path. The approach:
+
+1. **Build the server** as normal
+2. **Start it locally** on port 4100
+3. **Crawl every route** and save the HTML response to `dist/static/`
+4. **Deploy `dist/static/`** to Cloudflare Pages as pure static files
+
+Here's the prerender script:
+
+```typescript
+// app/briantakita.me/prerender.ts
+import { mkdir, writeFile } from 'fs/promises'
+import { dirname, join } from 'path'
+
+const BASE = 'http://localhost:4100'
+const OUT = 'dist/static'
+
+// Known routes from the router
+const routes = [
+  '/', '/about', '/open-source', '/portfolio',
+  '/tags', '/search', '/posts',
+  '/rss', '/rss.xml', '/sitemap.xml', '/robots.txt',
+]
+
+// Discover dynamic routes from sitemap
+const sitemapRes = await fetch(`${BASE}/sitemap.xml`)
+const sitemap = await sitemapRes.text()
+const urlMatches = sitemap.matchAll(/<loc>https?:\/\/[^<]*?(\/(posts|tags)\/[^<]+)<\/loc>/g)
+for (const m of urlMatches) {
+  if (!routes.includes(m[1])) routes.push(m[1])
+}
+
+for (const route of routes) {
+  const res = await fetch(`${BASE}${route}`)
+  const body = await res.text()
+  const isXml = route.endsWith('.xml')
+  const isTxt = route.endsWith('.txt')
+  const filePath = (isXml || isTxt)
+    ? join(OUT, route)
+    : join(OUT, route, 'index.html')
+  await mkdir(dirname(filePath), { recursive: true })
+  await writeFile(filePath, body)
+  console.log(`✓ ${route}`)
+}
+```
+
+**Build + prerender + deploy flow:**
+```bash
+# Build
+set -a && source .env && set +a
+cd app/briantakita.me && bun ./build.ts
+
+# Start server in background
+bun run dist/server--dev/index.js &
+SERVER_PID=$!
+
+# Prerender all pages
+bun ./prerender.ts
+
+# Copy static assets (JS/CSS/images)
+cp -r dist/browser--dev/* dist/static/
+
+kill $SERVER_PID
+
+# Deploy to Cloudflare Pages
+npx wrangler pages deploy dist/static --project-name briantakita-me
+```
+
+**Advantages over Workers SSR:**
+- Zero runtime compute — pure CDN-served files
+- No `rebuildjs-pages` library needed
+- No Worker cold starts
+- Simpler CI/CD (just build → prerender → deploy)
+- Free tier is more generous (Pages has unlimited requests)
+
+Want me to implement this and do a test deployment?
+
+## User
+
+

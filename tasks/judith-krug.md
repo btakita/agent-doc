@@ -984,3 +984,25 @@ Yes.
 ## User
 
 I think the main work will complete early. Just want to be there to support it as well. How about 1 free month of support with a fair ongoing cost. It can be subscription or hourly.
+
+## Assistant
+
+Updated the proposal with tiered AI cost estimates ($30-500/mo depending on usage).
+
+For ongoing support, three options:
+
+**A. Retainer:** $500/mo for up to 5 hours. Predictable budgeting, but unused hours don't roll over.
+
+**B. Hourly:** $100/hr billed monthly for actual time. No commitment — pay only when needed. Best for sporadic needs.
+
+**C. Hybrid:** $300/mo (3 hours included) + $100/hr overage. Lower commitment with priority access.
+
+**Recommendation:** Option B (hourly at $100/hr) with 1 free month. Simplest, lowest friction. If needs become regular, propose a retainer later.
+
+For the proposal: "1 month free support included. After that, ongoing support at $100/hr as needed."
+
+Want me to add this to the proposal?
+
+## User
+
+yes. Working on a detailed telephony plan in tasks/telephony.md. But I can follow up with that in another email.

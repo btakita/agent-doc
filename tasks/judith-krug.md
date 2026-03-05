@@ -959,3 +959,28 @@ Updated the proposal file with $8,000 / 80+ hours, two $4,000 milestone payments
 ## User
 
 The AI hosting seems too low. Especially if we will be integrating AI into their operations. Need to discuss how much AI they will want.
+
+## Assistant
+
+Good catch. The $10-30/mo estimate was based only on basic OCR (1-5 docs/day). With phone transcription and deeper AI integration, realistic costs are:
+
+| Use case | Volume | Est. cost/mo |
+|----------|--------|-------------|
+| OCR only | 1-5 docs/day | $10-30 |
+| + Phone transcription (API) | 5-10 calls/day | +$15-50 |
+| + Document intelligence | moderate | +$20-50 |
+| **Light total** | | **$30-80** |
+| **Moderate total** | | **$80-200** |
+| **Heavy (high call volume)** | | **$200-500** |
+
+Key variable is phone call transcription volume. Whisper API at $0.006/min: a 30-min call = $0.18, but 20 calls/day = ~$108/mo.
+
+**Recommendation:** Replace the fixed estimate in the proposal with a range and flag it as a discussion point for the Zoom with Robert. Map out actual daily volumes for calls, documents, and AI tasks to model costs accurately.
+
+Want me to update the proposal with tiered estimates?
+
+Yes.
+
+## User
+
+I think the main work will complete early. Just want to be there to support it as well. How about 1 free month of support with a fair ongoing cost. It can be subscription or hourly.

@@ -294,5 +294,37 @@ Yes. But I still want to keep the sticky behavior.
 - Is the h2 dark bar a z-index/height issue, or do you want a different visual treatment for sticky h2s?
 - Or should this specific post just have a shorter title?
 
+## Assistant
+
+### Fix: Allow H1 Wrapping While Keeping Sticky
+
+In `lib/ui--server--briantakita/sticky/index.ts`:
+
+1. Remove `whitespace-nowrap` and `[&>*]:sm:text-ellipsis` from `sticky__base_class`
+2. Remove `[&>*]:overflow-x-auto` and `[&>*]:overflow-y-hidden`
+3. Change `h-[2.75rem]` to `min-h-[2.75rem]` on level entries
+
+```typescript
+// Before
+const sticky__base_class = class_('sticky', 'bg-skin-fill', 'text-skin-base', 'whitespace-nowrap',
+	'relative',
+	'[&>*]:w-full',
+	'[&>*]:overflow-x-auto',
+	'[&>*]:overflow-y-hidden',
+	'[&>*]:sm:text-ellipsis',
+	'[&>*]:m-0',
+	'[&>*]:p-0',)
+
+// After
+const sticky__base_class = class_('sticky', 'bg-skin-fill', 'text-skin-base',
+	'relative',
+	'[&>*]:w-full',
+	'[&>*]:m-0',
+	'[&>*]:p-0',)
+```
+
+Sticky positioning and `bg-skin-fill` stay. Shall I make these edits now?
+
 ## User
 
+Yes

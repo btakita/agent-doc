@@ -171,3 +171,20 @@ Also discovered the `.bin/agent-doc` symlink points to the local `target/release
 ## User
 
 release tmux-router and agent-doc
+
+## Assistant
+
+Released both:
+
+**tmux-router v0.1.2** — [crates.io](https://crates.io/crates/tmux-router/0.1.2) | [GitHub](https://github.com/btakita/tmux-router/releases/tag/v0.1.2)
+- Fix: resize stash window before join to prevent "pane too small"
+- New test: `test_reconcile_stash_full_falls_back_to_break`
+
+**agent-doc v0.9.1** — [crates.io](https://crates.io/crates/agent-doc/0.9.1) | [PyPI](https://pypi.org/project/agent-doc/0.9.1/) | [GitHub](https://github.com/btakita/agent-doc/releases/tag/v0.9.1)
+- Bumps tmux-router to 0.1.2 for stash fix
+
+Parent submodule pointers updated and pushed.
+
+## User
+
+Let's release the jetbrains plugin to the store.

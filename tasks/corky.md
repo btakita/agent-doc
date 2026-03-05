@@ -166,3 +166,41 @@ release
 ## User
 
 What are options to have corky manage sms. I'm running Pulse SMS locally, but I don't expect many other people to. How can we import the SMS threads as a basic catch-all feature.
+
+## Assistant
+
+**Recommendation: import SMS Backup & Restore XML** — the de facto Android standard. One format covers everyone.
+
+**Why this is the catch-all:**
+- **Pulse SMS (you):** Pulse syncs to the system `mmssms.db`. SMS B&R reads that database directly. Pulse's own docs recommend this workflow since their backups are encrypted/non-exportable.
+- **Google Messages / RCS:** Same system database → same XML.
+- **Signal-as-SMS-app:** SMS routed through Signal are in `mmssms.db` too.
+- **iPhone users:** SMS-Tools can convert iOS SQLite → Android XML as a bridge.
+
+**XML format (stable 10+ years):**
+```xml
+<smses count="N">
+  <sms address="+15551234567" date="1696880543000" type="2"
+       body="Hello!" contact_name="Alice" />
+  <mms date="..." address="..." msg_box="2">
+    <parts>
+      <part ct="text/plain" text="MMS body" />
+      <part ct="image/jpeg" data="BASE64..." name="photo.jpg" />
+    </parts>
+  </mms>
+</smses>
+```
+
+Fields: `address` (phone), `date` (ms epoch), `type` (1=received, 2=sent), `body`, `contact_name`, MMS parts with base64 attachments.
+
+**Implementation:** ~100-150 lines following the Telegram importer pattern. Thread key: `sms:{e164_number}`. Command: `corky sms import <backup.xml>`. Output: same markdown conversation format as email threads.
+
+**What to skip:**
+- NDJSON (sms-ie) — same fields, niche FOSS, add later if requested
+- iMessage chat.db — macOS-only, high complexity
+- WhatsApp — separate protocol, not SMS
+- Signal encrypted backups — complex, and SMS portion is already in `mmssms.db`
+
+## User
+
+Implement sms import.

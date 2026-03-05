@@ -128,3 +128,17 @@ Done. Committed and pushed `specs/pane-groups.md` frontmatter update (`ffb5c53`)
 
 
 Please look at the current tmux pane layout being out of sync with the editor layout. Create an automated test for what happened and fix.
+
+## Assistant
+
+**Root cause**: `stash_pane()` in tmux-router uses `join_pane` to move unwanted panes into the stash window. When the stash window is too small (4 panes in 15 rows), tmux rejects with "pane too small" and the error propagated — leaving unwanted panes in the target window.
+
+**Fix** (`tmux-router/src/tmux.rs:455-461`): Added fallback to `break_pane` when `join_pane` fails in `stash_pane()`. The pane gets its own window instead of being stuck in the target.
+
+**Test** (`tmux-router/src/sync.rs:test_reconcile_stash_full_falls_back_to_break`): Creates a cramped stash window (4 rows, pre-filled with splits), then reconciles from 4 panes down to 2. Verifies the evicted panes survive via break_pane fallback and the target window has exactly the desired panes.
+
+**Results**: 47/47 tmux-router tests pass. Rebuilt and installed agent-doc — live sync now works correctly (2 panes matching editor layout).
+
+## User
+
+Do we need to have a window? What if we just detach the inactive panes?

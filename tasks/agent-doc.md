@@ -250,3 +250,37 @@ Want me to implement the `agent-doc plugin install` command?
 ## User
 
 I would need a separate Jetbrains and vs-code plugin install
+
+## Assistant
+
+### `agent-doc plugin` Subcommands
+
+```bash
+agent-doc plugin install jetbrains   # Download + install JetBrains plugin
+agent-doc plugin install vscode      # Download + install VS Code extension
+agent-doc plugin update jetbrains    # Update to latest
+agent-doc plugin update vscode
+agent-doc plugin list                # Show installed editor plugins + versions
+```
+
+**JetBrains install:**
+- Download signed zip from GitHub Releases
+- Auto-detect IDE plugins dir (`~/.local/share/JetBrains/IntelliJIdea*/plugins/` on Linux, `~/Library/Application Support/JetBrains/IntelliJIdea*/` on macOS)
+- If multiple IDEs found, prompt user to choose
+- Extract zip to plugins dir
+- Print "Restart your IDE to activate"
+
+**VS Code install:**
+- Download `.vsix` from GitHub Releases
+- Run `code --install-extension <path>` (VS Code CLI handles it)
+- No restart needed (VS Code hot-reloads extensions)
+
+**Both:**
+- Version check via GitHub Releases API
+- Cache check: skip if already at latest version
+
+Want me to implement this? ~200 lines of Rust in a new `src/plugin.rs` module.
+
+## User
+
+Yes...implement. Need to test VSCode integration as well. Does VSCode have the same SPEC and features as the JetBrains plugin?

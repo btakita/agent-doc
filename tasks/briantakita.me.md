@@ -323,4 +323,4 @@ Want me to implement this and do a test deployment?
 
 ## User
 
-
+Do we actually need a http server? Can we just simulate the http request using function calls?

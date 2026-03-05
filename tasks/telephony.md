@@ -188,6 +188,7 @@ Call → Dialpad (records + basic transcript) → Webhook →
 | CRM | Transcript storage | AI agent access | Notes |
 |---|---|---|---|
 | **GoHighLevel** | Custom fields on contact/call records | GHL API | Robert already uses; push transcripts via API |
+Are the transcripts stored in GHL CRM itself? What are the fees?
 | **Cloudflare D1** | Full SQL database | Workers API / direct query | Most flexible for custom AI agents |
 | **Both** | D1 as primary + sync to GHL | Query either | Recommended if Robert's CRM is central |
 
@@ -204,4 +205,72 @@ Call → Dialpad (records + basic transcript) → Webhook →
 
 ## User
 
+Dialpad + Cloudflare looks good. Depending on GHL costs. Is there a better solution for cloud computing such as AWS or Google Cloud?
 
+## Assistant
+
+### Inline clarifications
+
+**CPU-based Whisper:** whisper.cpp on CPU is very viable for batch processing. A Hetzner CPX41 (8 vCPU, ~$18/mo) transcribes at ~0.3-0.5x real-time with the medium model. For 2,000 min/mo → ~2-4 hours/day as a background queue. No GPU needed. Updated in-house total: **~$57/mo**.
+
+| Component | In-House (CPU VPS) |
+|---|---|
+| **Phone service** | $33/mo (Twilio recording-only) |
+| **Transcription** | $0 (whisper.cpp on VPS) |
+| **Compute** | ~$18/mo (Hetzner CPX41) + ~$5/mo (CF Workers) |
+| **Storage** | ~$0 (D1 free tier) + ~$1/mo (R2) |
+| **Total** | **~$57/mo** |
+
+**D1 storage fees:**
+
+| Tier | Storage | Reads | Writes |
+|---|---|---|---|
+| **Free** | 5 GB | 5M reads/day | 100K writes/day |
+| **Paid** | $0.75/GB-month | $0.75/million reads | $1.00/million writes |
+
+~2,000 calls/mo × ~5 KB = ~10 MB/mo. Stays in free tier for years.
+
+**GHL transcript storage:** Included in your plan ($97-$297/mo) — no per-record storage fees. Transcripts go in as contact notes/custom fields. Audio storage is $0.0005/min. Best approach: full transcripts in D1, push summaries + links to GHL.
+
+### Cloud platform comparison for transcript pipeline
+
+| Platform | Compute (webhook + orchestration) | Database | Object storage | Vectorize/search | Free tier | Total estimate |
+|---|---|---|---|---|---|---|
+| **Cloudflare** | Workers: $5/mo (paid plan) | D1: free (5GB) | R2: $0.015/GB, no egress | Vectorize: $0.01/1K vectors | Generous | **~$6-8/mo** |
+| **AWS** | Lambda: ~$1-3/mo | DynamoDB: ~$1-5/mo; RDS: ~$15-30/mo | S3: $0.023/GB + $0.09/GB egress | OpenSearch: ~$25+/mo | 12-month trial | **~$27-58/mo** |
+| **Google Cloud** | Cloud Functions: ~$1-3/mo | Firestore: ~$1-5/mo; Cloud SQL: ~$10-25/mo | GCS: $0.020/GB + $0.12/GB egress | Vertex AI Search: ~$25+/mo | $300 credit | **~$27-53/mo** |
+| **Azure** | Functions: ~$1-3/mo | Cosmos DB: ~$25+/mo | Blob: $0.018/GB + egress | AI Search: ~$25+/mo | $200 credit | **~$51-53/mo** |
+| **Supabase** | Edge Functions: $10/mo (Pro) | PostgreSQL: included (8GB) | Storage: included (100GB) | pgvector: included | Good | **~$25/mo** |
+| **Hetzner + self-hosted** | VPS: $18/mo (also runs Whisper) | SQLite/PostgreSQL: $0 | Local: $0 | pgvector: $0 | N/A | **~$18/mo (all-in-one)** |
+
+### Key differences
+
+**Cloudflare wins on:**
+- Zero egress fees (AWS/GCP charge $0.09-$0.12/GB for downloads — matters when AI agents pull recordings)
+- D1 free tier is very generous for this workload
+- Workers are cheapest for webhook/orchestration
+- Vectorize is built-in and cheap
+- Global edge deployment (low latency)
+
+**AWS/GCP win on:**
+- Managed ML services if you want to run Whisper as a cloud function (SageMaker, Vertex AI)
+- More mature monitoring/logging
+- Broader ecosystem if you need other services later
+- Better for teams already on those platforms
+
+**Hetzner VPS wins on:**
+- All-in-one: Whisper transcription + database + storage on one $18/mo box
+- Simplest architecture — no cloud functions, no managed services
+- But: single point of failure, you manage the server
+
+### Recommendation
+
+**For this workload, Cloudflare is the best fit.** The transcript pipeline is lightweight — webhook triggers, file storage, database writes, vector search. Cloudflare's free/cheap tiers cover it all. AWS and GCP are overkill and 3-8x more expensive for this use case due to egress fees and managed service minimums.
+
+**If you want the absolute cheapest:** Hetzner CPX41 ($18/mo) runs everything — Whisper, SQLite, file storage — on one box. Add Cloudflare Workers ($5/mo) just for the webhook/routing layer. Total: ~$23/mo for the entire pipeline.
+
+**If already invested in AWS/GCP:** Possible, but you'd pay ~$30-50/mo more for equivalent functionality. Only worth it if you need the broader ecosystem.
+
+## User
+
+I want Cloudflare for hosting. What are the costs for diarized transcription compute?

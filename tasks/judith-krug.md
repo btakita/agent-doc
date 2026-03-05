@@ -1432,3 +1432,5 @@ $100/hr is the base rate for additional work.
 The $8000 covers at least 80 hours of work. More hours if the core features take longer.
 
 Remove the `(~$6,300–9,000)` beside the time estimate. That is not relevant and is confusing.
+
+Re: ownership, Judith will have a royalty free license in perpetuity. She does not have exclusivity on the software however. So I can use it for other projects. Should that be included in the estimate or is it already implied?

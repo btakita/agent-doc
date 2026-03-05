@@ -174,3 +174,19 @@ Note: Calendar API must be enabled in your Google Cloud Console project (same pr
 ## User
 
 install for testing
+
+## Assistant
+
+**Installed.** `make release` built and linked to `.bin/corky`.
+
+```bash
+corky cal auth                              # authenticate (browser OAuth)
+corky cal list                              # list upcoming events
+corky cal delete "Sprint Review" --all      # delete recurring series
+```
+
+Ensure Google Calendar API is enabled in your Cloud Console project before running `corky cal auth`.
+
+## User
+
+corky cal list 403 response

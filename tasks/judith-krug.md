@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
-tmux_session: '1'
+tmux_session: '0'
 ---
+
 
 
 
@@ -210,3 +211,4 @@ Want me to draft that follow-up for tomorrow?
 
 ## User
 
+No response from Judith. Let's have a followup. I'm not sure what she decided to do. I wonder if $8000 scared her off

@@ -221,6 +221,23 @@ This makes tmux-router a **universal agent harness** — you can drive any CLI t
 
 ## Assistant
 
+Done. agent-doc v0.9.4 released:
+
+- **Cargo.toml**: `tmux-router = "0.2"`, version bumped to 0.9.4
+- **pyproject.toml**: synced to 0.9.4
+- **crates.io**: published
+- **PyPI**: published
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.9.4 (with binary)
+- **Installed locally**: `agent-doc v0.9.4`
+- **agent-loop**: submodule pointer updated, pushed to main
+
+All 150 agent-doc tests pass (129 unit + 21 integration).
+
+## User
+
+
+## Assistant
+
 Built the CLI — 48 tests pass, clippy clean. But first, your two questions:
 
 ### "Are we not using claim?"
@@ -382,3 +399,7 @@ Yes
 
 ## User
 
+I did not see the follow up response in this document.
+Is this a bug with tmux-router or agent-doc?
+
+Looks l

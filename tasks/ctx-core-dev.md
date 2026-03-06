@@ -372,3 +372,28 @@ This would catch any new packages that get added without updating the script.
 
 Can bun be used to develop ctx-core? ctx-core is a nodejs-compatible library.
 Can I rely on bun ensuring that ctx-core is fully nodejs-compatible?
+
+## Assistant
+
+**Yes, bun can develop ctx-core.** It runs the same JS/TS, supports `node_modules` resolution, handles `package.json` scripts. Works fine as a dev tool for Node-targeting libraries.
+
+**But no, bun can't guarantee Node.js compatibility.** Key gaps:
+
+- **Module resolution** — Bun is more lenient (auto-resolves `.ts`, bare specifiers). Code working in bun may fail in Node's strict ESM.
+- **Built-in APIs** — `Bun.serve`, `Bun.file` etc. don't exist in Node. Accidental usage won't be caught.
+- **`node:` prefix** — Bun accepts both `fs` and `node:fs`. Node ESM requires `node:` prefix.
+- **Package manager** — Bun's hoisting/resolution differs from pnpm. `node_modules` structure may differ.
+
+**Practical approach for ctx-core:**
+- **Use bun for speed** — installs, scripts, dev server are faster
+- **Keep pnpm for publishing** — release workflow already uses pnpm, npm consumers expect it
+- **Test with Node.js before publishing** — run uvu with Node to catch compatibility gaps
+- **Don't use bun-specific APIs** in library code
+
+For briantakita.me-dev (which targets bun runtime), bun everywhere is fine. The concern is only for ctx-core libraries shipping to npm for Node consumers.
+
+**The big win of migrating ctx-core-dev to bun:** single `node_modules` tree shared with briantakita.me-dev, eliminating the cross-monorepo type identity problem entirely. But that's a significant migration — changesets, publishing, workspace protocol all need to work under bun.
+
+## User
+
+Are there any bun packages that ensure npm & nodejs compatability for library development?

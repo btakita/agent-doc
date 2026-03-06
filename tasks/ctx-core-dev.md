@@ -303,3 +303,34 @@ One gap: the script doesn't dedup `relysjs/node_modules/rebuildjs/node_modules/e
 ## User
 
 What script calls `pnpm i --force`? Can we make `ctx-core--link.sh` be called as a hook in my development environment?
+
+## Assistant
+
+**Nothing calls `pnpm i --force` automatically** — I ran it manually during this debugging session. In normal workflow, `pnpm i --recursive` runs during the ctx-core-dev release pipeline.
+
+**briantakita.me-dev already auto-hooks on `bun i`** via its `postinstall` script:
+```json
+"postinstall": "[ -d ctx-core-dev ] && sh ./app/-briantakita.me-dev-bin/bin/ctx-core--link.sh || true"
+```
+
+The gap is when `pnpm i` runs in **ctx-core-dev** — it recreates nested deps that overwrite the dedup symlinks. Two ways to close that gap:
+
+1. **Add postinstall to ctx-core-dev** — call the link script from there too:
+   ```json
+   "postinstall": "[ -f ../briantakita.me-dev/app/-briantakita.me-dev-bin/bin/ctx-core--link.sh ] && sh ../briantakita.me-dev/app/-briantakita.me-dev-bin/bin/ctx-core--link.sh || true"
+   ```
+   Downside: couples ctx-core-dev to briantakita.me-dev's filesystem layout.
+
+2. **Shell alias / wrapper** — alias `pnpm i` in ctx-core-dev to also re-run the link script:
+   ```bash
+   # In .zshrc or project .envrc
+   ctx-core-install() { cd /home/brian/work/ctx-core/ctx-core-dev && pnpm i "$@" && sh /home/brian/work/btakita/briantakita.me-dev/app/-briantakita.me-dev-bin/bin/ctx-core--link.sh; }
+   ```
+
+3. **direnv `.envrc`** — auto-run when entering the briantakita.me-dev directory after ctx-core-dev changes. But this is too aggressive for every `cd`.
+
+**Recommendation:** Option 2 (alias) is simplest and doesn't couple repos. Or just remember to run `ctx-core--link.sh` after `pnpm i` in ctx-core-dev — it only matters during development.
+
+## User
+
+Can we make the ctx-core library node_modules different depending on whether it is symlinked by bun or another ctx-core library?

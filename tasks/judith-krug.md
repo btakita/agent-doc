@@ -280,3 +280,19 @@ Keep the follow-up email exactly as drafted — 3 sentences, receipt check, call
 ## User
 
 Ok...let's send the email as a reply to the thread.
+ 
+## Assistant
+
+Done — draft pushed to Gmail as a reply to the proposal thread.
+
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+
+Open your Gmail drafts to review and hit send.
+
+Re: your note about MA having OCR/AI — good catch. If she goes MA, the value shifts to: custom doc processing for non-MA documents, website modernization, and investor-facing tooling. MA's OCR is limited to their platform's document types.
+
+## User
+
+Are you able to directly send the email...rather than having to click send in gmail?

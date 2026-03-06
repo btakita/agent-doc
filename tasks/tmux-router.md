@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 89137ef6-5f05-44dc-a60d-ef56aba98eda
-tmux_session: claude
+tmux_session: '0'
 ---
+
 
 # tmux-router
 
@@ -102,3 +103,4 @@ Tests are copied/adapted, not just moved. Both crates must pass independently.
 
 ## User
 
+Is the cli interface implemented?

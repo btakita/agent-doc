@@ -279,3 +279,27 @@ Want me to run the ctx-core-dev release workflow?
 ## User
 
 We should remove the symlink? Is there a way to depend on packages that live in the file-system? So I don't need to release before I can test the packages...
+
+## Assistant
+
+**You already have the mechanism — `ctx-core--link.sh` handles this.** It symlinks ctx-core-dev packages into briantakita.me-dev's node_modules, bridges shared deps (esbuild, postcss) back into ctx-core-dev, and deduplicates nested copies.
+
+The issue was that our `pnpm i --force` in ctx-core-dev recreated the nested esbuild/postcss copies, overwriting the dedup. **Re-running the link script fixed it:**
+
+```
+sh ./app/-briantakita.me-dev-bin/bin/ctx-core--link.sh
+```
+
+All paths now resolve to briantakita.me-dev's root copies:
+- `rebuildjs/node_modules/esbuild` → root esbuild
+- `relysjs/node_modules/rebuildjs/node_modules/esbuild` → root esbuild (via chain)
+- `@rebuildjs/tailwindcss/node_modules/postcss` → root postcss
+- `@rebuildjs/tailwindcss/node_modules/esbuild` → root esbuild
+
+**Restart the TS server and check if the errors are gone.** The link script should be re-run after any `pnpm i` in ctx-core-dev or `bun i` in briantakita.me-dev, since both will recreate the nested copies.
+
+One gap: the script doesn't dedup `relysjs/node_modules/rebuildjs/node_modules/esbuild` directly — but since `relysjs → ctx-core-dev/lib/relysjs` and `rebuildjs/node_modules/esbuild` was deduped, the chain resolves correctly.
+
+## User
+
+What script calls `pnpm i --force`? Can we make `ctx-core--link.sh` be called as a hook in my development environment?

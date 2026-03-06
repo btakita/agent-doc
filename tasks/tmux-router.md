@@ -137,6 +137,7 @@ The CLI would be a thin wrapper around the existing library API. Two categories:
 ```bash
 tmux-router sync --col a.md --col b.md --session 0 --window @0
 tmux-router register tasks/plan.md %5
+# Are we not using claim?
 tmux-router status          # show registry + pane health
 tmux-router resync           # prune dead panes
 tmux-router focus tasks/plan.md
@@ -153,6 +154,8 @@ tmux-router capture %5 --lines 50         # last 50 lines of scrollback
 ### Sending Commands to Panes
 
 `send_keys()` already exists in the library — it types text into a pane literally and presses Enter. Whatever is running in that pane receives the keystrokes as if you typed them.
+
+Tmux already have send? What value would tmux-router have over the stock tmux send?
 
 **Interaction with a shell:**
 ```bash
@@ -215,3 +218,46 @@ This makes tmux-router a **universal agent harness** — you can drive any CLI t
 ## User
 
 
+
+## Assistant
+
+Built the CLI — 48 tests pass, clippy clean. But first, your two questions:
+
+### "Are we not using claim?"
+
+`claim` is an agent-doc concept — it binds a UUID-based `agent_doc_session` to a pane. In tmux-router standalone, there's no UUID system, so `register` is the equivalent (maps file-path → pane). I could add `claim` as an alias for `register` if that's more intuitive, or agent-doc could keep its own `claim` command that calls `tmux-router register` under the hood (which is what it does now via library calls).
+
+### "What value over stock tmux send?"
+
+Three things:
+
+1. **Registry-aware addressing** — send by file name instead of raw pane ID:
+   ```bash
+   tmux-router send plan.md "cargo test"   # looks up pane from registry
+   # vs
+   tmux send-keys -t %5 "cargo test" Enter  # must know pane ID
+   ```
+
+2. **Literal-by-default** — tmux `send-keys` interprets special key names by default (`C-c`, `Enter`, `Space`), which mangles code/text. tmux-router defaults to literal mode (`-l`) with `--raw` as opt-in for when you actually want key interpretation.
+
+3. **Enter handling** — `send` automatically appends Enter with a 50ms delay (TUI-safe). Stock tmux requires manually adding `Enter` as a separate argument.
+
+So `send`/`capture` wrap tmux's primitives with saner defaults and file-name addressing. For one-off commands, `tmux send-keys` works fine. The value shows up in scripted workflows where you're driving multiple panes by name.
+
+### What was built
+
+- `src/main.rs` (~160 lines) — clap CLI with 8 subcommands: `sync`, `register`, `unregister`, `status`, `resync`, `focus`, `send`, `capture`
+- `capture_pane()` on `Tmux` — reads screen buffer via `tmux capture-pane -p`
+- `send_keys_raw()` on `Tmux` — sends raw tmux key names (C-c, Escape, etc.)
+
+I should also update `send` to accept file names (registry lookup) in addition to raw pane IDs. Want me to add that + release?
+
+## User
+
+Yes. I'm trying to figure out the use cases of tmux-router standalone.
+So let's say someone is using nvim. They bind a tmux pane with a file. The tmux pane can run a program that watches the file.
+
+In the case of agent-doc, the file is a md file that acts as a agent loop interface.
+
+What other programs would tmux-router be instrumental in supporting?
+Perhaps a log watcher?

@@ -489,3 +489,76 @@ Yes
 
 ## User
 
+
+
+## Assistant
+
+### Subagent Architecture — The Right Fix
+
+You're right that subagents are the correct solution, not locks/queues. The core insight: **every `/agent-doc` invocation should spawn a subagent that owns its document cycle end-to-end**.
+
+**Proposed architecture:**
+
+```
+User: /agent-doc plan.md
+Skill: spawn subagent → "process plan.md document cycle"
+       → subagent runs steps 1-5 autonomously
+       → main context immediately free
+
+User: /agent-doc corky.md (while plan.md is still running)
+Skill: spawn subagent → "process corky.md document cycle"
+       → runs in parallel, no interference
+```
+
+**Concurrency model:**
+- **Independent documents** → parallel subagents (no coordination needed)
+The parallel subagents to make documents independent would be good. 
+- **Same document** → serial (file lock via `.agent-doc/locks/<hash>.lock`)
+- **Dependent tasks** (e.g., "release A then B") → skill detects dependency, chains subagents: spawn A, on completion spawn B
+
+Sometime I revise a request on the same document. I want the task to pick it up before completing it's currently running operation. The llm can decide. I think Claude already does a good job with "interruptions" on a single document. I dont see a need to lock. Do you?
+
+**What the skill decides:**
+1. Is this a simple document submit? → spawn subagent immediately
+2. Does this require shared state (release, cross-document work)? → orchestrate: spawn A, wait, spawn B
+3. Does this reference another in-progress task? → check `.agent-doc/active/` for running subagents, coordinate
+
+**What agent-doc executable provides:**
+- `agent-doc active` — list in-progress document cycles (PID + file + start time)
+- `agent-doc lock <file>` / `agent-doc unlock <file>` — file-level coordination
+- `.agent-doc/active/<hash>.json` — written on cycle start, deleted on completion
+
+**Benefit:** The main context becomes a pure orchestrator — it reads user intent, decides what to parallelize vs. serialize, spawns subagents, and reports results. No risk of losing write-backs because each subagent's context is isolated.
+
+### Skill Creator Eval Suite
+
+I've reviewed the [Skill Creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) format. It expects:
+- `evals/evals.json` — test prompts + assertions
+- Subagent-based execution (with-skill vs. without-skill)
+- Results in `<skill>-workspace/iteration-N/eval-N/`
+
+**Test cases for agent-doc skill:**
+
+| ID | Name | Prompt | Asserts |
+|----|------|--------|---------|
+| 0 | `single-submit` | Submit doc with new User block | Response written to file, snapshot updated |
+| 1 | `empty-submit` | Submit unchanged doc | "Nothing changed" message, no file edit |
+| 2 | `inline-annotation` | Submit doc with inline annotation in Assistant block | Annotation addressed in response |
+| 3 | `comment-ignored` | Add HTML comment only | No response triggered |
+| 4 | `concurrent-submit` | Submit doc A, immediately submit doc B | Both docs get responses written back |
+| 5 | `git-commit` | Submit doc in git repo | `agent-doc commit` called before response |
+| 6 | `snapshot-persistence` | Submit, verify snapshot matches doc state | SHA256 path correct, content matches |
+| 7 | `cwd-resilience` | Submit while CWD is a submodule | Write-back uses absolute paths, succeeds |
+| 8 | `claim-workflow` | `/agent-doc claim file.md` | `agent-doc claim` executed, no doc processing |
+| 9 | `diff-accuracy` | Edit middle of doc, submit | Only the changed section triggers response |
+
+This is a plan — the actual eval infrastructure needs the Skill Creator skill installed to run. Want me to:
+- **A)** Install Skill Creator and run the full eval suite now
+- **B)** Focus on implementing the subagent architecture first (the fix), then eval it
+- **C)** Both — implement subagent architecture, then eval it with Skill Creator
+
+Recommendation: **B then eval** — fix the architecture first, then use Skill Creator to prove it works.
+
+## User
+
+Yes...Option B with no lock...unless you can explain a compelling reason for a lock.

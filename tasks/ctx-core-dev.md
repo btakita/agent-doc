@@ -258,3 +258,24 @@ Types of property 'lastPlugin' are incompatible.
 Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.pnpm/postcss@8.5.6/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.pnpm/postcss@8.5.6/node_modules/postcss/lib/postcss").TransformCallback'.
 Type 'Plugin' is not assignable to type 'Plugin | TransformCallback'.
 ```
+
+## Assistant
+
+**Same pattern — now postcss.** `briantakita.me-dev/node_modules/postcss` vs `ctx-core-dev/node_modules/.pnpm/postcss@8.5.6/node_modules/postcss`. This confirms it's a **systemic cross-monorepo type identity problem**, not fixable per-dependency.
+
+Every shared dependency (esbuild, postcss, and likely others) will hit this because bun resolves `rebuildjs`, `relysjs`, etc. via symlinks into ctx-core-dev's source, which has its own `.pnpm/` dependency tree. TypeScript sees types from two different `node_modules` trees as incompatible even when they're the same version.
+
+**The only clean fix: publish the updated packages from ctx-core-dev, then `bun i` in briantakita.me-dev to install from npm instead of workspace symlinks.**
+
+Steps:
+1. In ctx-core-dev: commit peerDep changes, version, publish (`pnpm-publish--force`)
+2. In briantakita.me-dev: `bun i` to pull published versions from npm
+3. The symlinks will point to npm-installed copies that resolve deps from briantakita.me-dev's tree
+
+Alternatively, if you don't want to publish yet: add `postcss` to the briantakita.me-dev `overrides` too (`"postcss": "~8.4.49"` already there), but this won't fix the fundamental cross-tree resolution. These errors are IDE-only — `tsc --noEmit` in briantakita.me-dev passes clean because it resolves differently from bun's symlink graph.
+
+Want me to run the ctx-core-dev release workflow?
+
+## User
+
+We should remove the symlink? Is there a way to depend on packages that live in the file-system? So I don't need to release before I can test the packages...

@@ -926,3 +926,50 @@ error: Cannot find package 'fdir' from '/home/brian/work/ctx-core/ctx-core-dev/l
 
 Bun v1.3.10 (Linux x64)
 ```
+
+## Assistant
+
+### Changes implemented:
+
+**1. Renamed `pnpm-up.sh` → `bun-update.sh`:**
+- `git mv bin/pnpm-up.sh bin/bun-update.sh`
+- Updated `package.json` bin entry to `"bun-update": "./bin/bun-update.sh"`
+- Updated AGENTS.md reference
+
+The `bun-update.sh` wrapper is still useful — it runs `bun update` followed by `strip-workspace.sh` (removes `workspace:` prefixes from package.json before publishing). No existing tool supersedes this because the `strip-workspace` step is ctx-core-specific.
+
+**2. `lib/pnpm-tools` — no rename needed, it's dead code:**
+Nothing imports `@ctx-core/pnpm-tools` — zero consumers found. Its `projects_json_()` function is already duplicated in `lib/monorepo/project_a/index.js`. It can be removed entirely in a cleanup pass rather than renamed.
+
+Ok...We can remove. Should this package be deprecated in npmjs.org? Pointing to @ctx-core/monorepo?
+
+**3. briantakita.me-dev — postinstall already removed:**
+The postinstall hook referencing `ctx-core--link.sh` was already removed from briantakita.me-dev's package.json. No changes needed there.
+
+**4. The fdir error — classic symlink resolution failure:**
+```
+Cannot find package 'fdir' from '.../ctx-core-dev/lib/relysjs/node_modules/rebuildjs/server/build/index.js'
+```
+`relysjs` in briantakita.me-dev is still symlinked to `ctx-core-dev/lib/relysjs`. When bun resolves `rebuildjs` from relysjs, it walks up from the physical path in ctx-core-dev, not briantakita.me-dev. `fdir` is a dependency of `rebuildjs` but isn't hoisted to where the symlinked path can find it.
+
+**This is exactly the problem yalc fixes.** Once you run:
+```bash
+cd /home/brian/work/ctx-core/ctx-core-dev
+yalc-publish-all.sh
+
+cd /home/brian/work/btakita/briantakita.me-dev
+yalc add ctx-core relysjs rebuildjs relementjs rmemo \
+  @ctx-core/dev-tools @ctx-core/monorepo @ctx-core/preprocess \
+  @ctx-core/source-map @ctx-core/child_process @ctx-core/dir \
+  @ctx-core/fs @ctx-core/package @ctx-core/ctx-core-package-tools \
+  @rebuildjs/tailwindcss esbuild-plugin-esmfile esbuild-plugin-esmcss
+bun install
+```
+
+The packages will be copied (not symlinked) into briantakita.me-dev's node_modules, and `fdir` will resolve from the local tree. No more cross-monorepo resolution failures.
+
+**Next step:** Run the yalc commands above. Want me to run them, or will you do it manually?
+
+## User
+
+Yes. Run the command please. Do the rest of the fixes.

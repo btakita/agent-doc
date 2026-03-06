@@ -104,3 +104,25 @@ Tests are copied/adapted, not just moved. Both crates must pass independently.
 ## User
 
 Is the cli interface implemented?
+
+## Assistant
+
+No. tmux-router is currently **library-only** — there's no `src/main.rs` or `[[bin]]` in `Cargo.toml`. The CLI API listed at the top of this document is a design spec that hasn't been built.
+
+All tmux routing is currently done through **agent-doc**, which calls the `tmux_router` library API directly (Rust function calls, not CLI subprocess). The commands like `agent-doc sync`, `agent-doc claim`, `agent-doc focus` are thin wrappers that call `tmux_router::reconcile()`, `tmux_router::Registry`, etc.
+
+**Current status (v0.1.3):**
+- Library API: fully implemented and published to crates.io
+- 48 tests (integration + proptest + unit)
+- Used by agent-doc v0.9.3 as a dependency
+- No standalone CLI binary
+
+The CLI binary was listed as "Pending / Not Built" in `tasks/agent-doc.md`. It would be useful for non-Rust consumers or shell scripting, but agent-doc doesn't need it since it links directly.
+
+Want me to implement the CLI?
+
+## User
+
+Yes...how would it work? Could I send shell commands?
+
+It also looks like I can send data to the panes. What would the interaction with a program running in the pane be like in this case?

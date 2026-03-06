@@ -485,3 +485,30 @@ bun install seems deadlocked
 bun install v1.3.5 (1e86cebd)
 [31.57ms] migrated lockfile from pnpm-lock.yaml
 ```
+
+## Assistant
+
+**`bun install` hangs — two likely causes:**
+
+**1. `nodegit: "next"` in overrides + git-tools**
+nodegit compiles native C++ code during install. It frequently hangs, fails silently, or deadlocks the package manager. The `"next"` tag makes it worse — it pulls unreleased builds.
+
+**Fix:** Remove `nodegit` from the root overrides (line 113 in package.json).
+
+**2. `@ctx-core/*: "workspace:*"` glob override**
+Bun may handle glob overrides differently from pnpm. If any transitive dependency references an `@ctx-core/*` package that doesn't exist in the workspace, bun's resolver could loop. The explicit per-package overrides below it are redundant with the glob.
+
+**Fix:** Try removing the glob and keeping only the explicit per-package overrides. Or install with `--verbose` to see where it stalls:
+```bash
+bun install --verbose 2>&1 | tee bun-install.log
+```
+
+**Recommended steps:**
+1. Remove `"nodegit": "next"` from overrides
+2. Try `bun install` again
+3. If still hangs, remove `"@ctx-core/*": "workspace:*"` glob (explicit entries cover the needed packages)
+4. If still stuck, `--verbose` to find the exact blocker
+
+## User
+
+Try it and Troubleshoot please

@@ -547,3 +547,20 @@ There a 3 tmux panes and 2 editor windows. Please add the functional tests to re
 ## User
 
 release
+
+## Assistant
+
+Released both:
+
+**tmux-router v0.1.3** — [crates.io](https://crates.io/crates/tmux-router/0.1.3) | [GitHub](https://github.com/btakita/tmux-router/releases/tag/v0.1.3)
+- Fix: append `:` to session target in `ensure_stash_window()` for numeric session names
+- New test: `test_reconcile_ghost_pane_with_numeric_session`
+
+**agent-doc v0.9.3** — [crates.io](https://crates.io/crates/agent-doc/0.9.3) | [PyPI](https://pypi.org/project/agent-doc/0.9.3/) | [GitHub](https://github.com/btakita/agent-doc/releases/tag/v0.9.3)
+- Bumps tmux-router to 0.1.3
+
+Parent submodule pointers updated (`0b6f002`). Local binary: `~/.cargo/bin/agent-doc` v0.9.3.
+
+## User
+
+compact this file

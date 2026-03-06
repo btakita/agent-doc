@@ -73,4 +73,24 @@ git push --recurse-submodules=on-demand          # push all (submodules first, t
 
 ## User
 
-
+```
+TS2322: Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.plugins' are incompatible between these types.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").Plugin[] | undefined' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[] | undefined'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").Plugin[]' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[]'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esmcss/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.entryPoints' are incompatible between these types.
+Type 'Record<string, string> | (string | { in: string; out: string; })[] | undefined' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
+Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
+Type '{ in: string; out: string; }' is not assignable to type 'string'.
+```

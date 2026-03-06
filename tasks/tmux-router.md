@@ -358,3 +358,27 @@ All 48 tests pass, clippy clean. Ready to bump version and release when you want
 ## User
 
 Release tmux-router and agent-loop
+
+## Assistant
+
+Released both.
+
+### tmux-router v0.2.0
+
+- **crates.io**: published (`cargo install tmux-router` now gets the CLI)
+- **GitHub Release**: https://github.com/btakita/tmux-router/releases/tag/v0.2.0 (with prebuilt binary)
+- **Tag**: `v0.2.0` pushed
+
+Version bumped from 0.1.3 → 0.2.0 (new feature: CLI binary).
+
+### agent-loop
+
+- Submodule pointer updated to tmux-router `v0.2.0` (`f2d3490`)
+- Pushed to `main`
+
+Note: you said "agent-doc" but I released agent-loop (the parent repo with submodule pointer). agent-doc's `Cargo.toml` still points to `tmux-router = { path = "../tmux-router", version = "0.1" }` — it will need a version constraint bump to `"0.2"` and a new release if you want it to use the CLI features. Want me to update agent-doc too?
+
+Yes
+
+## User
+

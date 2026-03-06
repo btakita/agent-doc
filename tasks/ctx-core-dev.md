@@ -790,3 +790,139 @@ Updated `bin/yalc-publish-all.sh` — now runs `yalc publish --no-scripts --push
 ## User
 
 Are all of the ctx-core-dev packages ready to commit and release?
+
+Please update for yalc:
+
+```
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?1                                                                                                                                                                                06:55:18
+❯ bun i
+[0.01ms] ".env"
+bun install v1.3.10 (30e609e0)
+
+$ [ -d ctx-core-dev ] && sh ./app/-briantakita.me-dev-bin/bin/ctx-core--link.sh || true
+ctx-core-dev: /home/brian/work/ctx-core/ctx-core-dev
+
+linked @ctx-core/dev-tools -> /home/brian/work/ctx-core/ctx-core-dev/lib/dev-tools
+linked @ctx-core/monorepo -> /home/brian/work/ctx-core/ctx-core-dev/lib/monorepo
+linked @ctx-core/preprocess -> /home/brian/work/ctx-core/ctx-core-dev/lib/preprocess
+linked @ctx-core/source-map -> /home/brian/work/ctx-core/ctx-core-dev/lib/source-map
+linked @ctx-core/child_process -> /home/brian/work/ctx-core/ctx-core-dev/lib/child_process
+linked @ctx-core/ctx-core-package-tools -> /home/brian/work/ctx-core/ctx-core-dev/tools/ctx-core-package-tools
+linked @ctx-core/dir -> /home/brian/work/ctx-core/ctx-core-dev/lib/dir
+linked @ctx-core/fs -> /home/brian/work/ctx-core/ctx-core-dev/lib/fs
+linked @ctx-core/package -> /home/brian/work/ctx-core/ctx-core-dev/lib/package
+linked @rebuildjs/tailwindcss -> /home/brian/work/ctx-core/ctx-core-dev/lib/rebuildjs-tailwindcss
+linked esbuild-plugin-esmfile -> /home/brian/work/ctx-core/ctx-core-dev/lib/esbuild-plugin-esmfile
+linked esbuild-plugin-esmcss -> /home/brian/work/ctx-core/ctx-core-dev/lib/esbuild-plugin-esmcss
+linked ctx-core -> /home/brian/work/ctx-core/ctx-core-dev/lib/ctx-core
+linked relysjs -> /home/brian/work/ctx-core/ctx-core-dev/lib/relysjs
+linked rebuildjs -> /home/brian/work/ctx-core/ctx-core-dev/lib/rebuildjs
+linked relementjs -> /home/brian/work/ctx-core/ctx-core-dev/lib/relementjs
+linked rmemo -> /home/brian/work/ctx-core/ctx-core-dev/lib/rmemo
+
+Bridging shared dependencies into ctx-core-dev...
+  updated bridge esbuild -> /home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild
+  updated bridge postcss -> /home/brian/work/btakita/briantakita.me-dev/node_modules/postcss
+
+Deduplicating nested dependencies...
+  deduped @rebuildjs/tailwindcss/node_modules/esbuild -> root
+  deduped @rebuildjs/tailwindcss/node_modules/postcss -> root
+  deduped rebuildjs/node_modules/esbuild -> root
+  deduped esbuild-plugin-esmfile/node_modules/esbuild -> root
+  deduped esbuild-plugin-esmcss/node_modules/esbuild -> root
+
+Done. Run ctx-core--unlink to restore npm versions.
+
+17 packages installed [191.00ms]
+```
+
+## Assistant
+
+### Release readiness
+
+**Summary of all changes across ctx-core-dev:**
+
+**Root repo (not a submodule):**
+| File | Change |
+|------|--------|
+| `AGENTS.md` | Package manager → bun, added yalc section |
+| `bin/pnpm-up.sh` | `bun update` replaces `pnpm up` |
+This should be renamed to bun-update. Are there other tools in the ecosystem that supercede this tool?
+| `bin/yalc-publish-all.sh` | New — publishes all workspace packages to yalc |
+| `package.json` | Workspaces as array, overrides moved from `pnpm.overrides`, removed pnpm deps, added yalc + publint |
+| `pnpm-lock.yaml` | Deleted (replaced by `bun.lock`) |
+| `bun.lock` | New lockfile |
+
+**Submodule changes (193 packages):**
+| Change | Scope |
+|--------|-------|
+| `prepublishOnly`: `pnpm` → `bun`, added `publint && attw --pack --ignore-rules cjs-resolves-to-esm` | 186 packages |
+| `test`: `bun run /^test:/` → explicit `bun run test:types && bun run test:unit` (etc.) | 182 packages |
+| `disable:test:unit:coverage`: `pnpm` → `bun` | packages with coverage scripts |
+| `lib/build` — build_watch_cli reads package.json, uses `bun run build` | 1 package |
+| `lib/monorepo` — 15 scripts migrated, workspace-list.sh + workspace-exec.sh added | 1 package |
+| `lib/pnpm-tools` — reads package.json instead of pnpm-workspace.yaml | 1 package |
+Should we have an equivalent bun-tools?
+
+**Issues fixed during review:**
+1. `bun run /^test:/` — bun doesn't support pnpm's regex script matching. Fixed: expanded to explicit `&&` chains.
+2. `attw --pack` returns non-zero for `CJSResolvesToESM` on ESM-only packages. Fixed: added `--ignore-rules cjs-resolves-to-esm`.
+
+**Ready to commit?** The changes are consistent and tested (`bun run prepublishOnly` passes on `@ctx-core/array`). However:
+
+- **Changesets needed**: The `prepublishOnly` and `test` script changes are in package.json, which IS published. These need patch changesets for a proper release.
+- **Submodules commit first**: Each of the 193 submodules needs to be committed from within, then the parent updated. Use `recursive-git-commit` for this.
+- **`pnpm-lock.yaml.bak`** can be deleted — it's the backup from the migration.
+
+**Suggested commit sequence:**
+```bash
+# 1. Commit submodule changes (recursive-git-commit handles this)
+recursive-git-commit   # will open editor for review
+
+# 2. Commit root changes
+git add AGENTS.md bin/ package.json bun.lock
+git rm pnpm-lock.yaml
+git commit -m "chore: migrate from pnpm to bun workspaces"
+
+# 3. Delete backup
+rm pnpm-lock.yaml.bak
+```
+
+### Updating briantakita.me-dev for yalc
+
+The `ctx-core--link.sh` postinstall hook should be replaced. With yalc:
+
+```bash
+# One-time setup in briantakita.me-dev:
+yalc add ctx-core relysjs rebuildjs relementjs rmemo \
+  @ctx-core/dev-tools @ctx-core/monorepo @ctx-core/preprocess \
+  @ctx-core/source-map @ctx-core/child_process @ctx-core/dir \
+  @ctx-core/fs @ctx-core/package @ctx-core/ctx-core-package-tools \
+  @rebuildjs/tailwindcss esbuild-plugin-esmfile esbuild-plugin-esmcss
+bun install
+```
+
+Then update `package.json`:
+```json
+"postinstall": ""   // or remove entirely
+```
+
+The `ctx-core--link.sh` and `ctx-core--unlink.sh` scripts can be kept for reference but the postinstall hook no longer needs them. After `yalc add`, packages are stored in `.yalc/` and referenced via `file:.yalc/<pkg>` in package.json — no symlinks, no type identity conflicts.
+
+Want me to make these changes to briantakita.me-dev now?
+
+## User
+
+Yes implement the changes.
+
+I had an issue
+```
+~/work/btakita/agent-loop/briantakita.me-dev main !2 ?1                                                                                                                                                                                07:05:48
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+error: Cannot find package 'fdir' from '/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/server/build/index.js'
+
+Bun v1.3.10 (Linux x64)
+```

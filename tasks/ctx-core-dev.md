@@ -1091,3 +1091,17 @@ The script itself uses `$0` for self-recursion into single-package mode, so the 
 ## User
 
 release lib/monorepo
+
+## Assistant
+
+**@ctx-core/monorepo@21.4.161 published to npm.**
+
+Had to fix two issues along the way:
+1. `publint` wasn't in PATH when running from submodule — added root `node_modules/.bin` to PATH
+2. `publint` flagged `sort-packages.mjs` shebang (`#!/bin/env` → `#!/usr/bin/env`) and repo URL (added `git+` prefix)
+
+All committed and pushed (submodule + root pointer).
+
+## User
+
+compact this file

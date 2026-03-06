@@ -1,7 +1,8 @@
 ---
 agent_doc_session: ce60bbc6-783f-40ac-9639-4e37af731520
-tmux_session: '1'
+tmux_session: '0'
 ---
+
 
 ## Status Summary (compacted 2026-03-05)
 
@@ -464,3 +465,23 @@ Let's use bun to build ctx-core-dev. All of the libraries should have checks to 
 If I run bun install, would nodejs be able to load the library?
 
 If yes, let's implement phase 1-5
+
+## Assistant
+
+**Yes — `bun install` creates a standard `node_modules` layout that Node.js can load.** Same directory structure as npm/yarn. Node.js doesn't read lockfiles, so `bun.lock` vs `pnpm-lock.yaml` doesn't matter.
+
+Good news from analysis: `bun run /^test:` supports the same glob pattern as pnpm, so migration is mostly a bulk find-and-replace. Starting implementation now.
+
+Working through phases 1-5. Will report back with results.
+
+## User
+
+bun install seems deadlocked
+
+```
+~/work/btakita/agent-loop/ctx-core-dev main !3                                                                                                                                                                             ✘ INT 3m 8s 00:16:35
+❯ bun i
+[0.01ms] ".env"
+bun install v1.3.5 (1e86cebd)
+[31.57ms] migrated lockfile from pnpm-lock.yaml
+```

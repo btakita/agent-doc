@@ -44,6 +44,9 @@ agent-doc prompt session.md              # detect permission prompts → JSON
 agent-doc skill install                  # install Claude Code skill definition
 agent-doc skill check                    # check if skill is up to date
 agent-doc upgrade                        # upgrade to latest version
+agent-doc plugin install <editor>        # install editor plugin (jetbrains|vscode)
+agent-doc plugin update <editor>         # update editor plugin to latest
+agent-doc plugin list                    # list available editor plugins
 ```
 
 ## Document Format
@@ -261,6 +264,9 @@ agent-doc patch <file> <component> [content]  # update component (stdin if no co
 agent-doc watch [--stop] [--status]          # watch daemon (debounce + loop prevention)
 agent-doc audit-docs                # audit instruction files for staleness
 agent-doc upgrade                   # upgrade to latest version
+agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
+agent-doc plugin update <editor>    # update editor plugin to latest
+agent-doc plugin list               # list available editor plugins
 ```
 
 ## License

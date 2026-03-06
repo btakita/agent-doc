@@ -38,7 +38,7 @@ content here
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
 
-Per-component behavior is configured in `.agent-doc/components.toml` (see §7.19).
+Per-component behavior is configured in `.agent-doc/components.toml` (see §7.20).
 
 ## 3. Snapshot System
 
@@ -232,7 +232,17 @@ Default output: indented text table. `--json` outputs a JSON array of section ob
 
 > **Startup version check:** On every invocation (except `upgrade` itself), `warn_if_outdated` queries crates.io (with a 24h cache at `~/.cache/agent-doc/version-cache.json`) and prints a one-line stderr warning if a newer version is available. Errors are silently ignored so normal operation is never blocked.
 
-### 7.18 sync
+### 7.18 plugin
+
+`agent-doc plugin install <EDITOR>` — download and install the editor plugin from the latest GitHub Release.
+
+`agent-doc plugin update <EDITOR>` — update an installed plugin to the latest version.
+
+`agent-doc plugin list` — list available editor plugins and their install status.
+
+Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Releases (`btakita/agent-doc`). Prefers signed assets (`*-signed.zip`) when available, falling back to unsigned. Auto-detects standard plugin directories for each editor (e.g., JetBrains plugin dir via `idea.plugins.path` or platform defaults, VS Code `~/.vscode/extensions/`).
+
+### 7.19 sync
 
 `agent-doc sync --col <FILES>,... [--col <FILES>,...] [--window W] [--focus FILE]` — declarative 2D layout sync.
 
@@ -246,7 +256,7 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 5. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
 6. **VERIFY** — confirm final layout matches desired order
 
-### 7.19 patch
+### 7.20 patch
 
 `agent-doc patch <FILE> <COMPONENT> [CONTENT]` — replace content in a named component.
 
@@ -274,7 +284,7 @@ pre_patch = "cmd"      # Shell command: stdin→stdout transform
 post_patch = "cmd"     # Shell command: fire-and-forget
 ```
 
-### 7.20 watch
+### 7.21 watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.
 

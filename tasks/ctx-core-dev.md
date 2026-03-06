@@ -397,3 +397,36 @@ For briantakita.me-dev (which targets bun runtime), bun everywhere is fine. The 
 ## User
 
 Are there any bun packages that ensure npm & nodejs compatability for library development?
+
+## Assistant
+
+There's no single "bun compatibility guarantor" package, but there are good tools for each concern:
+
+**Build tools (ensure correct output formats):**
+- [**bunup**](https://dev.to/arshadyaseen/building-a-typescript-library-in-2026-with-bunup-3bmg) — Bun-native library bundler. Outputs dual ESM + CJS, auto-generates `.d.ts`, auto-maintains `package.json` exports. Builds in ~37ms vs tsup's 5.4s.
+- **`bun build`** (built-in) — can target `node` explicitly: `bun build --target=node`. Strips bun-specific APIs.
+- **`tsc --noEmit`** — you already use this for type checking. Catches type errors that bun's runtime wouldn't.
+
+**Package linters (catch publishing issues before they reach npm):**
+- [**publint**](https://publint.dev/) — lints `package.json` for packaging errors (wrong exports, missing files, incorrect module/main fields). `npx publint` before publish.
+- [**@arethetypeswrong/cli (attw)**](https://arethetypeswrong.github.io/) — checks TypeScript types work correctly under `node10`, `node16`, and `bundler` resolution modes. `npx attw --pack`. Catches ESM/CJS type mismatches.
+- Use **both together** — publint catches packaging issues, attw catches type resolution issues.
+
+**Runtime compatibility testing:**
+- Run your test suite with `node` (not just `bun`) before publishing. Your uvu tests already work with Node.
+- `bun build --target=node` then `node dist/index.js` to verify the output runs.
+
+**For ctx-core specifically:**
+You could add to the release workflow (before `pnpm-publish--force`):
+```bash
+npx publint              # check package.json correctness
+npx attw --pack          # check type resolution
+node -e "require('.')"   # verify CJS works
+node --input-type=module -e "import('.').then(console.log)"  # verify ESM works
+```
+
+These tools work regardless of whether you develop with bun or pnpm — they check the output, not the dev toolchain.
+
+## User
+
+Let's use bun to build ctx-core-dev. All of the libraries should have checks to ensure nodejs compatability.

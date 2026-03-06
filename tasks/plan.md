@@ -172,3 +172,13 @@ Audit now passes with 0 staleness issues. Changes uncommitted in agent-doc submo
 ## User
 
 Let's add ~/work/btakita/python-intentions as a symlink to agent-loop. No need for submodule right now.
+
+## Assistant
+
+Done. Created symlink `python-intentions → ~/work/btakita/python-intentions` and added to `.gitignore` under the local symlinks section (alongside `briantakita.me-dev` and `ctx-core-dev`).
+
+## User
+
+audit docs
+compact this file
+commit agent-loop

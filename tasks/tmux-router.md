@@ -261,3 +261,69 @@ In the case of agent-doc, the file is a md file that acts as a agent loop interf
 
 What other programs would tmux-router be instrumental in supporting?
 Perhaps a log watcher?
+
+## Assistant
+
+### The Pattern: File → Pane → Program
+
+The generic pattern is: a file changes, a program in a bound pane reacts to it. tmux-router manages the binding and layout. The program in the pane is whatever you want.
+
+**Concrete use cases:**
+
+| Use Case | File | Program in Pane | Interaction |
+|----------|------|----------------|-------------|
+| **Agent loop** (agent-doc) | `plan.md` | Claude Code | File edits → agent prompt → response appended |
+| **Log watcher** | `app.log` | `tail -f` or `lnav` | Real-time log stream bound to a pane |
+| **Test runner** | `src/main.rs` | `cargo watch -x test` | File save → tests rerun in bound pane |
+| **REPL-driven dev** | `scratch.py` | `ipython` | Edit file, send snippets to REPL via `send` |
+| **Build monitor** | `Cargo.toml` | `cargo build --watch` | Dependency changes → rebuild visible in pane |
+| **Database console** | `queries.sql` | `psql` / `sqlite3` | Send SQL from file to db console |
+| **Jupyter alternative** | `notebook.md` | `python3` REPL | Markdown cells → send code blocks to REPL, capture output |
+| **Multi-agent orchestration** | `task-a.md`, `task-b.md` | Multiple Claude Code instances | Route tasks to different agents, each in their own pane |
+| **Documentation preview** | `README.md` | `mdcat` or browser refresh | File watch → re-render in pane |
+| **Server + client** | `server.rs`, `client.rs` | Two processes | Side-by-side panes, send commands to either |
+
+### The nvim Workflow
+
+A nvim user could:
+
+```bash
+# Open project — layout mirrors nvim splits
+tmux-router sync --col src/main.rs --col tests/main_test.rs
+
+# Pane 1: cargo watch (auto-test on save)
+# Pane 2: tail -f logs/app.log
+
+# From nvim, send the current file's test to run:
+tmux-router send tests/main_test.rs "cargo test test_specific_case"
+
+# Read the test output:
+tmux-router capture tests/main_test.rs --lines 20
+```
+
+The key insight: **nvim already has terminals, but they're inside nvim's process**. tmux panes are independent — they survive nvim restarts, can be shared across editors, and can be driven by scripts without nvim running.
+
+### What Makes tmux-router Different From Just Using tmux?
+
+Raw tmux gives you panes but no **semantic addressing**. You have to track pane IDs (`%5`, `%12`) yourself. tmux-router adds:
+
+1. **File-to-pane binding** — address panes by the file they serve
+2. **Layout reconciliation** — declare desired layout, tmux-router figures out the joins/breaks/reorders
+3. **Registry persistence** — bindings survive across sessions
+4. **Health management** — dead panes get pruned, stale bindings cleaned up
+
+It's the difference between "I have 6 tmux panes" and "I have a pane for my test runner, a pane for my log watcher, and a pane for my REPL."
+
+### Also: File-name addressing is now live
+
+Updated `send` and `capture` to accept file names from the registry:
+
+```bash
+tmux-router send plan.md "cargo test"      # resolves plan.md → %5 from registry
+tmux-router capture plan.md --lines 20     # same
+tmux-router send %5 "cargo test"           # raw pane IDs still work
+```
+
+## User
+
+Implement. Also document use cases.

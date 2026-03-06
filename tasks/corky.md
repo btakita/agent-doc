@@ -513,3 +513,23 @@ Shall I implement fix #1 (skip interactive OAuth in watch mode)?
 ## User
 
 Implement 1 & 2.
+
+## Assistant
+
+Done. Both fixes implemented, tests pass, release binary installed.
+
+**Fix 1 — No interactive OAuth from watch mode:**
+- Added `get_access_token_noninteractive()` in `src/filter/gmail_auth.rs` — returns `Err` with actionable message instead of opening a browser
+- Added `run_noninteractive()` in `src/filter/check.rs` — passes through to non-interactive token getter
+- Updated `check_filter_drift()` in `src/watch.rs` to use `run_noninteractive()` — will never open a browser, logs "Run `corky filter auth` to re-authenticate" when token is expired
+
+**Fix 2 — Increased timeout for manual auth:**
+- `CALLBACK_TIMEOUT_SECS`: 120 → 300 (5 minutes) in `src/filter/gmail_auth.rs`
+
+**Build:** `cargo test` — all tests pass. Release binary installed to `~/.cargo/bin/corky` (v0.13.1).
+
+**Note:** Changes are on corky `main` branch (uncommitted). The local checkout was on `research/mail-directory-structure` — I switched to `main` and stashed the old branch's changes.
+
+## User
+
+release

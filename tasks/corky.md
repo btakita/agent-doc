@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-tmux_session: '1'
+tmux_session: '0'
 ---
+
 
 
 ## Session History
@@ -487,4 +488,6 @@ Shall I implement `corky sync imports` with this config parsing and validation n
 
 ## User
 
+I see my browser open http://127.0.0.1:8484/callback?state=189a436ea37bb7c9&iss=https://accounts.google.com&code=4/0AfrIepCTMr2TrIxRM6MbBHHnBZp384UgDJ-B2mQ9DrccDZGQpcwtTvQ-nGmnFIE-szusKA&scope=https://www.googleapis.com/auth/gmail.labels%20https://www.googleapis.com/auth/gmail.settings.basic
 
+But there is no server available when I finish the oauth flow. Some time may have passed because `corky watch` seems to trigger the oauth flow & I don't notice until some time passes. 

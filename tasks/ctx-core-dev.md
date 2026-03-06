@@ -973,3 +973,53 @@ The packages will be copied (not symlinked) into briantakita.me-dev's node_modul
 ## User
 
 Yes. Run the command please. Do the rest of the fixes.
+
+## Assistant
+
+### All done. Here's what was executed:
+
+**1. Installed yalc globally:**
+```
+bun add -g yalc  →  yalc@1.0.0-pre.53 installed at ~/.bun/bin/yalc
+```
+
+**2. Published all ctx-core-dev packages to yalc:**
+```
+cd /home/brian/work/ctx-core/ctx-core-dev
+./bin/yalc-publish-all.sh  →  190 packages published, 0 failures
+```
+
+**3. Added yalc packages in briantakita.me-dev:**
+```
+cd /home/brian/work/btakita/briantakita.me-dev
+yalc add ctx-core esmcss rebuildjs relementjs relysjs rmemo \
+  @ctx-core/dev-tools @ctx-core/monorepo @ctx-core/preprocess \
+  @ctx-core/source-map @rebuildjs/tailwindcss
+bun install  →  28 packages installed
+```
+
+**4. Verified `bun run dev` — fdir error is gone:**
+The `Cannot find package 'fdir'` error is resolved. The dev server now fails on `ASSETS_BRIANTAKITA_ME__BUCKET_URL|missing` — that's a missing env var, not a dependency issue. yalc is working correctly.
+
+We did remove this recently...since we moved hosting to Cloudflare.
+Is there any reason to require ASSETS_BRIANTAKITA_ME__BUCKET_URL?
+
+**5. Deprecated @ctx-core/pnpm-tools on npm:**
+```
+npm deprecate @ctx-core/pnpm-tools "Deprecated: use @ctx-core/monorepo instead"
+```
+All versions deprecated on npmjs.org.
+
+### Remaining items before release:
+
+1. **Commit ctx-core-dev submodules** — 193 submodules have uncommitted changes (prepublishOnly, test scripts, attw flags)
+2. **Create changesets** — the package.json script changes are published content, need patch bumps
+3. **Commit root** — AGENTS.md, bin/bun-update.sh, package.json, bun.lock
+4. **Release** — changeset-version-COMMIT_EDITMSG → recursive-git-commit → publish
+
+Want me to proceed with the commit + release workflow?
+
+Yes
+
+## User
+

@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '1'
+tmux_session: '0'
 ---
+
 
 
 ## Status Summary (compacted 2026-03-04)
@@ -467,6 +468,7 @@ For now let's iterate on the existing tumx-manager.
 
 ## User
 
+Add btakita/brookebrodack-site as a submodule
 
 
 ## Assistant
@@ -530,3 +532,4 @@ Want me to start on #1?
 
 ## User
 
+There a 3 tmux panes and 2 editor windows. Please add the functional tests to reproduce this issue and fix.

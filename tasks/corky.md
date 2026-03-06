@@ -490,4 +490,26 @@ Shall I implement `corky sync imports` with this config parsing and validation n
 
 I see my browser open http://127.0.0.1:8484/callback?state=189a436ea37bb7c9&iss=https://accounts.google.com&code=4/0AfrIepCTMr2TrIxRM6MbBHHnBZp384UgDJ-B2mQ9DrccDZGQpcwtTvQ-nGmnFIE-szusKA&scope=https://www.googleapis.com/auth/gmail.labels%20https://www.googleapis.com/auth/gmail.settings.basic
 
-But there is no server available when I finish the oauth flow. Some time may have passed because `corky watch` seems to trigger the oauth flow & I don't notice until some time passes. 
+But there is no server available when I finish the oauth flow. Some time may have passed because `corky watch` seems to trigger the oauth flow & I don't notice until some time passes.
+
+## Assistant
+
+**Root cause:** `corky watch` runs `check_filter_drift()` hourly. When your Gmail token is expired and refresh fails, it triggers the full OAuth flow in `gmail_auth.rs` — which starts a `tiny_http` server on `127.0.0.1:8484` with a **120-second timeout** (`CALLBACK_TIMEOUT_SECS`). By the time you notice the browser opened and complete the Google consent flow, the server has already shut down.
+
+**Two problems:**
+1. The 120s timeout is too short for a background daemon — you may not notice the browser for minutes
+2. `corky watch` shouldn't silently trigger an interactive OAuth flow from a background loop — it should fail gracefully and warn you to run `corky filter auth` manually
+
+**Recommended fixes (from most to least important):**
+
+1. **Don't trigger interactive OAuth from watch** — `check_filter_drift()` should skip if no valid token exists, log a warning ("Gmail token expired — run `corky filter auth` to re-authenticate"), and continue the watch loop. Never open a browser from a background daemon.
+2. **Increase timeout for manual auth** — When you explicitly run `corky filter auth`, bump from 120s to 300-600s. Print a clear countdown or "waiting..." message.
+3. **Immediate workaround** — Run `corky filter auth` manually right now. The server starts fresh and waits the full 120s while you're watching: `corky filter auth`
+
+**Note:** Your local corky repo checkout is on `research/mail-directory-structure` (v0.8.0) but the installed binary is v0.13.1 from `origin/main`. The filter code is in `src/filter/gmail_auth.rs` at commit `36ec3fe`.
+
+Shall I implement fix #1 (skip interactive OAuth in watch mode)?
+
+## User
+
+Implement 1 & 2.

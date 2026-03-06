@@ -533,3 +533,17 @@ Want me to start on #1?
 ## User
 
 There a 3 tmux panes and 2 editor windows. Please add the functional tests to reproduce this issue and fix.
+
+## Assistant
+
+**Root cause:** `ensure_stash_window()` in `tmux-router/src/tmux.rs` called `tmux new-window -t 0` where `0` is the session name. tmux parsed `0` as a window index (not session name), hit "index 0 in use", and failed. The fallback was `break_pane` — which created a new visible window instead of stashing the ghost pane.
+
+**Fix** (`tmux-router/src/tmux.rs:ensure_stash_window`): Append `:` to the session name — `tmux new-window -t 0:` forces tmux to interpret `0` as a session name with auto-assigned window index. This works for both numeric and named sessions.
+
+**Test** (`tmux-router/src/sync.rs:test_reconcile_ghost_pane_with_numeric_session`): Creates 3 panes in a window, desired layout is only 2. Verifies the ghost pane gets stashed (not left in target, not broken into a new visible window). Asserts ghost ends up in the stash window specifically.
+
+**Results:** 48/48 tmux-router tests pass. agent-doc rebuilt with the fix. Live sync confirmed — 2 panes matching 2 editor windows.
+
+## User
+
+release

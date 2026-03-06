@@ -1,7 +1,8 @@
 ---
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
-tmux_session: claude
+tmux_session: '0'
 ---
+
 
 Commit all in agent-loop
 
@@ -28,3 +29,4 @@ audit docs
 
 ## User
 
+Please convert all non-submodule repos in the agent-loop directory into git submodules.

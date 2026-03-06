@@ -197,3 +197,16 @@ Implemented during this session:
 ## User
 
 Judith has not gotten back to me. Should I follow up to see what she decided to do?
+
+## Assistant
+
+**Wait until tomorrow or Friday.** The proposal was sent earlier today — same-day follow-up reads as pushy. From earlier context: Robert Ward confirmed "silence ≠ rejection — she gets busy." She'll want to review it and likely discuss with Robert Waldman first.
+
+When you do follow up, keep it light — confirm receipt, don't ask for a decision:
+
+> "Just wanted to make sure the proposal came through OK — happy to jump on a call whenever you're ready to discuss."
+
+Want me to draft that follow-up for tomorrow?
+
+## User
+

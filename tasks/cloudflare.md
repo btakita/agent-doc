@@ -63,3 +63,28 @@ Want me to proceed with steps 2 and 4 (the ones I can do programmatically)? Step
 
 ## User
 
+
+
+## Assistant
+
+Done. All three steps executed:
+
+**Step 2 — Untrack `.env.production`:**
+- `git rm --cached .env.production` + added to `.gitignore`
+- Both `.env` and `.env.production` now untracked (`cc6b217`)
+
+**Step 3 — Scrub git history:**
+- Installed `git-filter-repo`
+- Replaced all three Slack webhook URL components (`T0A738MJP09`, `B0AD8LYF48L`, `KVoSSKcVCCZnNDgH5YjO9mQ1`) with `***REDACTED***` across all commits
+- Force-pushed scrubbed history to `btakita/cloudflare`
+
+**Step 4 — Set worker secret:**
+- `npx wrangler secret put SLACK_WEBHOOK_URL --name email-to-slack-worker` — using existing URL from local `.env`
+- Verified: secret listed for `email-to-slack-worker`
+
+Parent submodule pointer updated and pushed (`ae4cf85`).
+
+**Remaining:** Test email → Slack forwarding to confirm the worker still works with the secret.
+
+## User
+

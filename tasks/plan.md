@@ -3,8 +3,6 @@ agent_doc_session: cf853a21-3aaf-4775-9cc8-0e789109f9dd
 tmux_session: '1'
 ---
 
-
-
 # Plan: agent-doc & agent-loop
 
 ## Status
@@ -14,7 +12,7 @@ tmux_session: '1'
   - `claim`: `--position`, `--window`, `--pane` flags. Window-scoped routing via sessions.json.
   - `layout`: mirror editor splits, session-aware break-out, `--window` scoping
   - `prompt`: capture-pane polling, `--all`, `--answer <N>`. Plugin shows bottom-anchored panel.
-  - `skill install/check`, `commit` (superproject-aware), upgrade self-update
+  - `skill install/check`, `commit` (superproject-aware), `upgrade` self-update, `plugin install/update/list`
 - **corky**: v0.12.0 — crates.io + PyPI + GitHub Releases. 519 tests.
   - LinkedIn OAuth2, `_cmd` credential fields, contact sync v2, topics, scheduling
   - Gmail filters: `filter auth/pull/push/build`, `label clear`
@@ -26,6 +24,7 @@ tmux_session: '1'
   - Window-scoped `--window` passthrough via `TerminalUtil.projectWindowId()`
 - **agent-doc-vscode**: v0.1.0 — extension.
 - **agent-loop**: Root Makefile (`release`, `update`, `check`, `precommit`, `publish`, `clean`).
+  - Local symlinks (gitignored): `briantakita.me-dev`, `ctx-core-dev`, `python-intentions`
 
 ### Session Routing (tmux)
 
@@ -40,6 +39,7 @@ agent-doc prompt --all                 # poll all live sessions
 agent-doc prompt --answer <N> <file>   # answer a prompt
 agent-doc commit <file>                # git add + commit with timestamp
 agent-doc skill install|check          # SKILL.md management
+agent-doc plugin install|update|list   # Editor plugin management
 ```
 
 ## Outstanding
@@ -85,100 +85,39 @@ agent-doc skill install|check          # SKILL.md management
 
 ## Session Log
 
-### Session 1 (2026-02-25) — Items 1-41
+### Sessions 1-4 (2026-02-25 to 2026-02-28)
 
-Releases: agent-doc v0.3.0 → v0.4.0 → v0.4.1 → v0.4.2, corky v0.11.1 → v0.11.3, instruction-files v0.1.1 → v0.1.2.
+Releases: agent-doc v0.3.0 → v0.5.4, corky v0.11.1 → v0.12.0, instruction-files v0.1.1 → v0.1.3.
 
-Key work: Topics (Phases 1-3), multi-session polling, `agent-doc commit/claim/skill`, PromptPanel (`JDialog` → `JLayeredPane` overlay), prompt cycling fix, SKILL.md comment stripping + version frontmatter, social credential `_cmd` fields, SPECS.md in audit-docs, WrapLayout for button overflow, `tmux-setup.sh`.
-
-### Session 2 (2026-02-26) — Items 42-60
-
-Releases: corky v0.11.2 → v0.11.3 → v0.11.4 → v0.11.5, instruction-files v0.1.2 → v0.1.3, agent-doc v0.4.3 → v0.4.4.
-
-Key work: LinkedIn OAuth 401 fix, CWD-as-data-dir, watch Ctrl+C fix, plugin merge-safe reload (3-way merge), SPECS→SPEC rename (all 4 repos), PyPI catch-up, `corky label clear`, Gmail label cleanup (10,438 messages).
-
-### Session 3 (2026-02-27) — Items 61-97
-
-Releases: agent-doc v0.5.1, corky v0.12.0.
-
-Key work: Gmail filters (`auth/pull/push/build`, config restructure), `corky transcribe` (whisper-rs, CUDA, speakers), plugin focus fix (Alt+Esc toggle, 1-9 selectors), dynamic plugin (no restart), CI fix, `agent-doc focus/layout` implemented, tab-to-pane sync, layout break-out + target window heuristics, editor plugin migration to `agent-doc/editors/`.
-
-### Session 4 (2026-02-28) — Items 98-124+
-
-Releases: agent-doc v0.5.2 → v0.5.3 → v0.5.4.
-
-Key work: Claims notification log, positional claim (`--position` + Splitter tree walk), plugin logging cleanup → IntelliJ Logger, showHint for all actions, editor SPEC files, PID liveness (added then reverted), Alt+Enter fix (ActionPromoter `promote()` + self-disabling popup), "Replace with" diagnosed as IDEA bug. Window-scoped routing (`--window` on claim/layout, `SessionEntry.window`, `projectWindowId()`). PromptPoller `@Volatile` race fix. Layout session-aware break-out. PromptPanel truncation (45 chars) + height cap (30%).
+Key work: Topics (Phases 1-3), Gmail filters, `corky transcribe`, session routing (`start/route/claim/focus/layout/prompt`), JetBrains plugin (positional claim, ActionPromoter, PromptPanel), VSCode extension, window-scoped routing, `agent-doc commit/skill/upgrade`. LinkedIn OAuth fix, SPECS→SPEC rename, PyPI catch-up, `corky label clear`.
 
 ### Session 5 (2026-03-03)
 
-Key work: Yolo mode enabled (`bypassPermissions`). Token efficiency discussion (`smart_outline`/`smart_unfold`/`smart_search` from claude-mem plugin). Audit-docs run (fixed 4 stale agent-doc docs: SPEC.md, README.md, SKILL.md, CLAUDE.md). Submodule management: added briantakita.me → swapped to briantakita.me-dev → explored symlink/submodule emulation (git rejects symlinks for submodule paths, Gitman closest tool) → removed briantakita.me-dev submodule → replaced with gitignored `ctx-core-dev` symlink to `~/work/ctx-core/ctx-core-dev`. Committed all submodules (agent-doc, corky, philosophy, presence, resume) and task files.
+Key work: Yolo mode, token efficiency (claude-mem plugin), audit-docs fixes, submodule management (briantakita.me-dev → gitignored symlinks).
 
-## User
+### Session 6 (2026-03-05)
 
-commit agent-loop and push
-
-## Assistant
-
-Done. Two commits pushed to main:
-
-1. `ecfd6ed` — Updated submodule pointers (corky, existential-kernel/exkernel) and 12 task docs (plugin.md, dave-franklin.md compacted; philosophy, gmail, agent-doc, corky, etc. updated).
-2. `58f1413` — Audit-docs cleanup: trailing whitespace and frontmatter normalization in 3 task files.
-
-## User
-
-commit agent-loop
+Key work: briantakita.me migration to Cloudflare Pages (prerender + static deploy), R2 asset migration, Contabo decommission, email worker fix (SLACK_WEBHOOK_URL), `python-intentions` symlink added. Audit-docs: updated agent-doc SPEC.md/README.md/CLAUDE.md for new `plugin.rs` module (`plugin install/update/list`).
 
 ## Assistant
 
-Committed:
+### Audit results
 
-1. `80c597c` — agent-doc plan.md timestamp
-2. `2f0bcb6` — Task docs compacted + corky submodule updated (7 files, -1836/+311 lines)
+Ran `audit-docs` across submodules:
+- **corky**: Clean
+- **instruction-files**: Skipped (library crate)
+- **agent-doc**: 4 staleness issues from `src/plugin.rs` (new module: `plugin install/update/list`). Updated:
+  - **README.md**: Added plugin commands to Quick Start and CLI Reference
+  - **SPEC.md**: Added section 7.18 (plugin management)
+  - **CLAUDE.md**: Added `plugin.rs` to module layout
+  - **SKILL.md**: Touched (no content changes needed)
+- Only remaining warning: CLAUDE.md ontology table (14 rows) — advisory, intentional
 
-Working tree clean. 132 commits ahead of origin. Push?
+### Compacted
 
-## User
+Reduced plan.md from 185 to ~100 lines. Merged Sessions 1-4 into single summary, preserved all outstanding items and design decisions. Added `plugin install/update/list` to status and CLI reference.
 
-audit docs
-
-## Assistant
-
-Ran `audit-docs` across all submodules:
-
-- **corky**: Clean — no issues
-- **instruction-files**: Library crate, no audit binary (skipped)
-- **agent-doc**: 4 issues:
-  - `SKILL.md`, `CLAUDE.md`, `SPEC.md` — older than `src/patch.rs` (potentially stale)
-  - `CLAUDE.md:77-91` — large table warning (14 rows)
-
-Want me to review and update the 3 stale agent-doc docs?
+### Committed agent-loop
 
 ## User
 
-yes
-
-## Assistant
-
-Updated agent-doc docs — 3 staleness issues resolved:
-
-- **SPEC.md**: Added section 2.3 (Components — `<!-- agent:name -->` markers) and sections 7.19-7.20 (`patch` command spec + `watch` daemon spec)
-- **CLAUDE.md**: Touched for timestamp (content already accurate)
-- **SKILL.md**: Touched for timestamp (content already accurate)
-
-Only remaining warning: CLAUDE.md ontology table (14 rows) — advisory only, table intentionally lives there for agent visibility.
-
-Audit now passes with 0 staleness issues. Changes uncommitted in agent-doc submodule.
-
-## User
-
-Let's add ~/work/btakita/python-intentions as a symlink to agent-loop. No need for submodule right now.
-
-## Assistant
-
-Done. Created symlink `python-intentions → ~/work/btakita/python-intentions` and added to `.gitignore` under the local symlinks section (alongside `briantakita.me-dev` and `ctx-core-dev`).
-
-## User
-
-audit docs
-compact this file
-commit agent-loop

@@ -11,7 +11,9 @@ mail
 tmp/
 
 .agent-doc
+.wrangler
 
 # Local symlinks (not submodules)
 briantakita.me-dev
 ctx-core-dev
+python-intentions

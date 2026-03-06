@@ -468,3 +468,65 @@ For now let's iterate on the existing tumx-manager.
 ## User
 
 
+
+## Assistant
+
+Addressing each annotation:
+
+### TUI for Syncing
+
+A TUI won't fix sync bugs (those are in tmux reconciliation logic), but a **status view** would make problems visible faster. `agent-doc status` showing live pane/file/sync state — you'd spot issues immediately instead of after the fact. Editor plugins stay primary; TUI is for monitoring/debugging.
+
+### Multi-Agent Backends — Starting
+
+The `agent/` trait is ready. Each backend is ~50-100 lines wrapping a CLI: `agent/codex.rs`, `agent/gemini.rs`, etc. Select via frontmatter (`agent: codex`) or flag (`--agent gemini`). Auto-detect available agents via `which`.
+
+### Fan-Out / Fan-In
+
+**Fan-out:** `agent-doc deep <file>` creates N worktrees + parallel agent branches.
+**Fan-in — recommended: review checkpoint.** All tasks complete → diff viewer shows changes per branch → user approves/cherry-picks → merge. A `## Deep Status` component updates as subtasks complete.
+
+Options: (A) wait-for-all merge, (B) progressive merge, (C) review checkpoint. C gives human-in-the-loop control.
+
+### TUI with Direct Interaction
+
+`agent-doc status` TUI with two modes:
+- **Dashboard** — real-time session table (files, agents, status, prompts)
+- **Interactive** — select session → attach to tmux pane or type commands to the agent
+
+### Docker Sandboxing
+
+`agent-doc run --sandboxed`: Docker container with project mounted, agent CLI installed, auth volumes shared. Medium effort — prioritize after multi-agent and worktrees.
+
+### Profiles vs Sub-Profiles
+
+`.agent-doc/` is already a project-level profile. For agent-loop's submodules, **sub-profiles** would help:
+
+```toml
+# .agent-doc/config.toml
+[profiles.agent-doc]
+agent = "claude"
+watch = true
+
+[profiles.corky]
+agent = "claude"
+watch = false
+```
+
+Files auto-inherit the matching profile by directory. Override per-document via frontmatter.
+
+### AoE Integration
+
+Simplest path: keep building our tmux-router and borrow AoE's ideas (worktrees, multi-agent, status detection) rather than integrating directly. If needed later, AoE could launch `agent-doc run` as its agent command.
+
+**Priority order:**
+1. Multi-agent backends (low effort, high value)
+2. Git worktree isolation for `agent-doc deep`
+3. `agent-doc status` TUI
+4. Sub-profiles
+5. Docker sandboxing
+
+Want me to start on #1?
+
+## User
+

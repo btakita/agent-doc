@@ -44,6 +44,7 @@ src/
   skill.rs          # Manage bundled SKILL.md (install/check)
   resync.rs         # Validate sessions.json, remove dead panes
   upgrade.rs        # Self-update via crates.io / GitHub Releases
+  plugin.rs         # Editor plugin install/update/list via GitHub Releases
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend

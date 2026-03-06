@@ -1021,3 +1021,17 @@ pass briantakita.me/SLACK_WEBHOOK_URL
 
 rapid-brook-7c04 is an old app. Please delete it and fix the configuration.
 
+## Assistant
+
+### Fixed
+
+1. **Deleted `rapid-brook-7c04-production`** — the incorrectly created worker
+2. **Set `SLACK_WEBHOOK_URL`** on the correct `email-to-slack-worker`
+
+The issue was that your local wrangler (v4.63.0) ran from a directory that didn't have the `wrangler.toml`, so it used a stale/default worker name. The secret is now set on the right worker.
+
+Send a test email to `dev-slack@briantakita.me` to verify it arrives in Slack.
+
+## User
+
+Please fix /home/brian/work/btakita/agent-loop/cloudflare/wrangler.toml

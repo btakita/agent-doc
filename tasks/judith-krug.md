@@ -261,3 +261,22 @@ Review and run `corky draft push 20260306-judith-followup.md` when ready.
 
 Should I offer options with cost or supporting different directions?
 Maybe if Judith does go with Mortgage Optimizer?
+
+## Assistant
+
+**Not in this follow-up — save it for the call.** This email's only job is to confirm receipt and get her to respond. Adding pricing options or alternative scenarios would be negotiating against yourself before she's even objected, and makes the email longer (more likely to be put aside).
+
+The proposal already positions your work as platform-agnostic. Have these ready for the conversation, not in writing:
+
+| If Judith chooses... | Your play |
+|---------------------|-----------|
+| **TMO** (proposal as-is) | Execute the proposal |
+| **MA** | Drop Phase 1 website migration (MA has portals), focus on AI/OCR layer + website modernization. ~$5-6K instead of $8K |
+MA has OCR and AI I believe. We can have our own for other documents however.
+| **Neither** (stays manual) | Offer a smaller website-only engagement ($2-3K) as a foot in the door |
+
+Keep the follow-up email exactly as drafted — 3 sentences, receipt check, call offer. Present options verbally when she tells you what she's leaning toward.
+
+## User
+
+Ok...let's send the email as a reply to the thread.

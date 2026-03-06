@@ -238,3 +238,26 @@ Want me to draft this as a corky email (threaded reply to the proposal)?
 ## User
 
 Yes. Should an email for this or a sms text?
+
+## Assistant
+
+**Email.** The proposal was sent by email with Robert Waldman CC'd — follow up in the same channel so Robert sees it too. Text would feel like escalating pressure on a professional proposal, and you lose the paper trail.
+
+Draft created: `mail/drafts/20260306-judith-followup.md`
+
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+
+> Hi Judith,
+>
+> Just wanted to make sure the proposal came through OK yesterday. Happy to hop on a quick call with you and Robert whenever works — no rush at all.
+>
+> Brian
+
+Review and run `corky draft push 20260306-judith-followup.md` when ready.
+
+## User
+
+Should I offer options with cost or supporting different directions?
+Maybe if Judith does go with Mortgage Optimizer?

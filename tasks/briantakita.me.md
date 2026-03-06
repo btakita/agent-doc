@@ -962,3 +962,62 @@ Yes — added `.wrangler` to `.gitignore`. It contains local wrangler state and 
   }
 }
 ```
+
+## Assistant
+
+### `email-to-slack-worker` — Slack webhook URL is empty
+
+The worker has a `SLACK_WEBHOOK_URL` secret configured but its value is empty (or invalid), causing `TypeError: Invalid URL: ` when it tries to `fetch()`.
+
+**To fix**, you need a valid Slack Incoming Webhook URL:
+
+1. Go to [Slack API → Incoming Webhooks](https://api.slack.com/messaging/webhooks) → **Create New App** (or use an existing one)
+2. Enable **Incoming Webhooks** → **Add New Webhook to Workspace**
+3. Select the channel to receive email notifications
+4. Copy the webhook URL (looks like `https://hooks.slack.com/services/T.../B.../xxx`)
+5. Set it:
+
+```bash
+cd ~/work/btakita/agent-loop/cloudflare/workers/email-to-slack-worker
+echo "YOUR_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+```
+
+Or if you already have it in `pass`:
+
+```bash
+pass briantakita.me/SLACK_WEBHOOK_URL | npx wrangler secret put SLACK_WEBHOOK_URL
+```
+
+The worker code itself is fine — it just needs a valid webhook URL to post to.
+
+## User
+
+pass briantakita.me/SLACK_WEBHOOK_URL
+
+```
+❯ pass briantakita.me/SLACK_WEBHOOK_URL | npx wrangler secret put SLACK_WEBHOOK_URL
+
+ ⛅️ wrangler 4.63.0 (update available 4.71.0)
+─────────────────────────────────────────────
+▲ [WARNING] Processing wrangler.toml configuration:
+
+    - No environment found in configuration with name "production".
+      Before using `--env=production` there should be an equivalent environment section in the
+  configuration.
+
+      Consider adding an environment configuration section to the wrangler.toml file:
+      ```
+      [env.production]
+      ```
+
+
+
+🌀 Creating the secret for the Worker "rapid-brook-7c04-production"
+? There doesn't seem to be a Worker called "rapid-brook-7c04-production". Do you want to create a new Worker with that name and add secrets to it?
+🤖 Using fallback value in non-interactive context: yes
+🌀 Creating new Worker "rapid-brook-7c04-production"...
+✨ Success! Uploaded secret SLACK_WEBHOOK_URL
+```
+
+rapid-brook-7c04 is an old app. Please delete it and fix the configuration.
+

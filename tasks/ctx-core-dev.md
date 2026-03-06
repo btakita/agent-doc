@@ -162,3 +162,41 @@ The TS2322 Plugin type mismatch should be resolved. Publish esmcss from ctx-core
 ## User
 
 I still see the inference error. I ran `bun i` in briantakita.me-dev. Any other sync issues?
+
+## Assistant
+
+**The nested esbuild is gone** — confirmed `node_modules/esmcss/node_modules/esbuild/` no longer exists. Running `tsc --noEmit` in `app/briantakita.me` produces **no esbuild/esmcss errors**.
+
+This is a **stale TypeScript language server cache** in your editor. The TS server cached the old resolution path before `bun i` removed it.
+
+**Fix:** Restart the TS server in your editor:
+- **VS Code / VSCodium:** `Ctrl+Shift+P` → "TypeScript: Restart TS Server"
+- **JetBrains:** File → Invalidate Caches → Restart
+
+The underlying fix is working — the type mismatch is resolved on disk.
+
+## User
+
+I invalidated caches. Still seeing
+
+```
+TS2322: Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.plugins' are incompatible between these types.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").Plugin[] | undefined' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[] | undefined'.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").Plugin[]' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin[]'.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").Plugin'.
+Types of property 'setup' are incompatible.
+Type '(build: import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>' is not assignable to type '(build: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild) => void | Promise<void>'.
+Types of parameters 'build' and 'build' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/esbuild/lib/main").PluginBuild' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/lib/relysjs/node_modules/rebuildjs/node_modules/esbuild/lib/main").PluginBuild'.
+The types of 'initialOptions.entryPoints' are incompatible between these types.
+Type 'Record<string, string> | (string | { in: string; out: string; })[] | undefined' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[] | Record<string, string> | { in: string; out: string; }[] | undefined'.
+Type '(string | { in: string; out: string; })[]' is not assignable to type 'string[]'.
+Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
+Type '{ in: string; out: string; }' is not assignable to type 'string'.
+```

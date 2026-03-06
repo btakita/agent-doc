@@ -127,3 +127,19 @@ The Plugin API hasn't changed materially between 0.23 and 0.27, so widening the 
 ## User
 
 Is the pnpm override safe for projects that depend on this?
+
+## Assistant
+
+**Yes, pnpm overrides are scoped to the project that declares them.** The override in `briantakita.me-dev/package.json` only affects resolution within that workspace — it doesn't leak into published packages or downstream consumers.
+
+- Published packages (`esmcss`, `esbuild-plugin-esmcss`) keep their declared `package.json` dependencies unchanged — consumers resolve esbuild independently
+- Other projects that install `esmcss` will still get esbuild `^0.23.1` as esmcss declares
+- The override is a consumer-side directive, not a publisher-side change
+
+**However**, if you want downstream consumers (other projects using esmcss) to also avoid the duplicate, you still need to widen esmcss's esbuild range and publish. The override only fixes it locally in briantakita.me-dev.
+
+**Recommendation:** Do both — override now for the immediate fix, then widen `esmcss`'s range to `">=0.23.1"` in ctx-core-dev and publish so all consumers benefit.
+
+## User
+
+Both fixes.

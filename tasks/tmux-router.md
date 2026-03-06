@@ -126,3 +126,92 @@ Want me to implement the CLI?
 Yes...how would it work? Could I send shell commands?
 
 It also looks like I can send data to the panes. What would the interaction with a program running in the pane be like in this case?
+
+## Assistant
+
+### CLI Design
+
+The CLI would be a thin wrapper around the existing library API. Two categories:
+
+**Layout management** (what agent-doc already uses via library calls):
+```bash
+tmux-router sync --col a.md --col b.md --session 0 --window @0
+tmux-router register tasks/plan.md %5
+tmux-router status          # show registry + pane health
+tmux-router resync           # prune dead panes
+tmux-router focus tasks/plan.md
+```
+
+**Pane interaction** (new, directly useful from shell):
+```bash
+tmux-router send %5 "ls -la"              # send shell command to pane
+tmux-router send %5 --no-enter "partial"  # send text without pressing Enter
+tmux-router capture %5                     # read pane content (stdout)
+tmux-router capture %5 --lines 50         # last 50 lines of scrollback
+```
+
+### Sending Commands to Panes
+
+`send_keys()` already exists in the library — it types text into a pane literally and presses Enter. Whatever is running in that pane receives the keystrokes as if you typed them.
+
+**Interaction with a shell:**
+```bash
+tmux-router send %5 "cd /tmp && ls"
+# → the shell in pane %5 runs the command
+```
+
+**Interaction with Claude Code:**
+```bash
+tmux-router send %5 "fix the failing test"
+# → Claude Code in pane %5 receives the prompt
+```
+
+**Interaction with any TUI (vim, htop, etc.):**
+```bash
+tmux-router send %5 --raw ":wq"    # send to vim
+tmux-router send %5 --raw "q"      # send to htop
+```
+
+### Reading Pane Output
+
+Not yet implemented, but tmux has `capture-pane`:
+```bash
+tmux-router capture %5
+# → returns the visible content of pane %5 (what you'd see on screen)
+# Uses: tmux capture-pane -t %5 -p
+```
+
+This enables **scripted workflows**:
+```bash
+# Send a command, wait, read the result
+tmux-router send %5 "cargo test"
+sleep 5
+tmux-router capture %5 | grep "test result"
+```
+
+### The Full Picture
+
+tmux panes are **bidirectional channels**. The program running inside doesn't know or care whether keystrokes come from a human or `send-keys`. So:
+
+| Running in pane | `send` does | `capture` returns |
+|----------------|-------------|-------------------|
+| bash/zsh | Executes command | Terminal output |
+| Claude Code | Submits prompt | Agent response stream |
+| vim/neovim | Sends keystrokes | Editor screen |
+| python REPL | Evaluates expression | REPL output |
+| Any TUI | Sends input | Screen buffer |
+
+This makes tmux-router a **universal agent harness** — you can drive any CLI tool programmatically, including other AI agents, without them needing an API. agent-doc's `send_keys` already uses this for Claude Code prompt injection.
+
+### Implementation Plan
+
+1. Add `src/main.rs` with clap CLI (~150 lines)
+2. Add `capture_pane()` to `Tmux` struct (~20 lines)
+3. Wire `send`, `capture`, `sync`, `register`, `status`, `resync`, `focus` subcommands
+4. Publish as dual crate (library + binary)
+
+~200 lines total. Want me to build it?
+
+## User
+
+

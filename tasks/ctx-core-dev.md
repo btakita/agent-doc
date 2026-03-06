@@ -573,3 +573,65 @@ Types of property 'lastPlugin' are incompatible.
 Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").TransformCallback'.
 Type 'Plugin' is not assignable to type 'Plugin | TransformCallback'.
 ```
+
+## Assistant
+
+**Same cross-monorepo type identity issue** — now `ctx-core-dev/node_modules/.bun/postcss@8.5.8/...` vs `briantakita.me-dev/node_modules/postcss/...`. Path changed from `.pnpm/` to `.bun/` but the fundamental problem is the same: symlinked packages resolve deps from their source tree, not the consumer's.
+
+### Your three questions:
+
+**1. Can ctx-core-dev avoid this without coupling to briantakita.me-dev?**
+No — ctx-core-dev is the library. It doesn't know about its consumers. The issue is on the consumer side (wherever symlinks cross project boundaries).
+
+**2. Does briantakita.me-dev still need the postinstall hook?**
+Yes, as long as it uses symlinks to ctx-core-dev packages. The `ctx-core--link.sh` dedup hook is still needed after every `bun i` in either project.
+
+**3. Less invasive alternatives to symlinks for testing local changes?**
+
+**Best option: [yalc](https://github.com/wclr/yalc)** — a local publish/install tool. No symlinks, no type conflicts.
+
+```bash
+# Install once:
+bun add -g yalc
+
+# In ctx-core-dev (after making changes):
+yalc publish rebuildjs
+yalc publish relysjs
+yalc publish esmcss
+
+# In briantakita.me-dev:
+yalc add rebuildjs relysjs esmcss
+bun install
+```
+
+How it works:
+- `yalc publish` copies the built package into a local store (`~/.yalc/`)
+- `yalc add` installs from that store into the consumer — **copies files, no symlinks**
+- Each consumer gets its own resolution tree — no cross-project type conflicts
+- Changes require re-publishing (`yalc push` broadcasts to all consumers)
+- `yalc remove --all` to revert back to npm versions
+
+**Comparison:**
+
+| Approach | Symlinks? | Auto-updates? | Type conflicts? | Setup |
+|----------|-----------|---------------|-----------------|-------|
+| Workspace symlinks + bridge script | Yes | Yes | Yes (needs dedup) | Low |
+| yalc | No | `yalc push` | No | Low |
+| Verdaccio (local registry) | No | No | No | Medium |
+| `bun pack` + `file:` tarballs | No | No | No | High friction |
+
+**Recommendation:** Switch to yalc for the ctx-core → briantakita.me-dev workflow. You can create a helper script in ctx-core-dev that publishes all commonly-used packages in one command:
+
+```bash
+#!/bin/sh
+# bin/yalc-publish-all.sh
+for pkg in rebuildjs relysjs esmcss esbuild-plugin-esmcss esbuild-plugin-esmfile @rebuildjs/tailwindcss; do
+  (cd "$(dirname "$0")/../lib/$pkg" 2>/dev/null && yalc publish --push) || true
+done
+```
+
+Then after making changes in ctx-core-dev, just run `yalc-publish-all.sh` and briantakita.me-dev picks them up automatically (with `--push`).
+
+## User
+
+

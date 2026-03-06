@@ -296,3 +296,15 @@ Re: your note about MA having OCR/AI — good catch. If she goes MA, the value s
 ## User
 
 Are you able to directly send the email...rather than having to click send in gmail?
+
+## Assistant
+
+**Yes — `corky draft push --send` sends immediately.** I deliberately used draft-only because corky's safety rules say "never send directly — always save as draft for review first." It's a guardrail against sending something you haven't proofread.
+
+For a 3-line follow-up you've already approved — your call. Want me to send it now with `--send`? Or do you prefer the draft-then-send workflow going forward?
+
+The draft is already in your Gmail inbox — you can also just hit send there if that's easier right now.
+
+## User
+
+Yes. send it now

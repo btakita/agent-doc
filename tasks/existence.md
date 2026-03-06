@@ -90,3 +90,14 @@ existential-kernel → existence-lang (org), exkernel → existence (crate), exk
 ❯ gp
 Username for 'https://github.com': ^C
 
+## Assistant
+
+The philosophy repo remote is HTTPS (`https://github.com/btakita/philosophy`) — it prompts for credentials because there's no PAT/credential helper configured. The rest of your repos use SSH (e.g. agent-loop is `git@github.com:btakita/agent-loop.git`).
+
+**Fix:** `cd philosophy && git remote set-url origin git@github.com:btakita/philosophy.git`
+
+Then `gp` will work via SSH. Want me to run that?
+
+## User
+
+yes

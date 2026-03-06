@@ -604,7 +604,7 @@ yalc add rebuildjs relysjs esmcss
 bun install
 ```
 
-How it works:
+How it works:ee
 - `yalc publish` copies the built package into a local store (`~/.yalc/`)
 - `yalc add` installs from that store into the consumer — **copies files, no symlinks**
 - Each consumer gets its own resolution tree — no cross-project type conflicts
@@ -634,4 +634,4 @@ Then after making changes in ctx-core-dev, just run `yalc-publish-all.sh` and br
 
 ## User
 
-
+Switch to yalc. Please add instructions to call yalc-publish-all in the ctx-core-dev AGENTS.md. Ideally, it would run on all packages in ctx-core-dev. Should there be a watch script?

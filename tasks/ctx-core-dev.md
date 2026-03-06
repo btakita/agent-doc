@@ -512,3 +512,64 @@ bun install --verbose 2>&1 | tee bun-install.log
 ## User
 
 Try it and Troubleshoot please
+
+## Assistant
+
+**Fixed — `bun install` completes in 2.96 seconds.**
+
+The issue was the **pnpm lockfile migration**. Bun's `[migrated lockfile from pnpm-lock.yaml]` step was hanging — it couldn't convert the complex workspace lockfile. Once I moved `pnpm-lock.yaml` aside and let bun resolve fresh, it worked instantly.
+
+**Changes made to fix:**
+1. Removed `"@ctx-core/*": "workspace:*"` glob override (kept explicit per-package overrides)
+2. Removed `"@rebuildjs/*": "workspace:*"` and `"@relementjs/*": "workspace:*"` glob overrides
+3. Moved `pnpm-lock.yaml` → `pnpm-lock.yaml.bak` (prevents migration hang)
+4. `bun.lock` generated fresh — 2848 packages, 1591 resolved
+
+**Verification:**
+- `bun.lock` created (505KB)
+- `node_modules/` populated with all workspace and external packages
+- Node.js can load workspace packages: `require('ctx-core/array')` works
+
+**Only warnings:** 3x `incorrect peer dependency "vite@6.4.1"` — harmless, existing issue.
+
+**Next:** You can delete `pnpm-lock.yaml.bak` when you're confident the bun workflow works. All 5 phases of the migration are now complete.
+
+## User
+
+If I run `bun i` in ctx-core-dev, the resolution error occurs. It goes away when I run `bun i` in briantakita.me-dev.
+
+Is there way to avoid this issue when I run `bun i` in ctx-core-dev...without tightly coupling to briantakita.me-dev?
+
+Does briantakita.me-dev still need to set symlinks in the postinstall hook?
+
+I may have other projects that use ctx-core in a similar way...where I would want to test local changes before releasing. Is there a less invasive way to accomplish the testing goal without symlinks?
+
+```
+TS2322: Type '(tailwindcss_plugin: AcceptedPlugin) => (Processor_ | { postcss: Processor_ | TransformCallback; } | Plugin | PluginCreator<...> | TransformCallback | Processor_)[]' is not assignable to type '(tailwindcss_plugin: AcceptedPlugin) => AcceptedPlugin[]'.
+Type '(Processor_ | { postcss: Processor_ | TransformCallback; } | Plugin | PluginCreator<any> | TransformCallback | Processor_)[]' is not assignable to type 'AcceptedPlugin[]'.
+Type 'Processor_ | { postcss: Processor_ | TransformCallback; } | Plugin | PluginCreator<any> | TransformCallback | Processor_' is not assignable to type 'AcceptedPlugin'.
+Type 'Processor_' is not assignable to type 'AcceptedPlugin'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/processor").default' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/processor").default'.
+Types of property 'plugins' are incompatible.
+Type '(import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Transformer)[]' is not assignable to type '(import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").TransformCallback | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules...'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Transformer' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").TransformCallback | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/...'.
+Type 'Plugin' is not assignable to type 'Plugin | TransformCallback | Transformer'.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin'.
+Types of property 'prepare' are incompatible.
+Type '((result: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>) => Processors) | unde...' is not assignable to type '((result: import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/....'.
+Type '(result: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>) => Processors' is not assignable to type '(result: import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.b...'.
+Types of parameters 'result' and 'result' are incompatible.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcs...' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>'.
+Types of property 'lastPlugin' are incompatible.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").TransformCallback' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback'.
+Type 'Plugin' is not assignable to type 'Plugin | TransformCallback'.
+Type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin' is not assignable to type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin'.
+Types of property 'prepare' are incompatible.
+Type '((result: import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/....' is not assignable to type '((result: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>) => Processors) | unde...'.
+Type '(result: import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.b...' is not assignable to type '(result: import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>) => Processors'.
+Types of parameters 'result' and 'result' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/result").default<import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/document").default | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/root").default>' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/result").default<import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/document").default | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcs...'.
+Types of property 'lastPlugin' are incompatible.
+Type 'import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/postcss").TransformCallback' is not assignable to type 'import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").Plugin | import("/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/postcss@8.5.8/node_modules/postcss/lib/postcss").TransformCallback'.
+Type 'Plugin' is not assignable to type 'Plugin | TransformCallback'.
+```

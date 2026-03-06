@@ -1035,3 +1035,15 @@ Send a test email to `dev-slack@briantakita.me` to verify it arrives in Slack.
 ## User
 
 Please fix /home/brian/work/btakita/agent-loop/cloudflare/wrangler.toml
+
+## Assistant
+
+Deleted. It was a stale root `wrangler.toml` with `name = "rapid-brook-7c04"` — the old default worker name. Each worker already has its own `wrangler.toml` in its subdirectory (`workers/email-to-slack-worker/wrangler.toml`, `workers/email-gateway-worker/wrangler.toml`).
+
+This was the root cause: when running wrangler from the `cloudflare/` directory, it picked up this config and targeted the wrong worker.
+
+Committed (`d7e4678`) and pushed to the cloudflare repo. Parent submodule pointer updated (`40e357e`).
+
+## User
+
+compact this file

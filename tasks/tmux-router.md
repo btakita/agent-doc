@@ -429,3 +429,63 @@ The bug: when two `/agent-doc` invocations arrive in quick succession, the first
 Can the agent-doc executable help with tracking the context of n tasks? Or is this entirely something that the skill needs to track?
 
 Also, please look at the newly released Anthropic Skill Creator...with the skill metrics. Is this something that can help?
+
+## Assistant
+
+### Can agent-doc track N task contexts?
+
+Both the executable and skill need to cooperate. The bug was: skill started document A's write-back, got interrupted by document B, never finished A. Here's how they'd split responsibility:
+
+**What the executable can provide:**
+
+1. **Execution lock** (`agent-doc lock <file>`) — filesystem lock preventing concurrent skill execution. Second invocation returns "busy, document X in progress."
+We may want to have subagents instead. What if the skill always launches subagents? Something to watch out for would be concurrency. Perhaps the skill can also decide whether or not to use a subtree?
+2. **Task queue** (`agent-doc queue add <file>`) — ordered queue in `.agent-doc/queue.json`. Skill processes one document per cycle, checks queue after completion.
+3. **Pending write tracking** (`agent-doc pending`) — record that a document's response hasn't been written back yet. Skill checks on startup and completes pending writes first.
+
+**What the skill must enforce:**
+
+- Atomic document cycles: steps 1-5 (read, diff, respond, write-back, snapshot) must complete before accepting the next `/agent-doc` invocation
+- The skill can't truly block incoming messages (Claude Code delivers them), but it can defer processing by checking the lock/queue
+
+**Simplest fix:** Add a "pending response" file (`.agent-doc/pending/<hash>.md`) written before step 3 (respond) and deleted after step 4 (write-back). On next invocation, the skill checks for pending writes and completes them first.
+
+I effectively want the left or right side to take care of running concurrent agents that all respond back to the document they were called with.
+
+No tasks should be lost. Use subagents if necessary. Orchestration needs to be properly handled. Some tasks will depend on others to complete first. These should be properly orchestrated.
+
+### Anthropic Skill Creator — Yes, Directly Applicable
+
+The [Skill Creator](https://claude.com/blog/improving-skill-creator-test-measure-and-refine-agent-skills) (March 2026) adds eval/benchmark/improve modes with metrics:
+
+**How it helps us:**
+
+1. **Eval mode** — define test prompts for the agent-doc skill:
+   - "Submit document A, verify response written back"
+   - "Submit document A then immediately B, verify both get responses"
+   - "Submit with inline annotation, verify annotation addressed"
+   - Each gets pass/fail + token usage + elapsed time
+
+2. **Benchmark mode** — A/B test skill versions:
+   - Current skill vs. skill with pending-write protection
+   - Measure: write-back success rate, response latency, token cost
+
+3. **Improve mode** — analyze failures and suggest skill edits:
+   - The context-switch bug would show up as a consistent failure pattern
+   - Skill Creator suggests fixes (e.g., "add completion check before processing next document")
+
+4. **Trigger optimization** — tune skill description for reliable activation:
+   - Our skill triggers on `/agent-doc` which is already explicit, but if we add auto-trigger on file save, description precision becomes critical
+
+**Next steps:**
+- Install Skill Creator: add to `.claude/skills/`
+- Write eval suite for the agent-doc skill (~10 test cases)
+- Run benchmark: current skill vs. pending-write-protected version
+- Use metrics to validate the fix before releasing
+
+Want me to set up the Skill Creator eval suite for agent-doc?
+
+Yes
+
+## User
+

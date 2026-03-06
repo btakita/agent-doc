@@ -402,4 +402,30 @@ Yes
 I did not see the follow up response in this document.
 Is this a bug with tmux-router or agent-doc?
 
-Looks l
+Looks like this file became unclaimed as well.
+
+## Assistant
+
+This is a **Claude Code skill execution bug**, not a tmux-router or agent-doc crate bug.
+
+**What happened:** You wrote "Yes" inline (line 398) confirming the agent-doc update. I processed it and released agent-doc v0.9.4 — but while I was writing the response back to this file, a second `/agent-doc tasks/agent-doc.md` message arrived. I context-switched to handle agent-doc.md's "compact this file" request, and the write-back to tmux-router.md was lost.
+
+**The release did happen:**
+- agent-doc v0.9.4 — published to crates.io, PyPI, GitHub Release
+- `tmux-router = "0.2"` in agent-doc's Cargo.toml
+- agent-loop submodule pointer updated
+- Installed locally
+
+The bug: when two `/agent-doc` invocations arrive in quick succession, the first document's response write-back can get dropped if the agent context-switches to the second document before completing step 4 (Edit + snapshot update).
+
+**Regarding the unclaimed file:** When I `cd`'d into the agent-doc submodule to run `cargo build`/`cargo publish`, the CWD shifted. tmux routing is window-scoped — if the skill execution crossed tmux pane boundaries or the claim was session-scoped to the old CWD, the claim could have been lost.
+
+**Fixes needed:**
+1. The skill should complete all 5 steps (respond, write-back, snapshot) for each document before handling the next `/agent-doc` invocation
+2. Claims should be resilient to CWD changes during skill execution
+
+## User
+
+Can the agent-doc executable help with tracking the context of n tasks? Or is this entirely something that the skill needs to track?
+
+Also, please look at the newly released Anthropic Skill Creator...with the skill metrics. Is this something that can help?

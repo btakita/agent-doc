@@ -143,3 +143,22 @@ Is the pnpm override safe for projects that depend on this?
 ## User
 
 Both fixes.
+
+## Assistant
+
+**Done. Both fixes applied.**
+
+**Fix 1 — Override in briantakita.me-dev:**
+- Added `"esbuild": "^0.27.3"` to `overrides` in `package.json`
+- Note: briantakita.me-dev uses **bun** (not pnpm), so override goes in the top-level `"overrides"` field
+- `bun i` completed — `node_modules/esmcss/node_modules/esbuild/` no longer exists. Deduplicated.
+
+**Fix 2 — Widen esmcss range in ctx-core-dev:**
+- Changed `lib/esmcss/package.json` esbuild dep to `">=0.23.1"`
+- Not published yet — will take effect next release from ctx-core-dev
+
+The TS2322 Plugin type mismatch should be resolved. Publish esmcss from ctx-core-dev when ready so other consumers benefit too.
+
+## User
+
+I still see the inference error. I ran `bun i` in briantakita.me-dev. Any other sync issues?

@@ -40,3 +40,15 @@
 [submodule "cloudflare"]
 	path = cloudflare
 	url = git@github.com:btakita/cloudflare.git
+[submodule "briantakita.me-dev"]
+	path = briantakita.me-dev
+	url = git@github.com:btakita/briantakita.me-dev.git
+[submodule "ctx-core-dev"]
+	path = ctx-core-dev
+	url = git@github.com:ctx-core/dev.git
+[submodule "mail"]
+	path = mail
+	url = git@github.com:btakita/mail.git
+[submodule "python-intentions"]
+	path = python-intentions
+	url = git@github.com:btakita/python-intentions.git

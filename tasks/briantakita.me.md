@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
-tmux_session: '1'
+tmux_session: '0'
 ---
+
 
 ## Status Summary (compacted 2026-03-05)
 
@@ -100,3 +101,4 @@ Workers have individual `wrangler.toml` in subdirectories — no root `wrangler.
 
 ## User
 
+Does briantakita.me-dev repos have yalc dependencies to all packages in ctx-core-dev?

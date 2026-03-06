@@ -918,4 +918,47 @@ Committed (`c95d2ad`) and deployed via CI.
 
 ## User
 
-should .wrangler be in .gitignore? I only see .wrangler/cache 
+should .wrangler be in .gitignore? I only see .wrangler/cache
+
+## Assistant
+
+Yes — added `.wrangler` to `.gitignore`. It contains local wrangler state and R2 cache. Committed and pushed (`8d82173`).
+
+## User
+
+```
+{
+  "level": "error",
+  "message": "Slack send failed: TypeError: Invalid URL: ",
+  "$workers": {
+    "truncated": false,
+    "event": {
+      "rcptTo": "dev-slack@briantakita.me",
+      "mailFrom": "brian.takita@gmail.com",
+      "rawSize": 7261
+    },
+    "scriptName": "email-to-slack-worker",
+    "outcome": "ok",
+    "eventType": "email",
+    "scriptVersion": {
+      "id": "ca32de83-e3e1-4525-a947-10f66fed1804"
+    },
+    "executionModel": "stateless",
+    "requestId": "GGJ3GH5LKW7DQF80"
+  },
+  "$metadata": {
+    "id": "01KK07AS1HGF6JADSZZ9XEWFGZ",
+    "requestId": "GGJ3GH5LKW7DQF80",
+    "trigger": "brian.takita@gmail.com",
+    "service": "email-to-slack-worker",
+    "level": "error",
+    "error": "Slack send failed: TypeError: Invalid URL: ",
+    "message": "Slack send failed: TypeError: Invalid URL: ",
+    "account": "1e7e194ff8da4ad9e40ce041aea84f76",
+    "type": "cf-worker",
+    "fingerprint": "85b8ff5acbd4e50584f26891fdf7ef78",
+    "origin": "email",
+    "messageTemplate": "Slack send failed: TypeError: Invalid URL:"
+  }
+}
+```

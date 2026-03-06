@@ -94,3 +94,36 @@ Type '(string | { in: string; out: string; })[]' is not assignable to type 'stri
 Type 'string | { in: string; out: string; }' is not assignable to type 'string'.
 Type '{ in: string; out: string; }' is not assignable to type 'string'.
 ```
+
+## Assistant
+
+**Duplicate esbuild versions — `esmcss@0.2.13` pins `^0.23.1` while your app uses `^0.27.3`.**
+
+| Location | Version | Required by |
+|----------|---------|-------------|
+| `node_modules/esbuild/` | **0.27.3** | `app/briantakita.me` + `esbuild-plugin-esmcss` |
+| `node_modules/esmcss/node_modules/esbuild/` | **0.23.1** | `esmcss@0.2.13` |
+
+The ranges don't overlap (`^0.27.3` vs `^0.23.1`), so pnpm installs both. TypeScript sees two distinct `Plugin` types and refuses to assign one to the other.
+
+**Fix options:**
+
+1. **Widen `esmcss`'s esbuild range** in ctx-core-dev (it's your package, symlinked from `ctx-core-dev/lib/esmcss`). Change `"esbuild": "^0.23.1"` → `"esbuild": ">=0.23.1"` and publish. Cleanest fix.
+
+2. **pnpm override** (quick workaround) — force a single esbuild in `briantakita.me-dev/package.json`:
+   ```json
+   "pnpm": {
+     "overrides": {
+       "esbuild": "^0.27.3"
+     }
+   }
+   ```
+   Then `pnpm i` to deduplicate.
+
+3. **Both** — override now for the immediate fix, widen esmcss for the proper long-term fix.
+
+The Plugin API hasn't changed materially between 0.23 and 0.27, so widening the range is safe. Want me to apply the fix?
+
+## User
+
+Is the pnpm override safe for projects that depend on this?

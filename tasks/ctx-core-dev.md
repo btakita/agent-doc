@@ -334,3 +334,41 @@ The gap is when `pnpm i` runs in **ctx-core-dev** — it recreates nested deps t
 ## User
 
 Can we make the ctx-core library node_modules different depending on whether it is symlinked by bun or another ctx-core library?
+
+## Assistant
+
+**No — a symlinked directory has one physical `node_modules`.** When bun symlinks `node_modules/rebuildjs → ctx-core-dev/lib/rebuildjs`, the `node_modules/` inside is the same one pnpm manages. There's no "context-dependent node_modules" because the symlink points to one physical location.
+
+**What can achieve the effect:**
+
+1. **pnpm `injected` dependencies** — hard-copies workspace packages instead of symlinking. Each consumer gets its own copy with its own resolved deps. Add to ctx-core-dev `package.json`:
+   ```json
+   "dependenciesMeta": {
+     "rebuildjs": { "injected": true },
+     "relysjs": { "injected": true }
+   }
+   ```
+   But this only works within pnpm workspaces, not for external consumers like briantakita.me-dev.
+
+2. **Your bridging script (what you have)** — `ctx-core--link.sh` effectively achieves "different deps per context" by replacing nested copies with symlinks to the consumer's root. This is the right pattern.
+
+3. **Publish + install from npm** — each consumer gets its own resolution tree. No cross-project type conflicts. But requires publishing before testing.
+
+**The bridging script is the correct approach for local dev.** The only improvement: make it dynamically discover which packages need deduplication instead of hardcoding package names. Something like:
+
+```bash
+# Auto-dedup: find all nested esbuild/postcss in symlinked packages
+for pkg in esbuild postcss; do
+  find "$REPO_ROOT/node_modules" -maxdepth 4 -path "*/node_modules/$pkg" -not -path "$REPO_ROOT/node_modules/$pkg" | while read nested; do
+    rm -rf "$nested"
+    ln -s "$REPO_ROOT/node_modules/$pkg" "$nested"
+  done
+done
+```
+
+This would catch any new packages that get added without updating the script.
+
+## User
+
+Can bun be used to develop ctx-core? ctx-core is a nodejs-compatible library.
+Can I rely on bun ensuring that ctx-core is fully nodejs-compatible?

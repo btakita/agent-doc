@@ -635,3 +635,142 @@ Then after making changes in ctx-core-dev, just run `yalc-publish-all.sh` and br
 ## User
 
 Switch to yalc. Please add instructions to call yalc-publish-all in the ctx-core-dev AGENTS.md. Ideally, it would run on all packages in ctx-core-dev. Should there be a watch script?
+
+## Assistant
+
+**Done.** Created `bin/yalc-publish-all.sh` and updated AGENTS.md.
+
+### What was created:
+
+**`bin/yalc-publish-all.sh`** — Dynamically finds all non-private workspace packages and publishes them to yalc. Defaults to `--push` (auto-updates consumers). Skips private packages.
+
+**AGENTS.md updates:**
+- Package manager changed from "pnpm workspaces" to "bun workspaces (migrated from pnpm)"
+- Added "Local Development with yalc" section with full workflow instructions
+
+### On a watch script:
+
+The existing `build-watch` already handles rebuilding on source changes. Adding auto-yalc-publish on top would mean watching for build output (`.js`/`.d.ts`) changes, determining which package changed, and running `yalc publish --push` for just that package.
+
+**Recommendation:** Start without a watch — run `yalc-publish-all.sh` manually after `build-watch` processes your changes. It's fast since yalc only copies changed files. If you find yourself running it constantly, we can add a `yalc-watch.sh` that uses `inotifywait` on build outputs:
+
+```bash
+#!/bin/sh
+# bin/yalc-watch.sh — watch build outputs and auto-publish to yalc
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+inotifywait -m -r -e modify,create --include '\.(js|d\.ts|d\.ts\.map)$' \
+  "$ROOT/lib/" "$ROOT/tools/" | while read dir event file; do
+  pkg_dir="$dir"
+  while [ "$pkg_dir" != "$ROOT" ] && [ ! -f "$pkg_dir/package.json" ]; do
+    pkg_dir="$(dirname "$pkg_dir")"
+  done
+  if [ -f "$pkg_dir/package.json" ]; then
+    (cd "$pkg_dir" && yalc publish --push 2>/dev/null)
+  fi
+done
+```
+
+But I'd hold off on creating it until you've tried the manual workflow and know whether the friction warrants it.
+
+## User
+
+yalc-publish-all failed
+
+```
+...
+> @ctx-core/ribbon@10.2.27 prepublishOnly
+> bun run clean && bun run build && bun run test && publint && attw --pack
+
+$ :
+$ :
+$ bun run /^test:/
+error: Module not found "/^test:/"
+error: script "test" exited with code 1
+npm error Lifecycle script `prepublishOnly` failed with error:
+npm error code 1
+npm error path /home/brian/work/ctx-core/ctx-core-dev/lib/ribbon
+npm error workspace @ctx-core/ribbon@10.2.27
+npm error location /home/brian/work/ctx-core/ctx-core-dev/lib/ribbon
+npm error command failed
+npm error command sh -c bun run clean && bun run build && bun run test && publint && attw --pack
+yalc publish
+
+Publish package in yalc local repo
+
+Options:
+  --version            Show version number                             [boolean]
+  --help               Show help                                       [boolean]
+  --sig                                               [boolean] [default: false]
+  --dev-mod                                            [boolean] [default: true]
+  --workspace-resolve                                            [default: true]
+
+Error: Command failed: npm run prepublishOnly
+    at genericNodeError (node:internal/errors:998:15)
+    at wrappedFn (node:internal/errors:543:14)
+    at checkExecSyncError (node:child_process:925:11)
+    at Object.execSync (node:child_process:997:15)
+    at runPmScript (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:75:41)
+    at Array.forEach (<anonymous>)
+    at /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:90:28
+    at step (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:44:23)
+    at Object.next (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:25:53)
+    at /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:19:71 {
+  status: 1,
+  signal: null,
+  output: [ null, null, null ],
+  pid: 272974,
+  stdout: null,
+  stderr: null
+}
+  FAILED: @ctx-core/ribbon
+yalc publish --push @ctx-core/ripple-effect
+Running prepublishOnly script: bun run clean && bun run build && bun run test && publint && attw --pack
+npm warn Unknown project config "link-workspace-packages". This will stop working in the next major version of npm.
+
+> @ctx-core/ripple-effect@13.3.209 prepublishOnly
+> bun run clean && bun run build && bun run test && publint && attw --pack
+
+$ :
+$ :
+$ bun run /^test:/
+error: Module not found "/^test:/"
+error: script "test" exited with code 1
+npm error Lifecycle script `prepublishOnly` failed with error:
+npm error code 1
+npm error path /home/brian/work/ctx-core/ctx-core-dev/lib/ripple-effect
+npm error workspace @ctx-core/ripple-effect@13.3.209
+npm error location /home/brian/work/ctx-core/ctx-core-dev/lib/ripple-effect
+npm error command failed
+npm error command sh -c bun run clean && bun run build && bun run test && publint && attw --pack
+yalc publish
+
+Publish package in yalc local repo
+
+Options:
+  --version            Show version number                             [boolean]
+  --help               Show help                                       [boolean]
+  --sig                                               [boolean] [default: false]
+  --dev-mod                                            [boolean] [default: true]
+  --workspace-resolve                                            [default: true]
+
+Error: Command failed: npm run prepublishOnly
+    at genericNodeError (node:internal/errors:998:15)
+    at wrappedFn (node:internal/errors:543:14)
+    at checkExecSyncError (node:child_process:925:11)
+    at Object.execSync (node:child_process:997:15)
+    at runPmScript (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:75:41)
+    at Array.forEach (<anonymous>)
+    at /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:90:28
+    at step (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:44:23)
+    at Object.next (/home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:25:53)
+    at /home/brian/work/ctx-core/ctx-core-dev/node_modules/.bun/yalc@1.0.0-pre.53/node_modules/yalc/src/publish.js:19:71 {
+  status: 1,
+  signal: null,
+  output: [ null, null, null ],
+  pid: 273020,
+  stdout: null,
+  stderr: null
+}
+  FAILED: @ctx-core/ripple-effect
+...
+```

@@ -102,3 +102,20 @@ Workers have individual `wrangler.toml` in subdirectories — no root `wrangler.
 ## User
 
 Does briantakita.me-dev repos have yalc dependencies to all packages in ctx-core-dev?
+
+## Assistant
+
+**No — only the 11 packages it actually uses**, not all 190:
+
+```
+@ctx-core/dev-tools    @ctx-core/monorepo     @ctx-core/preprocess
+@ctx-core/source-map   @rebuildjs/tailwindcss  ctx-core
+esmcss                 rebuildjs              relementjs
+relysjs                rmemo
+```
+
+These match exactly the deps declared in briantakita.me-dev's workspace package.json files. `yalc-publish-all.sh` publishes all 190 to the yalc store, but only the ones you `yalc add` in the consumer are linked. If you add a new ctx-core dependency to briantakita.me-dev later, you'd need to `yalc add <pkg>` for it too.
+
+## User
+
+Please run yalc add on the dependencies. If not already added.

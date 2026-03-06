@@ -86,3 +86,7 @@ existential-kernel → existence-lang (org), exkernel → existence (crate), exk
 
 ## User
 
+~/work/btakita/agent-loop/philosophy master                                                                                                                                                                                            19:33:46
+❯ gp
+Username for 'https://github.com': ^C
+

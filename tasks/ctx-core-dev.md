@@ -429,4 +429,38 @@ These tools work regardless of whether you develop with bun or pnpm — they che
 
 ## User
 
-Let's use bun to build ctx-core-dev. All of the libraries should have checks to ensure nodejs compatability.
+Let's use bun to build ctx-core-dev. All of the libraries should have checks to ensure nodejs compatability
+
+## Assistant
+
+**This is a significant migration — 192 workspace packages with extensive pnpm-specific tooling.** Good news: relysjs already uses bun in its scripts, proving the concept works.
+
+### Migration Scope
+
+| Area | Effort | Notes |
+|------|--------|-------|
+| Root overrides | Low | `pnpm.overrides` → top-level `overrides` |
+| Workspace config | Done | Root already has `workspaces.packages` |
+| `pnpm run /^test:/` glob | Medium | Bun doesn't support glob in `run` — expand to explicit `bun run test:unit && bun run test:types` |
+| 192 `prepublishOnly` scripts | Medium | `pnpm clean && pnpm build && pnpm test` → `bun run clean && bun run build && bun run test` |
+| `@pnpm/list`, `@pnpm/sort-packages` | Medium | Used in monorepo tooling — need alternatives |
+| `monorepo_pnpm__dependencies__update.mjs` | High | Custom pnpm-specific CLI — needs rewrite or replacement |
+| Publishing (`pnpm-publish--force`) | Medium | Replace with `bun publish` or keep npm for publishing |
+| Lockfile | Auto | `bun i` generates `bun.lock` |
+| Node.js compat checks | Low | Add `publint` + `attw` to CI/prepublish |
+
+### Proposed Phases
+
+1. **Phase 1 — Root migration**: Replace `pnpm-lock.yaml` with `bun.lock`, move overrides, update root scripts. Verify `bun i` resolves all 192 packages.
+2. **Phase 2 — Package scripts**: Bulk-replace `pnpm` → `bun run` in all package.json scripts across lib/*.
+3. **Phase 3 — Monorepo tooling**: Rewrite or adapt `@ctx-core/monorepo` tools (dependency updates, publish orchestration).
+4. **Phase 4 — Node.js compat**: Add `publint` + `attw` checks to prepublishOnly. Run tests with Node before release.
+5. **Phase 5 — Publishing**: Test `bun publish` workflow end-to-end. Update release documentation.
+
+**This needs a detailed plan before implementation.** Want me to write one to a separate file, or should we start with Phase 1 as a proof-of-concept?
+
+## User
+
+If I run bun install, would nodejs be able to load the library?
+
+If yes, let's implement phase 1-5

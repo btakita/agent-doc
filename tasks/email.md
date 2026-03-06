@@ -1,10 +1,8 @@
 ---
-session: 6c57ef6d-db13-43df-a68d-0e9c4372110b
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 6c57ef6d-db13-43df-a68d-0e9c4372110b
+tmux_session: '1'
 ---
+
 
 ## User
 
@@ -62,3 +60,5 @@ Deleted 2 existing filters, created 2 new ones:
 ## User
 
 sync
+
+commit mail

@@ -212,3 +212,29 @@ Want me to draft that follow-up for tomorrow?
 ## User
 
 No response from Judith. Let's have a followup. I'm not sure what she decided to do. I wonder if $8000 scared her off
+
+## Assistant
+
+**$8K probably didn't scare her off** — she was already looking at $18K year-one for MA. Your proposal saves her ~$5K in year one and ~$6K/year ongoing. The value prop is strong. More likely she's busy (Robert Ward's earlier read) or discussing with Robert Waldman.
+
+That said, a light follow-up is fine — proposal was sent yesterday. Keep it short, don't re-pitch, give her an easy off-ramp to ask questions:
+
+**Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+
+> Hi Judith,
+>
+> Just wanted to make sure the proposal came through OK yesterday. Happy to hop on a quick call with you and Robert whenever works — no rush at all.
+>
+> Brian
+
+**Why this works:**
+- Confirms receipt (legitimate reason to follow up after 1 day)
+- Includes Robert Waldman (she'll want his input)
+- "No rush" removes pressure
+- Short = respectful of her time
+
+Want me to draft this as a corky email (threaded reply to the proposal)?
+
+## User
+
+Yes. Should an email for this or a sms text?

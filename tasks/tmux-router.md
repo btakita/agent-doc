@@ -327,3 +327,34 @@ tmux-router send %5 "cargo test"           # raw pane IDs still work
 ## User
 
 Implement. Also document use cases.
+
+## Assistant
+
+Done. Two things shipped:
+
+### 1. File-name addressing in `send` and `capture`
+
+`resolve_target()` checks if the target starts with `%` (raw pane ID) or looks it up in the registry. Works for both `send` and `capture`:
+
+```bash
+tmux-router send plan.md "cargo test"     # registry lookup
+tmux-router send %5 "cargo test"          # raw pane ID
+tmux-router capture plan.md --lines 20    # registry lookup
+```
+
+### 2. README with documented use cases
+
+Updated `tmux-router/README.md` with full CLI reference and 6 use cases:
+
+- **Test runner** — `cargo watch` in a bound pane, capture results
+- **REPL-driven dev** — send code to IPython from your editor
+- **Log watcher** — `tail -f` bound to a log file
+- **Database console** — send SQL to `psql` by file name
+- **Multi-agent orchestration** — multiple Claude Code instances, each bound to a task file
+- **Scripted workflows** — bash scripts using `send` + `capture` for automation
+
+All 48 tests pass, clippy clean. Ready to bump version and release when you want.
+
+## User
+
+Release tmux-router and agent-loop

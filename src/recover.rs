@@ -83,6 +83,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
     }
 

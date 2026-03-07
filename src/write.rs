@@ -12,7 +12,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::snapshot;
+use crate::{snapshot, template};
 
 /// Run the write command: append assistant response to document.
 ///
@@ -75,6 +75,71 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     drop(doc_lock);
 
     eprintln!("[write] Response appended to {}", file.display());
+    Ok(())
+}
+
+/// Run the template write command: parse patch blocks and apply to components.
+///
+/// `baseline` is the document content at the time the response was generated.
+pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Read response from stdin
+    let mut response = String::new();
+    std::io::stdin()
+        .read_to_string(&mut response)
+        .context("failed to read response from stdin")?;
+
+    if response.trim().is_empty() {
+        anyhow::bail!("empty response — nothing to write");
+    }
+
+    // Parse patch blocks from response
+    let (patches, unmatched) = template::parse_patches(&response)
+        .context("failed to parse patch blocks from response")?;
+
+    if patches.is_empty() && unmatched.trim().is_empty() {
+        anyhow::bail!("no patch blocks or content found in response");
+    }
+
+    // Read document state
+    let content_at_start = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let base = baseline.unwrap_or(&content_at_start);
+
+    // Apply patches to baseline
+    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+
+    // Acquire advisory lock
+    let doc_lock = acquire_doc_lock(file)?;
+
+    // Re-read file to check for user edits
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+
+    let final_content = if content_current == base {
+        content_ours
+    } else {
+        eprintln!("[write] File was modified during response generation. Merging...");
+        merge_contents(base, &content_ours, &content_current)?
+    };
+
+    atomic_write(file, &final_content)?;
+
+    // Update snapshot
+    snapshot::save(file, &final_content)?;
+
+    drop(doc_lock);
+
+    eprintln!(
+        "[write] Template patches applied to {} ({} components patched)",
+        file.display(),
+        patches.len()
+    );
     Ok(())
 }
 

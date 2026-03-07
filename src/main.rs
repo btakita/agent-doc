@@ -23,6 +23,7 @@ mod snapshot;
 mod start;
 mod submit;
 mod sync;
+mod template;
 mod upgrade;
 mod watch;
 mod write;
@@ -216,6 +217,14 @@ enum Commands {
         /// Baseline content for 3-way merge (reads from file if omitted)
         #[arg(long)]
         baseline_file: Option<PathBuf>,
+        /// Template mode: parse <!-- patch:name --> blocks and apply to components
+        #[arg(long)]
+        template: bool,
+    },
+    /// Show template structure of a document (components, modes, content)
+    TemplateInfo {
+        /// Path to the document
+        file: PathBuf,
     },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
@@ -335,13 +344,22 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file } => {
+        Commands::Write { file, baseline_file, template: is_template } => {
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)
                 .transpose()
                 .context("failed to read baseline file")?;
-            write::run(&file, baseline.as_deref())
+            if is_template {
+                write::run_template(&file, baseline.as_deref())
+            } else {
+                write::run(&file, baseline.as_deref())
+            }
+        }
+        Commands::TemplateInfo { file } => {
+            let info = template::template_info(&file)?;
+            println!("{}", serde_json::to_string_pretty(&info)?);
+            Ok(())
         }
         Commands::Upgrade => upgrade::run(),
     }

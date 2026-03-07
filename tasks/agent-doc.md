@@ -441,3 +441,19 @@ My recommendation is **Option 3** for now -- it's honest, zero-risk, and preserv
 ## User
 
 Why did we implement with_snapshot if we are not using it? Is it mainly for programmers using the library?
+
+## Assistant
+
+Honest answer: it was premature. The subagent that implemented the race condition mitigations added `with_snapshot` speculatively, anticipating that the watch daemon and `agent-doc deep` command would need a transactional read-modify-write pattern on the snapshot file. But neither of those features exist yet, so nothing calls it in production -- only the tests do.
+
+And no, it's not mainly for library consumers. `agent-doc` is an application binary, not a library others import. The `pub` visibility was cargo-cult from `with_registry` in `tmux-router`, which actually IS a library where `pub` makes sense. Here it's just noise.
+
+The right call is **Option 4: delete it**. YAGNI. The function, its tests, and the `pub` visibility should all go. When the watch daemon or `deep` command actually lands, we add it back as part of that PR with a real caller from day one. The `SnapshotLock` type can stay since `save()` and `load()` use it.
+
+The tests we lose aren't wasted work -- they proved the locking logic is sound. That knowledge carries forward. But shipping dead code with an `#[allow(dead_code)]` annotation is a code smell we don't need.
+
+Want me to go ahead and remove `with_snapshot` and its tests?
+
+Yes
+
+## User

@@ -413,3 +413,31 @@ All tests use `set_current_dir` to the temp dir (since `path_for` returns relati
 ## User
 
 How can we fix the dead_code warning?
+
+## Assistant
+
+Four options, ordered by preference:
+
+**Option 1 (recommended): Use `with_snapshot` in `submit.rs`**
+In `submit.rs` lines 112-131, the code does a manual lock-acquire, re-read, write, snapshot-save, lock-release sequence. The snapshot `save()` call on line 129 acquires its own separate `SnapshotLock`, meaning the doc lock and snapshot lock are briefly independent. Replacing the standalone `snapshot::save(file, &final_content)?` with `snapshot::with_snapshot()` doesn't directly help here since `with_snapshot` is for read-modify-write on snapshots, and submit just does a write. However, if there's any future code path that needs to read-then-update a snapshot atomically, `with_snapshot` is the right tool.
+
+The real win: `with_snapshot` is designed for the watch daemon and `agent-doc deep` (future features). When those are implemented, `with_snapshot` gets used in production code and the warning disappears naturally.
+
+**Option 2: `#[cfg(test)]` the function**
+Mark `with_snapshot` as `#[cfg(test)]` since it's only used in tests today. Downside: you'd have to remove the attribute when you actually need it in production code.
+
+**Option 3: `#[allow(dead_code)]` with a comment**
+```rust
+#[allow(dead_code)] // Used by tests; production use planned for watch daemon + deep
+pub fn with_snapshot<F>(doc: &Path, f: F) -> Result<()>
+```
+Simple, explicit about intent. Not ideal but honest.
+
+**Option 4: Delete it**
+Remove `with_snapshot` and its tests. Re-add when needed. YAGNI principle. Downside: you just wrote the tests.
+
+My recommendation is **Option 3** for now -- it's honest, zero-risk, and preserves the work. When the watch daemon or `agent-doc deep` lands, the `#[allow]` gets removed as part of that PR. Option 1 doesn't apply cleanly since `submit.rs` doesn't need read-modify-write on the snapshot.
+
+## User
+
+

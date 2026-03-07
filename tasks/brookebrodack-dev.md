@@ -1080,5 +1080,22 @@ This simplifies the data pipeline to: YouTube RSS + Google API only. Want me to 
 
 Yes
 
+## Assistant
+
+**Authory dependency removed.** All clean — zero references remaining.
+
+**Changes:**
+1. **Deleted** `lib/domain--server--brookebrodack/youtube/authory_youtube_rss_cache.ts`
+2. **Edited** `rss_youtube_video_a1.ts` — removed import and `authory__up_to_date` check (now only checks YouTube RSS staleness)
+3. **Edited** `youtube/index.ts` — removed authory re-export
+4. **Edited** `env/index.ts` — removed `AUTHORY_YOUTUBE_RSS_URL` from validation and type
+5. **Edited** `.github/workflows/deploy.yml` — removed `AUTHORY_YOUTUBE_RSS_URL` from all 3 build steps
+6. **Deleted** `AUTHORY_YOUTUBE_RSS_URL` GitHub secret from `btakita/brookebrodack-dev`
+
+**Verified:** Dev server starts clean on port 4101 with no errors. `grep -ri authory` returns zero matches.
+
+**Not yet committed or pushed** — ready when you want to deploy.
+
 ## User
 
+deploy

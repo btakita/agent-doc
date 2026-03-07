@@ -267,3 +267,27 @@ packages/ could also work. Which at least gets the submodules outside of the roo
 But if we go with packages/, why not just go with src/?
 
 Please advise.
+
+## Assistant
+
+**My advice: stay flat.**
+
+| Option | What it buys | What it costs |
+|--------|-------------|---------------|
+| `src/` | One nesting level | Every path changes, CLAUDE.md refs break, git history noise |
+| `packages/` | Same | Same cost, different name |
+| `apps/` + `libs/` | Semantic split | Ambiguous for dual-use (agent-doc is both app and lib) |
+| FHS | Unix familiarity | Deep nesting, unconventional |
+| **Flat** | Zero overhead | Slightly crowded root |
+
+**The root has ~20 submodules.** That's fine. `ls` handles it, IDE sidebars collapse them, and your names are already descriptive. The pain threshold for flat is ~40+ entries.
+
+**When to reorganize:** When quant repos arrive, add a single `quant/` directory for those. That's a targeted fix, not a wholesale restructure.
+
+**If you must nest:** `src/` is the most honest option — just "source code lives here" with no semantic pretense. But I'd argue against it until the root actually becomes unmanageable.
+
+The best directory structure is the one you don't have to think about. Right now, flat is that structure.
+
+## User
+
+I can see 40+ entries happening soon. Would there be any advantage to having a separate `src/` directory to separate the submodule layer from the config + bin/ layer?

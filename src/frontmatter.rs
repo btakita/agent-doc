@@ -27,6 +27,9 @@ pub struct Frontmatter {
     /// Set by `claim` or `sync` on first use; used to keep panes in the same session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
+    /// Response mode: "append" (default) or "template" (in-place component patching).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_mode: Option<String>,
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -171,6 +174,7 @@ mod tests {
             model: Some("opus".to_string()),
             branch: Some("dev".to_string()),
             tmux_session: None,
+            response_mode: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

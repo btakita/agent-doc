@@ -354,3 +354,37 @@ Builds entirely on existing component infrastructure. Main new work is the templ
 ## User
 
 Would another TUI "editor" be useful? How would some recent editors such as ki work in this flow?
+## Assistant
+
+### TUI Editors in the Agent-Doc Flow
+
+**Ki Editor** ([ki-editor.org](https://ki-editor.org)) is a multi-cursor combinatoric modal TUI editor written in Rust. Its name means "tree" (木) in Japanese — fitting, since it uses Tree-sitter for first-class structural editing.
+
+**What makes Ki interesting here:**
+- **Unified component model** — every UI element (prompt, completion dropdown, file explorer) is a full editor with the same keybindings. Mirrors agent-doc's "everything is a document" philosophy.
+- **Selection mode → Movement → Action** — more composable than Vim (`Action → Movement`) or Helix (`Movement → Action`).
+- **Positional keybindings** — layout-agnostic (QWERTY, Dvorak, Colemak). No mnemonics.
+- **Tree-sitter structural editing** — one key to select the enclosing syntax node. Markdown component markers (`<!-- agent:name -->`) could be registered as structural units.
+- **Auto-reload** — detects external file changes without manual refresh.
+
+**Two integration models:**
+
+**1. TUI as editing surface (works today)**
+Ki (or Helix, Neovim) as the editor. `agent-doc watch` detects saves, submits to agent, patches the document. Ki's auto-reload shows updates live. Zero Ki-specific code needed.
+
+**2. Purpose-built dashboard TUI (future `agent-doc status`)**
+A Ratatui-based interactive viewer for template-mode documents:
+- Component regions as foldable panes (like tmux splits in one terminal)
+- Expand a component → edit inline → submit
+- Agent responses patch specific components, TUI re-renders
+- Built into agent-doc, not dependent on external editor
+
+**The Ki-specific opportunity:**
+Ki's "everything is an editor" architecture means a plugin could treat `<!-- agent:name -->` component regions as Tree-sitter structural units. Pressing `d` (select enclosing node) inside a component selects the entire body. Multi-cursor lets you edit multiple components simultaneously, then submit once.
+
+**Pragmatic path:** Use any TUI editor as the editing surface + `agent-doc watch` for agent interaction. Build the dashboard TUI separately as `agent-doc status` when the need justifies it. Ki's structural editing is a bonus but not a prerequisite — the flow works with any editor that saves files.
+
+## User
+
+What are the next steps to support In-Place Response Documents for Jetbrains and VSCode?
+Please put all common logic into the agent-doc binary.

@@ -1014,3 +1014,24 @@ Files changed:
 ## User
 
 Can we have our own worker that does the same thing as pubsubhubbub.appspot.com?
+
+## Assistant
+
+**Not for YouTube** — YouTube only publishes feed updates to Google's PubSubHubbub hub. You can't redirect YouTube to push to a custom hub. The architecture is:
+
+```
+YouTube → Google's Hub → Your CF Worker (subscriber callback) → GH Actions
+```
+
+We already control the subscriber callback (the CF Worker). The hub is Google's because YouTube chose it — it's hardcoded in their Atom feed's `<link rel="hub">` element.
+
+**What you could build your own hub for:**
+- RSS/Atom feeds from **other** sources (blogs, podcasts) that don't have a hub
+- A **polling-to-push** bridge: your worker polls RSS feeds on a schedule, detects changes, and pushes notifications to subscribers
+- But for YouTube specifically, Google's hub is the only option and it works well
+
+**What we already have is the right architecture** — the CF Worker is the subscriber, Google's hub is the broker, and YouTube is the publisher. The cron auto-renewal keeps the subscription alive.
+
+## User
+
+Is the authory.com feed something that I can replace with a custom worker?

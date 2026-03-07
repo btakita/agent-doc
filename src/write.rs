@@ -83,7 +83,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = path.with_extension("md.agent-doc.lock");
+    let lock_path = crate::snapshot::lock_path_for(path)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

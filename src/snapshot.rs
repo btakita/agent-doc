@@ -5,6 +5,43 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 const SNAP_DIR: &str = ".agent-doc/snapshots";
+const LOCK_DIR: &str = ".agent-doc/locks";
+
+/// Compute the SHA256 hex hash of a document's canonical path.
+/// Used for both snapshot filenames and lock filenames.
+pub fn doc_hash(doc: &Path) -> Result<String> {
+    let canonical = doc.canonicalize()?;
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Compute the advisory lock file path for a given document.
+/// Walks up from the document to find the `.agent-doc/` project root.
+/// Returns `<project_root>/.agent-doc/locks/<sha256_hash>.lock`.
+/// Falls back to the document's parent directory if no project root found.
+pub fn lock_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root.join(LOCK_DIR).join(format!("{}.lock", hash)))
+}
+
+/// Walk up from a path to find the directory containing `.agent-doc/`.
+fn find_project_root(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.is_file() {
+        path.parent()?
+    } else {
+        path
+    };
+    loop {
+        if current.join(".agent-doc").is_dir() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Advisory file lock for snapshot operations
@@ -48,10 +85,7 @@ impl Drop for SnapshotLock {
 
 /// Compute the snapshot file path for a given document.
 pub fn path_for(doc: &Path) -> Result<PathBuf> {
-    let canonical = doc.canonicalize()?;
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    let hash = hex::encode(hasher.finalize());
+    let hash = doc_hash(doc)?;
     Ok(PathBuf::from(SNAP_DIR).join(format!("{}.md", hash)))
 }
 

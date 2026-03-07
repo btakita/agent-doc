@@ -931,3 +931,42 @@ The DNS:Edit permission is safe to add. Ready to proceed when you've updated the
 See screenshot. Which of these tokens are you talking about?
 
 Edited. Try moving the DNS over
+
+## Assistant
+
+**DNS cutover complete.** `https://brookebrodack.net/` → HTTP 200 from CF Pages.
+
+**What I did:**
+1. Listed DNS records (token now has DNS permission)
+2. Deleted A records: `brookebrodack.net` → `207.244.234.186` and `www.brookebrodack.net` → `207.244.234.186`
+3. Added CNAME records: `brookebrodack.net` → `brookebrodack.pages.dev` and `www` → `brookebrodack.pages.dev`
+4. CF Pages verification: **active** for both domains
+5. SSL certificate: provisioning (Google CA, 1-5 min — site works via CF universal SSL in the meantime)
+
+**Kept:** `ssh.brookebrodack.net` A record still points to Contabo (for SSH access).
+
+Remove ssh.brookebrodack.net
+
+**Verification:**
+- `https://brookebrodack.net/` → HTTP 200 (23KB)
+- `https://brookebrodack.pages.dev/` → HTTP 200 (23KB)
+
+**Migration complete.** All 7 phases done:
+1. Static build (static-export.ts)
+2. GH Actions CI/CD (deploy.yml)
+3. Assets (bundled in build, no R2 needed)
+4. YouTube data (baked at build time)
+5. DNS cutover (done)
+6. Scheduled rebuilds (cron every 6h)
+7. WebSub worker (deployed + subscribed)
+
+**Decommission when ready:**
+```bash
+ssh admin@207.244.234.186 "cd /home/admin/work/brookebrodack-dev && docker compose down"
+```
+
+Ready to decommission
+
+## User
+
+

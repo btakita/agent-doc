@@ -327,4 +327,6 @@ Published to all targets:
 - **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.10.1
 
 The bundled SKILL.md now includes template-mode instructions. Running `agent-doc skill install` in any project will propagate the fix. The claim-after-restart fix is tracked separately for the next release.
+
+We have exchange and input/output. Which is the default?
 <!-- /agent:exchange -->

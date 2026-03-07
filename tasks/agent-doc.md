@@ -204,51 +204,15 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:exchange -->
 
-**`exchange` is the default.** The SKILL.md lists it first and describes it as the primary convention. `input`/`output` is opt-in for structured separation.
+**Pre-recorded is the right call.** A live stream risks exposing API keys, email content (`mail/`), session tokens, or private repo data in terminal output.
 
-| Convention | Default? | Use case |
-|------------|----------|----------|
-| `exchange` | **Yes** | Shared conversation surface — user and agent write in the same space |
-| `input` + `output` | No | Formal request/response separation — task delegation, dashboards |
+**Recommended approach:** Record a natural session, then edit before publishing.
+- Use a **demo project** — fresh repo with no real secrets
+- Review frame by frame before publishing
+- Control pacing — cut dead time, add captions
+- Re-record individual segments if needed
 
-When a template-mode document has no explicit conversation components, the agent creates an `exchange` component. `input`/`output` is used when the document author explicitly sets them up.
+A "recorded live session" gives the authentic feel with the safety net of post-production. Record yourself going through it naturally, then trim and scrub.
 
-Let's work on the blog post for briantakita.me.
-Can you also help me with a general script for a screencast demo?
-I want the demo to be short and exciting.
-Not exciting in a marketing fluff sort of way...but a compelling short demo of the workflow.
-
-### Blog post outline
-
-1. **Hook**: "Your markdown file IS the chat interface"
-2. **The problem**: Context windows overflow, conversations are ephemeral, agent responses disappear into terminal scrollback
-3. **The solution**: agent-doc — document-as-UI with three interaction modes
-4. **Modes explained**:
-   - **Append**: Traditional chat. `## User` / `## Assistant` blocks. Linear history.
-   - **Template**: Named components. Agent patches specific regions. Living documents.
-   - **Exchange**: Shared conversation surface. User and agent write in the same space. Design discussions.
-5. **The design story**: How `response_mode` became `agent_doc_mode`, how `input`/`output` evolved into `exchange`
-6. **Demo link**: Screencast embedded
-7. **What's next**: Multi-agent backends, TUI dashboard, plugin ecosystem
-
-### Screencast script (~60 seconds, compelling workflow demo)
-
-No fluff — just show the workflow doing real work.
-
-| Time | Action | Voiceover |
-|------|--------|-----------|
-| 0:00 | Open a real project document in IDEA | "This is a real project. The document tracks architecture decisions." |
-| 0:05 | Show existing components (status, architecture) | "Named components — the agent updates them in place" |
-| 0:10 | Type a design question in the exchange | "I write directly in the document" |
-| 0:15 | Hit submit | "One click sends to Claude" |
-| 0:18 | Split view: terminal streaming + document updating | "Response streams in real time — into the document, not a chat window" |
-| 0:30 | Add an inline annotation to the response | "I disagree with this — annotate inline, submit again" |
-| 0:35 | Show revised response preserving the annotation | "3-way merge preserves my edits" |
-| 0:45 | `git diff` in terminal | "Every change is tracked. The document IS the conversation history" |
-| 0:55 | Quick cut: second document, different project | "Any markdown file. Any project." |
-| 0:60 | End: document with rich component structure | "agent-doc — documents that work with you" |
-
-**Tone:** Matter-of-fact. Let the workflow speak for itself. Real content, real project, real interaction.
-
-Should I have a live screencast or twitch stream instead? I would but I'm worried that I may expose some secrets unintentionally. 
+On Linux, please help me set up a screencast session using scripts that can be automated. I just want something simple that will start and end recording my screen session when I press a hotkey. Please look at my os and x session for the correct software and scripts.
 <!-- /agent:exchange -->

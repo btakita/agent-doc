@@ -586,3 +586,46 @@ The realistic parallel scenario is: the user has two editor tabs open, clicks "S
 ## User
 
 Please add functional tests for this lazy parallelization behavior.
+Also add documentation.
+
+Let's add configuration for the strategy. Let's make this hybrid lazy parallelization the default. Perhaps it should be named hybrid or something terse and clear. Also have a strategy for fully parallel and no parallelization.
+
+If strategy is not the optimal term, use the optimal term instead.
+
+## Assistant
+
+### Functional Tests — Done
+
+3 tests added to `agent-doc/src/submit.rs`:
+
+| Test | Proves |
+|------|--------|
+| `parallel_different_files_no_interference` | Concurrent cycles on different files complete independently |
+| `same_file_serialized_by_flock` | Same-file cycles serialize via flock — both writes land |
+| `flock_prevents_partial_read_during_write` | Reader blocked by flock sees completed write, not partial state |
+
+All 164 tests pass. Documentation added to `agent-doc/docs/reference/race-conditions.md`.
+
+### Configuration: Execution Mode
+
+"Strategy" works, but **"execution mode"** is more standard — it describes *how* something runs, not a plan. Three modes:
+
+```yaml
+execution-mode: hybrid   # hybrid | parallel | sequential
+```
+
+| Mode | Behavior | Cost |
+|------|----------|------|
+| **`hybrid`** (default) | First doc direct, 2nd+ concurrent docs use background subagent | Optimal — no overhead for single doc, scales for multi-doc |
+| **`parallel`** | Every `/agent-doc` spawns a background subagent | Higher token cost, but all docs process independently |
+| **`sequential`** | Never use subagents, fully sequential | Cheapest — B waits for A to complete |
+
+Added `execution-mode: hybrid` to SKILL.md frontmatter and updated the execution model section to reference the three modes. The skill reads the frontmatter value at step 0 (pre-flight) and decides the execution path.
+
+## User
+
+Does agent-doc have a toml file that we can use?...So agent-doc can be used with codex or without an agent loop...
+
+I notice that the claude tasks are now long running.
+Do we currently have a deadlock?
+Do the recently introduced locks keep the claude session task running by any chance? Do we log this behavior?

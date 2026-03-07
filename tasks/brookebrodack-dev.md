@@ -805,3 +805,36 @@ Ready to commit and push?
 ## User
 
 commit and push. Deploy to cloudflare
+
+## Assistant
+
+**Deployed to Cloudflare Pages.** Site is live at `https://brookebrodack.pages.dev/` (HTTP 200, 23KB).
+
+**Commits pushed:**
+
+1. **brookebrodack-site** (submodule): `feat: add static export script` → `5f3d6ed`
+2. **brookebrodack-dev**: `feat: Cloudflare Pages migration` → `7c4e1af` (6 files: deploy.yml, _redirects, websub worker)
+3. **brookebrodack-dev**: `fix: add asset download step` → `69ce282` (first build failed — `public/assets/` is gitignored, CI needs to download from S3)
+
+**CI/CD pipeline (all green):**
+- Checkout with submodules ✓
+- Bun install ✓
+- Download assets from Contabo S3 ✓ (added AWS secrets)
+- Initialize database ✓
+- Build ✓
+- Static export ✓
+- Deploy to CF Pages ✓
+
+**Additional secrets added:**
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `AWS_BUCKET` — for S3 asset download in CI
+
+**CF Pages project created:** `brookebrodack` at `brookebrodack.pages.dev`
+
+**Remaining steps:**
+1. **DNS cutover** — Add custom domains (`brookebrodack.net`, `www.brookebrodack.net`) in CF Pages settings
+2. **WebSub worker** — Deploy separately when ready
+3. **Decommission** — Remove Docker container from Contabo after DNS verification
+
+## User
+
+Do the remaining steps

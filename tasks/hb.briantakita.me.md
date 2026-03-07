@@ -117,3 +117,16 @@ The OAuth flow is working — your session and person record are in D1. The issu
 ## User
 
 Is this deployed?
+## Assistant
+
+Yes, it's deployed. Verified:
+
+- `GET /api/me` returns `{"user":null}` (working)
+- HTML pages contain the injected auth script (confirmed `logged_in=1`, `/api/me`, and `Sign out` references in the HTML)
+- Last deployment: `https://1d1aede2.herbaliciousbliss.pages.dev`
+
+Try signing in again — the `logged_in` cookie wasn't set by your previous OAuth (it was added after). After a fresh sign-in you should see the "Sign out" link and your profile picture.
+
+## User
+
+Thank you. Is hb.briantakita.me decommissioned on Contabo?

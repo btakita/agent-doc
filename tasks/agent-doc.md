@@ -204,15 +204,23 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:exchange -->
 
-**Pre-recorded is the right call.** A live stream risks exposing API keys, email content (`mail/`), session tokens, or private repo data in terminal output.
+### Screencast recording set up
 
-**Recommended approach:** Record a natural session, then edit before publishing.
-- Use a **demo project** — fresh repo with no real secrets
-- Review frame by frame before publishing
-- Control pacing — cut dead time, add captions
-- Re-record individual segments if needed
+**Your setup:** X11 + i3 + ffmpeg + PulseAudio (via pipewire-pulse)
 
-A "recorded live session" gives the authentic feel with the safety net of post-production. Record yourself going through it naturally, then trim and scrub.
+**Installed:** `~/bin/screencast-toggle` — a toggle script that starts/stops ffmpeg recording.
 
-On Linux, please help me set up a screencast session using scripts that can be automated. I just want something simple that will start and end recording my screen session when I press a hotkey. Please look at my os and x session for the correct software and scripts.
+**Hotkey:** `$mod+Print` (Super+PrintScreen) — press once to start, press again to stop.
+
+**How it works:**
+- Start: captures full screen at 30fps + system audio → `~/Videos/screencast-<timestamp>.mp4`
+- Stop: sends SIGINT to ffmpeg for clean file finalization
+- Desktop notification on start/stop via `notify-send`
+- Uses `libx264 ultrafast` preset — low CPU overhead, good quality (CRF 18)
+
+**To test:** Press `Super+Print`, do something for a few seconds, press `Super+Print` again. Check `~/Videos/` for the output.
+
+**Post-production:** Use `ffmpeg` to trim: `ffmpeg -ss 00:00:05 -to 00:01:05 -i input.mp4 -c copy output.mp4`
+
+Look in ~/work/btakita/slicemk-config/ for the location of the Print button. I don't think I have a binding.
 <!-- /agent:exchange -->

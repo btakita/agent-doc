@@ -1057,6 +1057,28 @@ Since the site is now fully static (rebuilt every 6h + on push), the simplest pa
 Want me to investigate what Authory provides that YouTube's own feed doesn't?
 
 Yes please
-## User
 
+## Assistant
+
+**The Authory feed is empty and should be removed.**
+
+I fetched `https://authory.com/BrianTakita/rss?collection=c787747f...` — it returns an RSS channel header with **zero `<item>` entries**.
+
+**How it's used in the code:**
+
+In `rss_youtube_video_a1.ts:23-25`, the Authory cache is checked alongside the YouTube RSS cache to determine if the video list is "up to date". If either is stale, it triggers a re-fetch. But the actual video data is parsed **only from the YouTube RSS feed** (`youtube_rss_cache.data` on line 115). The Authory feed contributes zero video data.
+
+Its role is purely a **staleness signal** — and since it's empty, it likely forces unnecessary cache invalidation on every check.
+
+**Recommendation:** Remove the Authory dependency entirely:
+1. Delete `authory_youtube_rss_cache.ts`
+2. Remove the `authory__up_to_date` check from `rss_youtube_video_a1.ts:23-25`
+3. Remove `AUTHORY_YOUTUBE_RSS_URL` from env validation and `.env`
+4. Remove the GH Actions secret
+
+This simplifies the data pipeline to: YouTube RSS + Google API only. Want me to do this cleanup?
+
+Yes
+
+## User
 

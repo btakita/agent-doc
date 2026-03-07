@@ -192,5 +192,56 @@ Plus updates to `package.json` exports map.
 
 Ready to start implementing. Shall I begin with step 1?
 
+## Assistant
+
+### Streaming & Incremental Export
+
+Good questions. Here's the approach for each:
+
+**Streaming file writes** — Yes. Each file is written immediately after fetch, not batched:
+
+```typescript
+for (const route of all_routes) {
+  const html = await fetch_and_rewrite(route)
+  await write_file(route, html)  // write immediately
+  on_export?.(route)             // progress callback
+}
+```
+
+This is what the existing per-site scripts already do. The framework version does the same naturally.
+
+**Incremental updates (skip unchanged files)** — Add an `incremental` option that compares fetched content against the existing file on disk before writing. Skip if identical. This avoids filesystem churn and preserves timestamps for deploy tools that use mtime.
+
+**Deleting stale files** — Manifest-based approach:
+
+Track exported files in `dist/browser/.export-manifest.json` (a JSON array of exported paths). On each export:
+1. Load the previous manifest
+2. Export all routes (streaming, write-as-you-go)
+3. Compare new export set against old manifest
+4. Delete files present in old manifest but not in new export
+5. Write updated manifest
+
+Updated config:
+
+```typescript
+export interface static_export_config_T {
+  routes?: string[]           // Explicit routes to pre-render
+  site_url: string            // Production URL for URL rewriting
+  out_dir?: string            // Output directory (default: 'dist/browser')
+  server_import?: string      // Path to built server module
+  app?: Elysia                // Pre-started app
+  sitemap?: boolean           // Auto-discover from /sitemap.xml (default: true)
+  extra_routes?: string[]     // Non-HTML routes (robots.txt, rss, sitemap.xml)
+  url_rewrite?: boolean       // localhost->site_url rewriting (default: true)
+  incremental?: boolean       // Only write changed files (default: false)
+  manifest?: boolean          // Track exports + delete stale (default: true when incremental)
+  clean?: boolean             // rm output dir before export (default: false)
+  on_export?: (route: string, file: string) => void  // Progress callback
+}
+```
+
+The `clean` option is the simple alternative — wipe the output dir before exporting. But manifest is better for incremental mode since it preserves unchanged files while still cleaning up stale ones.
+
 ## User
 
+How would a delete or move file be handled?

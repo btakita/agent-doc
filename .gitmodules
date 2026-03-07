@@ -55,3 +55,18 @@
 [submodule "brookebrodack-dev"]
 	path = brookebrodack-dev
 	url = git@github.com:btakita/brookebrodack-dev.git
+[submodule "cogov-dev"]
+	path = cogov-dev
+	url = git@github.com:cogov/cogov-dev.git
+[submodule "herbaliciousbliss-dev"]
+	path = herbaliciousbliss-dev
+	url = git@github.com:btakita/herbaliciousbliss-dev.git
+[submodule "drmanny-dev"]
+	path = drmanny-dev
+	url = git@github.com:btakita/drmanny-dev.git
+[submodule "prescience-notes-dev"]
+	path = prescience-notes-dev
+	url = git@github.com:btakita/prescience-notes.git
+[submodule "censible-core"]
+	path = censible-core
+	url = git@github.com:btakita/censible-core.git

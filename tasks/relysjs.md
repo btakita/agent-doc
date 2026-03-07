@@ -245,3 +245,27 @@ The `clean` option is the simple alternative — wipe the output dir before expo
 ## User
 
 How would a delete or move file be handled?
+
+## Assistant
+
+The manifest handles both automatically via set differencing.
+
+**Delete**: Each export produces a set of output paths. After export, diff new set against old manifest. Paths in old but not new get `unlink()`ed. Empty parent dirs get `rmdir()`ed.
+
+```
+Export 1: [/, /about, /blog] -> manifest: [index.html, about/index.html, blog/index.html]
+Export 2: /blog removed      -> manifest: [index.html, about/index.html]
+                             -> delete: blog/index.html, rmdir: blog/
+```
+
+**Move (rename)**: A move is a delete + create. If `/blog` becomes `/posts`:
+- Old: `blog/index.html` (not in new set -> delete)
+- New: `posts/index.html` (not in old set -> create)
+
+No special handling needed — the manifest diff handles it naturally.
+
+**Atomic moves**: There's a brief window where the old path is gone and the new one exists (or vice versa). For static deploys (Cloudflare Pages, Netlify, etc.) this doesn't matter — the deploy is atomic at the platform level. The export dir is just a build artifact uploaded as a unit.
+
+## User
+
+Let's implement.

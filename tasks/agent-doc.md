@@ -575,3 +575,39 @@ The is a compaction fix that should be initiated in the tasks/contabo.md doc. Re
 
 > **Re: agent-doc write-back failing after compaction** — This is the known issue where context compaction interrupts the agent-doc session workflow mid-cycle. The response was generated in the console but never written back to the file because the compaction cleared the state before the `agent-doc write` step executed. The agent-doc session in `tasks/agent-doc.md` is working on template modes and stale snapshot recovery — the `is_stale_snapshot()` feature (v0.9.5+) should help detect this, but the SKILL.md workflow needs a guard: if compaction occurs between step 3 (respond) and step 4 (write), the new session must detect the orphaned response and write it back.
 
+## Assistant
+
+### Compaction Recovery Implemented
+
+**The bug:** Context compaction interrupts the agent-doc workflow between step 3 (respond) and step 4 (write). The response streams to the console but `agent-doc write` never executes. Next `/agent-doc` call sees no diff — response is lost.
+
+**The fix: durable pending response store.**
+
+`agent-doc write` now saves the response to `.agent-doc/pending/<hash>.md` *before* writing to the document, and clears it *after* success. If compaction (or any crash) interrupts the write, the response persists on disk.
+
+**New: `agent-doc recover <FILE>`** — checks for a pending response and applies it:
+- Auto-detects append vs template mode (checks for `<!-- patch:` markers)
+- Uses same atomic write + 3-way merge + snapshot save path
+- Cleans up pending file after successful recovery
+
+**How it integrates with SKILL.md:**
+1. Pre-flight (step 0): run `agent-doc recover <FILE>` before computing diff
+2. If recovery found, the orphaned response is written and the user sees it
+3. Normal workflow continues (user's new edits trigger the next diff)
+
+**Files changed (2 commits):**
+```
+9536dc4 feat: compaction recovery — durable pending response store
+  src/recover.rs  — new module (run, save_pending, clear_pending, 4 tests)
+  src/snapshot.rs — pending_path_for()
+   src/write.rs    — save_pending before write, clear_pending after
+  src/main.rs     — Recover subcommand
+```
+
+**192 tests pass** (171 unit + 21 integration). Clippy clean.
+
+**Next:** Update SKILL.md step 0 to call `agent-doc recover` in pre-flight, then release.
+
+## User
+
+Proceed

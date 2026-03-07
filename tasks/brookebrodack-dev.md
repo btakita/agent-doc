@@ -742,3 +742,34 @@ Want me to install wrangler and run the login flow?
 I want the token to be long lived so I don't need to touch gh configuration or the actions to work.
 
 Is it possible to bootstrap gh actions with credentials and to have gh actions get refresh tokens to it can continue running without 403 errors?
+
+## Assistant
+
+**Use a Cloudflare API Token — it's already long-lived and never expires.**
+
+Cloudflare API Tokens (not OAuth) are static bearer tokens:
+- **No expiration** by default (unless you set a TTL)
+- **No refresh needed** — they're not OAuth, just a permanent key
+- **Scoped** — you control exactly what they can access
+- **This is how briantakita.me-dev works** — the token set March 5 will run forever
+
+**One-time setup:**
+
+1. [Cloudflare Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens) → Create Token
+2. Custom token with: **Account → Cloudflare Pages → Edit** (no TTL)
+3. Copy the token (shown once)
+4. Set as GitHub secrets:
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN -R btakita/brookebrodack-dev
+# paste token
+
+gh secret set CLOUDFLARE_ACCOUNT_ID -R btakita/brookebrodack-dev
+# paste account ID (from any domain's overview page sidebar)
+```
+
+That's it. No refresh tokens, no 403s, runs indefinitely. The `wrangler login` OAuth approach is for local dev only — CI/CD should use API tokens.
+
+## User
+
+Let's use CLOUDFLARE_API_TOKEN from cloudflare/.env

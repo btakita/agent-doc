@@ -1,7 +1,9 @@
 ---
-agent_doc_session: 8aedc767-848c-4f48-93f0-c505a4991e4d
+agent_doc_session: e42113ab-519f-4c5c-a636-23757ee17337
 tmux_session: '0'
 ---
+
+
 
 
 
@@ -485,4 +487,30 @@ The agent-doc pluginsa an error:
 
 Claim failed (exit 2): error: unexpected argument '--position' found tip: to pass '--position' as a value, use '-- --position' Usage: agent-doc claim   For more information, try '--help'.
 
-I manually claimed fgrom
+## Assistant
+
+**Fixed.** The `src/` migration broke the symlink chain, causing the JetBrains plugin to fall through to a stale binary.
+
+**Root cause:** The plugin resolves `agent-doc` by checking `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/` in order. After `git mv agent-doc src/agent-doc`:
+1. `~/bin/agent-doc` → `.bin/agent-doc` → `../agent-doc/target/release/agent-doc` — **broken** (old path)
+2. `~/.local/bin/agent-doc` — **stale v0.5.1** (no `--position` support)
+3. `~/.cargo/bin/agent-doc` — v0.9.6 (correct, but never reached)
+
+**Fixes applied:**
+1. Updated `.bin/agent-doc` symlink: `../agent-doc/...` → `../src/agent-doc/target/release/agent-doc`
+2. Updated `.bin/corky` symlink similarly
+3. Removed stale `~/.local/bin/agent-doc` (v0.5.1)
+
+Now `~/bin/agent-doc` resolves to v0.9.6 with full `--position` support. The plugin should work correctly.
+
+## User
+
+I manually claimed from the claude session and it now seems to work.
+
+## Assistant
+
+Good — the symlink fix from the previous session resolved the `--position` error. The manual claim confirmed `~/.cargo/bin/agent-doc` (v0.9.6) works correctly. The plugin should also work now that the stale `~/.local/bin/agent-doc` (v0.5.1) was removed and `~/bin/agent-doc` symlink was updated to point through `src/agent-doc/`.
+
+## User
+
+release anything that needs to be released. Commit all submodules and agent-loop.

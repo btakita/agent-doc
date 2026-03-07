@@ -5,3 +5,6 @@ agent_doc_mode: template
 ---
 
 Can we convert mi-www.site from Solid Start to rappstack...The same stack that briantakita.me, brookebrodack.net, and cogov.tech uses?
+
+Please add documentation for rappstack. This is a good opportunity.
+Add https://github.com/rappstack as a submodule in agent-loop

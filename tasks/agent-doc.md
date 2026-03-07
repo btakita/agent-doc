@@ -208,42 +208,75 @@ The interaction is a bit more than a response_mode. I wonder if there is a clear
 <!-- /agent:input -->
 
 <!-- agent:output -->
-### Released v0.10.0
+### Single conversation component: `exchange`
 
-**`agent_doc_mode` rename + release complete.**
+Yes — a single component is cleaner than separate `input`/`output`. If inline discussion is the primary interaction, splitting creates friction.
 
-**Published to all targets:**
-- crates.io: `agent-doc v0.10.0`
-- PyPI: `agent_doc-0.10.0`
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.10.0
-- Local binary: `~/.cargo/bin/agent-doc` (v0.10.0)
-- SKILL.md: updated to v0.10.0
+**Name candidates considered:**
 
-**What's in v0.10.0:**
-- Renamed `response_mode` → `agent_doc_mode` (canonical)
-- Aliases: `mode` (shorthand), `response_mode` (deprecated) — all three parse correctly
-- Serialization always uses `agent_doc_mode` (like `agent_doc_session`)
-- 4 new frontmatter tests for alias resolution
-- 179 tests passing, clippy clean
+| Name | Verdict |
+|------|---------|
+| `exchange` | Balanced, mutual, implies back-and-forth. **Recommended.** |
+| `dialog` | Clear but feels append-mode-ish |
+| `workspace` | Good spatial feel, but vague |
+| `surface` | Novel — "where interaction happens" |
+| `canvas` | Overloaded (Obsidian) |
+| `pad` | Simple, collaborative (Etherpad vibes) |
+| `thread` | Overloaded, implies chronological |
+| `prompt` | Too narrow — it's bidirectional |
 
-Do we need threading at all or can the inline conversation remain without threading?
+**`exchange` wins because:**
+- Implies mutual interaction (not one-directional)
+- Not overloaded by other tools
+- Short, clear, descriptive
+- Works for both user and agent writing in the same space
 
-**Backwards compatibility:** Existing documents with `response_mode: template` or `mode: template` continue to work. New documents and write-back use `agent_doc_mode`.
+```markdown
+<!-- agent:exchange -->
+User writes here. Agent responds inline. Annotations happen naturally.
+<!-- /agent:exchange -->
+```
 
-### In-place conversation model
+Should we keep input and output as well? There may be legitimate reasons for it.
+Although I would imagine that a user could write inside an output component but the user's input would be routed to the input component.
 
-Agreed on your approach:
-- Inline iteration preserves order within the output component
-- Conclusions drawn update the whole document (relevant components)
-- Back-and-forth can be cleaned up since git preserves history
-- This gives a natural "converge then clean" workflow
+### Keeping input/output alongside exchange
 
-### Blog post
+Yes — keep all three as conventions, each serving a different purpose:
 
-Ready to discuss the blog post. Key framing: "Two ways to talk to your document" — append (conversation) vs template (dashboard). What platform/format do you have in mind?
+| Component | Use case |
+|-----------|----------|
+| `exchange` | Shared conversation surface. User and agent write in the same space. Best for interactive discussions, annotations, iterative refinement. |
+| `input` + `output` | Structured separation. User writes prompts in `input`, agent responds in `output`. Better for formal requests, task delegation, or when you want clear request/response boundaries. |
+
+The routing idea is good: user text written inside `output` gets lifted to `input` on next cycle. This keeps the conversation legible — agent output stays clean, user additions are explicitly tracked.
+
+**When to use which:**
+- **`exchange`**: This document. Living discussions where the boundary between request and response blurs.
+- **`input`/`output`**: Task documents, dashboards, batch operations. "Do X" → "Done. Here's the result."
+
+Neither is mandatory. The agent-doc binary doesn't enforce conventions — components are just named regions. The SKILL.md and documentation establish patterns.
+
+**Threading: not needed.** The `exchange` component is flat — user annotates, agent responds, content evolves. Git provides the history timeline. Threading adds complexity when the document IS the thread.
+
+Agreed.
+
+**Other components** (status, architecture, releases, etc.) remain agent-managed via patch blocks. Only `exchange` is the shared conversation surface.
+
+I requested that tasks/contabo.md be converted to template mode. But it did not happen. Should I try again?
+
+Yes, try again. The conversion didn't happen because the previous session ran out of context. You can edit `tasks/contabo.md` frontmatter to add `agent_doc_mode: template` and restructure manually, or run `/agent-doc tasks/contabo.md` with a prompt requesting conversion. The claim was just logged (pane %32), so it's ready.
 
 briantakita.me...we can syndicate the blog post.
-Let's track this current discussion 
-<!-- /agent:output -->
+Let's track this current discussion because it will be interesting to talk about in the blog post.
 
-If we are going to have inline discussions, should we just have a single component for the discussion/conversation (or a better name) rather than having a separate input and output component? Please propose better names than discussion or conversation.
+I want to have a screencast as well.
+
+### Blog post plan
+
+- **Platform**: briantakita.me, syndicated
+- **Content**: Document modes (append vs template vs exchange), the design discussion that led here, architectural decisions
+- **Source material**: This discussion — the naming evolution (`response_mode` → `agent_doc_mode`), the `exchange` component proposal, the in-place annotation model
+- **Screencast**: Demo the workflow — editing a template-mode document, watching agent-doc pick up changes, seeing patch blocks applied in real time
+- **Good demo flow**: Create a fresh template document → write in exchange component → submit → show inline response → annotate → re-submit → show git diff timeline
+<!-- /agent:output -->

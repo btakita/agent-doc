@@ -495,5 +495,40 @@ Can we have a push notification from the YouTube feed? Can this happen via githu
 
 Let me know your answers and I'll start implementing.
 
+## Assistant
+
+**Re: GH Actions deployments** — Yes. Two options:
+
+1. **CF Pages auto-deploy** — Connect GitHub repo to CF Pages. Every push to `main` triggers build + deploy automatically. Zero config.
+2. **GH Actions workflow** — More control: `bun run build` in CI, then `wrangler pages deploy dist/browser/`. Better for monorepo (brookebrodack-dev has 21 submodules — CF Pages auto-build might not handle that well).
+
+Recommend option 2 (GH Actions) given the monorepo structure.
+
+**Re: YouTube push notifications** — Yes, YouTube supports WebSub (PubSubHubbub) for real-time new-video notifications:
+
+1. **Subscribe** to the channel's Atom feed via `https://pubsubhubbub.appspot.com`
+2. **CF Worker webhook** receives the push when Brooke uploads
+3. **Worker triggers GH Actions** via `POST /repos/btakita/brookebrodack-dev/dispatches` → rebuilds static site
+4. **Subscription renewal** — YouTube leases expire ~10 days; a scheduled Worker (cron) re-subscribes
+
+**Simpler alternative:** Skip WebSub, just run a GH Actions cron (every 6-12 hours) to rebuild. YouTube data doesn't need to be real-time for a fan site. Can add WebSub later if needed.
+
+Yes...have the cron. It is a reliable fallback. Let's also have the websub.
+
+**Updated migration plan:**
+
+| Phase | What | How |
+|-------|------|-----|
+| 1 | Static build | Add `bun run build` production mode (like briantakita.me) |
+| 2 | GH Actions CI/CD | Workflow: checkout → bun install → build → `wrangler pages deploy` |
+| 3 | Assets to R2 | Sync `public/assets/` to R2 bucket, update asset URLs |
+| 4 | YouTube data at build time | Fetch YouTube API during build, bake into HTML |
+| 5 | DNS cutover | Point CF Pages to `brookebrodack.net` |
+| 6 | Scheduled rebuilds | GH Actions cron for fresh YouTube data |
+| 7 | (Optional) WebSub | Real-time rebuild on new uploads |
+
+Ready to start with Phase 1?
+
 ## User
 
+Yes...phase 1-7 please

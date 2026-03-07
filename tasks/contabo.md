@@ -565,3 +565,49 @@ This work should happen in the `src/agent-doc/` submodule. Shall I proceed with 
 
 Yes implement.
 But first, please update any Jetbrains configurations, such as .idea/modules.xml, to account for the git mv to src/
+
+## Assistant
+
+**JetBrains config updated.**
+
+- `.idea/modules.xml` — all 7 module paths updated from `$PROJECT_DIR$/<name>/` to `$PROJECT_DIR$/src/<name>/`
+- `.idea/vcs.xml` — already had correct `src/` paths (IntelliJ auto-detected the submodule moves)
+
+No other `.idea` files had stale paths.
+
+Now proceeding with `agent-doc write` implementation.
+
+## User
+
+## Assistant
+
+**`agent-doc write` implemented and tested.**
+
+**New command:** `echo "response" | agent-doc write <file.md> [--baseline-file <path>]`
+
+**What it does:**
+1. Reads response content from stdin
+2. Appends `## Assistant\n\n<content>\n\n## User\n\n` to the document
+3. If user edited the file during response generation, performs 3-way merge via `git merge-file`
+4. Uses flock + atomic rename (tempfile → persist) for safe concurrent access
+5. Updates the snapshot after writing
+
+**`--baseline-file` option:** Pass the document state from before response generation to enable accurate 3-way merging when the user edits concurrently.
+
+**Tests (6 new, all passing):**
+- `write_appends_response` — verifies `## Assistant` block structure
+- `write_updates_snapshot` — snapshot path computation and storage
+- `write_preserves_user_edits_via_merge` — 3-way merge preserves concurrent user edits
+- `write_no_merge_when_unchanged` — skips merge when file is unmodified
+- `atomic_write_correct_content` — atomic write integrity
+- `concurrent_writes_no_corruption` — 20-thread concurrent write safety
+
+**Files changed:**
+- `src/write.rs` — new module (160 lines)
+- `src/main.rs` — added `Write` command variant + dispatch
+
+**Next:** Update the SKILL.md to use `agent-doc write` instead of the Edit tool for step 4.
+
+## User
+
+Yes. Update SKILL.md and ensure that the next version will propagate the SKILL.md change.

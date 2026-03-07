@@ -162,5 +162,7 @@ Which approach do you prefer?
 
 Option 1. Because production files are minified. The environment build should build **all** assets.
 
+Why were the css files not built in the production build?
+
 ## User
 

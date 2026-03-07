@@ -229,6 +229,78 @@ Can a lock protect against this?
 | Nested lock (prune + caller) | Not reentrant | Latent deadlock | Document or assert |
 | Watch daemon write window | 3-way merge | Low | Atomic rename |
 
-## User
+## Assistant
 
+### Addressing Each Annotation
+
+**1. "I did make changes. So I'm curious why there is no diff."**
+
+You are right that you made changes. The most likely explanation is a **stale snapshot**: the snapshot file matched the document at the time `agent-doc run` executed, even though you had edited the document before invoking the command. This can happen if:
+
+- The snapshot was updated by a previous run *after* your edits were already present (e.g., a compaction cycle that wrote the snapshot with your text already in it)
+- The claim was stale and the command was routed to a pane that didn't process it at all (the `send-keys` went to a pane without the skill loaded)
+
+The second explanation is more likely given that you said "nothing happened" rather than "it said nothing changed." If the skill had actually run and found no diff, it would have printed "Nothing changed since last submit." If nothing at all happened, the command text was probably injected as raw input into a pane that wasn't listening.
+
+Please add logging so you can investigate what happened here. I don't want to have to report the nuances of the behavior. It should be logged.
+
+**2. "Yes. Please implement." (SnapshotLock)**
+
+Done. Added `SnapshotLock` to `agent-doc/src/snapshot.rs`:
+
+- `SnapshotLock` struct -- RAII flock guard using `fs2`, same pattern as `RegistryLock`
+- Lock file: `<snapshot_path>.md.lock` (sibling to the snapshot file)
+- `snapshot::load()` now acquires lock before reading (skips lock if no snapshot exists)
+- `snapshot::save()` now acquires lock before writing
+- `snapshot::delete()` now acquires lock before deleting (skips lock if no snapshot exists)
+- `with_snapshot(doc, closure)` -- transactional helper for read-modify-write under a single lock hold
+- Internal `load_unlocked()` / `save_unlocked()` helpers for callers already holding the lock
+- Added `fs2 = "0.4"` to `agent-doc/Cargo.toml`
+- All 150 tests pass
+
+**3. "Implement." (load/save visibility)**
+
+Done. Changed `sessions::load()` and `sessions::save()` from `pub` to `pub(crate)`:
+
+- `load()` -- added doc comment: "Not locked internally. Callers performing read-modify-write must acquire RegistryLock first. Read-only callers can call directly for a point-in-time snapshot."
+- `save()` -- added doc comment: "Not locked internally. Callers MUST hold RegistryLock before calling. Prefer tmux_router::with_registry() for safe read-modify-write cycles."
+- All existing callers are within the `agent-doc` crate, so no external breakage
+- External crates (if any depended on agent-doc as a library) would be forced to use `tmux_router::with_registry()` instead
+
+**4. "Should there be a panic or a noop with a warning?"** (non-reentrant flock deadlock)
+
+Recommendation: **noop with a warning** (`eprintln!`), not a panic. Reasoning:
+
+- A panic in `prune()` would kill the entire CLI invocation, which is worse than skipping the prune
+- `prune()` is a best-effort cleanup -- skipping it is safe because the next command will retry
+- The warning makes the latent hazard visible in logs without crashing the user's workflow
+- Implementation: add a thread-local `bool` flag in `registry.rs` that tracks whether the current thread holds the lock. If `prune()` detects the flag is already set, log a warning and return `Ok(0)` instead of deadlocking
+
+Shall I implement this? It would touch `tmux-router/src/registry.rs` (adding the thread-local guard).
+
+Yes. noop with a warning
+
+**5. "Can a lock protect against this?"** (watch daemon micro-window)
+
+A file lock *can* protect it, but only if the editor also respects the lock -- which no editor does. The practical options:
+
+- **Atomic rename** (`write to temp file` then `rename`): eliminates the partial-write window. The 3-way merge already re-reads, so the only gap is between re-read and write. Atomic rename makes the write instantaneous from the filesystem's perspective. This is the standard solution.
+Do it
+- **flock on the document file**: would protect agent-doc against itself (e.g., watch daemon vs. manual `agent-doc run`), but editors ignore advisory locks, so it wouldn't prevent editor-vs-daemon races.
+- **Both**: use flock for agent-doc-vs-agent-doc coordination, and atomic rename for editor-vs-agent-doc safety.
+
+Recommendation: **atomic rename** is sufficient. The 3-way merge already handles the editor case correctly in practice -- the micro-window is theoretical (sub-millisecond). Atomic rename closes it completely with minimal code change (replace `fs::write(file, content)` with `write-to-tempfile + rename`).
+
+### Updated Summary Table
+
+| Race | Protected? | Severity | Fix | Status |
+|------|-----------|----------|-----|--------|
+| Registry read-modify-write | Yes (flock) | N/A | Done in v0.2.1 | Done |
+| Snapshot read-modify-write | Yes (flock) | N/A | SnapshotLock | **Done** |
+| claim validate-register gap | Benign TOCTOU | Negligible | Self-healing | N/A |
+| load()/save() without lock | pub(crate) | N/A | Visibility restricted | **Done** |
+| Nested lock (prune + caller) | Not reentrant | Latent deadlock | Noop + warning (proposed) | Awaiting approval |
+| Watch daemon write window | 3-way merge | Low | Atomic rename (proposed) | Awaiting approval |
+
+## User
 

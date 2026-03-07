@@ -146,3 +146,6 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 ## User
 
+Could you help me with why we have tasks/contabo.md.agent-doc.lock being located next to the file?
+
+I don't want this file comitted into the git repo. Is it possible to have it in the .agent-doc directory while keeping the file path uniqueness? Should .agent-doc have a database/datafile of locks instead?

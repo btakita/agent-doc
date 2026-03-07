@@ -1069,3 +1069,40 @@ It's under development. Let's try keeping it and develop it.
 
 ## User
 
+## Assistant
+
+**Understood — keeping auth and developing it. This rules out static deployment.**
+
+Since herbaliciousbliss uses `bun:sqlite` (Bun-specific API), the migration target matters:
+
+**Recommended: Fly.io** — lowest effort, keeps the existing stack intact:
+- Bun runs natively on Fly.io
+- SQLite works as-is with persistent volumes (no schema changes)
+- Google OAuth just needs the callback URL updated
+- Deploy via `fly launch` + Dockerfile
+- Free tier: 3 shared VMs, 1 GB persistent volume
+- Cost: ~$0/month for low-traffic sites (free allowances)
+
+**Why not CF Workers:**
+- `bun:sqlite` doesn't exist in the Workers runtime (V8, not Bun)
+- Would need to rewrite to D1 or Turso — significant refactor
+- Elysia needs a CF Worker adapter
+- Arctic/Oslo session management would need reworking
+
+**Migration plan (Fly.io):**
+1. Create Dockerfile (Bun base image + app)
+2. `fly launch` → creates app + persistent volume for SQLite
+3. Set secrets: `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, AWS creds for assets
+4. Download assets from Contabo Object Storage during build
+5. Update Google OAuth callback URL to new domain
+6. Deploy + verify
+7. Update DNS: CNAME `hb` → `<app>.fly.dev`
+
+**Alternative:** If you'd prefer to stay 100% on Cloudflare, we can do CF Workers + D1, but that's a multi-day refactor of the auth/DB layer.
+
+Which hosting target do you prefer?
+
+Which host has lower costs as data scales?
+
+## User
+

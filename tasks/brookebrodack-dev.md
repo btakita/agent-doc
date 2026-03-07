@@ -881,6 +881,31 @@ ssh admin@207.244.234.186 "cd /home/admin/work/brookebrodack-dev && docker compo
 
 The DNS cutover requires either updating the API token permissions or making the CNAME change in the CF dashboard. Which approach do you prefer?
 
-## User
+## Assistant
 
+**Re: "How did we switch briantakita.me over?"**
+
+Searched session logs — the briantakita.me DNS switch was done through the **CF Dashboard** directly, not via API. The API token (`cloudflare/.env`) has never had DNS permissions. The wrangler OAuth token also lacks `dns:write` scope.
+
+**The issue:** brookebrodack.net has existing **A records** (pointing to Contabo `207.244.234.186`). CF Pages needs a CNAME at root, but can't auto-add it while conflicting A records exist.
+
+**To complete the cutover, update the API token:**
+
+1. Go to [CF Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Find the token (the one starting with `l8U9k...`)
+3. Click Edit → Add permission: **Zone → DNS → Edit**
+If the key were compromised, can someone transfer the DNS control to their account?
+4. Save
+
+Then I can programmatically:
+- Delete the existing A records
+- CF Pages auto-activates the custom domains
+- Verify `brookebrodack.net` serves from Pages
+
+Alternatively, do it manually in the dashboard:
+- [CF Dashboard → brookebrodack.net → DNS](https://dash.cloudflare.com) → Delete A records → Add CNAME `@ → brookebrodack.pages.dev` (proxied)
+
+Which approach?
+
+## User
 

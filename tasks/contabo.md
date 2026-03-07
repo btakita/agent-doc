@@ -395,3 +395,60 @@ I think we need to reconsider a bit. These should be in src/:
 
 Why did you think these belonged in root?
 Is there a different way to categorize that is clearer and more obvious?
+
+## Assistant
+
+**Why I got it wrong:** I didn't look inside those repos. I guessed from their names — "presence" sounds like identity/content, "cloudflare" sounds like config, "existence-lang" sounds like specs. My "built/deployed?" test was correct in principle but I applied it lazily without checking.
+
+**A simpler, unambiguous test:** "Is this a software project repo with its own development lifecycle?"
+
+- **`src/`** = any submodule that is a software project (has source code, builds, tests, or releases)
+- **Root** = agent-loop's own operational files — things that exist *because of* agent-loop, not independently
+
+This eliminates the judgment call. You don't need to decide if something is "primarily" a library vs config vs specs. If it has a git repo with source code → `src/`. Period.
+
+| Root (agent-loop operational) | `src/` (software project repos) |
+|---|---|
+| `tasks/` — session docs | Every submodule with source code |
+| `mail/` — email data store | ...including presence/, cloudflare/, existence-lang/ |
+| `philosophy/` — ontology context (pure markdown) | |
+| `resume/` — content (pure markdown) | |
+| `CLAUDE.md`, `.claude/`, `.agent-doc/` | |
+
+**Revised layout:**
+
+```
+agent-loop/
+├── src/                      # All software project repos (17+, growing)
+│   ├── agent-doc/
+│   ├── briantakita.me-dev/
+│   ├── brookebrodack-dev/
+│   ├── censible-core/
+│   ├── cloudflare/
+│   ├── cogov-dev/
+│   ├── corky/
+│   ├── ctx-core-dev/
+│   ├── drmanny-dev/
+│   ├── existence-lang/
+│   ├── herbaliciousbliss-dev/
+│   ├── instruction-files/
+│   ├── presence/
+│   ├── prescience-notes-dev/
+│   ├── python-intentions/
+│   ├── tagpath/
+│   └── tmux-router/
+│
+├── philosophy/               # Ontology context (pure markdown, no builds)
+├── mail/                     # Email data
+├── resume/                   # Content
+├── tasks/                    # Session documents
+└── CLAUDE.md
+```
+
+Root: ~7 entries. `src/`: all repos that are software projects. The test is trivial to apply to any new submodule.
+
+Ready to execute?
+
+## User
+
+Yes

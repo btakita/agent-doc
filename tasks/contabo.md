@@ -760,3 +760,42 @@ Want me to start with step 1 — publishing the updated relysjs?
 ## User
 
 yes steps 1-4
+## Assistant
+
+**Steps 1-2 complete. Step 3 blocked on assets.**
+
+**Step 1 — relysjs published:** v1.21.75 on npm with `server/export` and `server/export/cloudflare` entry points.
+
+**Step 2 — cogov-dev updated:** `relysjs@1.21.75` installed in `app/cogov.me/`.
+
+**Step 3 — prerender script created** at `app/cogov.me/prerender.ts`:
+```typescript
+import { cloudflare_export_ } from 'relysjs/server/export/cloudflare'
+await cloudflare_export_({
+  site_url: 'https://cogov.me',
+  out_dir: 'dist/static',
+  sitemap: true,
+  extra_routes: ['/robots.txt'],
+  wrangler: { name: 'cogov-me' },
+})
+```
+
+**Blocker:** The build fails because `public/assets/images/` doesn't exist locally. cogov-dev's assets are stored on Contabo Object Storage (S3-compatible at `usc1.contabostorage.com`, bucket `assets.cogov.me`). The download script needs AWS credentials:
+
+```
+AWS_REGION=US-central
+AWS_BUCKET=assets.cogov.me
+AWS_ENDPOINT_URL=https://usc1.contabostorage.com
+AWS_ACCESS_KEY_ID=<your key>
+AWS_SECRET_ACCESS_KEY=<your secret>
+```
+
+**To unblock:** Please provide the Contabo Object Storage credentials (or create a `.env` file in cogov-dev), then I can:
+1. Download assets: `bash app/-dev-bin/bin/assets--download.sh`
+2. Build: `NODE_ENV=production bun build.ts`
+3. Pre-render: `bun prerender.ts`
+4. Deploy to CF Page
+
+## User
+
+Done

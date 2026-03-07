@@ -1229,3 +1229,45 @@ Starting implementation now.
 
 ## User
 
+It would be interesting to for relysjs and the new hono integration to have a similar enough interface to be swappable.
+
+## Assistant
+
+**censible/mi-www is a completely different stack from herbaliciousbliss.** No shared extraction makes sense.
+
+| | herbaliciousbliss | censible/mi-www |
+|--|-------------------|-----------------|
+| **Framework** | Elysia (Bun) | Solid Start + itty-router |
+| **Auth** | Arctic + Oslo (Google OAuth) | Auth0 SDK |
+| **Database** | SQLite + Drizzle ORM | PostgreSQL (raw SQL) |
+| **Cache** | None | Redis (ioredis) |
+| **SSR** | relementjs (functional HTML) | Solid.js components |
+| **Build** | rebuildjs/esbuild | Vite |
+| **Routes** | 4 GET handlers | 25+ routes (ESG data + PDF/SVG/XLSX exports) |
+
+**censible CF Workers migration is significantly harder:**
+- PostgreSQL → need Cloudflare Hyperdrive (TCP proxy) or migrate to D1
+- Redis → need KV or Durable Objects
+- pdfkit (PDF generation) → Node streams, needs WASM alternative
+- archiver (XLSX export) → Node streams, needs Web Streams rewrite
+- Solid Start SSR → not Workers-compatible, needs rewrite
+- IEX Cloud API calls → fine (just fetch)
+- Auth0 → works on Workers with edge config
+
+**Recommendation:** Migrate these sites independently, not as a shared framework:
+
+1. **herbaliciousbliss** → Hono + D1 (start now, ~2-3 days)
+2. **censible** → Much larger scope. Options:
+   - **Fly.io** (quick, keeps Postgres + Redis + Node streams as-is)
+   - **CF Workers + Hyperdrive** (keeps Postgres, needs stream rewrites for PDF/XLSX)
+   - **Full CF migration** (D1 + KV + WASM PDF, weeks of work)
+
+Given the complexity difference, I'd suggest:
+- **herbaliciousbliss → CF Workers + D1** (proceed now)
+- **censible → Fly.io** for now, CF later if needed
+
+Shall I start implementing herbaliciousbliss? And which path for censible?
+
+## User
+
+

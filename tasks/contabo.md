@@ -984,3 +984,49 @@ Can these sites be decommissioned on Contabo?
 
 ## User
 
+## Assistant
+
+**pe.briantakita.me and pn.briantakita.me are LIVE on Cloudflare Pages.** Both returning HTTP 200 with SSL.
+
+**cogov.me** still needs its Namecheap nameservers changed:
+- Current: `dns1.registrar-servers.com` / `dns2.registrar-servers.com`
+- Change to: `dion.ns.cloudflare.com` / `tegan.ns.cloudflare.com`
+- In Namecheap: Domain List → cogov.me → Nameservers → Custom DNS → enter the two CF nameservers
+
+Done
+
+**Re: Contabo decommissioning** — Yes, the 3 static sites can be stopped on Contabo now:
+
+Even if the cogov.me nameservers are not propgated, we can decommission cogov.me on contabo?
+
+If yes, decommission.
+
+```bash
+# On Contabo VPS (207.244.234.186):
+docker stop cogov-www-1 peakexistence-www-1 prescience-notes-www-1
+docker rm cogov-www-1 peakexistence-www-1 prescience-notes-www-1
+```
+
+The 2 remaining containers should stay running until migrated:
+- `herbaliciosbliss-www-1` (hb.briantakita.me) — needs auth/DB migration
+- `mi-www_site-1` (mi-www.site) — needs Postgres/Redis migration
+
+Traefik should also stay running to serve the remaining 2 sites + handle ACME certs.
+
+**Re: agent-doc compaction bug** — I'll defer the worktree branch for now. The fix requires changes to the SKILL.md workflow (detecting orphaned responses after compaction) and potentially the `agent-doc` binary (a `recover` command). This should be coordinated with the agent-doc session in `tasks/agent-doc.md` rather than done in isolation here.
+
+tasks/agent-doc will handle this. Absolved
+
+**Migration status:**
+
+| Site | Domain | CF Pages | Custom Domain | SSL | Contabo |
+|------|--------|----------|--------------|-----|---------|
+| cogov | cogov.me | ✅ `cogov-me.pages.dev` | ⏳ Pending NS change | ⏳ | Can stop |
+| peakexistence | pe.briantakita.me | ✅ `peakexistence.pages.dev` | ✅ Active | ✅ | Can stop |
+| prescience-notes | pn.briantakita.me | ✅ `prescience-notes.pages.dev` | ✅ Active | ✅ | Can stop |
+| herbaliciousbliss | hb.briantakita.me | ❌ Not started | — | — | Keep running |
+| censible | mi-www.site | ❌ Not started | — | — | Keep running |
+
+## User
+
+Let's start with hb.briantakita.me

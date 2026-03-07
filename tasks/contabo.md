@@ -1137,3 +1137,59 @@ Estimated effort: 2-3 days. But you'd be building on the final platform from day
 ## User
 
 Go with CF Workers
+## Assistant
+
+**CF Workers + D1 — migration plan for herbaliciousbliss.**
+
+Deep analysis complete. Good news: the auth layer (arctic + oslo) is 100% Workers-compatible. The refactor is smaller than expected.
+
+**What needs changing:**
+
+| Component | Current | Target | Effort |
+|-----------|---------|--------|--------|
+| HTTP framework | Elysia (Bun-only) | Hono (CF Workers native) | ~50 lines rewrite |
+| Database driver | `bun:sqlite` + `drizzle-orm/bun-sqlite` | D1 + `drizzle-orm/d1` | ~15 lines (driver swap) |
+| Build system | relysjs/rebuildjs (esbuild) | Wrangler | New wrangler.toml + worker entry |
+| Config init | `new Database('./db/app.db')` | D1 binding from env | ~10 lines |
+
+**What stays the same (zero changes):**
+- `arctic` (Google OAuth) — runtime-agnostic ✅
+- `oslo` (sessions, CSRF, cookies, crypto) — uses Web Crypto API ✅
+- Drizzle schema (person, session, text_cache tables) — identical ✅
+- All auth logic (~200 lines) — portable as-is ✅
+- Nodemailer — not actually used in code (dependency only)
+
+**Routes (only 4):**
+- `GET /` — home page with session auth
+- `GET /lyra` — profile page with session auth
+- `GET /login/google` — initiates OAuth
+- `GET /login/google/callback` — handles OAuth callback
+
+**Schema (3 tables):**
+- `person` — 8 cols (id, email, name, google_sub, etc.)
+- `session` — 3 cols (id, person_id FK, expire_dts)
+- `text_cache` — 5 cols (content cache with etag)
+
+**Migration steps:**
+1. Create D1 database: `wrangler d1 create herbaliciousbliss`
+2. Apply Drizzle migrations to D1
+3. Create worker entry point using Hono + D1 binding
+4. Swap Drizzle driver from `bun-sqlite` to `d1`
+5. Port 4 Elysia routes to Hono handlers
+6. Create `wrangler.toml` with D1 binding + env secrets
+7. Build browser assets (existing esbuild pipeline, output to `dist/browser/`)
+8. Deploy: `wrangler deploy` (worker) + `wrangler pages deploy dist/browser/` (assets)
+9. Set secrets: `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET`, etc.
+10. Update DNS: CNAME `hb` → worker route or Pages custom domain
+
+**Env vars needed:**
+- `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` (required)
+- `AUTH_SECRET` (required)
+- `ADMIN_EMAILS` (required)
+- `GOOGLE_API_KEY` (required)
+
+Shall I start implementing? I'd begin with steps 1-5 (D1 setup + Hono worker + route porting).
+
+## User
+
+Yes. Should we extract a hono equivalent of relysjs?

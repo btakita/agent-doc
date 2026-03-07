@@ -332,3 +332,66 @@ Want me to execute the `src/` migration?
 mail belongs in the root.
 I'm not sure about philosophy.
 It's not source code but is for context. So it seems that it belongs in root. Thoughts?
+
+## Assistant
+
+**Philosophy belongs at root.** It's referenced in CLAUDE.md's `## Philosophy — Domain Ontology` section and loaded into every conversation. It's a knowledge substrate, not something you build or deploy.
+
+**The test:** "Does this get built, deployed, or run?" If yes → `src/`. If no → root.
+
+| Submodule | Built/deployed? | Location |
+|-----------|----------------|----------|
+| agent-doc, corky, tmux-router, tagpath | Yes (cargo build) | `src/` |
+| briantakita.me-dev, brookebrodack-dev, etc. | Yes (bun build → CF Pages) | `src/` |
+| ctx-core-dev, instruction-files, python-intentions | Yes (build/publish) | `src/` |
+| **philosophy** | No — read-only context | **root** |
+| **mail** | No — data store | **root** |
+| **resume** | Borderline — content, not deployable | **root** |
+| **presence** | No — identity/context | **root** |
+presence is a monorepo for Presence-AI. It contains executable software in sub packages.
+| **cloudflare** | No — config/secrets | **root** |
+cloudflare is a monorepo. It contains executable software in sub packages.
+| **existence-lang/*** | Specs/docs | **root** |
+This contains source code as well.
+
+**Revised layout:**
+
+```
+agent-loop/
+├── src/                      # Buildable/deployable projects (14+, growing)
+│   ├── agent-doc/
+│   ├── corky/
+│   ├── tmux-router/
+│   ├── tagpath/
+│   ├── instruction-files/
+│   ├── python-intentions/
+│   ├── ctx-core-dev/
+│   ├── briantakita.me-dev/
+│   ├── brookebrodack-dev/
+│   ├── cogov-dev/
+│   ├── drmanny-dev/
+│   ├── herbaliciousbliss-dev/
+│   ├── prescience-notes-dev/
+│   └── censible-core/
+│
+├── philosophy/               # Ontology context
+├── existence-lang/           # Language specs
+├── mail/                     # Email data
+├── resume/                   # Content
+├── presence/                 # Identity
+├── cloudflare/               # Config/secrets
+├── tasks/                    # Session documents
+└── CLAUDE.md
+```
+
+Root: ~10 entries. `src/`: all buildable projects. Ready to execute?
+
+## User
+
+I think we need to reconsider a bit. These should be in src/:
+- presence/
+- cloudflare/
+- existence-lang/
+
+Why did you think these belonged in root?
+Is there a different way to categorize that is clearer and more obvious?

@@ -843,3 +843,32 @@ Want me to add the zone and get the nameservers?
 ## User
 
 yes. I have a namecheap account. Do you need access?
+## Assistant
+
+**No Namecheap API access needed — just a quick manual step.**
+
+The wrangler OAuth token lacks zone creation permission, so the zone needs to be added via the Cloudflare dashboard:
+
+How do I add the zone creation permission?
+
+1. **Cloudflare dashboard** → "Add a site" → enter `cogov.me` → Free plan
+   - CF will scan existing DNS and assign two nameservers
+
+2. **Namecheap** → Domain List → `cogov.me` → Nameservers
+   - Change from "Namecheap BasicDNS" to "Custom DNS"
+   - Enter the two Cloudflare nameservers
+
+What are the 2 CF nameservers?
+
+3. **Wait for propagation** (~5 min to 24 hours, usually minutes)
+
+4. Once the zone is active, the CF Pages custom domain auto-activates with SSL
+
+The site is already live at `https://cogov-me.pages.dev/` — DNS is the last step.
+
+Meanwhile, shall I proceed with the other two static sites (peakexistence + prescience-notes)? Same pattern: build → prerender → deploy to CF Pages.
+
+Yes
+
+## User
+

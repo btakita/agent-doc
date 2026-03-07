@@ -705,3 +705,21 @@ I've now synced the snapshot to match the full document state, so subsequent inv
 
 ## User
 
+## Assistant
+
+**Yes, Option 3 fully supports inline editing.** It only activates as a recovery path when the snapshot is out of sync — it compares the last `## Assistant` block against what the skill is about to write, and skips only if they match exactly.
+
+**Inline edits are unaffected because:**
+
+1. When you add an annotation within an existing block, the document changes relative to the snapshot
+2. The diff detects that change normally (comment stripping doesn't affect inline text)
+3. The skill responds and appends a new `## Assistant` block
+4. The idempotent check never fires because we're writing a *new* response, not re-writing the previous one
+
+The only scenario where Option 3 intervenes: context compaction interrupted a previous cycle, the response is already in the document, but the snapshot wasn't updated. The skill detects "the last assistant block already matches my response" and skips the redundant write, updating only the snapshot.
+
+**In short:** Option 3 is invisible during normal operation. Your inline editing workflow is completely unchanged.
+
+## User
+
+Implement Option 3. Add tests. Functional tests if possible.

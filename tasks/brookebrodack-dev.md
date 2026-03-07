@@ -1099,3 +1099,19 @@ Yes
 ## User
 
 deploy
+
+## Assistant
+
+**Deployed.** All green in 1m4s.
+
+**Commits pushed:**
+1. **`domain--server--brookebrodack`** (submodule): `refactor: remove authory youtube rss dependency` → `4ecb1e6`
+2. **`brookebrodack-dev`** (parent): `refactor: remove authory dependency, add websub auto-renewal` → `bf45fcd`
+
+**GH Actions run #22801675499:** All steps passed (checkout, bun install, assets, db init, build, static export, CF Pages deploy).
+
+**Verified:** `https://brookebrodack.net/` → HTTP 200 (23KB)
+
+## User
+
+compact this file

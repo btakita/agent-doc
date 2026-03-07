@@ -19,7 +19,7 @@ response_mode: template
 
 **Core features:**
 - **Session workflow** (`agent-doc run`): diff → send to agent → append response → 3-way merge-safe write → snapshot → git commit
-- **Components** (`<!~~ agent:name ~~>...<!~~ /agent:name ~~>`): Bounded, named, re-renderable document regions. Paired markers, nested supported. Config-driven modes via `.agent-doc/components.toml`.
+- **Components** (`<!-- agent:name -->...<!-- /agent:name -->`): Bounded, named, re-renderable document regions. Paired markers, nested supported. Config-driven modes via `.agent-doc/components.toml`.
 - **Template mode** (`response_mode: template`): In-place response documents. Patch-block response parser + component applier. Auto-create output component for unmatched content.
 - **`agent-doc patch`**: Replace/append/prepend component content. Shell hooks (`pre_patch` stdin/stdout, `post_patch` fire-and-forget). Thread-safe project-root resolution.
 - **`agent-doc watch`**: Daemon with `notify` crate, PID file, per-file debounce (500ms), bounded cycle limiting (default 3), convergence detection.
@@ -135,8 +135,11 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Fix component parser to skip code spans (fenced blocks + inline backticks) — markers in code are literal, not real
+- ~~Fix component parser to skip code spans~~ DONE (dedaca3)
 - Add `input` component to template-mode document convention (user writes in `input`, agent responds in `output`)
+- Response diff storage for undo/extract workflows
+- `agent-doc undo` — revert last response by applying inverse diff
+- `agent-doc extract` — move request+response pair to another document
 - `agent-doc convert` — auto-convert append-mode documents to template mode (creates `input` + `output` components)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
@@ -185,45 +188,41 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.9.9 release:** Template-mode + compaction recovery. Published to all targets. 192 tests.
 
 **Template conversion session:** Converted this document from append-mode to template-mode. Assessed `agent-doc convert` command feasibility.
+
+**Code-span parser fix:** Fixed `component.rs` to skip markers inside fenced code blocks and inline backtick spans. Eliminated `<!~~ ~~>` workaround. Discussed undo/extract features for response diffs.
 <!-- /agent:history -->
 
 ## User
 
 <!-- agent:output -->
-### User input should be a component
+### Code-span parser fix implemented
 
-Yes — template-mode documents should use an `input` component:
+The component parser in `component.rs` now skips markers inside code regions. No more `<!~~ ~~>`.
 
-```markdown
-## User
-<!~~ agent:input ~~>
-Your question here.
-<!~~ /agent:input ~~>
+**What changed:**
+- `find_code_ranges(doc)` scans for fenced code blocks (` ``` `, `~~~`) and inline backtick spans (`` ` ``)
+- `parse()` checks each `<!--` match against code ranges — skips if inside code
+- 4 new tests: fenced blocks, inline code, tilde fences, range detection
+- 20 component tests passing, clippy clean
 
-<!~~ agent:output ~~>
-Agent response here.
-<!~~ /agent:output ~~>
-```
+**Commit:** `dedaca3 fix: component parser skips code spans (fenced blocks + inline backticks)`
 
-I thought we were not using `<!~~ ~~>`. I see the strikethrough text formatting above.
+The document's architecture section now uses real `<!-- agent:name -->` syntax in backtick examples and `template-info` parses all 7 components correctly.
 
-**Why:**
-- Clear boundary between user input and agent output
-- `agent-doc write --template` can read `input` content as the prompt
-- Diff computation becomes component-scoped instead of free-text scanning
-- Plugin UX: gutter icon on `input` = "submit", folding works naturally
+### Regarding undo/extract requests
 
-**Three options for free text outside components:**
-1. **`input` component (recommended)** — explicit, clean separation
-2. **Auto-capture** — free text below `## User` auto-moves into `input`. Flexible but implicit.
-3. **Ignore** — only component content processed. Simple but restrictive.
+Your idea about storing response diffs is interesting:
 
-Option 1 aligns with "component boundaries are guard rails." The `agent-doc convert` command would create both `input` and `output` components.
+**Undo:** Store each response as a reversible diff. `agent-doc undo <FILE>` reverts the last response by applying the inverse diff. The pending store already saves the response — extending it to save the before/after diff is straightforward.
 
-**Note:** Code examples above use `<!~~ ~~>` because the code-span parser fix isn't built yet. Once `component.rs` skips code blocks, these become real `<!-- -->` syntax in code fences.
+**Extract:** Move a request + response pair to another document. This needs:
+1. The user request (from `input` component)
+2. The response diff (what changed in which components)
+3. The context the diff relates to (which components were read)
 
-Let's fix the formatting first. So we can immediately stop using `<!~~ ~~>`. It's confusing. Do this before answering the rest of my queries.
+The mechanical parts (diff storage, undo, extraction) belong in the binary. The "is this extraction correct?" judgment belongs to the agent.
 
+**Implementation path:** Response diffs → undo → extract. Each builds on the previous. The `input` component makes this cleaner since requests are explicitly bounded.
 <!-- /agent:output -->
 
 `<!~~ ~~>` is not ideal..neither is "backtick-wrapped markers get parsed as real components".
@@ -235,3 +234,5 @@ When agent-doc writes the response to this document...should the user request be
 I wonder if it makes sense to undo requests. So if we store the user requests in a component, it would be interesting to save the response diffs. Perhaps particular requests can then be extracted to other documents or undone.
 Undo would simply be reverting the diff.
 Extracting to another agent document, would involve the diff and the context that the diff relates to. This may require manual intervention if the automation does the extraction incorrectly.
+
+I'm still seeing my requests at the bottom of the document. They should be in a component...right?

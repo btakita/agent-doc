@@ -1403,3 +1403,36 @@ I would like to make sure our js.map file works though. To make debugging stack 
 compact this file. agent_doc_mode: template
 
 Let's focus on the current status of what is left to migrate from Contabo to Cloudflare
+## Assistant
+
+**Current Contabo → Cloudflare migration status:**
+
+### Remaining on Contabo (3 containers)
+
+| Container | Domain | Purpose |
+|-----------|--------|---------|
+| `mi-www_site-1` | `mi-www.site` | Censible (Solid Start + Postgres + Redis + Auth0) |
+| `mi-redis` | — | Redis for Censible |
+| `traefik` | — | Reverse proxy (only needed for Censible now) |
+
+### Migrated to Cloudflare (6 sites)
+
+| Site | CF Pages | Custom Domain | Auth | Status |
+|------|----------|---------------|------|--------|
+| `briantakita.me` | briantakita-me.pages.dev | briantakita.me | N/A | Live |
+| `brookebrodack.net` | brookebrodack-net.pages.dev | brookebrodack.net | N/A | Live |
+| `pe.briantakita.me` | peak-existence.pages.dev | pe.briantakita.me | N/A | Live |
+| `pn.briantakita.me` | prescience-notes.pages.dev | pn.briantakita.me | N/A | Live |
+| `hb.briantakita.me` | herbaliciousbliss.pages.dev | hb.briantakita.me | Google OAuth + D1 | Live |
+| `cogov.me` | cogov-me.pages.dev | cogov.me | N/A | **Pending** |
+
+### cogov.me fix
+
+The DNS A record was still pointing to Contabo (207.244.234.186). Just updated it to CNAME → `cogov-me.pages.dev`. The CF Pages custom domain verification is processing — currently returning 522 while it validates. Should resolve within minutes.
+
+### What's left
+
+Only `mi-www.site` (censible) remains on Contabo — you decided to keep it there due to its different stack (Solid Start, Postgres, Redis, Auth0). Once censible is the only site, you could also simplify the Contabo setup (remove traefik, run censible directly on port 443).
+
+## User
+

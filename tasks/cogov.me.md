@@ -85,3 +85,18 @@ yes
 
 ## User
 
+## Assistant
+
+**Rebuilt and redeployed.**
+
+The fix is live at `https://cogov.me/protocol.love` — now correctly serves as HTML (`content-type: text/html; charset=utf-8`) instead of triggering a download.
+
+**What happened:**
+- Re-exported cogov.me with the fixed `static_export__file_path_()`
+- `/protocol.love` now saves as `dist/browser/protocol.love/index.html` (was bare `protocol.love`)
+- Deployed to CF Pages: `https://89677098.cogov-me.pages.dev`
+
+**Note:** The yalc-pushed relysjs is a local override. To make this permanent, the fix needs to be committed and published in ctx-core-dev (relysjs package). The cogov-dev `package.json` should then be reverted from `file:.yalc/relysjs` back to the published version.
+
+## User
+

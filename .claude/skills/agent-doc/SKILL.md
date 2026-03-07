@@ -2,8 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.9.6"
-execution-mode: hybrid
+agent-doc-version: "0.10.0"
 ---
 
 # agent-doc submit
@@ -29,42 +28,6 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 - **Show progress** — stream your response in the console so the user sees real-time feedback
 - **Maintain session** — the document is a living conversation, not a one-shot
 
-## Execution Model
-
-Controlled by the `execution-mode` frontmatter field (default: `hybrid`).
-
-| Mode | Behavior | Token Cost |
-|------|----------|-----------|
-| **`hybrid`** (default) | First doc direct, 2nd+ concurrent docs use background subagent | Optimal — no overhead for single doc, scales for multi-doc |
-| **`parallel`** | Every `/agent-doc` spawns a background subagent | Higher (~7x), but all docs process independently |
-| **`sequential`** | Never use subagents, fully sequential | Cheapest — B waits for A to complete |
-
-**Why direct processing is safe:** Filesystem locking (flock + atomic rename) in agent-doc v0.9.5+ serializes concurrent access to documents and snapshots. The document IS the shared state (blackboard pattern) — no context duplication needed.
-
-### Hybrid Mode (Default)
-
-- Process the first `/agent-doc <FILE>` directly in the main agent context
-- If a second `/agent-doc <FILE2>` arrives while the first is still processing, dispatch it via `Agent(run_in_background: true)`
-- Same-document re-submit: filesystem locks serialize access; second invocation processes after the first completes
-
-### Parallel Mode
-
-- Every `/agent-doc <FILE>` invocation spawns a background subagent via `Agent(run_in_background: true)`
-- All documents process independently and concurrently
-
-### Sequential Mode
-
-- Process every `/agent-doc <FILE>` directly in the main agent context
-- Document B blocks until Document A's full cycle completes
-
-### Subagent Prompt (when used)
-
-The subagent prompt must include:
-- The full document cycle (steps 1-5 below)
-- The absolute path to `<FILE>`
-- The absolute path to the snapshot
-- The project root path (for `.agent-doc/` operations)
-
 ## Workflow
 
 ### 0. Pre-flight checks
@@ -72,6 +35,8 @@ The subagent prompt must include:
 **Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
 
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
+
+**Recover orphaned responses:** Run `agent-doc recover <FILE>` via Bash. If a pending response exists (from a previous cycle interrupted by context compaction), it will be written to the document automatically. Print the output to confirm recovery. This must run before computing the diff.
 
 **Check claims log:** Read `.agent-doc/claims.log` (if it exists). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
 
@@ -82,6 +47,7 @@ The subagent prompt must include:
   - If no snapshot exists, treat this as the first submit (entire document is new)
 
 ### 2. Compute the diff
+
 - Compare snapshot (previous state) against current content
 - **Strip comments** from both sides before comparing:
   - HTML comments: `<!-- ... -->` (including multiline)
@@ -92,17 +58,8 @@ The subagent prompt must include:
 - The diff represents what the user changed since the last submit
 - If no diff (content unchanged after comment stripping), tell the user nothing changed and stop
 
-#### Stale snapshot recovery (idempotent detection)
+### 3. Respond
 
-If there IS a diff, check whether the diff consists entirely of complete `## Assistant` and `## User` exchange blocks that were already written to the document by a previous cycle whose snapshot update was interrupted (e.g., by context compaction).
-
-**Detection:** Compare the diff content against what's already in the document. If the document already contains `## Assistant` blocks after the snapshot's last position, and the trailing `## User` block is empty (no new user content), the previous cycle completed the write but not the snapshot update.
-
-**Action:** Skip steps 3-4 (no re-response needed). Update the snapshot to match the current document state, print "[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale", and stop.
-
-**When NOT to recover:** If there is any new user content (new `## User` block with text, inline annotations, edits to previous responses), process normally — the user has new input that needs a response, even if the snapshot is stale. In this case, just update the snapshot baseline to the current document state before computing the real diff against only the new user content.
-
-### 3. Respond 
 - Address the user's changes naturally in the console (this gives real-time streaming feedback)
 - Respond to:
   - New `## User` blocks
@@ -110,21 +67,68 @@ If there IS a diff, check whether the diff consists entirely of complete `## Ass
   - Structural changes (deletions, reorganization)
 - Your console response IS the document response — they should be the same content
 
-### 4. Write back to the document 
-After responding, update the document file:
+### 4. Write back to the document
 
-1. **Re-read the file** (user may have edited during your response)
-2. Append your response as:
+Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
+
+#### 4a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
+
+Use `agent-doc write` to atomically append the response:
+
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Pipe your response** through `agent-doc write`:
+   ```bash
+   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp>
    ```
-   ## Assistant
+3. `agent-doc write` handles:
+   - Appending `## Assistant\n\n<response>\n\n## User\n\n`
+   - 3-way merging if the user edited during your response
+   - Atomic file write (flock + tempfile + rename)
+   - Snapshot update
 
-   <your response>
+#### 4b. Template mode (`agent_doc_mode: template`)
 
-   ## User
+Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
+The agent responds with **patch blocks** that target specific components.
 
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Format your response as patch blocks:**
+   ```markdown
+   <!-- patch:output -->
+   Your response content here.
+   <!-- /patch:output -->
+
+   <!-- patch:status -->
+   Updated status line.
+   <!-- /patch:status -->
    ```
-3. Use the Edit tool to append (not Write — preserves user edits made during response)
-4. Update the snapshot to match the new document state
+   - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
+   - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
+   - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
+3. **Pipe through `agent-doc write` with `--template` flag:**
+   ```bash
+   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --template
+   ```
+4. `agent-doc write --template` handles:
+   - Parsing patch blocks from the response
+   - Applying each patch to the matching component
+   - 3-way merging if the user edited during your response
+   - Atomic file write + snapshot update
+
+**Template document conventions:**
+- `<!-- agent:input -->` — user writes prompts here
+- `<!-- agent:output -->` — agent responds here (or use patch blocks for multiple components)
+- `<!-- agent:exchange -->` — shared conversation surface (user and agent both write inline)
+- Other components (status, architecture, etc.) are agent-managed via patch blocks
+
+**IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
+The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
+
+**Baseline file:** Before generating your response (step 3), save the current document to a temp file:
+```bash
+cp <FILE> /tmp/agent-doc-baseline-$$.md
+```
+Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
 
 ### 5. Git integration (optional)
 
@@ -139,14 +143,17 @@ Session documents use YAML frontmatter:
 
 ```yaml
 ---
-session: <uuid or null>
+agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>
+agent_doc_mode: <append | template>  # optional, default: append
 ---
 ```
 
-The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+**Append mode** (default): The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+
+**Template mode** (`agent_doc_mode: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 4b.
 
 ## Snapshot Storage
 

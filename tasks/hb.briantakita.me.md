@@ -130,3 +130,11 @@ Try signing in again — the `logged_in` cookie wasn't set by your previous OAut
 ## User
 
 Thank you. Is hb.briantakita.me decommissioned on Contabo?
+## Assistant
+
+Yes, it was decommissioned earlier in this session. Verified just now — no `herbaliciousbliss` container running on Contabo (`docker ps` returns nothing matching "herbal").
+
+The container `herbaliciosbliss-www-1` was stopped and removed after the Stage 1 static deploy was confirmed working. The DNS CNAME for `hb.briantakita.me` now points to `herbaliciousbliss.pages.dev` instead of the Contabo IP.
+
+## User
+

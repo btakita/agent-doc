@@ -204,13 +204,5 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:exchange -->
 
-### Keybinding updated
-
-No Print key on your SliceMK split keyboard. Changed i3 binding from `$mod+Print` to **`$mod+F9`**.
-
-F9 is on the fn layer (key 41) and fnpad layer (key 25). Full combo: **Super + fn + F9** to toggle recording.
-
-i3 config reloaded — binding is active now.
-
-save this to tasks/screencast.md
+Saved screencast content to `tasks/screencast.md` — template-mode document with components for setup, blog outline, and script. The exchange in this document is now clean for continued agent-doc discussion.
 <!-- /agent:exchange -->

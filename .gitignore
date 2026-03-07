@@ -10,4 +10,5 @@ research.md
 tmp/
 
 .agent-doc
+*.agent-doc.lock
 .wrangler

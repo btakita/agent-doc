@@ -308,3 +308,50 @@ Created 4 files in `ctx-core-dev/lib/relysjs/server/export/`:
 ## User
 
 Do the next steps.
+
+## Assistant
+
+### Steps 1-3 Complete: Implementation + Migration
+
+**Step 1-2** were already done (implementation + package.json exports).
+
+**Step 3: Migrated brookebrodack-site's `static-export.ts`**
+
+From 96 lines to 18 lines:
+```typescript
+import { static_export_ } from 'relysjs/server/export'
+import { site } from './config.js'
+static_export_({
+  site_url: site.website,
+  routes: ['/', '/brookers', '/content', '/site', '/store'],
+  extra_routes: ['/robots.txt', '/rss', '/sitemap.xml'],
+})
+```
+
+**Step 3b: Migrated briantakita.me's `prerender.ts`**
+
+From 43 lines to 16 lines. Added `base_url` option to `static_export_` to support connecting to an already-running external server (briantakita.me starts its server separately):
+```typescript
+import { static_export_ } from 'relysjs/server/export'
+await static_export_({
+  base_url: process.env.PRERENDER_BASE || 'http://localhost:4100',
+  site_url: process.env.PRERENDER_SITE_URL || 'https://briantakita.me',
+  out_dir: process.env.PRERENDER_OUT || 'dist/static',
+  sitemap: true,
+  extra_routes: ['/search', '/rss', '/rss.xml', '/robots.txt'],
+})
+```
+
+**API addition**: `base_url` config option — connects to an already-running server instead of starting one internally. Three modes:
+- `base_url` set: use external server (no startup/shutdown)
+- `app` set: use provided Elysia instance (no import)
+- Neither: auto-import `server_import` and start
+
+**Remaining:**
+- Step 4: Cloudflare Worker export testing (needs brookebrodack-dev WebSub handler extraction)
+- Step 5: Publish via ctx-core changeset workflow
+
+These can't be tested without `bun install` in the consumer projects. Want me to proceed with step 4 (Cloudflare Worker setup), or should we test the static export migrations first?
+
+## User
+

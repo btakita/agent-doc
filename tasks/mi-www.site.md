@@ -19,6 +19,23 @@ Who controls the dns of censible.co?
 ### Done:
 1. Added `rappstack/dev` as submodule at `src/rappstack-dev` (all 20+ lib submodules initialized)
 
+### DNS Status:
+
+**censible.co:**
+- Nameservers: `justin.ns.cloudflare.com` / `leia.ns.cloudflare.com` — **already on Cloudflare**
+- DNS is managed in a Cloudflare account (do you have access to this account?)
+
+**mi-www.site:**
+- A record: `207.244.234.186` (Contabo VPS)
+- Nameservers: `dns1.registrar-servers.com` / `dns2.registrar-servers.com` (Namecheap)
+- Currently redirects to Auth0 login: `/auth/login?return_to=...`
+- To deploy on CF Pages, you'll need to update DNS at Namecheap (or transfer NS to Cloudflare)
+
+**Questions before I create censible-dev:**
+1. Do you control the Cloudflare account for censible.co?
+2. Do you control the Namecheap account for mi-www.site?
+3. Should the new site be deployed at mi-www.site, censible.co, or both?
+
 ### Next Steps:
 1. Create `censible-dev` repo on GitHub (btakita/censible-dev)
 2. Set up rappstack monorepo structure (`app/censible-site/`, `lib/ui--server--censible/`, etc.)
@@ -41,12 +58,6 @@ Who controls the dns of censible.co?
 **Build:** `build.ts` with `relysjs_browser__build` + `relysjs_server__build` (parallel)
 
 **Export:** `prerender.ts` using `cloudflare_export_()` from relysjs
-
-### DNS for censible.co
-
-I don't have direct access to check the DNS registrar for censible.co. Let me look up what I can find.
-
-Creating the repo and scaffolding now...
 
 ## rappstack Documentation
 

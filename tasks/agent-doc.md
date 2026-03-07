@@ -456,4 +456,26 @@ Want me to go ahead and remove `with_snapshot` and its tests?
 
 Yes
 
+## Assistant
+
+Removed `with_snapshot` and its 3 tests from `/home/brian/work/btakita/agent-loop/agent-doc/src/snapshot.rs`.
+
+**Deleted:**
+- `with_snapshot()` function (lines 49-64)
+- `with_snapshot_creates_when_none_exists` test
+- `with_snapshot_reads_and_updates_existing` test
+- `with_snapshot_skips_write_when_closure_returns_none` test
+
+**Kept:** `SnapshotLock`, `load()`, `save()`, `delete()`, `load_unlocked()`, `save_unlocked()` -- all still used by production code.
+
+**Verification:** `cargo check` clean (no warnings), 14 snapshot tests pass (was 17), no unused imports.
+
 ## User
+
+Please read https://code.claude.com/docs/en/costs
+
+The subagents are more expensive. Are they necessary for the concurrency issues we were having...where updates to the agent docs were being lost due to muliple agent docs being run at the same time?
+
+If they are necessary, can we have something similar to a process fork to make token usage more efficient?
+
+Is there anything that we can learn from existing agent swarm libraries?

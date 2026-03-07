@@ -694,3 +694,41 @@ Want me to implement any of these (merge active into claim, startup validation, 
 
 ## User
 
+
+
+## Assistant
+
+### Race condition analysis
+
+The registry is a JSON file with read-modify-write semantics. There IS a theoretical TOCTOU race: agent A reads, agent B reads, agent A writes, agent B writes (clobbering A's entry). In practice this is unlikely because:
+
+- Each subagent touches a **different registry key** (keyed by session UUID), so concurrent writes only risk clobbering if they overlap at the file level
+- `std::fs::write` does an atomic write on Linux (write to page cache, single rename-like fsync) — not as safe as write-to-temp-then-rename, but adequate for low-contention use
+- Subagent lifecycles are staggered (claim happens once at session start, not continuously)
+
+**Would last-write-wins be safe?** Yes, for the current design. The worst case is one agent's registry entry gets dropped and silently re-added on next claim. No data corruption, just a transient missing entry.
+
+**Could there be 2 concurrent agent runs due to a race condition?** No — each subagent owns its own session UUID and pane. The registry maps session→pane, so two agents would write different keys. Even if one clobbers the other's JSON write, the "loser" re-claims on next invocation. For true correctness, `flock`-based advisory locking would eliminate the window entirely, but the collision probability is low enough that it's not worth the complexity now.
+
+Let's have a `flock` based advisory. Also mitigate for windows.
+Would `flock` fix the TOCTOU race?
+
+### Stale claim auto-prune: implemented
+
+The `resync::prune()` call at the top of `agent-doc claim` already removed dead-pane entries from the registry. What was missing was **file-specific feedback** — when a stale claim existed for the exact file being claimed, it was silently pruned with no indication to the user.
+
+**What I added:** A `validate_file_claim()` function in `claim.rs` that runs after `resync::prune()`. It:
+
+1. Loads the registry and checks for entries matching the file being claimed
+2. Tests each matching entry's pane via `pane_alive()`
+3. If dead, logs a clear message: `stale claim: <file> was bound to dead pane %X, replacing`
+4. Removes the stale entry and saves
+
+This handles the machine-restart scenario where tmux pane IDs are reassigned: the user now sees exactly why a re-claim was needed instead of the previous silent behavior.
+
+**File changed:** `/home/brian/work/btakita/agent-loop/agent-doc/src/claim.rs`
+
+Build and all 150 tests pass (`cargo build` + `cargo test`).
+
+## User
+

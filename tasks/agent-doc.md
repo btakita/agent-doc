@@ -184,3 +184,32 @@ Want me to implement the lock relocation in `agent-doc`?
 ## User
 
 Yes...hashed lock relocation.
+## Assistant
+
+### Implementation Complete
+
+Relocated document advisory locks from sibling files to `.agent-doc/locks/<hash>.lock`:
+
+**Changes (3 files):**
+
+1. **`snapshot.rs`** — Added `doc_hash()` (extracts SHA256 hashing), `lock_path_for()` (returns `.agent-doc/locks/<hash>.lock`), and `find_project_root()` (walks up to find `.agent-doc/` directory). Refactored `path_for()` to use `doc_hash()`.
+
+2. **`submit.rs:139-140`** — `acquire_doc_lock` now calls `crate::snapshot::lock_path_for(path)` instead of `path.with_extension("md.agent-doc.lock")`.
+
+3. **`write.rs:85-86`** — Same change as submit.rs.
+
+**Cleanup:**
+- Removed stale `tasks/*.agent-doc.lock` files
+- Added `*.agent-doc.lock` to `.gitignore` (safety net for old binaries)
+
+**How `lock_path_for` works:**
+1. Compute SHA256 of canonical document path (via `doc_hash()`)
+2. Walk up from document to find `.agent-doc/` project root
+3. Return `<project_root>/.agent-doc/locks/<hash>.lock`
+4. Falls back to document's parent dir if no project root found
+
+All 177 tests pass. Ready to release as v0.9.7.
+
+## User
+
+release

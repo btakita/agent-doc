@@ -568,9 +568,80 @@ Working through all 7 phases. Here's progress so far:
 - `YOUTUBE_RSS_URL` — YouTube RSS feed URL
 - `AUTHORY_YOUTUBE_RSS_URL` — Authory RSS URL
 
-### Phases 3-7: In Progress
+### Phase 3: Assets to R2 — Not Needed
 
-Working on R2 assets, YouTube data at build time, DNS cutover, and WebSub next.
+**Key discovery:** The `dist/browser/` output from `bun run build` only contains esbuild-bundled assets (~1.8MB) — images that are actually `import`ed in code get inlined/hashed into the JS/CSS bundles. The full 119MB `public/assets/` directory is only needed at dev/build time, not at serving time. CF Pages serves `dist/browser/` directly with all referenced assets already bundled.
+
+**No R2 bucket needed.** The static export captures everything.
+
+### Phase 4: YouTube Data at Build Time — Already Done
+
+The static export script (`static-export.ts`) handles this automatically:
+1. `db/migrate.ts` initializes the SQLite schema
+2. The production server fetches YouTube API data on startup (populates `text_cache` + `youtube_video` tables)
+3. `static-export.ts` crawls the running server, capturing the rendered YouTube content in the HTML
+
+The GH Actions workflow runs these steps in order: migrate → build → static-export.
+
+### Phase 5: DNS Cutover — Ready
+
+**Created:** `public/_redirects` for CF Pages URL rewrites:
+- `www.brookebrodack.net/*` → `brookebrodack.net/:splat` (301)
+- `bb.briantakita.me/*` → `brookebrodack.net/:splat` (301)
+
+**Steps to complete (manual):**
+1. Create CF Pages project named `brookebrodack` in dashboard
+2. Add custom domains: `brookebrodack.net`, `www.brookebrodack.net`
+3. CF automatically manages DNS CNAME records for Pages
+4. After verifying, remove the Docker container from Contabo
+
+### Phase 6: Scheduled Rebuilds — Already Done
+
+The GH Actions workflow includes `schedule: cron '0 */6 * * *'` — rebuilds every 6 hours for fresh YouTube data.
+
+### Phase 7: WebSub Worker — Done
+
+**Created:** `workers/websub/` with three files:
+
+1. **`index.ts`** — CF Worker handling:
+   - `GET`: WebSub hub verification (responds with `hub.challenge`)
+   - `POST`: Push notifications with HMAC-SHA1 verification → triggers GH Actions `workflow_dispatch`
+
+2. **`wrangler.toml`** — Worker config with `GH_OWNER`, `GH_REPO`, `GH_WORKFLOW` vars
+
+3. **`subscribe.sh`** — Subscription script for YouTube's PubSubHubbub hub
+
+**Secrets needed (via `wrangler secret put`):**
+- `GH_TOKEN` — GitHub PAT with `actions:write` scope
+- `WEBSUB_SECRET` — Shared secret for HMAC verification
+
+**Subscription renewal:** YouTube leases expire ~10 days. Re-run `subscribe.sh` periodically (could add a CF Worker cron trigger for auto-renewal).
+
+---
+
+### Summary — All Files Created
+
+| File | Purpose |
+|------|---------|
+| `app/brookebrodack-site/static-export.ts` | Pre-renders all routes to static HTML |
+| `.github/workflows/deploy.yml` | CI/CD: build → static export → CF Pages deploy |
+| `public/_redirects` | www + subdomain redirects |
+| `workers/websub/index.ts` | WebSub push notification → GH Actions trigger |
+| `workers/websub/wrangler.toml` | Worker configuration |
+| `workers/websub/subscribe.sh` | YouTube feed subscription script |
+
+### Next Steps (Manual Setup)
+
+1. **GitHub secrets** — Add to `btakita/brookebrodack-dev` Settings → Secrets:
+   - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+   - `GOOGLE_API_KEY`, `YOUTUBE_CHANNELID`, `YOUTUBE_RSS_URL`, `AUTHORY_YOUTUBE_RSS_URL`
+2. **CF Pages project** — Create `brookebrodack` in CF dashboard
+3. **Commit and push** — All files are unstaged, ready to commit
+4. **First deploy** — Push to main triggers GH Actions
+5. **WebSub worker** — `cd workers/websub && wrangler deploy && wrangler secret put GH_TOKEN && wrangler secret put WEBSUB_SECRET`
+6. **Subscribe** — Run `subscribe.sh` with env vars
+7. **DNS cutover** — Add custom domains in CF Pages
+8. **Decommission** — Remove Docker container from Contabo after verification
 
 ## User
 

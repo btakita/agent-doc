@@ -51,5 +51,102 @@ Let's test this again. If there is a problem, file a bug report if none already 
 
 **Note:** This repo uses `workspace:*` dependencies (8 packages from `@btakita/*` and `@rappstack/*`), so `bun install` must run from the parent workspace monorepo. Changes are unstaged — not committed.
 
+## Assistant
+
+All upgrades applied to `brookebrodack-site/package.json`:
+
+| Package | Version |
+|---------|---------|
+| drizzle-kit | ^0.31.9 |
+| drizzle-orm | ^0.45.1 |
+| marked | ^17.0.4 |
+| tailwindcss | ^4.2.1 |
+| postcss | ^8.5.8 |
+
+**Re: postcss circular import** — searched GitHub issues on `postcss/postcss` for "circular import/dependency" — no existing bug report found. The issue we hit in briantakita.me-dev may be bun-specific (postcss uses a deferred CJS require pattern for its inherent circular deps; ESM entry just re-exports from CJS). Can't test here since the parent monorepo (`brookebrodack-dev`) isn't cloned locally — postcss needs a full `bun install` to verify. Will test when you set up the workspace.
+
+**Migration notes for when you build:**
+- **tailwindcss 4**: Complete config rewrite — `tailwind.config.js` replaced by CSS `@theme` directives, `@apply` syntax changes
+- **drizzle 0.45**: Schema API changes, new migration format — run `drizzle-kit generate` to regenerate
+- **marked 17**: Renderer API changed — check any custom renderers
+
+**Parent workspace:** `btakita/brookebrodack-dev` (not cloned locally). `brookebrodack-site` expects to be at `app/brookebrodack-site` within it.
+
 ## User
 
+```
+~/work/btakita/agent-loop/brookebrodack-site main !1                                                                                                                                                                                   04:30:19
+❯ bun i
+[0.01ms] ".env"
+bun install v1.3.10 (30e609e0)
+error: Workspace dependency "@btakita/dev-bin" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@btakita/domain--server--brookebrodack" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@btakita/ui--browser--brookebrodack" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@btakita/ui--server--brookebrodack" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@rappstack/domain--server" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@rappstack/domain--server--auth" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@rappstack/ui--any" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+
+error: Workspace dependency "@rappstack/ui--server" not found
+
+Searched in "./*"
+
+Workspace documentation: https://bun.com/docs/install/workspaces
+
+error: @btakita/dev-bin@workspace:* failed to resolve
+error: @btakita/domain--server--brookebrodack@workspace:* failed to resolve
+error: @btakita/ui--browser--brookebrodack@workspace:* failed to resolve
+error: @btakita/ui--server--brookebrodack@workspace:* failed to resolve
+error: @rappstack/domain--server@workspace:* failed to resolve
+error: @rappstack/domain--server--auth@workspace:* failed to resolve
+error: @rappstack/ui--any@workspace:* failed to resolve
+error: @rappstack/ui--server@workspace:* failed to resolve
+~/work/btakita/agent-loop/brookebrodack-site main !1                                                                                                                                                                                   04:30:26
+❯ bun run dev
+$ bun run dev:sourcemap__resolve__bun
+$ sourcemap__resolve__bun -f index.ts
+/usr/bin/bash: line 1: sourcemap__resolve__bun: command not found
+error: script "dev:sourcemap__resolve__bun" exited with code 127
+error: script "dev" exited with code 127
+```

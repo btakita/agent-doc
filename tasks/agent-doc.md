@@ -233,3 +233,28 @@ Version bumped from 0.9.7 to 0.9.8 (0.9.7 was already published for the `agent-d
 ## User
 
 Can we clean up the existing tasks/*.agent-doc.lock files?
+## Assistant
+
+Done — removed 2 stale lock files:
+- `tasks/agent-doc.md.agent-doc.lock`
+- `tasks/contabo.md.agent-doc.lock`
+
+These were recreated by the old v0.9.7 binary earlier in this session (before the v0.9.8 install). Now that v0.9.8 is installed, new locks go to `.agent-doc/locks/` and won't appear in the working tree. The `.gitignore` entry (`*.agent-doc.lock`) also prevents any stragglers from being committed.
+
+## User
+
+I want to explore the idea of having responses use the dashboard-as-document templates.
+
+Currently, the responses default to append at the end of the document.
+
+Some documents may be better having inline annotation and responses.
+Where the annotations and responses occur at the templated location.
+
+What would the UX look like:
+- to being one of these documents?
+- to transition a default append-only document to an in-place response document?
+
+How can the user maintain order in the document? Preventing content from spilling over?
+Can code folding with the editor be used?
+
+Would it be possible to have a dashboard-like or IDE-like interface within the document?

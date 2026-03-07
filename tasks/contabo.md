@@ -825,3 +825,21 @@ Where is `cogov.me` DNS currently managed? If it's in Cloudflare, I can add the 
 ## User
 
 cogov.me DNS is managed in Cloudflare.
+## Assistant
+
+**cogov.me custom domain setup — needs nameserver change.**
+
+`cogov.me` DNS is at the registrar (registrar-servers.com), NOT Cloudflare yet. Current A record points to Contabo VPS `207.244.234.186`.
+
+**To complete the migration:**
+1. Add `cogov.me` as a zone in Cloudflare (free plan)
+2. Change nameservers at the registrar to Cloudflare's assigned nameservers
+3. After propagation (~minutes to hours), CF auto-provisions SSL and activates the Pages custom domain
+
+I can add the zone now via the API — that will give you the Cloudflare nameservers to set at the registrar. The site is already live and verified at `https://cogov-me.pages.dev/`.
+
+Want me to add the zone and get the nameservers?
+
+## User
+
+yes. I have a namecheap account. Do you need access?

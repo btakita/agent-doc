@@ -27,9 +27,16 @@ pub struct Frontmatter {
     /// Set by `claim` or `sync` on first use; used to keep panes in the same session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
-    /// Response mode: "append" (default) or "template" (in-place component patching).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_mode: Option<String>,
+    /// Document mode: "append" (default) or "template" (in-place component patching).
+    /// Serialized as `agent_doc_mode` in YAML; reads legacy `response_mode` and shorthand `mode` via aliases.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_mode",
+        alias = "mode",
+        alias = "response_mode"
+    )]
+    pub mode: Option<String>,
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -174,7 +181,7 @@ mod tests {
             model: Some("opus".to_string()),
             branch: Some("dev".to_string()),
             tmux_session: None,
-            response_mode: None,
+            mode: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();
@@ -274,6 +281,39 @@ mod tests {
         assert_eq!(fm.session.as_deref(), Some("legacy-id"));
         assert_eq!(fm.agent.as_deref(), Some("claude"));
         assert!(body.contains("Body"));
+    }
+
+    #[test]
+    fn parse_agent_doc_mode_canonical() {
+        let content = "---\nagent_doc_mode: template\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.mode.as_deref(), Some("template"));
+    }
+
+    #[test]
+    fn parse_mode_shorthand_alias() {
+        let content = "---\nmode: template\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.mode.as_deref(), Some("template"));
+    }
+
+    #[test]
+    fn parse_response_mode_legacy_alias() {
+        let content = "---\nresponse_mode: template\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.mode.as_deref(), Some("template"));
+    }
+
+    #[test]
+    fn write_uses_agent_doc_mode_field() {
+        let fm = Frontmatter {
+            mode: Some("template".to_string()),
+            ..Default::default()
+        };
+        let result = write(&fm, "body\n").unwrap();
+        assert!(result.contains("agent_doc_mode:"));
+        assert!(!result.contains("response_mode:"));
+        assert!(!result.contains("\nmode:"));
     }
 
     #[test]

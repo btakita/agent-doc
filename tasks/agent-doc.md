@@ -258,3 +258,99 @@ How can the user maintain order in the document? Preventing content from spillin
 Can code folding with the editor be used?
 
 Would it be possible to have a dashboard-like or IDE-like interface within the document?
+<<<<<<< agent-response
+## Assistant
+
+### In-Place Response Documents (Dashboard-as-Document)
+
+This builds on the existing component model. Components (`<!-- agent:name -->...<!-- /agent:name -->`) already support replace/append/prepend. The idea extends this to make the entire document a template where responses target specific regions.
+
+#### Two Document Modes
+
+**Append mode (current default):** Linear `## User` / `## Assistant` conversation. Good for open-ended sessions.
+
+**Template mode (proposed):**
+```markdown
+---
+response_mode: template
+---
+
+# Project Dashboard
+
+## Status
+<!-- agent:status -->
+Build passing. 3 open PRs.
+<!-- /agent:status -->
+
+## Recent Activity
+<!-- agent:activity mode="append" max_entries="10" -->
+- 2026-03-07: Released v0.9.8
+<!-- /agent:activity -->
+
+## Questions
+<!-- agent:questions -->
+User annotates inline; agent responds in-place.
+<!-- /agent:questions -->
+```
+
+Agent responds by patching specific components instead of appending `## Assistant` blocks.
+
+#### UX: Starting a Template Document
+
+- **Frontmatter flag:** `response_mode: template` — explicit opt-in
+- **Scaffold:** `agent-doc init --template dashboard` for quick setup
+- **Auto-detect fallback:** If document has `<!-- agent:* -->` components and no `## User`/`## Assistant` structure, infer template mode
+
+#### UX: Transitioning Append → Template
+
+1. Add `response_mode: template` to frontmatter
+2. Wrap sections in component markers
+3. Next `/agent-doc` submit detects template mode
+4. Old `## User`/`## Assistant` blocks remain as read-only history/context
+
+Incremental — can mix append history at top with template regions below.
+
+#### Preventing Spillover
+
+**Component boundaries are the guard rails.** Agent can only modify within its assigned components. User content outside is untouchable.
+
+Additional controls via `components.toml`:
+- `max_entries` — cap on append-mode items (already designed)
+- `max_lines` — hard limit on component content length
+- `frozen` — read-only component (agent reads but can't write)
+
+#### Code Folding
+
+Component markers are natural fold points. Both IDEs support this:
+
+```
+▶ <!-- agent:status -->     [collapsed]
+▶ <!-- agent:activity -->   [collapsed]
+▼ <!-- agent:questions -->  [expanded — user is working here]
+```
+
+**JetBrains:** Register `FoldingBuilder` detecting `<!-- agent:* -->` pairs
+**VS Code:** Custom folding provider for component regions
+
+Gives a collapsed dashboard view — user sees section headers, expands to work.
+
+#### Dashboard/IDE Interface
+
+With folding + template mode:
+- **Gutter icons** — fold/unfold, refresh per component
+- **Structure view** — component tree in IDE sidebar
+- **Quick-nav popup** — jump between components
+- User navigates by expanding/collapsing. Agent updates on each submit.
+
+#### Implementation Path
+
+1. `response_mode: template | append` in frontmatter (default: append)
+2. Template-mode submit: extract user annotations from components, respond via `patch` per component
+3. `FoldingBuilder` (JetBrains) / folding provider (VS Code)
+4. `max_lines` and `frozen` in component config
+
+Builds entirely on existing component infrastructure. Main new work is the template-mode submit path.
+
+## User
+
+Would another TUI "editor" be useful? How would some recent editors such as ki work in this flow?

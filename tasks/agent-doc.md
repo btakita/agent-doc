@@ -611,3 +611,43 @@ The is a compaction fix that should be initiated in the tasks/contabo.md doc. Re
 ## User
 
 Proceed
+## Assistant
+
+### Released v0.9.9
+
+**Published to all targets:**
+- crates.io: `agent-doc v0.9.9`
+- PyPI: `agent_doc-0.9.9`
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.9
+- Local binary: `~/.cargo/bin/agent-doc` (v0.9.9)
+- SKILL.md: updated to v0.9.9 (with `agent-doc recover` in pre-flight)
+
+**What's in v0.9.9:**
+
+1. **Template-mode for in-place response documents**
+   - `response_mode: template` frontmatter field
+   - `agent-doc template-info <FILE>` — JSON output for plugins
+   - `<!-- patch:name -->` response parser + component applier
+   - `agent-doc write --template` — template-mode write from stdin
+   - Auto-create `<!-- agent:output -->` for unmatched content
+
+2. **Compaction recovery**
+   - `agent-doc write` saves responses to `.agent-doc/pending/<hash>.md` before writing
+   - `agent-doc recover <FILE>` — detect and apply orphaned responses
+   - SKILL.md pre-flight (step 0) calls `agent-doc recover` automatically
+   - Survives context compaction, crashes, and interrupted sessions
+
+3. **SKILL.md updates**
+   - Added `agent-doc recover <FILE>` to pre-flight checks
+   - Version bumped to 0.9.9
+
+**192 tests passing.** 3 commits in submodule:
+```
+12c39fb feat: template-mode for in-place response documents
+9536dc4 feat: compaction recovery — durable pending response store
+95d476f release: v0.9.9 — template mode + compaction recovery
+```
+
+## User
+
+Let's convert this document to use templates. Please format. Assess whether or not some or all of the conversion logic belongs in agent-doc 

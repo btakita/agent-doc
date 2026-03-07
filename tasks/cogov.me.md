@@ -166,3 +166,34 @@ Why were the css files not built in the production build?
 
 ## User
 
+## Assistant
+
+**Fixed and redeployed. No more post-copy needed.**
+
+**Why CSS was in a different directory:** The `rebuildjs` build system determines the output directory from `NODE_ENV`:
+
+```js
+// rebuildjs/server/app/index.js:95-96
+browser__relative_path = is_prod_(ctx) ? 'browser' : 'browser--dev'
+// is_prod_ = () => process.env.NODE_ENV === 'production'
+```
+
+Without `NODE_ENV=production`, `bun build.ts` outputs CSS/JS to `dist/browser--dev/` while `prerender.ts` wrote HTML to `dist/browser/` — two different directories.
+
+**What changed:**
+
+1. **`prerender.ts`** — removed `base_url` (which connected to a running dev server with different hashes). Now uses `server_import: resolve('dist/server/index.js')` so the export auto-starts the production server, guaranteeing HTML references match the built CSS/JS hashes.
+
+2. **Build flow** — now `NODE_ENV=production bun build.ts` outputs everything to `dist/browser/` + `dist/server/`. Then `NODE_ENV=production bun prerender.ts` starts the production server from `dist/server/index.js`, pre-renders HTML into `dist/browser/`, and all assets are co-located.
+
+**Verified:**
+- `https://cogov.me/` → styled correctly (`text/css`)
+- `https://cogov.me/protocol.love` → serves as HTML page
+- CSS hash in HTML (`DRA43SYN_IXDEIXMI`) matches the built CSS file
+- No manual `cp -r dist/browser--dev/* dist/browser/` needed
+
+Deployed at: `https://69ec5a9f.cogov-me.pages.dev`
+
+## User
+
+Who owns cogov.tech?

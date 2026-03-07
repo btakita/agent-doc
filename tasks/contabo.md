@@ -1030,3 +1030,42 @@ tasks/agent-doc will handle this. Absolved
 ## User
 
 Let's start with hb.briantakita.me
+## Assistant
+
+**Contabo decommissioned:** Stopped and removed `cogov-www-1`, `peakexistence-www-1`, `prescience-notes-www-1`. Remaining on Contabo: `herbaliciosbliss-www-1`, `mi-www_site-1`, `traefik`, `mi-redis`.
+
+**Re: cogov.me + NS propagation** — Yes, we can decommission even before propagation. During the gap, `cogov.me` returns a CF 404 (NS still at registrar). Once it propagates to `dion.ns.cloudflare.com` / `tegan.ns.cloudflare.com`, CF Pages takes over. You confirmed "Done" on the NS change, so it's just a matter of time.
+
+---
+
+**herbaliciousbliss (hb.briantakita.me) analysis:**
+
+This is NOT a static site. It has server-side state:
+
+| Component | Detail |
+|-----------|--------|
+| **SQLite** | `bun:sqlite` → `./db/app.db` with WAL mode |
+| **Schema** | `person_tbl` (Google OAuth users), `session_tbl` |
+| **Auth** | Google OAuth via `arctic` (AUTH_GOOGLE_ID/SECRET) |
+| **Session** | CSRF tokens + session headers on every page |
+| **Email** | `nodemailer` dependency |
+| **Routes** | `/` (home), `/lyra`, `/login/google`, `/login/google/callback` |
+| **Assets** | Contabo Object Storage (bucket `herbaliciousbliss.asset`) |
+
+**Migration options:**
+
+| Option | Effort | Trade-off |
+|--------|--------|-----------|
+| **A. Strip auth, make static** | Low | Lose login/user features. Only if auth isn't needed anymore |
+| **B. CF Workers + D1** | High | Full migration: rewrite `bun:sqlite` → D1 API, adapt Drizzle, port Elysia to CF Worker |
+| **C. CF Workers + Turso** | Medium | SQLite-compatible edge DB, smaller code changes than D1 |
+| **D. Fly.io or Railway** | Low | Keep Bun runtime, just redeploy — cheapest path |
+
+**My recommendation: Option A** if the auth/login features aren't actively used. The site has only 2 content pages (`/` and `/lyra`). If it's just a content/marketing site with dormant auth, strip it and deploy static like the other 3.
+
+**Question:** Is the Google OAuth login on herbaliciousbliss actively used? Or can we make it static?
+
+It's under development. Let's try keeping it and develop it.
+
+## User
+

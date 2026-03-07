@@ -30,3 +30,29 @@ audit docs
 ## User
 
 Please convert all non-submodule repos in the agent-loop directory into git submodules.
+
+.yalc should be gitignored
+
+## Assistant
+
+Done. Converted 4 standalone repos to submodules:
+
+| Directory | Remote | Commit |
+|-----------|--------|--------|
+| `briantakita.me-dev` | `btakita/briantakita.me-dev` | `36cf923` |
+| `ctx-core-dev` | `ctx-core/dev` | `38fc176` |
+| `mail` | `btakita/mail` | `f27a91d` |
+| `python-intentions` | `btakita/python-intentions` | `28896c6` |
+
+**Steps taken:**
+1. Committed uncommitted changes in briantakita.me-dev, mail, python-intentions
+2. Added `.yalc/` and `yalc.lock` to briantakita.me-dev's `.gitignore`
+3. Pushed all 3 to origin/main
+4. Removed directories, re-added as `git submodule add`
+5. Removed the 4 entries from `.gitignore` (they were being ignored as "local symlinks")
+
+Changes are staged but not committed in agent-loop — `.gitmodules`, `.gitignore`, and the 4 new submodule pointers.
+
+## User
+
+

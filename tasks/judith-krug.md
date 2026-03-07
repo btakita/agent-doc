@@ -308,3 +308,14 @@ The draft is already in your Gmail inbox — you can also just hit send there if
 ## User
 
 Yes. send it now
+
+## Assistant
+
+**Sent.** Follow-up email delivered to judithkrug@gmail.com (CC: rwaldman100@gmail.com).
+
+Draft file updated to `status: sent` at `mail/drafts/20260306-judith-followup.md`.
+
+Note: corky requires `status: approved` (or `review`/`scheduled`) before `--send` works — `draft` status is blocked as a safety check. I updated the status to `approved` then sent.
+
+## User
+

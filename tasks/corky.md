@@ -533,3 +533,30 @@ Done. Both fixes implemented, tests pass, release binary installed.
 ## User
 
 release
+
+## Assistant
+
+**Released corky v0.13.2**
+
+The OAuth fixes from the previous session weren't on disk (clean working tree, no stashes), so I re-implemented them:
+
+**Fix 1 — Non-interactive OAuth in watch mode:**
+- Added `get_access_token_noninteractive()` in `src/filter/gmail_auth.rs` — tries cached/refreshed token, returns `Err` with "Run `corky filter auth`" message instead of opening browser
+- Added `run_noninteractive()` in `src/filter/check.rs` — uses non-interactive token getter
+- Updated `check_filter_drift()` in `src/watch.rs` to use `run_noninteractive()`
+
+**Fix 2 — OAuth callback timeout:** 120s → 300s (5 min)
+
+**Release checklist:**
+- [x] `make check` — clippy clean, all tests pass
+- [x] Version bump: `Cargo.toml` + `pyproject.toml` → 0.13.2
+- [x] VERSIONS.md updated
+- [x] Committed + pushed to GitHub
+- [x] Tagged `v0.13.2`
+- [x] Published to crates.io
+- [x] Published to PyPI (maturin)
+- [x] GitHub Release created with prebuilt binary
+- [x] Installed to `~/.cargo/bin/corky`
+
+## User
+

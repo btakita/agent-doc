@@ -1,7 +1,9 @@
 ---
-agent_doc_session: a2267a78-5840-45a5-a654-ac0aa081b7d4
+agent_doc_session: 8aedc767-848c-4f48-93f0-c505a4991e4d
 tmux_session: '0'
 ---
+
+
 
 What websites are currently running on my Contabo account?
 
@@ -452,3 +454,33 @@ Ready to execute?
 ## User
 
 Yes
+
+## Assistant
+
+**Done.** All 17 software project submodules moved to `src/`.
+
+**Root (7 entries):**
+```
+bin/  mail/  philosophy/  resume/  src/  tasks/  tmp/
+```
+
+**`src/` (17 projects):**
+```
+agent-doc  briantakita.me-dev  brookebrodack-dev  censible-core
+cloudflare  cogov-dev  corky  ctx-core-dev  drmanny-dev
+existence-lang  herbaliciousbliss-dev  instruction-files
+presence  prescience-notes-dev  python-intentions  tagpath  tmux-router
+```
+
+**What was done:**
+1. `git mv` for all 17 project submodules → `src/`
+2. `.gitmodules` paths auto-updated
+3. `CLAUDE.md` updated with new `## Layout` section (also cleaned up duplicate Workflow/Task sections)
+4. Existence-lang nested submodules re-initialized at new paths
+5. All changes staged, ready to commit
+
+## User
+
+The agent-doc pluginsa an error:
+
+Claim failed (exit 2): error: unexpected argument '--position' found tip: to pass '--position' as a value, use '-- --position' Usage: agent-doc claim   For more information, try '--help'.

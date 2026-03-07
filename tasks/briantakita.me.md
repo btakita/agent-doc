@@ -119,3 +119,10 @@ These match exactly the deps declared in briantakita.me-dev's workspace package.
 ## User
 
 Please run yalc add on the dependencies. If not already added.
+
+## Assistant
+
+Already done — all 11 ctx-core dependencies are already `yalc add`'d in briantakita.me-dev (from the ctx-core-dev migration session earlier). Verified via `yalc.lock`.
+
+## User
+

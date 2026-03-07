@@ -269,3 +269,42 @@ No special handling needed — the manifest diff handles it naturally.
 ## User
 
 Let's implement.
+
+## Assistant
+
+### Implementation Complete
+
+Created 4 files in `ctx-core-dev/lib/relysjs/server/export/`:
+
+**`index.js` + `index.d.ts`** — `static_export_(config)`:
+- Sitemap auto-discovery + explicit routes (merged, deduplicated)
+- Streaming file writes (write-as-you-go per route, not batched)
+- URL rewriting (localhost -> production origin)
+- `incremental` mode — skip unchanged files via content comparison
+- `manifest` mode — `.export-manifest.json` tracks exports, deletes stale files
+- `clean` mode — `rm -rf` output dir before export
+- `on_export` callback for progress tracking
+- Auto server lifecycle (dynamic import + `app__start`, stop in `finally`)
+- Returns `{ exported: string[], errors: string[] }`
+
+**`cloudflare/index.js` + `cloudflare/index.d.ts`** — `cloudflare_export_(config)`:
+- Delegates to `static_export_()` for static files
+- `worker_entry__generate_(dynamic_routes)` — generates lightweight `fetch` handler with pattern matching, falls through to `env.ASSETS.fetch` for static
+- ESBuild bundle targeting Workers runtime (`es2022`, `browser` platform, minified)
+- `wrangler_toml__generate_()` — generates `wrangler.toml` with Pages config
+- Returns `{ ...static_result, worker_entry_path, wrangler_path }`
+
+**`package.json`** updated with export paths:
+- `relysjs/server/export`
+- `relysjs/server/export/cloudflare`
+
+### Next Steps
+
+1. Test `static_export_` with brookebrodack-site (replace `static-export.ts`)
+2. Test `cloudflare_export_` with brookebrodack-dev's WebSub worker
+3. Migrate briantakita.me's `prerender.ts`
+4. Publish via ctx-core changeset workflow
+
+## User
+
+Do the next steps.

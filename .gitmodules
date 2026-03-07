@@ -1,72 +1,72 @@
 [submodule "corky"]
-	path = corky
+	path = src/corky
 	url = git@github.com:btakita/corky.git
 [submodule "agent-doc"]
-	path = agent-doc
+	path = src/agent-doc
 	url = git@github.com:btakita/agent-doc.git
 [submodule "resume"]
 	path = resume
 	url = git@github.com:btakita/resume.git
 [submodule "instruction-files"]
-	path = instruction-files
+	path = src/instruction-files
 	url = git@github.com:btakita/instruction-files.git
 [submodule "philosophy"]
 	path = philosophy
 	url = https://github.com/btakita/philosophy
 [submodule "presence"]
-	path = presence
+	path = src/presence
 	url = git@github.com:btakita/presence.git
 [submodule "tagpath"]
-	path = tagpath
+	path = src/tagpath
 	url = git@github.com:btakita/tagpath.git
 [submodule "tmux-router"]
-	path = tmux-router
+	path = src/tmux-router
 	url = git@github.com:btakita/tmux-router.git
 [submodule "existence-lang/.github"]
-	path = existence-lang/.github
+	path = src/existence-lang/.github
 	url = git@github.com:existence-lang/.github.git
 [submodule "existence-lang/existence-lang.github.io"]
-	path = existence-lang/existence-lang.github.io
+	path = src/existence-lang/existence-lang.github.io
 	url = git@github.com:existence-lang/existence-lang.github.io.git
 [submodule "existence-lang/ontology"]
-	path = existence-lang/ontology
+	path = src/existence-lang/ontology
 	url = git@github.com:existence-lang/ontology.git
 [submodule "existence-lang/spec"]
-	path = existence-lang/spec
+	path = src/existence-lang/spec
 	url = git@github.com:existence-lang/spec.git
 [submodule "existence-lang/existence"]
-	path = existence-lang/existence
+	path = src/existence-lang/existence
 	url = git@github.com:existence-lang/existence.git
 [submodule "cloudflare"]
-	path = cloudflare
+	path = src/cloudflare
 	url = git@github.com:btakita/cloudflare.git
 [submodule "briantakita.me-dev"]
-	path = briantakita.me-dev
+	path = src/briantakita.me-dev
 	url = git@github.com:btakita/briantakita.me-dev.git
 [submodule "ctx-core-dev"]
-	path = ctx-core-dev
+	path = src/ctx-core-dev
 	url = git@github.com:ctx-core/dev.git
 [submodule "mail"]
 	path = mail
 	url = git@github.com:btakita/mail.git
 [submodule "python-intentions"]
-	path = python-intentions
+	path = src/python-intentions
 	url = git@github.com:btakita/python-intentions.git
 [submodule "brookebrodack-dev"]
-	path = brookebrodack-dev
+	path = src/brookebrodack-dev
 	url = git@github.com:btakita/brookebrodack-dev.git
 [submodule "cogov-dev"]
-	path = cogov-dev
+	path = src/cogov-dev
 	url = git@github.com:cogov/cogov-dev.git
 [submodule "herbaliciousbliss-dev"]
-	path = herbaliciousbliss-dev
+	path = src/herbaliciousbliss-dev
 	url = git@github.com:btakita/herbaliciousbliss-dev.git
 [submodule "drmanny-dev"]
-	path = drmanny-dev
+	path = src/drmanny-dev
 	url = git@github.com:btakita/drmanny-dev.git
 [submodule "prescience-notes-dev"]
-	path = prescience-notes-dev
+	path = src/prescience-notes-dev
 	url = git@github.com:btakita/prescience-notes.git
 [submodule "censible-core"]
-	path = censible-core
+	path = src/censible-core
 	url = git@github.com:btakita/censible-core.git

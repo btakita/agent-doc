@@ -101,3 +101,10 @@ Then `gp` will work via SSH. Want me to run that?
 ## User
 
 yes
+
+## Assistant
+
+Done. Switched philosophy remote to SSH and pushed (already up-to-date). Checked all other submodules — they're all SSH already.
+
+## User
+

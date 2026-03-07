@@ -412,3 +412,4 @@ All tests use `set_current_dir` to the temp dir (since `path_for` returns relati
 
 ## User
 
+How can we fix the dead_code warning?

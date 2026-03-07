@@ -723,3 +723,45 @@ The only scenario where Option 3 intervenes: context compaction interrupted a pr
 ## User
 
 Implement Option 3. Add tests. Functional tests if possible.
+
+## Assistant
+
+### Option 3 Implemented: Stale Snapshot Recovery
+
+**Two layers:**
+
+#### 1. Rust binary (`agent-doc/src/diff.rs`)
+
+Added `is_stale_snapshot(snapshot_content, document_content) -> bool` function:
+- Strips comments from both sides
+- Checks that the document starts with the snapshot content as a prefix
+- Verifies the "extra" content contains `## Assistant` blocks (completed exchanges)
+- Returns `true` only if the trailing `## User` block is empty (no new user input)
+- Returns `false` if user has new content (inline annotations, new questions, edits)
+
+Wired into `compute()`: when stale snapshot is detected, auto-syncs the snapshot and returns `None` (no diff), with log line: `[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale`
+
+#### 2. SKILL.md instructions
+
+Added "Stale snapshot recovery (idempotent detection)" subsection to step 2:
+- Detection: diff consists entirely of completed exchange blocks with empty trailing `## User`
+- Action: skip response, update snapshot, print recovery message
+- When NOT to recover: any new user content triggers normal processing
+
+#### Tests (7 new in `diff.rs`)
+
+| Test | Scenario |
+|------|----------|
+| `stale_snapshot_detects_completed_exchange` | Single completed exchange after snapshot — detected |
+| `stale_snapshot_false_when_user_has_new_content` | User added text in `## User` — NOT stale |
+| `stale_snapshot_false_when_identical` | No diff at all — NOT stale |
+| `stale_snapshot_false_when_no_assistant_block` | Extra content has no `## Assistant` — NOT stale |
+| `stale_snapshot_multiple_exchanges_stale` | Multiple completed exchanges — detected |
+| `stale_snapshot_with_inline_annotation_not_stale` | User edited within existing block — NOT stale |
+| `stale_snapshot_ignores_comments_in_detection` | Comments stripped before detection |
+
+**Results:** 150 unit tests pass, 21 integration tests pass. Clippy clean.
+
+## User
+
+Does the skill auto-upgrade when the user installs the next version of agent-doc?

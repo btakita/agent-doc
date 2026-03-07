@@ -1035,3 +1035,28 @@ We already control the subscriber callback (the CF Worker). The hub is Google's 
 ## User
 
 Is the authory.com feed something that I can replace with a custom worker?
+
+## Assistant
+
+**Yes, and you may not even need to.**
+
+The `AUTHORY_YOUTUBE_RSS_URL` fetches a curated RSS feed from `authory.com/BrianTakita/rss?collection=...`. The code in `authory_youtube_rss_cache.ts` caches it with a 1-hour TTL and uses it alongside the standard YouTube RSS feed to build the video list.
+
+**Key question:** Is the Authory collection different from the full YouTube channel feed? If it's just a mirror of Brooke's uploads, you can drop Authory entirely and rely solely on `YOUTUBE_RSS_URL` + `GOOGLE_API_KEY` (which you already have).
+
+**If you do need a curated subset**, replacement options:
+
+| Approach | Complexity | Benefit |
+|----------|-----------|---------|
+| **Drop Authory, use YouTube API only** | Remove code | Simplest — one less dependency |
+| **CF Worker RSS generator** | New worker | Full control over curation, no 3rd-party dependency |
+| **Static JSON at build time** | Build script change | No live feed needed — curate in a JSON/YAML file in the repo |
+
+Since the site is now fully static (rebuilt every 6h + on push), the simplest path is to **drop Authory and use YouTube data exclusively** — it's already fetched at build time via the Google API. The Authory feed was likely added as a fallback/supplement when the site was dynamic.
+
+Want me to investigate what Authory provides that YouTube's own feed doesn't?
+
+Yes please
+## User
+
+

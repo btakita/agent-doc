@@ -388,3 +388,107 @@ Ki's "everything is an editor" architecture means a plugin could treat `<!-- age
 
 What are the next steps to support In-Place Response Documents for Jetbrains and VSCode?
 Please put all common logic into the agent-doc binary.
+## Assistant
+
+### Implementation Plan: In-Place Response Documents
+
+All common logic lives in the `agent-doc` binary. Plugins are thin UI layers that call CLI commands.
+
+#### Phase 1 — Binary: Template-mode detection
+
+**Files:** `frontmatter.rs`, `submit.rs`
+
+Add `response_mode: Option<String>` to `Frontmatter`:
+```yaml
+---
+response_mode: template   # "template" | "append" (default)
+---
+```
+
+In `submit.rs`, after computing the diff, branch based on `response_mode`:
+- **append** (current): `## Assistant` block appended
+- **template**: patch targeted components instead
+
+If we have template, but there is not template field for the output, should we add an output field at the end of the document by default?
+
+#### Phase 2 — Binary: `agent-doc template-info <FILE>`
+
+New subcommand that outputs JSON describing the document's template structure:
+```json
+{
+  "template_mode": true,
+  "components": [
+    { "name": "status", "mode": "replace", "content": "Build passing.", "line": 12 },
+    { "name": "activity", "mode": "append", "max_entries": 10, "content": "...", "line": 18 }
+  ]
+}
+```
+
+Single CLI call gives plugins everything they need for rendering (folding ranges, gutter icons, structure view). No parsing logic in plugins.
+
+#### Phase 3 — Binary: Template-mode submit path
+
+When `response_mode: template`:
+1. **Prompt includes component structure** — names, modes, current content (not `## User`/`## Assistant` history)
+2. **Agent responds with patch blocks** using `<!-- patch:name -->` markers:
+   ```markdown
+   <!-- patch:status -->
+   Build passing. 4 open PRs.
+   <!-- /patch:status -->
+
+   <!-- patch:activity -->
+   - 2026-03-07: Implemented template mode
+   <!-- /patch:activity -->
+   ```
+3. **New `apply_template_patches()`** in `submit.rs` parses `<!-- patch:name -->` blocks from response, calls existing `patch.rs` logic per component
+4. Same atomic write + 3-way merge + snapshot save
+
+The `<!-- patch:name -->` convention reuses marker syntax the agent already knows. Distinct prefix (`patch:` vs `agent:`) prevents confusion between document components and response directives.
+
+#### Phase 4 — Binary: `agent-doc write --template`
+
+Extend `write.rs` to accept template-mode responses from stdin:
+```bash
+echo "<structured response>" | agent-doc write plan.md --template --baseline-file /tmp/baseline.md
+```
+
+Parses `<!-- patch:name -->` blocks, patches components, atomic write. This is what the SKILL.md workflow calls for template-mode documents.
+
+#### Phase 5 — JetBrains plugin: Component folding
+
+- Register `FoldingBuilder` detecting `<!-- agent:name -->...<!-- /agent:name -->` pairs
+- Collapsed placeholder shows component name + mode: `[agent:status (replace)]`
+- Call `agent-doc template-info` for fold range data (no markdown parsing in Kotlin)
+
+#### Phase 6 — VS Code extension: Component folding
+
+- Custom `FoldingRangeProvider` for the same markers
+- Call `agent-doc template-info` for structure (no markdown parsing in TypeScript)
+
+#### Phase 7 — Both plugins: Gutter icons + structure view
+
+- Gutter icons: fold/unfold, submit single component
+- Structure view: component tree in IDE sidebar
+- Quick-nav popup: jump between components
+
+#### Dependency chain
+
+```
+Phase 1 (frontmatter) → Phase 3 (submit path) → Phase 4 (write --template)
+Phase 2 (template-info) → Phase 5+6 (folding) → Phase 7 (gutter/structure)
+```
+
+Phases 1-4 (binary) and Phase 2 (template-info) can proceed in parallel. Plugin work (5-7) depends on Phase 2 shipping first.
+
+#### What already exists
+
+- `component.rs` — full parser with nesting, `replace_content()`, `is_agent_marker()`
+- `patch.rs` — replace/append/prepend engine with `components.toml` config, shell hooks
+- `write.rs` — 3-way merge, atomic write, snapshot save
+- `submit.rs` — diff → send → write flow with doc advisory locking
+
+Template mode is a new submit path, not a rewrite. ~200-300 lines of new Rust code for Phases 1-4.
+
+## User
+
+Let's go forward with the plan. Note my question above.

@@ -291,3 +291,44 @@ The best directory structure is the one you don't have to think about. Right now
 ## User
 
 I can see 40+ entries happening soon. Would there be any advantage to having a separate `src/` directory to separate the submodule layer from the config + bin/ layer?
+
+## Assistant
+
+**Yes.** That's the right reason to reorganize — separating the **project layer** (submodules = things you build) from the **orchestration layer** (config, tasks, docs).
+
+```
+agent-loop/
+├── src/                      # All submodules (40+ projects)
+│   ├── agent-doc/
+│   ├── briantakita.me-dev/
+│   ├── brookebrodack-dev/
+│   ├── cogov-dev/
+│   ├── corky/
+│   ├── ...
+│   └── quant-xyz/
+│
+├── tasks/                    # Session documents
+├── .claude/                  # Claude config
+├── .agent-doc/               # Snapshots
+├── CLAUDE.md
+├── .gitmodules
+└── .gitignore
+```
+
+**What this buys:**
+- Root stays clean (~5 entries) regardless of submodule count
+- `ls src/` = all projects; `ls` = only orchestration
+- Tab completion in root isn't polluted
+- Clear boundary: submodules are "in" `src/`, everything else is meta
+
+**Cost:** One-time migration — `git mv` each submodule, update `.gitmodules` paths, CLAUDE.md refs. Mechanical, one commit.
+
+**Open question:** `mail/` — it's data, not a project. Keep at root? Or move to `src/` for consistency since it's still a submodule?
+
+Want me to execute the `src/` migration?
+
+## User
+
+mail belongs in the root.
+I'm not sure about philosophy.
+It's not source code but is for context. So it seems that it belongs in root. Thoughts?

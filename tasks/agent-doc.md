@@ -779,4 +779,24 @@ The SKILL.md content is embedded in the binary at compile time via `include_str!
 
 ## User
 
-Release tmux-routes and agent-doc
+Release tmux-router and agent-doc
+
+## Assistant
+
+### Released
+
+**tmux-router v0.2.2**
+- Nested lock detection (thread-local `REGISTRY_LOCK_HELD`), `acquire_or_skip()`, 8 race condition tests
+- Published: [crates.io](https://crates.io/crates/tmux-router/0.2.2) | [GitHub Release](https://github.com/btakita/tmux-router/releases/tag/v0.2.2)
+
+**agent-doc v0.9.6**
+- SnapshotLock (flock), atomic rename, document advisory lock, stale snapshot recovery, `pub(crate)` for load/save, diagnostic logging, race condition docs, 26 new tests
+- Published: [crates.io](https://crates.io/crates/agent-doc/0.9.6) | [PyPI](https://pypi.org/project/agent-doc/0.9.6/) | [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.9.6)
+- Binary installed: `agent-doc 0.9.6`
+
+SKILL.md `agent-doc-version` updated to `0.9.6`.
+
+## User
+
+compact this file
+

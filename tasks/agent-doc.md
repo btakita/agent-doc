@@ -205,54 +205,40 @@ The interaction is a bit more than a response_mode. I wonder if there is a clear
 <!-- /agent:input -->
 
 <!-- agent:output -->
-### Release shipped (v0.9.10) + naming discussion
+### Naming: `agent_doc_mode` with aliases
 
-The release already went out before I saw the strikethrough — v0.9.10 is published. That's fine since the code-span parser fix is a solid standalone release.
+`agent_doc_mode` is the right canonical name — namespaced, future-proof, unambiguous even when other tools read the frontmatter.
 
-### Is `response_mode` the right name?
-
-Good instinct — `response_mode` is too narrow. It implies only the output changes, but template mode changes the entire interaction pattern:
-
-- **Append:** Temporal conversation. `## User` → `## Assistant`. Linear.
-- **Template:** Spatial document. Components patch in-place. Structural.
-
-**Alternative names considered:**
-
-| Name | Verdict |
-|------|---------|
-| `response_mode` | Too narrow — only describes output |
-| `mode` | Clean, unambiguous in frontmatter context |
-| `document_mode` | Explicit — governs the whole document |
-| `interaction` | Right scope, but generic |
-| `layout` | Spatial metaphor, but misses append semantics |
-| `flow` | Vague |
-
-**Recommendation: `mode`** — simple, clear in frontmatter:
-```yaml
-mode: template   # template | append (default)
+**Alias chain:**
+```
+agent_doc_mode (canonical) → mode (shorthand) → response_mode (deprecated)
 ```
 
-Or `document_mode` if you want more specificity. Both are better than `response_mode`.
+**Implementation:** Parse all three fields in `frontmatter.rs`, resolve by priority. On write-back, use canonical name. The heuristic is simple — check in order: `agent_doc_mode` > `mode` > `response_mode`, first match wins.
 
-How about `agent_doc_mode`? The frontmatter assumes only agent_doc is using it. Which is most likely the case. But there may be times where other tools look at the frontmatter.
-Also, as we expand the frontmatter api, I wonder if `mode` would be sufficient. Is it futureproof?
+**Futureproofing:** `mode` alone could collide (Hugo `type`, Astro `layout`). `agent_doc_mode` is safe in any frontmatter context. Alias keeps casual usage working.
 
-This is a rename in `frontmatter.rs` + SKILL.md + docs. Can keep `response_mode` as a deprecated alias for backwards compatibility with existing documents.
+### Inline annotations in the output component
 
-Sure...how about `agent_doc_mode` being the canonical name with aliases:
-- mode
-- response_mode
+Your inline text (lines 237-248) is inside the `output` component — you're annotating the agent's previous response.
 
-Perhaps we can have a heuristic to interpret ambiguous terms accordingly.
+**Two approaches:**
+1. **In-place conversation** — agent reads annotations in context, replaces `output` with new response that addresses them. Annotations are consumed each cycle.
+2. **Lift to input** — `agent-doc write` moves user text from `output` to `input` before patching. Clean separation but loses spatial context.
 
-How will my inline responses in the response component be formatted? As in-place formatted conversation or will it be lifted to the input component?
+**Recommendation: Option 1 (in-place).** Template mode is spatial interaction — annotate where it matters. `input` is for new requests not anchored to a location.
 
-### Documentation + blog post
+I like in place. As long as the template document's content is coherent. So if we are iterating on a topic, the inline conversation needs to preserve it's order. But any conclusions that have been drawn can update the entire document with the conclusion. The back and forth can be removed as well as the conversation is preserved in git history.
 
-For docs: README rewrite covering both modes, component system, `input`/`output` convention.
+Do we need threading at all or can the inline conv
 
-For blog: "Two ways to talk to your document" — when to use append (conversation) vs template (dashboard), how to transition, the component model.
+Each cycle: agent reads `output` (with your annotations) + `input` (new requests) → responds by replacing `output` → history captures the arc.
 
-Shall I start with the rename, docs, or blog post?
-Still discussing
+### Status: still discussing
+
+Confirmed. No rename or docs work yet — settling the naming and interaction model first.
+
+Let's do the `agent_doc_mode` canonical name with aliases. And release. Should this version be 0.10.0?
+
+Let's talk about the blog post.
 <!-- /agent:output -->

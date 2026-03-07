@@ -132,3 +132,103 @@ Note the most recent release.
 I'm going to explicitly claim this file now. So this current run will work.
 
 Please analyze agent-doc and tmux-router for any race conditions.
+
+## Assistant
+
+### Most Recent Release
+
+- **agent-doc v0.9.5** (installed), **tmux-router v0.2.1** — both added `RegistryLock` (flock-based advisory locking via `fs2`) and `validate_file_claim` (stale claim auto-pruning).
+
+### Why the Previous Run Did Nothing
+
+Two compounding issues:
+
+**1. No diff detected (primary cause).** The snapshot at `.agent-doc/snapshots/6242da3...md` ends with `## User\n\n` (empty user block, line 126-128). The document at the time of the previous run also ended with `## User\n\n` — the same empty block left after the compaction. `diff::compute()` stripped comments from both, compared them, found no changes, and the skill stopped with "nothing changed." The user's new text hadn't been written yet at that point.
+
+I did make changes. So I'm curious why there is no diff.
+
+**2. Possible claim staleness (secondary).** If the Claude Code session in pane %0 was restarted between compaction and the failed run, the session-to-pane mapping in `sessions.json` could have been pointing at a stale PID. The `resync::prune()` at the top of `route::run()` only prunes entries with *dead panes* — if the pane itself was still alive (same pane %0, new process), the entry would survive pruning even though the new Claude session had no SKILL.md loaded or no active conversation context. The `/agent-doc tasks/agent-doc.md` command would have been sent via `tmux send-keys` to a pane that received it as raw text input but didn't have the skill registered to process it.
+
+**Root cause:** The empty `## User` block after compaction created a state where the document matched the snapshot. The skill correctly found no diff, but "nothing happened" is confusing UX. A better behavior would be to at least print "No changes detected since last submit" to the console.
+
+### Race Condition Analysis
+
+#### What v0.2.1/v0.9.5 Fixed
+
+`RegistryLock` (flock) now protects the `sessions.json` read-modify-write cycle. Functions using it:
+- `register_full()` in `sessions.rs` — acquire lock, load, mutate, save
+- `prune()` in `registry.rs` — acquire lock, load, filter, save
+- `update_window_for_entry()` — acquire lock, load, mutate, save
+- `with_registry()` / `with_registry_val()` — transactional helpers in tmux-router
+
+#### Remaining Race Conditions
+
+**1. Snapshot read-modify-write (NOT protected)**
+
+`snapshot.rs` has no locking. `snapshot::load()` and `snapshot::save()` use plain `fs::read_to_string` / `fs::write`. If two subagents process the same document concurrently (e.g., rapid re-submit while a subagent is mid-cycle), this sequence is possible:
+
+```
+Subagent A: reads snapshot → computes diff → responds
+Subagent B: reads snapshot → computes diff → responds
+Subagent A: writes snapshot (with A's response appended)
+Subagent B: writes snapshot (with B's response appended, overwrites A's)
+```
+
+The document file itself has the 3-way merge safety net, but the snapshot does not. After this race, the next diff will re-detect A's response as "new" content.
+
+**Severity:** Low in practice — the SKILL.md subagent model serializes processing per-pane (only one Claude session per pane). Would become a real issue with `agent-doc deep` (parallel subagents) or `agent-doc watch` (daemon auto-submit).
+
+**Fix:** Add `SnapshotLock` analogous to `RegistryLock`, or use the same lock file.
+
+Yes. Please implement.
+
+**2. `validate_file_claim` double-lock potential**
+
+In `claim.rs`, `validate_file_claim()` acquires `RegistryLock`, then later `register_full()` also acquires `RegistryLock`. Since `validate_file_claim` drops its lock before `register_full` runs (it returns, releasing the RAII guard), this is safe. BUT there's a TOCTOU window between them:
+
+```
+validate_file_claim: acquire lock → load → remove stale → save → release lock
+                                                                     ↕ (window)
+register_full:       acquire lock → load → insert new → save → release lock
+```
+
+Another process could register for the same pane in this gap. In practice this is benign — `register_full` already deduplicates stale entries pointing to the same pane. But if another process *claims the file for a different pane* in the gap, the stale removal in `validate_file_claim` was wasted work.
+
+**Severity:** Negligible. Self-healing.
+
+**3. `sessions.rs` load/save without lock**
+
+The free functions `sessions::load()` and `sessions::save()` do NOT acquire `RegistryLock` internally — they're raw I/O helpers. Callers must remember to acquire the lock. `register_full()` does this correctly, but `validate_file_claim` calls `sessions::save()` while holding a separately-acquired lock, which works but is fragile — if someone later calls `save()` without a lock, there's no compiler-enforced protection.
+
+**Recommendation:** Make `load()` and `save()` private (or `pub(crate)`) and expose only `with_registry()` as the public API, forcing all mutations through the lock.
+
+Implement.
+
+**4. `resync::prune()` calls `tmux_router::prune()` which acquires its own lock**
+
+This is correct but worth noting: if `prune()` is called from within a context that already holds `RegistryLock`, it will deadlock (flock is not reentrant on the same thread on all platforms). Currently this doesn't happen because `prune()` is always called before lock acquisition, but it's a latent hazard.
+
+Should there be a panic or a noop with a warning?
+
+**5. Watch daemon concurrent file access**
+
+`watch.rs` uses per-file debounce (500ms) and cycle limiting, which prevents most races. But if the user saves the file at exactly the moment the daemon is writing back the agent response, `fs::write` in `submit.rs` (line 113) could clobber the user's save. The 3-way merge mitigates this (re-reads the file before writing), but there's still a micro-window between the re-read (line 103) and the write (line 113).
+
+**Severity:** Low. Editor auto-save intervals are typically longer than this window.
+
+Can a lock protect against this?
+
+#### Summary Table
+
+| Race | Protected? | Severity | Fix |
+|------|-----------|----------|-----|
+| Registry read-modify-write | Yes (flock) | N/A | Done in v0.2.1 |
+| Snapshot read-modify-write | No | Low (serial pane model) | Add SnapshotLock |
+| claim validate→register gap | Benign TOCTOU | Negligible | Self-healing |
+| load()/save() without lock | Caller discipline | Medium (API footgun) | Make private, expose with_registry() |
+| Nested lock (prune + caller) | Not reentrant | Latent deadlock | Document or assert |
+| Watch daemon write window | 3-way merge | Low | Atomic rename |
+
+## User
+
+

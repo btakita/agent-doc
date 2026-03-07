@@ -44,3 +44,44 @@ Which approach would you prefer? Or both (quick fix now, proper fix in relysjs)?
 ## User
 
 The /protocol.love route should be inferred that it is an html document somewhere. The SSR behvarior was HTML. So we should infer HTML for the static rendering.
+## Assistant
+
+**Fixed in relysjs.** The static export now uses the SSR response's `Content-Type` header to determine the file path.
+
+**Change:** `static_export__file_path_()` in `relysjs/server/export/index.js`
+
+```js
+// Before: guessed from file extension only
+const ext = extname(route)
+if (ext && ext !== '.html') {
+    return join(out_dir, route)  // /protocol.love → bare file
+}
+
+// After: uses Content-Type from SSR response
+const is_html = content_type
+    ? content_type.includes('text/html')
+    : !ext || ext === '.html'
+if (ext && !is_html) {
+    return join(out_dir, route)  // only raw files (robots.txt, sitemap.xml)
+}
+// HTML routes get index.html treatment
+return join(out_dir, route, 'index.html')  // /protocol.love/index.html
+```
+
+The fetch loop now passes `res.headers.get('content-type')` to the file path function. Since the Elysia server returns `text/html` for `/protocol.love`, it will now be saved as `dist/browser/protocol.love/index.html` — which CF Pages serves correctly.
+
+**Files changed:**
+- `src/ctx-core-dev/lib/relysjs/server/export/index.js` — pass content_type, update file_path logic
+- `src/ctx-core-dev/lib/relysjs/server/export/index.d.ts` — add optional `content_type` param
+
+**To deploy the fix:**
+1. Publish the relysjs update (or yalc push to cogov-dev)
+2. Re-run the cogov.me static export: `bun prerender.ts`
+3. Redeploy to CF Pages
+
+Want me to rebuild and redeploy cogov.me now?
+
+yes
+
+## User
+

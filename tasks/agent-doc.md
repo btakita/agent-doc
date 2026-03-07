@@ -399,3 +399,16 @@ Added race condition tests to both repos. All tests pass cleanly.
 ## User
 
 Add a test for with_snapshot
+
+## Assistant
+
+Added three tests for `with_snapshot` in `/home/brian/work/btakita/agent-loop/agent-doc/src/snapshot.rs`:
+
+1. **`with_snapshot_creates_when_none_exists`** -- closure receives `None` when no snapshot exists, returns `Some(content)`, verifies snapshot is created
+2. **`with_snapshot_reads_and_updates_existing`** -- seeds a snapshot, verifies closure receives existing content, updates it, verifies new content persisted
+3. **`with_snapshot_skips_write_when_closure_returns_none`** -- seeds a snapshot, closure returns `None`, verifies original content unchanged
+
+All tests use `set_current_dir` to the temp dir (since `path_for` returns relative paths) and run with `--test-threads=1` to avoid CWD races. All 16 snapshot tests pass. The `dead_code` warning on `with_snapshot` remains (it's only used in tests for now).
+
+## User
+

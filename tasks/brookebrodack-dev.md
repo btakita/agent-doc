@@ -213,3 +213,29 @@ cp .env.sample .env
 ## User
 
 Help me retrieve the GOOGLE_API_KEY. Does contabo secrets have it? Can you access it?
+
+## Assistant
+
+Found it on the Contabo VPS in the Docker container config:
+
+```
+GOOGLE_API_KEY=AIzaSyDXCih1GSmHu44GgQMi8XQ3ctp-fh62uxI
+```
+
+This is a YouTube Data API key used by `lib/domain--server--brookebrodack/youtube/google_api_key.ts` to fetch channel data.
+
+Add it to your `.env`:
+
+```bash
+echo 'GOOGLE_API_KEY=AIzaSyDXCih1GSmHu44GgQMi8XQ3ctp-fh62uxI' >> brookebrodack-dev/.env
+```
+
+You may also want to store it in pass for future reference:
+
+```bash
+echo 'AIzaSyDXCih1GSmHu44GgQMi8XQ3ctp-fh62uxI' | pass insert -e brookebrodack/GOOGLE_API_KEY
+```
+
+## User
+
+Is brookebrodack-dev/.env correct?

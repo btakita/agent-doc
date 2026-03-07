@@ -27,6 +27,10 @@ use crate::{frontmatter, resync, sessions};
 
 pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
+
+    // Check for stale claims on this specific file and log if found
+    validate_file_claim(file);
+
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -121,6 +125,50 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     );
 
     Ok(())
+}
+
+/// Validate the existing claim for a file: if the claimed pane is dead, log and
+/// remove it so the new claim can proceed cleanly. This handles the common case
+/// of stale claims after a machine restart (tmux pane IDs are reassigned).
+///
+/// Called after `resync::prune()` which handles bulk dead-pane removal. This
+/// function provides file-specific logging so the user sees *why* a re-claim
+/// was needed rather than getting a silent no-op.
+fn validate_file_claim(file: &Path) {
+    let file_str = file.to_string_lossy();
+    let registry_path = sessions::registry_path();
+    let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
+        return;
+    };
+    let Ok(registry) = sessions::load() else {
+        return;
+    };
+
+    let tmux = sessions::Tmux::default_server();
+
+    // Find entries pointing to this file with dead panes
+    let stale_keys: Vec<(String, String)> = registry
+        .iter()
+        .filter(|(_, entry)| {
+            entry.file == file_str.as_ref() && !tmux.pane_alive(&entry.pane)
+        })
+        .map(|(k, e)| (k.clone(), e.pane.clone()))
+        .collect();
+
+    if stale_keys.is_empty() {
+        return;
+    }
+
+    // Remove stale entries and save
+    let mut registry = registry;
+    for (key, pane) in &stale_keys {
+        eprintln!(
+            "stale claim: {} was bound to dead pane {}, replacing",
+            file_str, pane
+        );
+        registry.remove(key);
+    }
+    let _ = sessions::save(&registry);
 }
 
 /// Check if a tmux window is alive by listing its panes.

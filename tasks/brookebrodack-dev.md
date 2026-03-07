@@ -647,5 +647,32 @@ Automate?
 7. **DNS cutover** — Add custom domains in CF Pages
 8. **Decommission** — Remove Docker container from Contabo after verification
 
+## Assistant
+
+**Re: Static export in relysjs** — Good idea for the longer term, but it's a separate feature that belongs in the relysjs framework itself (ctx-core/relysjs repo). The `static-export.ts` script works now and is the right approach for brookebrodack-dev. Adding a built-in `relysjs export` command would benefit briantakita.me too. We can track that as a follow-up task.
+
+**Re: Automating GitHub secrets** — Yes, `gh secret set` can do this:
+
+```bash
+cd brookebrodack-dev
+gh secret set CLOUDFLARE_API_TOKEN --body "$(pass cloudflare/api-token)"
+gh secret set CLOUDFLARE_ACCOUNT_ID --body "$(pass cloudflare/account-id)"
+gh secret set GOOGLE_API_KEY --body "$(pass brookebrodack/GOOGLE_API_KEY)"
+gh secret set YOUTUBE_CHANNELID --body "UCO42ciP_nkDcOlATRjLXCqQ"
+gh secret set YOUTUBE_RSS_URL --body "http://www.youtube.com/feeds/videos.xml?channel_id=UCO42ciP_nkDcOlATRjLXCqQ"
+gh secret set AUTHORY_YOUTUBE_RSS_URL --body "$(grep AUTHORY_YOUTUBE_RSS_URL .env | cut -d= -f2)"
+```
+
+Requires `gh` CLI authenticated and the secrets in `pass` or `.env`. I can run this for you.
+
+**Re: Automating CF Pages project** — Yes:
+
+```bash
+wrangler pages project create brookebrodack --production-branch main
+```
+
+Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (or `wrangler login`). Want me to run both automations now?
+
 ## User
 
+How do you get the cloudflare credentials when running commands for briantakita.me-dev?

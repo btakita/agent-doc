@@ -715,3 +715,30 @@ pass insert cloudflare/account-id
 ## User
 
 Can we just use wrangler to get the tokens?
+
+## Assistant
+
+Not exactly — `wrangler` can't retrieve existing API tokens. But `wrangler login` opens a browser OAuth flow that creates a new token and stores it locally at `~/.wrangler/config/default.toml`. Once authenticated, all `wrangler` commands work without manual tokens.
+
+**Local setup:**
+```bash
+bun add -g wrangler
+wrangler login          # opens browser → OAuth → stores token locally
+wrangler whoami         # verify + shows account ID
+```
+
+**For GitHub Actions**, extract the token after login:
+```bash
+TOKEN=$(grep oauth_token ~/.wrangler/config/default.toml | cut -d'"' -f2)
+gh secret set CLOUDFLARE_API_TOKEN -R btakita/brookebrodack-dev --body "$TOKEN"
+```
+
+**Note:** The OAuth token has broader scopes than a scoped API token. For CI/CD, Cloudflare recommends creating a scoped token (Pages:Edit) via the dashboard. But the OAuth token works fine.
+
+Want me to install wrangler and run the login flow?
+
+## User
+
+I want the token to be long lived so I don't need to touch gh configuration or the actions to work.
+
+Is it possible to bootstrap gh actions with credentials and to have gh actions get refresh tokens to it can continue running without 403 errors?

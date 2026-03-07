@@ -492,3 +492,57 @@ Template mode is a new submit path, not a rewrite. ~200-300 lines of new Rust co
 ## User
 
 Let's go forward with the plan. Note my question above.
+## Assistant
+
+### Implementation Progress
+
+#### Your question: output fallback for template mode
+
+Good catch on the inline annotation (line 412). When a template-mode response contains content outside `<!-- patch:name -->` blocks, we need a fallback target:
+
+**Implemented: auto-create `<!-- agent:output -->`** — If the document has an existing `<!-- agent:output -->` component, unmatched content appends there. If not, one is auto-created at the end of the document. The user can:
+- Move it wherever they want
+- Add `[output] frozen = true` in `components.toml` to block it
+- Pre-create it in their template to control placement
+
+#### Phases 1-4 implemented
+
+All binary changes are complete. 188 tests pass (167 unit + 21 integration, +7 new).
+
+**Phase 1 — `response_mode` in frontmatter** (`frontmatter.rs`)
+- Added `response_mode: Option<String>` field
+- `"template"` enables in-place patching; `"append"` or `None` keeps current behavior
+
+**Phase 2 — `agent-doc template-info <FILE>`** (`template.rs` + `main.rs`)
+- New subcommand outputs JSON:
+  ```json
+  {"template_mode": true, "components": [{"name": "status", "mode": "replace", "content": "...", "line": 12}]}
+  ```
+- Plugins call this single command — no markdown parsing in Kotlin/TypeScript
+
+**Phase 3 — Patch block parser** (`template.rs`)
+- `parse_patches(response)` extracts `<!-- patch:name -->...<!-- /patch:name -->` blocks
+- Returns `(Vec<PatchBlock>, unmatched_text)`
+- `apply_patches(doc, patches, unmatched, file)` applies to `<!-- agent:name -->` components
+- Respects `components.toml` mode (replace/append/prepend)
+- Applies patches in reverse position order to preserve byte offsets
+- Unmatched text goes to `<!-- agent:output -->` (existing or auto-created)
+
+**Phase 4 — `agent-doc write --template`** (`write.rs`)
+- `run_template()` reads response from stdin, parses patch blocks, applies to document
+- Same 3-way merge + atomic write + snapshot save as append mode
+- Usage: `echo "<response>" | agent-doc write plan.md --template --baseline-file /tmp/baseline.md`
+
+**New file:** `src/template.rs` (~270 lines including tests)
+
+**Files changed:**
+- `frontmatter.rs` — `response_mode` field
+- `main.rs` — `mod template`, `TemplateInfo` subcommand, `--template` flag on `Write`
+- `write.rs` — `run_template()` function
+- `template.rs` — new module (patch parser, applier, template-info)
+
+Plugin phases (5-7) can proceed whenever ready — `agent-doc template-info` is available now.
+
+## User
+
+Proceed

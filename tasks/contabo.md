@@ -191,5 +191,79 @@ This is a proposal only — no moves executed. Want to refine or go with this?
 Is there a precedent for monorepos mirroring a unix file system?
 Are there any advantages for mirroring an installation?
 
+## Assistant
+
+**Re: `usr/src` for tools → `usr/bin`** — Good call. `usr/src/` is source, `usr/bin/` is compiled output. Maps perfectly: `usr/src/corky/` builds to `usr/bin/corky`.
+
+**Re: `usr/lib`** — Yes, more correct. Everything here is user-level, not system-essential.
+
+**Re: Precedent for FHS monorepos** — Not a common pattern. Most monorepos use `packages/`, `apps/`, `libs/` (Nx, Turborepo, Bazel). Closest precedents:
+- **Nix/Guix** — builds literal Unix trees (`/nix/store/.../{bin,lib,share}`)
+- **Homebrew** — uses `/usr/local` prefix hierarchy
+- For a git submodule monorepo? Novel.
+
+**Re: Advantages of mirroring installation**
+
+| Advantage | Detail |
+|-----------|--------|
+| Familiar mental model | Any Unix user knows where to look |
+| Build output mapping | `usr/src/corky` → `usr/bin/corky` mirrors `cargo install` |
+| Deployment alignment | Repo structure matches deployed system |
+| 30+ year proven taxonomy | FHS scales |
+
+| Disadvantage | Detail |
+|--------------|--------|
+| Deep nesting | `usr/src/agent-doc/src/main.rs` |
+| Tooling mismatch | Cargo/bun workspaces don't understand FHS |
+| Unfamiliar to most devs | Not expected in a git monorepo |
+
+**Revised layout:**
+
+```
+agent-loop/
+├── usr/
+│   ├── src/                  # Source repos for tools
+│   │   ├── agent-doc/
+│   │   ├── corky/
+│   │   ├── tmux-router/
+│   │   └── tagpath/
+│   ├── bin/                  # Build output (gitignored)
+│   └── lib/                  # Shared libraries & frameworks
+│       ├── instruction-files/
+│       ├── philosophy/
+│       ├── ctx-core-dev/
+│       └── existence-lang/
+│
+├── var/
+│   ├── www/                  # Websites
+│   │   ├── briantakita.me-dev/
+│   │   ├── brookebrodack-dev/
+│   │   ├── cogov-dev/
+│   │   ├── drmanny-dev/
+│   │   ├── herbaliciousbliss-dev/
+│   │   ├── prescience-notes-dev/
+│   │   └── censible-core/
+│   └── mail/                 # Email data
+│
+├── etc/                      # Configuration
+│   └── cloudflare/
+│
+├── opt/                      # Optional/standalone
+│   ├── quant/
+│   ├── resume/
+│   ├── presence/
+│   └── python-intentions/
+│
+└── tasks/                    # Session documents (root)
+```
+
+Want to execute this, or keep refining?
+
 ## User
 
+I  like the simplicity of apps/ and libs/. However, in this case, the metaphor seems unclear.
+Since there are some tools that are both an app and a lib.
+packages/ could also work. Which at least gets the submodules outside of the root module.
+But if we go with packages/, why not just go with src/?
+
+Please advise.

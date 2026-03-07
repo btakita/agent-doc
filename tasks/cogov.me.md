@@ -197,3 +197,16 @@ Deployed at: `https://69ec5a9f.cogov-me.pages.dev`
 ## User
 
 Who owns cogov.tech?
+## Assistant
+
+I don't have access to domain registrar data to determine who owns `cogov.tech`. Here's what I can see:
+
+- **DNS:** Points to Cloudflare nameservers (`clara.ns.cloudflare.com`, `igor.ns.cloudflare.com`), resolves to Cloudflare IPs (`172.67.142.100`, `104.21.63.14`)
+- **cogov-dev references:** The repo uses `cogov.tech` in social links (Facebook messenger/page URL) and a demo URL (`demo.cogov.tech`), but no domain ownership config in the codebase
+- **Not in your wrangler account:** `cogov.tech` didn't show up when listing Cloudflare zones (though `cogov.me` is there as a Pages project)
+
+Do you know which Cloudflare account or registrar `cogov.tech` is under?
+
+## User
+
+Commit and deploy updates to cogov.me

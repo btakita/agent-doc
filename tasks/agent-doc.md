@@ -546,3 +546,32 @@ Plugin phases (5-7) can proceed whenever ready — `agent-doc template-info` is 
 ## User
 
 Proceed
+## Assistant
+
+### Done — Phases 1-4 committed
+
+`make check` passes (clippy clean, 188 tests). Committed to agent-doc submodule:
+
+```
+12c39fb feat: template-mode for in-place response documents
+```
+
+**4 files changed, 519 insertions:**
+- `src/template.rs` — new module (patch parser, applier, template-info, 7 tests)
+- `src/frontmatter.rs` — `response_mode: Option<String>` field
+- `src/main.rs` — `mod template`, `TemplateInfo` subcommand, `--template` flag on `Write`
+- `src/write.rs` — `run_template()` function
+
+**Ready for next steps:**
+- Bump version + release (v0.9.9 or v0.10.0?)
+- Update SKILL.md to use `--template` flag for template-mode documents
+- Plugin phases (5-7): component folding, gutter icons, structure view
+
+What would you like to do next?
+
+## User
+
+The is a compaction fix that should be initiated in the tasks/contabo.md doc. Read it and implement here.
+
+> **Re: agent-doc write-back failing after compaction** — This is the known issue where context compaction interrupts the agent-doc session workflow mid-cycle. The response was generated in the console but never written back to the file because the compaction cleared the state before the `agent-doc write` step executed. The agent-doc session in `tasks/agent-doc.md` is working on template modes and stale snapshot recovery — the `is_stale_snapshot()` feature (v0.9.5+) should help detect this, but the SKILL.md workflow needs a guard: if compaction occurs between step 3 (respond) and step 4 (write), the new session must detect the orphaned response and write it back.
+

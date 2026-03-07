@@ -56,3 +56,19 @@ Changes are staged but not committed in agent-loop — `.gitmodules`, `.gitignor
 ## User
 
 
+The directory <Project>/mail/mailboxes/lucas is registered as a Git root, but no Git repositories were found there.
+
+## Assistant
+
+**Diagnosis:** `mail/mailboxes/lucas` is a nested submodule (defined in `mail/.gitmodules`) that was never initialized. The directory existed with conversation files but had no `.git` file, so JetBrains detected it as a registered git root with no actual repo.
+
+**Fix applied:**
+1. Backed up the local conversation files from `mailboxes/lucas/conversations/`
+2. Removed the empty directory and ran `git submodule update --init mailboxes/lucas` inside the `mail` submodule — successfully cloned from `btakita/mailbox-lucas.git`
+3. Restored conversation files (13 new + 7 updated) into the initialized submodule
+
+The warning should be gone now. The `mailboxes/lucas` submodule has uncommitted changes (the new/modified conversation files from corky). You may want to commit and push those from within `mail/mailboxes/lucas`.
+
+## User
+
+

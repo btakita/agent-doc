@@ -285,11 +285,18 @@ Yes. noop with a warning
 A file lock *can* protect it, but only if the editor also respects the lock -- which no editor does. The practical options:
 
 - **Atomic rename** (`write to temp file` then `rename`): eliminates the partial-write window. The 3-way merge already re-reads, so the only gap is between re-read and write. Atomic rename makes the write instantaneous from the filesystem's perspective. This is the standard solution.
-Do it
 - **flock on the document file**: would protect agent-doc against itself (e.g., watch daemon vs. manual `agent-doc run`), but editors ignore advisory locks, so it wouldn't prevent editor-vs-daemon races.
 - **Both**: use flock for agent-doc-vs-agent-doc coordination, and atomic rename for editor-vs-agent-doc safety.
 
 Recommendation: **atomic rename** is sufficient. The 3-way merge already handles the editor case correctly in practice -- the micro-window is theoretical (sub-millisecond). Atomic rename closes it completely with minimal code change (replace `fs::write(file, content)` with `write-to-tempfile + rename`).
+
+Do an atomic rename.
+
+> use flock for agent-doc-vs-agent-doc coordination
+
+Is this useful or does the atomic rename already cover this. If yes, add a flock as well.
+
+Please document the race condition analysis and whatever mitigations we have done.
 
 ### Updated Summary Table
 
@@ -302,5 +309,6 @@ Recommendation: **atomic rename** is sufficient. The 3-way merge already handles
 | Nested lock (prune + caller) | Not reentrant | Latent deadlock | Noop + warning (proposed) | Awaiting approval |
 | Watch daemon write window | 3-way merge | Low | Atomic rename (proposed) | Awaiting approval |
 
+Please update this table in the next response.
 ## User
 

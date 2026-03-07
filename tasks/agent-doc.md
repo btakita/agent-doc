@@ -203,130 +203,18 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## Exchange
 
 <!-- agent:exchange -->
-~~version bump (minor version?) and release~~
-Add documentation. We should write a blog post as well explaining the different response_modes.
 
-Actually, is response_mode the correct name?
-The interaction is a bit more than a response_mode. I wonder if there is a clearer name.
+**`exchange` is the default.** The SKILL.md lists it first and describes it as the primary convention. `input`/`output` is opt-in for structured separation.
 
-### Single conversation component: `exchange`
+| Convention | Default? | Use case |
+|------------|----------|----------|
+| `exchange` | **Yes** | Shared conversation surface — user and agent write in the same space |
+| `input` + `output` | No | Formal request/response separation — task delegation, dashboards |
 
-Yes — a single component is cleaner than separate `input`/`output`. If inline discussion is the primary interaction, splitting creates friction.
+When a template-mode document has no explicit conversation components, the agent creates an `exchange` component. `input`/`output` is used when the document author explicitly sets them up.
 
-**Name candidates considered:**
-
-| Name | Verdict |
-|------|---------|
-| `exchange` | Balanced, mutual, implies back-and-forth. **Recommended.** |
-| `dialog` | Clear but feels append-mode-ish |
-| `workspace` | Good spatial feel, but vague |
-| `surface` | Novel — "where interaction happens" |
-| `canvas` | Overloaded (Obsidian) |
-| `pad` | Simple, collaborative (Etherpad vibes) |
-| `thread` | Overloaded, implies chronological |
-| `prompt` | Too narrow — it's bidirectional |
-
-**`exchange` wins because:**
-- Implies mutual interaction (not one-directional)
-- Not overloaded by other tools
-- Short, clear, descriptive
-- Works for both user and agent writing in the same space
-
-```markdown
-<!-- agent:exchange -->
-User writes here. Agent responds inline. Annotations happen naturally.
-<!-- /agent:exchange -->
-```
-
-Should we keep input and output as well? There may be legitimate reasons for it.
-Although I would imagine that a user could write inside an output component but the user's input would be routed to the input component.
-
-### Keeping input/output alongside exchange
-
-Yes — keep all three as conventions, each serving a different purpose:
-
-| Component | Use case |
-|-----------|----------|
-| `exchange` | Shared conversation surface. User and agent write in the same space. Best for interactive discussions, annotations, iterative refinement. |
-| `input` + `output` | Structured separation. User writes prompts in `input`, agent responds in `output`. Better for formal requests, task delegation, or when you want clear request/response boundaries. |
-
-The routing idea is good: user text written inside `output` gets lifted to `input` on next cycle. This keeps the conversation legible — agent output stays clean, user additions are explicitly tracked.
-
-**When to use which:**
-- **`exchange`**: This document. Living discussions where the boundary between request and response blurs.
-- **`input`/`output`**: Task documents, dashboards, batch operations. "Do X" → "Done. Here's the result."
-
-Neither is mandatory. The agent-doc binary doesn't enforce conventions — components are just named regions. The SKILL.md and documentation establish patterns.
-
-**Threading: not needed.** The `exchange` component is flat — user annotates, agent responds, content evolves. Git provides the history timeline. Threading adds complexity when the document IS the thread.
-
-Agreed.
-
-**Other components** (status, architecture, releases, etc.) remain agent-managed via patch blocks. Only `exchange` is the shared conversation surface.
-
-I requested that tasks/contabo.md be converted to template mode. But it did not happen. Should I try again?
-
-Yes, try again. The conversion didn't happen because the previous session ran out of context. You can edit `tasks/contabo.md` frontmatter to add `agent_doc_mode: template` and restructure manually, or run `/agent-doc tasks/contabo.md` with a prompt requesting conversion. The claim was just logged (pane %32), so it's ready.
-
-briantakita.me...we can syndicate the blog post.
-Let's track this current discussion because it will be interesting to talk about in the blog post.
-
-I want to have a screencast as well.
-
-### Blog post plan
-
-- **Platform**: briantakita.me, syndicated
-- **Content**: Document modes (append vs template vs exchange), the design discussion that led here, architectural decisions
-- **Source material**: This discussion — the naming evolution (`response_mode` → `agent_doc_mode`), the `exchange` component proposal, the in-place annotation model
-- **Screencast**: Demo the workflow — editing a template-mode document, watching agent-doc pick up changes, seeing patch blocks applied in real time
-- **Good demo flow**: Create a fresh template document → write in exchange component → submit → show inline response → annotate → re-submit → show git diff timeline
-
-### Template mode conversion fix
-
-Found the root cause: **the SKILL.md had zero template-mode instructions.** It was still at v0.9.9 content (append-only workflow) even after the v0.10.0 binary install. The `agent-doc skill install` command updated the version number but the bundled SKILL.md never had template-mode documentation added.
-
-**What was missing:**
-- No mention of `agent_doc_mode` frontmatter field
-- No instructions for `--template` flag on `agent-doc write`
-- No documentation of patch block format (`<!-- patch:name -->...<!-- /patch:name -->`)
-- No component conventions (`input`, `output`, `exchange`)
-
-**Fixed:**
-1. Updated `.claude/skills/agent-doc/SKILL.md` with template-mode workflow (step 4b)
-2. Added `agent_doc_mode` to the Document Format section
-3. Documented patch block format and component conventions
-4. Copied updated SKILL.md to `src/agent-doc/SKILL.md` (binary source) for next release
-
-### SKILL.md update status
-
-| Location | Updated? | Notes |
-|----------|----------|-------|
-| `.claude/skills/agent-doc/SKILL.md` | **Yes** | Template-mode step 4b, `agent_doc_mode` field, patch block format |
-| `src/agent-doc/SKILL.md` | **Yes** | Copied from the local skill — source for `include_str!` bundle |
-| **Published binary** (crates.io/PyPI/GitHub) | **Yes** | **v0.10.1 released** |
-
-### Claim issue after IDEA restart
-
-The claim survives IDEA restart (lives in `.agent-doc/sessions.json`), but the plugin's tmux routing may not resolve the correct pane after restart. This is a real bug — tracked in pending for the next release.
-
-I don't think the correct tmux pane was bound. The claude session was idle.
-
-**Workaround:** Run `/agent-doc tasks/agent-doc.md` directly from the Claude console rather than relying on plugin routing after IDEA restart.
-
-Can we fix this for the upcoming patch release?
-
-**Tracked for next release.** The tmux claim-after-restart fix is now in the pending list. The SKILL.md fix shipped separately as v0.10.1.
-
-Please release the SKILL.md fix. We will have another release for the fix to send an agent-doc run to the tmux pane that claimed the document in a previous run of the Idea editor.
-
-### v0.10.1 released
-
-Published to all targets:
-- **crates.io**: `agent-doc v0.10.1`
-- **PyPI**: `agent_doc-0.10.1`
-- **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.10.1
-
-The bundled SKILL.md now includes template-mode instructions. Running `agent-doc skill install` in any project will propagate the fix. The claim-after-restart fix is tracked separately for the next release.
-
-We have exchange and input/output. Which is the default?
+Let's work on the blog post for briantakita.me.
+Can you also help me with a general script for a screencast demo?
+I want the demo to be short and exciting.
+Not exc
 <!-- /agent:exchange -->

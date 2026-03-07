@@ -61,7 +61,11 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Load the session registry from disk. Returns empty map if file doesn't exist.
-pub fn load() -> Result<SessionRegistry> {
+///
+/// **Not locked internally.** Callers performing read-modify-write must acquire
+/// `RegistryLock` first (or use `tmux_router::with_registry`). Read-only callers
+/// can call this directly for a point-in-time snapshot.
+pub(crate) fn load() -> Result<SessionRegistry> {
     let path = PathBuf::from(SESSIONS_FILE);
     if !path.exists() {
         return Ok(SessionRegistry::new());
@@ -74,7 +78,10 @@ pub fn load() -> Result<SessionRegistry> {
 }
 
 /// Save the session registry to disk.
-pub fn save(registry: &SessionRegistry) -> Result<()> {
+///
+/// **Not locked internally.** Callers MUST hold `RegistryLock` before calling.
+/// Prefer `tmux_router::with_registry()` for safe read-modify-write cycles.
+pub(crate) fn save(registry: &SessionRegistry) -> Result<()> {
     let path = PathBuf::from(SESSIONS_FILE);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

@@ -104,10 +104,25 @@ fn match_html_comment(content: &str, pos: usize) -> Option<(usize, &str)> {
 /// Both snapshot and current content are comment-stripped before comparison.
 pub fn compute(doc: &Path) -> Result<Option<String>> {
     let current = std::fs::read_to_string(doc)?;
+    let snap_path = snapshot::path_for(doc)?;
     let previous = snapshot::load(doc)?.unwrap_or_default();
+
+    eprintln!(
+        "[diff] doc={} snapshot={} doc_len={} snap_len={}",
+        doc.display(),
+        snap_path.display(),
+        current.len(),
+        previous.len(),
+    );
 
     let current_stripped = strip_comments(&current);
     let previous_stripped = strip_comments(&previous);
+
+    eprintln!(
+        "[diff] stripped: doc_len={} snap_len={}",
+        current_stripped.len(),
+        previous_stripped.len(),
+    );
 
     let diff = TextDiff::from_lines(&previous_stripped, &current_stripped);
     let has_changes = diff
@@ -115,8 +130,20 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         .any(|c| c.tag() != ChangeTag::Equal);
 
     if !has_changes {
+        eprintln!("[diff] no changes detected between snapshot and document (after comment stripping)");
         return Ok(None);
     }
+
+    // Stale snapshot recovery: if the diff is only completed assistant/user
+    // exchanges with no new user content, the previous cycle wrote the response
+    // but context compaction prevented the snapshot update.
+    if is_stale_snapshot(&previous, &current) {
+        eprintln!("[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale");
+        snapshot::save(doc, &current)?;
+        return Ok(None);
+    }
+
+    eprintln!("[diff] changes detected, computing unified diff");
 
     let mut output = String::new();
     for change in diff.iter_all_changes() {
@@ -129,6 +156,60 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         output.push_str(change.value());
     }
     Ok(Some(output))
+}
+
+/// Detect whether the diff between snapshot and document is a stale snapshot
+/// (previous cycle wrote the response but didn't update the snapshot).
+///
+/// Returns `true` if:
+/// - The document contains the snapshot content as a prefix
+/// - The content after the snapshot is only complete `## Assistant` / `## User` exchanges
+/// - The trailing `## User` block is empty (no new user content)
+///
+/// Returns `false` if there is any new user content that needs a response.
+pub fn is_stale_snapshot(snapshot_content: &str, document_content: &str) -> bool {
+    let snap_stripped = strip_comments(snapshot_content);
+    let doc_stripped = strip_comments(document_content);
+
+    // Document must be longer than snapshot
+    if doc_stripped.len() <= snap_stripped.len() {
+        return false;
+    }
+
+    // Check that the document starts with the snapshot content
+    // Use trimmed comparison to handle trailing whitespace differences
+    let snap_trimmed = snap_stripped.trim_end();
+    let doc_trimmed = doc_stripped.trim_end();
+
+    if !doc_trimmed.starts_with(snap_trimmed) {
+        return false;
+    }
+
+    // Get the "extra" content beyond the snapshot
+    let extra = &doc_stripped[snap_trimmed.len()..];
+    let extra_trimmed = extra.trim();
+
+    if extra_trimmed.is_empty() {
+        return false;
+    }
+
+    // The extra content should contain at least one ## Assistant block
+    if !extra_trimmed.contains("## Assistant") {
+        return false;
+    }
+
+    // Check if the last ## User block is empty (no new user content)
+    // Split on "## User" and check the last segment
+    let parts: Vec<&str> = extra_trimmed.split("## User").collect();
+    if let Some(last_user_block) = parts.last() {
+        let user_content = last_user_block.trim();
+        // Empty user block = stale snapshot recovery
+        // Non-empty user block = user has new input
+        user_content.is_empty()
+    } else {
+        // No ## User block at all — not a standard exchange pattern
+        false
+    }
 }
 
 /// Print the diff to stdout (for the `diff` subcommand).
@@ -257,5 +338,58 @@ mod tests {
     #[test]
     fn empty_document() {
         assert_eq!(strip_comments(""), "");
+    }
+
+    // --- Stale snapshot detection tests ---
+
+    #[test]
+    fn stale_snapshot_detects_completed_exchange() {
+        let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\nWhat's up\n\n## Assistant\n\nNot much\n\n## User\n\n";
+        assert!(is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn stale_snapshot_false_when_user_has_new_content() {
+        let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\nNew question here\n";
+        assert!(!is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn stale_snapshot_false_when_identical() {
+        let content = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\n";
+        assert!(!is_stale_snapshot(content, content));
+    }
+
+    #[test]
+    fn stale_snapshot_false_when_no_assistant_block() {
+        let snapshot = "## User\n\nHello\n\n";
+        let document = "## User\n\nHello\n\nSome random text\n\n## User\n\n";
+        assert!(!is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn stale_snapshot_multiple_exchanges_stale() {
+        let snapshot = "## User\n\nQ1\n\n## Assistant\n\nA1\n\n## User\n\n";
+        let document = "## User\n\nQ1\n\n## Assistant\n\nA1\n\n## User\n\nQ2\n\n## Assistant\n\nA2\n\n## User\n\nQ3\n\n## Assistant\n\nA3\n\n## User\n\n";
+        assert!(is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn stale_snapshot_with_inline_annotation_not_stale() {
+        let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
+        // User added inline annotation within an existing assistant block
+        let document = "## User\n\nHello\n\n## Assistant\n\nHi there\n\nPlease elaborate\n\n## User\n\n";
+        // This modifies the snapshot prefix, so starts_with check fails
+        assert!(!is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn stale_snapshot_ignores_comments_in_detection() {
+        let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\n<!-- scratch -->\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        // Comments are stripped, so the user block between snapshot and new assistant is empty
+        assert!(is_stale_snapshot(snapshot, document));
     }
 }

@@ -124,3 +124,43 @@ Deployed at: `https://4aeb55e3.cogov-me.pages.dev`
 ## User
 
 Please make some tests for this.
+
+Why were the css and html files being written to different directories?
+They should both be written to the same directory...without having to post-copy the files.
+## Assistant
+
+**Tests created.** 11 tests covering `static_export__file_path_()` — all pass:
+
+```
+bun test v1.3.10
+ 11 pass, 0 fail [6.00ms]
+```
+
+Test file: `src/ctx-core-dev/lib/relysjs/server/export/index.test.ts`
+
+Key test cases:
+- `/protocol.love` + `text/html` → `protocol.love/index.html` (the bug fix)
+- `/robots.txt` + `text/plain` → bare file
+- `/sitemap.xml` + `application/xml` → bare file
+- `/protocol.love` without content-type → bare file (backward compat)
+- Standard routes (`/`, `/about`, `/nested/path`) → `index.html`
+
+---
+
+**Why different directories:** The relysjs build system uses `dist/browser--dev/` for dev builds and `dist/browser/` for production builds. When you run `bun build.ts` without `NODE_ENV=production`, it outputs to the `--dev` directories. The `prerender.ts` writes HTML to `dist/browser/` (the `out_dir` config). But the CSS/JS assets were built by the dev build to `dist/browser--dev/`.
+
+The `cloudflare_export_()` function already writes to `dist/browser/` for the prerendered HTML. The issue is that the relysjs build doesn't output browser assets to `dist/browser/` in dev mode.
+
+**Fix options:**
+1. **Build in production mode** before prerendering (uses `dist/browser/` + `dist/server/`)
+2. **Change `prerender.ts` `out_dir`** to `dist/browser--dev` to match where the dev build puts assets
+3. **Have `cloudflare_export_` automatically copy browser assets** from the build output to the export dir
+
+Option 2 is simplest — change `prerender.ts` to export into `dist/browser--dev/` where the CSS already lives, then deploy that directory. Or option 1 — use a production build flow where both CSS and HTML end up in `dist/browser/`.
+
+Which approach do you prefer?
+
+Option 1. Because production files are minified. The environment build should build **all** assets.
+
+## User
+

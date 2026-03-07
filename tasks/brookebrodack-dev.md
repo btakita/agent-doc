@@ -967,6 +967,33 @@ ssh admin@207.244.234.186 "cd /home/admin/work/brookebrodack-dev && docker compo
 
 Ready to decommission
 
+## Assistant
+
+**Done — both actions completed:**
+
+1. **`ssh.brookebrodack.net` A record deleted** — removed via CF API (record `a87cee4a...`)
+2. **Docker container decommissioned** — `brookebrodack-www-1` stopped and removed on Contabo (207.244.234.186)
+
+**Verification:**
+- `docker ps --filter name=brookebrodack` — no containers running
+- `https://brookebrodack.net/` — HTTP 200 (served from CF Pages)
+
+**Migration fully complete.** The Contabo VPS no longer runs any brookebrodack services. All traffic is served by Cloudflare Pages with:
+- Static pre-rendering via `static-export.ts`
+- CI/CD via GitHub Actions (push + cron every 6h)
+- WebSub worker for YouTube push notifications
+- Custom domains: `brookebrodack.net` + `www.brookebrodack.net`
+
+**Remaining DNS records** for `brookebrodack.net` zone: only the CNAME records pointing to `brookebrodack.pages.dev`.
+
+**Follow-up items (not blocking):**
+- Replace `GH_TOKEN` in WebSub worker with a long-lived GitHub PAT (`actions:write` scope)
+Why? I thought GH_TOKEN in gh actions already has write permissions. 
+- Add WebSub subscription auto-renewal (CF Worker cron trigger)
+Do it
+- Add static export to relysjs framework (tracked separately)
+Will be run in tasks/relysjs.md
+
 ## User
 
 

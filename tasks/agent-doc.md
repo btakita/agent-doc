@@ -258,7 +258,7 @@ How can the user maintain order in the document? Preventing content from spillin
 Can code folding with the editor be used?
 
 Would it be possible to have a dashboard-like or IDE-like interface within the document?
-<<<<<<< agent-response
+
 ## Assistant
 
 ### In-Place Response Documents (Dashboard-as-Document)

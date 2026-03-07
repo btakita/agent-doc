@@ -630,3 +630,67 @@ This is the first invocation using the new subagent delegation model from SKILL.
 
 ## User
 
+
+
+## Assistant
+
+No new content detected in this submission, but you have three unanswered inline questions from the previous cycle (embedded in the Assistant block around the active marker discussion). Addressing them now:
+
+### 1. Could the active marker live in the claim primitive?
+
+Yes, and it would simplify things. Instead of two separate systems (registry claim + `.agent-doc/active/<hash>.json`), the registry entry itself could carry an `active: bool` or `active_since: timestamp` field:
+
+```json
+{
+  "file": "tasks/tmux-router.md",
+  "pane": "%5",
+  "active": true,
+  "active_since": "2026-03-06T10:30:00Z"
+}
+```
+
+**Advantages:**
+- Single source of truth -- no orphaned active markers if a subagent crashes
+- `agent-doc status` shows both claim and processing state in one view
+- Simpler cleanup: `resync` already prunes dead panes, it can also clear stale `active` flags
+
+**One concern:** the registry is file-based (JSON). Two subagents writing to it concurrently could race. But since same-document submissions are serial (no lock, just "subagent re-reads"), only cross-document parallelism exists, and each touches a different registry entry. Safe enough.
+
+Could there be a race condition. Such is with rapidly running commands in sequence?
+Would last write wins be safe? Could there be 2 concurrent agent runs due to a race condition?
+
+Recommendation: merge active marker into the claim. Drop `.agent-doc/active/` entirely.
+
+### 2. Edge case: document claimed by another tmux pane while a task is running
+
+Current behavior: the second `claim` would overwrite the registry entry, pointing the file to a new pane. The first subagent (still running) would write its response back to the file (it uses the file path, not the pane), but the snapshot update and any tmux focus operations would target the old pane.
+
+**Desired behavior options:**
+- **A) Last-write-wins** (current) -- second claim takes over, first subagent's response still lands in the file but pane focus goes to the new pane
+- **B) Reject** -- if a subagent is active on this file, refuse the re-claim until it completes
+- **C) Transfer** -- re-claim succeeds, notify the running subagent to redirect its tmux operations to the new pane
+
+Option A is probably fine. The file is the important artifact, not the pane. The response gets written regardless of which pane "owns" the file.
+
+### 3. Stale claims after machine restart
+
+This is likely the root cause of the "ambiguous behavior." After a reboot:
+- tmux server restarts -- all pane IDs (`%5`, `%12`) are reassigned
+- The registry still has old pane IDs from the previous session
+- `agent-doc` tries to use the stale pane ID, which either doesn't exist or belongs to a different pane
+
+**What should happen:**
+- On first invocation after restart, `agent-doc` (or tmux-router) should detect that the claimed pane is dead (`pane_alive()` returns false) and auto-prune the stale entry
+- Then re-claim with the current pane
+Yes
+
+**What likely happens now:** the stale claim exists, `pane_alive()` fails silently somewhere, and the system falls through to a no-op or error path without clear feedback. "No action taken" matches this -- the code sees a claim exists, doesn't verify the pane is alive, and skips re-claiming.
+
+**Fix:** Add a `validate_claims()` step at session start that prunes dead pane entries. This could be automatic in `agent-doc claim` -- if the existing claim points to a dead pane, silently replace it.
+
+Implement.
+
+Want me to implement any of these (merge active into claim, startup validation, stale claim pruning)?
+
+## User
+

@@ -532,3 +532,45 @@ Ready to start with Phase 1?
 ## User
 
 Yes...phase 1-7 please
+
+## Assistant
+
+Working through all 7 phases. Here's progress so far:
+
+### Phase 1: Static Build — Done
+
+**Key finding:** relysjs doesn't have a static export mode — it's a fully dynamic SSR system (same as briantakita.me). So I created a **pre-rendering script** that:
+
+1. Starts the production Elysia server
+2. Fetches all routes (crawls them)
+3. Rewrites `localhost` URLs to `https://brookebrodack.net`
+4. Writes static HTML/XML/TXT files to `dist/browser/`
+
+**Created:** `app/brookebrodack-site/static-export.ts`
+
+**Routes exported:**
+- HTML: `/`, `/brookers`, `/content`, `/site`, `/store`
+- Raw: `/robots.txt`, `/rss`, `/sitemap.xml`
+
+### Phase 2: GH Actions CI/CD — Done
+
+**Created:** `.github/workflows/deploy.yml`
+
+- Triggers: push to main, manual dispatch, every 6 hours (cron)
+- Steps: checkout (with submodules) → bun install → db init → build → static export → wrangler pages deploy
+- Uses `cloudflare/wrangler-action@v3`
+
+**GitHub secrets needed:**
+- `CLOUDFLARE_API_TOKEN` — CF API token with Pages write access
+- `CLOUDFLARE_ACCOUNT_ID` — CF account ID
+- `GOOGLE_API_KEY` — YouTube Data API key
+- `YOUTUBE_CHANNELID` — `UCO42ciP_nkDcOlATRjLXCqQ`
+- `YOUTUBE_RSS_URL` — YouTube RSS feed URL
+- `AUTHORY_YOUTUBE_RSS_URL` — Authory RSS URL
+
+### Phases 3-7: In Progress
+
+Working on R2 assets, YouTube data at build time, DNS cutover, and WebSub next.
+
+## User
+

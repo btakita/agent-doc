@@ -1193,3 +1193,39 @@ Shall I start implementing? I'd begin with steps 1-5 (D1 setup + Hono worker + r
 ## User
 
 Yes. Should we extract a hono equivalent of relysjs?
+## Assistant
+
+**No — don't extract a Hono equivalent of relysjs yet.**
+
+relysjs is ~95% Elysia-specific runtime concerns. The reusable parts are:
+- **relementjs** — already framework-agnostic (functional HTML components, no Elysia dependency)
+- **Build system** (rebuildjs) — independent, can still build browser bundles
+- **Static export** — already works standalone
+- **ctx-core/rmemo** context system — the only tricky part
+
+**What relysjs actually does at runtime (for herbaliciousbliss):**
+- `html_response__new()` — trivial wrapper, becomes `c.html()` in Hono
+- `request_ctx__ensure()` — binds Elysia context to rmemo scope, can use Hono's `c.set()`/`c.get()` instead
+- `middleware_()` — rebuildjs dev hot-reload wrapper, not needed in production Worker
+- `app__start()` — calls `app.listen()`, not needed in Workers (export `fetch` handler)
+
+**Why not extract now:**
+1. Only herbaliciousbliss uses this stack on CF Workers so far
+2. Extracting a framework before you have 2+ consumers is premature abstraction
+3. The ctx-core/rmemo reactive context system is deeply integrated — adapting it for Hono would be a framework-level effort
+4. Direct Hono code for 4 routes is simpler and more maintainable than a framework wrapper
+
+**When to extract:** If/when you migrate censible or build another Hono + D1 site, and patterns repeat. Then extract the shared pieces into a `@rappstack/hono` or similar package.
+
+Let's look at migrating censible as well. Same with `mi-www.site`
+
+**Plan for herbaliciousbliss: direct Hono implementation.**
+- Use Hono's built-in context (`c.env.DB` for D1, `c.set('site', site)` for config)
+- Keep relementjs components unchanged (they just return HTML strings)
+- Keep Drizzle schema unchanged (swap driver only)
+- Keep arctic/oslo auth logic unchanged (copy the functions, replace context lookups)
+
+Starting implementation now.
+
+## User
+

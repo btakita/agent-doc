@@ -657,3 +657,37 @@ tmux-router v0.2.2 is already published on crates.io and has no uncommitted chan
 ## User
 
 Let's complete migrating the websites from contabo to cloudflare
+## Assistant
+
+**Migration plan for 5 Contabo sites → Cloudflare.**
+
+All 5 sites use the same stack: **Elysia server + relysjs SSR + Bun**. None are purely static — they all need server-side rendering.
+
+**Current state:**
+
+| Site | Domain | Database | Complexity |
+|------|--------|----------|------------|
+| cogov | `cogov.me` | None | Low — stateless SSR |
+| prescience-notes | `pn.briantakita.me` | None | Medium — LangChain/Google GenAI API deps |
+| herbaliciousbliss | `hb.briantakita.me` | SQLite (Drizzle) | Medium — needs D1 migration |
+| peakexistence | `pe.briantakita.me` | SQLite (Drizzle) | Medium — needs D1 migration |
+| censible/mi-www | `mi-www.site` | Postgres + Redis | High — complex backend |
+
+**Recommended migration order:**
+1. **cogov** — simplest, stateless, good proof of concept
+2. **prescience-notes** — just needs API key secrets
+3. **herbaliciousbliss** — SQLite → Cloudflare D1
+4. **peakexistence** — same pattern as herbaliciousbliss
+5. **censible** — most complex, Postgres + Redis
+
+**Key decision needed:** These are all Elysia/Bun SSR servers. The migration target is either:
+- **CF Pages with Functions** — good for SSR sites, auto-deploys from git
+- **CF Workers** — more control, better for complex routing/DB
+
+Since `relysjs` builds both browser and server bundles, the server bundle needs to be adapted to run as a CF Worker (or Pages Function). This means adding a `_worker.js` entry point or `functions/` directory that wraps the Elysia server.
+
+**Shall I start with cogov?** I'd set up the CF Pages deployment config, adapt the build to output a CF-compatible bundle, and create the wrangler config. Once that pattern works, the others follow the same template.
+
+## User
+
+Some these sites can be 100% static, correct? Let's start with those sites first.

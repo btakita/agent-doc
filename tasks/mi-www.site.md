@@ -9,78 +9,48 @@ Can we convert mi-www.site from Solid Start to rappstack...The same stack that b
 Please add documentation for rappstack. This is a good opportunity.
 Add https://github.com/rappstack as a submodule in agent-loop
 
+Yes...let's convert censible. And mi-www.site
+
+Who controls the dns of censible.co?
+
 <!-- agent:output -->
-Yes, we can convert mi-www.site (censible root-web) from Solid Start to rappstack. Here's the analysis:
+**Proceeding with the conversion.**
 
-## Feasibility: HIGH
+### Done:
+1. Added `rappstack/dev` as submodule at `src/rappstack-dev` (all 20+ lib submodules initialized)
 
-**Root-web is mostly static content** — 9 routes, no auth, no database for the public-facing site:
+### Next Steps:
+1. Create `censible-dev` repo on GitHub (btakita/censible-dev)
+2. Set up rappstack monorepo structure (`app/censible-site/`, `lib/ui--server--censible/`, etc.)
+3. Convert 9 SolidJS routes to relementjs server HTML functions
+4. Set up build pipeline (relysjs + rebuildjs + Tailwind)
+5. Static export + deploy to Cloudflare Pages
 
-| Route | Complexity | Notes |
-|-------|-----------|-------|
-| `/` (home) | Trivial | Redirect to `/solutions` |
-| `/solutions` | Medium | Static HTML+CSS, hero image, ESG methodology content |
-| `/faq` | Low | Static content |
-| `/legal` | Low | Static content |
-| `/team` | Low | Static content |
-| `/company-etf-and-mutual-fund-rankings` | Low | Static issue list |
-| `/company-etf-and-mutual-fund-rankings/:issue_id` | Low | Dynamic param, static rendering |
-| `/company-etf-and-mutual-fund-rankings/women-in-leadership` | High | Server-side fetch from CENSIBLE_SEARCH_URL API |
-| `/404` | Trivial | Error page |
+### Architecture (following cogov-dev pattern):
 
-**Key question:** Is the `CENSIBLE_SEARCH_URL` API still running? The Women in Leadership page fetches 7 endpoints from it. If it's down, that page would need to be either static-ified from cached data or dropped.
+**Routing:** Elysia + `middleware_()` + `html_route_()` helper (same as cogov.me `index.server.ts`)
 
-**esg-web** (the dashboard with Auth0 + PostgreSQL + Redis + full REST API) is a **separate, much larger migration** — not part of this scope.
+**Page rendering:** Each page becomes a `<page>__doc_html_()` function in `lib/ui--server--censible/`:
+- `solutions__doc_html_()` — the big ESG methodology page (largest content)
+- `faq__doc_html_()`, `legal__doc_html_()`, `team__doc_html_()`
+- `company_etf_and_mutual_fund_rankings__doc_html_()` + issue subpages
+- `women_in_leadership__doc_html_()` — needs server-side data fetch
 
-## Migration Plan
+**CSS:** Converting from `@censible/css` JS functions to Tailwind + esmcss
 
-### 1. Add rappstack as submodule
-```
-cd agent-loop && git submodule add git@github.com:rappstack/dev.git src/rappstack-dev
-```
+**Build:** `build.ts` with `relysjs_browser__build` + `relysjs_server__build` (parallel)
 
-### 2. Create censible-dev monorepo structure
-Following the rappstack convention (matching briantakita.me-dev, brookebrodack-dev, cogov-dev):
-```
-censible-dev/
-├── app/
-│   ├── censible-site/          # Main site (mi-www.site)
-│   │   ├── app/
-│   │   │   └── index.server.ts # Elysia routes
-│   │   ├── build.ts
-│   │   ├── config.ts
-│   │   ├── index.ts
-│   │   ├── start.ts
-│   │   ├── static-export.ts
-│   │   └── package.json
-│   └── -censible-dev-bin/
-├── lib/
-│   ├── ui--server--censible/   # Server HTML (relementjs)
-│   ├── ui--any--censible/      # Shared UI logic
-│   ├── domain--server--censible/
-│   └── dev-bin/
-├── package.json
-└── tsconfig.json
-```
+**Export:** `prerender.ts` using `cloudflare_export_()` from relysjs
 
-### 3. Convert pages from SolidJS to relementjs
-Each SolidJS component becomes a relementjs server HTML function:
-- `C_solutions()` → `solutions__doc_html_({ ctx })`
-- `C_faq()` → `faq__doc_html_({ ctx })`
-- etc.
+### DNS for censible.co
 
-CSS would move from `@censible/css` JS functions to Tailwind or plain CSS via esmcss.
+I don't have direct access to check the DNS registrar for censible.co. Let me look up what I can find.
 
-### 4. Deploy to Cloudflare Pages
-Same pattern as herbaliciousbliss — static export + CF Pages deployment.
+Creating the repo and scaffolding now...
 
 ## rappstack Documentation
 
-The rappstack org (https://github.com/rappstack) currently has minimal documentation. The `rappstack/dev` README says:
-
-> @rappstack/* packages are currently used as git submodules in a bun monorepo. This is to get some apps off the ground while working through some api churn.
-
-**Repos in the org:**
+**Repos in the org (https://github.com/rappstack):**
 - `rappstack/dev` — Development monorepo with all lib submodules
 - `rappstack/domain--server` — Server domain logic
 - `rappstack/domain--server--auth` — Auth schemas (person_tbl, session_tbl)
@@ -96,12 +66,4 @@ The rappstack org (https://github.com/rappstack) currently has minimal documenta
 - `relementjs` — HTML generation (JSX-like, server-rendered)
 - `esmcss` — CSS extraction
 - `ctx-core` — Reactive memoization (rmemo), context system
-
-### Adding as submodule
-
-I can add `rappstack/dev` as a submodule right now. Shall I proceed?
-
-Yes...let's convert censible. And mi-www.site
-
-Who is the dns of censible 
 <!-- /agent:output -->

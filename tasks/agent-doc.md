@@ -765,3 +765,18 @@ Added "Stale snapshot recovery (idempotent detection)" subsection to step 2:
 ## User
 
 Does the skill auto-upgrade when the user installs the next version of agent-doc?
+
+## Assistant
+
+**Yes.** Step 0 (pre-flight) in SKILL.md already handles this:
+
+1. Runs `agent-doc --version` to get the installed binary version
+2. Compares against `agent-doc-version: "0.5.6"` in the SKILL.md frontmatter
+3. If the binary is newer, runs `agent-doc skill install` — overwrites SKILL.md with the version bundled in the new binary
+4. Continues with the updated instructions
+
+The SKILL.md content is embedded in the binary at compile time via `include_str!` in `skill.rs`. When the user installs a new release (`cargo install agent-doc`), the new binary carries the updated SKILL.md. The stale snapshot recovery we just added will be included automatically in the next release.
+
+## User
+
+Release tmux-routes and agent-doc

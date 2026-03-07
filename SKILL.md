@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.5.6"
+agent-doc-version: "0.9.7"
 ---
 
 # agent-doc submit
@@ -67,20 +67,27 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 ### 4. Write back to the document
 
-After responding, update the document file:
+After responding, use `agent-doc write` to atomically append the response:
 
-1. **Re-read the file** (user may have edited during your response)
-2. Append your response as:
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Pipe your response** through `agent-doc write`:
+   ```bash
+   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp>
    ```
-   ## Assistant
+3. `agent-doc write` handles:
+   - Appending `## Assistant\n\n<response>\n\n## User\n\n`
+   - 3-way merging if the user edited during your response
+   - Atomic file write (flock + tempfile + rename)
+   - Snapshot update
 
-   <your response>
+**IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
+The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
 
-   ## User
-
-   ```
-3. Use the Edit tool to append (not Write — preserves user edits made during response)
-4. Update the snapshot to match the new document state
+**Baseline file:** Before generating your response (step 3), save the current document to a temp file:
+```bash
+cp <FILE> /tmp/agent-doc-baseline-$$.md
+```
+Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
 
 ### 5. Git integration (optional)
 

@@ -25,6 +25,7 @@ mod submit;
 mod sync;
 mod upgrade;
 mod watch;
+mod write;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -208,6 +209,14 @@ enum Commands {
         #[command(subcommand)]
         action: PluginAction,
     },
+    /// Append an assistant response to a session document (reads from stdin)
+    Write {
+        /// Path to the session document
+        file: PathBuf,
+        /// Baseline content for 3-way merge (reads from file if omitted)
+        #[arg(long)]
+        baseline_file: Option<PathBuf>,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -326,6 +335,14 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
+        Commands::Write { file, baseline_file } => {
+            let baseline = baseline_file
+                .as_ref()
+                .map(std::fs::read_to_string)
+                .transpose()
+                .context("failed to read baseline file")?;
+            write::run(&file, baseline.as_deref())
+        }
         Commands::Upgrade => upgrade::run(),
     }
 }

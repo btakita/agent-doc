@@ -838,3 +838,49 @@ commit and push. Deploy to cloudflare
 ## User
 
 Do the remaining steps
+
+## Assistant
+
+### Step 1: DNS Cutover — Partially Done
+
+**Custom domains added** via CF API:
+- `brookebrodack.net` — status: pending (CNAME not set)
+- `www.brookebrodack.net` — status: pending (CNAME not set)
+
+**Blocker:** The API token (`cloudflare/.env`) lacks DNS Zone Edit permission. CF Pages needs CNAME records pointing to `brookebrodack.pages.dev`, but the token can only manage Pages/Workers, not DNS records.
+
+**To fix (one of these):**
+1. **CF Dashboard** → DNS → brookebrodack.net → Delete existing A records → Add CNAME `@ → brookebrodack.pages.dev` and `www → brookebrodack.pages.dev`
+2. **Update API token** → CF Dashboard → My Profile → API Tokens → Edit the token → Add permission: Zone → DNS → Edit → Save. Then I can update DNS programmatically.
+
+Current DNS: `brookebrodack.net` → `172.67.177.44` / `104.21.80.101` (A records proxying to Contabo).
+
+How did we switch briantakita.me over? Use the same technique.
+
+### Step 2: WebSub Worker — Done
+
+**Deployed:** `brookebrodack-websub` at `https://brookebrodack-websub.brian-takita.workers.dev`
+
+**Secrets set:**
+- `GH_TOKEN` — GitHub CLI token for workflow dispatch
+- `WEBSUB_SECRET` — `3731eb8f...` (generated, 32 bytes hex)
+
+**YouTube subscription:** HTTP 202 accepted. The hub will verify by GETting the worker URL.
+
+**Note:** The `GH_TOKEN` is using the `gh` CLI OAuth token which may expire. For long-lived access, create a GitHub PAT (Personal Access Token) with `actions:write` scope and update the worker secret.
+
+### Step 3: Decommission — Waiting
+
+**Not safe to decommission yet** — DNS still points to Contabo. After DNS cutover is complete and verified (CF Pages serving `brookebrodack.net` with HTTP 200), then remove the Docker container:
+
+```bash
+ssh admin@207.244.234.186 "cd /home/admin/work/brookebrodack-dev && docker compose down"
+```
+
+### Action Needed
+
+The DNS cutover requires either updating the API token permissions or making the CNAME change in the CF dashboard. Which approach do you prefer?
+
+## User
+
+

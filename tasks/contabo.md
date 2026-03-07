@@ -886,3 +886,27 @@ I don't see add a site
 
 ## User
 
+## Assistant
+
+**I can see the dashboard in your screenshot.** The "Add a site" was renamed — click **"+ Add"** (top-right) → **"Connect a domain"** (first option in the dropdown). That's where you add `cogov.me` as a zone.
+
+Alternatively, click the **"+"** next to the "Domains" heading in the bottom-left section (where briantakita.me and brookebrodack.net are listed).
+
+**All 3 static sites are now live on CF Pages** (visible in your screenshot):
+
+| Site | CF Pages URL | Deployed |
+|------|-------------|----------|
+| cogov.me | `https://cogov-me.pages.dev/` | 22 min ago |
+| peakexistence | `https://peakexistence.pages.dev/` | 1 min ago |
+| prescience-notes | `https://prescience-notes.pages.dev/` | 7 min ago |
+
+**DNS setup needed for each:**
+- `cogov.me` → add as CF zone (Connect a domain), then set nameservers at Namecheap
+- `pe.briantakita.me` → CNAME `pe` → `peakexistence.pages.dev` (in briantakita.me zone, already in CF)
+- `pn.briantakita.me` → CNAME `pn` → `prescience-notes.pages.dev` (same zone)
+
+The `briantakita.me` subdomains are easier — they're already in Cloudflare. Want me to set up those CNAMEs now?
+
+## User
+
+I have cogov.me setup on cloudflare. Please migrate pe.briantakita.me and pn.briantakita.me

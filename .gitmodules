@@ -52,3 +52,6 @@
 [submodule "python-intentions"]
 	path = python-intentions
 	url = git@github.com:btakita/python-intentions.git
+[submodule "brookebrodack-site"]
+	path = brookebrodack-site
+	url = git@github.com:btakita/brookebrodack-site.git

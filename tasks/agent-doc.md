@@ -135,7 +135,9 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Fix component parser to skip code spans (fenced blocks + inline backticks) — markers in code are literal, not real
 - `agent-doc convert` — auto-convert append-mode documents to template mode
+- Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -164,7 +166,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 9. **Subagents are expensive (~7x)** — use filesystem locking instead when possible; subagents only for true parallelism
 10. **Stale snapshots from context compaction** — solved with `is_stale_snapshot()` auto-recovery in `diff.rs`
 11. **Durable pending store** — save response before write, clear after success; survives compaction and crashes
-12. **Distinct patch prefix** — `<!~~ patch:name ~~>` vs `<!~~ agent:name ~~>` prevents confusion between response directives and document components
+12. **Distinct patch prefix** — patch markers vs agent markers prevents confusion between response directives and document components
+13. **Skip code spans in parser** — never invent custom escape syntax; follow the universal convention of treating code blocks as literal
 <!-- /agent:lessons -->
 
 ## Session History
@@ -186,47 +189,33 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## User
 
 <!-- agent:output -->
-### Document Converted to Template Mode
+### Parser should skip code spans (not `<!~~ ~~>`)
 
-This document is now a template-mode document (`response_mode: template`).
+`<!~~ ~~>` has no precedent and is the wrong approach. The correct fix is **skip code spans in the component parser**.
 
-**Structure (7 components):**
-- **status** — Version, test count, publish status (replace mode)
-- **architecture** — Full system architecture reference (replace mode)
-- **releases** — Release history table (append mode for new releases)
-- **pending** — Backlog items (replace mode as items complete)
-- **lessons** — Key lessons (append mode for new discoveries)
-- **history** — Condensed session history (append mode)
-- **output** — Fallback for unmatched responses
+**Precedent:** Hugo, MDX, Liquid, Handlebars, Tree-sitter — all skip special syntax inside code fences and backtick spans. This is the universal convention.
 
-**What changed:**
-- All `## User` / `## Assistant` conversation blocks condensed into `history` component
-- Added `response_mode: template` to frontmatter
-- Component markers around each section
-- Added v0.9.7-v0.9.9 to release history, lessons 11-12 from recent sessions
+**Fix in `component.rs` (~30 LOC):**
+1. Scan for fenced code blocks and inline backtick spans → collect byte ranges
+2. In marker search, skip any match inside a code range
+3. Real markers in normal markdown → parsed; markers in code → literal text
 
-### Assessment: `agent-doc convert` command
+Once fixed, this document can use real marker syntax in examples without `<!~~ ~~>` escaping.
 
-**Belongs in the binary (mechanical, ~150 LOC):**
-1. Add `response_mode: template` to frontmatter
-2. Wrap existing `## User` / `## Assistant` blocks in history component (frozen)
-3. Create output component at document end
-4. Optionally wrap top-level `##` sections in named components (heading text as name)
+**New items for pending:**
+- Fix component parser to skip code spans (fenced blocks + inline backticks)
+- `agent-doc convert` — mechanical append-to-template migration
+- Document binary-vs-agent responsibility split in README
 
-Add any missing gaps in agent-doc.
-
-**Does NOT belong in the binary (judgment):**
-- Condensing conversation history into summaries
-- Choosing component modes (replace/append/prepend) based on content semantics
-- Structural reorganization and layout decisions
-
-Add to docs what belongs where.
-
-**Two-step workflow:** `agent-doc convert` (safe, mechanical) then `/agent-doc` (agent refines layout).
-
-**Bug found during conversion:** Component parser doesn't skip code spans — backtick-wrapped markers get parsed as real components. Escaped examples in this document using `<!~~ ~~>`. Should fix in `component.rs` to skip fenced code blocks and inline code.
+**Binary vs agent responsibility (for docs):**
+- **Binary (mechanical):** frontmatter, marker wrapping, component CRUD, parser, atomic write, recovery
+- **Agent (judgment):** content summarization, component naming, mode selection, layout decisions
 <!-- /agent:output -->
 
 `<!~~ ~~>` is not ideal..neither is "backtick-wrapped markers get parsed as real components".
 
 Would it be better to not evaluate content in backticks or use `<!~~ ~~>`. `<!~~ ~~>` seems very peculiar. Is there any precedent with other libraries or apps?
+
+When agent-doc writes the response to this document...should the user request be in its' own component?
+
+I wonder if it makes sense to undo 

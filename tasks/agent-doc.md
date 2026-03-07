@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.9.10 | **Tests:** 175 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.10.0 | **Tests:** 179 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -131,6 +131,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.9.8 | Lock relocation to `.agent-doc/locks/<hash>.lock` |
 | v0.9.9 | Template-mode, compaction recovery, `agent-doc recover`, `agent-doc template-info` |
 | v0.9.10 | Code-span parser fix, template input/output component convention |
+| v0.10.0 | Renamed `response_mode` → `agent_doc_mode` with aliases (mode, response_mode) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -190,7 +191,9 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 **Template conversion session:** Converted this document from append-mode to template-mode. Assessed `agent-doc convert` command feasibility.
 
-**Code-span parser fix:** Fixed `component.rs` to skip markers inside fenced code blocks and inline backtick spans. Eliminated `<!~~ ~~>` workaround. Discussed undo/extract features for response diffs.
+**Code-span parser fix:** Fixed `component.rs` to skip markers inside fenced code blocks and inline backtick spans. Released as v0.9.10.
+
+**v0.10.0 session:** Renamed `response_mode` → `agent_doc_mode` (canonical) with `mode` (shorthand) and `response_mode` (deprecated) as aliases. Discussed in-place conversation model and blog post.
 <!-- /agent:history -->
 
 ## User
@@ -205,40 +208,42 @@ The interaction is a bit more than a response_mode. I wonder if there is a clear
 <!-- /agent:input -->
 
 <!-- agent:output -->
-### Naming: `agent_doc_mode` with aliases
+### Released v0.10.0
 
-`agent_doc_mode` is the right canonical name — namespaced, future-proof, unambiguous even when other tools read the frontmatter.
+**`agent_doc_mode` rename + release complete.**
 
-**Alias chain:**
-```
-agent_doc_mode (canonical) → mode (shorthand) → response_mode (deprecated)
-```
+**Published to all targets:**
+- crates.io: `agent-doc v0.10.0`
+- PyPI: `agent_doc-0.10.0`
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.10.0
+- Local binary: `~/.cargo/bin/agent-doc` (v0.10.0)
+- SKILL.md: updated to v0.10.0
 
-**Implementation:** Parse all three fields in `frontmatter.rs`, resolve by priority. On write-back, use canonical name. The heuristic is simple — check in order: `agent_doc_mode` > `mode` > `response_mode`, first match wins.
+**What's in v0.10.0:**
+- Renamed `response_mode` → `agent_doc_mode` (canonical)
+- Aliases: `mode` (shorthand), `response_mode` (deprecated) — all three parse correctly
+- Serialization always uses `agent_doc_mode` (like `agent_doc_session`)
+- 4 new frontmatter tests for alias resolution
+- 179 tests passing, clippy clean
 
-**Futureproofing:** `mode` alone could collide (Hugo `type`, Astro `layout`). `agent_doc_mode` is safe in any frontmatter context. Alias keeps casual usage working.
+Do we need threading at all or can the inline conversation remain without threading?
 
-### Inline annotations in the output component
+**Backwards compatibility:** Existing documents with `response_mode: template` or `mode: template` continue to work. New documents and write-back use `agent_doc_mode`.
 
-Your inline text (lines 237-248) is inside the `output` component — you're annotating the agent's previous response.
+### In-place conversation model
 
-**Two approaches:**
-1. **In-place conversation** — agent reads annotations in context, replaces `output` with new response that addresses them. Annotations are consumed each cycle.
-2. **Lift to input** — `agent-doc write` moves user text from `output` to `input` before patching. Clean separation but loses spatial context.
+Agreed on your approach:
+- Inline iteration preserves order within the output component
+- Conclusions drawn update the whole document (relevant components)
+- Back-and-forth can be cleaned up since git preserves history
+- This gives a natural "converge then clean" workflow
 
-**Recommendation: Option 1 (in-place).** Template mode is spatial interaction — annotate where it matters. `input` is for new requests not anchored to a location.
+### Blog post
 
-I like in place. As long as the template document's content is coherent. So if we are iterating on a topic, the inline conversation needs to preserve it's order. But any conclusions that have been drawn can update the entire document with the conclusion. The back and forth can be removed as well as the conversation is preserved in git history.
+Ready to discuss the blog post. Key framing: "Two ways to talk to your document" — append (conversation) vs template (dashboard). What platform/format do you have in mind?
 
-Do we need threading at all or can the inline conv
-
-Each cycle: agent reads `output` (with your annotations) + `input` (new requests) → responds by replacing `output` → history captures the arc.
-
-### Status: still discussing
-
-Confirmed. No rename or docs work yet — settling the naming and interaction model first.
-
-Let's do the `agent_doc_mode` canonical name with aliases. And release. Should this version be 0.10.0?
-
-Let's talk about the blog post.
+briantakita.me...we can syndicate the blog post.
+Let's track this current discussion 
 <!-- /agent:output -->
+
+If we are going to have inline discussions, should we just have a single component for the discussion/conversation (or a better name) rather than having a separate input and output component? Please propose better names than discussion or conversation.

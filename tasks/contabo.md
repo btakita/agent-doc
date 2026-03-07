@@ -611,3 +611,25 @@ Now proceeding with `agent-doc write` implementation.
 ## User
 
 Yes. Update SKILL.md and ensure that the next version will propagate the SKILL.md change.
+## Assistant
+
+**SKILL.md updated and version bumped to v0.9.7.**
+
+**Changes made:**
+1. **SKILL.md step 4** — now uses `agent-doc write` via Bash instead of the Edit tool:
+   ```bash
+   cp <FILE> /tmp/agent-doc-baseline-$$.md
+   # ... generate response ...
+   echo "<response>" | agent-doc write <FILE> --baseline-file /tmp/agent-doc-baseline-$$.md
+   ```
+2. **Frontmatter `agent-doc-version`** — bumped from `0.5.6` to `0.9.7`
+3. **Cargo.toml + pyproject.toml** — version `0.9.6` → `0.9.7` (kept in sync)
+4. **SKILL.md bundled at build time** via `include_str!("../SKILL.md")` — `agent-doc skill install` propagates the updated step 4 to `.claude/skills/agent-doc/SKILL.md`
+
+**Propagation path:** SKILL.md source → `cargo build` embeds it → `agent-doc skill install` writes to `.claude/skills/` → next Claude session auto-loads it → pre-flight check detects version mismatch → auto-updates.
+
+All 21 tests pass. The binary is built at v0.9.7.
+
+## User
+
+release. Does tmux-router need to release as well?

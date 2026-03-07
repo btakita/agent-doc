@@ -97,3 +97,23 @@ Here's what was done:
 ## User
 
 I went through the oauth...but still see the Sign in with Google button after a successful oauth.
+## Assistant
+
+The OAuth flow is working — your session and person record are in D1. The issue is that the **static HTML doesn't know you're logged in** — it was pre-rendered without session context.
+
+**Fixed with client-side auth detection:**
+
+1. **`logged_in=1` cookie** — set on OAuth callback (non-httpOnly, so browser JS can read it)
+2. **Injected `<script>`** — the Worker injects a small script into every HTML page that:
+   - Checks for the `logged_in` cookie
+   - Replaces "Sign in with Google" with a "Sign out" link
+   - Calls `/api/me` to fetch user info and shows your profile picture on account buttons
+3. **New endpoints:**
+   - `GET /api/me` — returns `{ user: { name, email, image } }` or `{ user: null }`
+   - `GET /logout` — clears session from D1, clears cookies, redirects to `/`
+
+**To test:** You need to sign in again (the existing session doesn't have the `logged_in` cookie from before this update). Click "Sign in with Google" → complete OAuth → you should see "Sign out" instead of the sign-in button, and your profile picture on the account icon.
+
+## User
+
+Is this deployed?

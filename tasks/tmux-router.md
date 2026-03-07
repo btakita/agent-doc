@@ -562,3 +562,36 @@ Recommendation: **B then eval** — fix the architecture first, then use Skill C
 ## User
 
 Yes...Option B with no lock...unless you can explain a compelling reason for a lock.
+
+## Assistant
+
+No compelling reason for a lock. You're right on all counts:
+
+1. **Same-document revision** — the subagent re-reads before write-back, picking up your edits naturally
+2. **Parallel documents** — independent subagents, no shared state to corrupt
+3. **Interruption pattern** — Claude already handles "user edited during response" via the re-read-before-write step
+
+Lock removed from the design. The only coordination primitive is `.agent-doc/active/<hash>.json` — not for locking, just for the skill to know "a subagent is already processing this file, skip spawning another."
+
+Will the file be deleted when all tasks are completed for the claimed file?
+Or will the file be kept?
+
+### Implemented: Subagent Delegation in SKILL.md
+
+Updated `.claude/skills/agent-doc/SKILL.md` with the subagent execution model:
+
+**Key changes:**
+- Added "Execution Model — Subagent Per Document" section
+- Every `/agent-doc <FILE>` invocation MUST delegate to a subagent via the Agent tool
+- Pre-flight checks (claim, version, claims log) stay in main context
+- Steps 1-5 (read, diff, respond, write-back, snapshot) run in the subagent
+- Same-document re-submit: subagent picks up revisions on re-read, no lock
+- No `.agent-doc/locks/` directory — removed entirely
+
+**Why this fixes the bug:** The Agent tool runs to completion. When a second `/agent-doc` message arrives, it queues as a system reminder. The first subagent finishes its full cycle (including write-back and snapshot), THEN the main agent processes the second message.
+
+The next `/agent-doc` invocation will use the new subagent pattern. Want to test it now?
+
+yes
+
+## User

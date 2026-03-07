@@ -35,8 +35,8 @@ pub struct ComponentInfo {
 }
 
 /// Check if a document is in template mode.
-pub fn is_template_mode(response_mode: Option<&str>) -> bool {
-    matches!(response_mode, Some("template"))
+pub fn is_template_mode(mode: Option<&str>) -> bool {
+    matches!(mode, Some("template"))
 }
 
 /// Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks from an agent response.
@@ -201,7 +201,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let (fm, _body) = crate::frontmatter::parse(&doc)?;
-    let template_mode = is_template_mode(fm.response_mode.as_deref());
+    let template_mode = is_template_mode(fm.mode.as_deref());
 
     let components = component::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;

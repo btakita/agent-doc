@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.9.9"
+agent-doc-version: "0.10.0"
 ---
 
 # agent-doc submit

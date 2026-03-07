@@ -213,3 +213,23 @@ All 177 tests pass. Ready to release as v0.9.7.
 ## User
 
 release
+## Assistant
+
+### Released v0.9.8
+
+Version bumped from 0.9.7 to 0.9.8 (0.9.7 was already published for the `agent-doc write` command).
+
+**Published to all targets:**
+- crates.io: `agent-doc v0.9.8`
+- PyPI: `agent_doc-0.9.8`
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.8
+- Local binary: `~/.cargo/bin/agent-doc` (v0.9.8)
+
+**What's in v0.9.8:**
+- Relocate doc advisory locks to `.agent-doc/locks/<hash>.lock`
+- `doc_hash()`, `lock_path_for()`, `find_project_root()` in `snapshot.rs`
+- 177 tests passing
+
+## User
+
+Can we clean up the existing tasks/*.agent-doc.lock files?

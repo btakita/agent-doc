@@ -676,3 +676,32 @@ The `[diff]` and `[submit]` diagnostic logging we added earlier logs to stderr. 
 ## User
 
 I notice that my previous requests to run this document were blocked...well after there was a response.
+
+## Assistant
+
+This is the **stale snapshot problem**. The snapshot wasn't updated after the previous conversation's context compacted. Here's what happened:
+
+1. The previous Claude Code session processed your exchanges (functional tests, config, deadlock investigation)
+2. Responses were written to the document (lines 595-675 exist in the file)
+3. The session ran out of context before step 4 of the skill cycle completed — the snapshot was never updated
+4. The snapshot was frozen at line 588 (the empty `## User` after the parallelization discussion)
+5. Every subsequent `/agent-doc` invocation saw a massive diff (lines 589-679) and tried to re-process already-answered questions
+
+**Why it felt "blocked":** The skill was processing a huge diff that included several complete exchanges, regenerating responses for questions already answered in the document. That's wasted work that looks like hanging.
+
+**Root cause:** Context compaction can interrupt the skill mid-cycle. The response gets written to the document (step 4a), but the snapshot update (step 4b) never executes.
+
+**Fix options:**
+
+1. **Atomic cycle completion** — write document + snapshot in a single critical section (partially done with the doc advisory lock, but the skill-level cycle can still be interrupted by context compaction)
+2. **Snapshot-before-response** — update the snapshot *before* generating the response, so even if the cycle is interrupted, the next invocation won't re-process the same diff. Downside: if the response write fails, the diff is lost.
+3. **Idempotent response detection** — before writing back, check if the document already contains the response (e.g., the last `## Assistant` block matches what we're about to write). Skip the write if it does, and just update the snapshot.
+
+Option 3 is the most robust — it handles the "snapshot out of sync" case gracefully without changing the write order. The check is cheap (string comparison of the last assistant block).
+
+Does Option 3 allow in-line editing & requests to the claude session?
+
+I've now synced the snapshot to match the full document state, so subsequent invocations will start clean.
+
+## User
+

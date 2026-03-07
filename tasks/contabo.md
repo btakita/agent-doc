@@ -1106,3 +1106,34 @@ Which host has lower costs as data scales?
 
 ## User
 
+## Assistant
+
+**Cloudflare is cheaper at scale.**
+
+| | Fly.io | CF Workers + D1 |
+|--|--------|-----------------|
+| **Compute** | $1.94/mo per shared-1x VM (after 3 free) | $5/mo for 10M req (Workers Paid), $0.30/M after |
+| **SQLite storage** | $0.15/GB/mo persistent volume | D1: 5 GB free, $0.75/GB/mo after |
+| **SQLite reads** | Unlimited (local disk) | 25B free rows/mo, $0.001/M after |
+| **SQLite writes** | Unlimited (local disk) | 50M free rows/mo, $1.00/M after |
+| **Bandwidth** | $0.02/GB outbound (after 100 GB free) | Unlimited (no egress fees) |
+| **At low traffic** | ~$0 (free tier) | ~$0 (free tier) |
+| **At 10M req/mo** | ~$10-20/mo (VM + bandwidth) | ~$5/mo (no egress) |
+| **Scaling** | Manual (add VMs) | Auto, global edge |
+
+**Verdict:** CF Workers + D1 scales better — no egress, auto-scaling, global. Fly.io is cheaper to *start* (zero code changes) but costs grow linearly.
+
+**The real trade-off:** Since herbaliciousbliss is under active development, building on CF Workers + D1 now avoids a future migration. The refactor scope:
+
+1. Replace `bun:sqlite` → D1 bindings (Drizzle supports D1 natively)
+2. Port Elysia routes to CF Worker fetch handler (or use `@elysiajs/cf-worker` adapter if available)
+3. Migrate `arctic`/`oslo` session management (these are runtime-agnostic, should work)
+4. Move `nodemailer` → CF Email Workers or external SMTP API (SendGrid/Resend)
+
+Estimated effort: 2-3 days. But you'd be building on the final platform from day one.
+
+**Recommendation:** If you're planning to grow this site, go CF Workers + D1. If it's a side project with minimal traffic expectations, Fly.io and revisit later.
+
+## User
+
+Go with CF Workers

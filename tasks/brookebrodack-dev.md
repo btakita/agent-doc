@@ -170,5 +170,23 @@ Please add brookebrodack-dev as the submodule instead of brookebrodack-site.
 
 Going to use brookebrodack-dev.
 
+## Assistant
+
+Done — swapped submodules:
+
+1. **Removed** `brookebrodack-site` submodule (deinit + rm + cleaned `.git/modules/`)
+2. **Added** `brookebrodack-dev` as submodule with all 21 nested submodules initialized
+3. **Installed** dependencies: 694 packages via `bun install --ignore-scripts`
+
+The `brookebrodack-dev` submodule is staged in agent-loop (`.gitmodules` updated, old entry removed).
+
+**Note:** The `app/brookebrodack-site/package.json` in this fresh clone still has the original dependency versions (not the upgrades from the previous discussion). The upgraded `package.json` was only in the agent-loop standalone submodule which is now removed. You'll need to re-apply the dependency updates to `brookebrodack-dev/app/brookebrodack-site/package.json` if you want them.
+
+Reapply please.
+
+**Still blocking:** `public/` assets directory missing — dev server won't start without it.
+
+Do we have a script to load the assets from the contabo S3 bucket?
+
 ## User
 

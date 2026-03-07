@@ -910,3 +910,41 @@ The `briantakita.me` subdomains are easier — they're already in Cloudflare. Wa
 ## User
 
 I have cogov.me setup on cloudflare. Please migrate pe.briantakita.me and pn.briantakita.me
+## Assistant
+
+**DNS migration for pe.briantakita.me and pn.briantakita.me.**
+
+The wrangler OAuth token can't write DNS records. Two options:
+
+Why not? I thought it could edit DNS. How can we automate this?
+
+**Option A — Cloudflare dashboard (30 seconds):**
+1. Go to `briantakita.me` zone → DNS → Records
+2. Add: Type `CNAME`, Name `pe`, Target `peakexistence.pages.dev`, Proxied ✓
+3. Add: Type `CNAME`, Name `pn`, Target `prescience-notes.pages.dev`, Proxied ✓
+
+**Option B — API token with DNS permission:**
+1. dash.cloudflare.com/profile/api-tokens → Create Token
+2. Use "Edit zone DNS" template, scope to `briantakita.me`
+3. Share the token and I'll create the records programmatically
+
+After the CNAMEs exist, I'll add the custom domains to the Pages projects.
+
+Great that cogov.me is set up on Cloudflare — once nameservers propagate, it'll serve from CF Pages automatically.
+
+**Summary of all 3 static site migrations:**
+
+| Site | CF Pages | Custom Domain | DNS Status |
+|------|----------|--------------|------------|
+| cogov.me | `cogov-me.pages.dev` ✓ | `cogov.me` | Zone added, awaiting NS propagation |
+| peakexistence | `peakexistence.pages.dev` ✓ | `pe.briantakita.me` | Needs CNAME record |
+| prescience-notes | `prescience-notes.pages.dev` ✓ | `pn.briantakita.me` | Needs CNAME record |
+
+## User
+
+We already used a token to change the DNS for brookebrodack.net
+See image
+
+Please add your response. agent-doc should've handled the response after the compaction. But failed to. There is currently work being done on agent-doc to support template modes. SSee tasks/agent-doc.md and it's associated tmux pane + claude session.
+
+Coordinate to fix the bug

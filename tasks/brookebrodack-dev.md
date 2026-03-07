@@ -907,5 +907,25 @@ Alternatively, do it manually in the dashboard:
 
 Which approach?
 
+## Assistant
+
+**Re: "If the key were compromised, can someone transfer DNS control?"**
+
+**No.** A token with `Zone:DNS:Edit` can modify DNS records (redirect traffic), but **cannot**:
+- Transfer the domain to another registrar (requires registrar auth)
+- Transfer the zone to another CF account (requires account owner)
+- Change nameservers (requires registrar)
+- Access other CF services beyond the scoped permission
+
+**Risk if compromised:** Attacker could redirect traffic temporarily. Fix: revoke the token, restore records. No permanent ownership loss.
+
+**Mitigation options:**
+- Scope the token to specific zones only (brookebrodack.net)
+- Add IP address filtering on the token
+- The token is only in `cloudflare/.env` (gitignored) and GH Secrets (encrypted)
+
+The DNS:Edit permission is safe to add. Ready to proceed when you've updated the token, or I can do the DNS switch through the dashboard manually if you prefer.
+
 ## User
 
+See screenshot. Which of these tokens are you talking about?

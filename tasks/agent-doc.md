@@ -356,3 +356,46 @@ Created `agent-doc/docs/reference/race-conditions.md` with full analysis of all 
 
 ## User
 
+Please add tests for race conditions.
+
+## Assistant
+
+Added race condition tests to both repos. All tests pass cleanly.
+
+### tmux-router (`src/registry.rs`) -- 8 new tests
+
+1. **`acquire_lock_succeeds`** -- `RegistryLock::acquire` returns `Ok`
+2. **`lock_released_on_drop`** -- after dropping a lock, a second `acquire` succeeds
+3. **`nested_acquire_returns_error`** -- re-entrant `acquire` on the same thread returns an error containing "already held"
+4. **`acquire_or_skip_returns_none_on_reentrant`** -- `acquire_or_skip` returns `Ok(None)` when the thread already holds the lock
+5. **`acquire_or_skip_returns_some_when_free`** -- returns `Some(lock)` when free
+6. **`with_registry_read_modify_write`** -- inserts an entry under lock and verifies it persists
+7. **`with_registry_val_returns_value`** -- closure return value propagates through
+8. **`concurrent_with_registry_serializes_writes`** -- 10 threads with a `Barrier` all write different keys; final registry has all 10 entries (proves flock serialization works)
+
+### agent-doc -- 11 new tests
+
+**`snapshot.rs`:**
+1. **`flock_acquire_and_release_on_drop`** -- raw `fs2` flock acquire, release, re-acquire cycle
+2. **`flock_serializes_concurrent_access`** -- 10 threads increment a counter under flock; final value is exactly 10 (proves no lost updates)
+3. **`atomic_write_via_tempfile_produces_correct_content`** -- tempfile+persist writes expected content
+4. **`atomic_write_overwrites_existing`** -- atomic write replaces existing file
+5. **`concurrent_atomic_writes_no_partial_content`** -- 20 threads atomically write; final content is always a complete valid string (no partial/corrupted reads)
+
+**`submit.rs`:**
+6. **`acquire_doc_lock_succeeds`** -- `acquire_doc_lock` returns a valid locked file
+7. **`doc_lock_released_on_drop`** -- after dropping, second acquire succeeds
+8. **`atomic_write_correct_content`** -- `atomic_write()` produces correct file
+9. **`atomic_write_overwrites_existing`** -- overwrites old content
+10. **`concurrent_atomic_writes_no_corruption`** -- 20 concurrent writers; final content is a valid complete write
+11. **`merge_clean_no_conflicts`** -- 3-way merge with no user edits preserves agent response (uses `git merge-file` with explicit `current_dir` for CWD isolation)
+
+### Test results
+
+- **tmux-router:** 56 passed, 0 failed (8 new)
+- **agent-doc:** 140 passed, 0 failed, 2 ignored (11 new); 21 integration tests pass
+- **clippy:** clean (only pre-existing `with_snapshot` unused warning)
+
+## User
+
+Add a test for with_snapshot

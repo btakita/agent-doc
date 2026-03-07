@@ -777,3 +777,25 @@ Build and all 150 tests pass (`cargo build` + `cargo test` in both tmux-router a
 ## User
 
 release tmux-router, agent-doc
+
+## Assistant
+
+Released both packages with the flock advisory locking changes.
+
+**tmux-router v0.2.1:**
+- Committed: `RegistryLock` RAII guard, `with_registry`/`with_registry_val` helpers, locking in `update_window_for_entry` and `prune`, `fs2` dependency
+- Published: crates.io, GitHub Release (https://github.com/btakita/tmux-router/releases/tag/v0.2.1)
+
+**agent-doc v0.9.5:**
+- Committed: registry locking in `register_full` and `validate_file_claim`, stale claim auto-pruning, `RegistryLock` re-export, tmux-router bumped to 0.2.1
+- Published: crates.io, PyPI, GitHub Release with prebuilt binary (https://github.com/btakita/agent-doc/releases/tag/v0.9.5)
+- Installed locally: `~/.cargo/bin/agent-doc` replaced v0.9.4 with v0.9.5
+- `pyproject.toml` version synced to 0.9.5
+
+**agent-loop:** Submodule pointers updated and pushed.
+
+All 48 tmux-router tests and 150 agent-doc tests pass. Clippy clean.
+
+## User
+
+

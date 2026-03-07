@@ -84,5 +84,113 @@ Lightweight handler.
 
 both features
 
+## Assistant
+
+### Refined Design & Implementation Plan
+
+Based on your answers and deep-diving the relysjs codebase, here's the refined design.
+
+#### Feature 1: `relysjs/server/export` — Static Site Export
+
+New module at `ctx-core-dev/lib/relysjs/server/export/index.ts`:
+
+```typescript
+export interface static_export_config_T {
+  routes?: string[]           // Explicit routes to pre-render
+  site_url: string            // Production URL for URL rewriting
+  out_dir?: string            // Output directory (default: 'dist/browser')
+  server_import?: string      // Path to built server module (default: './dist/server/index.js')
+  app?: Elysia                // Pre-started app (skips server_import + app__start)
+  sitemap?: boolean           // Auto-discover routes from /sitemap.xml (default: true)
+  extra_routes?: string[]     // Non-HTML routes (robots.txt, rss, sitemap.xml)
+  url_rewrite?: boolean       // Enable localhost->site_url rewriting (default: true)
+}
+```
+
+The function:
+1. If no `app` provided: dynamically import `server_import`, call `app__start()`
+2. If `sitemap: true` (default): fetch `/sitemap.xml`, parse `<loc>` tags, merge with explicit `routes`
+3. Fetch each route, classify as HTML or raw based on extension
+4. Rewrite URLs if `url_rewrite` enabled
+5. Write files: HTML routes -> `<route>/index.html`, raw routes -> as-is
+6. Stop server in `finally` block (if we started it)
+7. Return `{ exported: string[], errors: string[] }` for programmatic use
+
+Replaces ~60 lines per site with ~5 lines:
+```typescript
+import { static_export_ } from 'relysjs/server/export'
+await static_export_({
+  site_url: 'https://brookebrodack.net',
+  routes: ['/', '/brookers', '/content', '/site', '/store'],
+  extra_routes: ['/robots.txt', '/rss', '/sitemap.xml'],
+})
+```
+
+Can we also accept append batches so file writes can be streamed?
+I'm wondering if there is a way to update the static files and not overwrite the files.
+This wouldn't support deleting files. What would you recommend to support deleting files that are streamed?
+
+#### Feature 2: `relysjs/server/export/cloudflare` — Cloudflare Worker Export
+
+New module at `ctx-core-dev/lib/relysjs/server/export/cloudflare/index.ts`:
+
+```typescript
+export interface cloudflare_export_config_T extends static_export_config_T {
+  dynamic_routes?: route_handler_T[]  // Routes handled by lightweight Worker
+  worker_out?: string                 // Worker output dir (default: 'dist/worker')
+  wrangler?: Partial<wrangler_config_T>  // Wrangler.toml overrides
+}
+
+export interface route_handler_T {
+  pattern: string              // URL pattern (e.g., '/api/*', '/websub')
+  handler: string              // Path to handler module
+}
+```
+
+The function:
+1. Run `static_export_()` for all static routes -> `dist/browser/`
+2. Generate a lightweight Cloudflare Worker entry point that:
+   - Serves static files from Cloudflare Pages (Pages handles this via `env.ASSETS.fetch`)
+   - Routes `dynamic_routes` patterns to their handler modules
+3. Bundle the Worker entry with ESBuild targeting `browser` (Workers runtime)
+4. Generate `wrangler.toml` with Pages project config + Worker routes
+
+Generated worker entry pattern:
+```typescript
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url)
+    if (url.pathname.startsWith('/api/')) return api_handler(request, env)
+    if (url.pathname === '/websub') return websub_handler(request, env)
+    return env.ASSETS.fetch(request)
+  }
+}
+```
+
+#### File Structure in relysjs
+
+```
+ctx-core-dev/lib/relysjs/
+  server/
+    export/
+      index.ts                    # static_export_, static_export_config_T
+      cloudflare/
+        index.ts                  # cloudflare_export_, cloudflare_export_config_T
+        worker_entry__generate.ts # Worker entry point code generation
+```
+
+Plus updates to `package.json` exports map.
+
+#### Implementation Order
+
+1. `server/export/index.ts` — core static export with sitemap discovery
+2. Update `package.json` exports
+3. Test by replacing brookebrodack-site's `static-export.ts` with the new API
+4. `server/export/cloudflare/index.ts` — Worker export building on static export
+5. Test with brookebrodack-dev's WebSub worker as the dynamic route
+6. Migrate briantakita.me's `prerender.ts` to validate the API works for both sites
+
+Ready to start implementing. Shall I begin with step 1?
+
 ## User
 

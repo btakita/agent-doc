@@ -406,3 +406,58 @@ Deploy this update to contabo.
 ## User
 
 Let's do a full migration of brookebrodack.net over to CloudFlare.
+
+## Assistant
+
+Here's what I found about the current setup and a migration plan:
+
+### Current Architecture
+
+| Component | Current | Notes |
+|-----------|---------|-------|
+| **Server** | Bun + Elysia on port 4101 | Dynamic SSR via relysjs |
+| **Container** | Docker (`oven/bun` image) | `bun -b start` entrypoint |
+| **Reverse Proxy** | Traefik | TLS via ACME, www→apex redirect, `bb.briantakita.me` redirect |
+| **Database** | SQLite (`app.db`) | 4 tables: `text_cache`, `person`, `session`, `youtube_video` |
+| **Assets** | Contabo S3 (`usc1.contabostorage.com`) | 119MB in `public/assets/` |
+| **DNS** | Already on Cloudflare | Proxied (CF IPs `104.21.x`, `172.67.x`) |
+| **Domains** | `brookebrodack.net`, `www.brookebrodack.net`, `bb.briantakita.me` | All redirect to apex |
+| **VPS** | Contabo 207.244.234.186 | Also hosts other services (censible, cogov) |
+
+### Migration Options
+
+**Option A: Cloudflare Pages + Workers (full serverless)**
+- Rewrite server to run on CF Workers (no Bun/Node APIs, no SQLite file)
+- Database: SQLite → Cloudflare D1 (or Turso)
+- Assets: Contabo S3 → Cloudflare R2
+- Build: `relysjs` SSR needs adaptation — Workers have different runtime constraints
+- **Effort:** High — relysjs/elysia/ctx-core assume Bun runtime
+
+**Option B: Cloudflare Tunnel (keep Bun server, move hosting to CF edge)**
+- Install `cloudflared` on VPS, create tunnel to port 4101
+- Remove Traefik, CF handles TLS/routing
+- Keep SQLite, keep Bun, keep everything as-is
+- Assets: optionally move to R2, or keep on Contabo S3
+- **Effort:** Low — 30 minutes, no code changes
+
+**Option C: Cloudflare Pages (static) + Workers (API)**
+- Pre-render pages at build time → Pages
+- YouTube API / DB queries → Workers + D1
+- **Effort:** Medium-high — requires splitting static/dynamic
+
+### Recommendation
+
+**Start with Option B** (Cloudflare Tunnel) — it's the fastest path with zero code changes. DNS is already on CF. Then incrementally migrate to Workers/Pages if needed.
+
+**Steps for Option B:**
+1. Create a CF Tunnel via dashboard or `cloudflared tunnel create brookebrodack`
+2. Configure tunnel to point to `http://localhost:4101`
+3. Update CF DNS to use tunnel (CNAME → `<tunnel-id>.cfargotunnel.com`)
+4. Remove Traefik labels from docker-compose
+5. Move assets from Contabo S3 → R2 (optional, saves S3 costs)
+
+Which option do you want to go with? Or do you want a different approach?
+
+## User
+
+Let's try option C. The static pages can be generated the same way  with briantakita.me

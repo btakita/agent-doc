@@ -541,6 +541,8 @@ Working through all 7 phases. Here's progress so far:
 
 **Key finding:** relysjs doesn't have a static export mode — it's a fully dynamic SSR system (same as briantakita.me). So I created a **pre-rendering script** that:
 
+Let's add static export to relysjs.
+
 1. Starts the production Elysia server
 2. Fetches all routes (crawls them)
 3. Rewrites `localhost` URLs to `https://brookebrodack.net`
@@ -635,7 +637,9 @@ The GH Actions workflow includes `schedule: cron '0 */6 * * *'` — rebuilds eve
 1. **GitHub secrets** — Add to `btakita/brookebrodack-dev` Settings → Secrets:
    - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
    - `GOOGLE_API_KEY`, `YOUTUBE_CHANNELID`, `YOUTUBE_RSS_URL`, `AUTHORY_YOUTUBE_RSS_URL`
+Can we automate this step?
 2. **CF Pages project** — Create `brookebrodack` in CF dashboard
+Automate?
 3. **Commit and push** — All files are unstaged, ready to commit
 4. **First deploy** — Push to main triggers GH Actions
 5. **WebSub worker** — `cd workers/websub && wrangler deploy && wrangler secret put GH_TOKEN && wrangler secret put WEBSUB_SECRET`

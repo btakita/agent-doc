@@ -1400,3 +1400,6 @@ I would like to make sure our js.map file works though. To make debugging stack 
 
 ## User
 
+compact this file. agent_doc_mode: template
+
+Let's focus on the current status of what is left to migrate from Contabo to Cloudflare

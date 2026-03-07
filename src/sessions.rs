@@ -14,7 +14,7 @@ use std::process::Command;
 pub use tmux_router::Tmux;
 #[cfg(test)]
 pub use tmux_router::IsolatedTmux;
-pub use tmux_router::{RegistryEntry as SessionEntry, Registry as SessionRegistry};
+pub use tmux_router::{RegistryEntry as SessionEntry, RegistryLock, Registry as SessionRegistry};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 
@@ -118,6 +118,7 @@ pub fn register_full(
     pid: u32,
     window: &str,
 ) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path())?;
     let mut registry = load()?;
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())

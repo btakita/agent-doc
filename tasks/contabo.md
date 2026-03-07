@@ -872,3 +872,17 @@ Yes
 
 ## User
 
+## Assistant
+
+**Answers + deploying other 2 sites in parallel.**
+
+**Re: zone creation permission** — The wrangler OAuth token has fixed scopes from `wrangler login`. You can't add permissions to it. Simplest approach: use the Cloudflare dashboard ("Add a site" → enter `cogov.me` → Free plan). It's 2 clicks. Alternatively, create a custom API token at dash.cloudflare.com/profile/api-tokens with "Zone: Edit" permission.
+
+I don't see add a site
+
+**Re: CF nameservers** — They're assigned per-zone when you add the site. They'll look like `aria.ns.cloudflare.com` and `chad.ns.cloudflare.com` (random name pairs). You'll see them immediately after adding the zone in the CF dashboard.
+
+**Peakexistence + prescience-notes** — Both deploying to CF Pages in parallel right now. Will report URLs when complete.
+
+## User
+

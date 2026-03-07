@@ -691,3 +691,31 @@ Since `relysjs` builds both browser and server bundles, the server bundle needs 
 ## User
 
 Some these sites can be 100% static, correct? Let's start with those sites first.
+## Assistant
+
+**Yes — 3 of the 5 sites can be 100% static.**
+
+| Site | Static? | Evidence |
+|------|---------|----------|
+| **cogov** (`cogov.me`) | **YES** | Pure HTML routes: `/`, `/connect`, `/declaration`, `/ecosystem`, etc. No auth, no DB |
+| **peakexistence** (`pe.briantakita.me`) | **YES** | Only `/`, `/robots.txt`, `/sitemap.xml` — all static HTML generators |
+| **prescience-notes** (`pn.briantakita.me`) | **YES** | Same pattern — `/`, `/robots.txt`, `/sitemap.xml` only |
+| herbaliciousbliss (`hb.briantakita.me`) | No | Google OAuth + CSRF + session management |
+| censible/mi-www (`mi-www.site`) | No | PostgreSQL queries + dynamic PDF/SVG/XLSX generation |
+
+**For the 3 static sites, the approach is:**
+1. Pre-render all routes to static HTML at build time
+2. Deploy the `dist/browser/` output to Cloudflare Pages
+3. Point DNS to CF Pages
+
+None of the 3 have a `prerender.ts` yet (only `briantakita.me-dev` has one). We'll need to create prerender scripts for each, or adapt the existing briantakita.me pattern.
+
+**Shall I start with cogov?** It has the most routes (12 pages) so it's the best test case. I'd:
+1. Create a `prerender.ts` based on briantakita.me's pattern
+2. Build static output
+3. Set up `wrangler.toml` for CF Pages deployment
+4. Configure DNS
+
+## User
+
+Yes. relysjs had a recent addition of generating the static html files. Please use that.

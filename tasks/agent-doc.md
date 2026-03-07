@@ -216,5 +216,39 @@ When a template-mode document has no explicit conversation components, the agent
 Let's work on the blog post for briantakita.me.
 Can you also help me with a general script for a screencast demo?
 I want the demo to be short and exciting.
-Not exc
+Not exciting in a marketing fluff sort of way...but a compelling short demo of the workflow.
+
+### Blog post outline
+
+1. **Hook**: "Your markdown file IS the chat interface"
+2. **The problem**: Context windows overflow, conversations are ephemeral, agent responses disappear into terminal scrollback
+3. **The solution**: agent-doc — document-as-UI with three interaction modes
+4. **Modes explained**:
+   - **Append**: Traditional chat. `## User` / `## Assistant` blocks. Linear history.
+   - **Template**: Named components. Agent patches specific regions. Living documents.
+   - **Exchange**: Shared conversation surface. User and agent write in the same space. Design discussions.
+5. **The design story**: How `response_mode` became `agent_doc_mode`, how `input`/`output` evolved into `exchange`
+6. **Demo link**: Screencast embedded
+7. **What's next**: Multi-agent backends, TUI dashboard, plugin ecosystem
+
+### Screencast script (~60 seconds, compelling workflow demo)
+
+No fluff — just show the workflow doing real work.
+
+| Time | Action | Voiceover |
+|------|--------|-----------|
+| 0:00 | Open a real project document in IDEA | "This is a real project. The document tracks architecture decisions." |
+| 0:05 | Show existing components (status, architecture) | "Named components — the agent updates them in place" |
+| 0:10 | Type a design question in the exchange | "I write directly in the document" |
+| 0:15 | Hit submit | "One click sends to Claude" |
+| 0:18 | Split view: terminal streaming + document updating | "Response streams in real time — into the document, not a chat window" |
+| 0:30 | Add an inline annotation to the response | "I disagree with this — annotate inline, submit again" |
+| 0:35 | Show revised response preserving the annotation | "3-way merge preserves my edits" |
+| 0:45 | `git diff` in terminal | "Every change is tracked. The document IS the conversation history" |
+| 0:55 | Quick cut: second document, different project | "Any markdown file. Any project." |
+| 0:60 | End: document with rich component structure | "agent-doc — documents that work with you" |
+
+**Tone:** Matter-of-fact. Let the workflow speak for itself. Real content, real project, real interaction.
+
+Should I have a live screencast or twitch stream instead? I would but I'm worried that I may expose some secrets unintentionally. 
 <!-- /agent:exchange -->

@@ -351,5 +351,21 @@ This is an Elysia version incompatibility -- `elysia@1.4.27` likely requires a n
 
 See if the upgrade works. If not, we may need to file a bug and pin.
 
+## Assistant
+
+**Fixed.** The issue was a TypeBox version mismatch:
+
+- **Installed:** `@sinclair/typebox@0.32.20` (lacks `Type.Module()`)
+- **Required by Elysia 1.4.27:** `@sinclair/typebox >= 0.34.0`
+
+**Fix:** Added `"@sinclair/typebox": "^0.34.48"` as an explicit dependency in `app/brookebrodack-site/package.json`. Ran `bun install --ignore-scripts` to resolve it.
+
+**Dev server now starts clean** on port 4101 with no errors. No need to file a bug or pin -- the upgrade works once TypeBox is at the correct version.
+
+**Changes (unstaged in brookebrodack-dev):**
+- `app/brookebrodack-site/package.json` -- added `@sinclair/typebox` dependency
+- `bun.lockb` -- updated lockfile
+
 ## User
 
+Please commit and push.

@@ -676,3 +676,42 @@ Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (or `wrangler lo
 ## User
 
 How do you get the cloudflare credentials when running commands for briantakita.me-dev?
+
+## Assistant
+
+**briantakita.me-dev doesn't use Cloudflare credentials locally.** The `CLOUDFLARE_API_TOKEN` lives only in GitHub Secrets (set 2026-03-05). The deploy workflow passes it to `cloudflare/wrangler-action@v3` — no local `wrangler` auth needed.
+
+**Current state:**
+- No `pass` entry for Cloudflare (checked `pass ls`)
+- `wrangler` not installed locally
+- `gh secret` can set values but can't read them back
+- briantakita.me-dev's workflow also has no `CLOUDFLARE_ACCOUNT_ID` secret — the `wrangler-action` infers it from the API token
+
+**For brookebrodack-dev, the options are:**
+
+1. **Reuse the same token** — If the API token from March 5 has account-level scope (not project-scoped to briantakita-me), it will work for brookebrodack too. You'd just need to find the original value (Cloudflare dashboard → API Tokens → view/regenerate).
+
+2. **Create a new token** — Cloudflare dashboard → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template → scope to "Cloudflare Pages" + account.
+
+3. **Account ID** — The `wrangler-action` can auto-detect account ID from the token. But the `wrangler.toml` for WebSub worker would need it. Find it at: Cloudflare dashboard → any domain → right sidebar → Account ID.
+
+**Recommended approach:**
+```bash
+# Get your API token from CF dashboard, then:
+gh secret set CLOUDFLARE_API_TOKEN -R btakita/brookebrodack-dev
+# Paste the token when prompted
+
+# Account ID (for wrangler.toml):
+gh secret set CLOUDFLARE_ACCOUNT_ID -R btakita/brookebrodack-dev
+# Paste account ID when prompted
+```
+
+Store both in `pass` for future use:
+```bash
+pass insert cloudflare/api-token
+pass insert cloudflare/account-id
+```
+
+## User
+
+Can we just use wrangler to get the tokens?

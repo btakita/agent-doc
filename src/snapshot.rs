@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 const SNAP_DIR: &str = ".agent-doc/snapshots";
 const LOCK_DIR: &str = ".agent-doc/locks";
+const PENDING_DIR: &str = ".agent-doc/pending";
 
 /// Compute the SHA256 hex hash of a document's canonical path.
 /// Used for both snapshot filenames and lock filenames.
@@ -26,6 +27,16 @@ pub fn lock_path_for(doc: &Path) -> Result<PathBuf> {
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root.join(LOCK_DIR).join(format!("{}.lock", hash)))
+}
+
+/// Compute the pending response file path for a given document.
+/// Returns `<project_root>/.agent-doc/pending/<sha256_hash>.md`.
+pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root.join(PENDING_DIR).join(format!("{}.md", hash)))
 }
 
 /// Walk up from a path to find the directory containing `.agent-doc/`.

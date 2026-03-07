@@ -14,6 +14,7 @@ mod patch;
 mod plugin;
 mod prompt;
 mod component;
+mod recover;
 mod reset;
 mod resync;
 mod route;
@@ -226,6 +227,11 @@ enum Commands {
         /// Path to the document
         file: PathBuf,
     },
+    /// Recover an orphaned response (from interrupted write-back after compaction)
+    Recover {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -359,6 +365,13 @@ fn main() -> anyhow::Result<()> {
         Commands::TemplateInfo { file } => {
             let info = template::template_info(&file)?;
             println!("{}", serde_json::to_string_pretty(&info)?);
+            Ok(())
+        }
+        Commands::Recover { file } => {
+            let recovered = recover::run(&file)?;
+            if !recovered {
+                eprintln!("[recover] No pending response found for {}", file.display());
+            }
             Ok(())
         }
         Commands::Upgrade => upgrade::run(),

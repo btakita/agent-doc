@@ -328,5 +328,28 @@ Please run this.
 
 This should create the SQLite tables (including `text_cache`) via drizzle. If `db:push` fails due to the drizzle-kit version jump (0.23→0.31), try `db:migrate` instead, or check if there's a migration SQL file in `app/brookebrodack-site/db/`.
 
+## Assistant
+
+**Database initialized.** Ran `drizzle-kit push` -- all 4 tables created: `text_cache`, `person`, `session`, `youtube_video`.
+
+**Fixes applied to make drizzle-kit work:**
+
+1. **`drizzle.config.ts`** — changed `driver: 'libsql'` to `dialect: 'sqlite'` (required by drizzle-kit 0.31+)
+2. **`package.json` scripts** — updated deprecated commands:
+   - `db:generate`: `drizzle-kit generate:sqlite` → `drizzle-kit generate`
+   - `db:push`: `drizzle-config push:sqlite` → `drizzle-kit push`
+3. **Added `better-sqlite3`** as devDependency — drizzle-kit needs it to connect to SQLite (bun:sqlite isn't usable by drizzle-kit CLI)
+
+**Dev server status:** The `text_cache` error is resolved. Server now hits a **new error**:
+
+```
+TypeError: t.Module is not a function. (In 't.Module({})', 't.Module' is undefined)
+    at new Elysia (elysia/src/index.ts:418:2)
+```
+
+This is an Elysia version incompatibility -- `elysia@1.4.27` likely requires a newer version of `@sinclair/typebox` that provides `Type.Module()`. This was introduced around TypeBox 0.34+. The workspace may be pulling an older TypeBox version. Next step would be to check and upgrade `@sinclair/typebox` or pin a compatible Elysia version.
+
+See if the upgrade works. If not, we may need to file a bug and pin.
+
 ## User
 

@@ -382,3 +382,27 @@ Note: The previous dep update commit (`e0ac347`) was on a detached HEAD in the s
 ## User
 
 Deploy this update to contabo.
+
+## Assistant
+
+**Deployed to Contabo VPS** (207.244.234.186).
+
+**Steps performed:**
+
+1. **SSH agent setup** -- started `ssh-agent.socket` and loaded `id_ed25519` for GitHub SSH forwarding
+2. **Git pull** -- `git fetch && git reset --hard origin/main` on `/home/admin/work/brookebrodack-dev` (updated `672f0c8..8097684`)
+3. **Submodule sync** -- `git submodule sync && git submodule update --init --recursive --force` -- all 21 submodules updated, including `app/brookebrodack-site` to `20e6feb`
+4. **Dependency install** -- `bun install --ignore-scripts` inside the `brookebrodack-www-1` container (313 packages, 13s)
+5. **Skipped `drizzle-kit push`** -- it tried to DROP all existing tables (including `text_cache` with 4 items and `youtube_video` with 228 items). The production DB already has the correct schema; the new drizzle config just needs to match it at runtime.
+6. **Container restart** -- `docker compose restart www` -- clean startup, server running on port 4101
+
+**Verification:**
+- `curl https://brookebrodack.net/` returns HTTP 200
+- Container logs show `server started on port 4101` with no errors
+- YouTube API requests returning 304 (cache hits) as expected
+
+**Note:** The stale submodule ref `e0ac347` (from the detached HEAD commit that was never pushed) caused the initial `git pull` to fail. Fixed by doing `git reset --hard origin/main` + `git submodule update --force`.
+
+## User
+
+Let's do a full migration of brookebrodack.net over to CloudFlare.

@@ -461,3 +461,39 @@ Which option do you want to go with? Or do you want a different approach?
 ## User
 
 Let's try option C. The static pages can be generated the same way  with briantakita.me
+
+## Assistant
+
+Good call. The brookebrodack-site build already produces `dist/server--dev/` and `dist/browser--dev/` via relysjs — same pattern as briantakita.me. Here's the plan:
+
+### What's Dynamic vs Static
+
+| Feature | Current | CF Migration |
+|---------|---------|-------------|
+| **Pages** (home, about, etc.) | SSR via Elysia | Pre-render at build → **CF Pages** (static HTML/CSS/JS) |
+| **YouTube feed** | Live API call → SQLite `text_cache` | **CF Worker** → D1 or KV for cache |
+| **Assets** (images, videos) | Contabo S3 → `public/assets/` | **CF R2** bucket |
+| **Database** | SQLite file (`app.db`) | **CF D1** (SQLite-compatible) |
+
+### Migration Steps
+
+1. **Build static site** — Modify the relysjs build to output static HTML (same as briantakita.me's `bun run build` with `app__start: false`)
+2. **Deploy to CF Pages** — `wrangler pages deploy dist/browser/` or connect GitHub repo
+3. **YouTube Worker** — Extract the YouTube API + text_cache logic into a CF Worker with D1
+4. **Assets to R2** — Sync `public/assets/` to an R2 bucket, serve via custom domain or CF Pages `_redirects`
+5. **DNS cutover** — Update CF DNS from Contabo proxy to Pages deployment
+6. **Decommission** — Remove Docker container from Contabo
+
+### Questions Before Starting
+
+1. **YouTube data freshness** — Currently fetches live and caches in SQLite with `ttl_ms = Infinity` (never expires, uses ETags). For static: do you want YouTube data baked at build time (rebuild to update), or keep it dynamic via a Worker?
+2. **D1 database** — The 4 tables (`text_cache`, `person`, `session`, `youtube_video`) — are `person` and `session` actively used? Or is it mainly `text_cache` + `youtube_video`?
+3. **Build frequency** — How often should the static site rebuild? On push? On a schedule (e.g., daily for fresh YouTube data)?
+
+Code change deployments should happen from gh actions.
+Can we have a push notification from the YouTube feed? Can this happen via github actions?
+
+Let me know your answers and I'll start implementing.
+
+## User
+

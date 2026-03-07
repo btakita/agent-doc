@@ -732,3 +732,48 @@ Build and all 150 tests pass (`cargo build` + `cargo test`).
 
 ## User
 
+
+## Assistant
+
+### Does `flock` fix the TOCTOU race?
+
+Yes, completely. The TOCTOU (time-of-check-to-time-of-use) race is: Agent A reads registry, Agent B reads registry, Agent A writes, Agent B writes (clobbering A). With `flock`, Agent A acquires an exclusive lock, then reads, modifies, writes, and releases. Agent B blocks on the lock until A is done. The read-modify-write becomes atomic with respect to other cooperating processes.
+
+### Cross-platform strategy
+
+- **Linux/macOS:** `flock()` syscall
+- **Windows:** `LockFileEx` syscall
+- **Abstraction:** The `fs2` crate (0.4) provides `FileExt::lock_exclusive()` and `FileExt::unlock()` that dispatch to the correct OS primitive on all three platforms. Single dependency, no conditional compilation needed.
+
+### Implementation
+
+Added `fs2 = "0.4"` to `tmux-router/Cargo.toml` and implemented a `RegistryLock` RAII guard in `tmux-router/src/registry.rs`:
+
+- **`RegistryLock::acquire(registry_path)`** -- opens/creates `<path>.lock` sibling file, calls `lock_exclusive()` (blocks until available), returns a guard
+- **`Drop` for `RegistryLock`** -- explicitly calls `unlock()` (also released on file close)
+- **`with_registry(path, closure)`** -- convenience: acquire lock, load, run closure on `&mut Registry`, save, release. Eliminates TOCTOU by holding the lock across the entire read-modify-write
+- **`with_registry_val(path, closure)`** -- same but returns a value from the closure
+
+All read-modify-write call sites now hold the lock:
+
+| Function | File |
+|----------|------|
+| `register_full()` | `agent-doc/src/sessions.rs` |
+| `validate_file_claim()` | `agent-doc/src/claim.rs` |
+| `update_window_for_entry()` | `tmux-router/src/registry.rs` |
+| `prune()` | `tmux-router/src/registry.rs` |
+
+Read-only callers (`lookup`, `load` for display, `prompt`, `watch discover`) don't need the lock -- they tolerate slightly stale data and don't write back.
+
+**Files changed:**
+- `/home/brian/work/btakita/agent-loop/tmux-router/Cargo.toml` -- added `fs2 = "0.4"`
+- `/home/brian/work/btakita/agent-loop/tmux-router/src/lib.rs` -- exported `RegistryLock`, `with_registry`, `with_registry_val`
+- `/home/brian/work/btakita/agent-loop/tmux-router/src/registry.rs` -- `RegistryLock` guard, `with_registry`/`with_registry_val` helpers, locking in `update_window_for_entry` and `prune`
+- `/home/brian/work/btakita/agent-loop/agent-doc/src/sessions.rs` -- locking in `register_full`, re-export `RegistryLock`
+- `/home/brian/work/btakita/agent-loop/agent-doc/src/claim.rs` -- locking in `validate_file_claim`
+
+Build and all 150 tests pass (`cargo build` + `cargo test` in both tmux-router and agent-doc). The lock is re-entrant safe on the same thread (advisory locks are per-process on Unix), so nested calls from `register_full` calling `load`/`save` work correctly.
+
+## User
+
+release tmux-router, agent-doc

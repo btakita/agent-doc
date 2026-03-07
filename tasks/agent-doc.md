@@ -279,4 +279,28 @@ I want to have a screencast as well.
 - **Source material**: This discussion — the naming evolution (`response_mode` → `agent_doc_mode`), the `exchange` component proposal, the in-place annotation model
 - **Screencast**: Demo the workflow — editing a template-mode document, watching agent-doc pick up changes, seeing patch blocks applied in real time
 - **Good demo flow**: Create a fresh template document → write in exchange component → submit → show inline response → annotate → re-submit → show git diff timeline
+
+We seem to be having problems converting to agent_doc_mode: template in other documents. This file converted properly, but others did not. Has the skill been updated?
+
+### Template mode conversion fix
+
+Found the root cause: **the SKILL.md had zero template-mode instructions.** It was still at v0.9.9 content (append-only workflow) even after the v0.10.0 binary install. The `agent-doc skill install` command updated the version number but the bundled SKILL.md never had template-mode documentation added.
+
+**What was missing:**
+- No mention of `agent_doc_mode` frontmatter field
+- No instructions for `--template` flag on `agent-doc write`
+- No documentation of patch block format (`<!-- patch:name -->...<!-- /patch:name -->`)
+- No component conventions (`input`, `output`, `exchange`)
+
+**Fixed:**
+1. Updated `.claude/skills/agent-doc/SKILL.md` with template-mode workflow (step 4b)
+2. Added `agent_doc_mode` to the Document Format section
+3. Documented patch block format and component conventions
+4. Copied updated SKILL.md to `src/agent-doc/SKILL.md` (binary source) for next release
+
+This document worked because the conversion happened manually in context — the agent had the knowledge from the conversation. Other documents failed because they relied on the SKILL.md (which lacked template instructions).
+
+**Next steps:** Rebuild and release the binary so `agent-doc skill install` propagates the fix to all projects.
 <!-- /agent:output -->
+
+We seem to be having problems converting to agent_doc_mode: template in other documents. This file converted properly, but others did not. Has the skill been updated?

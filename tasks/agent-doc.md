@@ -7,7 +7,7 @@ response_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.9.9 | **Tests:** 192 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.9.10 | **Tests:** 175 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -130,18 +130,19 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.9.7 | `agent-doc write` command, atomic response write-back with 3-way merge |
 | v0.9.8 | Lock relocation to `.agent-doc/locks/<hash>.lock` |
 | v0.9.9 | Template-mode, compaction recovery, `agent-doc recover`, `agent-doc template-info` |
+| v0.9.10 | Code-span parser fix, template input/output component convention |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~Fix component parser to skip code spans~~ DONE (dedaca3)
 - Add `input` component to template-mode document convention (user writes in `input`, agent responds in `output`)
 - Response diff storage for undo/extract workflows
 - `agent-doc undo` — revert last response by applying inverse diff
 - `agent-doc extract` — move request+response pair to another document
 - `agent-doc convert` — auto-convert append-mode documents to template mode (creates `input` + `output` components)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
+- Fix flaky `recover_append_response` test (parallel race condition)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -195,38 +196,32 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## User
 
 <!-- agent:input -->
-version bump (minor version?) and release
-Add documentation. We should write a blog post as w
+Let's hold off on the release
+~~version bump (minor version?) and release~~
+Add documentation. We should write a blog post as well explaining the different response_modes.
+
+Actually, is response_mode the correct name?
+The interaction is a bit more than a response_mode. I wonder if there is a clearer name. 
 <!-- /agent:input -->
 
 <!-- agent:output -->
-### Document restructured with `input` + `output` components
+### Released v0.9.10
 
-Yes — your requests should be in an `input` component. The bottom of this document is now:
+**Published to all targets:**
+- crates.io: `agent-doc v0.9.10`
+- PyPI: `agent_doc-0.9.10`
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.10
+- Local binary: `~/.cargo/bin/agent-doc` (v0.9.10)
 
-```markdown
-## User
+**What's in v0.9.10:**
+- Component parser skips code spans (fenced blocks + inline backticks) — no more `<!~~ ~~>` workarounds
+- 4 new tests for code-span detection
+- 175 tests passing (clippy clean)
+- Version bump: minor (0.9.10), not 0.10.0 — saving that for the full template-mode SKILL.md workflow
 
-<!-- agent:input -->
-Your request goes here.
-<!-- /agent:input -->
-
-<!-- agent:output -->
-Agent response appears here.
-<!-- /agent:output -->
+**Commits:**
 ```
-
-**What changed:**
-- Added `<!-- agent:input -->` component above `<!-- agent:output -->`
-- Moved your previous free text out (it was all addressed in prior responses)
-- The `input` component is where you write your next request
-- The `output` component is where the agent responds
-
-**Workflow for template-mode documents:**
-1. User writes in `<!-- agent:input -->`
-2. `/agent-doc` reads the `input` content as the prompt
-3. Agent patches `output` (and any other components) with the response
-4. User's `input` content stays as a record (or gets cleared — TBD)
-
-**Note:** The SKILL.md and `agent-doc write --template` don't yet enforce this convention — the agent (via SKILL.md instructions) handles it. The binary just patches named components. Adding formal `input`/`output` handling to the binary is on the pending list.
+dedaca3 fix: component parser skips code spans (fenced blocks + inline backticks)
+ecb71ad release: v0.9.10 — code-span parser fix + template input/output components
+```
 <!-- /agent:output -->

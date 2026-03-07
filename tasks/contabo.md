@@ -1344,3 +1344,59 @@ Make `/` and `/lyra` render personalized content when logged in, served from the
 ## User
 
 
+## Assistant
+
+**You're right — we bundle the code output, not the workspace packages.**
+
+The existing `build.ts` already uses esbuild to bundle everything into `dist/server/index.js` with all `workspace:*` imports resolved. For the Worker:
+
+1. Build with existing esbuild pipeline → produces single bundled `dist/server/index.js`
+2. Write a thin Worker entry point that imports the bundle and exports a `fetch` handler
+3. The only change: swap the Drizzle driver from `bun-sqlite` to `d1` before building
+
+Wrangler doesn't need to resolve workspace packages — it just deploys the pre-bundled JS. This makes Stage 2 much simpler than I described.
+
+**Revised Stage 2 plan:**
+1. Modify `build.ts` to support a `--target worker` flag that uses `drizzle-orm/d1` instead of `drizzle-orm/bun-sqlite`
+2. Create a thin `worker-entry.ts` that wraps the bundled server as a CF Worker fetch handler
+3. `bun build.ts --target worker` → `dist/worker/index.js`
+4. `wrangler deploy dist/worker/index.js` with D1 binding
+5. Set secrets + update Google OAuth callback
+
+The bundling concern was a false alarm. The real work is just the Drizzle driver swap and the worker entry point.
+
+I would like to make sure our js.map file works though. To make debugging stack traces easier.
+
+**Proceeding with Stage 1 now** — static deploy of herbaliciousbliss to CF Pages.
+
+## User
+
+## Assistant
+
+**Stage 1 complete — herbaliciousbliss deployed to Cloudflare Pages.**
+
+| Step | Status |
+|------|--------|
+| Assets downloaded from Contabo S3 | Done (64.4 MiB, 19 files) |
+| Production build (`NODE_ENV=production bun build.ts`) | Done |
+| Pre-rendered static HTML (`/` and `/lyra`) | Done |
+| Deployed to CF Pages (`herbaliciousbliss.pages.dev`) | Done |
+| Custom domain `hb.briantakita.me` CNAME configured | Done |
+| Contabo container `herbaliciosbliss-www-1` stopped + removed | Done |
+
+**Sites remaining on Contabo:**
+- `mi-www.site` (censible) — staying on Contabo per your decision
+- `traefik` reverse proxy — still running for censible
+
+**All 4 migrated sites now on Cloudflare:**
+| Site | CF Pages URL | Custom Domain | Status |
+|------|-------------|---------------|--------|
+| cogov.me | cogov-me.pages.dev | cogov.me | Live (pending NS propagation) |
+| pe.briantakita.me | peak-existence.pages.dev | pe.briantakita.me | Live |
+| pn.briantakita.me | prescience-notes.pages.dev | pn.briantakita.me | Live |
+| hb.briantakita.me | herbaliciousbliss.pages.dev | hb.briantakita.me | Live |
+
+**Next step (Stage 2, follow-up session):** CF Worker + D1 for herbaliciousbliss auth — Drizzle driver swap, Hono worker entry, Google OAuth callback update.
+
+## User
+

@@ -539,3 +539,29 @@ The fix belongs in the SKILL.md workflow (retry logic or atomic write via `agent
 
 I want agent-doc to own the writeback. The functional tests were assuming that agent-doc owns the writeback. So I want tests for the behavior so this bug does not occur.
 Would it be beneficiat to work with claude code to resolve some merge issues?
+
+## Assistant
+
+**Yes — `agent-doc` should own the write-back.** This eliminates the race condition entirely.
+
+**New command: `agent-doc write <FILE>`**
+- Accepts response content via stdin
+- Atomically appends `## Assistant\n\n<content>\n\n## User\n\n` to the document
+- Uses flock + atomic rename (same pattern as snapshot writes)
+- Updates the snapshot after writing
+- Returns success/failure
+
+**Functional tests to add:**
+1. `test_write_appends_response` — write response to a document, verify `## Assistant` block appears
+2. `test_write_updates_snapshot` — after write, snapshot matches document
+3. `test_write_concurrent_edit` — simulate user editing during write, verify no data loss
+4. `test_write_preserves_user_edits` — user adds content between response generation and write-back, both are preserved
+
+**Re: Claude Code merge resolution** — Yes, beneficial. The write-back race is exactly where Claude Code's Edit tool struggles with concurrent access. If `agent-doc write` handles the atomic append, Claude Code only pipes content to stdin — no file reading/editing at all. This also opens the door for `agent-doc` to handle merge conflicts when the user edits during response generation.
+
+This work should happen in the `src/agent-doc/` submodule. Shall I proceed with implementation?
+
+## User
+
+Yes implement.
+But first, please update any Jetbrains configurations, such as .idea/modules.xml, to account for the git mv to src/

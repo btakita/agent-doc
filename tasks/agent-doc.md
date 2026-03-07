@@ -629,3 +629,50 @@ Does agent-doc have a toml file that we can use?...So agent-doc can be used with
 I notice that the claude tasks are now long running.
 Do we currently have a deadlock?
 Do the recently introduced locks keep the claude session task running by any chance? Do we log this behavior?
+
+## Assistant
+
+### Config TOML — Yes, it exists
+
+agent-doc already has `~/.config/agent-doc/config.toml`. It configures agent backends:
+
+```toml
+default_agent = "claude"
+
+[agents.claude]
+command = "claude"
+args = ["-p", "--output-format", "json"]
+
+[agents.codex]
+command = "codex"
+args = ["--quiet"]
+```
+
+This is how agent-doc works without being tied to Claude — any CLI agent backend can be added. `agent-doc run --agent codex file.md` would use the codex config. The `execution-mode` setting from SKILL.md is separate (skill-level orchestration, not binary-level config). We could add execution-mode to config.toml as well if you want it configurable per-project rather than per-skill.
+
+Yes. Needs to be supported here for non-Claude interactions. Per skill is also helpful.
+
+### No Deadlock
+
+Checked with `fuser` and `lsof` — no process is holding any lock file. The `sessions.json.lock` file exists (created on first use) but is not locked by any process.
+
+**The locks are not causing long-running tasks.** flock acquisition/release takes microseconds. The locks only block if another process holds the same lock, which isn't happening.
+
+### Why Tasks Are Long-Running
+
+The long runtimes are from **subagent overhead**, not locks. Each `/agent-doc` invocation was spawning a subagent (the old execution model), which:
+1. Starts a fresh context window (~30s startup)
+2. Loads CLAUDE.md, MCP servers, skills
+3. Reads the full document + snapshot
+4. Processes the diff and responds
+5. Writes back + updates snapshot
+
+This multiplied per invocation. Now that we've switched to direct processing (hybrid mode), subsequent `/agent-doc` calls on the same session should be much faster — no subagent spawn, no context duplication.
+
+### Logging
+
+The `[diff]` and `[submit]` diagnostic logging we added earlier logs to stderr. The flock operations themselves don't log (they're sub-millisecond). If you want lock timing instrumented, we could add `[lock]` log lines around `acquire()` calls. But the locks aren't the bottleneck — the subagent spawns were.
+
+## User
+
+I notice that my previous requests to run this document were blocked...well after there was a response.

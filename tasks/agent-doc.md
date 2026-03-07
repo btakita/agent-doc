@@ -310,5 +310,49 @@ Please document the race condition analysis and whatever mitigations we have don
 | Watch daemon write window | 3-way merge | Low | Atomic rename (proposed) | Awaiting approval |
 
 Please update this table in the next response.
+
+## Assistant
+
+All six items implemented. Tests pass (48 tmux-router, 150 agent-doc).
+
+Please add tests for race conditions.
+
+### 1. Diagnostic logging
+
+Added `[diff]` and `[submit]` log lines to `agent-doc/src/diff.rs` and `agent-doc/src/submit.rs`. Every diff computation now logs: document path, snapshot path, byte lengths (raw and stripped), and whether changes were detected. Submit logs entry, diff size, and the "nothing changed" case with the file path. These will make silent no-ops self-diagnosable from logs without user intervention.
+
+### 2. Noop + warning for nested flock
+
+`tmux-router/src/registry.rs` now has a thread-local `REGISTRY_LOCK_HELD` flag. `RegistryLock::acquire()` checks the flag and returns an error if already held (fail-fast for unexpected nesting). New `acquire_or_skip()` returns `Ok(None)` with an `[registry]` warning instead of deadlocking. `prune()` uses `acquire_or_skip()` so it becomes a harmless no-op when called from within a locked context. The `Drop` impl clears the flag.
+
+### 3. Atomic rename for document writes
+
+`submit.rs` now writes via `atomic_write()`: creates a `tempfile::NamedTempFile` in the same directory as the target file, writes content, then calls `persist()` (POSIX rename). This eliminates the partial-write window entirely.
+
+### 4. Atomic rename for snapshot writes
+
+`snapshot.rs` `save_unlocked()` now uses the same tempfile + persist pattern.
+
+### 5. Flock for agent-doc-vs-agent-doc coordination
+
+Yes, the flock is useful in addition to atomic rename. Atomic rename makes individual writes atomic, but the critical section in `submit::run()` spans re-read + merge + write + snapshot-update. Without a lock, two concurrent `agent-doc` processes (e.g., watch daemon fires while a manual `run` is mid-flight) could both re-read the same state and both try to write, with the second clobbering the first's merge result. The flock serializes the entire re-read/write/snapshot sequence.
+
+`submit::run()` now acquires `<file>.md.agent-doc.lock` (advisory flock) before the re-read/merge/write/snapshot block, released after both the document and snapshot are written.
+
+### 6. Race condition documentation
+
+Created `agent-doc/docs/reference/race-conditions.md` with full analysis of all identified race conditions, their mitigations, and version history.
+
+### Updated Summary Table
+
+| Race | Protected? | Severity | Fix | Status |
+|------|-----------|----------|-----|--------|
+| Registry read-modify-write | Yes (flock) | N/A | Done in v0.2.1 | **Done** |
+| Snapshot read-modify-write | Yes (flock) | N/A | SnapshotLock | **Done** |
+| claim validate-register gap | Benign TOCTOU | Negligible | Self-healing | N/A |
+| load()/save() without lock | pub(crate) | N/A | Visibility restricted | **Done** |
+| Nested lock (prune + caller) | Thread-local guard | N/A | noop + warning via `acquire_or_skip()` | **Done** |
+| Watch daemon write window | Atomic rename + flock | N/A | tempfile+persist + doc advisory lock | **Done** |
+
 ## User
 

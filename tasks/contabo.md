@@ -484,3 +484,5 @@ presence  prescience-notes-dev  python-intentions  tagpath  tmux-router
 The agent-doc pluginsa an error:
 
 Claim failed (exit 2): error: unexpected argument '--position' found tip: to pass '--position' as a value, use '-- --position' Usage: agent-doc claim   For more information, try '--help'.
+
+I manually claimed fgrom

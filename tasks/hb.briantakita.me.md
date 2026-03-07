@@ -68,3 +68,32 @@ Shall I start implementing?
 yes
 ## User
 
+## Assistant
+
+**Stage 2 implemented and deployed.**
+
+Here's what was done:
+
+1. **Created `worker/index.ts`** — self-contained CF Worker handling `/login/google` and `/login/google/callback`, using:
+   - `arctic` for Google OAuth (same library as before)
+   - `drizzle-orm/d1` for D1 database queries (async, replacing `drizzle-orm/bun-sqlite`)
+   - `oslo/cookie` for cookie management
+   - Falls back to `env.ASSETS.fetch(request)` for static pages
+
+2. **Created `build-worker.ts`** — esbuild config that bundles `worker/index.ts` → `dist/browser/_worker.js`
+
+3. **Created D1 migration** (`migrations/0001_init.sql`) — `person` table (with `google_sub`, `google_picture`) and `session` table with index
+
+4. **Applied migration** to remote D1 database
+
+5. **Set secrets** via `wrangler pages secret put`: `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET`
+
+6. **Deployed** — `_worker.js` is automatically picked up by CF Pages as the Worker handler
+
+**Verified:** `GET /login/google` returns 302 redirect to Google OAuth consent screen with correct `client_id` and `redirect_uri=https://hb.briantakita.me/login/google/callback`.
+
+**To test fully:** Click "Sign in with Google" on `hb.briantakita.me`. If the Google OAuth console already has `https://hb.briantakita.me/login/google/callback` as an authorized redirect URI (likely, since the domain hasn't changed), the full flow should work.
+
+## User
+
+I went through the oauth...but still see the Sign in with Google button after a successful oauth.

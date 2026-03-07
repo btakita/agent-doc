@@ -61,13 +61,83 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
     }
 }
 
+/// Find byte ranges of code regions (fenced code blocks + inline code spans).
+/// Markers inside these ranges are treated as literal text, not component markers.
+fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let bytes = doc.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Fenced code blocks: line starting with ``` or ~~~
+        if (pos == 0 || bytes[pos - 1] == b'\n') && pos + 3 <= len {
+            let fence_char = bytes[pos];
+            if (fence_char == b'`' || fence_char == b'~')
+                && bytes[pos + 1] == fence_char
+                && bytes[pos + 2] == fence_char
+            {
+                let block_start = pos;
+                // Skip past the opening fence line
+                pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
+                // Find closing fence
+                loop {
+                    if pos >= len {
+                        ranges.push((block_start, len));
+                        break;
+                    }
+                    if pos + 3 <= len
+                        && bytes[pos] == fence_char
+                        && bytes[pos + 1] == fence_char
+                        && bytes[pos + 2] == fence_char
+                    {
+                        let end = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
+                        ranges.push((block_start, end));
+                        pos = end;
+                        break;
+                    }
+                    pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
+                }
+                continue;
+            }
+        }
+
+        // Inline code spans: `...`
+        if bytes[pos] == b'`' && (pos + 1 < len && bytes[pos + 1] != b'`') {
+            let span_start = pos;
+            pos += 1;
+            // Find closing backtick (not escaped, not newline-terminated)
+            while pos < len && bytes[pos] != b'`' && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            if pos < len && bytes[pos] == b'`' {
+                ranges.push((span_start, pos + 1));
+                pos += 1;
+                continue;
+            }
+            // No closing backtick found on same line — not a code span
+            continue;
+        }
+
+        pos += 1;
+    }
+
+    ranges
+}
+
+fn memchr_byte(needle: u8, haystack: &[u8], start: usize) -> Option<usize> {
+    haystack[start..].iter().position(|&b| b == needle).map(|i| start + i)
+}
+
 /// Parse all components from a document.
 ///
 /// Uses a stack for nesting. Returns components sorted by `open_start`.
 /// Errors on unmatched open/close markers or invalid names.
+/// Skips markers inside fenced code blocks and inline code spans.
 pub fn parse(doc: &str) -> Result<Vec<Component>> {
     let bytes = doc.as_bytes();
     let len = bytes.len();
+    let code_ranges = find_code_ranges(doc);
     let mut templates: Vec<Component> = Vec::new();
     // Stack of (name, open_start, open_end)
     let mut stack: Vec<(String, usize, usize)> = Vec::new();
@@ -77,6 +147,12 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
         // Look for `<!--`
         if &bytes[pos..pos + 4] != b"<!--" {
             pos += 1;
+            continue;
+        }
+
+        // Skip markers inside code regions
+        if code_ranges.iter().any(|&(start, end)| pos >= start && pos < end) {
+            pos += 4;
             continue;
         }
 
@@ -325,5 +401,63 @@ content
         let ranges = parse(doc).unwrap();
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].content(doc), "");
+    }
+
+    #[test]
+    fn markers_in_fenced_code_block_ignored() {
+        let doc = "\
+<!-- agent:real -->
+content
+<!-- /agent:real -->
+```markdown
+<!-- agent:fake -->
+this is just an example
+<!-- /agent:fake -->
+```
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "real");
+    }
+
+    #[test]
+    fn markers_in_inline_code_ignored() {
+        let doc = "\
+Use `<!-- agent:example -->` markers for components.
+<!-- agent:real -->
+content
+<!-- /agent:real -->
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "real");
+    }
+
+    #[test]
+    fn markers_in_tilde_fence_ignored() {
+        let doc = "\
+<!-- agent:x -->
+data
+<!-- /agent:x -->
+~~~
+<!-- agent:y -->
+example
+<!-- /agent:y -->
+~~~
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "x");
+    }
+
+    #[test]
+    fn code_ranges_detected() {
+        let doc = "before\n```\ncode\n```\nafter `inline` end\n";
+        let ranges = find_code_ranges(doc);
+        assert_eq!(ranges.len(), 2);
+        // Fenced block
+        assert!(doc[ranges[0].0..ranges[0].1].contains("code"));
+        // Inline span
+        assert!(doc[ranges[1].0..ranges[1].1].contains("inline"));
     }
 }

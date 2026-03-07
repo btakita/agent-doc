@@ -1306,3 +1306,41 @@ Shall I proceed with the herbaliciousbliss Hono + D1 implementation?
 ## User
 
 Let's leave censible on Contabo for now. Migrate herbaliciousbliss only.
+## Assistant
+
+**Implementation update — deeper than expected. Proposing staged approach.**
+
+After tracing through the code, the entire herbaliciousbliss stack is built on `ctx-core/rmemo` — a reactive memoization system. Every function (auth, session, CSRF, UI rendering) uses reactive context scopes. This isn't just "swap Elysia for Hono" — it's "port the reactive context system to Workers."
+
+**The good news:** `ctx-core/rmemo` is pure JS with no Node.js imports. It *should* work in CF Workers if bundled correctly. The auth functions (`login_google__GET`, `session__create`, etc.) don't need rewriting — they just need the rmemo context set up correctly.
+
+**The challenge:** Building/bundling. The workspace packages (`@rappstack/*`, `@btakita/*`, `relysjs`, `rebuildjs`, `ctx-core`) are all linked via `workspace:*` in the monorepo. Wrangler's bundler needs to resolve all of these. This is a build-config challenge, not a code-change challenge.
+
+**D1 database already created:** `herbaliciousbliss` (ID: `28b81e75-0581-4d86-a12e-82fb9644ef3c`, region ENAM).
+
+**Proposed stages:**
+
+### Stage 1: Static deploy (today)
+Pre-render `/` and `/lyra` as static HTML (unauthenticated view). Deploy to CF Pages like the other 3 sites. This lets us decommission herbaliciousbliss on Contabo immediately.
+
+- Create `prerender.ts` (same pattern as cogov)
+- Deploy static site to CF Pages
+- Update DNS: CNAME `hb` → CF Pages
+- Stop container on Contabo
+
+### Stage 2: Auth worker (follow-up session)
+Add CF Worker for `/login/google` and `/login/google/callback`. This requires:
+- D1 database with person/session/text_cache tables
+- Worker entry point that sets up rmemo context + D1-backed Drizzle
+- Bundle the workspace packages for Workers runtime
+Can we just bundle the code output? Why would we need the workspace packages?
+- Google OAuth callback URL update
+
+### Stage 3: SSR with auth (optional)
+Make `/` and `/lyra` render personalized content when logged in, served from the worker instead of static pages.
+
+**Stage 1 gets the site off Contabo today.** Auth can follow when the bundling is sorted out. Want me to proceed with Stage 1?
+
+## User
+
+

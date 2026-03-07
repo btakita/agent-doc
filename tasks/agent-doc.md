@@ -194,45 +194,39 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 ## User
 
-<!-- agent:output -->
-### Code-span parser fix implemented
+<!-- agent:input -->
+version bump (minor version?) and release
+Add documentation. We should write a blog post as w
+<!-- /agent:input -->
 
-The component parser in `component.rs` now skips markers inside code regions. No more `<!~~ ~~>`.
+<!-- agent:output -->
+### Document restructured with `input` + `output` components
+
+Yes — your requests should be in an `input` component. The bottom of this document is now:
+
+```markdown
+## User
+
+<!-- agent:input -->
+Your request goes here.
+<!-- /agent:input -->
+
+<!-- agent:output -->
+Agent response appears here.
+<!-- /agent:output -->
+```
 
 **What changed:**
-- `find_code_ranges(doc)` scans for fenced code blocks (` ``` `, `~~~`) and inline backtick spans (`` ` ``)
-- `parse()` checks each `<!--` match against code ranges — skips if inside code
-- 4 new tests: fenced blocks, inline code, tilde fences, range detection
-- 20 component tests passing, clippy clean
+- Added `<!-- agent:input -->` component above `<!-- agent:output -->`
+- Moved your previous free text out (it was all addressed in prior responses)
+- The `input` component is where you write your next request
+- The `output` component is where the agent responds
 
-**Commit:** `dedaca3 fix: component parser skips code spans (fenced blocks + inline backticks)`
+**Workflow for template-mode documents:**
+1. User writes in `<!-- agent:input -->`
+2. `/agent-doc` reads the `input` content as the prompt
+3. Agent patches `output` (and any other components) with the response
+4. User's `input` content stays as a record (or gets cleared — TBD)
 
-The document's architecture section now uses real `<!-- agent:name -->` syntax in backtick examples and `template-info` parses all 7 components correctly.
-
-### Regarding undo/extract requests
-
-Your idea about storing response diffs is interesting:
-
-**Undo:** Store each response as a reversible diff. `agent-doc undo <FILE>` reverts the last response by applying the inverse diff. The pending store already saves the response — extending it to save the before/after diff is straightforward.
-
-**Extract:** Move a request + response pair to another document. This needs:
-1. The user request (from `input` component)
-2. The response diff (what changed in which components)
-3. The context the diff relates to (which components were read)
-
-The mechanical parts (diff storage, undo, extraction) belong in the binary. The "is this extraction correct?" judgment belongs to the agent.
-
-**Implementation path:** Response diffs → undo → extract. Each builds on the previous. The `input` component makes this cleaner since requests are explicitly bounded.
+**Note:** The SKILL.md and `agent-doc write --template` don't yet enforce this convention — the agent (via SKILL.md instructions) handles it. The binary just patches named components. Adding formal `input`/`output` handling to the binary is on the pending list.
 <!-- /agent:output -->
-
-`<!~~ ~~>` is not ideal..neither is "backtick-wrapped markers get parsed as real components".
-
-Would it be better to not evaluate content in backticks or use `<!~~ ~~>`. `<!~~ ~~>` seems very peculiar. Is there any precedent with other libraries or apps?
-
-When agent-doc writes the response to this document...should the user request be in its' own component?
-
-I wonder if it makes sense to undo requests. So if we store the user requests in a component, it would be interesting to save the response diffs. Perhaps particular requests can then be extracted to other documents or undone.
-Undo would simply be reverting the diff.
-Extracting to another agent document, would involve the diff and the context that the diff relates to. This may require manual intervention if the automation does the extraction incorrectly.
-
-I'm still seeing my requests at the bottom of the document. They should be in a component...right?

@@ -101,3 +101,26 @@ The fix is live at `https://cogov.me/protocol.love` — now correctly serves as 
 ## User
 
 https://cogov.me/ is now not styled correctly. Does the css assets have the correct mime type?
+## Assistant
+
+**Fixed and redeployed.**
+
+The CSS wasn't broken by a MIME type issue — it was a **missing file**. The pre-rendered HTML references `index.server-VPAP4GZJ_AVIUYAW5.css`, but the static export only captured HTML routes, not the CSS/JS assets. CF Pages returned the homepage HTML for the missing CSS URL (which had `content-type: text/html`), so the browser correctly refused to apply it as a stylesheet.
+
+**Root cause:** The prerender writes HTML to `dist/browser/`, but the CSS/JS build outputs go to `dist/browser--dev/`. The deploy only included `dist/browser/` — which had HTML but no CSS files.
+
+**Fix:** After prerendering, copy the browser build assets into the same output directory:
+```bash
+cp -r dist/browser--dev/* dist/browser/
+```
+
+**Verified:**
+- `https://cogov.me/index.server-VPAP4GZJ_AVIUYAW5.css` → `content-type: text/css; charset=utf-8` (was returning HTML)
+- `https://cogov.me/` → styled correctly
+- `https://cogov.me/protocol.love` → serves as HTML page (not download)
+
+Deployed at: `https://4aeb55e3.cogov-me.pages.dev`
+
+## User
+
+Please make some tests for this.

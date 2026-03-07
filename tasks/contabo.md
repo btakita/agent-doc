@@ -633,3 +633,27 @@ All 21 tests pass. The binary is built at v0.9.7.
 ## User
 
 release. Does tmux-router need to release as well?
+## Assistant
+
+**agent-doc v0.9.7 released. tmux-router does NOT need a release.**
+
+tmux-router v0.2.2 is already published on crates.io and has no uncommitted changes. agent-doc's `Cargo.toml` already depends on `tmux-router = "0.2.2"` which matches.
+
+**Release summary:**
+
+| Target | Version | Status |
+|--------|---------|--------|
+| crates.io | `agent-doc 0.9.7` | Published |
+| PyPI | `agent-doc 0.9.7` | Published |
+| GitHub Release | `v0.9.7` | Created |
+| Git tag | `v0.9.7` | Pushed |
+| tmux-router | `0.2.2` | Already published, no changes needed |
+
+**What's in v0.9.7:**
+- New `agent-doc write` command — atomic response write-back with 3-way merge
+- Updated SKILL.md step 4 — uses `agent-doc write` instead of Edit tool
+- Eliminates the "file modified since read" race condition
+
+## User
+
+Let's complete migrating the websites from contabo to cloudflare

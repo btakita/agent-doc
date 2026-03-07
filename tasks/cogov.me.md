@@ -100,3 +100,4 @@ The fix is live at `https://cogov.me/protocol.love` — now correctly serves as 
 
 ## User
 
+https://cogov.me/ is now not styled correctly. Does the css assets have the correct mime type?

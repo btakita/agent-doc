@@ -479,3 +479,65 @@ The subagents are more expensive. Are they necessary for the concurrency issues 
 If they are necessary, can we have something similar to a process fork to make token usage more efficient?
 
 Is there anything that we can learn from existing agent swarm libraries?
+
+## Assistant
+
+### The Costs Page Summary
+
+From the Claude Code costs documentation:
+
+- **Average cost**: ~$6/developer/day, under $12 for 90% of users
+- **Subagent costs**: Each subagent (via the Agent tool) spawns a separate context window. It loads CLAUDE.md, MCP servers, and skills automatically, plus whatever you put in the spawn prompt. Token usage scales with team size.
+- **Agent teams** (the experimental multi-agent feature) use approximately **7x more tokens** than standard sessions
+- **No forking mechanism**: There is no context-sharing or process-fork capability. Each subagent starts from scratch
+- **Cost reduction advice**: Use Haiku for simple subagent tasks (`model: haiku`), keep spawn prompts focused, delegate verbose operations to subagents so only summaries return to the main context
+
+### Are Subagents Necessary for the Concurrency Bug?
+
+**No.** The original problem was: when two `/agent-doc` invocations arrive in quick succession, the main agent could context-switch between them, causing one write-back to be lost. The subagent-per-document pattern was introduced because the Agent tool runs to completion without interruption.
+
+But there are simpler solutions that don't require subagents:
+
+1. **Claude Code queues messages** -- it doesn't interrupt mid-response when a new message arrives. The skill processes sequentially. The real issue was the snapshot/document state becoming stale between read and write, which we already fixed with flock + atomic rename in v0.9.5.
+
+2. **The locking we just implemented IS the fix.** The `SnapshotLock`, document advisory lock (`<file>.md.agent-doc.lock`), and atomic rename in `submit.rs` serialize concurrent access at the filesystem level. Two simultaneous `agent-doc run` invocations on the same file will now block and serialize correctly, regardless of whether they're in the same agent context or separate subagents.
+
+3. **For different files**, there was never a concurrency issue -- each file has its own snapshot and lock.
+
+**Recommendation**: Drop the subagent-per-document pattern from the SKILL.md workflow. The main agent can process `/agent-doc` invocations directly. The filesystem locking handles the concurrency. This eliminates the token multiplication entirely.
+
+### Process Fork / Context Sharing
+
+Claude Code has no mechanism for forking context or sharing state between subagents. Each subagent starts with a fresh context window. The only way to reduce subagent token cost is to minimize what you send them:
+
+- Send only the diff, not the full document
+- Use Haiku for simple operations
+- Keep spawn prompts minimal
+
+But all of these are band-aids. The real answer is: if you don't need subagents, don't use them.
+
+### What Agent Swarm Libraries Do
+
+Patterns from CrewAI, AutoGen, LangGraph, and similar frameworks:
+
+| Pattern | Description | Applicable to agent-doc? |
+|---------|------------|-------------------------|
+| **Shared memory/blackboard** | Agents read/write to a shared state store instead of passing full context | Yes -- the document file IS the shared state. No need to duplicate it in agent context. |
+| **Minimal handoff** | Pass only the task description + relevant diff, not full history | Yes -- the SKILL.md already does this (diff-based) |
+| **Role specialization** | Different agents for different tasks (researcher, coder, reviewer) | Not yet -- but relevant for `agent-doc deep` fan-out |
+| **Event-driven** | Agents react to events (file changes) rather than polling | Yes -- `agent-doc watch` already does this |
+| **Token budgeting** | Track and cap token usage per agent per task | Not implemented; could add to `agent-doc run --token-budget` |
+
+The key insight from swarm architectures: **the document IS the shared blackboard**. The user writes to the document, the agent reads the diff, responds, and writes back. No context duplication needed. This is already agent-doc's architecture -- subagents were a workaround for a concurrency bug that's now fixed at the filesystem level.
+
+### Action Items
+
+1. **Remove subagent requirement from SKILL.md** -- process `/agent-doc` directly in the main agent context
+2. **Verify the locking works** -- test two rapid-fire `/agent-doc` invocations on the same file
+3. **Consider `model: haiku` for future subagent use cases** (like `agent-doc deep` fan-out) where subagents are architecturally justified
+
+## User
+
+Please do the action items. One use case. Document A & B are both claimed by the same claude session in a tmux pane. Document A is running, then the user want to run Document B.
+
+Does Document B's run block until Document A is complete? It should happen in parallel.

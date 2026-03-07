@@ -773,3 +773,35 @@ That's it. No refresh tokens, no 403s, runs indefinitely. The `wrangler login` O
 ## User
 
 Let's use CLOUDFLARE_API_TOKEN from cloudflare/.env
+
+Can we get the CLOUDFLARE_ACCOUNT_ID from wrangler?
+
+## Assistant
+
+Done. Found `CLOUDFLARE_API_TOKEN` in `cloudflare/.env` and retrieved the account ID via the CF API.
+
+**All 6 GitHub secrets set for `btakita/brookebrodack-dev`:**
+
+| Secret | Source |
+|--------|--------|
+| `CLOUDFLARE_API_TOKEN` | `cloudflare/.env` |
+| `CLOUDFLARE_ACCOUNT_ID` | CF API (`/accounts` endpoint) → `1e7e194f...` |
+| `GOOGLE_API_KEY` | `brookebrodack-dev/.env` |
+| `YOUTUBE_CHANNELID` | `brookebrodack-dev/.env` |
+| `YOUTUBE_RSS_URL` | `brookebrodack-dev/.env` |
+| `AUTHORY_YOUTUBE_RSS_URL` | `brookebrodack-dev/.env` |
+
+**Re: wrangler for account ID** — No need, the CF REST API works with the token we already have: `GET /accounts` returns account ID directly. No wrangler install required.
+
+**Next steps remaining:**
+1. Commit and push the migration files (static-export.ts, deploy.yml, _redirects, workers/websub/)
+2. Create CF Pages project (`brookebrodack`)
+3. First deploy (push to main triggers GH Actions)
+4. Deploy WebSub worker + subscribe
+5. DNS cutover
+
+Ready to commit and push?
+
+## User
+
+commit and push. Deploy to cloudflare

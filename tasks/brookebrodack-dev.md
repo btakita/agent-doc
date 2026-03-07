@@ -270,3 +270,63 @@ Note: these are brookebrodack-specific Contabo S3 keys (different from the brian
 ## User
 
 Commit all brookebrodack-dev changes.
+
+Content Feed is broken.
+
+```
+~/work/btakita/agent-loop/brookebrodack-dev main !3 ?1                                                                                                                                                                  ✘ INT 7m 17s ▼ 04:49:44
+❯ bun run dev
+$ cd ./app/brookebrodack-site && bun dev
+$ bun run dev:sourcemap__resolve__bun
+$ sourcemap__resolve__bun -f index.ts
+browser__build|watch
+server__build|watch
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+server started on port 4101
+15 |   logger;
+16 |   exec(query) {
+17 |     this.client.exec(query);
+18 |   }
+19 |   prepareQuery(query, fields, executeMethod, isResponseInArrayMode, customResultMapper) {
+20 |     const stmt = this.client.prepare(query.sql);
+                                  ^
+SQLiteError: no such table: text_cache
+      errno: 1,
+ byteOffset: -1,
+
+      at prepare (bun:sqlite:345:37)
+    at prepareQuery (../../src/bun-sqlite/session.ts:56:27)
+    at _prepare (../../../src/sqlite-core/query-builders/select.ts:865:70)
+    at all (../../../src/sqlite-core/query-builders/select.ts:884:14)
+    at text_cache__select (../../../../lib/domain--server/text_cache/text_cache__select.ts:10:3)
+    at <anonymous> (../../../../lib/domain--server--brookebrodack/youtube/youtube_channelListResponse.ts:15:21)
+      at memo__run (/home/brian/work/btakita/agent-loop/brookebrodack-dev/node_modules/ctx-core/all/rmemo/index.js:203:17)
+      at memo (/home/brian/work/btakita/agent-loop/brookebrodack-dev/node_modules/ctx-core/all/rmemo/index.js:17:20)
+    at <anonymous> (../../../../lib/domain--server--brookebrodack/youtube/youtube_channelListResponse.ts:51:18)
+```
+
+## Assistant
+
+**Committed** two commits in brookebrodack-dev:
+
+1. **`app/brookebrodack-site`** (submodule): `chore: update dependencies` — all 15 package bumps
+2. **`brookebrodack-dev`** (parent): `chore: update deps, migrate direnv to mise` — submodule pointer, `.env.sample` + `GOOGLE_API_KEY`, `.envrc` → `.mise.toml`, `bun.lockb`
+
+**Dev server progress:** It starts now (port 4101) but crashes on `SQLiteError: no such table: text_cache`. The database needs to be initialized. Try:
+
+```bash
+cd brookebrodack-dev/app/brookebrodack-site
+bun run db:push    # or bun run db:migrate
+```
+
+Please run this.
+
+This should create the SQLite tables (including `text_cache`) via drizzle. If `db:push` fails due to the drizzle-kit version jump (0.23→0.31), try `db:migrate` instead, or check if there's a migration SQL file in `app/brookebrodack-site/db/`.
+
+## User
+

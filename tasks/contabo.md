@@ -537,3 +537,5 @@ The fix belongs in the SKILL.md workflow (retry logic or atomic write via `agent
 
 ## User
 
+I want agent-doc to own the writeback. The functional tests were assuming that agent-doc owns the writeback. So I want tests for the behavior so this bug does not occur.
+Would it be beneficiat to work with claude code to resolve some merge issues?

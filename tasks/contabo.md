@@ -120,3 +120,76 @@ I'm considering unix style of mapping. Please fill out and propose the "unix-sty
 
 lib/*
 var/www/*
+
+## Assistant
+
+**Unix FHS-inspired layout for agent-loop:**
+
+```
+agent-loop/
+├── bin/                      # Executable tools & CLIs
+│   ├── agent-doc/
+│   ├── corky/
+│   ├── tmux-router/
+│   └── tagpath/
+How about usr/src for these?
+And it would output to usr/bin
+│
+├── lib/                      # Shared libraries & frameworks
+│   ├── instruction-files/
+│   ├── philosophy/
+│   ├── ctx-core-dev/
+│   └── existence-lang/
+│       ├── .github/
+│       ├── existence-lang.github.io/
+│       ├── ontology/
+│       ├── spec/
+│       └── existence/
+usr/lib instead?
+│
+├── var/
+│   ├── www/                  # Web sites & apps
+│   │   ├── briantakita.me-dev/
+│   │   ├── brookebrodack-dev/
+│   │   ├── cogov-dev/
+│   │   ├── drmanny-dev/
+│   │   ├── herbaliciousbliss-dev/
+│   │   ├── prescience-notes-dev/
+│   │   └── censible-core/
+│   ├── mail/                 # Email data (private)
+│   └── spool/                # Job queues, cron (future)
+│
+├── etc/                      # Configuration
+│   └── cloudflare/
+│
+├── opt/                      # Optional/standalone packages
+│   ├── quant/                # Algorithmic trading (future)
+│   ├── resume/
+│   ├── presence/
+│   └── python-intentions/
+│
+├── tmp/                      # Scratch/ephemeral (gitignored)
+└── tasks/                    # Session documents (stays at root)
+```
+
+**Mapping rationale:**
+
+| Unix FHS | Purpose | agent-loop Analogy |
+|----------|---------|-------------------|
+| `/bin` | Essential user commands | CLI tools you build |
+| `/lib` | Shared libraries | Reusable frameworks and specs |
+| `/var/www` | Web server document roots | Website project repos |
+| `/var/mail` | User mailboxes | Email data |
+| `/etc` | System configuration | API tokens, infra config |
+| `/opt` | Optional add-on packages | Standalone projects, plugins |
+| `/tmp` | Temporary files | Scratch workspace |
+
+**What stays at root:** `tasks/`, `.claude/`, `.agent-doc/`, `CLAUDE.md` — meta/operational, not project content.
+
+This is a proposal only — no moves executed. Want to refine or go with this?
+
+Is there a precedent for monorepos mirroring a unix file system?
+Are there any advantages for mirroring an installation?
+
+## User
+

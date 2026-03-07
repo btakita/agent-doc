@@ -369,3 +369,16 @@ See if the upgrade works. If not, we may need to file a bug and pin.
 ## User
 
 Please commit and push.
+
+## Assistant
+
+**Committed and pushed** both repos:
+
+1. **`brookebrodack-site`** (submodule): `fix: upgrade drizzle-kit config, add typebox + better-sqlite3` — pushed `3ab771a..20e6feb` to `main`
+2. **`brookebrodack-dev`** (parent): `fix: update brookebrodack-site submodule + lockfile` — pushed `672f0c8..8097684` to `main`
+
+Note: The previous dep update commit (`e0ac347`) was on a detached HEAD in the submodule and never reached origin/main. This new commit includes all changes (dep upgrades + drizzle config fix + typebox + better-sqlite3) squashed into one commit on main.
+
+## User
+
+Deploy this update to contabo.

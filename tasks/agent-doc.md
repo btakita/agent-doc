@@ -1,34 +1,42 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
 tmux_session: '0'
+response_mode: template
 ---
 
+# agent-doc
 
+<!-- agent:status -->
+**Version:** v0.9.9 | **Tests:** 192 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Published:** crates.io, PyPI, GitHub Releases
+**Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
+<!-- /agent:status -->
 
-## Status Summary (compacted 2026-03-07)
+## Architecture
 
-### Architecture
-
+<!-- agent:architecture -->
 **tmux-router v0.2.2**: Standalone Rust crate (library + CLI). `Tmux` struct (30+ tmux ops + `capture_pane()` + `send_keys_raw()`), `Registry` (file-path-to-pane mappings), `reconcile()` (2D layout sync), `IsolatedTmux` (RAII test infra), stash window, `FileResolution` callback, `prune()`. CLI: `sync`, `register`, `unregister`, `status`, `resync`, `focus`, `send`, `capture`. File-name addressing (registry lookup). Thread-local `REGISTRY_LOCK_HELD` flag for nested flock deadlock prevention. `acquire_or_skip()` for non-blocking lock attempts. 56 tests. Published to crates.io + GitHub Releases.
-
-**agent-doc v0.9.6**: Interactive document sessions with AI agents. Depends on tmux-router 0.2.2. Published to crates.io, PyPI, GitHub Releases.
 
 **Core features:**
 - **Session workflow** (`agent-doc run`): diff → send to agent → append response → 3-way merge-safe write → snapshot → git commit
-- **Components** (`<!-- agent:name -->...<!-- /agent:name -->`): Bounded, named, re-renderable document regions. Paired markers, nested supported. Config-driven modes via `.agent-doc/components.toml`.
+- **Components** (`<!~~ agent:name ~~>...<!~~ /agent:name ~~>`): Bounded, named, re-renderable document regions. Paired markers, nested supported. Config-driven modes via `.agent-doc/components.toml`.
+- **Template mode** (`response_mode: template`): In-place response documents. Patch-block response parser + component applier. Auto-create output component for unmatched content.
 - **`agent-doc patch`**: Replace/append/prepend component content. Shell hooks (`pre_patch` stdin/stdout, `post_patch` fire-and-forget). Thread-safe project-root resolution.
 - **`agent-doc watch`**: Daemon with `notify` crate, PID file, per-file debounce (500ms), bounded cycle limiting (default 3), convergence detection.
+- **`agent-doc write`**: Atomic response write-back with 3-way merge. `--template` flag for template-mode. Durable pending store for compaction recovery.
+- **`agent-doc recover`**: Detect and apply orphaned responses from `.agent-doc/pending/<hash>.md`. Auto-detects append vs template mode.
+- **`agent-doc template-info`**: JSON output of document template structure for plugin rendering.
 - **`agent-doc plugin install`**: Download + install JetBrains/VS Code plugins from GitHub Releases. Auto-detect IDE dirs. Aliases: `jb`/`idea`/`code`/`codium`.
 - **Comment stripping**: `strip_comments()` — strips `<!-- -->` and `[//]: # (...)` but preserves component markers.
 - **Auto-resync**: `prune()` runs before route/sync/claim operations.
-- **Stale snapshot recovery**: `is_stale_snapshot()` in `diff.rs` auto-detects when context compaction interrupted a previous cycle, syncs the snapshot without re-processing.
-- **Diagnostic logging**: `[diff]`, `[submit]`, `[snapshot recovery]` prefixed stderr lines for debugging silent no-ops.
+- **Stale snapshot recovery**: `is_stale_snapshot()` in `diff.rs` auto-detects when context compaction interrupted a previous cycle.
+- **Diagnostic logging**: `[diff]`, `[submit]`, `[snapshot recovery]` prefixed stderr lines.
 
 **Concurrency safety (v0.9.5+):**
 - `SnapshotLock` — flock-based advisory locking for snapshot read/write (`fs2`)
 - `RegistryLock` — flock-based advisory locking for `sessions.json` (in tmux-router)
 - Atomic rename — `tempfile::NamedTempFile` + `persist()` for document and snapshot writes
-- Document advisory lock — `<file>.md.agent-doc.lock` for agent-doc-vs-agent-doc coordination
+- Document advisory lock — `.agent-doc/locks/<hash>.lock` (relocated from sibling files in v0.9.8)
 - `sessions::load()`/`save()` — `pub(crate)` to force callers through `with_registry()`
 
 **Tmux routing**: Window-scoped. Plugin passes `--window`. `route` auto-starts dead panes via `join-pane`. 2D sync with ATTACH-first reconciliation.
@@ -50,6 +58,7 @@ tmux_session: '0'
 | Nested lock deadlock | Thread-local flag + `acquire_or_skip()` | v0.2.2 |
 | Watch daemon write window | Atomic rename + doc advisory lock | v0.9.6 |
 | Stale snapshot (context compaction) | `is_stale_snapshot()` auto-recovery | v0.9.6 |
+| Compaction mid-write | Durable pending store + `recover` | v0.9.9 |
 
 Full analysis: `agent-doc/docs/reference/race-conditions.md`
 
@@ -91,21 +100,6 @@ Component names support colon-separated namespacing: `agent:type:scope`. Sibling
 | **Project** | system + scope | Bounded working context; identified by `.agent-doc/` at root |
 | **Pane** | focus + scope | Tmux viewport — finite attention applied to a single document |
 
-### Release History
-
-| Version | Key Changes |
-|---------|-------------|
-| v0.5.5–v0.6.6 | Window-scoped routing, 2D sync, Junie backend, LayoutDetector |
-| v0.7.0–v0.7.2 | Snapshot-diff-apply sync, ATTACH-first reconciliation |
-| v0.8.0 | tmux-router extraction (-3133 lines) |
-| v0.9.0 | Components, patch, watch daemon. 150 tests. |
-| v0.9.1 | Colons in component names |
-| v0.9.2 | `plugin install/update/list`, VS Code 9/9 parity |
-| v0.9.3 | tmux-router 0.1.3 (stash window fix for numeric sessions) |
-| v0.9.4 | tmux-router 0.2.0 (CLI binary, capture_pane, send_keys_raw) |
-| v0.9.5 | RegistryLock, SnapshotLock, flock advisory locking, stale claim auto-pruning |
-| v0.9.6 | Atomic rename, doc advisory lock, stale snapshot recovery, diagnostic logging, race condition docs, 26 new tests |
-
 ### Comparison with Agent of Empires
 
 AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). agent-doc is a **document workflow** (markdown is the UI). Complementary — could run agent-doc inside AoE-managed panes.
@@ -116,9 +110,33 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 3. `agent-doc status` TUI (dashboard + interactive modes)
 4. Sub-profiles per submodule in `.agent-doc/config.toml`
 5. Docker sandboxing (`agent-doc run --sandboxed`)
+<!-- /agent:architecture -->
 
-### Pending / Not Built
+## Release History
 
+<!-- agent:releases -->
+| Version | Key Changes |
+|---------|-------------|
+| v0.5.5-v0.6.6 | Window-scoped routing, 2D sync, Junie backend, LayoutDetector |
+| v0.7.0-v0.7.2 | Snapshot-diff-apply sync, ATTACH-first reconciliation |
+| v0.8.0 | tmux-router extraction (-3133 lines) |
+| v0.9.0 | Components, patch, watch daemon. 150 tests. |
+| v0.9.1 | Colons in component names |
+| v0.9.2 | `plugin install/update/list`, VS Code 9/9 parity |
+| v0.9.3 | tmux-router 0.1.3 (stash window fix for numeric sessions) |
+| v0.9.4 | tmux-router 0.2.0 (CLI binary, capture_pane, send_keys_raw) |
+| v0.9.5 | RegistryLock, SnapshotLock, flock advisory locking, stale claim auto-pruning |
+| v0.9.6 | Atomic rename, doc advisory lock, stale snapshot recovery, diagnostic logging, 26 new tests |
+| v0.9.7 | `agent-doc write` command, atomic response write-back with 3-way merge |
+| v0.9.8 | Lock relocation to `.agent-doc/locks/<hash>.lock` |
+| v0.9.9 | Template-mode, compaction recovery, `agent-doc recover`, `agent-doc template-info` |
+<!-- /agent:releases -->
+
+## Pending / Not Built
+
+<!-- agent:pending -->
+- `agent-doc convert` — auto-convert append-mode documents to template mode
+- Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
 - `agent-doc status` — Ratatui TUI with dashboard + interactive pane attachment
@@ -130,9 +148,11 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - `agent-doc init --dashboard` — scaffold template with log + status components
 - Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
 - Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
+<!-- /agent:pending -->
 
-### Key Lessons
+## Lessons
 
+<!-- agent:lessons -->
 1. **Always paired markers** — single markers unworkable for re-rendering
 2. **Project root resolution** — walk up from file to find `.agent-doc/`, not CWD
 3. **ATTACH before DETACH** — join new panes first, then stash unwanted
@@ -143,511 +163,70 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 8. **YAGNI for speculative code** — `with_snapshot` was added speculatively, then deleted (no production callers)
 9. **Subagents are expensive (~7x)** — use filesystem locking instead when possible; subagents only for true parallelism
 10. **Stale snapshots from context compaction** — solved with `is_stale_snapshot()` auto-recovery in `diff.rs`
+11. **Durable pending store** — save response before write, clear after success; survives compaction and crashes
+12. **Distinct patch prefix** — `<!~~ patch:name ~~>` vs `<!~~ agent:name ~~>` prevents confusion between response directives and document components
+<!-- /agent:lessons -->
+
+## Session History
+
+<!-- agent:history -->
+**v0.9.7 session:** Lock relocation from sibling files to `.agent-doc/locks/<hash>.lock`. SHA256-hashed paths mirror snapshot scheme.
+
+**v0.9.8 session:** Released lock relocation. Cleaned up stale `tasks/*.agent-doc.lock` files.
+
+**In-place response documents session:** Explored dashboard-as-document concept, TUI editor integration (Ki Editor), designed 7-phase implementation plan. Implemented Phases 1-4: `response_mode: template` frontmatter, `template-info` CLI, patch-block parser, `agent-doc write --template`, auto-create output fallback.
+
+**Compaction recovery session:** Diagnosed write-back failure after context compaction. Implemented durable pending response store (`.agent-doc/pending/<hash>.md`), `agent-doc recover` command, SKILL.md pre-flight integration.
+
+**v0.9.9 release:** Template-mode + compaction recovery. Published to all targets. 192 tests.
+
+**Template conversion session:** Converted this document from append-mode to template-mode. Assessed `agent-doc convert` command feasibility.
+<!-- /agent:history -->
 
 ## User
 
-Could you help me with why we have tasks/contabo.md.agent-doc.lock being located next to the file?
+<!-- agent:output -->
+### Document Converted to Template Mode
 
-I don't want this file comitted into the git repo. Is it possible to have it in the .agent-doc directory while keeping the file path uniqueness? Should .agent-doc have a database/datafile of locks instead?
-## Assistant
+This document is now a template-mode document (`response_mode: template`).
 
-### Why lock files are next to the document
+**Structure (7 components):**
+- **status** — Version, test count, publish status (replace mode)
+- **architecture** — Full system architecture reference (replace mode)
+- **releases** — Release history table (append mode for new releases)
+- **pending** — Backlog items (replace mode as items complete)
+- **lessons** — Key lessons (append mode for new discoveries)
+- **history** — Condensed session history (append mode)
+- **output** — Fallback for unmatched responses
 
-The document advisory lock (`<file>.md.agent-doc.lock`) was placed adjacent to the document for simplicity — `path.with_extension("md.agent-doc.lock")` is a one-liner. But you're right, it creates two problems:
-1. Pollutes the working tree (shows up in `git status`)
-2. Risk of accidental commit
+**What changed:**
+- All `## User` / `## Assistant` conversation blocks condensed into `history` component
+- Added `response_mode: template` to frontmatter
+- Component markers around each section
+- Added v0.9.7-v0.9.9 to release history, lessons 11-12 from recent sessions
 
-### Recommended: Move locks to `.agent-doc/locks/`
+### Assessment: `agent-doc convert` command
 
-Use the same SHA256-of-canonical-path scheme as snapshots:
-
-```
-.agent-doc/locks/<sha256_hash>.lock
-```
-
-This mirrors the existing snapshot pattern exactly:
-- Snapshots: `.agent-doc/snapshots/<hash>.md`
-- Locks: `.agent-doc/locks/<hash>.lock`
-
-The change is small — two files need updating:
-- `src/write.rs:86` — `let lock_path = path.with_extension("md.agent-doc.lock");`
-- `src/submit.rs:140` — `let lock_path = path.with_extension("md.agent-doc.lock");`
-
-Both would call a shared `lock_path_for(doc_path)` function that resolves the project root, computes the hash, and returns `.agent-doc/locks/<hash>.lock`.
-
-**A database/datafile is overkill** — `flock()` operates on file descriptors, not database rows. One lock file per document is the right granularity. The hash-based naming preserves uniqueness without the file system clutter.
-
-**Quick mitigation now**: Add `*.agent-doc.lock` to `.gitignore` so existing lock files don't get committed while we implement the proper fix.
-
-Want me to implement the lock relocation in `agent-doc`?
-
-## User
-
-Yes...hashed lock relocation.
-## Assistant
-
-### Implementation Complete
-
-Relocated document advisory locks from sibling files to `.agent-doc/locks/<hash>.lock`:
-
-**Changes (3 files):**
-
-1. **`snapshot.rs`** — Added `doc_hash()` (extracts SHA256 hashing), `lock_path_for()` (returns `.agent-doc/locks/<hash>.lock`), and `find_project_root()` (walks up to find `.agent-doc/` directory). Refactored `path_for()` to use `doc_hash()`.
-
-2. **`submit.rs:139-140`** — `acquire_doc_lock` now calls `crate::snapshot::lock_path_for(path)` instead of `path.with_extension("md.agent-doc.lock")`.
-
-3. **`write.rs:85-86`** — Same change as submit.rs.
-
-**Cleanup:**
-- Removed stale `tasks/*.agent-doc.lock` files
-- Added `*.agent-doc.lock` to `.gitignore` (safety net for old binaries)
-
-**How `lock_path_for` works:**
-1. Compute SHA256 of canonical document path (via `doc_hash()`)
-2. Walk up from document to find `.agent-doc/` project root
-3. Return `<project_root>/.agent-doc/locks/<hash>.lock`
-4. Falls back to document's parent dir if no project root found
-
-All 177 tests pass. Ready to release as v0.9.7.
-
-## User
-
-release
-## Assistant
-
-### Released v0.9.8
-
-Version bumped from 0.9.7 to 0.9.8 (0.9.7 was already published for the `agent-doc write` command).
-
-**Published to all targets:**
-- crates.io: `agent-doc v0.9.8`
-- PyPI: `agent_doc-0.9.8`
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.8
-- Local binary: `~/.cargo/bin/agent-doc` (v0.9.8)
-
-**What's in v0.9.8:**
-- Relocate doc advisory locks to `.agent-doc/locks/<hash>.lock`
-- `doc_hash()`, `lock_path_for()`, `find_project_root()` in `snapshot.rs`
-- 177 tests passing
-
-## User
-
-Can we clean up the existing tasks/*.agent-doc.lock files?
-## Assistant
-
-Done — removed 2 stale lock files:
-- `tasks/agent-doc.md.agent-doc.lock`
-- `tasks/contabo.md.agent-doc.lock`
-
-These were recreated by the old v0.9.7 binary earlier in this session (before the v0.9.8 install). Now that v0.9.8 is installed, new locks go to `.agent-doc/locks/` and won't appear in the working tree. The `.gitignore` entry (`*.agent-doc.lock`) also prevents any stragglers from being committed.
-
-## User
-
-I want to explore the idea of having responses use the dashboard-as-document templates.
-
-Currently, the responses default to append at the end of the document.
-
-Some documents may be better having inline annotation and responses.
-Where the annotations and responses occur at the templated location.
-
-What would the UX look like:
-- to being one of these documents?
-- to transition a default append-only document to an in-place response document?
-
-How can the user maintain order in the document? Preventing content from spilling over?
-Can code folding with the editor be used?
-
-Would it be possible to have a dashboard-like or IDE-like interface within the document?
-
-## Assistant
-
-### In-Place Response Documents (Dashboard-as-Document)
-
-This builds on the existing component model. Components (`<!-- agent:name -->...<!-- /agent:name -->`) already support replace/append/prepend. The idea extends this to make the entire document a template where responses target specific regions.
-
-#### Two Document Modes
-
-**Append mode (current default):** Linear `## User` / `## Assistant` conversation. Good for open-ended sessions.
-
-**Template mode (proposed):**
-```markdown
----
-response_mode: template
----
-
-# Project Dashboard
-
-## Status
-<!-- agent:status -->
-Build passing. 3 open PRs.
-<!-- /agent:status -->
-
-## Recent Activity
-<!-- agent:activity mode="append" max_entries="10" -->
-- 2026-03-07: Released v0.9.8
-<!-- /agent:activity -->
-
-## Questions
-<!-- agent:questions -->
-User annotates inline; agent responds in-place.
-<!-- /agent:questions -->
-```
-
-Agent responds by patching specific components instead of appending `## Assistant` blocks.
-
-#### UX: Starting a Template Document
-
-- **Frontmatter flag:** `response_mode: template` — explicit opt-in
-- **Scaffold:** `agent-doc init --template dashboard` for quick setup
-- **Auto-detect fallback:** If document has `<!-- agent:* -->` components and no `## User`/`## Assistant` structure, infer template mode
-
-#### UX: Transitioning Append → Template
-
+**Belongs in the binary (mechanical, ~150 LOC):**
 1. Add `response_mode: template` to frontmatter
-2. Wrap sections in component markers
-3. Next `/agent-doc` submit detects template mode
-4. Old `## User`/`## Assistant` blocks remain as read-only history/context
+2. Wrap existing `## User` / `## Assistant` blocks in history component (frozen)
+3. Create output component at document end
+4. Optionally wrap top-level `##` sections in named components (heading text as name)
 
-Incremental — can mix append history at top with template regions below.
+Add any missing gaps in agent-doc.
 
-#### Preventing Spillover
+**Does NOT belong in the binary (judgment):**
+- Condensing conversation history into summaries
+- Choosing component modes (replace/append/prepend) based on content semantics
+- Structural reorganization and layout decisions
 
-**Component boundaries are the guard rails.** Agent can only modify within its assigned components. User content outside is untouchable.
+Add to docs what belongs where.
 
-Additional controls via `components.toml`:
-- `max_entries` — cap on append-mode items (already designed)
-- `max_lines` — hard limit on component content length
-- `frozen` — read-only component (agent reads but can't write)
+**Two-step workflow:** `agent-doc convert` (safe, mechanical) then `/agent-doc` (agent refines layout).
 
-#### Code Folding
+**Bug found during conversion:** Component parser doesn't skip code spans — backtick-wrapped markers get parsed as real components. Escaped examples in this document using `<!~~ ~~>`. Should fix in `component.rs` to skip fenced code blocks and inline code.
+<!-- /agent:output -->
 
-Component markers are natural fold points. Both IDEs support this:
+`<!~~ ~~>` is not ideal..neither is "backtick-wrapped markers get parsed as real components".
 
-```
-▶ <!-- agent:status -->     [collapsed]
-▶ <!-- agent:activity -->   [collapsed]
-▼ <!-- agent:questions -->  [expanded — user is working here]
-```
-
-**JetBrains:** Register `FoldingBuilder` detecting `<!-- agent:* -->` pairs
-**VS Code:** Custom folding provider for component regions
-
-Gives a collapsed dashboard view — user sees section headers, expands to work.
-
-#### Dashboard/IDE Interface
-
-With folding + template mode:
-- **Gutter icons** — fold/unfold, refresh per component
-- **Structure view** — component tree in IDE sidebar
-- **Quick-nav popup** — jump between components
-- User navigates by expanding/collapsing. Agent updates on each submit.
-
-#### Implementation Path
-
-1. `response_mode: template | append` in frontmatter (default: append)
-2. Template-mode submit: extract user annotations from components, respond via `patch` per component
-3. `FoldingBuilder` (JetBrains) / folding provider (VS Code)
-4. `max_lines` and `frozen` in component config
-
-Builds entirely on existing component infrastructure. Main new work is the template-mode submit path.
-
-## User
-
-Would another TUI "editor" be useful? How would some recent editors such as ki work in this flow?
-## Assistant
-
-### TUI Editors in the Agent-Doc Flow
-
-**Ki Editor** ([ki-editor.org](https://ki-editor.org)) is a multi-cursor combinatoric modal TUI editor written in Rust. Its name means "tree" (木) in Japanese — fitting, since it uses Tree-sitter for first-class structural editing.
-
-**What makes Ki interesting here:**
-- **Unified component model** — every UI element (prompt, completion dropdown, file explorer) is a full editor with the same keybindings. Mirrors agent-doc's "everything is a document" philosophy.
-- **Selection mode → Movement → Action** — more composable than Vim (`Action → Movement`) or Helix (`Movement → Action`).
-- **Positional keybindings** — layout-agnostic (QWERTY, Dvorak, Colemak). No mnemonics.
-- **Tree-sitter structural editing** — one key to select the enclosing syntax node. Markdown component markers (`<!-- agent:name -->`) could be registered as structural units.
-- **Auto-reload** — detects external file changes without manual refresh.
-
-**Two integration models:**
-
-**1. TUI as editing surface (works today)**
-Ki (or Helix, Neovim) as the editor. `agent-doc watch` detects saves, submits to agent, patches the document. Ki's auto-reload shows updates live. Zero Ki-specific code needed.
-
-**2. Purpose-built dashboard TUI (future `agent-doc status`)**
-A Ratatui-based interactive viewer for template-mode documents:
-- Component regions as foldable panes (like tmux splits in one terminal)
-- Expand a component → edit inline → submit
-- Agent responses patch specific components, TUI re-renders
-- Built into agent-doc, not dependent on external editor
-
-**The Ki-specific opportunity:**
-Ki's "everything is an editor" architecture means a plugin could treat `<!-- agent:name -->` component regions as Tree-sitter structural units. Pressing `d` (select enclosing node) inside a component selects the entire body. Multi-cursor lets you edit multiple components simultaneously, then submit once.
-
-**Pragmatic path:** Use any TUI editor as the editing surface + `agent-doc watch` for agent interaction. Build the dashboard TUI separately as `agent-doc status` when the need justifies it. Ki's structural editing is a bonus but not a prerequisite — the flow works with any editor that saves files.
-
-## User
-
-What are the next steps to support In-Place Response Documents for Jetbrains and VSCode?
-Please put all common logic into the agent-doc binary.
-## Assistant
-
-### Implementation Plan: In-Place Response Documents
-
-All common logic lives in the `agent-doc` binary. Plugins are thin UI layers that call CLI commands.
-
-#### Phase 1 — Binary: Template-mode detection
-
-**Files:** `frontmatter.rs`, `submit.rs`
-
-Add `response_mode: Option<String>` to `Frontmatter`:
-```yaml
----
-response_mode: template   # "template" | "append" (default)
----
-```
-
-In `submit.rs`, after computing the diff, branch based on `response_mode`:
-- **append** (current): `## Assistant` block appended
-- **template**: patch targeted components instead
-
-If we have template, but there is not template field for the output, should we add an output field at the end of the document by default?
-
-#### Phase 2 — Binary: `agent-doc template-info <FILE>`
-
-New subcommand that outputs JSON describing the document's template structure:
-```json
-{
-  "template_mode": true,
-  "components": [
-    { "name": "status", "mode": "replace", "content": "Build passing.", "line": 12 },
-    { "name": "activity", "mode": "append", "max_entries": 10, "content": "...", "line": 18 }
-  ]
-}
-```
-
-Single CLI call gives plugins everything they need for rendering (folding ranges, gutter icons, structure view). No parsing logic in plugins.
-
-#### Phase 3 — Binary: Template-mode submit path
-
-When `response_mode: template`:
-1. **Prompt includes component structure** — names, modes, current content (not `## User`/`## Assistant` history)
-2. **Agent responds with patch blocks** using `<!-- patch:name -->` markers:
-   ```markdown
-   <!-- patch:status -->
-   Build passing. 4 open PRs.
-   <!-- /patch:status -->
-
-   <!-- patch:activity -->
-   - 2026-03-07: Implemented template mode
-   <!-- /patch:activity -->
-   ```
-3. **New `apply_template_patches()`** in `submit.rs` parses `<!-- patch:name -->` blocks from response, calls existing `patch.rs` logic per component
-4. Same atomic write + 3-way merge + snapshot save
-
-The `<!-- patch:name -->` convention reuses marker syntax the agent already knows. Distinct prefix (`patch:` vs `agent:`) prevents confusion between document components and response directives.
-
-#### Phase 4 — Binary: `agent-doc write --template`
-
-Extend `write.rs` to accept template-mode responses from stdin:
-```bash
-echo "<structured response>" | agent-doc write plan.md --template --baseline-file /tmp/baseline.md
-```
-
-Parses `<!-- patch:name -->` blocks, patches components, atomic write. This is what the SKILL.md workflow calls for template-mode documents.
-
-#### Phase 5 — JetBrains plugin: Component folding
-
-- Register `FoldingBuilder` detecting `<!-- agent:name -->...<!-- /agent:name -->` pairs
-- Collapsed placeholder shows component name + mode: `[agent:status (replace)]`
-- Call `agent-doc template-info` for fold range data (no markdown parsing in Kotlin)
-
-#### Phase 6 — VS Code extension: Component folding
-
-- Custom `FoldingRangeProvider` for the same markers
-- Call `agent-doc template-info` for structure (no markdown parsing in TypeScript)
-
-#### Phase 7 — Both plugins: Gutter icons + structure view
-
-- Gutter icons: fold/unfold, submit single component
-- Structure view: component tree in IDE sidebar
-- Quick-nav popup: jump between components
-
-#### Dependency chain
-
-```
-Phase 1 (frontmatter) → Phase 3 (submit path) → Phase 4 (write --template)
-Phase 2 (template-info) → Phase 5+6 (folding) → Phase 7 (gutter/structure)
-```
-
-Phases 1-4 (binary) and Phase 2 (template-info) can proceed in parallel. Plugin work (5-7) depends on Phase 2 shipping first.
-
-#### What already exists
-
-- `component.rs` — full parser with nesting, `replace_content()`, `is_agent_marker()`
-- `patch.rs` — replace/append/prepend engine with `components.toml` config, shell hooks
-- `write.rs` — 3-way merge, atomic write, snapshot save
-- `submit.rs` — diff → send → write flow with doc advisory locking
-
-Template mode is a new submit path, not a rewrite. ~200-300 lines of new Rust code for Phases 1-4.
-
-## User
-
-Let's go forward with the plan. Note my question above.
-## Assistant
-
-### Implementation Progress
-
-#### Your question: output fallback for template mode
-
-Good catch on the inline annotation (line 412). When a template-mode response contains content outside `<!-- patch:name -->` blocks, we need a fallback target:
-
-**Implemented: auto-create `<!-- agent:output -->`** — If the document has an existing `<!-- agent:output -->` component, unmatched content appends there. If not, one is auto-created at the end of the document. The user can:
-- Move it wherever they want
-- Add `[output] frozen = true` in `components.toml` to block it
-- Pre-create it in their template to control placement
-
-#### Phases 1-4 implemented
-
-All binary changes are complete. 188 tests pass (167 unit + 21 integration, +7 new).
-
-**Phase 1 — `response_mode` in frontmatter** (`frontmatter.rs`)
-- Added `response_mode: Option<String>` field
-- `"template"` enables in-place patching; `"append"` or `None` keeps current behavior
-
-**Phase 2 — `agent-doc template-info <FILE>`** (`template.rs` + `main.rs`)
-- New subcommand outputs JSON:
-  ```json
-  {"template_mode": true, "components": [{"name": "status", "mode": "replace", "content": "...", "line": 12}]}
-  ```
-- Plugins call this single command — no markdown parsing in Kotlin/TypeScript
-
-**Phase 3 — Patch block parser** (`template.rs`)
-- `parse_patches(response)` extracts `<!-- patch:name -->...<!-- /patch:name -->` blocks
-- Returns `(Vec<PatchBlock>, unmatched_text)`
-- `apply_patches(doc, patches, unmatched, file)` applies to `<!-- agent:name -->` components
-- Respects `components.toml` mode (replace/append/prepend)
-- Applies patches in reverse position order to preserve byte offsets
-- Unmatched text goes to `<!-- agent:output -->` (existing or auto-created)
-
-**Phase 4 — `agent-doc write --template`** (`write.rs`)
-- `run_template()` reads response from stdin, parses patch blocks, applies to document
-- Same 3-way merge + atomic write + snapshot save as append mode
-- Usage: `echo "<response>" | agent-doc write plan.md --template --baseline-file /tmp/baseline.md`
-
-**New file:** `src/template.rs` (~270 lines including tests)
-
-**Files changed:**
-- `frontmatter.rs` — `response_mode` field
-- `main.rs` — `mod template`, `TemplateInfo` subcommand, `--template` flag on `Write`
-- `write.rs` — `run_template()` function
-- `template.rs` — new module (patch parser, applier, template-info)
-
-Plugin phases (5-7) can proceed whenever ready — `agent-doc template-info` is available now.
-
-## User
-
-Proceed
-## Assistant
-
-### Done — Phases 1-4 committed
-
-`make check` passes (clippy clean, 188 tests). Committed to agent-doc submodule:
-
-```
-12c39fb feat: template-mode for in-place response documents
-```
-
-**4 files changed, 519 insertions:**
-- `src/template.rs` — new module (patch parser, applier, template-info, 7 tests)
-- `src/frontmatter.rs` — `response_mode: Option<String>` field
-- `src/main.rs` — `mod template`, `TemplateInfo` subcommand, `--template` flag on `Write`
-- `src/write.rs` — `run_template()` function
-
-**Ready for next steps:**
-- Bump version + release (v0.9.9 or v0.10.0?)
-- Update SKILL.md to use `--template` flag for template-mode documents
-- Plugin phases (5-7): component folding, gutter icons, structure view
-
-What would you like to do next?
-
-## User
-
-The is a compaction fix that should be initiated in the tasks/contabo.md doc. Read it and implement here.
-
-> **Re: agent-doc write-back failing after compaction** — This is the known issue where context compaction interrupts the agent-doc session workflow mid-cycle. The response was generated in the console but never written back to the file because the compaction cleared the state before the `agent-doc write` step executed. The agent-doc session in `tasks/agent-doc.md` is working on template modes and stale snapshot recovery — the `is_stale_snapshot()` feature (v0.9.5+) should help detect this, but the SKILL.md workflow needs a guard: if compaction occurs between step 3 (respond) and step 4 (write), the new session must detect the orphaned response and write it back.
-
-## Assistant
-
-### Compaction Recovery Implemented
-
-**The bug:** Context compaction interrupts the agent-doc workflow between step 3 (respond) and step 4 (write). The response streams to the console but `agent-doc write` never executes. Next `/agent-doc` call sees no diff — response is lost.
-
-**The fix: durable pending response store.**
-
-`agent-doc write` now saves the response to `.agent-doc/pending/<hash>.md` *before* writing to the document, and clears it *after* success. If compaction (or any crash) interrupts the write, the response persists on disk.
-
-**New: `agent-doc recover <FILE>`** — checks for a pending response and applies it:
-- Auto-detects append vs template mode (checks for `<!-- patch:` markers)
-- Uses same atomic write + 3-way merge + snapshot save path
-- Cleans up pending file after successful recovery
-
-**How it integrates with SKILL.md:**
-1. Pre-flight (step 0): run `agent-doc recover <FILE>` before computing diff
-2. If recovery found, the orphaned response is written and the user sees it
-3. Normal workflow continues (user's new edits trigger the next diff)
-
-**Files changed (2 commits):**
-```
-9536dc4 feat: compaction recovery — durable pending response store
-  src/recover.rs  — new module (run, save_pending, clear_pending, 4 tests)
-  src/snapshot.rs — pending_path_for()
-   src/write.rs    — save_pending before write, clear_pending after
-  src/main.rs     — Recover subcommand
-```
-
-**192 tests pass** (171 unit + 21 integration). Clippy clean.
-
-**Next:** Update SKILL.md step 0 to call `agent-doc recover` in pre-flight, then release.
-
-## User
-
-Proceed
-## Assistant
-
-### Released v0.9.9
-
-**Published to all targets:**
-- crates.io: `agent-doc v0.9.9`
-- PyPI: `agent_doc-0.9.9`
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.9
-- Local binary: `~/.cargo/bin/agent-doc` (v0.9.9)
-- SKILL.md: updated to v0.9.9 (with `agent-doc recover` in pre-flight)
-
-**What's in v0.9.9:**
-
-1. **Template-mode for in-place response documents**
-   - `response_mode: template` frontmatter field
-   - `agent-doc template-info <FILE>` — JSON output for plugins
-   - `<!-- patch:name -->` response parser + component applier
-   - `agent-doc write --template` — template-mode write from stdin
-   - Auto-create `<!-- agent:output -->` for unmatched content
-
-2. **Compaction recovery**
-   - `agent-doc write` saves responses to `.agent-doc/pending/<hash>.md` before writing
-   - `agent-doc recover <FILE>` — detect and apply orphaned responses
-   - SKILL.md pre-flight (step 0) calls `agent-doc recover` automatically
-   - Survives context compaction, crashes, and interrupted sessions
-
-3. **SKILL.md updates**
-   - Added `agent-doc recover <FILE>` to pre-flight checks
-   - Version bumped to 0.9.9
-
-**192 tests passing.** 3 commits in submodule:
-```
-12c39fb feat: template-mode for in-place response documents
-9536dc4 feat: compaction recovery — durable pending response store
-95d476f release: v0.9.9 — template mode + compaction recovery
-```
-
-## User
-
-Let's convert this document to use templates. Please format. Assess whether or not some or all of the conversion logic belongs in agent-doc 
+Would it be better to not evaluate content in backticks or use `<!~~ ~~>`. `<!~~ ~~>` seems very peculiar. Is there any precedent with other libraries or apps?

@@ -204,23 +204,13 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:exchange -->
 
-### Screencast recording set up
+### Keybinding updated
 
-**Your setup:** X11 + i3 + ffmpeg + PulseAudio (via pipewire-pulse)
+No Print key on your SliceMK split keyboard. Changed i3 binding from `$mod+Print` to **`$mod+F9`**.
 
-**Installed:** `~/bin/screencast-toggle` — a toggle script that starts/stops ffmpeg recording.
+F9 is on the fn layer (key 41) and fnpad layer (key 25). Full combo: **Super + fn + F9** to toggle recording.
 
-**Hotkey:** `$mod+Print` (Super+PrintScreen) — press once to start, press again to stop.
+i3 config reloaded — binding is active now.
 
-**How it works:**
-- Start: captures full screen at 30fps + system audio → `~/Videos/screencast-<timestamp>.mp4`
-- Stop: sends SIGINT to ffmpeg for clean file finalization
-- Desktop notification on start/stop via `notify-send`
-- Uses `libx264 ultrafast` preset — low CPU overhead, good quality (CRF 18)
-
-**To test:** Press `Super+Print`, do something for a few seconds, press `Super+Print` again. Check `~/Videos/` for the output.
-
-**Post-production:** Use `ffmpeg` to trim: `ffmpeg -ss 00:00:05 -to 00:01:05 -i input.mp4 -c copy output.mp4`
-
-Look in ~/work/btakita/slicemk-config/ for the location of the Print button. I don't think I have a binding.
+save this to tasks/screencast.md
 <!-- /agent:exchange -->

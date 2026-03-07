@@ -150,3 +150,25 @@ $ sourcemap__resolve__bun -f index.ts
 error: script "dev:sourcemap__resolve__bun" exited with code 127
 error: script "dev" exited with code 127
 ```
+
+## Assistant
+
+You can't run `bun install` or `bun dev` from the standalone submodule — it needs the parent workspace. I cloned `brookebrodack-dev` to `/home/brian/work/btakita/brookebrodack-dev` with all 21 submodules.
+
+Please add brookebrodack-dev as the submodule instead of brookebrodack-site.
+
+**Install result:** `bun install --ignore-scripts` succeeded (768 packages). The `canvas` native module in `app/-brookebrodack-dev-bin` fails to compile on Node 25 (pre-built binaries don't exist for node-v141 ABI). Used `--ignore-scripts` to skip it — canvas is only needed by dev-bin, not the site itself.
+
+**Dev server:** Starts but fails with `Cannot find module '../../public/assets/images/brooke-brodack-logo.jpg'`. The `public` symlink at `app/brookebrodack-site/public` points to `../../public` which doesn't exist in the repo (likely gitignored assets — need to populate).
+
+**Current blockers:**
+1. Missing `public/` assets directory in brookebrodack-dev root
+2. `canvas` native module incompatible with Node 25 (non-critical, dev-bin only)
+3. TypeScript peer dependency warnings (expects 5.4.4, we have newer)
+
+**Next steps:** Do you have the `public/` assets backed up somewhere (S3, local backup, Cloudflare R2)? Or should we create a minimal `public/` with placeholder assets to get the dev server running?
+
+Going to use brookebrodack-dev.
+
+## User
+

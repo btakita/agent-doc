@@ -149,3 +149,38 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 Could you help me with why we have tasks/contabo.md.agent-doc.lock being located next to the file?
 
 I don't want this file comitted into the git repo. Is it possible to have it in the .agent-doc directory while keeping the file path uniqueness? Should .agent-doc have a database/datafile of locks instead?
+## Assistant
+
+### Why lock files are next to the document
+
+The document advisory lock (`<file>.md.agent-doc.lock`) was placed adjacent to the document for simplicity — `path.with_extension("md.agent-doc.lock")` is a one-liner. But you're right, it creates two problems:
+1. Pollutes the working tree (shows up in `git status`)
+2. Risk of accidental commit
+
+### Recommended: Move locks to `.agent-doc/locks/`
+
+Use the same SHA256-of-canonical-path scheme as snapshots:
+
+```
+.agent-doc/locks/<sha256_hash>.lock
+```
+
+This mirrors the existing snapshot pattern exactly:
+- Snapshots: `.agent-doc/snapshots/<hash>.md`
+- Locks: `.agent-doc/locks/<hash>.lock`
+
+The change is small — two files need updating:
+- `src/write.rs:86` — `let lock_path = path.with_extension("md.agent-doc.lock");`
+- `src/submit.rs:140` — `let lock_path = path.with_extension("md.agent-doc.lock");`
+
+Both would call a shared `lock_path_for(doc_path)` function that resolves the project root, computes the hash, and returns `.agent-doc/locks/<hash>.lock`.
+
+**A database/datafile is overkill** — `flock()` operates on file descriptors, not database rows. One lock file per document is the right granularity. The hash-based naming preserves uniqueness without the file system clutter.
+
+**Quick mitigation now**: Add `*.agent-doc.lock` to `.gitignore` so existing lock files don't get committed while we implement the proper fix.
+
+Want me to implement the lock relocation in `agent-doc`?
+
+## User
+
+Yes...hashed lock relocation.

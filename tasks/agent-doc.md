@@ -136,7 +136,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:pending -->
 - Fix component parser to skip code spans (fenced blocks + inline backticks) — markers in code are literal, not real
-- `agent-doc convert` — auto-convert append-mode documents to template mode
+- Add `input` component to template-mode document convention (user writes in `input`, agent responds in `output`)
+- `agent-doc convert` — auto-convert append-mode documents to template mode (creates `input` + `output` components)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
@@ -189,27 +190,40 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 ## User
 
 <!-- agent:output -->
-### Parser should skip code spans (not `<!~~ ~~>`)
+### User input should be a component
 
-`<!~~ ~~>` has no precedent and is the wrong approach. The correct fix is **skip code spans in the component parser**.
+Yes — template-mode documents should use an `input` component:
 
-**Precedent:** Hugo, MDX, Liquid, Handlebars, Tree-sitter — all skip special syntax inside code fences and backtick spans. This is the universal convention.
+```markdown
+## User
+<!~~ agent:input ~~>
+Your question here.
+<!~~ /agent:input ~~>
 
-**Fix in `component.rs` (~30 LOC):**
-1. Scan for fenced code blocks and inline backtick spans → collect byte ranges
-2. In marker search, skip any match inside a code range
-3. Real markers in normal markdown → parsed; markers in code → literal text
+<!~~ agent:output ~~>
+Agent response here.
+<!~~ /agent:output ~~>
+```
 
-Once fixed, this document can use real marker syntax in examples without `<!~~ ~~>` escaping.
+I thought we were not using `<!~~ ~~>`. I see the strikethrough text formatting above.
 
-**New items for pending:**
-- Fix component parser to skip code spans (fenced blocks + inline backticks)
-- `agent-doc convert` — mechanical append-to-template migration
-- Document binary-vs-agent responsibility split in README
+**Why:**
+- Clear boundary between user input and agent output
+- `agent-doc write --template` can read `input` content as the prompt
+- Diff computation becomes component-scoped instead of free-text scanning
+- Plugin UX: gutter icon on `input` = "submit", folding works naturally
 
-**Binary vs agent responsibility (for docs):**
-- **Binary (mechanical):** frontmatter, marker wrapping, component CRUD, parser, atomic write, recovery
-- **Agent (judgment):** content summarization, component naming, mode selection, layout decisions
+**Three options for free text outside components:**
+1. **`input` component (recommended)** — explicit, clean separation
+2. **Auto-capture** — free text below `## User` auto-moves into `input`. Flexible but implicit.
+3. **Ignore** — only component content processed. Simple but restrictive.
+
+Option 1 aligns with "component boundaries are guard rails." The `agent-doc convert` command would create both `input` and `output` components.
+
+**Note:** Code examples above use `<!~~ ~~>` because the code-span parser fix isn't built yet. Once `component.rs` skips code blocks, these become real `<!-- -->` syntax in code fences.
+
+Let's fix the formatting first. So we can immediately stop using `<!~~ ~~>`. It's confusing. Do this before answering the rest of my queries.
+
 <!-- /agent:output -->
 
 `<!~~ ~~>` is not ideal..neither is "backtick-wrapped markers get parsed as real components".
@@ -218,4 +232,6 @@ Would it be better to not evaluate content in backticks or use `<!~~ ~~>`. `<!~~
 
 When agent-doc writes the response to this document...should the user request be in its' own component?
 
-I wonder if it makes sense to undo 
+I wonder if it makes sense to undo requests. So if we store the user requests in a component, it would be interesting to save the response diffs. Perhaps particular requests can then be extracted to other documents or undone.
+Undo would simply be reverting the diff.
+Extracting to another agent document, would involve the diff and the context that the diff relates to. This may require manual intervention if the automation does the extraction incorrectly.

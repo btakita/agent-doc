@@ -12,7 +12,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{snapshot, template};
+use crate::{recover, snapshot, template};
 
 /// Run the write command: append assistant response to document.
 ///
@@ -38,6 +38,9 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let base = baseline.unwrap_or(&content_at_start);
+
+    // Save response to pending store (survives context compaction)
+    recover::save_pending(file, &response)?;
 
     // Build "ours": baseline + response appended
     let mut content_ours = base.to_string();
@@ -74,6 +77,9 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     drop(doc_lock);
 
+    // Clear pending response after successful write
+    recover::clear_pending(file)?;
+
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
 }
@@ -95,6 +101,9 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     if response.trim().is_empty() {
         anyhow::bail!("empty response — nothing to write");
     }
+
+    // Save response to pending store (survives context compaction)
+    recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
     let (patches, unmatched) = template::parse_patches(&response)
@@ -135,11 +144,79 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     drop(doc_lock);
 
+    // Clear pending response after successful write
+    recover::clear_pending(file)?;
+
     eprintln!(
         "[write] Template patches applied to {} ({} components patched)",
         file.display(),
         patches.len()
     );
+    Ok(())
+}
+
+/// Apply an append-mode response from a string (not stdin).
+/// Used by `recover` to apply orphaned responses.
+pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let mut content_ours = content.clone();
+    if !content_ours.ends_with('\n') {
+        content_ours.push('\n');
+    }
+    content_ours.push_str("## Assistant\n\n");
+    content_ours.push_str(response);
+    if !response.ends_with('\n') {
+        content_ours.push('\n');
+    }
+    content_ours.push_str("\n## User\n\n");
+
+    let doc_lock = acquire_doc_lock(file)?;
+
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+
+    let final_content = if content_current == content {
+        content_ours
+    } else {
+        merge_contents(&content, &content_ours, &content_current)?
+    };
+
+    atomic_write(file, &final_content)?;
+    snapshot::save(file, &final_content)?;
+    drop(doc_lock);
+    eprintln!("[write] Response appended to {}", file.display());
+    Ok(())
+}
+
+/// Apply template-mode patches from a string (not stdin).
+/// Used by `recover` to apply orphaned template responses.
+pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let (patches, unmatched) = template::parse_patches(response)
+        .context("failed to parse patch blocks from response")?;
+
+    let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+
+    let doc_lock = acquire_doc_lock(file)?;
+
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+
+    let final_content = if content_current == content {
+        content_ours
+    } else {
+        merge_contents(&content, &content_ours, &content_current)?
+    };
+
+    atomic_write(file, &final_content)?;
+    snapshot::save(file, &final_content)?;
+    drop(doc_lock);
+    eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())
 }
 

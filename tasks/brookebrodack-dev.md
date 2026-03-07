@@ -994,6 +994,23 @@ Do it
 - Add static export to relysjs framework (tracked separately)
 Will be run in tasks/relysjs.md
 
+## Assistant
+
+**Re: GH_TOKEN** — Good point, clarifying: The `GH_TOKEN` in the **WebSub Cloudflare Worker** (not GitHub Actions) is a separate token. When I deployed the worker, I used the `gh` CLI's OAuth token (from `gh auth token`). That token can expire or get revoked if you re-authenticate `gh`. GitHub Actions' built-in `GITHUB_TOKEN` is only available inside workflow runs — the CF Worker can't use it. But if the `gh` CLI token stays valid, it's fine as-is. Only replace it if you notice WebSub-triggered deploys stop working.
+
+**Re: WebSub auto-renewal — Done.**
+
+Added a `scheduled` handler to the WebSub worker:
+- **Cron:** `0 0 */7 * *` (every 7 days at midnight UTC)
+- **Action:** POSTs to `pubsubhubbub.appspot.com/subscribe` to renew the YouTube feed lease
+- **Deployed:** Worker updated with cron trigger active
+
+Files changed:
+- `workers/websub/index.ts` — added `scheduled()` handler + `renew_subscription()` function
+- `workers/websub/wrangler.toml` — added `[triggers] crons`, `YOUTUBE_CHANNELID` var
+
+**Re: relysjs static export** — Acknowledged, will be tracked in `tasks/relysjs.md`.
+
 ## User
 
-
+Can we have our own worker that does the same thing as pubsubhubbub.appspot.com?

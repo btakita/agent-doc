@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
 tmux_session: '0'
-response_mode: template
+agent_doc_mode: template
 ---
 
 # agent-doc
@@ -205,23 +205,54 @@ The interaction is a bit more than a response_mode. I wonder if there is a clear
 <!-- /agent:input -->
 
 <!-- agent:output -->
-### Released v0.9.10
+### Release shipped (v0.9.10) + naming discussion
 
-**Published to all targets:**
-- crates.io: `agent-doc v0.9.10`
-- PyPI: `agent_doc-0.9.10`
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.9.10
-- Local binary: `~/.cargo/bin/agent-doc` (v0.9.10)
+The release already went out before I saw the strikethrough — v0.9.10 is published. That's fine since the code-span parser fix is a solid standalone release.
 
-**What's in v0.9.10:**
-- Component parser skips code spans (fenced blocks + inline backticks) — no more `<!~~ ~~>` workarounds
-- 4 new tests for code-span detection
-- 175 tests passing (clippy clean)
-- Version bump: minor (0.9.10), not 0.10.0 — saving that for the full template-mode SKILL.md workflow
+### Is `response_mode` the right name?
 
-**Commits:**
+Good instinct — `response_mode` is too narrow. It implies only the output changes, but template mode changes the entire interaction pattern:
+
+- **Append:** Temporal conversation. `## User` → `## Assistant`. Linear.
+- **Template:** Spatial document. Components patch in-place. Structural.
+
+**Alternative names considered:**
+
+| Name | Verdict |
+|------|---------|
+| `response_mode` | Too narrow — only describes output |
+| `mode` | Clean, unambiguous in frontmatter context |
+| `document_mode` | Explicit — governs the whole document |
+| `interaction` | Right scope, but generic |
+| `layout` | Spatial metaphor, but misses append semantics |
+| `flow` | Vague |
+
+**Recommendation: `mode`** — simple, clear in frontmatter:
+```yaml
+mode: template   # template | append (default)
 ```
-dedaca3 fix: component parser skips code spans (fenced blocks + inline backticks)
-ecb71ad release: v0.9.10 — code-span parser fix + template input/output components
-```
+
+Or `document_mode` if you want more specificity. Both are better than `response_mode`.
+
+How about `agent_doc_mode`? The frontmatter assumes only agent_doc is using it. Which is most likely the case. But there may be times where other tools look at the frontmatter.
+Also, as we expand the frontmatter api, I wonder if `mode` would be sufficient. Is it futureproof?
+
+This is a rename in `frontmatter.rs` + SKILL.md + docs. Can keep `response_mode` as a deprecated alias for backwards compatibility with existing documents.
+
+Sure...how about `agent_doc_mode` being the canonical name with aliases:
+- mode
+- response_mode
+
+Perhaps we can have a heuristic to interpret ambiguous terms accordingly.
+
+How will my inline responses in the response component be formatted? As in-place formatted conversation or will it be lifted to the input component?
+
+### Documentation + blog post
+
+For docs: README rewrite covering both modes, component system, `input`/`output` convention.
+
+For blog: "Two ways to talk to your document" — when to use append (conversation) vs template (dashboard), how to transition, the component model.
+
+Shall I start with the rename, docs, or blog post?
+Still discussing
 <!-- /agent:output -->

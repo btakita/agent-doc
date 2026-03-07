@@ -301,6 +301,47 @@ Found the root cause: **the SKILL.md had zero template-mode instructions.** It w
 This document worked because the conversion happened manually in context — the agent had the knowledge from the conversation. Other documents failed because they relied on the SKILL.md (which lacked template instructions).
 
 **Next steps:** Rebuild and release the binary so `agent-doc skill install` propagates the fix to all projects.
+
+Has SKILL.md been updated locally and in the release?
+
+### SKILL.md update status
+
+| Location | Updated? | Notes |
+|----------|----------|-------|
+| `.claude/skills/agent-doc/SKILL.md` | **Yes** | Updated this session — template-mode step 4b, `agent_doc_mode` field, patch block format |
+| `src/agent-doc/SKILL.md` | **Yes** | Copied from the local skill — source for next `include_str!` bundle |
+| **Published binary** (crates.io/PyPI/GitHub) | **No** | Still v0.10.0 without template instructions |
+
+Let's publish a patch release.
+
+The local SKILL.md in this project works because you're using it directly. Other projects that run `agent-doc skill install` will get the old version until we rebuild and release.
+
+**To propagate the fix:** bump version → `make check` → publish. Want to do that now?
+
+I just had an issue with running agent-doc on this file. My Idea editor restarted...I did not re claim this file since Idea restarted..but I did claim this doc in the running claude session on previous editor runs. agent-doc run did not go anywhere.
+
+### Claim issue after IDEA restart
+
+The claim is actually fine — checked the registry and `tasks/agent-doc.md` is claimed on pane %0 (this Claude session). The claim survived the IDEA restart because claims live in `.agent-doc/sessions.json`, not in IDEA's state.
+
+The "didn't go anywhere" was likely a timing issue:
+1. IDEA restarted and the plugin sent a new claim (we saw it in the claims log: "Claimed tasks/agent-doc.md for pane %0")
+2. The `/agent-doc` command was sent to the pane via `send-keys`, but this Claude session may have been mid-response or waiting for input
+3. The command would have been queued in the terminal — it may have executed but found no diff (if the snapshot was current)
+
+I don't think the correct tmux pane was bound. The claude session was idle.
+
+**If this happens again:** Check the Claude session terminal — the `/agent-doc` command may be sitting in the input buffer. You can also run `/agent-doc tasks/agent-doc.md` directly from the Claude console (as you just did) rather than relying on the plugin routing.
 <!-- /agent:output -->
 
 We seem to be having problems converting to agent_doc_mode: template in other documents. This file converted properly, but others did not. Has the skill been updated?
+
+Has SKILL.md been updated locally and in the release?
+
+I just had an issue with running agent-doc on this file. My Idea editor restarted...I did not re claim this file since Idea restarted..but I did claim this doc in the running claude session on previous editor runs. agent-doc run did not go anywhere.
+
+Can we fix this for the upcoming patch release?
+
+Let's convert this file's input and output to exchange. Move my requests at the bottom of this file to the bottom of the exchange.
+
+Please release the SKILL.md fix. We will have another release for the fix to send an agent-doc run to the tmux pane that claimed the document in a previous run of the Idea editor.

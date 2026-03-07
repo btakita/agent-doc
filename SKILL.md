@@ -69,7 +69,11 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 ### 4. Write back to the document
 
-After responding, use `agent-doc write` to atomically append the response:
+Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
+
+#### 4a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
+
+Use `agent-doc write` to atomically append the response:
 
 1. **Save a baseline copy** of the document content (before step 3) to a temp file
 2. **Pipe your response** through `agent-doc write`:
@@ -81,6 +85,41 @@ After responding, use `agent-doc write` to atomically append the response:
    - 3-way merging if the user edited during your response
    - Atomic file write (flock + tempfile + rename)
    - Snapshot update
+
+#### 4b. Template mode (`agent_doc_mode: template`)
+
+Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
+The agent responds with **patch blocks** that target specific components.
+
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Format your response as patch blocks:**
+   ```markdown
+   <!-- patch:output -->
+   Your response content here.
+   <!-- /patch:output -->
+
+   <!-- patch:status -->
+   Updated status line.
+   <!-- /patch:status -->
+   ```
+   - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
+   - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
+   - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
+3. **Pipe through `agent-doc write` with `--template` flag:**
+   ```bash
+   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --template
+   ```
+4. `agent-doc write --template` handles:
+   - Parsing patch blocks from the response
+   - Applying each patch to the matching component
+   - 3-way merging if the user edited during your response
+   - Atomic file write + snapshot update
+
+**Template document conventions:**
+- `<!-- agent:input -->` — user writes prompts here
+- `<!-- agent:output -->` — agent responds here (or use patch blocks for multiple components)
+- `<!-- agent:exchange -->` — shared conversation surface (user and agent both write inline)
+- Other components (status, architecture, etc.) are agent-managed via patch blocks
 
 **IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
 The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
@@ -108,10 +147,13 @@ agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>
+agent_doc_mode: <append | template>  # optional, default: append
 ---
 ```
 
-The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+**Append mode** (default): The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+
+**Template mode** (`agent_doc_mode: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 4b.
 
 ## Snapshot Storage
 

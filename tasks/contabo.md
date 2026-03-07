@@ -719,3 +719,44 @@ None of the 3 have a `prerender.ts` yet (only `briantakita.me-dev` has one). We'
 ## User
 
 Yes. relysjs had a recent addition of generating the static html files. Please use that.
+## Assistant
+
+**Good call — the `relysjs/server/export` API is perfect for this.**
+
+relysjs recently added `static_export_()` and `cloudflare_export_()` (commit `8cc60c2`). However, there's a prerequisite:
+
+**cogov-dev's relysjs dependency needs updating first.** The installed version doesn't have `server/export` yet. Since cogov-dev uses npm-published relysjs (not yalc), we need to:
+
+1. **Publish the latest relysjs** (with `server/export`) to npm from ctx-core-dev
+2. **Update relysjs** in cogov-dev's `app/cogov.me/package.json`
+3. Then create the prerender/export script
+
+**cogov.me routes to pre-render (12 pages):**
+- `/`, `/connect`, `/declaration`, `/ecosystem`, `/holochain`, `/protocol.love`
+- `/services`, `/site`, `/specs`, `/team/raymond-d-powell`, `/vision`
+- `/robots.txt`, `/sitemap.xml`
+- `/team` → 302 redirect to `/team/raymond-d-powell` (handled by CF Pages `_redirects` file)
+
+**Once relysjs is updated, the cogov prerender script would be:**
+```typescript
+import { cloudflare_export_ } from 'relysjs/server/export/cloudflare'
+await cloudflare_export_({
+  site_url: 'https://cogov.me',
+  out_dir: 'dist/static',
+  sitemap: true,
+  extra_routes: ['/robots.txt'],
+  wrangler: { name: 'cogov-me' },
+})
+```
+
+**Next steps:**
+1. Publish relysjs with `server/export` from ctx-core-dev
+2. Update cogov-dev dependencies
+3. Create prerender script + test locally
+4. Deploy to CF Pages
+
+Want me to start with step 1 — publishing the updated relysjs?
+
+## User
+
+yes steps 1-4

@@ -440,4 +440,4 @@ My recommendation is **Option 3** for now -- it's honest, zero-risk, and preserv
 
 ## User
 
-
+Why did we implement with_snapshot if we are not using it? Is it mainly for programmers using the library?

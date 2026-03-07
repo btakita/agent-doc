@@ -1271,3 +1271,38 @@ Shall I start implementing herbaliciousbliss? And which path for censible?
 ## User
 
 
+## Assistant
+
+**Re: swappable relysjs/Hono interface** — Good idea. The swappable layer would be thin:
+
+```typescript
+// Shared interface (framework-agnostic)
+interface ServerAdapter {
+  html_response(content: string | ReadableStream, opts?: { headers?: Headers }): Response
+  request_url(req: Request): URL
+  cookie(req: Request, name: string): string | undefined
+  set_cookie(headers: Headers, name: string, value: string, opts: CookieOptions): void
+  env<T>(key: string): T  // D1 binding, secrets, etc.
+}
+```
+
+**What this enables:**
+- `relysjs` implements `ServerAdapter` wrapping Elysia context
+- `relysjs/hono` (or `@rappstack/hono`) implements it wrapping Hono `c` context
+- Auth logic, session management, and domain code depend only on `ServerAdapter`
+- Swap backends by changing the import, not the business logic
+
+**What stays framework-specific:**
+- Route definitions (Elysia `.get()` vs Hono `.get()` — slightly different signatures)
+- Middleware registration
+- Build pipeline
+
+This is essentially what `request_ctx` already does in relysjs — it abstracts the framework context. The Hono version would map `c.env`, `c.req`, `c.header()` into the same interface.
+
+**Practical approach:** Implement herbaliciousbliss on Hono first (direct, no abstraction). Then extract the shared `ServerAdapter` interface from the patterns that emerge. This avoids designing the interface in a vacuum.
+
+Shall I proceed with the herbaliciousbliss Hono + D1 implementation?
+
+## User
+
+Let's leave censible on Contabo for now. Migrate herbaliciousbliss only.

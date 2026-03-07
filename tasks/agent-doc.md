@@ -541,3 +541,48 @@ The key insight from swarm architectures: **the document IS the shared blackboar
 Please do the action items. One use case. Document A & B are both claimed by the same claude session in a tmux pane. Document A is running, then the user want to run Document B.
 
 Does Document B's run block until Document A is complete? It should happen in parallel.
+
+## Assistant
+
+### Action Item Results
+
+**1. Removed subagent requirement from SKILL.md** -- Done.
+
+Updated `.claude/skills/agent-doc/SKILL.md`:
+- Renamed section from "Execution Model -- Subagent Per Document" to "Execution Model -- Direct Processing (Default)"
+- Default path: process `/agent-doc` directly in main context (no subagent overhead)
+- Removed all `(subagent)` annotations from workflow steps
+- Added "When to Use Background Subagents" subsection for the parallel case
+
+**2. Locking verification** -- Already verified by the race condition tests added earlier (56 tmux-router tests, 140 agent-doc tests including concurrent write serialization tests). The flock + atomic rename in v0.9.5 serializes same-file access correctly.
+
+**3. Haiku for future subagents** -- Documented in the SKILL.md parallel section. When `agent-doc deep` fan-out lands, subagents should use `model: haiku` for simple tasks.
+
+### The Parallel Processing Question
+
+**Yes, Document B blocks until Document A completes.** Claude Code is sequential -- it processes one message at a time. There is no way around this in the main context. When A is generating its response, the `/agent-doc B` command queues and waits.
+
+**The fix is a hybrid model**, which is now in the updated SKILL.md:
+
+| Scenario | Execution |
+|----------|-----------|
+| Single document (common case) | Direct -- no subagent, no token overhead |
+| Multiple documents, user wants parallel | Background subagent (`Agent(run_in_background: true)`) for the 2nd+ document |
+
+**How it works in practice:**
+1. User submits Document A via `/agent-doc A` -- processes directly in main context
+2. User submits Document B via `/agent-doc B` while A is still generating
+3. The skill detects A is in progress and dispatches B to a background subagent
+4. Both run concurrently -- A in main context, B in the subagent
+5. B's subagent writes back to the document and updates the snapshot independently
+6. Filesystem locks (flock) prevent corruption if both touch shared state
+
+**The token cost tradeoff:** The background subagent costs extra tokens (fresh context window), but only when parallelism is explicitly needed. The common case (single document) pays zero subagent overhead. This is the best of both worlds.
+
+**Detection heuristic:** In practice, "A is in progress" means the skill is mid-cycle (between reading the diff and writing back). Since Claude Code queues messages, the second `/agent-doc B` arrives as a queued message. The main agent sees it after A completes -- so B never actually needs a subagent unless the user explicitly asks for parallel processing or uses the editor plugin's submit button on B while A's console output is still streaming.
+
+The realistic parallel scenario is: the user has two editor tabs open, clicks "Submit" on both via the IDE plugin in quick succession. The plugin sends two `/agent-doc` commands. The first processes directly, the second should use `Agent(run_in_background: true)`.
+
+## User
+
+Please add functional tests for this lazy parallelization behavior.

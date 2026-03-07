@@ -135,9 +135,9 @@ pub fn run(
 }
 
 /// Acquire an advisory flock on a document file for agent-doc-vs-agent-doc
-/// coordination. Lock file is `<path>.lock` (sibling). Released on drop.
+/// coordination. Lock file is `.agent-doc/locks/<hash>.lock`. Released on drop.
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = path.with_extension("md.agent-doc.lock");
+    let lock_path = crate::snapshot::lock_path_for(path)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

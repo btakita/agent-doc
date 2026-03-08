@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** WIL rankings + ESG issue rankings live from D1 ✓. ESG scores behind auth ✓. Next: financial indicators, ESG teaser, fund data, mi-web/esg-web.
+**Status:** ESG teaser live ✓. WIL + issue rankings ✓. Auth ✓. Next: fund data import, financial indicators (FMP API), mi-web/esg-web.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -22,40 +22,46 @@ Replaced the down CENSIBLE_SEARCH_URL with D1-backed queries:
 - Top 25 large-cap (NYSE/NASDAQ)
 - SP1500 CEO infographic (bundled at build)
 - Fund sections: empty (no fund-level data in D1 yet)
+Missing data for:
+  - Best Funds for Women in Leadership
+  - Worst Funds for Women in Leadership
+  - Largest Funds — Women in Leadership
+  - Responsible Investing Funds — Women in Leadership
 
 **ESG Issue Rankings (live):**
 - 12 issues: carbon, governance, privacy, labor, etc.
 - Top 50 companies per issue with score + percentile
 - Linked to company profiles
 
-**New public API:**
-- `GET /api/rankings/wil` — WIL company rankings
-- `GET /api/rankings/:issue_id` — issue-specific rankings
+### Phase 11 — ESG Teaser + Research
 
-**Test:**
-- https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/women-in-leadership
-Missing data for:
-  - Best Funds for Women in Leadership
-  - Worst Funds for Women in Leadership
-  - Largest Funds — Women in Leadership
-  - Responsible Investing Funds — Women in Leadership
-- https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/carbon_emissions
-- https://censible-root-web.brian-takita.workers.dev/api/rankings/wil
-
-**Re: financial indicators + ESG teaser:**
-Can add to the public company profile page:
-- Financial indicators (need data source — `_yahoo__equity.csv` or `_ft__security_detail.csv`)
-- ESG teaser: overall tier (Leader/Average/Laggard) or letter rating without detailed scores
-What specific financial indicators and what level of ESG teaser would you like?
+**ESG Teaser (deployed):**
+Public company pages now show ESG tier without numeric scores:
+- Overall: Leader / Average / Laggard (based on MSCI ESG score 7+/4+/<4)
+- E, S, G pills with same tier labels
+- "Log in for detailed scores" CTA
+- Test: https://censible-root-web.brian-takita.workers.dev/companies/AAPL
 Teaser
 
-**Remaining work:**
-- Financial indicators + ESG teaser on public company page
+**Free financial APIs:**
+Best option: **Financial Modeling Prep (FMP)** — free tier, 250 req/day, has bulk endpoints (stock screener returns many tickers per call). Covers market cap, PE ratio, price, volume, sector. Would need a free API key. Can cover 9K companies with bulk calls well under the daily limit. Runner-up: Finnhub (60 req/min, no bulk). Alpha Vantage too slow (25/day).
 Is there a free api for current data?
-- Fund data import (CSV files are portfolio holdings, not fund-level rankings — need fund metadata)
+
+**Fund data — what's needed:**
+The CSV files we have (`_mi_wil_*.csv`) are portfolio holdings (28 positions with tickers + weights), NOT fund-level rankings. For WIL fund sections we need:
+1. **Fund metadata** — fund_name, ticker, fund_type, style, PE ratio, number_of_companies_in_fund
+2. **Aggregated WIL metrics per fund** — female_board_pct, female_ceos/total_ceos, zero_female_board_members, board_>30%_female
+3. **Fund categorization** — which funds are "largest", "responsible investing", etc.
+
+This was originally computed by finegar-api (now down). Options:
+- A) Import from a fund data source (Morningstar, FMP fund endpoint, etc.)
+- B) Compute from holdings: use _mi_wil_*.csv holdings → look up each company's gender data in D1 → aggregate per fund. But we only have 28 holdings, not thousands of real funds.
+- C) Use static curated data (manually list top/worst/largest/RI funds with their WIL metrics)
 what files do we need?
-- mi-web / esg-web apps (separate deployments, need planning)
+
+**mi-web / esg-web — plan:**
+These are separate Cloudflare Worker deployments. mi-web is a "mutual fund intelligence" dashboard showing fund-level ESG analysis. esg-web is an ESG-focused company analysis tool. Both currently exist as SolidJS apps in the monorepo. Migration would follow the same pattern as root-web: Hono worker + D1 + server-rendered HTML.
 continue
 
-Compare what we ha
+Compare what we currently have with censible.co and mi-www.site
 <!-- /agent:exchange -->

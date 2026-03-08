@@ -103,14 +103,23 @@ Core product — company ESG lookup + portfolio rebalancing.
 | Memory | — | — | **128MB per isolate** |
 | Monthly cost | **$5/month** | usage-based | — |
 
-**PDF generation feasibility:** 128MB memory + up to 5 min CPU time per request is sufficient for most pdfkit/pdfmake reports. CPU time only counts active processing — D1 queries and KV reads don't count. For very large reports that might exceed 128MB, use a fallback pattern:
-- Queues: dispatch heavy generation to a background worker
-- R2: store generated files, return a download link
-- This keeps the request-response cycle fast while handling large exports async
+**PDF/Excel generation — streaming strategy for memory efficiency:**
 
-I may need additional RAM or to stream data and output.
+The 128MB isolate limit is manageable with streaming. Workers natively support `ReadableStream` responses:
 
-**vs. Heroku cost:** Heroku dynos start at $7/month (Eco) or $25/month (Basic). Workers Paid at $5/month is cheaper and includes edge distribution. The main tradeoff is the 128MB memory constraint, which Heroku doesn't have.
+- **PDF streaming:** pdfkit supports `.pipe(stream)` — generate pages incrementally, pipe chunks directly to the HTTP response. Memory stays proportional to the current page, not the full document.
+- **Data streaming:** Use D1 cursor-based pagination to process rows in batches. Each batch generates its report section, then memory is freed before the next batch.
+- **Excel streaming:** Standard `xlsx` library buffers in memory. Switch to `ExcelJS` which supports `workbook.xlsx.write(stream)` for streaming writes.
+I'm writing the xml. which can be streamed. as with compressing in zip format.
+- **SVG charts:** Already lightweight — render each chart to SVG string via relementjs, embed inline or stream as part of the response.
+
+**Escalation path for truly large reports:**
+1. **Streaming response** (first choice) — keeps memory low, immediate download starts
+2. **Durable Objects** — own isolate, up to 60s CPU, good for complex multi-step generation
+3. **Queues + R2** — async: dispatch generation job, store result in R2, notify user with download link
+4. **Bun server fallback** — no memory limit, for reports that genuinely need >128MB (rare)
+
+**vs. Heroku cost:** Heroku dynos start at $7/month (Eco) or $25/month (Basic). Workers Paid at $5/month is cheaper and includes edge distribution. The main tradeoff is the 128MB memory constraint, which streaming mitigates.
 
 Sources: [Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/) | [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) | [5-min CPU time](https://developers.cloudflare.com/changelog/post/2025-03-25-higher-cpu-limits/)
 

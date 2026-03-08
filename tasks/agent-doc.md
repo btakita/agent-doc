@@ -255,8 +255,31 @@ Removed `agent-doc compact` from the pending list.
 9. Docker sandboxing, TmuxBatch, sub-profiles
 10. Blog post on briantakita.me
 
-In tasks/cogov.me.md, I asked agent-doc to use `agent_doc_mode: template`. It did not configure an exchange. 57Instead, it configured an input/output. It should use exchange by default.
+In tasks/cogov.me.md, I asked agent-doc to use `agent_doc_mode: template`. It did not configure an exchange. Instead, it configured an input/output. It should use exchange by default.
 
 Let's do pending 1 & 2.
 Also agent-doc convert
+
+### Fixes Applied
+
+**Fix 1: Template init uses `exchange` by default**
+- `init.rs`: Template mode now scaffolds `<!-- agent:exchange -->` instead of input/output
+- `template.rs`: Auto-create fallback uses `exchange` component; existing component lookup checks for both `exchange` and `output` (backwards compatible)
+- All tests updated and passing
+
+**Fix 2: Flaky `recover_append_response` test**
+- Root cause: `snapshot::path_for()` returned relative paths while `lock_path_for()` and `pending_path_for()` returned absolute paths. Parallel test threads with different CWDs caused relative path resolution to fail.
+- Fix: `path_for()` now uses `find_project_root()` for absolute path resolution, consistent with the other path functions. Falls back to relative path only when no `.agent-doc/` directory exists.
+
+**Fix 3: `agent-doc convert`** — not yet started. This was mentioned alongside pending 1 & 2.
+
+Implement
+
+**Fix 4: tmux claim-after-restart** — not yet started. What's the expected behavior? The plugin should detect when IDEA restarts and re-run `agent-doc claim` for open documents?
+
+It would be better if we could do this claim lazily. Where calling agent-doc run would claim if the registered claim is no longer valid.
+
+`make check` passes: 192 tests + 21 CLI tests, clippy clean.
+
+Ready to release these fixes. What version should this be?
 <!-- /agent:exchange -->

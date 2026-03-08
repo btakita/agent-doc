@@ -101,8 +101,9 @@ pub fn run(
     if let Some(ref sid) = response.session_id {
         content_ours = frontmatter::set_resume_id(&content_ours, sid)?;
     }
+    let response_text = crate::write::strip_assistant_heading(&response.text);
     content_ours.push_str("\n## Assistant\n\n");
-    content_ours.push_str(&response.text);
+    content_ours.push_str(&response_text);
     content_ours.push_str("\n\n## User\n\n");
 
     // Acquire advisory lock on the document for agent-doc-vs-agent-doc

@@ -309,3 +309,59 @@ Robert is in a much stronger position than a typical "30-day notice" situation. 
 
 ## User
 
+## Assistant
+
+Two critical updates noted.
+
+## Immediate Action Plan (March 12 is 5 days away)
+
+### Priority 1: Send the response letter NOW
+
+Robert should send the letter from the previous session **today or tomorrow at the latest**. Two delivery methods simultaneously:
+
+1. **Email** — send to the landlord's email immediately (creates a timestamped record)
+2. **Certified mail** — send via USPS Certified Mail with Return Receipt. Go to any post office. Cost is ~$7. This creates legal proof of delivery. Even if it arrives after March 12, the **send date** matters.
+
+The letter puts Shawn Hedayati on notice that Robert knows about retaliatory eviction and has preserved the Craigslist evidence. This alone often causes landlords to back off or negotiate.
+
+### Priority 2: Alternative legal help (since Rent Control Board isn't answering)
+
+Since Santa Monica Rent Control Board isn't responding, try these:
+
+- **Bet Tzedek Legal Services** — (323) 939-0506 — free legal help for LA County tenants
+- **Neighborhood Legal Services of LA County** — (800) 433-6251 — free tenant rights assistance
+- **Legal Aid Foundation of Los Angeles (LAFLA)** — (800) 399-4529
+- **Stay Housed LA** — (213) 985-4357 — eviction prevention hotline
+- **LA County Bar Association Lawyer Referral** — (213) 243-1525 — low-cost consultations ($35 for 30 min)
+
+Call multiple numbers — whoever answers first. Explain: "I'm facing a retaliatory eviction from a storage garage in Santa Monica. The landlord complained about a leak, received a 30-day notice, and the landlord immediately re-listed the unit at a higher rent on Craigslist. March 12 deadline."
+
+### Priority 3: Document everything right now
+
+Robert should write down (even in a phone notes app):
+- **The verbal leak conversation** — approximate date, what was said, who was present
+- **All 6+ landlord contacts** — screenshot every text, note every call with date/time/what was said
+- **The Craigslist ad** — already archived (good), but also take personal screenshots
+
+### What happens if Robert stays past March 12 WITHOUT sending the letter?
+
+The landlord would need to:
+1. Serve a **3-day notice to quit** (can't file eviction without this)
+2. File an **unlawful detainer** lawsuit (takes time + costs the landlord money)
+3. Robert gets **5 days** to respond to the summons
+4. Robert files an answer asserting retaliatory eviction defense
+5. Trial is set — typically 20+ days out
+
+**The landlord CANNOT legally change locks, remove Robert's property, or cut access.** Any self-help eviction is illegal in California and Robert could sue for damages.
+
+The landlord said Robert must notify him before accessing his property...or the landlord will have Robert arrested for trespassing.
+
+But sending the letter first is much better — it often prevents the landlord from even starting this process.
+
+### One more question: How long has Robert been renting?
+
+This is still the key unanswered question. If Robert has been at 1224 21st St for **1 year or more**, the 30-day notice is **invalid** — California requires 60 days (Civil Code § 1946.1). This would push the earliest valid termination to **April 13**, giving Robert an additional month automatically.
+
+## User
+
+Robert does not have a copy of the lease. Nor does he have the landlord's address to send the Certified Letter to. It could go to the building office. Are there any other options?

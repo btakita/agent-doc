@@ -687,3 +687,34 @@ Ready to start step 1 — creating the rhonojs package scaffold in ctx-core-dev.
 Yes...Let's do steps 1-5.
 
 I want to support both rhonojs and relysjs
+## Assistant
+
+**Steps 1-2 complete. rhonojs created in `ctx-core-dev/lib/rhonojs/`.**
+
+All 6 server modules ported from Elysia → Hono:
+
+| Module | Changes from relysjs |
+|---|---|
+| `server/hono` | Replaces `server/elysiajs` — reactive Hono Context |
+| `server/app` | `Hono` replaces `Elysia`, `app__start` uses `Bun.serve()` |
+| `server/build` | `rhonojs_plugin_` replaces `relysjs_plugin_` |
+| `server/route` | `html_route_` takes Hono `Context`, uses `c.get/set` for request_ctx |
+| `server/compression` | Wraps Hono's built-in `compress()` (was custom Elysia fork) |
+| `server/static` | `Hono` replaces `Elysia` for route registration |
+| `server/export` | Same (fetch-based, framework-agnostic) |
+| `server/export/cloudflare` | Same |
+
+**Dual support (relysjs + rhonojs):** Both packages coexist. rappstack overlays work with either. Apps choose their server framework:
+- **Hono (rhonojs):** CF Workers apps, new projects → demo.cogov.me, herbaliciousbliss, mi-www.site
+- **Elysia (relysjs):** Existing Bun-native apps → cogov.me, briantakita.me, brookebrodack, drmanny, prescience-notes
+
+No migration pressure on existing relysjs apps. New apps default to rhonojs.
+
+**Remaining steps (next sessions):**
+3. Wire demo.cogov.me to rhonojs
+4. Wire herbaliciousbliss to rhonojs
+5. Update rappstack-dev to support both relysjs and rhonojs overlays
+
+## User
+
+continue

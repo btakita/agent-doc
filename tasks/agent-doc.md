@@ -319,4 +319,6 @@ Published to all targets:
 - **SKILL.md updated**: v0.12.0
 
 197 unit tests + 21 CLI tests passing.
+
+compact this file
 <!-- /agent:exchange -->

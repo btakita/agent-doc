@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.5.6"
+agent-doc-version: "0.10.0"
 ---
 
 # agent-doc submit
@@ -36,6 +36,8 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
 
+**Recover orphaned responses:** Run `agent-doc recover <FILE>` via Bash. If a pending response exists (from a previous cycle interrupted by context compaction), it will be written to the document automatically. Print the output to confirm recovery. This must run before computing the diff.
+
 **Check claims log:** Read `.agent-doc/claims.log` (if it exists). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
 
 ### 1. Read the document and snapshot
@@ -67,20 +69,66 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 ### 4. Write back to the document
 
-After responding, update the document file:
+Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
 
-1. **Re-read the file** (user may have edited during your response)
-2. Append your response as:
+#### 4a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
+
+Use `agent-doc write` to atomically append the response:
+
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Pipe your response** through `agent-doc write`:
+   ```bash
+   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp>
    ```
-   ## Assistant
+3. `agent-doc write` handles:
+   - Appending `## Assistant\n\n<response>\n\n## User\n\n`
+   - 3-way merging if the user edited during your response
+   - Atomic file write (flock + tempfile + rename)
+   - Snapshot update
 
-   <your response>
+#### 4b. Template mode (`agent_doc_mode: template`)
 
-   ## User
+Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
+The agent responds with **patch blocks** that target specific components.
 
+1. **Save a baseline copy** of the document content (before step 3) to a temp file
+2. **Format your response as patch blocks:**
+   ```markdown
+   <!-- patch:output -->
+   Your response content here.
+   <!-- /patch:output -->
+
+   <!-- patch:status -->
+   Updated status line.
+   <!-- /patch:status -->
    ```
-3. Use the Edit tool to append (not Write — preserves user edits made during response)
-4. Update the snapshot to match the new document state
+   - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
+   - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
+   - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
+3. **Pipe through `agent-doc write` with `--template` flag:**
+   ```bash
+   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --template
+   ```
+4. `agent-doc write --template` handles:
+   - Parsing patch blocks from the response
+   - Applying each patch to the matching component
+   - 3-way merging if the user edited during your response
+   - Atomic file write + snapshot update
+
+**Template document conventions:**
+- `<!-- agent:input -->` — user writes prompts here
+- `<!-- agent:output -->` — agent responds here (or use patch blocks for multiple components)
+- `<!-- agent:exchange -->` — shared conversation surface (user and agent both write inline)
+- Other components (status, architecture, etc.) are agent-managed via patch blocks
+
+**IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
+The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
+
+**Baseline file:** Before generating your response (step 3), save the current document to a temp file:
+```bash
+cp <FILE> /tmp/agent-doc-baseline-$$.md
+```
+Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
 
 ### 5. Git integration (optional)
 
@@ -99,10 +147,13 @@ agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>
+agent_doc_mode: <append | template>  # optional, default: append
 ---
 ```
 
-The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+**Append mode** (default): The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+
+**Template mode** (`agent_doc_mode: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 4b.
 
 ## Snapshot Storage
 

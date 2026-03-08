@@ -49,30 +49,40 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
             eprintln!("Sent /agent-doc {} → pane {}", file_path, registered_pane);
             return Ok(());
         }
-        // Pane is dead — try lazy claim if --pane provided
-        if let Some(new_pane) = pane {
+        // Pane is dead — try lazy claim
+        let target_pane = pane
+            .map(|p| p.to_string())
+            .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
+        if let Some(new_pane) = target_pane
+            && tmux.pane_alive(&new_pane)
+        {
             eprintln!(
                 "Pane {} is dead, lazy-claiming to pane {}",
                 registered_pane, new_pane
             );
-            sessions::register(&session_id, new_pane, &file_path)?;
+            sessions::register(&session_id, &new_pane, &file_path)?;
             let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(new_pane, &command)?;
+            tmux.send_keys(&new_pane, &command)?;
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
             return Ok(());
         }
         eprintln!("Pane {} is dead, auto-starting...", registered_pane);
     } else {
-        // No registered pane — try lazy claim if --pane provided
-        if let Some(new_pane) = pane {
+        // No registered pane — try lazy claim
+        let target_pane = pane
+            .map(|p| p.to_string())
+            .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
+        if let Some(new_pane) = target_pane
+            && tmux.pane_alive(&new_pane)
+        {
             eprintln!(
                 "No pane registered for session {}, lazy-claiming to pane {}",
                 &session_id[..std::cmp::min(8, session_id.len())],
                 new_pane
             );
-            sessions::register(&session_id, new_pane, &file_path)?;
+            sessions::register(&session_id, &new_pane, &file_path)?;
             let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(new_pane, &command)?;
+            tmux.send_keys(&new_pane, &command)?;
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
             return Ok(());
         }

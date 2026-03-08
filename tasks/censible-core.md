@@ -33,18 +33,28 @@ Convert censible-core to use rappstack with rhonojs.
 
 1. **SolidJS → relementjs**: This is a full UI rewrite. Every component, page layout, and interactive element changes. relementjs uses functional HTML generation (e.g. `div_()`, `span_()`) instead of JSX reactive components. Is this acceptable scope?
 
+YAes
+
 2. **Auth0 → Persontric/Arctic**: Requires user migration strategy. Auth0 manages user credentials externally; Persontric is self-hosted. Options:
    - Keep Auth0 initially, wrap with rhonojs middleware
    - Migrate users to Persontric with password reset flow
    - Support both during transition period
 
+es
+
 3. **PostgreSQL stays**: Drizzle ORM has PostgreSQL adapters. persontric-adapter-postgresql exists for auth tables. Raw SQL can migrate incrementally.
 
+Let's convert to Sqlite on Cloudflare
+
 4. **Redis**: rhonojs doesn't include Redis, but ioredis works fine with Hono. No migration needed for caching layer.
+
+Use cloudflare alternative if necessary
 
 5. **Deployment target**: Cloudflare Workers (via rhonojs/server/export/cloudflare) or stay on traditional server (Bun/Node)?
    - CF Workers: Need D1 or Hyperdrive for PostgreSQL access
    - Bun server: Simpler migration, keep existing PostgreSQL connection
+
+Cloudflare workers
 
 ### Recommended Phases
 
@@ -94,7 +104,14 @@ Switch from Vite/Rollup to rebuildjs, choose deployment target.
 ### Questions for You
 
 1. Is full SolidJS → relementjs rewrite acceptable, or should we keep SolidJS and only adopt rhonojs for the server layer?
+Full rewrite
 2. Auth0 migration strategy — keep Auth0, or fully switch to Persontric?
+Keep auth0
 3. Deployment target — Cloudflare Workers or Bun server?
+Cloudflare Workers. Use cloudflare dev environment. If convenient, also support Bun server. But it's a lower priority.
 4. Which app to start with?
+
+- root-web (easiest)
+- mi-web
+- esg-web
 <!-- /agent:exchange -->

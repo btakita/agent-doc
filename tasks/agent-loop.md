@@ -254,25 +254,20 @@ Then commit agent-loop and push to origin.
 
 <!-- agent:output -->
 
-### Submodules committed and pushed
+### `.agent-doc/` added to all submodule gitignores
 
-| Submodule | Changes | Pushed |
-|-----------|---------|--------|
-| **mail** | 7 files (conversations, drafts, contact notes) | `bd2b50d` |
-| **agent-doc** | SKILL.md v0.12.0 update | `2647b79` |
-| **censible-core** | .iml module config | `491368b` |
-| **cogov-dev** | pointer sync (already pushed) | `2ab7a2e` |
-| **ctx-core-dev** | pointer sync (already pushed) | `d798586` |
-| **herbaliciousbliss-dev** | pointer sync (already pushed) | `63a969b` |
-| **rappstack-dev** | pointer sync (already pushed) | `7b61e10` |
+**20 submodules updated:**
+- Added `.agent-doc/` to `.gitignore` in all submodules that didn't already have it
+- Created `.gitignore` files for 4 submodules that had none (existence-lang sub-repos)
+- 6 submodules already had `.agent-doc/` — skipped
+- All committed and pushed
 
-**Skipped:** `ctx-core-dev/lib/relysjs` and `rappstack-dev/lib/ui--server--blog` — untracked git repos that need to be added as submodules (separate task).
+**`.sync-state.json` in mail:**
+- Yes, it should be gitignored — it's corky's IMAP sync state (UID validity, last UIDs). Machine-local, changes on every sync.
+- Added to `mail/.gitignore`
+- Removed from git tracking (`git rm --cached`) and pushed
 
-**agent-loop** parent committed (`c63de8c`) and pushed with updated submodule pointers + task docs.
+**Parent agent-loop** committed (`6f11966`) and pushed with all 20 updated submodule pointers.
 
-**Releases:** agent-doc v0.12.0 was released earlier this session (crates.io, PyPI, GitHub). No other submodules had unreleased changes requiring a version bump.
-
-Add .agent-doc/ to all .gitignore files in the submodules...recursively
-
-Should .sync-state.json be gitignored?
+commit all .gitignore files in the submodules. Commit everything
 <!-- /agent:output -->

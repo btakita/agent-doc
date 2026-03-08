@@ -644,3 +644,44 @@ Key principle: **orgs are for package scopes, not individual packages.** rhonojs
 ## User
 
 Ok...let's put rhonojs as a top-level package in ctx-core-dev. Let's convert all projects using relysjs over to rhonojs.
+## Assistant
+
+**Scope assessed.** 53 relysjs consumers across 9 monorepo workspaces.
+
+**relysjs modules → rhonojs mapping:**
+
+| relysjs module | rhonojs equivalent | Effort |
+|---|---|---|
+| `server/app` — Elysia lifecycle | Hono app lifecycle + `Bun.serve` or Worker export | Medium |
+| `server/build` — esbuild builds | Same — rebuildjs is framework-agnostic | Low |
+| `server/compression` — Elysia middleware | Hono `compress()` (built-in) | Low |
+| `server/elysiajs` — reactive request context | `server/hono` — reactive Hono context | Medium |
+| `server/route` — `html_route_()` | Hono `c.html()` + relementjs | Low |
+| `server/static` — static files | Hono `serveStatic()` (built-in) | Low |
+| `server/export` — static site gen | Same — fetch-based, framework-agnostic | None |
+| `server/export/cloudflare` — wrangler | Same | None |
+
+**Hard parts:** `server/app` and `server/elysiajs` — Elysia-specific APIs. Everything else is framework-agnostic or has direct Hono equivalents.
+
+**Migration plan (multi-session):**
+1. Create rhonojs scaffold in ctx-core-dev
+2. Port the 6 server modules from Elysia → Hono
+3. Wire demo.cogov.me to rhonojs (already Hono)
+4. Migrate blog sites (brookebrodack, drmanny, prescience-notes, briantakita.me — same pattern)
+5. Update rappstack-dev overlays
+6. Deprecate relysjs
+
+**Workspaces to migrate:**
+- cogov-dev (6 packages)
+- briantakita.me-dev (2)
+- brookebrodack-dev (11)
+- drmanny-dev (10)
+- herbaliciousbliss-dev (9)
+- prescience-notes-dev (8)
+- rappstack-dev (6)
+
+Ready to start step 1 — creating the rhonojs package scaffold in ctx-core-dev.
+
+## User
+
+Yes...Let's do steps 1-5.

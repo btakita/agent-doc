@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.12.0 | **Tests:** 197 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.12.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -122,21 +122,22 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.8.0 | tmux-router extraction (-3133 lines) |
 | v0.9.0 | Components, patch, watch daemon. 150 tests. |
 | v0.9.1 | Colons in component names |
-| v0.9.2 | `plugin install/update/list`, VS Code 9/9 parity |
+| v0.9.2 | plugin install/update/list, VS Code 9/9 parity |
 | v0.9.3 | tmux-router 0.1.3 (stash window fix for numeric sessions) |
 | v0.9.4 | tmux-router 0.2.0 (CLI binary, capture_pane, send_keys_raw) |
 | v0.9.5 | RegistryLock, SnapshotLock, flock advisory locking, stale claim auto-pruning |
 | v0.9.6 | Atomic rename, doc advisory lock, stale snapshot recovery, diagnostic logging, 26 new tests |
-| v0.9.7 | `agent-doc write` command, atomic response write-back with 3-way merge |
-| v0.9.8 | Lock relocation to `.agent-doc/locks/<hash>.lock` |
-| v0.9.9 | Template-mode, compaction recovery, `agent-doc recover`, `agent-doc template-info` |
+| v0.9.7 | agent-doc write command, atomic response write-back with 3-way merge |
+| v0.9.8 | Lock relocation to .agent-doc/locks/hash.lock |
+| v0.9.9 | Template-mode, compaction recovery, agent-doc recover, agent-doc template-info |
 | v0.9.10 | Code-span parser fix, template input/output component convention |
-| v0.10.0 | Renamed `response_mode` → `agent_doc_mode` with aliases (mode, response_mode) |
+| v0.10.0 | Renamed response_mode -> agent_doc_mode with aliases (mode, response_mode) |
 | v0.10.1 | Bundle template-mode instructions in SKILL.md |
 | v0.11.0 | Append-friendly merge strategy, shared merge module |
-| v0.11.1 | Fix duplicate `## Assistant` heading in append-mode responses |
-| v0.11.2 | Also strip trailing `## User` heading from responses |
-| v0.12.0 | `convert` command, `compact` command, lazy claim via `route --pane`, exchange default for template init |
+| v0.11.1 | Fix duplicate ## Assistant heading in append-mode responses |
+| v0.11.2 | Also strip trailing ## User heading from responses |
+| v0.12.0 | convert command, compact command, lazy claim via route --pane, exchange default for template init |
+| v0.12.1 | Lazy claim fallback to active_pane("claude") without --pane; no plugin changes needed |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -215,15 +216,24 @@ agent-doc run on a document with a stale claim still does not reclaim with an ac
 
 ### Fixed: Lazy claim now works without --pane
 
-**Root cause:** The v0.12.0 lazy claim only triggered when --pane was explicitly passed to agent-doc route. The JetBrains plugin never passes --pane — it just calls agent-doc route file. So when the registered pane was dead, route fell through to auto-start instead of re-claiming.
+**Root cause:** The v0.12.0 lazy claim only triggered when --pane was explicitly passed to agent-doc route. The JetBrains plugin never passes --pane -- it just calls agent-doc route file. So when the registered pane was dead, route fell through to auto-start instead of re-claiming.
 
-**Fix:** When the registered pane is dead (or no pane is registered) and no --pane was provided, route now falls back to tmux.active_pane("claude") — the currently active pane in the claude session. If that pane is alive, it lazy-claims to it.
+**Fix:** When the registered pane is dead (or no pane is registered) and no --pane was provided, route now falls back to tmux.active_pane("claude") -- the currently active pane in the claude session. If that pane is alive, it lazy-claims to it.
 
-**Priority chain:** --pane (explicit) → active_pane("claude") (fallback) → auto-start (last resort)
-
-This means the plugin works without any changes. Any alive Claude session pane will be auto-claimed when Submit is triggered from the IDE. Binary installed.
-
-Should this be v0.12.1 or fold into next release?
+**Priority chain:** --pane (explicit) -> active_pane("claude") (fallback) -> auto-start (last resort)
 
 release
+
+### v0.12.1 Released
+
+Published to all targets:
+- **crates.io**: agent-doc 0.12.1
+- **PyPI**: agent-doc 0.12.1
+- **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.12.1
+- **Binary**: agent-doc 0.12.1 installed
+- **SKILL.md**: updated to v0.12.1
+
+218 tests passing (197 unit + 21 CLI).
+
+compact this file
 <!-- /agent:exchange -->

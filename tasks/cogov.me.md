@@ -244,3 +244,52 @@ Changes:
 ## User
 
 Let's have a submodule to https://github.com/cogov/CoGov.Vue. This will be demo.cogov.me as the prototype. What would it take to convert it from vue to our stack? What about mongo as the datastore? Is mongo compatible with Cloudflare or do we need to switch to a different data store? 
+
+## Assistant
+
+**Submodule added.** `app/demo.cogov.me` → `git@github.com:cogov/CoGov.Vue.git`
+
+**What CoGov.Vue is:**
+- Vue 2 + Vuex + vue-router frontend
+- Express + EJS server with MongoDB (mongoose) backend
+- Foundation Sites CSS
+- 6 views: Collectives, Council, CreateCollective, Members, Person, PrivilegeSet, ProposalForm
+- 4 components: Action, NavBar, Proposals, RevisionRow
+- Session auth with connect-mongo
+
+**Converting Vue → rappstack:**
+
+| Vue/Express | rappstack equivalent |
+|---|---|
+| Vue 2 SFCs (.vue) | relementjs server-rendered HTML functions |
+| Vuex store | ctx-core/rmemo reactive signals |
+| vue-router | Elysia routes |
+| Express server | Elysia (via relysjs) |
+| Foundation CSS | Tailwind CSS |
+| EJS templates | relementjs `layout__doc_html_()` |
+
+The main work is rewriting the 6 views + 4 components from Vue templates to relementjs functions, and converting the Vuex store modules to rmemo signals. The routing is straightforward — each view becomes an Elysia route handler.
+
+**MongoDB + Cloudflare:**
+
+MongoDB is **not directly compatible** with Cloudflare Workers/Pages. CF Workers don't support raw TCP sockets (which the MongoDB driver needs). MongoDB Atlas had a Data API (REST), but it's being deprecated.
+
+**Alternatives for Cloudflare:**
+
+1. **Cloudflare D1** (SQLite) — free tier, built-in, serverless. Best for structured data like collectives, proposals, members. Would need schema migration from Mongo documents to SQL tables.
+2. **Cloudflare KV** — key-value store, good for session data and simple lookups.
+3. **Turso** (libSQL/SQLite) — similar to D1 but works outside Cloudflare too.
+4. **MongoDB Atlas + server mode** — keep Mongo but run the server on a VPS (not CF Workers). Deploy static frontend to CF Pages, API server to VPS or Fly.io.
+
+**Recommendation:** D1 for the data, KV for sessions. The CoGov data model (collectives, councils, proposals, members, privilege sets) maps cleanly to relational tables. D1 is free and native to CF.
+
+If you want to keep the option to run outside Cloudflare, Turso gives you the same SQLite interface with broader deployment options.
+
+Forking is fine if needed — the submodule currently points to `cogov/CoGov.Vue`. Want me to fork it to your GitHub account, or will the conversion be a fresh app in cogov-dev that references CoGov.Vue as a reference only?
+
+## User
+
+Instead of using a submodule, let's have the source live in the cogov-dev repo.
+Copy the source from the original app. Convert it to rappstack.
+Use D1 as the data store.
+KV for sessions.

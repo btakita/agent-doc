@@ -213,4 +213,10 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 *Compacted. Resolved items (v0.11.0 merge strategy, v0.11.1–v0.11.2 heading fixes, CWD drift) folded into history.*
 
 Is there an /agent-doc compact command?
+
+### No `compact` command yet
+
+Not built. It's in the pending list as `agent-doc compact — auto-summarize old exchanges`. For now, compaction is manual: ask the agent to compact, and it rewrites the exchange with resolved items folded into history summaries.
+
+Implement agent-doc compact. What else is pending?
 <!-- /agent:exchange -->

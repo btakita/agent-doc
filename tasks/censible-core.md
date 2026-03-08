@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1 started — root-web migration. Exploring current structure and planning scaffolding.
+**Status:** Phase 1 in progress — ready to start. Step 0: pnpm → bun conversion. Then scaffold root-web with rhonojs.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -24,39 +24,21 @@ Convert censible-core to use rappstack with rhonojs.
 | Deploy primary | Cloudflare Workers |
 | Deploy secondary | Bun server (lower priority) |
 | Migration order | root-web → mi-web → esg-web |
+| Package manager | bun (convert from pnpm) |
+| App directory | Overwrite root-web in place |
+| CSS tokens | Keep @censible/css as shared lib |
 
 ### Phase 1 — root-web Migration
 
-#### Current root-web Structure
+#### Step 0 — pnpm → bun workspace conversion
+- Add `"workspaces"` field to root `package.json` (replaces `pnpm-workspace.yaml`)
+- Delete `pnpm-workspace.yaml` and `pnpm-lock.yaml`
+- Run `bun install` to generate `bun.lock`
+- Convert `workspace:*` references to `workspace:*` (bun uses same syntax — no change needed)
+- Verify all packages resolve correctly
 
-**Pages (8 routes):**
-- `/` → redirect to `/solutions`
-- `/solutions` — main product/marketing page (hero, product cards, ESG methodology grid)
-- `/faq` — collapsible Q&A with `<details>` elements
-- `/team` — expandable team bios with photos
-- `/legal` — Terms & Privacy Policy
-- `/company-etf-and-mutual-fund-rankings` — ESG ranking index
-- `/company-etf-and-mutual-fund-rankings/women-in-leadership` — WIL data (only page with server data fetch)
-- `/company-etf-and-mutual-fund-rankings/:issue_id` — dynamic ESG issue pages
-- Server redirects: `/gender_diversity`, `/women-in-leadership` → WIL page
-
-**Layout:** `Layout_nav_footer_header` wrapping `Masthead_layout` (nav) + content + `Footer_layout`
-
-**Styling:** CSS-in-JS via `@censible/css` tokens (colors, typography, breakpoints). Custom fonts: Neuzeitgro, PT Serif. No Tailwind.
-
-**Dependencies on monorepo libs:**
-- `@censible/ui-solid` — Layout, ESG_Root_Ranking_Page, WIL components
-- `@censible/css` — Design tokens
-- `@censible/domain` — Constants, issue definitions
-- `@censible/service-domain` — wil_data_() for WIL page
-- `@censible/ctx` — Context management
-
-**Static assets:** Images (hero backgrounds, team photos, product illustrations), fonts, favicons, manifest.json
-
-#### Migration Plan for root-web
-
-**Step 1 — Scaffold rhonojs app structure**
-Create new app directory (e.g., `apps/root-web-rhonojs/` or overwrite `apps/root-web/`):
+#### Step 1 — Scaffold rhonojs app in `apps/root-web/`
+Clear existing Solid Start files, create new structure:
 ```
 root-web/
 ├── app/
@@ -70,41 +52,33 @@ root-web/
 ├── config.ts              # Site metadata
 ├── start.ts               # Dev/prod server
 ├── wrangler.toml          # CF Workers config
-├── package.json
-└── public/                # Static assets (images, fonts, favicons)
+├── package.json           # Updated deps (remove solid-*, add rhonojs/hono/relementjs)
+└── public/                # Keep existing static assets
 ```
 
-**Step 2 — Port design tokens**
-Migrate `@censible/css` tokens to work with relementjs. Options:
-- Keep `@censible/css` as-is (it's just constants, not SolidJS-dependent)
-- Or inline into app's CSS
+#### Step 2 — Port design tokens
+Keep `@censible/css` as shared lib. It exports plain constants (colors, font names, breakpoints) — no SolidJS dependency.
 
-**Step 3 — Create relementjs layout**
-Port `Layout_nav_footer_header` → `layout__doc_html_()` function:
+#### Step 3 — Create relementjs layout
+Port `Layout_nav_footer_header` → `layout__doc_html_()`:
 - `<head>` with meta tags, fonts, favicons
-- Navigation header
+- Navigation header (masthead)
 - Footer with nav columns
 - Wrap page content
 
-**Step 4 — Port pages one at a time**
-Each SolidJS page component → relementjs page function:
-1. `/solutions` (most content, good for establishing patterns)
-2. `/faq` (simple HTML, `<details>` elements)
-3. `/team` (image-heavy, expandable cards)
-4. `/legal` (pure text)
-5. `/company-etf-and-mutual-fund-rankings/*` (data-dependent, last)
+#### Step 4 — Port pages
+1. `/solutions` — hero, product cards, ESG methodology grid
+2. `/faq` — collapsible Q&A (`<details>`)
+3. `/team` — expandable team bios with photos
+4. `/legal` — Terms & Privacy Policy
+5. `/company-etf-and-mutual-fund-rankings/*` — ESG rankings (data-dependent)
 
-**Step 5 — Build & deploy**
-- Configure build.ts with rhonojs plugins
-- Test locally with `bun start.ts`
-- Deploy to CF Workers via `wrangler deploy`
+#### Step 5 — Build & deploy
+- `bun build.ts` → rhonojs server + browser builds
+- `bun start.ts` → local dev
+- `wrangler deploy` → CF Workers
 
-#### Questions Before Starting
+Ready to begin. Say "go" and I'll start with Step 0 (pnpm → bun conversion).
 
-1. Should we create a new app directory (`root-web-rhonojs`) alongside the existing one, or overwrite `root-web` in place?
-In place is fine if it works.
-2. The censible-core repo is a pnpm monorepo — should the new root-web stay in this monorepo or move to a separate repo?
-Convert to bun.
-3. Should we keep `@censible/css` as a shared lib or inline the design tokens?
-shared is fine
+go
 <!-- /agent:exchange -->

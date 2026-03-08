@@ -485,3 +485,62 @@ This is Robert's **strongest legal argument**. Combined with the retaliatory evi
 
 ## User
 
+## Assistant
+
+Important clarification. Since Robert only rents the garage for personal storage (no residential dwelling from this landlord), this changes the § 1946.1 analysis:
+
+### Revised § 1946.1 analysis
+
+**§ 1946.1 likely does NOT apply to a standalone storage garage.** The statute specifically references "dwelling units" — meaning places where people live. A standalone garage rented purely for personal storage is generally classified as a **commercial tenancy**, not a residential one.
+
+This means the 30-day notice period in the lease is probably enforceable, and the 60-day argument is significantly weakened.
+
+### But Robert still has strong defenses
+
+Even without the 60-day argument, Robert's position is still strong for these reasons:
+
+**1. Retaliatory eviction still applies**
+
+California Civil Code § 1942.5 (retaliatory eviction) is the **primary** defense and it doesn't require a "dwelling unit." The key elements are all present:
+- Robert complained about a leak (habitability issue for stored property)
+- Landlord served termination notice shortly after
+- Landlord immediately re-listed the unit at a higher rent ($325 → $350)
+- The Craigslist ad + archived evidence proves the financial motive
+
+Even for commercial tenancies, courts disfavor retaliatory terminations. A judge seeing this fact pattern — leak complaint → termination → immediate re-listing at higher rent — will view it unfavorably for the landlord.
+
+**2. The trespassing threat is still illegal**
+
+Robert is a paying tenant through at least March 12. The landlord cannot restrict access or threaten arrest for trespassing. This remains evidence of harassment and potentially an illegal lockout (Civil Code § 789.3).
+
+**3. Unlawful detainer still takes time**
+
+Even if the 30-day notice is technically valid, the landlord still must go through the formal eviction process after March 12. Robert can raise the retaliatory eviction defense in court, which adds weeks to months.
+
+**4. The 28-day issue**
+
+The notice was Feb 12 → Mar 12 = **28 days**, not 30. Even under the commercial standard (Civil Code § 1946 — notice "at least as long as the period between payments"), 28 days may be short of the required 30 for a monthly tenancy. This is a technicality but a valid one — the notice may still be defective by 2 days.
+
+### Revised strategy
+
+Since the 60-day argument is weaker for a standalone garage, the **retaliatory eviction defense** becomes the primary argument. The updated response letter should lead with:
+
+1. **Retaliatory eviction** — leak complaint → termination → re-listing at higher rent
+2. **The 28-day technicality** — notice may be 2 days short of the required 30
+3. **Harassment documentation** — 6+ contacts, trespassing threat
+4. **Craigslist evidence** — proves financial motive, not legitimate termination
+
+The letter should still be sent immediately. Even though the 60-day argument is weakened, the retaliatory eviction case and the documented harassment pattern are strong enough to make the landlord think twice.
+
+### Should we update the letter?
+
+Would you like me to draft an updated version of the response letter that leads with the retaliatory eviction argument (instead of the 60-day notice) and incorporates all the evidence gathered so far?
+
+> **Not legal advice.** A tenant rights attorney can evaluate whether § 1946.1 might still apply in Robert's specific situation — courts sometimes extend protections beyond the strict "dwelling unit" definition.
+
+## User
+
+Send robert ward an email of the summary of our findings.
+This will include a draft of an email and letter for Robert to send to the landlord.
+
+Should we include both § 1942.5 and § 1946.1 to provide more surface area for a defense?

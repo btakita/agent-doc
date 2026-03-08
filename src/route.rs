@@ -15,11 +15,11 @@ use crate::{frontmatter, resync, sessions};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
-pub fn run(file: &Path) -> Result<()> {
-    run_with_tmux(file, &Tmux::default_server())
+pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
+    run_with_tmux(file, &Tmux::default_server(), pane)
 }
 
-pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
+pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before lookup
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -39,18 +39,43 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
     let file_path = file.to_string_lossy();
 
     // Look up pane for this session
-    let pane = sessions::lookup(&session_id)?;
+    let registered = sessions::lookup(&session_id)?;
 
-    if let Some(ref pane_id) = pane {
-        if tmux.pane_alive(pane_id) {
+    if let Some(ref registered_pane) = registered {
+        if tmux.pane_alive(registered_pane) {
             // Pane is alive — send the command
             let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(pane_id, &command)?;
-            eprintln!("Sent /agent-doc {} → pane {}", file_path, pane_id);
+            tmux.send_keys(registered_pane, &command)?;
+            eprintln!("Sent /agent-doc {} → pane {}", file_path, registered_pane);
             return Ok(());
         }
-        eprintln!("Pane {} is dead, auto-starting...", pane_id);
+        // Pane is dead — try lazy claim if --pane provided
+        if let Some(new_pane) = pane {
+            eprintln!(
+                "Pane {} is dead, lazy-claiming to pane {}",
+                registered_pane, new_pane
+            );
+            sessions::register(&session_id, new_pane, &file_path)?;
+            let command = format!("/agent-doc {}", file_path);
+            tmux.send_keys(new_pane, &command)?;
+            eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
+            return Ok(());
+        }
+        eprintln!("Pane {} is dead, auto-starting...", registered_pane);
     } else {
+        // No registered pane — try lazy claim if --pane provided
+        if let Some(new_pane) = pane {
+            eprintln!(
+                "No pane registered for session {}, lazy-claiming to pane {}",
+                &session_id[..std::cmp::min(8, session_id.len())],
+                new_pane
+            );
+            sessions::register(&session_id, new_pane, &file_path)?;
+            let command = format!("/agent-doc {}", file_path);
+            tmux.send_keys(new_pane, &command)?;
+            eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
+            return Ok(());
+        }
         eprintln!(
             "No pane registered for session {}, auto-starting...",
             &session_id[..std::cmp::min(8, session_id.len())]

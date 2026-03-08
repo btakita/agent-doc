@@ -7,40 +7,49 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 15 complete ✓ — Company A-Z, PDF/CSV reports, mi-web/esg-web stubs. Finnhub ✓. Portfolios ✓. WIL ✓. ESG teaser ✓. Auth ✓. Next: deploy mi-web/esg-web, learn/blog, custom domains.
+**Status:** Autocomplete search live ✓. Phase 15 complete ✓. Finnhub ✓. Next: mi-web portfolio reports (SVG charts vs tables TBD), esg-web, custom domains.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 15 — Company A-Z, PDF Reports, mi-web/esg-web ✓
+### Phase 16 — Autocomplete Search ✓ + mi-www.site Analysis
 
-Built all three in parallel agents and deployed:
+**Autocomplete Search** — deployed:
+- Live search dropdown as you type (debounced 300ms, fetches `/api/search`)
+- Keyboard navigation (arrows, Enter, Escape)
+- Click-to-navigate to company page
+- Falls back to normal form submit if no selection
+- **Test:** https://censible-root-web.brian-takita.workers.dev/companies
 
-**1. Company A-Z Browse** ✓
-- `/companies/browse?letter=A` — alphabetical listing with A-Z nav
-- Links from `/companies` search page
-- Shows ticker, name, industry, country (500 per letter)
-- **Test:** https://censible-root-web.brian-takita.workers.dev/companies/browse
-What happened to search? Can we implement autocomplete search?
+**mi-www.site Feature Inventory** (from source code analysis):
 
-**2. PDF / CSV Reports** ✓
-- `/companies/:ticker/report` — printer-friendly HTML report with "Print / Save as PDF" button
-- Public: company info + financials + ESG tier. Authenticated: full ESG scores + gender data
-- `/api/companies/:locator/report.pdf` — authenticated full report
-- `/api/companies/:locator/export.csv` — CSV export of all ESG data
-- `@media print` CSS for clean PDF output
-- **Test:** https://censible-root-web.brian-takita.workers.dev/companies/AAPL/report
+The original mi-web is a SolidJS SSR app generating ESG portfolio reports. Key features:
 
-**3. mi-web / esg-web Stubs** ✓
-- `apps/mi-web/` — Hono worker stub ("Censible Portfolio Tool"), D1 + KV bindings, builds clean (66 KiB)
-- `apps/esg-web/` — Hono worker stub ("ESG Explorer"), search redirect, builds clean (67 KiB)
-- Both have standalone layouts with cross-app nav (root/mi/esg)
-- Ready to deploy when needed: `npx wrangler deploy` from each directory
+| Feature | Description |
+|---------|-------------|
+| **Portfolio ESG Reports** | 6 portfolio pages (3 Eco + 3 WIL snapshots) with SVG bar charts and line graphs |
+| **Score Visualizations** | Portfolio summary bar, per-issue bars comparing vs benchmarks (URTH, ERTH, PXWEX) |
+| **Two Criteria** | Eco (carbon, water stress) and WIL (gender diversity) with weighted scoring |
+| **PDF Export** | Multi-page PDF via pdfkit + svg-to-pdfkit (5 pages: ordinal/raw scores + graphs) |
+| **XLSX Export** | Multi-sheet workbook with positions, ESG detail, criteria weights, peer comparisons |
+| **SVG Export** | Multi-page SVG document |
+| **Raw Data Table** | All positions with ticker, weight, per-issue scores, rank 1-5 color coding |
+| **Print Mode** | `?print` query param for print-optimized CSS |
+| **Benchmark Comparison** | Each portfolio compared against URTH, ERTH, PXWEX benchmark ETFs |
 
-**New files:** `pages/company_browse.ts`, `pages/report.ts`, `apps/mi-web/*`, `apps/esg-web/*`
-**Modified:** `worker/index.ts` (3 new routes), `worker/middleware/auth0.ts` (optional auth helper)
+**Data model:** CSV-sourced positions with per-issue scores/percentiles, peer comparisons (geographic, industry, materiality, SIC), market-weight-normalized aggregation.
 
-All features deployed to root-web. What's next?
+**Replication approach for Hono mi-web:**
+1. We already have the portfolio data in JSON (Phase 13 portfolios with ESG scores)
+2. SVG chart generation can be server-side (template strings like current HTML pages)
+3. PDF export: printer-friendly HTML approach (like our report.ts) since pdfkit won't work in Workers
+Would svg to pdf work? Let's do that if it will work.
+4. XLSX: can use a lightweight XML approach (no archiver needed)
+Yes
+5. Benchmark data needs to be imported from CSV or computed from D1
+Yes
 
-mi-www.site?
+What's your priority — replicate the full SVG charts, or start with the data tables + print-to-PDF approach we already have?
+
+Full SVG charts. SVG -> PDF.
 <!-- /agent:exchange -->

@@ -144,10 +144,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Response diff storage for undo/extract workflows
 - `agent-doc undo` — revert last response by applying inverse diff
 - `agent-doc extract` — move request+response pair to another document
-- `agent-doc convert` — auto-convert append-mode documents to template mode (creates `exchange` component)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
-- Fix flaky `recover_append_response` test (parallel race condition)
-- Fix tmux claim-after-restart: plugin must re-resolve pane binding when IDEA restarts
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -279,7 +276,33 @@ Implement
 
 It would be better if we could do this claim lazily. Where calling agent-doc run would claim if the registered claim is no longer valid.
 
-`make check` passes: 192 tests + 21 CLI tests, clippy clean.
+### Implemented: `agent-doc convert` + Lazy Claim
 
-Ready to release these fixes. What version should this be?
+**`agent-doc convert <file>`** — Converts append-mode documents to template mode.
+
+- Updates frontmatter: sets `agent_doc_mode: template`
+- Finds first `## User` heading (skipping code blocks) and wraps from there to end in `<!-- agent:exchange -->...<!-- /agent:exchange -->`
+- Content before `## User` (title, preamble) preserved outside the exchange component
+- Adds `## Exchange` section heading
+- Rejects documents already in template mode
+- Atomic write + snapshot update
+- 5 tests (user blocks, no blocks, rejection, frontmatter update, code block preservation)
+
+```bash
+agent-doc convert tasks/plan.md
+```
+
+**Lazy claim via `agent-doc route --pane`** — Auto-re-claims when existing claim is stale.
+
+- Added `--pane` option to `agent-doc route`
+- When the registered pane is dead and `--pane` is provided: re-registers the session to the new pane, then routes to it (skips auto-start)
+- When no existing registration and `--pane` provided: registers and routes immediately
+- When no `--pane`: falls back to auto-start as before
+- Plugin can pass `--pane %<id>` on every route call, making explicit `claim` calls unnecessary after restart
+
+`make check` passes: 197 tests + 21 CLI tests, clippy clean.
+
+Ready to release. Suggest v0.12.0 since `convert` is a new feature and lazy claim changes the route API.
+
+release 0.12.0
 <!-- /agent:exchange -->

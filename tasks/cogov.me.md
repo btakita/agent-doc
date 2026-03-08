@@ -7,28 +7,10 @@ agent_doc_mode: template
 # cogov.me
 
 <!-- agent:status -->
-**Completed:** herbaliciousbliss → rhonojs migration (55 files across 10 submodules)
+**Status:** rhonojs migration complete. Ready to commit across repos.
 <!-- /agent:status -->
 
-<!-- agent:input -->
-<!-- /agent:input -->
-
-<!-- agent:output -->
-### herbaliciousbliss → rhonojs migration — DONE
-
-55 files changed across 10 submodules in herbaliciousbliss-dev:
-
-- **31 files** — type-only imports changed to `rebuildjs/server`
-- **12 files** — Hono-specific imports changed to `rhonojs/server`
-- **3 files** — Elysia framework code → Hono (`new Elysia()` → `new Hono()`, context patterns)
-- **2 files** — Context type updates (Elysia context → Hono Context)
-- **1 file** — Build system (`relysjs_browser__build` → `rhonojs_browser__build`)
-- **10 package.json** — dependency updates (relysjs → rhonojs, elysia → hono)
-
-Zero remaining `relysjs` imports in source files (verified).
-
-**Next:** Commit all uncommitted work across repos, then publish rhonojs to npm.
-<!-- /agent:output -->
+<!-- agent:exchange -->
 
 ## Session History (compacted)
 
@@ -60,12 +42,18 @@ Zero remaining `relysjs` imports in source files (verified).
 - `ctx-core-dev/lib/rhonojs/` — entire new package (20+ files)
 - `cogov-dev/app/demo.cogov.me/` — rhonojs dependency + cookie fixes + new routes
 - `rappstack-dev/lib/*/` — 28 import changes across 6 packages
+- `herbaliciousbliss-dev/` — 55 files migrated from relysjs/Elysia to rhonojs/Hono
 
 ## Pending
 
-- [ ] herbaliciousbliss → rhonojs migration (43 files, 7 app + 36 lib)
+- [x] herbaliciousbliss → rhonojs migration (55 files across 10 submodules)
 - [ ] Commit all uncommitted work across repos
 - [ ] Publish rhonojs to npm
 - [ ] Deploy demo.cogov.me to CF Workers
 
-Convert this doc to use agent:exchange instead of agent:input/agent:output.
+- Converted to `agent:exchange`. The input/output split is replaced by a single exchange component where both user and agent write inline.
+
+Also updated pending checklist — herbaliciousbliss migration marked done, added herbaliciousbliss to uncommitted work.
+
+Release rhonojs on npm. Do whatever commits + pushes we need to do. Skip agent-doc b/c another session is working on it. 
+<!-- /agent:exchange -->

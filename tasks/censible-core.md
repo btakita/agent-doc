@@ -7,29 +7,31 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Portfolio collections live ✓ (9 portfolios). WIL complete ✓. ESG teaser ✓. Auth ✓. Finegar DB alive ✓. Next: Finnhub lazy fetch (Phase 14), PDF reports, mi-web/esg-web.
+**Status:** Finnhub financials live ✓ (lazy fetch + KV cache). Portfolio collections ✓. WIL ✓. ESG teaser ✓. Auth ✓. Next: PDF reports, mi-web/esg-web, Company A-Z.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 14 — Finnhub Lazy Fetch
+### Phase 14 — Finnhub Lazy Fetch ✓
 
-**Approach:** Lazy fetch + KV cache (not cron). Data fetched on-demand when a user views a company, cached 24h in KV.
+Found existing API key in `.env`. Implemented and deployed:
+
+**What's live:**
+- Lazy fetch from Finnhub (quote + metrics) with 24h KV cache
+- Company pages now show: price, change, market cap, P/E, EPS, 52W range, beta
+- Public API: `/api/companies/:ticker/financials`
+- KV namespace `FINNHUB_CACHE` + secret `FINNHUB_API_KEY` configured
 
 **Architecture:**
-1. Add `FINNHUB_CACHE` KV binding + `FINNHUB_API_KEY` secret
-2. On `/companies/:ticker` visit → check KV `finnhub:{ticker}`
-3. Cache hit (< 24h): serve instantly
-4. Cache miss: fetch Finnhub `/api/v1/quote` + `/api/v1/stock/metric`, store in KV with 24h TTL
-5. Display: current price, market cap, PE ratio, EPS, 52-week high/low
+- `worker/finnhub.ts` — fetch + cache module (2 API calls per ticker, cached 24h in KV)
+- On company page load: ESG teaser + Finnhub data fetched in parallel
+- No data fetched for companies without tickers
+- Graceful degradation: if Finnhub returns nothing, financial section is hidden
 
-**Why lazy > cron:**
-- Zero cost for unviewed companies (most of 9K)
-- Always fresh for actively-viewed ones
-- 60 calls/min is plenty for on-demand traffic
-- Simpler architecture (no scheduled worker)
+**Test:** https://censible-root-web.brian-takita.workers.dev/companies/AAPL
+**API:** https://censible-root-web.brian-takita.workers.dev/api/companies/AAPL/financials
 
-Ready to implement — need your Finnhub API key (free signup at finnhub.io).
+What's next? Remaining items: PDF reports, mi-web/esg-web apps, Company A-Z listing.
 
-Setup FINNHUB_API_KEY in .env
+Do it all in parallel agents.
 <!-- /agent:exchange -->

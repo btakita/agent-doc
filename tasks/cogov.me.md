@@ -393,3 +393,50 @@ This is a multi-session project. Want me to start with phase 1 (scaffold the rap
 ## User
 
 Let's use hono. We already use hono for another app. So let's extract out an equivalent of relysjs for hono.
+
+## Assistant
+
+Good call — Hono is a better fit for Cloudflare Workers than Elysia. Elysia is Bun-native and doesn't run on CF Workers, while Hono is designed for edge runtimes with native D1/KV bindings.
+
+**What relysjs provides (that needs a Hono equivalent):**
+
+| relysjs feature | Hono equivalent |
+|---|---|
+| Elysia server + routing | Hono router (built-in) |
+| `relysjs_browser__build` | rebuildjs esbuild (same — framework agnostic) |
+| `relysjs_server__build` | Not needed — Hono runs directly on CF Workers |
+| `static_export_()` | Adapt to fetch from Hono dev server |
+| `cloudflare_export_()` | Same — just change the fetch target |
+| Dev server with HMR | `wrangler dev` (built-in) |
+| relysjs esbuild plugin | Not needed — no server entry linking |
+
+**Key insight:** With Hono on CF Workers, the architecture simplifies significantly:
+- No separate browser/server builds — Hono runs as a Worker, browser assets are esbuild-only
+- D1/KV are first-class bindings (no adapters needed)
+- `wrangler dev` replaces the custom dev server
+- Static export just fetches from `wrangler dev` and writes HTML files
+
+**Proposed package: `rhono`** (or similar name — reactive Hono, following the `r` prefix convention)
+
+Core features:
+1. **`rhono_browser__build`** — esbuild browser build (CSS, JS assets)
+2. **`rhono_export_`** — static site export from Hono dev server
+3. **Middleware** — relementjs HTML rendering, session (KV), D1 access
+4. **Dev mode** — `wrangler dev` with browser asset rebuilding
+
+**Revised architecture for demo.cogov.me:**
+- Hono Workers app with D1/KV bindings
+- relementjs for HTML rendering (unchanged — it's framework agnostic)
+- rebuildjs for browser CSS/JS builds
+- `wrangler dev` for local development
+- Static export for CF Pages OR dynamic Workers deployment
+
+**Two deployment options:**
+1. **CF Pages + Functions** — static HTML + Workers functions for API
+2. **CF Workers only** — Hono handles everything (simpler, but no CDN caching for HTML)
+
+Which deployment model do you prefer? And what name for the Hono equivalent package?
+
+## User
+
+See tasks/contabo.md...herbaliciousbliss

@@ -365,3 +365,63 @@ This is still the key unanswered question. If Robert has been at 1224 21st St fo
 ## User
 
 Robert does not have a copy of the lease. Nor does he have the landlord's address to send the Certified Letter to. It could go to the building office. Are there any other options?
+## Assistant
+
+### The trespassing threat is ILLEGAL
+
+This is a big deal. The landlord threatening to have Robert **arrested for trespassing** for accessing his own rented storage unit is:
+
+1. **An illegal threat.** Robert is a paying tenant. He has a legal right to access his rented space. A tenant cannot be arrested for trespassing at their own rental — that's not how trespassing law works. The police would not arrest Robert for accessing a unit he rents.
+
+Does Robert **have to** notify the landlord when he will access the storage or can Robert come and go to the storage at any time?
+
+2. **Evidence of landlord harassment.** This threat, combined with the 6+ contacts and the retaliatory eviction pattern, strengthens Robert's case significantly. **Robert should screenshot/save this communication immediately.**
+
+3. **Potential illegal lockout.** If the landlord restricts Robert's access to the garage before the lease is properly terminated, that constitutes an **illegal lockout** under California Civil Code § 789.3. Robert could sue for actual damages + $100/day for each day of violation + attorney's fees.
+
+**Robert should NOT comply with this demand.** He has every right to access his storage unit during the tenancy.
+
+Does this apply even past 3/12/26?
+
+---
+
+### Sending the letter without the landlord's home address
+
+Robert doesn't need the landlord's home address. Here are the options:
+
+**1. Email the letter (fastest, creates a record)**
+- Does Robert have an email address for Shawn Hedayati? Even from previous rent communications?
+- The Craigslist ad's anonymized email (ca4c1c71fa0130d69436e7bc118b22e5@hous.craigslist.org) would actually reach him too
+
+**2. Send certified mail to the building/management office**
+- **1224 21st Street, Santa Monica, CA 90404** — this is the property address. If there's an on-site office, send it there addressed to "Shawn Hedayati, Property Manager"
+- This is legally valid — you're sending it to the address where he conducts business regarding this property
+
+**3. Text the letter**
+- If the landlord has been texting Robert 6+ times, Robert has his phone number. Robert can text/send photos of the letter. Not as formal as certified mail, but creates an immediate timestamped record
+
+**4. Hand-deliver with a witness**
+- Robert can print the letter, go to the building office, and hand it to whoever is there. Bring a friend as a witness. Take a photo of the delivery. Write down date, time, who received it.
+
+**Best approach: Do ALL of the above simultaneously.** Email + text + certified mail to the property address. The more delivery methods, the harder it is for the landlord to claim he never received it.
+
+### Getting a copy of the lease
+
+Robert can:
+1. **Request it from the landlord in writing** — "Please provide a copy of our lease agreement as required by law." Under California Civil Code § 1962, landlords must provide copies of rental agreements upon request.
+2. **Check email/text history** — was the lease ever sent digitally?
+3. **Check bank records** — how long has Robert been paying rent? This establishes tenancy duration even without the lease document. If payments go back 1+ year, that's proof for the 60-day notice requirement.
+4. **It may not matter** — even without a written lease, Robert has an implied month-to-month tenancy by virtue of paying rent and occupying the space. His rights are the same.
+
+### Summary of what Robert should do RIGHT NOW
+
+1. **Save the trespassing threat** — screenshot it, it's powerful evidence
+2. **Send the response letter via email and text TODAY** — use whatever contact info Robert has for Hedayati
+3. **Send certified mail to 1224 21st St, Santa Monica CA 90404** — addressed to Shawn Hedayati
+4. **Check bank records** for how long rent has been paid (1+ year = 60-day notice required)
+5. **Call legal aid numbers** — Bet Tzedek (323) 939-0506, Stay Housed LA (213) 985-4357, LAFLA (800) 399-4529
+6. **Do NOT stop accessing the garage** — Robert has every legal right to access his rented space
+
+## User
+
+Robert has been renting 4 years. Does Civil Code § 1946.1 60 day notice override the lease agreement of 30 day notice? Is it possible for Robert to forego that right?

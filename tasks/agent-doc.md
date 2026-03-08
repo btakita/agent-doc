@@ -314,4 +314,16 @@ This is lesson #2 in practice: "Project root resolution — walk up from file to
 **Fix applied:** The second attempt used the absolute path `/home/brian/work/btakita/agent-loop/tasks/agent-doc.md` and succeeded. The `agent-doc` binary correctly resolves the project root from the file path — the issue was purely the shell invocation passing a relative path from the wrong CWD.
 
 Do we need a new release for the SKILL update?
+
+### No release needed
+
+No. The CWD drift was a **Claude Code agent behavior** issue (passing a relative path from the wrong directory), not a bug in the `agent-doc` binary or the bundled SKILL.md.
+
+The SKILL.md already documents this correctly: "Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session." The binary itself correctly resolves the project root from the file path — the fix is entirely in how the agent invokes the CLI.
+
+No code change, no SKILL.md change, no release needed.
+
+compact this file
+
+Is there 
 <!-- /agent:exchange -->

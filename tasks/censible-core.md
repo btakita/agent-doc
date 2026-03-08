@@ -42,4 +42,6 @@ Alternatively, FMP at $19/mo has bulk endpoints that can fetch all data in a few
 
 What's your preference: Finnhub (free) or FMP ($19/mo)?
 Finnhub
+
+Can we lazily fetch data?
 <!-- /agent:exchange -->

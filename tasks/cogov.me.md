@@ -485,3 +485,58 @@ yes. Do it
 
 ## User
 
+## Assistant
+
+**demo.cogov.me scaffold complete and working.**
+
+**App structure:**
+```
+app/demo.cogov.me/
+├── worker/index.ts    — Hono app with all routes
+├── wrangler.toml      — CF Workers config (D1 binding)
+├── db/0000_init.sql   — D1 migration (11 tables)
+├── package.json       — hono, drizzle-orm deps
+└── dist/browser/      — static assets dir
+
+lib/domain--server--cogov-demo/
+├── schema/index.ts    — Drizzle ORM schema (11 tables)
+└── package.json
+
+lib/ui--server--cogov-demo/
+├── layout/layout__doc_html.ts  — Master HTML template
+├── home/home__doc_html.ts      — Home page
+├── person/person__doc_html.ts  — Sign in / register
+├── collectives/collectives__doc_html.ts — Browse/create/join
+├── council/council__doc_html.ts — Council management
+├── members/members__doc_html.ts — Member list
+├── index.ts           — Barrel export
+└── package.json
+```
+
+**Routes implemented:**
+- `GET /` — Home page
+- `GET /person` — Sign in / register form
+- `POST /person/register` — Create person + set cookie
+- `GET /person/sign-in/:id` — Sign in as existing person
+- `GET /person/sign-out` — Clear session
+- `GET /collectives` — Browse collectives, join/create
+- `POST /collective/create` — Create collective + council + membership
+- `POST /collective/join` — Join a collective
+- `GET /council?collective_id=N` — View councils + proposals
+- `GET /members?collective_id=N` — View members
+
+**Verified:** `wrangler dev` starts, local D1 initialized, all routes return 200 with styled HTML.
+
+**Not yet created:** Privilege Set and Proposal views (remaining 2 from CoGov.Vue).
+
+Create it.
+
+**Next steps:**
+1. Commit scaffold in cogov-dev
+2. Add Privilege Set and Proposal views
+3. Push to remotes
+4. Deploy to CF Workers
+
+## User
+
+Is it worthwhile to create rhonojs for herbaliciousbliss, demo.cogov.me, and eventually mi-www.site?

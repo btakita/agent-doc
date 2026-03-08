@@ -63,9 +63,7 @@ Replace Redis with Cloudflare KV.
 Investment dashboard — heavy data, PDF/Excel/SVG exports.
 - Rewrite SolidJS components to relementjs
 - Port API routes (data exports, portfolio endpoints) to Hono
-- PDF generation: pdfkit/pdfmake may need adaptation for Workers (memory/CPU limits)
-  - Alternative: use CF Workers Paid plan or offload to a separate service
-I'm concerned about PDF generation memory usage. What are the costs of the CF Workers Paid plan?
+- PDF generation: pdfkit/pdfmake works within Workers Paid limits (see cost analysis below)
 - Excel/SVG generation: verify xlsx and svg libraries work in Workers runtime
 - Charts/visualizations: server-render to SVG via relementjs
 
@@ -96,12 +94,25 @@ Core product — company ESG lookup + portfolio rebalancing.
 - Row size limit: 1MB
 - If data exceeds limits, consider splitting across multiple D1 databases or using Hyperdrive + external PostgreSQL
 
-**PDF/Excel in Workers:**
-- Workers have 128MB memory limit (paid plan) and 30s CPU time
-- Large PDF generation may hit limits — consider:
-  - R2 for storing generated files
-  - Queue + Durable Object for async generation
-  - Or keep a small Bun server for heavy export jobs
+**CF Workers Paid Plan — Cost & Limits Analysis:**
+
+| Resource | Included | Overage | Per-request limit |
+|----------|----------|---------|-------------------|
+| Requests | 10M/month | $0.30/M | — |
+| CPU time | 30M CPU-ms/month | $0.02/M CPU-ms | 30s default, up to **5 min** |
+| Memory | — | — | **128MB per isolate** |
+| Monthly cost | **$5/month** | usage-based | — |
+
+**PDF generation feasibility:** 128MB memory + up to 5 min CPU time per request is sufficient for most pdfkit/pdfmake reports. CPU time only counts active processing — D1 queries and KV reads don't count. For very large reports that might exceed 128MB, use a fallback pattern:
+- Queues: dispatch heavy generation to a background worker
+- R2: store generated files, return a download link
+- This keeps the request-response cycle fast while handling large exports async
+
+I may need additional RAM or to stream data and output.
+
+**vs. Heroku cost:** Heroku dynos start at $7/month (Eco) or $25/month (Basic). Workers Paid at $5/month is cheaper and includes edge distribution. The main tradeoff is the 128MB memory constraint, which Heroku doesn't have.
+
+Sources: [Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/) | [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) | [5-min CPU time](https://developers.cloudflare.com/changelog/post/2025-03-25-higher-cpu-limits/)
 
 ### Architecture Diagram (target state)
 

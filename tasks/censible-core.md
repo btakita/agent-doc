@@ -7,40 +7,39 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** WIL complete with fund data ✓ (from live finegar RDS DB). ESG teaser ✓. Auth ✓. Next: portfolio collections, financial data, PDF reports, mi-web/esg-web.
+**Status:** Portfolio collections live ✓ (9 portfolios). WIL complete ✓. ESG teaser ✓. Auth ✓. Finegar DB alive ✓. Next: financial data (Finnhub), PDF reports, mi-web/esg-web.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 12 — Fund WIL Rankings + Finegar DB Discovery ✓
+### Phase 13 — Portfolio Collections ✓
 
-**Finegar DB is alive!** Found credentials on USB drive:
-- Host: `finegar-large.cka6h4ihwghf.us-east-1.rds.amazonaws.com` (AWS RDS, not Heroku)
-- 66 tables, including: `domestic_funds` (20K funds), `fund_company_exposures` (5.2M holdings), `board_leadership` (21K companies), `company_women_leadership`, `company_financial`, `market_cap`, etc.
+**Deployed 9 portfolio pages:**
+- `/portfolios` — index page with Core, Eco, WIL groups
+- `/portfolios/mi` — Censible core portfolio (26 holdings)
+- `/portfolios/mi_eco_*` — 4 Eco portfolio snapshots (20-24 holdings each)
+- `/portfolios/mi_wil_*` — 4 WIL portfolio snapshots (17 holdings each)
 
-**Fund WIL Rankings (deployed):**
-Computed from finegar DB: joined `domestic_funds` → `fund_company_exposures` → `board_leadership` to aggregate per-fund gender metrics across 14,967 qualifying funds.
-- Best 25 funds by WIL score (top: iShares MSCI Sweden ETF)
-- Worst 25 funds (with 50+ holdings, bottom: First Trust Japan AlphaDEX)
-- Largest 25 funds by number of holdings
-- 25 Responsible Investing funds (ESG/SRI/sustainable keywords)
-- All 4 fund sections now populated on WIL page
+Each portfolio page shows: holdings table with ticker, name, weight, and 6 key ESG issue scores (carbon, labor, governance, privacy, gender, health & safety) color-coded by score level.
 
-**Test:** https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/women-in-leadership
+**Test:** https://censible-root-web.brian-takita.workers.dev/portfolios
 
-Thank you
+**Free financial data APIs — research results:**
 
-**Financial data in finegar DB:**
-`company_financial` table has market cap, PE ratio, price, dividend yield, etc. — but data is from 2016 (stale). For current data, best option is FMP API (free tier, 250 req/day with bulk endpoints).
+| API | Free tier | Rate limit | Viable for 9K? |
+|-----|-----------|------------|-----------------|
+| **Finnhub** | Yes, free key | 60/min | **Best** — 2.5 hrs for full refresh |
+| **FMP** | 250/day | 250/day | No free (need $19/mo) |
+| **yfinance** | No key needed | Aggressive blocking | Risky, ToS issues |
+| **Alpha Vantage** | 25/day | 25/day | No (360 days!) |
+| **TradingView** | None | — | No public API |
+| **Google Finance** | Deprecated 2012 | — | No |
+| **Yahoo Finance** | None official | — | No official API |
 
-Let's use the FMP API. Does TradingView, Yahoo Finance, Google Finance, or another company have free apis?
+**Recommendation:** Finnhub free tier is the best option — 60 calls/min, no daily limit, covers market cap, PE ratio, price, EPS. A scheduled Cloudflare Worker cron could refresh all 9K companies every few hours.
 
-**Next steps — what I'll implement now:**
-1. Portfolio collections (Eco/Global/Tortue/US/Wil) — the `_mi_*.csv` files have holdings, can build portfolio pages showing composition with ESG scores from D1
-2. Portfolio history — list available portfolio dates from CSV files
-3. PDF reports — generate ESG compliance PDFs using the data in D1 + finegar
+Alternatively, FMP at $19/mo has bulk endpoints that can fetch all data in a few calls.
 
-Should I proceed with portfolio collections first?
-
-Yes
+What's your preference: Finnhub (free) or FMP ($19/mo)?
+Finnhub
 <!-- /agent:exchange -->

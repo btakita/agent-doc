@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Decisions locked. Revised migration plan ready. Next: begin Phase 1 on root-web.
+**Status:** Phase 1 started — root-web migration. Exploring current structure and planning scaffolding.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -25,123 +25,86 @@ Convert censible-core to use rappstack with rhonojs.
 | Deploy secondary | Bun server (lower priority) |
 | Migration order | root-web → mi-web → esg-web |
 
-### Revised Migration Plan
+### Phase 1 — root-web Migration
 
-**Phase 1 — root-web on rhonojs + Cloudflare Workers**
-Simplest app first. Marketing/landing site with static-ish pages, no auth, no database.
-- Scaffold new rhonojs app structure (build.ts, start.ts, worker/index.ts, wrangler.toml)
-- Rewrite SolidJS pages to relementjs server-rendered HTML
-- Port routes from Solid Start file-based routing to Hono handlers
-- Build with `rhonojs_server__build()` + `rhonojs_browser__build()`
+#### Current root-web Structure
+
+**Pages (8 routes):**
+- `/` → redirect to `/solutions`
+- `/solutions` — main product/marketing page (hero, product cards, ESG methodology grid)
+- `/faq` — collapsible Q&A with `<details>` elements
+- `/team` — expandable team bios with photos
+- `/legal` — Terms & Privacy Policy
+- `/company-etf-and-mutual-fund-rankings` — ESG ranking index
+- `/company-etf-and-mutual-fund-rankings/women-in-leadership` — WIL data (only page with server data fetch)
+- `/company-etf-and-mutual-fund-rankings/:issue_id` — dynamic ESG issue pages
+- Server redirects: `/gender_diversity`, `/women-in-leadership` → WIL page
+
+**Layout:** `Layout_nav_footer_header` wrapping `Masthead_layout` (nav) + content + `Footer_layout`
+
+**Styling:** CSS-in-JS via `@censible/css` tokens (colors, typography, breakpoints). Custom fonts: Neuzeitgro, PT Serif. No Tailwind.
+
+**Dependencies on monorepo libs:**
+- `@censible/ui-solid` — Layout, ESG_Root_Ranking_Page, WIL components
+- `@censible/css` — Design tokens
+- `@censible/domain` — Constants, issue definitions
+- `@censible/service-domain` — wil_data_() for WIL page
+- `@censible/ctx` — Context management
+
+**Static assets:** Images (hero backgrounds, team photos, product illustrations), fonts, favicons, manifest.json
+
+#### Migration Plan for root-web
+
+**Step 1 — Scaffold rhonojs app structure**
+Create new app directory (e.g., `apps/root-web-rhonojs/` or overwrite `apps/root-web/`):
+```
+root-web/
+├── app/
+│   ├── index.ts           # Hono app setup
+│   ├── index.server.ts    # Routes → page functions
+│   ├── index.browser.ts   # Browser hyop (nav toggle)
+│   └── index.css          # Global styles
+├── worker/
+│   └── index.ts           # CF Worker entry
+├── build.ts               # rhonojs_server__build + rhonojs_browser__build
+├── config.ts              # Site metadata
+├── start.ts               # Dev/prod server
+├── wrangler.toml          # CF Workers config
+├── package.json
+└── public/                # Static assets (images, fonts, favicons)
+```
+
+**Step 2 — Port design tokens**
+Migrate `@censible/css` tokens to work with relementjs. Options:
+- Keep `@censible/css` as-is (it's just constants, not SolidJS-dependent)
+- Or inline into app's CSS
+
+**Step 3 — Create relementjs layout**
+Port `Layout_nav_footer_header` → `layout__doc_html_()` function:
+- `<head>` with meta tags, fonts, favicons
+- Navigation header
+- Footer with nav columns
+- Wrap page content
+
+**Step 4 — Port pages one at a time**
+Each SolidJS page component → relementjs page function:
+1. `/solutions` (most content, good for establishing patterns)
+2. `/faq` (simple HTML, `<details>` elements)
+3. `/team` (image-heavy, expandable cards)
+4. `/legal` (pure text)
+5. `/company-etf-and-mutual-fund-rankings/*` (data-dependent, last)
+
+**Step 5 — Build & deploy**
+- Configure build.ts with rhonojs plugins
+- Test locally with `bun start.ts`
 - Deploy to CF Workers via `wrangler deploy`
-- Verify: all pages render, SEO meta preserved, styles working
 
-**Phase 2 — Database migration (D1)**
-Before tackling mi-web/esg-web, set up the data layer.
-- Define Drizzle schemas matching existing PostgreSQL tables
-- Create D1 database for each environment (prod, staging)
-- Write PostgreSQL → D1 data migration scripts
-- Adapt raw SQL queries to Drizzle ORM with D1 driver
-- Test data integrity after migration
+#### Questions Before Starting
 
-**Phase 3 — Auth0 on Cloudflare Workers**
-Auth0 SDK works in Workers with some adaptation.
-- Create Hono middleware for Auth0 JWT verification
-- Port `/auth` OAuth redirect flow to Hono routes
-- Session management: use CF KV for session storage (replacing in-memory/Redis)
-- Port account creation/preferences to D1 queries
-- Test full login → session → protected route flow
-
-**Phase 4 — Caching layer (KV)**
-Replace Redis with Cloudflare KV.
-- Map existing Redis cache keys to KV namespace structure
-- Port `@censible/redis-client` to a KV-backed cache client
-- Financial data caching, FX rate caching → KV with TTL
-- Browser/server split: KV only accessible server-side (same as Redis)
-
-**Phase 5 — mi-web rewrite**
-Investment dashboard — heavy data, PDF/Excel/SVG exports.
-- Rewrite SolidJS components to relementjs
-- Port API routes (data exports, portfolio endpoints) to Hono
-- PDF generation: pdfkit/pdfmake works within Workers Paid limits (see cost analysis below)
-- Excel export: custom XML generation (SpreadsheetML) streamed through ZIP compression
-- Charts/visualizations: server-render to SVG via relementjs
-
-**Phase 6 — esg-web rewrite**
-Core product — company ESG lookup + portfolio rebalancing.
-- Most complex app: search, company profiles, portfolio CRUD
-- Rewrite all SolidJS components to relementjs
-- Port REST API (companies, portfolios, rebalance) to Hono routes
-- Auth0-protected routes via Phase 3 middleware
-- Data-intensive queries via Drizzle + D1
-
-**Phase 7 — Remaining apps & cleanup**
-- Evaluate which apps (quiz-web, msci-demo-web, clasp-web, kyc-web, finegar-etl, screenshot-web) to migrate vs. deprecate
-- finegar-etl may need a different deployment (not CF Workers — long-running ETL jobs)
-- Decommission Heroku after all apps migrated
-- Remove Solid Start, Vite, itty-router dependencies
-
-### Technical Notes
-
-**Auth0 in CF Workers:**
-- `auth0` npm package uses Node.js crypto — needs `nodejs_compat` compatibility flag in wrangler.toml
-- Alternative: use Auth0's `/authorize` redirect + `/oauth/token` endpoint directly (HTTP-based, no SDK dependency)
-- JWT verification via `jose` library (works natively in Workers)
-
-**D1 limitations to watch:**
-- 10GB max database size (per database)
-- No stored procedures or advanced PostgreSQL features
-- Row size limit: 1MB
-- If data exceeds limits, consider splitting across multiple D1 databases or using Hyperdrive + external PostgreSQL
-
-**CF Workers Paid Plan — Cost & Limits Analysis:**
-
-| Resource | Included | Overage | Per-request limit |
-|----------|----------|---------|-------------------|
-| Requests | 10M/month | $0.30/M | — |
-| CPU time | 30M CPU-ms/month | $0.02/M CPU-ms | 30s default, up to **5 min** |
-| Memory | — | — | **128MB per isolate** |
-| Monthly cost | **$5/month** | usage-based | — |
-
-**PDF/Excel generation — streaming strategy for memory efficiency:**
-
-The 128MB isolate limit is manageable with streaming. Workers natively support `ReadableStream` responses:
-
-- **PDF streaming:** pdfkit supports `.pipe(stream)` — generate pages incrementally, pipe chunks directly to the HTTP response. Memory stays proportional to the current page, not the full document.
-- **Data streaming:** Use D1 cursor-based pagination to process rows in batches. Each batch generates its report section, then memory is freed before the next batch.
-- **Excel streaming:** Custom XML generation (SpreadsheetML) — you write the XML directly and stream it through a ZIP compressor. XLSX is just a ZIP of XML files (`xl/worksheets/sheet1.xml`, `xl/styles.xml`, etc.). Use `fflate` for streaming ZIP compression in Workers — it's pure JS, lightweight, and supports `ZipPassThrough`/`ZipDeflate` for incremental compression without buffering the entire archive.
-- **SVG charts:** Already lightweight — render each chart to SVG string via relementjs, embed inline or stream as part of the response.
-
-**Escalation path for truly large reports:**
-1. **Streaming response** (first choice) — keeps memory low, immediate download starts
-2. **Durable Objects** — own isolate, up to 60s CPU, good for complex multi-step generation
-3. **Queues + R2** — async: dispatch generation job, store result in R2, notify user with download link
-4. **Bun server fallback** — no memory limit, for reports that genuinely need >128MB (rare)
-
-**vs. Heroku cost:** Heroku dynos start at $7/month (Eco) or $25/month (Basic). Workers Paid at $5/month is cheaper and includes edge distribution. The main tradeoff is the 128MB memory constraint, which streaming mitigates.
-
-Sources: [Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/) | [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) | [5-min CPU time](https://developers.cloudflare.com/changelog/post/2025-03-25-higher-cpu-limits/)
-
-### Architecture Diagram (target state)
-
-```
-                    Cloudflare Edge
-                    ┌─────────────────────────────────────┐
-                    │                                     │
-User ──→ CF DNS ──→ │  Workers (rhonojs/Hono)            │
-                    │  ├── root-web (marketing)           │
-                    │  ├── mi-web (dashboard)             │
-                    │  └── esg-web (ESG platform)         │
-                    │                                     │
-                    │  D1 (SQLite) ← Drizzle ORM         │
-                    │  KV ← Cache (replaces Redis)        │
-                    │  R2 ← File storage (PDFs, exports) │
-                    │                                     │
-                    └──────────┬──────────────────────────┘
-                               │
-                          Auth0 (external)
-                          JWT verification
-```
-
-Let's start
+1. Should we create a new app directory (`root-web-rhonojs`) alongside the existing one, or overwrite `root-web` in place?
+In place is fine if it works.
+2. The censible-core repo is a pnpm monorepo — should the new root-web stay in this monorepo or move to a separate repo?
+Convert to bun.
+3. Should we keep `@censible/css` as a shared lib or inline the design tokens?
+shared is fine
 <!-- /agent:exchange -->

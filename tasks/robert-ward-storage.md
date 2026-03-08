@@ -427,3 +427,61 @@ Robert can:
 Robert has been renting 4 years. Does Civil Code § 1946.1 60 day notice override the lease agreement of 30 day notice? Is it possible for Robert to forego that right?
 
 Please write response in document.
+## Assistant
+
+**4 years — this changes everything.** The 30-day notice is almost certainly invalid.
+
+### Does § 1946.1 override a 30-day lease clause?
+
+**Yes, in most cases.** Here's the legal analysis:
+
+**California Civil Code § 1946.1(b)** states:
+
+> *"A landlord... shall give the tenant at least 60 days' written notice... where the tenant... has resided in the dwelling unit for one year or more."*
+
+This is a **statutory minimum** — it sets the floor, not the ceiling. A lease clause requiring only 30 days' notice for a 4-year tenant conflicts with the statute.
+
+**Key question: Does § 1946.1 apply to a storage garage?**
+
+The statute uses the phrase "dwelling unit" in subsection (b). This is where it gets nuanced:
+
+1. **If the garage is part of a residential tenancy** (e.g., comes with an apartment, or Robert uses it for residential storage as part of his living arrangement), § 1946.1 clearly applies. The 60-day requirement overrides the 30-day lease clause.
+
+2. **If it's a standalone commercial storage rental** (purely business/storage, no residential component), the argument is weaker but not dead:
+   - California courts have extended tenant protections to mixed-use and accessory spaces
+   - The lease itself may not distinguish between residential and commercial
+   - The landlord is treating it as a standard tenancy (month-to-month, eviction notice, etc.)
+
+Robert is storing his personal items in the storage. But Robert does not rent any residential dwelling from the landlord.
+
+3. **Even for purely commercial tenancies**, California Civil Code § 1946 (note: not 1946.1) requires "notice at least as long as the period between payments" — which for monthly rent is 30 days. So the 30-day clause doesn't violate § 1946 for commercial. But § 1946.1's 60-day rule is the stronger argument if it applies.
+
+### Can Robert waive the 60-day right?
+
+**Generally no.** California Civil Code § 1942.5(a) makes lease provisions that waive statutory tenant protections **void as contrary to public policy**. A lease clause that shortens the required notice period below the statutory minimum is typically unenforceable.
+
+However, there's a nuance: § 1946.1(d) allows a tenant to give **30 days' notice** to terminate (even if the landlord must give 60). The asymmetry is intentional — it protects tenants while giving them flexibility. But a landlord cannot use a lease clause to reduce their own obligation below 60 days for a 1+ year tenant.
+
+**Could Robert have "waived" it unknowingly?** Unlikely. Even if the lease says "30 days' notice by either party," that clause is superseded by § 1946.1 for landlord-initiated terminations of tenancies over 1 year. Robert didn't need to do anything special to preserve this right — it's automatic.
+
+### What this means practically
+
+The February 12 notice with a March 12 deadline gave only **28 days** (not even a full 30). For a 4-year tenancy, the landlord was required to give **60 days**. This means:
+
+- **The notice is defective** — it doesn't comply with § 1946.1
+- **The earliest valid termination date would be April 13** (60 days from Feb 12)
+- **The landlord would need to serve a NEW, proper 60-day notice** to start the clock
+- If the landlord tries to file an unlawful detainer based on the 30-day notice, Robert has a strong defense to get it dismissed
+
+### Updated letter recommendation
+
+The response letter from the previous session should be updated to include this argument prominently:
+
+> "Furthermore, I have been a tenant at this property for over four (4) years. Pursuant to California Civil Code § 1946.1(b), a landlord must provide at least sixty (60) days' written notice to terminate a tenancy of one year or more. Your notice of February 12, 2026, providing only 28 days' notice, fails to comply with this statutory requirement and is therefore legally deficient. A proper termination would require notice through at least April 13, 2026."
+
+This is Robert's **strongest legal argument**. Combined with the retaliatory eviction defense, Robert is in a very strong position.
+
+> **Not legal advice.** Robert should consult a tenant rights attorney to confirm these arguments apply to his specific garage tenancy.
+
+## User
+

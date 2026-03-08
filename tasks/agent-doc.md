@@ -145,6 +145,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Fix flaky `recover_append_response` test (parallel race condition)
 - Fix tmux claim-after-restart: plugin must re-resolve pane binding when IDEA restarts
+- Append-friendly merge strategy: auto-resolve when both sides append to same component
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -204,18 +205,20 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:exchange -->
 
-Saved screencast content to `tasks/screencast.md` — template-mode document with components for setup, blog outline, and script. The exchange in this document is now clean for continued agent-doc discussion.
+### 3-way merge improvement (owned here)
 
-Moved this from tasks/agent-loop.md. This document should take over this task:
+The core issue: `agent-doc write --template` uses `diffy` for 3-way merge, which produces standard conflict markers when both sides modify the same region. But in the `exchange` component, "both sides appending" is the normal case — not a real conflict.
 
-I keep on getting 3-way merge conflicts that are easily resolvable by hand. Basically I usually want both sets of changes...unless there is a true conflict. If the user adds a change and the claude session adds a change...append the user change after the claude session response.
-**agent-loop:** Updated 4 submodule pointers, committed (`ae548f1`), pushed.
+**Implementation plan for next release:**
 
-**Workaround (current):** The SKILL.md instructs the agent to save a baseline copy and use `--baseline-file` for accurate merge. But when both sides append to the same component boundary, the diff3 algorithm still produces markers. The fix needs to happen in the binary's merge logic.
-**agent-loop:** Updated 4 submodule pointers, committed (`ae548f1`), pushed.
+1. **Detect append-only conflicts** — after merge, scan for conflict markers where both sides only added content at the same position
+2. **Auto-resolve** — concatenate: agent response first, then user additions
+3. **True conflicts** — keep markers only when the same existing lines were modified differently
+4. **Config option** — `merge_strategy = "append-friendly"` in `.agent-doc/components.toml` (default for `exchange` components)
 
-**Lesson for future:** Use `git submodule foreach --recursive` to find dirty nested submodules, not just `git submodule status` (which only shows one level deep).
+This matches the `exchange` convention — conversation flows forward. Both sides appending is expected behavior, not a conflict.
 
-**Lesson for future:** Use `git submodule foreach --recursive` to find dirty nested submodules, not just `git submodule status` (which only shows one level deep).
+Make sure that the config options are documented. Use append-friendly as the default.
 
+Implement and release
 <!-- /agent:exchange -->

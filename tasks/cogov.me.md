@@ -7,13 +7,27 @@ agent_doc_mode: template
 # cogov.me
 
 <!-- agent:status -->
-**Active task:** herbaliciousbliss → rhonojs migration (43 files)
+**Completed:** herbaliciousbliss → rhonojs migration (55 files across 10 submodules)
 <!-- /agent:status -->
 
 <!-- agent:input -->
 <!-- /agent:input -->
 
 <!-- agent:output -->
+### herbaliciousbliss → rhonojs migration — DONE
+
+55 files changed across 10 submodules in herbaliciousbliss-dev:
+
+- **31 files** — type-only imports changed to `rebuildjs/server`
+- **12 files** — Hono-specific imports changed to `rhonojs/server`
+- **3 files** — Elysia framework code → Hono (`new Elysia()` → `new Hono()`, context patterns)
+- **2 files** — Context type updates (Elysia context → Hono Context)
+- **1 file** — Build system (`relysjs_browser__build` → `rhonojs_browser__build`)
+- **10 package.json** — dependency updates (relysjs → rhonojs, elysia → hono)
+
+Zero remaining `relysjs` imports in source files (verified).
+
+**Next:** Commit all uncommitted work across repos, then publish rhonojs to npm.
 <!-- /agent:output -->
 
 ## Session History (compacted)

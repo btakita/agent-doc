@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1, Step 0 — pnpm → bun conversion in progress. Blocker: FontAwesome Pro token needed.
+**Status:** Phase 1, Step 0 complete (pnpm → bun). Ready for Step 1: scaffold rhonojs app.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -30,29 +30,21 @@ Convert censible-core to use rappstack with rhonojs.
 
 ### Phase 1 — root-web Migration
 
-#### Step 0 — pnpm → bun conversion
+#### Step 0 — pnpm → bun conversion ✓
 
-**Done:**
-- Converted `workspaces` from object format to flat array (bun-compatible)
+**Completed:**
+- Converted `workspaces` from object format to flat array
 - Moved `pnpm.overrides` → top-level `overrides`
-- Removed `pnpm` from devDependencies
-- Removed self-referencing `@censible/dev` devDependency
+- Removed `pnpm` from devDependencies, removed self-referencing `@censible/dev`
 - Deleted `pnpm-workspace.yaml`
-- Removed unused `vendor/*` workspace paths (no vendor dirs exist)
+- `.env` created with FontAwesome Pro token
+- `bun install --ignore-scripts` succeeded, `bun.lock` generated (815KB)
+- Note: `better-sqlite3` native build skipped (incompatible with Node 25.x; will be removed when mi-web migrates to D1)
+- Peer dependency warnings for old SolidJS versions (expected, will be resolved as apps migrate)
 
-**Blocker: FontAwesome Pro auth token**
+#### Step 1 — Scaffold rhonojs app (next)
 
-`bun install` fails because `@fortawesome/pro-*` packages require authentication against `npm.fontawesome.com`. The `.npmrc` references `FONTAWESOME_AUTH_TOKEN` but no `.env` file exists with the token.
+Ready to clear existing Solid Start files from `apps/root-web/` and scaffold the rhonojs app structure. Proceeding now.
 
-censible-core/.env
-
-The `.env.sample` has `FONTAWESOME_NPM_KEY=` (note the different var name).
-
-To unblock:
-1. Set `FONTAWESOME_AUTH_TOKEN=<your-token>` in `.env` or shell environment
-2. Then run `bun install`
-
-Alternatively, if FontAwesome Pro is no longer needed (switching to relementjs may eliminate icon dependencies), we could remove the `@fortawesome/pro-*` packages and the `.npmrc` registry config.
-
-**Question:** Do you have the FontAwesome Pro token, or should we remove FA Pro dependencies and use an alternative (e.g., free FA, Heroicons, or inline SVGs)?
+continue...finish rest of the steps
 <!-- /agent:exchange -->

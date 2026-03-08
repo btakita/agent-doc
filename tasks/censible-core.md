@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1 complete ✓ — root-web deployed to CF Workers. Live at https://censible-root-web.brian-takita.workers.dev
+**Status:** Phase 1.5 complete ✓ — rankings pages deployed. Starting Phase 2: D1 database setup.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -31,62 +31,53 @@ Convert censible-core to use rappstack with rhonojs.
 ### Phase 1 — root-web Migration ✓
 
 #### Step 0 — pnpm → bun conversion ✓
-
-**Completed:**
-- Converted `workspaces` from object format to flat array
-- Moved `pnpm.overrides` → top-level `overrides`
-- Removed `pnpm` from devDependencies, removed self-referencing `@censible/dev`
-- Deleted `pnpm-workspace.yaml`
-- `.env` created with FontAwesome Pro token
-- `bun install --ignore-scripts` succeeded, `bun.lock` generated (815KB)
-- Note: `better-sqlite3` native build skipped (incompatible with Node 25.x; will be removed when mi-web migrates to D1)
-- Peer dependency warnings for old SolidJS versions (expected, will be resolved as apps migrate)
-
 #### Step 1 — Scaffold rhonojs app ✓
-
-- Cleared old SolidJS source files (`src/`, `vite.config.js`, `rollup.config.mjs`)
-- Created `worker/index.ts` — Hono app with routes: /, /solutions, /faq, /team, /legal + redirects
-- Created `wrangler.toml` — CF Workers config with `[assets]` serving from `public/`
-- Updated `package.json` — replaced SolidJS/Solid Start deps with hono, wrangler, @cloudflare/workers-types
-- Updated `tsconfig.json` — ES2022 target, bundler moduleResolution
-- Preserved `public/` symlink to shared static assets
-
 #### Step 2 — Port design tokens ✓
-
-CSS from `@censible/css` tokens inlined directly into page layout.
-
 #### Step 3 — Create layout ✓
-
-`pages/layout.ts` — full HTML document layout with masthead, footer, responsive nav, all CSS inlined.
-
 #### Step 4 — Port pages ✓
-
-- `pages/solutions.ts` — Hero, integrate, products, ESG methodology (12 articles), partner sections
-- `pages/faq.ts` — 17 collapsible `<details>` across 4 sections
-- `pages/team.ts` — Hero, 3 team bios, commitment/story/questions
-- `pages/legal.ts` — Terms of use + privacy policy (5 articles)
-- **Not yet ported:** `/company-etf-and-mutual-fund-rankings/*` (data-dependent, requires D1)
-
 #### Step 5 — Build, verify & deploy ✓
 
-- `bun install` succeeded (hono 4.12.5, wrangler 4.71.0)
-- Fixed: removed `nodejs_compat` flag (caused unenv path resolution bug with bun)
-- `wrangler dev` — all routes verified locally (200s on all pages, 302s on redirects)
-- `wrangler deploy` — uploaded 199 static assets + 134KB worker bundle
-- **Live URL:** https://censible-root-web.brian-takita.workers.dev
-- All routes verified on production: /solutions, /faq, /team, /legal → 200; / → 302
+**Live URL:** https://censible-root-web.brian-takita.workers.dev
+
+### Phase 1.5 — Rankings Pages ✓
+
+- `pages/rankings.ts` — ESG root ranking index (12 issues as grid links) + individual issue pages
+- `pages/wil.ts` — Women in Leadership data-driven page with 11 sections (hero, company tables, fund tables, methodology, SP1500 infographic)
+- Worker routes: `/company-etf-and-mutual-fund-rankings`, `/:issue_id`, `/women-in-leadership`
+- WIL fetches live data from `CENSIBLE_SEARCH_URL` (Heroku search API) — 7 parallel API calls
+- SP1500 CEO data loaded from static JSON in `public/`
+- `CENSIBLE_SEARCH_URL` secret configured on CF Workers
+- Note: Heroku search API currently returning 503 — WIL page shows graceful error. Will work when API is available.
+- All other rankings routes verified live (200)
+
+### Phase 2 — D1 Database (in progress)
+
+**PostgreSQL Schema (6 tables to migrate):**
+
+| Table | Purpose | Complexity |
+|-------|---------|------------|
+| `account` | User preferences (email PK, JSON prefs) | Simple |
+| `portfolio` | Portfolio metadata (BIGSERIAL PK, FK to account) | Simple |
+| `position` | Holdings (composite PK, FK to portfolio) | Medium |
+| `portfolio_version` | Historical snapshots (JSON storage) | Medium |
+| `staged_change_position` | Working copy of positions | Medium |
+| `staged_portfolio` | Working portfolio state | Simple |
+
+**SQLite migration notes:**
+- BIGSERIAL → INTEGER PRIMARY KEY AUTOINCREMENT
+- MONEY → REAL
+- TIMESTAMP WITH TIME ZONE → TEXT (ISO 8601)
+- JSON → TEXT (SQLite JSON1 functions)
+- ON DELETE CASCADE supported in SQLite with PRAGMA foreign_keys=ON
 
 ### Remaining Work
 
 | Phase | Task | Status |
 |-------|------|--------|
-| 1.5 | Port company-etf-and-mutual-fund-rankings (needs D1) | Pending |
-| 2 | Set up D1 database + migrate schema from PostgreSQL | Pending |
+| 2 | D1 database + schema migration | In Progress |
 | 3 | Auth0 integration on CF Workers (jose JWT middleware) | Pending |
 | 4 | KV caching layer (replacing Redis) | Pending |
 | 5 | mi-web migration | Pending |
 | 6 | esg-web migration | Pending |
 | 7 | Decommission Contabo censible containers | Pending |
-
-continue
 <!-- /agent:exchange -->

@@ -227,22 +227,32 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
 
-/// Strip a leading `## Assistant` heading from response text.
+/// Strip leading `## Assistant` and trailing `## User` headings from response text.
 ///
-/// The `agent-doc write` command adds its own `## Assistant\n\n` prefix,
-/// so if the agent response also starts with `## Assistant`, we'd get a
-/// duplicate heading. This strips the leading heading (and optional blank
-/// lines) to prevent that.
+/// The `agent-doc write` command adds its own `## Assistant\n\n` prefix and
+/// `\n## User\n\n` suffix, so if the agent response includes these headings,
+/// we'd get duplicates. This strips them to prevent that.
 pub fn strip_assistant_heading(response: &str) -> String {
-    let trimmed = response.trim_start();
+    let mut result = response.to_string();
+
+    // Strip leading ## Assistant
+    let trimmed = result.trim_start();
     if let Some(rest) = trimmed.strip_prefix("## Assistant") {
-        // Strip the heading line + any following blank lines
         let rest = rest.strip_prefix('\n').unwrap_or(rest);
         let rest = rest.trim_start_matches('\n');
-        rest.to_string()
-    } else {
-        response.to_string()
+        result = rest.to_string();
     }
+
+    // Strip trailing ## User (with optional whitespace/newlines after)
+    let trimmed_end = result.trim_end();
+    if let Some(before) = trimmed_end.strip_suffix("## User") {
+        result = before.trim_end_matches('\n').to_string();
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+    }
+
+    result
 }
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {

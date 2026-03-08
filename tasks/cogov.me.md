@@ -68,4 +68,4 @@ Zero remaining `relysjs` imports in source files (verified).
 - [ ] Publish rhonojs to npm
 - [ ] Deploy demo.cogov.me to CF Workers
 
-continue
+Convert this doc to use agent:exchange instead of agent:input/agent:output.

@@ -1,11 +1,8 @@
 ---
 agent_doc_session: e42113ab-519f-4c5c-a636-23757ee17337
 tmux_session: '0'
+agent_doc_mode: template
 ---
-
-
-
-
 
 What websites are currently running on my Contabo account?
 
@@ -1436,3 +1433,5 @@ Only `mi-www.site` (censible) remains on Contabo — you decided to keep it ther
 
 ## User
 
+Convert to agent_doc_mode: template
+agent-doc compact

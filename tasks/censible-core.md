@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phases 1–6 backend complete ✓ — All routes deployed. UI placeholders for esg-web/mi-web. Blocked on search API (Heroku maintenance mode).
+**Status:** Phases 1–6 backend complete. Finegar-api analyzed (50+ endpoints). Plan: Hyperdrive → Contabo PostgreSQL. Need: Auth0 audience, PG external access.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -34,52 +34,90 @@ Convert censible-core to use rappstack with rhonojs.
 
 ### Phase 1.5 — Rankings Pages ✓
 
-- 12 ESG issues index + individual issue pages + WIL data page
-- Blocked: Heroku search API in maintenance mode (503)
-
 ### Phase 2 — D1 Database ✓
-
-- `censible-db` (ID: `0129a78b-a3a4-49b9-8ac4-931cc3f4b00a`, ENAM)
-- 6 tables: account, portfolio, position, portfolio_version, staged_change_position, staged_portfolio
-- Query modules: `worker/db/account.ts`, `worker/db/portfolio.ts`
 
 ### Phase 3 — Auth0 Middleware ✓
 
-- `worker/middleware/auth0.ts` — jose JWT verification against Auth0 JWKS
+- AUTH0_DOMAIN set to `censible.us.auth0.com` ✓
+- AUTH0_AUDIENCE — **still needed** (see below)
 
 ### Phase 4 — API Routes ✓
 
-- Full portfolio CRUD at `/api/rebalance/*` (authenticated)
-- Account preferences at `/api/account/preferences`
-- Search proxy at `/search/*`
-- Financial data proxy: `/securities/:ticker/financial`, `/currencies/:code/fx_rate`
+### Phase 5 — mi-web Assessment (deferred)
 
-### Phase 5 — mi-web Assessment
+### Phase 6 — esg-web Routes ✓ (placeholders)
 
-**Decision: Defer full UI port.** mi-web generates static ESG reports (6 portfolios × 4 formats = 24 endpoints) from pre-computed 2022 data snapshots. Challenges:
-- Source CSV data files not in repo (external data pipeline)
-- Rendering uses SolidJS SSR → SVG → pdfkit → PDF pipeline
-- XLSX uses archiver + custom SpreadsheetML XML
-- All data is from fixed dates (2022-07-31, 2022-09-30, 2022-11-30)
+### Phase 7 — Finegar-API Migration (in progress)
 
-**When data files are available:** Generate static HTML/SVG/PDF/XLSX and serve from `public/`
+**Analyzed `portfoliome/finegar-api`** — Flask/Python API with 50+ endpoints. Key findings:
 
-### Phase 6 — esg-web Routes ✓
+**Architecture:** Flask → PostgreSQL (finegar DB) + Redis cache + Celery tasks + IEX/Bloomberg pricing
 
-**All esg-web URL routes now served by the Worker:**
+**Endpoint categories:**
+1. Company search/lookup (FTS on `security_search` table)
+2. Company ESG ratings (`esg.key_issue_metrics`)
+3. Women in Leadership rankings (`company_women_leadership_stats`, `women_leader_fund_scores`)
+4. Fund ESG ratings (weighted by `fund_company_exposures`)
+5. Company executives (`factset_screens.people`, `.jobs`, `.compensations`)
+6. Company peers (`company_peers` with scoring)
+7. Security pricing (IEX/Bloomberg with Redis cache)
+8. Company screening (dynamic filter builder)
+9. Reference data (countries, currencies, exchanges, geographic regions)
 
-| Route | Status |
-|-------|--------|
-| `/companies` | Placeholder (search form + "coming soon") |
-| `/companies/:company_locator` | Placeholder (company name + back link) |
-| `/rebalance` | 302 → `/rebalance/portfolios` |
-| `/rebalance/portfolios` | Placeholder (login required note + API pointer) |
-| `/rebalance/portfolios/new` | Placeholder |
-| `/rebalance/portfolios/:name` | Placeholder |
-| `/securities/:ticker/financial` | Proxy to search API |
-| `/currencies/:code/fx_rate` | Proxy to search API |
+**Recommended approach: Cloudflare Hyperdrive**
 
-**Backend complete, frontend placeholder.** The D1 portfolio API is fully functional. UI needs interactive components (company ESG charts, portfolio tables, CSV upload) — blocked on search API availability for company data.
+Hyperdrive is Cloudflare's managed PostgreSQL proxy — it lets Workers make SQL queries directly to an existing PostgreSQL database. Benefits:
+- No data migration needed — all 30+ tables and complex queries (FTS, window functions, CTEs) work as-is
+- Connection pooling built-in
+- ~30ms added latency
+- Keep existing finegar schema intact
+
+**Requirements to proceed:**
+1. Expose PostgreSQL on Contabo externally (port 5432 or SSH tunnel)
+2. Create Hyperdrive config: `wrangler hyperdrive create censible-finegar --connection-string "postgres://user:pass@host:5432/finegar"`
+
+Let's port the search data to SQLite
+
+### Action Items for User
+
+**1. Auth0 Audience (blocking API auth)**
+
+In the Auth0 dashboard (https://manage.auth0.com/dashboard/us/censible/):
+- Go to **Applications → APIs** (left sidebar)
+- Find the Censible API entry
+- Copy the **Identifier** field (looks like `https://api.censible.co` or similar)
+- Then I'll run: `wrangler secret put AUTH0_AUDIENCE`
+AUTH0_AUDIENCE=https://censible.auth0.com/api/v2/
+
+**2. Contabo PostgreSQL Access (blocking search)**
+
+The finegar database needs to be accessible from Cloudflare Workers. Options:
+
+**Option A (recommended): Expose PG directly**
+- SSH into Contabo (207.244.234.186)
+- Find the PostgreSQL port: `docker exec mi-www_site-1 env | grep PG`
+- Add a port mapping or expose 5432 externally
+- Then create Hyperdrive: `wrangler hyperdrive create censible-finegar --connection-string "postgres://user:pass@207.244.234.186:5432/finegar"`
+
+**Option B: SSH tunnel**
+- Use Cloudflare Tunnel (cloudflared) to expose PG securely without opening ports
+
+**Option C: pg_dump + D1 import**
+- Export key tables as JSON/CSV from Contabo
+- Import into D1 (loses FTS and complex query support)
+
+Option 3
+
+**3. mi-web CSV Data**
+
+If on Contabo, find them:
+```bash
+ssh root@207.244.234.186
+docker exec mi-www_site-1 find / -name "esg_mi_*.csv" 2>/dev/null
+```
+Or check S3/object storage configuration.
+
+Please look.
 
 ### Current Architecture
 
@@ -91,25 +129,9 @@ censible-root-web (CF Worker, 217KB)
 ├── Portfolio: /rebalance/* (placeholder UI, full API)
 ├── API: /api/rebalance/* (D1 + Auth0)
 ├── Proxy: /search/*, /securities/*, /currencies/*
-├── D1: censible-db (6 tables)
+├── D1: censible-db (6 tables, user/portfolio data)
 └── Assets: 217 static files from public/
 ```
 
-### Remaining Work
-
-| Task | Blocker | Priority |
-|------|---------|----------|
-| Company ESG detail pages (interactive) | Search API down | High |
-I believe search is in https://github.com/portfoliome/finegar-api. Please add a Cloudflare compatible port of finegar-api search and other necessary features to censible-core. 
-| Portfolio management UI (login, CRUD forms) | Auth0 credentials needed | High |
-How do I get these Auth0 credentials? See screenshot.
-| mi-web report generation | Data CSV files needed | Medium |
-I believe that the CSV files are on Contabo. Either in the container or S3 bucket.
-| KV caching layer | None (optimization) | Low |
-| Decommission Contabo containers | All above complete | Last |
-
-**Blockers:**
-1. **Heroku search API is in maintenance mode** — WIL page, company detail, and financial proxies all return errors. Need to either restore the Heroku service or migrate the search API itself.
-2. **Auth0 credentials** — AUTH0_DOMAIN and AUTH0_AUDIENCE need to be set as secrets (`wrangler secret put AUTH0_DOMAIN`, `wrangler secret put AUTH0_AUDIENCE`)
-3. **mi-web data** — ESG report CSV source files not in the repository
+**Next:** Once PG access is configured → add Hyperdrive binding → implement finegar search endpoints directly in Worker → replace placeholders with live data.
 <!-- /agent:exchange -->

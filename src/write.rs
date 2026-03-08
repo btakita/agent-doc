@@ -10,9 +10,8 @@ use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 
-use crate::{recover, snapshot, template};
+use crate::{merge, recover, snapshot, template};
 
 /// Run the write command: append assistant response to document.
 ///
@@ -67,7 +66,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         content_ours
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
-        merge_contents(base, &content_ours, &content_current)?
+        merge::merge_contents(base, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -134,7 +133,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         content_ours
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
-        merge_contents(base, &content_ours, &content_current)?
+        merge::merge_contents(base, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -180,7 +179,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let final_content = if content_current == content {
         content_ours
     } else {
-        merge_contents(&content, &content_ours, &content_current)?
+        merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -210,7 +209,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let final_content = if content_current == content {
         content_ours
     } else {
-        merge_contents(&content, &content_ours, &content_current)?
+        merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -250,50 +249,6 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
     Ok(())
-}
-
-fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
-    let tmp = tempfile::TempDir::new()
-        .context("failed to create temp dir for merge")?;
-
-    let base_path = tmp.path().join("base");
-    let ours_path = tmp.path().join("ours");
-    let theirs_path = tmp.path().join("theirs");
-
-    std::fs::write(&base_path, base)?;
-    std::fs::write(&ours_path, ours)?;
-    std::fs::write(&theirs_path, theirs)?;
-
-    let output = Command::new("git")
-        .current_dir(tmp.path())
-        .args([
-            "merge-file",
-            "-p",
-            "--diff3",
-            "-L", "agent-response",
-            "-L", "original",
-            "-L", "your-edits",
-            &ours_path.to_string_lossy(),
-            &base_path.to_string_lossy(),
-            &theirs_path.to_string_lossy(),
-        ])
-        .output()?;
-
-    let merged = String::from_utf8(output.stdout)
-        .map_err(|e| anyhow::anyhow!("merge produced invalid UTF-8: {}", e))?;
-
-    if output.status.success() {
-        eprintln!("[write] Merge successful — user edits preserved.");
-    } else if output.status.code() == Some(1) {
-        eprintln!("[write] WARNING: Merge conflicts detected. Please resolve conflict markers manually.");
-    } else {
-        anyhow::bail!(
-            "git merge-file failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    Ok(merged)
 }
 
 #[cfg(test)]
@@ -365,7 +320,7 @@ mod tests {
         // "theirs" = user added a follow-up to the User block
         let theirs = "---\nsession: test\n---\n\n## User\n\nOriginal question\nAnd a follow-up!\n";
 
-        let merged = merge_contents(base, &ours, theirs).unwrap();
+        let merged = merge::merge_contents(base, &ours, theirs).unwrap();
 
         // Both the response and the user's follow-up should be in the merge
         assert!(merged.contains("My response"), "response missing from merge");
@@ -393,7 +348,7 @@ mod tests {
         let final_content = if content_current == base {
             ours.clone()
         } else {
-            merge_contents(base, &ours, &content_current).unwrap()
+            merge::merge_contents(base, &ours, &content_current).unwrap()
         };
 
         drop(doc_lock);

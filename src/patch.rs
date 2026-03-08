@@ -15,6 +15,13 @@ struct ComponentConfig {
     /// Patch mode: "replace" (default), "append", "prepend"
     #[serde(default = "default_mode")]
     mode: String,
+    /// Merge strategy: "append-friendly" (default) or "strict".
+    /// "append-friendly" auto-resolves conflicts where both sides only appended.
+    /// "strict" preserves all conflict markers for manual resolution.
+    /// Currently parsed for config validation; merge runs at document level.
+    #[serde(default = "default_merge_strategy")]
+    #[allow(dead_code)]
+    merge_strategy: String,
     /// Auto-prefix entries with ISO timestamp (for append/prepend modes)
     #[serde(default)]
     timestamp: bool,
@@ -27,6 +34,10 @@ struct ComponentConfig {
     /// Shell command to run after patching (fire-and-forget)
     #[serde(default)]
     post_patch: Option<String>,
+}
+
+fn default_merge_strategy() -> String {
+    "append-friendly".to_string()
 }
 
 fn default_mode() -> String {

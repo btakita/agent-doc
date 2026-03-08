@@ -205,4 +205,17 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 <!-- agent:exchange -->
 
 Saved screencast content to `tasks/screencast.md` — template-mode document with components for setup, blog outline, and script. The exchange in this document is now clean for continued agent-doc discussion.
+
+Moved this from tasks/agent-loop.md. This document should take over this task:
+
+I keep on getting 3-way merge conflicts that are easily resolvable by hand. Basically I usually want both sets of changes...unless there is a true conflict. If the user adds a change and the claude session adds a change...append the user change after the claude session response.
+**agent-loop:** Updated 4 submodule pointers, committed (`ae548f1`), pushed.
+
+**Workaround (current):** The SKILL.md instructs the agent to save a baseline copy and use `--baseline-file` for accurate merge. But when both sides append to the same component boundary, the diff3 algorithm still produces markers. The fix needs to happen in the binary's merge logic.
+**agent-loop:** Updated 4 submodule pointers, committed (`ae548f1`), pushed.
+
+**Lesson for future:** Use `git submodule foreach --recursive` to find dirty nested submodules, not just `git submodule status` (which only shows one level deep).
+
+**Lesson for future:** Use `git submodule foreach --recursive` to find dirty nested submodules, not just `git submodule status` (which only shows one level deep).
+
 <!-- /agent:exchange -->

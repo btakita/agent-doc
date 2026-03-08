@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1 Steps 0–4 complete. root-web scaffolded, all routes verified locally. Ready for deploy.
+**Status:** Phase 1 complete ✓ — root-web deployed to CF Workers. Live at https://censible-root-web.brian-takita.workers.dev
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -28,7 +28,7 @@ Convert censible-core to use rappstack with rhonojs.
 | App directory | Overwrite root-web in place |
 | CSS tokens | Keep @censible/css as shared lib |
 
-### Phase 1 — root-web Migration
+### Phase 1 — root-web Migration ✓
 
 #### Step 0 — pnpm → bun conversion ✓
 
@@ -44,7 +44,6 @@ Convert censible-core to use rappstack with rhonojs.
 
 #### Step 1 — Scaffold rhonojs app ✓
 
-**Completed:**
 - Cleared old SolidJS source files (`src/`, `vite.config.js`, `rollup.config.mjs`)
 - Created `worker/index.ts` — Hono app with routes: /, /solutions, /faq, /team, /legal + redirects
 - Created `wrangler.toml` — CF Workers config with `[assets]` serving from `public/`
@@ -54,44 +53,38 @@ Convert censible-core to use rappstack with rhonojs.
 
 #### Step 2 — Port design tokens ✓
 
-CSS from `@censible/css` tokens inlined directly into page layout. All typography, color, grid, and animation tokens carried over.
+CSS from `@censible/css` tokens inlined directly into page layout.
 
 #### Step 3 — Create layout ✓
 
-`pages/layout.ts` — full HTML document layout with:
-- Masthead (top bar, navigation dropdowns, logo)
-- Footer (company info, social links, disclaimers)
-- Responsive nav with mobile menu support
-- All CSS inlined from original SolidJS layout components
+`pages/layout.ts` — full HTML document layout with masthead, footer, responsive nav, all CSS inlined.
 
 #### Step 4 — Port pages ✓
 
-All static pages ported from SolidJS routes to plain HTML template functions:
 - `pages/solutions.ts` — Hero, integrate, products, ESG methodology (12 articles), partner sections
 - `pages/faq.ts` — 17 collapsible `<details>` across 4 sections
 - `pages/team.ts` — Hero, 3 team bios, commitment/story/questions
 - `pages/legal.ts` — Terms of use + privacy policy (5 articles)
 - **Not yet ported:** `/company-etf-and-mutual-fund-rankings/*` (data-dependent, requires D1)
 
-#### Step 5 — Local verification ✓
+#### Step 5 — Build, verify & deploy ✓
 
 - `bun install` succeeded (hono 4.12.5, wrangler 4.71.0)
 - Fixed: removed `nodejs_compat` flag (caused unenv path resolution bug with bun)
-- `wrangler dev` — all routes verified:
-  - `/` → 302 redirect to /solutions
-  - `/solutions` → 200 (36KB HTML)
-  - `/faq` → 200
-  - `/team` → 200
-  - `/legal` → 200
-  - `/gender_diversity` → 302 redirect
+- `wrangler dev` — all routes verified locally (200s on all pages, 302s on redirects)
+- `wrangler deploy` — uploaded 199 static assets + 134KB worker bundle
+- **Live URL:** https://censible-root-web.brian-takita.workers.dev
+- All routes verified on production: /solutions, /faq, /team, /legal → 200; / → 302
 
-#### Next: Deploy to Cloudflare Workers
+### Remaining Work
 
-Ready to run `wrangler deploy` to push root-web live. This requires CF API credentials configured.
-
-**Remaining for full migration:**
-- Deploy root-web to CF Workers
-- Port company-etf-and-mutual-fund-rankings pages (Phase 2, needs D1)
-- Phase 3: mi-web migration
-- Phase 4: esg-web migration
+| Phase | Task | Status |
+|-------|------|--------|
+| 1.5 | Port company-etf-and-mutual-fund-rankings (needs D1) | Pending |
+| 2 | Set up D1 database + migrate schema from PostgreSQL | Pending |
+| 3 | Auth0 integration on CF Workers (jose JWT middleware) | Pending |
+| 4 | KV caching layer (replacing Redis) | Pending |
+| 5 | mi-web migration | Pending |
+| 6 | esg-web migration | Pending |
+| 7 | Decommission Contabo censible containers | Pending |
 <!-- /agent:exchange -->

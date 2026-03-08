@@ -440,3 +440,47 @@ Which deployment model do you prefer? And what name for the Hono equivalent pack
 ## User
 
 See tasks/contabo.md...herbaliciousbliss
+## Assistant
+
+Checked `tasks/contabo.md`. The herbaliciousbliss migration is already planned as Hono + D1 + Drizzle on CF Workers. With demo.cogov.me as a **second** Hono consumer, extraction now makes sense — the "wait for 2 consumers" threshold is met.
+
+**From contabo.md, herbaliciousbliss uses:**
+- Hono (replacing Elysia) for routing
+- D1 + Drizzle ORM for data
+- Arctic + Oslo for Google OAuth
+- ctx-core/rmemo reactive context
+- relementjs for HTML rendering
+
+**Shared patterns between herbaliciousbliss and demo.cogov.me:**
+
+| Feature | herbaliciousbliss | demo.cogov.me |
+|---|---|---|
+| Framework | Hono | Hono |
+| Database | D1 + Drizzle | D1 + Drizzle |
+| Auth | Google OAuth (Arctic) | Simple person sign-in (later OAuth) |
+| HTML | relementjs | relementjs |
+| Sessions | KV (Oslo) | KV |
+| Build | rebuildjs (esbuild) | rebuildjs (esbuild) |
+
+**What to extract into a shared package (`@rappstack/hono` or `rhono`):**
+
+rhonojs works. relysjs has it's own organization. Should we have a rhonojs organization?
+I have quite a few organizations now. I'm wondering how I can get out of doing this.
+
+I could make it part of rappstack, but rappstack overlays on top of relysjs and rhonojs.
+
+1. **Hono + D1 middleware** — bind Drizzle to Hono context
+2. **Session middleware** — KV-based session with cookies
+3. **HTML response helper** — relementjs → Hono `c.html()`
+4. **Browser build** — esbuild pipeline for CSS/JS assets
+5. **Static export** — fetch from `wrangler dev`, write HTML files
+6. **rmemo context adapter** — bind ctx-core/rmemo to Hono context
+
+**Approach:** Build demo.cogov.me alongside the herbaliciousbliss migration. Extract shared code as it emerges rather than designing the interface upfront.
+
+Want me to start scaffolding demo.cogov.me as a Hono app, using the herbaliciousbliss patterns as reference?
+
+yes. Do it
+
+## User
+

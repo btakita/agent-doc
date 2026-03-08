@@ -34,6 +34,11 @@ Replaced the down CENSIBLE_SEARCH_URL with D1-backed queries:
 
 **Test:**
 - https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/women-in-leadership
+Missing data for:
+  - Best Funds for Women in Leadership
+  - Worst Funds for Women in Leadership
+  - Largest Funds — Women in Leadership
+  - Responsible Investing Funds — Women in Leadership
 - https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/carbon_emissions
 - https://censible-root-web.brian-takita.workers.dev/api/rankings/wil
 
@@ -42,9 +47,15 @@ Can add to the public company profile page:
 - Financial indicators (need data source — `_yahoo__equity.csv` or `_ft__security_detail.csv`)
 - ESG teaser: overall tier (Leader/Average/Laggard) or letter rating without detailed scores
 What specific financial indicators and what level of ESG teaser would you like?
+Teaser
 
 **Remaining work:**
 - Financial indicators + ESG teaser on public company page
+Is there a free api for current data?
 - Fund data import (CSV files are portfolio holdings, not fund-level rankings — need fund metadata)
+what files do we need?
 - mi-web / esg-web apps (separate deployments, need planning)
+continue
+
+Compare what we ha
 <!-- /agent:exchange -->

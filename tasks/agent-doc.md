@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.11.1 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.11.2 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -135,6 +135,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.10.1 | Bundle template-mode instructions in SKILL.md |
 | v0.11.0 | Append-friendly merge strategy, shared merge module |
 | v0.11.1 | Fix duplicate `## Assistant` heading in append-mode responses |
+| v0.11.2 | Also strip trailing `## User` heading from responses |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -204,6 +205,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
 
 **v0.11.1 session:** Fixed duplicate `## Assistant` heading bug. Added `strip_assistant_heading()` to strip leading `## Assistant` from response text before the write command adds its own. Released to all targets.
+
+**v0.11.2 session:** Extended `strip_assistant_heading()` to also strip trailing `## User` heading from responses. Same root cause as the `## Assistant` duplicate — `agent-doc write` appends `\n## User\n\n` suffix, and if the agent response also ends with `## User`, you get a double. Released to all targets.
 <!-- /agent:history -->
 
 ## Exchange
@@ -278,5 +281,27 @@ Also:
 
 
 ## User
+```
+
+### v0.11.2 — Fixed duplicate `## User`
+
+**Root cause:** Same pattern as `## Assistant`. `agent-doc write` appends `\n## User\n\n` after the response. If the agent's response text ends with `## User`, you get a double heading.
+
+**Fix:** Extended `strip_assistant_heading()` to also strip trailing `## User` (with optional whitespace/newlines after). Now handles both directions:
+- Strip leading `## Assistant` heading
+- Strip trailing `## User` heading
+
+**Released v0.11.2** to all targets: crates.io, PyPI, GitHub Releases.
+
+Why are we getting file not found errors?
+
+```
+● Bash(cat <<'RESPONSE' | agent-doc write tasks/agent-doc.md --baseline-file /tmp/agent-doc-baseline-139810.md
+      --template
+      <!-- patch:status -->…)
+  ⎿  Error: Exit code 1
+     Error: file not found: tasks/agent-doc.md
+
+     Error: file not found: tasks/agent-doc.md
 ```
 <!-- /agent:exchange -->

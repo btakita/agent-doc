@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.11.0 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.11.1 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -134,6 +134,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.10.0 | Renamed `response_mode` → `agent_doc_mode` with aliases (mode, response_mode) |
 | v0.10.1 | Bundle template-mode instructions in SKILL.md |
 | v0.11.0 | Append-friendly merge strategy, shared merge module |
+| v0.11.1 | Fix duplicate `## Assistant` heading in append-mode responses |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -146,7 +147,6 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Fix flaky `recover_append_response` test (parallel race condition)
 - Fix tmux claim-after-restart: plugin must re-resolve pane binding when IDEA restarts
-- Append-friendly merge strategy: auto-resolve when both sides append to same component
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -202,6 +202,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.10.1 session:** Designed `exchange` component convention for shared conversation surfaces. Diagnosed and fixed missing template-mode instructions in bundled SKILL.md. Released v0.10.1 to all targets. Converted this document from input/output to exchange component. Identified tmux claim-after-restart bug for next release.
 
 **v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
+
+**v0.11.1 session:** Fixed duplicate `## Assistant` heading bug. Added `strip_assistant_heading()` to strip leading `## Assistant` from response text before the write command adds its own. Released to all targets.
 <!-- /agent:history -->
 
 ## Exchange
@@ -254,5 +256,27 @@ I'm seeing responses with two `## Assistant`. See tasks/cogov.me.md:
 ## Assistant
 
 ## Assistant
+```
+
+### v0.11.1 — Fixed duplicate `## Assistant`
+
+**Root cause:** In append mode, `agent-doc write` prepends `## Assistant
+
+` to the response. If the Claude agent's response text ALSO starts with `## Assistant`, you get a double heading.
+
+**Fix:** Added `strip_assistant_heading()` to `write.rs` (pub, used by `submit.rs` too). Strips any leading `## Assistant` heading from the response before prepending the canonical one. Applied in all three append-mode write paths:
+- `write::run()` — stdin-based write
+- `write::apply_append_from_string()` — recovery writes
+- `submit::run()` — direct agent-doc run
+
+**Released v0.11.1** to all targets: crates.io, PyPI, GitHub Releases.
+
+Also:
+
+```
+## User
+
+
+## User
 ```
 <!-- /agent:exchange -->

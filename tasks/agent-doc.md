@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.10.1 | **Tests:** 179 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.11.0 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -133,6 +133,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.9.10 | Code-span parser fix, template input/output component convention |
 | v0.10.0 | Renamed `response_mode` → `agent_doc_mode` with aliases (mode, response_mode) |
 | v0.10.1 | Bundle template-mode instructions in SKILL.md |
+| v0.11.0 | Append-friendly merge strategy, shared merge module |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -199,6 +200,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.10.0 session:** Renamed `response_mode` → `agent_doc_mode` (canonical) with `mode` (shorthand) and `response_mode` (deprecated) as aliases. Discussed in-place conversation model and blog post.
 
 **v0.10.1 session:** Designed `exchange` component convention for shared conversation surfaces. Diagnosed and fixed missing template-mode instructions in bundled SKILL.md. Released v0.10.1 to all targets. Converted this document from input/output to exchange component. Identified tmux claim-after-restart bug for next release.
+
+**v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
 <!-- /agent:history -->
 
 ## Exchange
@@ -221,4 +224,35 @@ This matches the `exchange` convention — conversation flows forward. Both side
 Make sure that the config options are documented. Use append-friendly as the default.
 
 Implement and release
+
+### v0.11.0 — Released
+
+**Implemented and published to all targets:**
+
+- **New `merge.rs` module** — shared 3-way merge with append-friendly conflict resolution. Extracts duplicated `merge_contents()` from `write.rs` and `submit.rs`.
+- **`resolve_append_conflicts()`** — post-processes `git merge-file --diff3` output. When the "original" section of a conflict is empty (both sides only appended), auto-resolves by concatenating: agent response first, then user edits. True conflicts (where existing content was modified differently) retain markers.
+- **`merge_strategy` config** — added to `ComponentConfig` in `.agent-doc/components.toml`. Values: `"append-friendly"` (default) or `"strict"`. Append-friendly is always-on by default.
+- **Version bump** — 0.10.1 → 0.11.0
+
+**Published:** crates.io, PyPI, GitHub Releases (with prebuilt binary).
+**Tests:** 186 passing + 21 CLI tests. Clippy clean.
+
+```toml
+# .agent-doc/components.toml
+[exchange]
+mode = "replace"
+merge_strategy = "append-friendly"  # default — auto-resolve append-only conflicts
+
+[log]
+mode = "append"
+merge_strategy = "strict"  # opt out — keep all conflict markers
+```
+
+I'm seeing responses with two `## Assistant`. See tasks/cogov.me.md:
+
+```
+## Assistant
+
+## Assistant
+```
 <!-- /agent:exchange -->

@@ -7,49 +7,42 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Autocomplete search live ✓. Phase 15 complete ✓. Finnhub ✓. Next: mi-web portfolio reports (SVG charts vs tables TBD), esg-web, custom domains.
+**Status:** Phase 17 complete ✓ — SVG charts + PDF/XLSX export. Autocomplete ✓. Company A-Z ✓. Finnhub ✓. Portfolios ✓. WIL ✓. Next: benchmark data, mi-web deploy, esg-web deploy, custom domains.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 16 — Autocomplete Search ✓ + mi-www.site Analysis
+### Phase 17 — SVG Charts, PDF Export, XLSX Export ✓
 
-**Autocomplete Search** — deployed:
-- Live search dropdown as you type (debounced 300ms, fetches `/api/search`)
-- Keyboard navigation (arrows, Enter, Escape)
-- Click-to-navigate to company page
-- Falls back to normal form submit if no selection
-- **Test:** https://censible-root-web.brian-takita.workers.dev/companies
+Built and deployed all three in parallel:
 
-**mi-www.site Feature Inventory** (from source code analysis):
+**1. SVG Chart Module** (`pages/svg_charts.ts`) ✓
+- `svg_rank_bar()` — stacked horizontal bar with rank 1-5 color segments
+- `svg_portfolio_bar()` — portfolio summary with name, score %, and rank bar
+- `svg_issue_bar()` — per-issue comparison (portfolio vs benchmarks)
+- `svg_line_graph()` — area chart with bezier curves and gradient fill
+- `svg_stats_bar()` — statistics comparison with labeled percentage bars
+- Full rank 1-5 color scale: red → orange → yellow → light green → green
 
-The original mi-web is a SolidJS SSR app generating ESG portfolio reports. Key features:
+**2. Portfolio Report Page** (`pages/portfolio_report.ts`) ✓
+- Route: `/portfolios/:portfolio_id/report`
+- Inline SVG charts: overall ESG bar, per-issue score bars, cumulative distribution chart
+- Data table with color-coded issue scores
+- **Save as PDF** button (client-side jsPDF + svg2pdf.js — renders SVGs natively to PDF)
+- **Print** button (window.print() with @media print CSS)
+- **Test:** https://censible-root-web.brian-takita.workers.dev/portfolios/mi/report
 
-| Feature | Description |
-|---------|-------------|
-| **Portfolio ESG Reports** | 6 portfolio pages (3 Eco + 3 WIL snapshots) with SVG bar charts and line graphs |
-| **Score Visualizations** | Portfolio summary bar, per-issue bars comparing vs benchmarks (URTH, ERTH, PXWEX) |
-| **Two Criteria** | Eco (carbon, water stress) and WIL (gender diversity) with weighted scoring |
-| **PDF Export** | Multi-page PDF via pdfkit + svg-to-pdfkit (5 pages: ordinal/raw scores + graphs) |
-| **XLSX Export** | Multi-sheet workbook with positions, ESG detail, criteria weights, peer comparisons |
-| **SVG Export** | Multi-page SVG document |
-| **Raw Data Table** | All positions with ticker, weight, per-issue scores, rank 1-5 color coding |
-| **Print Mode** | `?print` query param for print-optimized CSS |
-| **Benchmark Comparison** | Each portfolio compared against URTH, ERTH, PXWEX benchmark ETFs |
+The score distribution chart is out of alignment. See screenshot.
 
-**Data model:** CSV-sourced positions with per-issue scores/percentiles, peer comparisons (geographic, industry, materiality, SIC), market-weight-normalized aggregation.
+**3. XLSX Export** (`worker/xlsx.ts`) ✓
+- Route: `/portfolios/:portfolio_id/export.xlsx`
+- Pure JS implementation — no dependencies, no Node.js APIs
+- Sheet 1 (Holdings): ticker, name, weight, 6 key ESG scores with rank-colored cells
+- Sheet 2 (ESG Detail): all ESG issue IDs as columns
+- Styled headers (dark bg, white text), rank-colored score cells
+- **Test:** https://censible-root-web.brian-takita.workers.dev/portfolios/mi/export.xlsx
 
-**Replication approach for Hono mi-web:**
-1. We already have the portfolio data in JSON (Phase 13 portfolios with ESG scores)
-2. SVG chart generation can be server-side (template strings like current HTML pages)
-3. PDF export: printer-friendly HTML approach (like our report.ts) since pdfkit won't work in Workers
-Would svg to pdf work? Let's do that if it will work.
-4. XLSX: can use a lightweight XML approach (no archiver needed)
-Yes
-5. Benchmark data needs to be imported from CSV or computed from D1
-Yes
+I remember that formulas were implemented. So the xlsx files were interactive and formula driven.
 
-What's your priority — replicate the full SVG charts, or start with the data tables + print-to-PDF approach we already have?
-
-Full SVG charts. SVG -> PDF.
+Worker size: 645 KiB (105 KiB gzipped). What's next?
 <!-- /agent:exchange -->

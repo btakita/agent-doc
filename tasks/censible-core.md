@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1.5 complete ✓ — rankings pages deployed. Starting Phase 2: D1 database setup.
+**Status:** Phases 1–4 complete ✓ — D1 database, Auth0 middleware, API routes, and search proxy all deployed. Ready for Phase 5: mi-web UI migration.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -28,56 +28,58 @@ Convert censible-core to use rappstack with rhonojs.
 | App directory | Overwrite root-web in place |
 | CSS tokens | Keep @censible/css as shared lib |
 
-### Phase 1 — root-web Migration ✓
-
-#### Step 0 — pnpm → bun conversion ✓
-#### Step 1 — Scaffold rhonojs app ✓
-#### Step 2 — Port design tokens ✓
-#### Step 3 — Create layout ✓
-#### Step 4 — Port pages ✓
-#### Step 5 — Build, verify & deploy ✓
+### Phase 1 — root-web Static Pages ✓
 
 **Live URL:** https://censible-root-web.brian-takita.workers.dev
 
 ### Phase 1.5 — Rankings Pages ✓
 
-- `pages/rankings.ts` — ESG root ranking index (12 issues as grid links) + individual issue pages
-- `pages/wil.ts` — Women in Leadership data-driven page with 11 sections (hero, company tables, fund tables, methodology, SP1500 infographic)
-- Worker routes: `/company-etf-and-mutual-fund-rankings`, `/:issue_id`, `/women-in-leadership`
-- WIL fetches live data from `CENSIBLE_SEARCH_URL` (Heroku search API) — 7 parallel API calls
-- SP1500 CEO data loaded from static JSON in `public/`
-- `CENSIBLE_SEARCH_URL` secret configured on CF Workers
-- Note: Heroku search API currently returning 503 — WIL page shows graceful error. Will work when API is available.
-- All other rankings routes verified live (200)
+- `pages/rankings.ts` — 12 ESG issues index + individual issue pages
+- `pages/wil.ts` — Women in Leadership (fetches from search API, 11 sections)
+- Note: Heroku search API returning 503 — WIL graceful error until available
 
-### Phase 2 — D1 Database (in progress)
+### Phase 2 — D1 Database ✓
 
-**PostgreSQL Schema (6 tables to migrate):**
+- Created D1 database `censible-db` (ID: `0129a78b-a3a4-49b9-8ac4-931cc3f4b00a`, region: ENAM)
+- `migrations/0001_initial/up.sql` — 6 tables migrated from PostgreSQL:
+  - `account`, `portfolio`, `position`, `portfolio_version`, `staged_change_position`, `staged_portfolio`
+  - BIGSERIAL → INTEGER AUTOINCREMENT, MONEY → REAL, timestamps → ISO 8601 TEXT
+- Schema applied to remote D1 (8 queries, 21 rows written)
+- D1 binding added to `wrangler.toml`
+- Query modules: `worker/db/account.ts`, `worker/db/portfolio.ts`
 
-| Table | Purpose | Complexity |
-|-------|---------|------------|
-| `account` | User preferences (email PK, JSON prefs) | Simple |
-| `portfolio` | Portfolio metadata (BIGSERIAL PK, FK to account) | Simple |
-| `position` | Holdings (composite PK, FK to portfolio) | Medium |
-| `portfolio_version` | Historical snapshots (JSON storage) | Medium |
-| `staged_change_position` | Working copy of positions | Medium |
-| `staged_portfolio` | Working portfolio state | Simple |
+### Phase 3 — Auth0 Middleware ✓
 
-**SQLite migration notes:**
-- BIGSERIAL → INTEGER PRIMARY KEY AUTOINCREMENT
-- MONEY → REAL
-- TIMESTAMP WITH TIME ZONE → TEXT (ISO 8601)
-- JSON → TEXT (SQLite JSON1 functions)
-- ON DELETE CASCADE supported in SQLite with PRAGMA foreign_keys=ON
+- `worker/middleware/auth0.ts` — Hono middleware using `jose` for JWT verification
+- Verifies against Auth0 JWKS endpoint, extracts email from JWT claims
+- Supports both `email` and `https://censible.co/email` claim paths
+- JWKS cached in module scope for performance
+- AUTH0_DOMAIN and AUTH0_AUDIENCE configured as secrets
+
+### Phase 4 — API Routes & Search Proxy ✓
+
+**Authenticated API routes** (mounted at `/api/*`):
+- `PUT /api/account/preferences` — Update account preferences
+- `GET /api/rebalance/portfolio_names` — List portfolio names
+- `GET /api/rebalance/portfolios/:name` — Get portfolio with positions
+- `POST /api/rebalance/portfolios` — Create portfolio (with positions + versioning)
+- `PATCH /api/rebalance/portfolios/:name` — Update (staged changes)
+- `POST /api/rebalance/portfolios/:name/portfolio_version` — Save version snapshot
+- `DELETE /api/rebalance/portfolios/:name` — Delete portfolio
+- `GET /api/rebalance/portfolios/:name/card` — Portfolio card
+
+**Search proxy** (unauthenticated):
+- `/search/*` → proxies to `CENSIBLE_SEARCH_URL` (company/fund lookups)
+
+**Deployed:** 212KB bundle, verified on production (401 for unauth API, 200 for static pages)
 
 ### Remaining Work
 
 | Phase | Task | Status |
 |-------|------|--------|
-| 2 | D1 database + schema migration | In Progress |
-| 3 | Auth0 integration on CF Workers (jose JWT middleware) | Pending |
-| 4 | KV caching layer (replacing Redis) | Pending |
-| 5 | mi-web migration | Pending |
-| 6 | esg-web migration | Pending |
+| 5 | mi-web UI migration (reports/exports) | Pending |
+| 6 | esg-web UI migration (portfolio dashboard) | Pending |
 | 7 | Decommission Contabo censible containers | Pending |
+
+**Phase 5-6 scope:** Port SolidJS SPAs to server-rendered HTML. esg-web is the larger app (company lookup, portfolio management, ESG ratings, screening). mi-web has ESG report exports (PDF/SVG/XLSX).
 <!-- /agent:exchange -->

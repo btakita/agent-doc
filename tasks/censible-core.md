@@ -64,7 +64,7 @@ Investment dashboard — heavy data, PDF/Excel/SVG exports.
 - Rewrite SolidJS components to relementjs
 - Port API routes (data exports, portfolio endpoints) to Hono
 - PDF generation: pdfkit/pdfmake works within Workers Paid limits (see cost analysis below)
-- Excel/SVG generation: verify xlsx and svg libraries work in Workers runtime
+- Excel export: custom XML generation (SpreadsheetML) streamed through ZIP compression
 - Charts/visualizations: server-render to SVG via relementjs
 
 **Phase 6 — esg-web rewrite**
@@ -109,8 +109,7 @@ The 128MB isolate limit is manageable with streaming. Workers natively support `
 
 - **PDF streaming:** pdfkit supports `.pipe(stream)` — generate pages incrementally, pipe chunks directly to the HTTP response. Memory stays proportional to the current page, not the full document.
 - **Data streaming:** Use D1 cursor-based pagination to process rows in batches. Each batch generates its report section, then memory is freed before the next batch.
-- **Excel streaming:** Standard `xlsx` library buffers in memory. Switch to `ExcelJS` which supports `workbook.xlsx.write(stream)` for streaming writes.
-I'm writing the xml. which can be streamed. as with compressing in zip format.
+- **Excel streaming:** Custom XML generation (SpreadsheetML) — you write the XML directly and stream it through a ZIP compressor. XLSX is just a ZIP of XML files (`xl/worksheets/sheet1.xml`, `xl/styles.xml`, etc.). Use `fflate` for streaming ZIP compression in Workers — it's pure JS, lightweight, and supports `ZipPassThrough`/`ZipDeflate` for incremental compression without buffering the entire archive.
 - **SVG charts:** Already lightweight — render each chart to SVG string via relementjs, embed inline or stream as part of the response.
 
 **Escalation path for truly large reports:**
@@ -143,4 +142,6 @@ User ──→ CF DNS ──→ │  Workers (rhonojs/Hono)            │
                           Auth0 (external)
                           JWT verification
 ```
+
+Let's start
 <!-- /agent:exchange -->

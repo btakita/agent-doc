@@ -254,40 +254,18 @@ Then commit agent-loop and push to origin.
 
 <!-- agent:output -->
 
-### All submodules already clean
+### Nested submodules fixed
 
-The `.gitignore` changes were committed and pushed in the previous cycle. All 20 submodules are clean.
+Found 2 nested repos with uncommitted `.gitignore` changes:
 
-The only remaining items are `ctx-core-dev/lib/relysjs` and `rappstack-dev/lib/ui--server--blog` — these are **untracked git repos** inside those submodules that need to be added as submodules themselves (separate task, not a gitignore issue). The `m` status in `git status` means "modified content in submodule" due to these untracked directories.
+| Nested Repo | Parent | Fix |
+|------------|--------|-----|
+| `ctx-core-dev/lib/relysjs` | ctx-core-dev | Committed + pushed `.gitignore`, updated parent pointer |
+| `rappstack-dev/lib/ui--server--blog` | rappstack-dev | Was on detached HEAD — checked out main, added `.agent-doc/` to `.gitignore`, committed + pushed, updated parent pointer |
 
-Nothing left to commit or push.
+All submodule pointers updated through the full chain: nested repo → parent submodule → agent-loop. Everything pushed.
 
-```
-❯ gs
-On branch main
-Your branch is ahead of 'origin/main' by 2 commits.
-  (use "git push" to publish your local commits)
+**Recursive check:** All submodules clean (no output from `git submodule foreach --recursive`).
 
-Changes not staged for commit:
-  (use "git add <file>..." to update what will be committed)
-  (use "git restore <file>..." to discard changes in working directory)
-  (commit or discard the untracked or modified content in submodules)
-	modified:   src/ctx-core-dev (modified content)
-	modified:   src/rappstack-dev (modified content)
-	modified:   tasks/agent-loop.md
-	modified:   tasks/censible-core.md
-
-no changes added to commit (use "git add" and/or "git commit -a")
-~/work/btakita/agent-loop main ⇡2 *8 !2                                                                                                                                                                                                01:11:43
-❯ git -C src/rappstack-dev/lib/ui--server--blog status
-HEAD detached from b601c99
-Changes not staged for commit:
-  (use "git add <file>..." to update what will be committed)
-  (use "git restore <file>..." to discard changes in working directory)
-	modified:   .gitignore
-
-no changes added to commit (use "git add" and/or "git commit -a") 
-```
-
-Check submodules recursively
+compact this file
 <!-- /agent:output -->

@@ -212,4 +212,18 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 *Compacted. All resolved items from v0.12.0 session (compact command, convert command, lazy claim, template init fix, flaky test fix, release) folded into history.*
 
 agent-doc run on a document with a stale claim still does not reclaim with an active tmux pane. I attempted to run this file. I had to Claim for Tmux Pane before it picked up the run.
+
+### Fixed: Lazy claim now works without --pane
+
+**Root cause:** The v0.12.0 lazy claim only triggered when --pane was explicitly passed to agent-doc route. The JetBrains plugin never passes --pane — it just calls agent-doc route file. So when the registered pane was dead, route fell through to auto-start instead of re-claiming.
+
+**Fix:** When the registered pane is dead (or no pane is registered) and no --pane was provided, route now falls back to tmux.active_pane("claude") — the currently active pane in the claude session. If that pane is alive, it lazy-claims to it.
+
+**Priority chain:** --pane (explicit) → active_pane("claude") (fallback) → auto-start (last resort)
+
+This means the plugin works without any changes. Any alive Claude session pane will be auto-claimed when Submit is triggered from the IDE. Binary installed.
+
+Should this be v0.12.1 or fold into next release?
+
+release
 <!-- /agent:exchange -->

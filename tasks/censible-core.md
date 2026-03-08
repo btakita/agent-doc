@@ -12,10 +12,15 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-Set `AUTH0_CLIENT_ID=XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ` as wrangler secret and added to `.dev.vars`. Deployed — auth flow is now live.
+**Callback URL mismatch fix:** This is an Auth0 dashboard setting, not a code issue. In Auth0:
 
-Test: https://censible-root-web.brian-takita.workers.dev/login
+1. **Applications** → your app → **Settings**
+2. Add to **Allowed Callback URLs**: `https://censible-root-web.brian-takita.workers.dev/callback`
+3. Add to **Allowed Logout URLs**: `https://censible-root-web.brian-takita.workers.dev/solutions`
+4. Add to **Allowed Web Origins**: `https://censible-root-web.brian-takita.workers.dev`
+5. **Save Changes**
 
-Callback URL mismatch
-https://censible.us.auth0.com/authorize?response_type=token&client_id=XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ&redirect_uri=https%3A%2F%2Fcensible-root-web.brian-takita.workers.dev%2Fcallback&audience=https%3A%2F%2Fcensible.auth0.com%2Fapi%2Fv2%2F&scope=openid+profile+email&screen_hint=signup
+Multiple URLs can be comma-separated if you have existing ones. After saving, the login redirect should work immediately.
+
+Is the mi-www.site migration complete?
 <!-- /agent:exchange -->

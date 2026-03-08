@@ -32,6 +32,9 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         anyhow::bail!("empty response — nothing to write");
     }
 
+    // Strip leading "## Assistant" heading if present — the write command adds its own
+    let response = strip_assistant_heading(&response);
+
     // Read document state before lock (for baseline)
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -157,6 +160,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `recover` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
+    let response = strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
@@ -165,7 +169,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         content_ours.push('\n');
     }
     content_ours.push_str("## Assistant\n\n");
-    content_ours.push_str(response);
+    content_ours.push_str(&response);
     if !response.ends_with('\n') {
         content_ours.push('\n');
     }
@@ -222,6 +226,24 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
+
+/// Strip a leading `## Assistant` heading from response text.
+///
+/// The `agent-doc write` command adds its own `## Assistant\n\n` prefix,
+/// so if the agent response also starts with `## Assistant`, we'd get a
+/// duplicate heading. This strips the leading heading (and optional blank
+/// lines) to prevent that.
+pub fn strip_assistant_heading(response: &str) -> String {
+    let trimmed = response.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("## Assistant") {
+        // Strip the heading line + any following blank lines
+        let rest = rest.strip_prefix('\n').unwrap_or(rest);
+        let rest = rest.trim_start_matches('\n');
+        rest.to_string()
+    } else {
+        response.to_string()
+    }
+}
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     let lock_path = crate::snapshot::lock_path_for(path)?;

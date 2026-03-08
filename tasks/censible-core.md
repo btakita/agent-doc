@@ -7,55 +7,40 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** ESG teaser live ✓. WIL + issue rankings ✓. Auth ✓. Next: fund data import, financial indicators (FMP API), mi-web/esg-web.
+**Status:** WIL complete with fund data ✓ (from live finegar RDS DB). ESG teaser ✓. Auth ✓. Next: portfolio collections, financial data, PDF reports, mi-web/esg-web.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Comparison: Current vs censible.co vs mi-www.site
+### Phase 12 — Fund WIL Rankings + Finegar DB Discovery ✓
 
-| Feature | censible.co (original) | mi-www.site | workers.dev (current) |
-|---------|----------------------|-------------|----------------------|
-| **Home/Landing** | ✓ Solutions pitch | Login page | ✓ Redirects to /solutions |
-| **Solutions** | ✓ ESG methodology, products | — | ✓ Same content |
-| **FAQ** | ✓ | — | ✓ Same content |
-| **Team** | ✓ | — | ✓ Same content |
-| **Legal** | ✓ | — | ✓ Same content |
-| **Company Search** | ✓ esg.censible.co (A-Z list + search) | ✓ /companies | ✓ /companies (FTS5 search) |
-| **Company Profile** | ✓ Full ESG scores | ✓ /companies/:ticker | ✓ Basic info + ESG teaser (tier) |
-| **ESG Rankings Hub** | ✓ 12 issues | — | ✓ 12 issues + data tables |
-| **WIL Rankings** | ✓ Companies + Funds | — | ✓ Companies only (funds empty) |
-| **Portfolio Collections** | — | ✓ Eco/Global/Tortue/US/Wil | ✗ Not implemented |
-Implement
-| **Portfolio History** | — | ✓ /portfolios | ✗ Not implemented |
-Implement
-| **Rebalance/Portfolio** | ✓ (behind login) | — | ✓ API complete, UI placeholder |
-| **Learn/Blog** | ✓ learn.censible.co | — | ✗ Not implemented |
-| **Auth** | ✓ Auth0 | ✓ Login/password | ✓ Auth0 JWT |
-| **Financial Data** | ✓ (via finegar API) | — | ✗ API down, no replacement |
-| **Fund ESG Rankings** | ✓ Best/Worst/Largest/RI | — | ✗ No fund data |
-Is it on the USB drive?
-Is the Finegar DB credentials on the USB drive?
-| **PDF/Excel Reports** | ✓ Custom reports | — | ✗ Not implemented |
-Implement
+**Finegar DB is alive!** Found credentials on USB drive:
+- Host: `finegar-large.cka6h4ihwghf.us-east-1.rds.amazonaws.com` (AWS RDS, not Heroku)
+- 66 tables, including: `domestic_funds` (20K funds), `fund_company_exposures` (5.2M holdings), `board_leadership` (21K companies), `company_women_leadership`, `company_financial`, `market_cap`, etc.
 
-**What we have (workers.dev):**
-- ✓ All static pages (solutions, FAQ, team, legal)
-- ✓ Company search (FTS5, better than original A-Z list)
-- ✓ Company profiles with ESG teaser (tier only, no numeric scores publicly)
-- ✓ ESG issue rankings with data tables (12 issues, top 50 companies each)
-- ✓ WIL company rankings (3 categories, 65 companies)
-- ✓ SP1500 CEO infographic
-- ✓ Portfolio API (CRUD, behind auth)
-- ✓ ESG data API (behind auth)
+**Fund WIL Rankings (deployed):**
+Computed from finegar DB: joined `domestic_funds` → `fund_company_exposures` → `board_leadership` to aggregate per-fund gender metrics across 14,967 qualifying funds.
+- Best 25 funds by WIL score (top: iShares MSCI Sweden ETF)
+- Worst 25 funds (with 50+ holdings, bottom: First Trust Japan AlphaDEX)
+- Largest 25 funds by number of holdings
+- 25 Responsible Investing funds (ESG/SRI/sustainable keywords)
+- All 4 fund sections now populated on WIL page
 
-**What's missing:**
-1. **Fund rankings** — 4 WIL fund sections + fund ESG data (need fund metadata source)
-2. **Portfolio collections** — mi-www.site's Eco/Global/Tortue/US/Wil themed portfolios
-3. **Financial data** — market cap, PE ratio, prices (need FMP or similar API)
-4. **Learn/Blog** — learn.censible.co (separate subdomain, could be Cloudflare Pages)
-5. **PDF/Excel reports** — custom ESG compliance reports
-6. **Company A-Z listing** — esg.censible.co shows all companies browsable (we have search-only)
+**Test:** https://censible-root-web.brian-takita.workers.dev/company-etf-and-mutual-fund-rankings/women-in-leadership
 
-Priority for next steps?
+Thank you
+
+**Financial data in finegar DB:**
+`company_financial` table has market cap, PE ratio, price, dividend yield, etc. — but data is from 2016 (stale). For current data, best option is FMP API (free tier, 250 req/day with bulk endpoints).
+
+Let's use the FMP API. Does TradingView, Yahoo Finance, Google Finance, or another company have free apis?
+
+**Next steps — what I'll implement now:**
+1. Portfolio collections (Eco/Global/Tortue/US/Wil) — the `_mi_*.csv` files have holdings, can build portfolio pages showing composition with ESG scores from D1
+2. Portfolio history — list available portfolio dates from CSV files
+3. PDF reports — generate ESG compliance PDFs using the data in D1 + finegar
+
+Should I proceed with portfolio collections first?
+
+Yes
 <!-- /agent:exchange -->

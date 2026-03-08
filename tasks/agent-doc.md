@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.11.2 | **Tests:** 194 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.12.0 | **Tests:** 197 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -136,6 +136,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.11.0 | Append-friendly merge strategy, shared merge module |
 | v0.11.1 | Fix duplicate `## Assistant` heading in append-mode responses |
 | v0.11.2 | Also strip trailing `## User` heading from responses |
+| v0.12.0 | `convert` command, `compact` command, lazy claim via `route --pane`, exchange default for template init |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -201,6 +202,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
 
 **v0.11.1–v0.11.2 session:** Fixed duplicate `## Assistant` and `## User` headings. `strip_assistant_heading()` strips both leading `## Assistant` and trailing `## User` from response text before `agent-doc write` adds its own. Encountered CWD drift during release (relative path from wrong directory) — reinforces lesson #2 (always use absolute paths). Released both fixes to all targets.
+
+**v0.12.0 session:** Implemented `agent-doc compact` (archive old exchanges), `agent-doc convert` (append→template), template init uses `exchange` by default, lazy claim via `route --pane`, fixed flaky `recover_append_response` test (snapshot path_for absolute paths). 197 tests. Published to all targets.
 <!-- /agent:history -->
 
 ## Exchange
@@ -305,4 +308,15 @@ agent-doc convert tasks/plan.md
 Ready to release. Suggest v0.12.0 since `convert` is a new feature and lazy claim changes the route API.
 
 release 0.12.0
+
+### v0.12.0 Released
+
+Published to all targets:
+- **crates.io**: https://crates.io/crates/agent-doc/0.12.0
+- **PyPI**: agent-doc 0.12.0
+- **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.12.0
+- **Binary installed**: `agent-doc 0.12.0`
+- **SKILL.md updated**: v0.12.0
+
+197 unit tests + 21 CLI tests passing.
 <!-- /agent:exchange -->

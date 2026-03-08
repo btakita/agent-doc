@@ -1,10 +1,8 @@
 ---
-session: 375061ae-6496-4ab9-a303-2f0b0da4f61a
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 375061ae-6496-4ab9-a303-2f0b0da4f61a
+tmux_session: '0'
 ---
+
 ## Summary
 
 Collaboration with Ron Berkes on smart contract manufacturing + call transcription pipeline.

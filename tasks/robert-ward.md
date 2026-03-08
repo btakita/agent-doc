@@ -1,10 +1,8 @@
 ---
-session: aaca1487-6409-4c94-88d6-97b579485190
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
+tmux_session: '0'
 ---
+
 
 Robert Ward is a long time friend who lives in LA.
 He has a Chinese Medicine, acupressure, therapeutic massage practice.

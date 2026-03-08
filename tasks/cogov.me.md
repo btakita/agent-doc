@@ -620,3 +620,27 @@ Two paths:
 ## User
 
 Should I move relysjs and rhonojs under the rappstack organization and retire the relysjs org?
+## Assistant
+
+**No — keep them separate.** They serve different architectural layers:
+
+- **rappstack** — framework-agnostic overlays (ctx-core signals, relementjs components, shared patterns)
+- **relysjs** — Elysia integration (server builds, dev server, esbuild plugins)
+- **rhonojs** — Hono integration (middleware, CF Workers bindings, wrangler dev)
+
+Putting relysjs/rhonojs under rappstack conflates the layers. rappstack is the **overlay** that sits on top of whichever server framework. relysjs/rhonojs are the **framework adapters** rappstack plugs into.
+
+**Recommendation:**
+
+1. **Keep rappstack org** — framework-agnostic packages (`@rappstack/domain`, `@rappstack/ui`, etc.)
+2. **Publish `rhonojs` as an unscoped npm package** — source in ctx-core-dev alongside relysjs
+3. **Retire relysjs org later** — once all apps migrated to Hono, archive it
+4. **No new GitHub org needed** — rhonojs is a single package (or 2-3 sub-packages at most)
+
+Key principle: **orgs are for package scopes, not individual packages.** rhonojs doesn't need `@rhonojs/*` unless you want scoped sub-packages like `@rhonojs/d1`, `@rhonojs/session`. If you do want scoping, use `@rappstack/hono-*` — it's already there.
+
+**Simplest path:** `rhonojs` on npm, source in ctx-core-dev. Zero org overhead.
+
+## User
+
+Ok...let's put rhonojs as a top-level package in ctx-core-dev. Let's convert all projects using relysjs over to rhonojs.

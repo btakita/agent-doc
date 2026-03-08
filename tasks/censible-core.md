@@ -7,24 +7,25 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** D1 import complete ✓. 9K companies with ESG scores, MSCI ratings, gender data loaded. Search API + company detail pages live.
+**Status:** ESG data moved behind Auth0 login ✓. Public: search + basic company info. Auth required: ESG scores, MSCI ratings, gender data.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 7 — D1 Data Import ✓
+### Phase 9 — ESG Data Auth Protection ✓
 
-**D1 Schema** (migration 0002_esg_data):
-- `company` — 9,056 companies (issuerid, ticker, name, industry, exchange, description, etc.)
-- `esg_score` — 9,056 rows (ESG key issues as JSON: 35 issues × score + percentile)
-- `msci_esg` — 9,056 rows (overall ESG, E/S/G sub-scores)
-- `company_gender` — 9,057 rows (female directors/executives, diversity scores)
-- `geographic_classification` — 247 countries
-- `company_fts` — FTS5 full-text search index (auto-synced via triggers)
+Moved all ESG score data behind Auth0 login per licensing requirements:
 
-**Data sourced from USB drive** — `censible-core/data/import.mi-www.site/` CSVs.
+**Public (no auth):**
+- `GET /api/search?q=...` — company name/ticker search
+- `/companies?q=...` — search page with results table
+- `/companies/:ticker` — basic company info (name, ticker, exchange, industry, description) + "login to view ESG data" prompt
 
-### Phase 8 — Search API + Company Pages ✓
+**Auth required (401 without JWT):**
+- `GET /api/companies/:locator` — full company detail with ESG + MSCI + gender
+- `GET /api/companies/:locator/esg` — ESG key issues
+- `GET /api/companies/:locator/msci` — MSCI ratings
+- `GET /api/companies/:locator/gender` — gender diversity
 
 **Live endpoints:**
 - `GET /api/search?q=apple&limit=5` — FTS company search
@@ -60,9 +61,14 @@ censible-root-web (CF Worker, 225KB)
 
 **Remaining work:**
 - WIL rankings page needs data source (search API is down — could load from D1 or static JSON)
+Please implement the search API
 - mi-web / esg-web apps (phases 5, 6 — deferred)
+Please implement
 - Fund data import (if needed)
+Please implement
 
 The direct company esg scores cannot be publicly accessible due to licensing reasons.
 Please put the esg scores behind a login.
+
+Perhaps we can keep the public profile of each company but the scores must be behind a login.
 <!-- /agent:exchange -->

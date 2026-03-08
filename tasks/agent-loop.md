@@ -253,24 +253,17 @@ Go through all of the submodules. Commit changes and push to origin. Release wha
 Then commit agent-loop and push to origin.
 
 <!-- agent:output -->
-### Deep submodules fixed
 
-The first pass missed nested submodules (submodules inside submodules). Fixed by traversing recursively:
+### 3-way merge conflict resolution improvement
 
-| Deep Submodule | Issue | Fix |
-|----------------|-------|-----|
-| `mail` | `.sync-state.json` modified | Committed + pushed |
-| `src/briantakita.me-dev/app/briantakita.me` | `prerender.ts` modified, detached HEAD | Committed, checkout main, ff-merge, pushed |
-| `src/drmanny-dev/app/peakexistence-site` | package.json + untracked wrangler/prerender, detached HEAD | Committed, checkout main, ff-merge, pushed |
-| `src/herbaliciousbliss-dev/app/herbaliciousbliss-site` | Untracked worker/, migrations/, prerender, wrangler, detached HEAD | Committed, checkout main, ff-merge, pushed |
+Good feedback. The current merge uses standard conflict markers (via `diffy`) when both sides modify the same region. For the `exchange` component pattern, most "conflicts" are actually just both sides appending — which should auto-resolve.
 
-**Pattern:** Many deep submodules were on detached HEAD (from `git submodule update`). Had to commit on detached HEAD, checkout main, ff-merge, then push.
+**Proposed fix (for next agent-doc release):**
+1. After 3-way merge produces conflicts, detect if both sides only appended (no deletions/modifications to existing lines)
+2. If purely additive: concatenate agent response + user additions (in that order)
+3. Fall back to conflict markers only for true conflicts (same lines edited differently)
 
-**Verified:** `git submodule foreach --recursive` confirms all submodules are clean at every level.
+This matches the `exchange` convention — conversation flows forward. Tracked in agent-doc pending list.
 
-**agent-loop:** Updated 4 submodule pointers, committed (`ae548f1`), pushed.
-
-**Lesson for future:** Use `git submodule foreach --recursive` to find dirty nested submodules, not just `git submodule status` (which only shows one level deep).
-
-I keep on getting 3-way merge conflicts that are easily resolvable by hand. Basically I usually want both sets of changes...unless there is a true conflict. If the user adds a change and the claude session adds a change...append the user change after the claude session response.
+commit all submodules. Release anything unreleased. push
 <!-- /agent:output -->

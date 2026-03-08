@@ -425,3 +425,5 @@ Robert can:
 ## User
 
 Robert has been renting 4 years. Does Civil Code § 1946.1 60 day notice override the lease agreement of 30 day notice? Is it possible for Robert to forego that right?
+
+Please write response in document.

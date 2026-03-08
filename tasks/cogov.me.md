@@ -293,3 +293,103 @@ Instead of using a submodule, let's have the source live in the cogov-dev repo.
 Copy the source from the original app. Convert it to rappstack.
 Use D1 as the data store.
 KV for sessions.
+## Assistant
+
+**Submodule removed — will create source directly in cogov-dev.** Here's the conversion plan:
+
+**Data model → D1 (SQLite) schema:**
+
+```sql
+CREATE TABLE person (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+
+CREATE TABLE collective (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT, description TEXT, details TEXT
+);
+
+CREATE TABLE council (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collective_id INTEGER REFERENCES collective(id),
+  collective_council INTEGER DEFAULT 0,
+  name TEXT
+);
+
+CREATE TABLE member (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collective_id INTEGER REFERENCES collective(id),
+  person_id INTEGER REFERENCES person(id)
+);
+
+CREATE TABLE privilege_set (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collective_id INTEGER REFERENCES collective(id),
+  name TEXT
+);
+
+CREATE TABLE privilege (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  privilege_set_id INTEGER REFERENCES privilege_set(id),
+  action_type TEXT
+);
+
+CREATE TABLE member_privilege (
+  collective_id INTEGER, member_id INTEGER, privilege_set_id INTEGER
+);
+
+CREATE TABLE council_privilege (
+  collective_id INTEGER, council_id INTEGER, privilege_set_id INTEGER
+);
+
+CREATE TABLE proposal (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collective_id INTEGER, council_id INTEGER,
+  name TEXT, date TEXT
+);
+
+CREATE TABLE proposal_revision (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proposal_id INTEGER REFERENCES proposal(id),
+  name TEXT, date TEXT
+);
+
+CREATE TABLE proposal_action (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  revision_id INTEGER REFERENCES proposal_revision(id),
+  action_type TEXT, params TEXT
+);
+```
+
+**Routes → Elysia:**
+
+| Vue route | Elysia route | Purpose |
+|---|---|---|
+| `/person` | `/person` | Sign in/register |
+| `/collectives` | `/collectives` | Browse/join |
+| `/create-collective` | `/collective/create` | Create form |
+| `/council` | `/council` | Council management |
+| `/members` | `/members` | Member list |
+| `/privilege-set` | `/privilege-set` | Privileges |
+| `/proposal` | `/proposal` | Proposal form |
+| — | `/api/*` | REST API for D1 CRUD |
+
+**Architecture:**
+- Server-rendered HTML (relementjs) — no client-side framework needed
+- Elysia API routes for CRUD
+- D1 for all data, KV for sessions
+- Tailwind CSS (replacing Foundation)
+- Form submissions + optional HTMX for interactivity
+
+**Conversion phases:**
+
+1. **Scaffold** — `app/demo.cogov.me/` as rappstack app (build.ts, config.ts, start.ts, index.ts)
+2. **D1 schema** — Create migration, deploy D1 database
+3. **Layout + Nav** — Port NavBar to relementjs layout
+4. **Views** — Convert 7 Vue views to server-rendered pages + API endpoints
+5. **Session** — KV-based auth
+6. **Deploy** — CF Pages + Workers
+
+This is a multi-session project. Want me to start with phase 1 (scaffold the rappstack app)?
+
+## User
+
+Let's use hono. We already use hono for another app. So let's extract out an equivalent of relysjs for hono.

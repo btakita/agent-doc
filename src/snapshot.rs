@@ -95,9 +95,19 @@ impl Drop for SnapshotLock {
 }
 
 /// Compute the snapshot file path for a given document.
+/// Returns an absolute path: `<project_root>/.agent-doc/snapshots/<hash>.md`.
+/// Falls back to relative path if no project root found (e.g., tests without `.agent-doc/`).
 pub fn path_for(doc: &Path) -> Result<PathBuf> {
     let hash = doc_hash(doc)?;
-    Ok(PathBuf::from(SNAP_DIR).join(format!("{}.md", hash)))
+    let filename = format!("{}.md", hash);
+    // Try to find project root for absolute path (consistent with lock_path_for/pending_path_for)
+    if let Ok(canonical) = doc.canonicalize()
+        && let Some(root) = find_project_root(&canonical)
+    {
+        return Ok(root.join(SNAP_DIR).join(filename));
+    }
+    // Fallback: relative path (legacy behavior for tests without .agent-doc/)
+    Ok(PathBuf::from(SNAP_DIR).join(filename))
 }
 
 /// Load the snapshot content under an exclusive lock.
@@ -173,20 +183,30 @@ mod tests {
 
     /// Helper: write a snapshot file directly (without changing CWD).
     fn write_snapshot_directly(dir: &Path, doc: &Path, content: &str) {
-        let snap_rel = path_for(doc).unwrap();
-        let snap_abs = dir.join(&snap_rel);
-        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
-        fs::write(&snap_abs, content).unwrap();
+        let snap = snapshot_path_in(dir, doc);
+        fs::create_dir_all(snap.parent().unwrap()).unwrap();
+        fs::write(&snap, content).unwrap();
     }
 
     /// Helper: read a snapshot file directly (without changing CWD).
     fn read_snapshot_directly(dir: &Path, doc: &Path) -> Option<String> {
-        let snap_rel = path_for(doc).unwrap();
-        let snap_abs = dir.join(&snap_rel);
-        if snap_abs.exists() {
-            Some(fs::read_to_string(&snap_abs).unwrap())
+        let snap = snapshot_path_in(dir, doc);
+        if snap.exists() {
+            Some(fs::read_to_string(&snap).unwrap())
         } else {
             None
+        }
+    }
+
+    /// Compute snapshot path within a specific directory.
+    /// If path_for returns absolute (project root found), use it directly.
+    /// Otherwise, join relative path with dir.
+    fn snapshot_path_in(dir: &Path, doc: &Path) -> PathBuf {
+        let p = path_for(doc).unwrap();
+        if p.is_absolute() {
+            p
+        } else {
+            dir.join(&p)
         }
     }
 
@@ -214,7 +234,7 @@ mod tests {
     fn path_for_has_correct_structure() {
         let (_dir, doc) = setup();
         let p = path_for(&doc).unwrap();
-        assert!(p.to_string_lossy().starts_with(".agent-doc/snapshots/"));
+        assert!(p.to_string_lossy().contains(".agent-doc/snapshots/"));
         assert!(p.to_string_lossy().ends_with(".md"));
         // Hash is 64 hex chars
         let filename = p.file_stem().unwrap().to_string_lossy();
@@ -253,9 +273,8 @@ mod tests {
         write_snapshot_directly(dir.path(), &doc, "content");
         assert!(read_snapshot_directly(dir.path(), &doc).is_some());
 
-        let snap_rel = path_for(&doc).unwrap();
-        let snap_abs = dir.path().join(&snap_rel);
-        fs::remove_file(&snap_abs).unwrap();
+        let snap = snapshot_path_in(dir.path(), &doc);
+        fs::remove_file(&snap).unwrap();
         assert!(read_snapshot_directly(dir.path(), &doc).is_none());
     }
 

@@ -172,8 +172,8 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
         let components = component::parse(&result)
             .context("failed to re-parse components after patching")?;
 
-        if let Some(output_comp) = components.iter().find(|c| c.name == "output") {
-            // Append to existing output component
+        if let Some(output_comp) = components.iter().find(|c| c.name == "exchange" || c.name == "output") {
+            // Append to existing exchange/output component
             let existing = output_comp.content(&result);
             let new_content = if existing.trim().is_empty() {
                 format!("{}\n", unmatched)
@@ -182,13 +182,13 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
             };
             result = output_comp.replace_content(&result, &new_content);
         } else {
-            // Auto-create output component at the end
+            // Auto-create exchange component at the end
             if !result.ends_with('\n') {
                 result.push('\n');
             }
-            result.push_str("\n<!-- agent:output -->\n");
+            result.push_str("\n<!-- agent:exchange -->\n");
             result.push_str(unmatched);
-            result.push_str("\n<!-- /agent:output -->\n");
+            result.push_str("\n<!-- /agent:exchange -->\n");
         }
     }
 
@@ -368,30 +368,30 @@ All green.
     }
 
     #[test]
-    fn apply_patches_unmatched_creates_output() {
+    fn apply_patches_unmatched_creates_exchange() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         let doc = "# Dashboard\n\n<!-- agent:status -->\nok\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
         let result = apply_patches(doc, &[], "Extra info here", &doc_path).unwrap();
-        assert!(result.contains("<!-- agent:output -->"));
+        assert!(result.contains("<!-- agent:exchange -->"));
         assert!(result.contains("Extra info here"));
-        assert!(result.contains("<!-- /agent:output -->"));
+        assert!(result.contains("<!-- /agent:exchange -->"));
     }
 
     #[test]
-    fn apply_patches_unmatched_appends_to_existing_output() {
+    fn apply_patches_unmatched_appends_to_existing_exchange() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
-        let doc = "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\n<!-- agent:output -->\nprevious\n<!-- /agent:output -->\n";
+        let doc = "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\n<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
         let result = apply_patches(doc, &[], "new stuff", &doc_path).unwrap();
         assert!(result.contains("previous"));
         assert!(result.contains("new stuff"));
-        // Should not create a second output component
-        assert_eq!(result.matches("<!-- agent:output -->").count(), 1);
+        // Should not create a second exchange component
+        assert_eq!(result.matches("<!-- agent:exchange -->").count(), 1);
     }
 
     #[test]

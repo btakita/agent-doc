@@ -2,7 +2,9 @@ mod agent;
 mod audit_docs;
 mod claim;
 mod clean;
+mod compact;
 mod config;
+mod convert;
 mod diff;
 mod focus;
 mod frontmatter;
@@ -72,6 +74,9 @@ enum Commands {
         /// Agent backend to use
         #[arg(long)]
         agent: Option<String>,
+        /// Document mode: append (default) or template
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Preview the diff that would be sent
     Diff {
@@ -103,6 +108,9 @@ enum Commands {
     Route {
         /// Path to the session document
         file: PathBuf,
+        /// Tmux pane ID for lazy claiming (auto-claims if existing claim is stale)
+        #[arg(long)]
+        pane: Option<String>,
     },
     /// Detect permission prompts from a Claude Code session
     Prompt {
@@ -233,6 +241,19 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Archive old exchanges to reduce document size (append-mode only)
+    Compact {
+        /// Path to the session document
+        file: PathBuf,
+        /// Number of recent exchanges to keep (default: 2)
+        #[arg(long, default_value = "2")]
+        keep: usize,
+    },
+    /// Convert an append-mode document to template mode
+    Convert {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -280,15 +301,15 @@ fn main() -> anyhow::Result<()> {
             dry_run,
             no_git,
         } => submit::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
-        Commands::Init { file, title, agent } => {
-            init::run(&file, title.as_deref(), agent.as_deref(), &config)
+        Commands::Init { file, title, agent, mode } => {
+            init::run(&file, title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
         }
         Commands::Diff { file } => diff::run(&file),
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
-        Commands::Route { file } => route::run(&file),
+        Commands::Route { file, pane } => route::run(&file, pane.as_deref()),
         Commands::Prompt { file, answer, all } => {
             if all {
                 return prompt::run_all();
@@ -375,6 +396,8 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Commands::Compact { file, keep } => compact::run(&file, keep),
+        Commands::Convert { file } => convert::run(&file),
         Commands::Upgrade => upgrade::run(),
     }
 }

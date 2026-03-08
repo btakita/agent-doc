@@ -271,6 +271,11 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
+/// Atomic write: write to temp file then rename. Public for use by compact.
+pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
+    atomic_write(path, content)
+}
+
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     use std::io::Write;
     let parent = path.parent().unwrap_or(Path::new("."));

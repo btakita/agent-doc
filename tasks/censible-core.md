@@ -7,30 +7,15 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** All core features complete ✓. Benchmark portfolios ✓. mi-web/esg-web deployed ✓. Auth flow ✓. User portfolios CRUD ✓. Remaining: custom domains (need domain names), AUTH0_CLIENT_ID secret.
+**Status:** All features deployed ✓. Auth flow live with AUTH0_CLIENT_ID. Remaining: custom domains.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-**Getting AUTH0_CLIENT_ID:**
+Set `AUTH0_CLIENT_ID=XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ` as wrangler secret and added to `.dev.vars`. Deployed — auth flow is now live.
 
-1. Go to https://manage.auth0.com → **Applications** → **Applications**
-2. Find or create your SPA application (e.g. "Censible Web")
-3. The **Client ID** is at the top of the app's **Settings** tab
+Test: https://censible-root-web.brian-takita.workers.dev/login
 
-If creating new: **+ Create Application** → "Censible Web" → **Single Page Web Applications**, then set:
-- **Allowed Callback URLs**: `https://censible-root-web.brian-takita.workers.dev/callback`
-- **Allowed Logout URLs**: `https://censible-root-web.brian-takita.workers.dev/solutions`
-- **Allowed Web Origins**: `https://censible-root-web.brian-takita.workers.dev`
-
-Then run:
-```bash
-cd src/censible-core/apps/root-web
-npx wrangler secret put AUTH0_CLIENT_ID
-# paste the client ID when prompted
-```
-
-Your Auth0 tenant: `censible.us.auth0.com`, audience: `https://censible.auth0.com/api/v2/`
-
-I added AUTH0_CLIENT_ID to .env
+Callback URL mismatch
+https://censible.us.auth0.com/authorize?response_type=token&client_id=XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ&redirect_uri=https%3A%2F%2Fcensible-root-web.brian-takita.workers.dev%2Fcallback&audience=https%3A%2F%2Fcensible.auth0.com%2Fapi%2Fv2%2F&scope=openid+profile+email&screen_hint=signup
 <!-- /agent:exchange -->

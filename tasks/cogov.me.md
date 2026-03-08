@@ -230,3 +230,17 @@ Shall I push these commits to the git remotes?
 ## User
 
 Update the readme. We don't use lerna. We use bun.
+## Assistant
+
+**README updated.** (`a81f91d`)
+
+Changes:
+- Replaced lerna/yarn workspace references with bun
+- Removed nvm/yarn setup steps
+- Added production build & deploy instructions (`NODE_ENV=production bun build && bun prerender && wrangler pages deploy`)
+- Removed tmux section (outdated)
+- Simplified to essentials: clone, install, dev, build/deploy
+
+## User
+
+Let's have a submodule to https://github.com/cogov/CoGov.Vue. This will be demo.cogov.me as the prototype. What would it take to convert it from vue to our stack? What about mongo as the datastore? Is mongo compatible with Cloudflare or do we need to switch to a different data store? 

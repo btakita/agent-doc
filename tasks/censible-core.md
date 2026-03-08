@@ -7,41 +7,29 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Portfolio collections live ✓ (9 portfolios). WIL complete ✓. ESG teaser ✓. Auth ✓. Finegar DB alive ✓. Next: financial data (Finnhub), PDF reports, mi-web/esg-web.
+**Status:** Portfolio collections live ✓ (9 portfolios). WIL complete ✓. ESG teaser ✓. Auth ✓. Finegar DB alive ✓. Next: Finnhub lazy fetch (Phase 14), PDF reports, mi-web/esg-web.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### Phase 13 — Portfolio Collections ✓
+### Phase 14 — Finnhub Lazy Fetch
 
-**Deployed 9 portfolio pages:**
-- `/portfolios` — index page with Core, Eco, WIL groups
-- `/portfolios/mi` — Censible core portfolio (26 holdings)
-- `/portfolios/mi_eco_*` — 4 Eco portfolio snapshots (20-24 holdings each)
-- `/portfolios/mi_wil_*` — 4 WIL portfolio snapshots (17 holdings each)
+**Approach:** Lazy fetch + KV cache (not cron). Data fetched on-demand when a user views a company, cached 24h in KV.
 
-Each portfolio page shows: holdings table with ticker, name, weight, and 6 key ESG issue scores (carbon, labor, governance, privacy, gender, health & safety) color-coded by score level.
+**Architecture:**
+1. Add `FINNHUB_CACHE` KV binding + `FINNHUB_API_KEY` secret
+2. On `/companies/:ticker` visit → check KV `finnhub:{ticker}`
+3. Cache hit (< 24h): serve instantly
+4. Cache miss: fetch Finnhub `/api/v1/quote` + `/api/v1/stock/metric`, store in KV with 24h TTL
+5. Display: current price, market cap, PE ratio, EPS, 52-week high/low
 
-**Test:** https://censible-root-web.brian-takita.workers.dev/portfolios
+**Why lazy > cron:**
+- Zero cost for unviewed companies (most of 9K)
+- Always fresh for actively-viewed ones
+- 60 calls/min is plenty for on-demand traffic
+- Simpler architecture (no scheduled worker)
 
-**Free financial data APIs — research results:**
+Ready to implement — need your Finnhub API key (free signup at finnhub.io).
 
-| API | Free tier | Rate limit | Viable for 9K? |
-|-----|-----------|------------|-----------------|
-| **Finnhub** | Yes, free key | 60/min | **Best** — 2.5 hrs for full refresh |
-| **FMP** | 250/day | 250/day | No free (need $19/mo) |
-| **yfinance** | No key needed | Aggressive blocking | Risky, ToS issues |
-| **Alpha Vantage** | 25/day | 25/day | No (360 days!) |
-| **TradingView** | None | — | No public API |
-| **Google Finance** | Deprecated 2012 | — | No |
-| **Yahoo Finance** | None official | — | No official API |
-
-**Recommendation:** Finnhub free tier is the best option — 60 calls/min, no daily limit, covers market cap, PE ratio, price, EPS. A scheduled Cloudflare Worker cron could refresh all 9K companies every few hours.
-
-Alternatively, FMP at $19/mo has bulk endpoints that can fetch all data in a few calls.
-
-What's your preference: Finnhub (free) or FMP ($19/mo)?
-Finnhub
-
-Can we lazily fetch data?
+Setup FINNHUB_API_KEY in .env
 <!-- /agent:exchange -->

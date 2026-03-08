@@ -685,3 +685,5 @@ Ready to start step 1 — creating the rhonojs package scaffold in ctx-core-dev.
 ## User
 
 Yes...Let's do steps 1-5.
+
+I want to support both rhonojs and relysjs

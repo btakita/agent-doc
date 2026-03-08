@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.11.2 | **Tests:** 186 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.11.2 | **Tests:** 194 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -155,7 +155,6 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Sub-profiles for submodule workflows in `.agent-doc/config.toml`
 - Docker sandboxing (`--sandboxed`)
 - `TmuxBatch` — command batching to reduce flicker
-- `agent-doc compact` — auto-summarize old exchanges
 - `agent/api.rs` — direct HTTP API backend
 - `agent-doc init --dashboard` — scaffold template with log + status components
 - Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
@@ -219,4 +218,45 @@ Is there an /agent-doc compact command?
 Not built. It's in the pending list as `agent-doc compact — auto-summarize old exchanges`. For now, compaction is manual: ask the agent to compact, and it rewrites the exchange with resolved items folded into history summaries.
 
 Implement agent-doc compact. What else is pending?
+
+### `agent-doc compact` — Implemented
+
+**New command:** `agent-doc compact <file> [--keep N]`
+
+Archives old User/Assistant exchanges from append-mode documents to `.agent-doc/archives/<hash>-<timestamp>.md`, keeping only the most recent N exchanges (default: 2). A summary marker replaces the archived content.
+
+**Features:**
+- Parses exchanges by `## User` / `## Assistant` headings (respects code blocks)
+- Only archives complete exchanges (trailing User block preserved as active)
+- Archive file includes frontmatter with session ID, timestamp, exchange count
+- Atomic write + snapshot update
+- Template-mode documents rejected (components are already bounded)
+
+**Usage:**
+```bash
+agent-doc compact tasks/plan.md           # keep 2 recent exchanges
+agent-doc compact tasks/plan.md --keep 5  # keep 5 recent exchanges
+```
+
+**Tests:** 6 new tests (parse, code blocks, trailing user, archive format, compacted format, timestamp).
+**Total:** 194 passing + 21 CLI tests. Clippy clean.
+
+Removed `agent-doc compact` from the pending list.
+
+**Other pending items (prioritized):**
+1. Fix flaky `recover_append_response` test (parallel race condition)
+2. Fix tmux claim-after-restart (plugin re-resolve pane binding)
+3. Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
+4. `agent-doc deep` — fan-out with git worktrees
+5. `agent-doc convert` — append-to-template conversion
+6. Plugin phases 5-7 (folding, gutter icons, structure view)
+7. `agent-doc status` — Ratatui TUI
+8. Response diff storage / undo / extract
+9. Docker sandboxing, TmuxBatch, sub-profiles
+10. Blog post on briantakita.me
+
+In tasks/cogov.me.md, I asked agent-doc to use `agent_doc_mode: template`. It did not configure an exchange. 57Instead, it configured an input/output. It should use exchange by default.
+
+Let's do pending 1 & 2.
+Also agent-doc convert
 <!-- /agent:exchange -->

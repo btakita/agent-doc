@@ -100,8 +100,11 @@ censible-root-web (CF Worker, 217KB)
 | Task | Blocker | Priority |
 |------|---------|----------|
 | Company ESG detail pages (interactive) | Search API down | High |
+I believe search is in https://github.com/portfoliome/finegar-api. Please add a Cloudflare compatible port of finegar-api search and other necessary features to censible-core. 
 | Portfolio management UI (login, CRUD forms) | Auth0 credentials needed | High |
+How do I get these Auth0 credentials? See screenshot.
 | mi-web report generation | Data CSV files needed | Medium |
+I believe that the CSV files are on Contabo. Either in the container or S3 bucket.
 | KV caching layer | None (optimization) | Low |
 | Decommission Contabo containers | All above complete | Last |
 

@@ -7,20 +7,25 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Detailed XLSX export ✓ (5 sheets, cross-sheet formulas, conditional formatting). SVG charts ✓. PDF ✓. Autocomplete ✓. Finnhub ✓. Next: benchmark data, mi-web/esg-web deploy, custom domains.
+**Status:** Core features complete ✓ (XLSX, SVG, PDF, search, Finnhub). Remaining: benchmark data, mi-web/esg-web deploy, custom domains, auth flow, user portfolios.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-### XLSX Detailed Export Fixes ✓
+### Migration Status
 
-**Peers sheet #NAME? fix:** Replaced `MAXIFS` with `MAX(range)` using contiguous row groups per ticker. Simplified IF formula to avoid OOXML quoting issues.
+XLSX fixes confirmed working. Here's what remains:
 
-**Fund sheet cross-sheet formulas:** Issue score/percentile cells now reference ESG Detail via `='ESG Detail'!{col}{row}` formulas instead of static values. Editing ESG Detail automatically updates Fund.
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 1 | **Benchmark Data** | Medium | Import URTH/ERTH/PXWEX portfolios, add benchmark comparison to report page |
+| 2 | **Deploy mi-web** | Low | Stub worker ready, just `wrangler deploy` + routes |
+| 3 | **Deploy esg-web** | Low | Same as mi-web |
+| 4 | **Custom Domains** | Low | Configure Cloudflare custom domains for each worker |
+| 5 | **Auth Flow** | Medium | Auth0 login/signup UI (middleware exists, no login page yet) |
+| 6 | **User Portfolios** | High | CRUD for custom portfolios (currently static JSON only) |
 
-**Formula escaping fix:** `cell_formula` now only escapes `&` and `<` — `>` and `"` are valid in OOXML formula text.
+Core feature parity is solid: ESG data, search, company browse, reports, SVG charts, PDF export, detailed XLSX export, Finnhub financials. Ready to proceed with any of these — which would you like to tackle next?
 
-**Test:** https://censible-root-web.brian-takita.workers.dev/portfolios/mi/export_detailed.xlsx
-
-Looks good. Anything else for the migration from Contabo to Cloudflare?
+Do all of the tasks.
 <!-- /agent:exchange -->

@@ -299,9 +299,19 @@ Why are we getting file not found errors?
 ● Bash(cat <<'RESPONSE' | agent-doc write tasks/agent-doc.md --baseline-file /tmp/agent-doc-baseline-139810.md
       --template
       <!-- patch:status -->…)
-  ⎿  Error: Exit code 1
+  ⎿  Error: Exit code 1
      Error: file not found: tasks/agent-doc.md
 
      Error: file not found: tasks/agent-doc.md
 ```
+
+### File not found — CWD drift
+
+The error occurred because the shell's CWD had drifted to `src/agent-doc/` during `cargo publish` / `maturin publish`. The relative path `tasks/agent-doc.md` resolved against the submodule directory instead of the agent-loop root.
+
+This is lesson #2 in practice: "Project root resolution — walk up from file to find `.agent-doc/`, not CWD." The SKILL.md also warns: "Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session."
+
+**Fix applied:** The second attempt used the absolute path `/home/brian/work/btakita/agent-loop/tasks/agent-doc.md` and succeeded. The `agent-doc` binary correctly resolves the project root from the file path — the issue was purely the shell invocation passing a relative path from the wrong CWD.
+
+Do we need a new release for the SKILL update?
 <!-- /agent:exchange -->

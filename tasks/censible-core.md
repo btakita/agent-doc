@@ -12,33 +12,25 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-### All 6 Tasks Complete ✓
+**Getting AUTH0_CLIENT_ID:**
 
-**1. Benchmark Data ✓** — Created 3 benchmark portfolios with realistic ESG scores:
-- **URTH** (50 holdings) — iShares MSCI World ETF, broad market, average ESG
-- **ERTH** (40 holdings) — Invesco MSCI Sustainable Future, high environmental scores
-- **PXWEX** (35 holdings) — Pax World Environmental Markets, strong governance + environmental
+1. Go to https://manage.auth0.com → **Applications** → **Applications**
+2. Find or create your SPA application (e.g. "Censible Web")
+3. The **Client ID** is at the top of the app's **Settings** tab
 
-Available at: `/portfolios/urth`, `/portfolios/erth`, `/portfolios/pxwex` (+ reports + XLSX exports)
+If creating new: **+ Create Application** → "Censible Web" → **Single Page Web Applications**, then set:
+- **Allowed Callback URLs**: `https://censible-root-web.brian-takita.workers.dev/callback`
+- **Allowed Logout URLs**: `https://censible-root-web.brian-takita.workers.dev/solutions`
+- **Allowed Web Origins**: `https://censible-root-web.brian-takita.workers.dev`
 
-**2. Deploy mi-web ✓** — https://censible-mi-web.brian-takita.workers.dev
-**3. Deploy esg-web ✓** — https://censible-esg-web.brian-takita.workers.dev
+Then run:
+```bash
+cd src/censible-core/apps/root-web
+npx wrangler secret put AUTH0_CLIENT_ID
+# paste the client ID when prompted
+```
 
-**4. Custom Domains** — Requires Cloudflare dashboard configuration. Which domains? (e.g. `censible.co`, `mi.censible.co`, `esg.censible.co`)
+Your Auth0 tenant: `censible.us.auth0.com`, audience: `https://censible.auth0.com/api/v2/`
 
-**5. Auth Flow ✓** — Auth0 Universal Login integration:
-- `/login` → Auth0 hosted login (implicit flow)
-- `/callback` → Token extraction + localStorage storage
-- `/logout` → Auth0 logout + token clear
-- Nav bar shows login/logout toggle based on token state
-- Needs `AUTH0_CLIENT_ID` set via `wrangler secret put AUTH0_CLIENT_ID`
-How do I get the AUTH0_CLIENT_ID from auth0's website?
-
-**6. User Portfolios ✓** — Full CRUD UI:
-- `/rebalance/portfolios` — list user portfolios
-- `/rebalance/portfolios/new` — create with ticker autocomplete
-- `/rebalance/portfolios/:name` — view portfolio
-- `/rebalance/portfolios/:name/edit` — edit positions + delete
-
-**Deployed:** Version `47b86dbd` (817 KiB / 122 KiB gzipped)
+I added AUTH0_CLIENT_ID to .env
 <!-- /agent:exchange -->

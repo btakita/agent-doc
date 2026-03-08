@@ -540,3 +540,43 @@ Create it.
 ## User
 
 Is it worthwhile to create rhonojs for herbaliciousbliss, demo.cogov.me, and eventually mi-www.site?
+## Assistant
+
+**Privilege Set and Proposal views created.** All 7 CoGov.Vue views are now ported.
+
+**New files:**
+- `lib/ui--server--cogov-demo/privilege-set/privilege_set__doc_html.ts` — Browse privilege sets, create new ones
+- `lib/ui--server--cogov-demo/proposal/proposal__doc_html.ts` — View proposal with revisions/actions, create proposals + revisions
+
+**New routes:**
+- `GET /privilege-set?collective_id=N` — View privilege sets for a collective
+- `POST /privilege-set/create` — Create a privilege set
+- `GET /proposal?proposal_id=N` — View a proposal with revisions
+- `GET /proposal?collective_id=N` — Create proposal form
+- `POST /proposal/create` — Create a proposal
+- `POST /proposal/revision/create` — Add a revision to a proposal
+
+---
+
+**On rhonojs:** Yes, it's worthwhile. You have three Hono + D1 consumers (herbaliciousbliss, demo.cogov.me, mi-www.site). The shared patterns are clear:
+
+1. **Drizzle + D1 middleware** — both apps do the same `drizzle(c.env.DB)` + `c.set('db', db)` pattern
+2. **Cookie-based session middleware** — `getCookie`/`setCookie` person lookup is identical
+3. **relementjs HTML response** — `c.html(view__doc_html_(...))` pattern repeats everywhere
+
+**Recommendation:** Don't create a separate `rhonojs` GitHub org. Put it in `rappstack` as `@rappstack/hono` (or `@rappstack/rhonojs`). rappstack already overlays on framework-specific packages — this is exactly what it's for. The `@rappstack/hono` package provides Hono-specific middleware, while `rappstack` core stays framework-agnostic.
+
+This avoids org proliferation. relysjs keeps its own org because it's a standalone framework. rhonojs is thinner — it's mostly middleware glue — so it fits naturally under rappstack.
+
+**Concrete extraction targets from demo.cogov.me + herbaliciousbliss:**
+- `drizzle_d1_middleware` — creates Drizzle instance from D1 binding
+- `session_middleware` — KV/cookie session management
+- `html_response` — relementjs integration helper
+
+Build the patterns inline first (as you're doing), extract after both apps are working.
+
+## User
+
+Can rhonojs provide the same functionality as relysjs? Should I use both relysjs and rhonojs?
+relysjs seems better for bun runtimes. rhonojs is better for the middleware glue in cloudflare runtimes.
+If it's relysjs + rhonojs, then it makes sense. But hono is also a fast webserver. So it may also make sense to completely replay elysiajs and have less dependencies. Thoughts?

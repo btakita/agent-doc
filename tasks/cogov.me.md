@@ -580,3 +580,43 @@ Build the patterns inline first (as you're doing), extract after both apps are w
 Can rhonojs provide the same functionality as relysjs? Should I use both relysjs and rhonojs?
 relysjs seems better for bun runtimes. rhonojs is better for the middleware glue in cloudflare runtimes.
 If it's relysjs + rhonojs, then it makes sense. But hono is also a fast webserver. So it may also make sense to completely replay elysiajs and have less dependencies. Thoughts?
+## Assistant
+
+**Recommendation: Replace Elysia with Hono entirely (Path B).**
+
+Two paths:
+
+**Path A: relysjs + rhonojs (dual framework)**
+- relysjs stays for Bun-native apps (cogov.me static site, briantakita.me)
+- rhonojs handles CF Workers apps (demo.cogov.me, herbaliciousbliss, mi-www.site)
+- Con: two routing frameworks, two middleware patterns to maintain
+
+**Path B: rhonojs replaces relysjs (Hono everywhere)**
+- Hono runs on Bun, Deno, Node, CF Workers — truly universal
+- Kill the Elysia dependency entirely
+- One framework, one set of middleware, one mental model
+
+**Why Path B:**
+
+1. **Hono on Bun is equally performant.** You don't need Elysia for "Bun runtimes" — Hono serves on Bun just as fast. The runtime distinction is irrelevant.
+2. **Less surface area.** One router, one middleware API. Every app shares the same patterns.
+3. **Elysia's unique value (Eden treaty, type-safe RPC) is unused.** You do server-rendered HTML with relementjs — none of that matters.
+4. **relysjs becomes rhonojs.** The build tooling (rebuildjs, esbuild, static export) stays unchanged. Only the server framework layer swaps.
+5. **Migration is incremental.** Existing static-exported sites (cogov.me, briantakita.me) can stay on Elysia until you're ready — no rush.
+
+**What rhonojs provides (superset of relysjs):**
+- `rhonojs_browser__build` — esbuild CSS/JS pipeline (same as relysjs)
+- `rhonojs_server__build` — optional, for Bun-native Hono servers
+- `static_export_()` / `cloudflare_export_()` — same as relysjs, targets Hono
+- Middleware: Drizzle D1, KV sessions, relementjs HTML response
+- Dev: `wrangler dev` for CF, `bun --hot` for Bun-native
+
+**Timeline:**
+1. **Now:** Build demo.cogov.me + herbaliciousbliss with Hono (inline, no extraction)
+2. **After both work:** Extract shared patterns into `rhonojs`
+3. **Later:** Migrate cogov.me, briantakita.me from Elysia → Hono
+4. **Eventually:** Deprecate relysjs
+
+## User
+
+Should I move relysjs and rhonojs under the rappstack organization and retire the relysjs org?

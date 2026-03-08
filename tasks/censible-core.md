@@ -65,6 +65,7 @@ Investment dashboard — heavy data, PDF/Excel/SVG exports.
 - Port API routes (data exports, portfolio endpoints) to Hono
 - PDF generation: pdfkit/pdfmake may need adaptation for Workers (memory/CPU limits)
   - Alternative: use CF Workers Paid plan or offload to a separate service
+I'm concerned about PDF generation memory usage. What are the costs of the CF Workers Paid plan?
 - Excel/SVG generation: verify xlsx and svg libraries work in Workers runtime
 - Charts/visualizations: server-render to SVG via relementjs
 

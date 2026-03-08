@@ -9,6 +9,7 @@ mod frontmatter;
 mod git;
 mod init;
 mod layout;
+mod merge;
 mod outline;
 mod patch;
 mod plugin;

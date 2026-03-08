@@ -2,9 +2,8 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::path::Path;
-use std::process::Command;
 
-use crate::{agent, config::Config, diff, frontmatter, git, snapshot};
+use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot};
 
 pub fn run(
     file: &Path,
@@ -119,7 +118,7 @@ pub fn run(
         content_ours
     } else {
         eprintln!("File was modified during submit. Merging changes...");
-        merge_contents(&content_original, &content_ours, &content_current)?
+        merge::merge_contents(&content_original, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -168,57 +167,6 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
     Ok(())
-}
-
-/// 3-way merge using git merge-file.
-/// base = original content, ours = original + response, theirs = user's edits.
-/// Returns merged content (with conflict markers if conflicts exist).
-fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
-    let tmp = std::env::temp_dir().join(format!("agent-doc-merge-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp)?;
-
-    let base_path = tmp.join("base");
-    let ours_path = tmp.join("ours");
-    let theirs_path = tmp.join("theirs");
-
-    std::fs::write(&base_path, base)?;
-    std::fs::write(&ours_path, ours)?;
-    std::fs::write(&theirs_path, theirs)?;
-
-    // git merge-file -p writes merged result to stdout
-    // exit 0 = clean merge, 1 = conflicts, <0 = error
-    let output = Command::new("git")
-        .args([
-            "merge-file",
-            "-p",
-            "--diff3",
-            "-L", "agent-response",
-            "-L", "original",
-            "-L", "your-edits",
-            &ours_path.to_string_lossy(),
-            &base_path.to_string_lossy(),
-            &theirs_path.to_string_lossy(),
-        ])
-        .output()?;
-
-    // Clean up temp files
-    let _ = std::fs::remove_dir_all(&tmp);
-
-    let merged = String::from_utf8(output.stdout)
-        .map_err(|e| anyhow::anyhow!("merge produced invalid UTF-8: {}", e))?;
-
-    if output.status.success() {
-        eprintln!("Merge successful — user edits preserved.");
-    } else if output.status.code() == Some(1) {
-        eprintln!("WARNING: Merge conflicts detected. Please resolve conflict markers manually.");
-    } else {
-        anyhow::bail!(
-            "git merge-file failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    Ok(merged)
 }
 
 #[cfg(test)]

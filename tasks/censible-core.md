@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phase 1 in progress — ready to start. Step 0: pnpm → bun conversion. Then scaffold root-web with rhonojs.
+**Status:** Phase 1, Step 0 — pnpm → bun conversion in progress. Blocker: FontAwesome Pro token needed.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -30,55 +30,29 @@ Convert censible-core to use rappstack with rhonojs.
 
 ### Phase 1 — root-web Migration
 
-#### Step 0 — pnpm → bun workspace conversion
-- Add `"workspaces"` field to root `package.json` (replaces `pnpm-workspace.yaml`)
-- Delete `pnpm-workspace.yaml` and `pnpm-lock.yaml`
-- Run `bun install` to generate `bun.lock`
-- Convert `workspace:*` references to `workspace:*` (bun uses same syntax — no change needed)
-- Verify all packages resolve correctly
+#### Step 0 — pnpm → bun conversion
 
-#### Step 1 — Scaffold rhonojs app in `apps/root-web/`
-Clear existing Solid Start files, create new structure:
-```
-root-web/
-├── app/
-│   ├── index.ts           # Hono app setup
-│   ├── index.server.ts    # Routes → page functions
-│   ├── index.browser.ts   # Browser hyop (nav toggle)
-│   └── index.css          # Global styles
-├── worker/
-│   └── index.ts           # CF Worker entry
-├── build.ts               # rhonojs_server__build + rhonojs_browser__build
-├── config.ts              # Site metadata
-├── start.ts               # Dev/prod server
-├── wrangler.toml          # CF Workers config
-├── package.json           # Updated deps (remove solid-*, add rhonojs/hono/relementjs)
-└── public/                # Keep existing static assets
-```
+**Done:**
+- Converted `workspaces` from object format to flat array (bun-compatible)
+- Moved `pnpm.overrides` → top-level `overrides`
+- Removed `pnpm` from devDependencies
+- Removed self-referencing `@censible/dev` devDependency
+- Deleted `pnpm-workspace.yaml`
+- Removed unused `vendor/*` workspace paths (no vendor dirs exist)
 
-#### Step 2 — Port design tokens
-Keep `@censible/css` as shared lib. It exports plain constants (colors, font names, breakpoints) — no SolidJS dependency.
+**Blocker: FontAwesome Pro auth token**
 
-#### Step 3 — Create relementjs layout
-Port `Layout_nav_footer_header` → `layout__doc_html_()`:
-- `<head>` with meta tags, fonts, favicons
-- Navigation header (masthead)
-- Footer with nav columns
-- Wrap page content
+`bun install` fails because `@fortawesome/pro-*` packages require authentication against `npm.fontawesome.com`. The `.npmrc` references `FONTAWESOME_AUTH_TOKEN` but no `.env` file exists with the token.
 
-#### Step 4 — Port pages
-1. `/solutions` — hero, product cards, ESG methodology grid
-2. `/faq` — collapsible Q&A (`<details>`)
-3. `/team` — expandable team bios with photos
-4. `/legal` — Terms & Privacy Policy
-5. `/company-etf-and-mutual-fund-rankings/*` — ESG rankings (data-dependent)
+censible-core/.env
 
-#### Step 5 — Build & deploy
-- `bun build.ts` → rhonojs server + browser builds
-- `bun start.ts` → local dev
-- `wrangler deploy` → CF Workers
+The `.env.sample` has `FONTAWESOME_NPM_KEY=` (note the different var name).
 
-Ready to begin. Say "go" and I'll start with Step 0 (pnpm → bun conversion).
+To unblock:
+1. Set `FONTAWESOME_AUTH_TOKEN=<your-token>` in `.env` or shell environment
+2. Then run `bun install`
 
-go
+Alternatively, if FontAwesome Pro is no longer needed (switching to relementjs may eliminate icon dependencies), we could remove the `@fortawesome/pro-*` packages and the `.npmrc` registry config.
+
+**Question:** Do you have the FontAwesome Pro token, or should we remove FA Pro dependencies and use an alternative (e.g., free FA, Heroicons, or inline SVGs)?
 <!-- /agent:exchange -->

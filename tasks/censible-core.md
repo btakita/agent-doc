@@ -7,111 +7,119 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration assessment complete. Awaiting decisions on scope (UI rewrite? Auth migration? Deploy target?).
+**Status:** Decisions locked. Revised migration plan ready. Next: begin Phase 1 on root-web.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 ## Migration Assessment: censible-core → rappstack/rhonojs
 
-### Stack Comparison
+### Decisions (locked)
 
-| Layer | Current (censible-core) | Target (rappstack/rhonojs) |
-|-------|------------------------|---------------------------|
-| UI rendering | SolidJS 1.6 (reactive components) | relementjs (functional HTML generation) |
-| Server framework | Solid Start 0.2.7 (SSR) | Hono via rhonojs |
-| Routing | File-based + itty-router | Hono routes + relementjs page renderers |
-| Auth | Auth0 (JWT, OAuth redirect) | Persontric + Arctic (Google OAuth, sessions) |
-| Database | Raw SQL + postgresql-client | Drizzle ORM (PostgreSQL adapter available) |
-| Caching | Redis (ioredis) | No built-in; can add Redis or KV |
-| State mgmt | nanostores + ctx-core context | ctx-core context (same foundation) |
-| Build | Vite + Rollup | rebuildjs (esbuild wrapper) |
-| Deploy | Heroku (Node 18) | Cloudflare Workers or Bun server |
+| Decision | Choice |
+|----------|--------|
+| UI framework | Full rewrite: SolidJS → relementjs |
+| Auth | Keep Auth0 (wrap with Hono middleware) |
+| Database | PostgreSQL → D1 (SQLite on Cloudflare) |
+| Caching | Redis → Cloudflare KV (or Durable Objects if needed) |
+| Deploy primary | Cloudflare Workers |
+| Deploy secondary | Bun server (lower priority) |
+| Migration order | root-web → mi-web → esg-web |
 
-**Shared foundation:** 26+ @ctx-core/* packages already used in censible-core. This is the bridge.
+### Revised Migration Plan
 
-### Key Architectural Decisions Needed
+**Phase 1 — root-web on rhonojs + Cloudflare Workers**
+Simplest app first. Marketing/landing site with static-ish pages, no auth, no database.
+- Scaffold new rhonojs app structure (build.ts, start.ts, worker/index.ts, wrangler.toml)
+- Rewrite SolidJS pages to relementjs server-rendered HTML
+- Port routes from Solid Start file-based routing to Hono handlers
+- Build with `rhonojs_server__build()` + `rhonojs_browser__build()`
+- Deploy to CF Workers via `wrangler deploy`
+- Verify: all pages render, SEO meta preserved, styles working
 
-1. **SolidJS → relementjs**: This is a full UI rewrite. Every component, page layout, and interactive element changes. relementjs uses functional HTML generation (e.g. `div_()`, `span_()`) instead of JSX reactive components. Is this acceptable scope?
+**Phase 2 — Database migration (D1)**
+Before tackling mi-web/esg-web, set up the data layer.
+- Define Drizzle schemas matching existing PostgreSQL tables
+- Create D1 database for each environment (prod, staging)
+- Write PostgreSQL → D1 data migration scripts
+- Adapt raw SQL queries to Drizzle ORM with D1 driver
+- Test data integrity after migration
 
-YAes
+**Phase 3 — Auth0 on Cloudflare Workers**
+Auth0 SDK works in Workers with some adaptation.
+- Create Hono middleware for Auth0 JWT verification
+- Port `/auth` OAuth redirect flow to Hono routes
+- Session management: use CF KV for session storage (replacing in-memory/Redis)
+- Port account creation/preferences to D1 queries
+- Test full login → session → protected route flow
 
-2. **Auth0 → Persontric/Arctic**: Requires user migration strategy. Auth0 manages user credentials externally; Persontric is self-hosted. Options:
-   - Keep Auth0 initially, wrap with rhonojs middleware
-   - Migrate users to Persontric with password reset flow
-   - Support both during transition period
+**Phase 4 — Caching layer (KV)**
+Replace Redis with Cloudflare KV.
+- Map existing Redis cache keys to KV namespace structure
+- Port `@censible/redis-client` to a KV-backed cache client
+- Financial data caching, FX rate caching → KV with TTL
+- Browser/server split: KV only accessible server-side (same as Redis)
 
-es
+**Phase 5 — mi-web rewrite**
+Investment dashboard — heavy data, PDF/Excel/SVG exports.
+- Rewrite SolidJS components to relementjs
+- Port API routes (data exports, portfolio endpoints) to Hono
+- PDF generation: pdfkit/pdfmake may need adaptation for Workers (memory/CPU limits)
+  - Alternative: use CF Workers Paid plan or offload to a separate service
+- Excel/SVG generation: verify xlsx and svg libraries work in Workers runtime
+- Charts/visualizations: server-render to SVG via relementjs
 
-3. **PostgreSQL stays**: Drizzle ORM has PostgreSQL adapters. persontric-adapter-postgresql exists for auth tables. Raw SQL can migrate incrementally.
+**Phase 6 — esg-web rewrite**
+Core product — company ESG lookup + portfolio rebalancing.
+- Most complex app: search, company profiles, portfolio CRUD
+- Rewrite all SolidJS components to relementjs
+- Port REST API (companies, portfolios, rebalance) to Hono routes
+- Auth0-protected routes via Phase 3 middleware
+- Data-intensive queries via Drizzle + D1
 
-Let's convert to Sqlite on Cloudflare
+**Phase 7 — Remaining apps & cleanup**
+- Evaluate which apps (quiz-web, msci-demo-web, clasp-web, kyc-web, finegar-etl, screenshot-web) to migrate vs. deprecate
+- finegar-etl may need a different deployment (not CF Workers — long-running ETL jobs)
+- Decommission Heroku after all apps migrated
+- Remove Solid Start, Vite, itty-router dependencies
 
-4. **Redis**: rhonojs doesn't include Redis, but ioredis works fine with Hono. No migration needed for caching layer.
+### Technical Notes
 
-Use cloudflare alternative if necessary
+**Auth0 in CF Workers:**
+- `auth0` npm package uses Node.js crypto — needs `nodejs_compat` compatibility flag in wrangler.toml
+- Alternative: use Auth0's `/authorize` redirect + `/oauth/token` endpoint directly (HTTP-based, no SDK dependency)
+- JWT verification via `jose` library (works natively in Workers)
 
-5. **Deployment target**: Cloudflare Workers (via rhonojs/server/export/cloudflare) or stay on traditional server (Bun/Node)?
-   - CF Workers: Need D1 or Hyperdrive for PostgreSQL access
-   - Bun server: Simpler migration, keep existing PostgreSQL connection
+**D1 limitations to watch:**
+- 10GB max database size (per database)
+- No stored procedures or advanced PostgreSQL features
+- Row size limit: 1MB
+- If data exceeds limits, consider splitting across multiple D1 databases or using Hyperdrive + external PostgreSQL
 
-Cloudflare workers
+**PDF/Excel in Workers:**
+- Workers have 128MB memory limit (paid plan) and 30s CPU time
+- Large PDF generation may hit limits — consider:
+  - R2 for storing generated files
+  - Queue + Durable Object for async generation
+  - Or keep a small Bun server for heavy export jobs
 
-### Recommended Phases
+### Architecture Diagram (target state)
 
-**Phase 1 — Server framework (lowest risk)**
-Replace Solid Start + itty-router with rhonojs/Hono for API routes. Keep existing SQL and Redis as-is. This gives the new server foundation without touching UI.
-- New entry point using `rhonojs_app__new()`
-- Migrate API routes from itty-router to Hono handlers
-- Port `entry-server.tsx` request handling to Hono middleware
-
-**Phase 2 — Database layer**
-Migrate raw SQL to Drizzle ORM with PostgreSQL adapter.
-- Define Drizzle schemas for existing tables
-- Replace `query($pg, SQL)` calls with Drizzle queries
-- Add persontric tables (person, session) for Phase 3
-
-**Phase 3 — Authentication**
-Replace Auth0 with Persontric + Arctic.
-- Implement Google OAuth via Arctic (or other providers)
-- Session cookie management via Persontric
-- User migration: import Auth0 users into person table
-- CSRF protection via rappstack patterns
-
-**Phase 4 — UI rendering (largest phase)**
-Rewrite SolidJS components to relementjs.
-- Server pages: `relementjs/server` HTML generation
-- Browser interactivity: `hyop` snippets for progressive enhancement
-- Port each app (root-web, esg-web, mi-web) one at a time
-- Leverage `@rappstack/ui--server` for layouts, meta tags, RSS, sitemap
-
-**Phase 5 — Build & deploy**
-Switch from Vite/Rollup to rebuildjs, choose deployment target.
-- `rhonojs_server__build()` + `rhonojs_browser__build()`
-- Target: Cloudflare Workers (need Hyperdrive for PostgreSQL) or Bun server
-- Decommission Heroku
-
-### Current Architecture (for reference)
-
-**Monorepo:** 9 apps (root-web, esg-web, mi-web, finegar-etl, quiz-web, msci-demo-web, clasp-web, kyc-web, screenshot-web) + 24 shared libs
-
-**Key apps:**
-- **root-web** — Marketing/landing site (simpler, good migration candidate)
-- **esg-web** — Company ESG lookup + portfolio rebalancing (core product, complex)
-- **mi-web** — Investment dashboard with PDF/Excel/SVG exports (heaviest data)
-
-**Migration order suggestion:** root-web → quiz-web → esg-web → mi-web (simple to complex)
-
-### Questions for You
-
-1. Is full SolidJS → relementjs rewrite acceptable, or should we keep SolidJS and only adopt rhonojs for the server layer?
-Full rewrite
-2. Auth0 migration strategy — keep Auth0, or fully switch to Persontric?
-Keep auth0
-3. Deployment target — Cloudflare Workers or Bun server?
-Cloudflare Workers. Use cloudflare dev environment. If convenient, also support Bun server. But it's a lower priority.
-4. Which app to start with?
-
-- root-web (easiest)
-- mi-web
-- esg-web
+```
+                    Cloudflare Edge
+                    ┌─────────────────────────────────────┐
+                    │                                     │
+User ──→ CF DNS ──→ │  Workers (rhonojs/Hono)            │
+                    │  ├── root-web (marketing)           │
+                    │  ├── mi-web (dashboard)             │
+                    │  └── esg-web (ESG platform)         │
+                    │                                     │
+                    │  D1 (SQLite) ← Drizzle ORM         │
+                    │  KV ← Cache (replaces Redis)        │
+                    │  R2 ← File storage (PDFs, exports) │
+                    │                                     │
+                    └──────────┬──────────────────────────┘
+                               │
+                          Auth0 (external)
+                          JWT verification
+```
 <!-- /agent:exchange -->

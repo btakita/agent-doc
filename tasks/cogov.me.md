@@ -210,3 +210,23 @@ Do you know which Cloudflare account or registrar `cogov.tech` is under?
 ## User
 
 Commit and deploy updates to cogov.me
+## Assistant
+
+**Committed and deployed.**
+
+**Commits made:**
+
+1. **relysjs** (`ctx-core-dev/lib/relysjs`):
+   - `a97a129` — test: add static_export__file_path_ tests
+
+2. **cogov-dev**:
+   - `65a7369` — fix: prerender uses production server instead of dev server
+   - `94ee03c` — chore: update branding from cogov.tech to cogov.me
+
+**Deployed:** `https://f7e89b9f.cogov-me.pages.dev` — includes the branding updates (cogov.tech → cogov.me in footer copyright and specs demo link).
+
+Shall I push these commits to the git remotes?
+
+## User
+
+Update the readme. We don't use lerna. We use bun.

@@ -204,126 +204,13 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 **v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
 
-**v0.11.1 session:** Fixed duplicate `## Assistant` heading bug. Added `strip_assistant_heading()` to strip leading `## Assistant` from response text before the write command adds its own. Released to all targets.
-
-**v0.11.2 session:** Extended `strip_assistant_heading()` to also strip trailing `## User` heading from responses. Same root cause as the `## Assistant` duplicate — `agent-doc write` appends `\n## User\n\n` suffix, and if the agent response also ends with `## User`, you get a double. Released to all targets.
+**v0.11.1–v0.11.2 session:** Fixed duplicate `## Assistant` and `## User` headings. `strip_assistant_heading()` strips both leading `## Assistant` and trailing `## User` from response text before `agent-doc write` adds its own. Encountered CWD drift during release (relative path from wrong directory) — reinforces lesson #2 (always use absolute paths). Released both fixes to all targets.
 <!-- /agent:history -->
 
 ## Exchange
 
 <!-- agent:exchange -->
+*Compacted. Resolved items (v0.11.0 merge strategy, v0.11.1–v0.11.2 heading fixes, CWD drift) folded into history.*
 
-### 3-way merge improvement (owned here)
-
-The core issue: `agent-doc write --template` uses `diffy` for 3-way merge, which produces standard conflict markers when both sides modify the same region. But in the `exchange` component, "both sides appending" is the normal case — not a real conflict.
-
-**Implementation plan for next release:**
-
-1. **Detect append-only conflicts** — after merge, scan for conflict markers where both sides only added content at the same position
-2. **Auto-resolve** — concatenate: agent response first, then user additions
-3. **True conflicts** — keep markers only when the same existing lines were modified differently
-4. **Config option** — `merge_strategy = "append-friendly"` in `.agent-doc/components.toml` (default for `exchange` components)
-
-This matches the `exchange` convention — conversation flows forward. Both sides appending is expected behavior, not a conflict.
-
-Make sure that the config options are documented. Use append-friendly as the default.
-
-Implement and release
-
-### v0.11.0 — Released
-
-**Implemented and published to all targets:**
-
-- **New `merge.rs` module** — shared 3-way merge with append-friendly conflict resolution. Extracts duplicated `merge_contents()` from `write.rs` and `submit.rs`.
-- **`resolve_append_conflicts()`** — post-processes `git merge-file --diff3` output. When the "original" section of a conflict is empty (both sides only appended), auto-resolves by concatenating: agent response first, then user edits. True conflicts (where existing content was modified differently) retain markers.
-- **`merge_strategy` config** — added to `ComponentConfig` in `.agent-doc/components.toml`. Values: `"append-friendly"` (default) or `"strict"`. Append-friendly is always-on by default.
-- **Version bump** — 0.10.1 → 0.11.0
-
-**Published:** crates.io, PyPI, GitHub Releases (with prebuilt binary).
-**Tests:** 186 passing + 21 CLI tests. Clippy clean.
-
-```toml
-# .agent-doc/components.toml
-[exchange]
-mode = "replace"
-merge_strategy = "append-friendly"  # default — auto-resolve append-only conflicts
-
-[log]
-mode = "append"
-merge_strategy = "strict"  # opt out — keep all conflict markers
-```
-
-I'm seeing responses with two `## Assistant`. See tasks/cogov.me.md:
-
-```
-## Assistant
-
-## Assistant
-```
-
-### v0.11.1 — Fixed duplicate `## Assistant`
-
-**Root cause:** In append mode, `agent-doc write` prepends `## Assistant
-
-` to the response. If the Claude agent's response text ALSO starts with `## Assistant`, you get a double heading.
-
-**Fix:** Added `strip_assistant_heading()` to `write.rs` (pub, used by `submit.rs` too). Strips any leading `## Assistant` heading from the response before prepending the canonical one. Applied in all three append-mode write paths:
-- `write::run()` — stdin-based write
-- `write::apply_append_from_string()` — recovery writes
-- `submit::run()` — direct agent-doc run
-
-**Released v0.11.1** to all targets: crates.io, PyPI, GitHub Releases.
-
-Also:
-
-```
-## User
-
-
-## User
-```
-
-### v0.11.2 — Fixed duplicate `## User`
-
-**Root cause:** Same pattern as `## Assistant`. `agent-doc write` appends `\n## User\n\n` after the response. If the agent's response text ends with `## User`, you get a double heading.
-
-**Fix:** Extended `strip_assistant_heading()` to also strip trailing `## User` (with optional whitespace/newlines after). Now handles both directions:
-- Strip leading `## Assistant` heading
-- Strip trailing `## User` heading
-
-**Released v0.11.2** to all targets: crates.io, PyPI, GitHub Releases.
-
-Why are we getting file not found errors?
-
-```
-● Bash(cat <<'RESPONSE' | agent-doc write tasks/agent-doc.md --baseline-file /tmp/agent-doc-baseline-139810.md
-      --template
-      <!-- patch:status -->…)
-  ⎿  Error: Exit code 1
-     Error: file not found: tasks/agent-doc.md
-
-     Error: file not found: tasks/agent-doc.md
-```
-
-### File not found — CWD drift
-
-The error occurred because the shell's CWD had drifted to `src/agent-doc/` during `cargo publish` / `maturin publish`. The relative path `tasks/agent-doc.md` resolved against the submodule directory instead of the agent-loop root.
-
-This is lesson #2 in practice: "Project root resolution — walk up from file to find `.agent-doc/`, not CWD." The SKILL.md also warns: "Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session."
-
-**Fix applied:** The second attempt used the absolute path `/home/brian/work/btakita/agent-loop/tasks/agent-doc.md` and succeeded. The `agent-doc` binary correctly resolves the project root from the file path — the issue was purely the shell invocation passing a relative path from the wrong CWD.
-
-Do we need a new release for the SKILL update?
-
-### No release needed
-
-No. The CWD drift was a **Claude Code agent behavior** issue (passing a relative path from the wrong directory), not a bug in the `agent-doc` binary or the bundled SKILL.md.
-
-The SKILL.md already documents this correctly: "Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session." The binary itself correctly resolves the project root from the file path — the fix is entirely in how the agent invokes the CLI.
-
-No code change, no SKILL.md change, no release needed.
-
-compact this file
-
-Is there 
+Is there an /agent-doc compact command?
 <!-- /agent:exchange -->

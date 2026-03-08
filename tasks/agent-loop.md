@@ -254,16 +254,25 @@ Then commit agent-loop and push to origin.
 
 <!-- agent:output -->
 
-### 3-way merge conflict resolution improvement
+### Submodules committed and pushed
 
-Good feedback. The current merge uses standard conflict markers (via `diffy`) when both sides modify the same region. For the `exchange` component pattern, most "conflicts" are actually just both sides appending — which should auto-resolve.
+| Submodule | Changes | Pushed |
+|-----------|---------|--------|
+| **mail** | 7 files (conversations, drafts, contact notes) | `bd2b50d` |
+| **agent-doc** | SKILL.md v0.12.0 update | `2647b79` |
+| **censible-core** | .iml module config | `491368b` |
+| **cogov-dev** | pointer sync (already pushed) | `2ab7a2e` |
+| **ctx-core-dev** | pointer sync (already pushed) | `d798586` |
+| **herbaliciousbliss-dev** | pointer sync (already pushed) | `63a969b` |
+| **rappstack-dev** | pointer sync (already pushed) | `7b61e10` |
 
-**Proposed fix (for next agent-doc release):**
-1. After 3-way merge produces conflicts, detect if both sides only appended (no deletions/modifications to existing lines)
-2. If purely additive: concatenate agent response + user additions (in that order)
-3. Fall back to conflict markers only for true conflicts (same lines edited differently)
+**Skipped:** `ctx-core-dev/lib/relysjs` and `rappstack-dev/lib/ui--server--blog` — untracked git repos that need to be added as submodules (separate task).
 
-This matches the `exchange` convention — conversation flows forward. Tracked in agent-doc pending list.
+**agent-loop** parent committed (`c63de8c`) and pushed with updated submodule pointers + task docs.
 
-commit all submodules. Release anything unreleased. push
+**Releases:** agent-doc v0.12.0 was released earlier this session (crates.io, PyPI, GitHub). No other submodules had unreleased changes requiring a version bump.
+
+Add .agent-doc/ to all .gitignore files in the submodules...recursively
+
+Should .sync-state.json be gitignored?
 <!-- /agent:output -->

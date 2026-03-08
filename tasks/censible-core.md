@@ -7,131 +7,77 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Phases 1–6 backend complete. Finegar-api analyzed (50+ endpoints). Plan: Hyperdrive → Contabo PostgreSQL. Need: Auth0 audience, PG external access.
+**Status:** AUTH0_AUDIENCE set ✓. Contabo investigated — no PostgreSQL, no CSVs. Finegar DB is on Heroku (503/down). Need: Heroku PG credentials or pg_dump backup for D1 import.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
-## Migration Assessment: censible-core → rappstack/rhonojs
 
-### Decisions (locked)
+### Contabo Investigation Results
 
-| Decision | Choice |
-|----------|--------|
-| UI framework | Full rewrite: SolidJS → relementjs |
-| Auth | Keep Auth0 (wrap with Hono middleware) |
-| Database | PostgreSQL → D1 (SQLite on Cloudflare) |
-| Caching | Redis → Cloudflare KV (or Durable Objects if needed) |
-| Deploy primary | Cloudflare Workers |
-| Deploy secondary | Bun server (lower priority) |
-| Migration order | root-web → mi-web → esg-web |
-| Package manager | bun (convert from pnpm) |
-| App directory | Overwrite root-web in place |
-| CSS tokens | Keep @censible/css as shared lib |
+**SSH'd into 207.244.234.186** — findings:
 
-### Phase 1 — root-web Static Pages ✓
+- **No PostgreSQL** on Contabo. Only 3 Docker containers: `traefik`, `mi-www_site-1`, `mi-redis`
+- **No `esg_mi_*.csv` files** found anywhere in the container
+- mi-www uses **Contabo Object Storage (S3)** for file data (`USE_S3=1`, endpoint: `usc1.contabostorage.com`)
+- Data files found in container match what's already in `root-web/public/`: `wil_zero_US-region.json`, `women_in_leadership_sp1500_CEOs.json`, `esg_ratings_keys.json`
 
-**Live URL:** https://censible-root-web.brian-takita.workers.dev
+### Finegar Database Location
 
-### Phase 1.5 — Rankings Pages ✓
+The finegar database is **on Heroku PostgreSQL**, not Contabo:
+- `CENSIBLE_SEARCH_URL=https://censible-search.herokuapp.com` (currently returning **503 — maintenance mode**)
+- `FINEGAR_PG_URL` is blank in all `.env` files — needs Heroku credentials
+- The finegar-api Flask app ran as a Heroku dyno with Heroku Postgres addon
 
-### Phase 2 — D1 Database ✓
+### What's Needed for D1 Import
 
-### Phase 3 — Auth0 Middleware ✓
+To port finegar search data to SQLite/D1, I need access to the PostgreSQL data. Options:
 
-- AUTH0_DOMAIN set to `censible.us.auth0.com` ✓
-- AUTH0_AUDIENCE — **still needed** (see below)
+**Option A: Heroku CLI access**
+- Install `heroku` CLI and login
+- `heroku pg:pull DATABASE_URL finegar_local -a censible-search` (pulls DB locally)
+- Then I can dump the tables and create D1 migrations
 
-### Phase 4 — API Routes ✓
+**Option B: Existing pg_dump backup**
+- If you have a PostgreSQL dump file (`.sql` or `.dump`) from finegar, provide the path
 
-### Phase 5 — mi-web Assessment (deferred)
+**Option C: Heroku database credentials**
+- Go to https://dashboard.heroku.com/apps/censible-search/resources
+- Click the Heroku Postgres addon → Settings → View Credentials
+- Provide the connection string and I'll dump it remotely
 
-### Phase 6 — esg-web Routes ✓ (placeholders)
+### Completed This Round
 
-### Phase 7 — Finegar-API Migration (in progress)
+- ✅ `AUTH0_AUDIENCE` secret set to `https://censible.auth0.com/api/v2/`
+- ✅ SSH'd into Contabo — confirmed no PostgreSQL, no CSV data files
+- ✅ Analyzed finegar-api schema (40+ tables, all SQL queries documented)
+- ✅ Confirmed search API is down (Heroku 503)
 
-**Analyzed `portfoliome/finegar-api`** — Flask/Python API with 50+ endpoints. Key findings:
-
-**Architecture:** Flask → PostgreSQL (finegar DB) + Redis cache + Celery tasks + IEX/Bloomberg pricing
-
-**Endpoint categories:**
-1. Company search/lookup (FTS on `security_search` table)
-2. Company ESG ratings (`esg.key_issue_metrics`)
-3. Women in Leadership rankings (`company_women_leadership_stats`, `women_leader_fund_scores`)
-4. Fund ESG ratings (weighted by `fund_company_exposures`)
-5. Company executives (`factset_screens.people`, `.jobs`, `.compensations`)
-6. Company peers (`company_peers` with scoring)
-7. Security pricing (IEX/Bloomberg with Redis cache)
-8. Company screening (dynamic filter builder)
-9. Reference data (countries, currencies, exchanges, geographic regions)
-
-**Recommended approach: Cloudflare Hyperdrive**
-
-Hyperdrive is Cloudflare's managed PostgreSQL proxy — it lets Workers make SQL queries directly to an existing PostgreSQL database. Benefits:
-- No data migration needed — all 30+ tables and complex queries (FTS, window functions, CTEs) work as-is
-- Connection pooling built-in
-- ~30ms added latency
-- Keep existing finegar schema intact
-
-**Requirements to proceed:**
-1. Expose PostgreSQL on Contabo externally (port 5432 or SSH tunnel)
-2. Create Hyperdrive config: `wrangler hyperdrive create censible-finegar --connection-string "postgres://user:pass@host:5432/finegar"`
-
-Let's port the search data to SQLite
-
-### Action Items for User
-
-**1. Auth0 Audience (blocking API auth)**
-
-In the Auth0 dashboard (https://manage.auth0.com/dashboard/us/censible/):
-- Go to **Applications → APIs** (left sidebar)
-- Find the Censible API entry
-- Copy the **Identifier** field (looks like `https://api.censible.co` or similar)
-- Then I'll run: `wrangler secret put AUTH0_AUDIENCE`
-AUTH0_AUDIENCE=https://censible.auth0.com/api/v2/
-
-**2. Contabo PostgreSQL Access (blocking search)**
-
-The finegar database needs to be accessible from Cloudflare Workers. Options:
-
-**Option A (recommended): Expose PG directly**
-- SSH into Contabo (207.244.234.186)
-- Find the PostgreSQL port: `docker exec mi-www_site-1 env | grep PG`
-- Add a port mapping or expose 5432 externally
-- Then create Hyperdrive: `wrangler hyperdrive create censible-finegar --connection-string "postgres://user:pass@207.244.234.186:5432/finegar"`
-
-**Option B: SSH tunnel**
-- Use Cloudflare Tunnel (cloudflared) to expose PG securely without opening ports
-
-**Option C: pg_dump + D1 import**
-- Export key tables as JSON/CSV from Contabo
-- Import into D1 (loses FTS and complex query support)
-
-Option 3
-
-**3. mi-web CSV Data**
-
-If on Contabo, find them:
-```bash
-ssh root@207.244.234.186
-docker exec mi-www_site-1 find / -name "esg_mi_*.csv" 2>/dev/null
+I have a usb drive which may contain the csv files:
+Please help me track the usb drive to mount
 ```
-Or check S3/object storage configuration.
-
-Please look.
-
-### Current Architecture
-
+❯ lsusb
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 001 Device 002: ID 0db0:0076 Micro Star International MYSTIC LIGHT
+Bus 001 Device 003: ID 6655:a583 Best Buy NS-PCNVMEHDE(-C)
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 003 Device 002: ID 0489:e10a Foxconn / Hon Hai
+Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 005 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 006 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 007 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 008 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 009 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 009 Device 002: ID 05e3:0610 Genesys Logic, Inc. Hub
+Bus 009 Device 003: ID 05e3:0610 Genesys Logic, Inc. Hub
+Bus 009 Device 004: ID 03f0:0b8b HP, Inc HyperX SoloCast
+Bus 009 Device 005: ID 05ac:0265 Apple, Inc. Magic Trackpad
+Bus 009 Device 008: ID 3938:1390 Sonix Technology Co., Ltd. onn 4K Webcam
+Bus 009 Device 009: ID 05ac:0265 Apple, Inc. Magic Trackpad
+Bus 009 Device 010: ID 1d50:615e OpenMoko, Inc. SliceMK ErgoDox
+Bus 010 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 010 Device 002: ID 05e3:0626 Genesys Logic, Inc. Hub
+Bus 010 Device 003: ID 05e3:0625 Genesys Logic, Inc. USB3.2 Hub
+Bus 011 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
 ```
-censible-root-web (CF Worker, 217KB)
-├── Static pages: /, /solutions, /faq, /team, /legal
-├── Rankings: /company-etf-and-mutual-fund-rankings/*
-├── Company: /companies, /companies/:locator (placeholder)
-├── Portfolio: /rebalance/* (placeholder UI, full API)
-├── API: /api/rebalance/* (D1 + Auth0)
-├── Proxy: /search/*, /securities/*, /currencies/*
-├── D1: censible-db (6 tables, user/portfolio data)
-└── Assets: 217 static files from public/
-```
-
-**Next:** Once PG access is configured → add Hyperdrive binding → implement finegar search endpoints directly in Worker → replace placeholders with live data.
 <!-- /agent:exchange -->

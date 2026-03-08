@@ -544,3 +544,105 @@ Send robert ward an email of the summary of our findings.
 This will include a draft of an email and letter for Robert to send to the landlord.
 
 Should we include both § 1942.5 and § 1946.1 to provide more surface area for a defense?
+## Assistant
+
+**Yes — include both § 1942.5 and § 1946.1.** There's no downside. Worst case on § 1946.1, the court rules it doesn't apply to a standalone garage. Best case, it does apply and the notice is defective. More legal surface area = more leverage.
+
+I don't have Robert's email on file. Can you provide it so I can send via corky? In the meantime, here are both drafts ready to go:
+
+---
+
+### Email to Robert Ward — Summary of Findings
+
+**Subject: Storage Garage Legal Analysis — Action Items Before March 12**
+
+Robert,
+
+I've been researching your situation with the storage garage at 1224 21st St, Santa Monica. Here's a summary of what I've found, plus a draft letter for you to send to your landlord Shawn Hedayati. **You should send this letter as soon as possible — March 12 is days away.**
+
+**Key findings:**
+
+1. **Retaliatory eviction (California Civil Code § 1942.5)** — You complained about a water leak, and shortly after, Hedayati served you a termination notice. He then immediately re-listed the same garage on Craigslist at $350/month ($25 more than your $325). This is strong evidence of retaliatory eviction, which is illegal in California. We have archived copies of the Craigslist ad as proof.
+
+2. **60-day notice may be required (Civil Code § 1946.1)** — You've been renting for 4 years. California law requires 60 days' notice for tenancies over 1 year. The notice gave you only 28 days (Feb 12 → Mar 12). This statute specifically references "dwelling units," so its applicability to a standalone garage is debatable — but it's worth asserting as an additional defense.
+
+3. **The trespassing threat is illegal** — Hedayati cannot threaten to have you arrested for accessing your own rented storage unit. You are a paying tenant with legal right of access. This threat is evidence of harassment and potentially an illegal lockout (Civil Code § 789.3).
+
+4. **Hedayati cannot self-help evict** — Even after March 12, he cannot change locks, remove your property, or cut access. He must go through formal court eviction (unlawful detainer), which takes weeks to months.
+
+**What you need to do RIGHT NOW:**
+
+1. **Send the attached letter to Hedayati** — via email, text, AND certified mail to 1224 21st St, Santa Monica CA 90404
+2. **Save ALL texts and document ALL phone calls** from Hedayati — dates, times, content
+3. **Screenshot the trespassing threat** if you haven't already
+4. **Call for free legal help:**
+   - Stay Housed LA: (213) 985-4357
+   - Bet Tzedek Legal Services: (323) 939-0506
+   - LAFLA: (800) 399-4529
+   - Neighborhood Legal Services: (800) 433-6251
+
+**The draft letter to send to Hedayati is below. Fill in [DATE] with today's date before sending.**
+
+Best,
+Brian
+
+---
+
+### Draft Letter for Robert to Send to Shawn Hedayati
+
+**Subject: Response to Notice of Termination — 1224 21st Street, Santa Monica, CA 90404**
+
+Dear Mr. Hedayati,
+
+I am writing in response to your notice of termination dated February 12, 2026, regarding my storage garage at 1224 21st Street, Santa Monica, CA 90404.
+
+I wish to bring several legal concerns to your attention:
+
+**1. Retaliatory Eviction (California Civil Code § 1942.5)**
+
+I brought a water leak in the storage unit to your attention prior to receiving this termination notice. Shortly thereafter, you served me with a notice to vacate. California Civil Code § 1942.5 creates a rebuttable presumption that a termination notice served within 180 days of a tenant's complaint about a habitability condition constitutes retaliatory eviction, which is illegal under California law.
+
+**2. Financial Motive Evidenced by Craigslist Re-Listing**
+
+I note that the same storage unit at 1224 21st Street has been advertised on Craigslist at $350/month — $25 above my current rent of $325/month — suggesting the termination is motivated by a desire to obtain higher rent rather than any legitimate reason. This listing was posted on or around February 12, 2026 — the same date as the termination notice. Archived copies of this listing have been preserved:
+
+- Original: https://losangeles.craigslist.org/wst/prk/d/santa-monica-garage-in-best-part-of/7914836150.html
+- Archive 1: https://archive.ph/9R4N4
+- Archive 2: https://web.archive.org/web/20260302013905/https://losangeles.craigslist.org/wst/prk/d/santa-monica-garage-in-best-part-of/7914836150.html
+
+Only the property manager would have authority to advertise this specific unit at this address. The Craigslist contact email associated with this listing is ca4c1c71fa0130d69436e7bc118b22e5@hous.craigslist.org. Should this matter proceed to litigation, I intend to seek disclosure of the identity behind this listing through appropriate legal channels.
+
+A $25/month increase ($300/year) as the sole motivation for displacing a 4-year tenant who complained about a maintenance issue constitutes retaliatory eviction under California law.
+
+**3. Defective Notice Period (California Civil Code § 1946.1)**
+
+I have been a tenant at this property for over four (4) years. Pursuant to California Civil Code § 1946.1(b), a landlord must provide at least sixty (60) days' written notice to terminate a tenancy of one year or more. Your notice of February 12, 2026, providing only 28 days' notice, fails to comply with this statutory requirement and is therefore legally deficient. A proper termination would require notice through at least April 13, 2026.
+
+**4. Illegal Threats and Harassment**
+
+You have contacted me over six (6) times via text and phone attempting to pressure me to vacate before the notice period expires. You have also threatened to have me arrested for trespassing if I access my own rented storage unit without prior notification to you. As a paying tenant, I have a legal right to access my rented space. Restricting that access or threatening arrest constitutes harassment and potentially an illegal lockout under California Civil Code § 789.3.
+
+**Notice**
+
+I am placing you on notice that I am aware of my legal rights under California law. I will not be coerced, harassed, or intimidated into vacating prematurely. Any attempt at self-help eviction — including changing locks, removing my property, or restricting my access — is illegal under California law and will result in legal action seeking damages.
+
+I am willing to discuss a reasonable timeline for vacating the unit, but any such discussion must occur without threats, harassment, or coercion.
+
+Sincerely,
+Robert Ward
+
+[DATE]
+
+---
+
+**Delivery instructions for Robert:**
+1. Send via **email** to Hedayati's email address (if known)
+2. Send via **text** — photograph/screenshot the letter and text it to Hedayati's phone number
+3. Send via **certified mail with return receipt** to: Shawn Hedayati, 1224 21st Street, Santa Monica, CA 90404
+4. Do all three simultaneously for maximum documentation
+
+## User
+
+
+Robert Ward is in my correspondence.
+His email is robertward3@yahoo.com

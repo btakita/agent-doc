@@ -762,3 +762,33 @@ herbaliciousbliss has already been migrated to CF Workers.
 
 ## User
 
+## Assistant
+
+## Assistant
+
+**Correction noted — herbaliciousbliss is on CF Workers.**
+
+Checked the codebase: herbaliciousbliss-dev is in a hybrid state:
+- **Worker auth handler** (`worker/index.ts`) — uses raw CF Workers API with D1 (not Hono, not Elysia)
+- **Main app** (`app/index.server.ts`) — still uses Elysia + relysjs for the SSR server
+- **wrangler.toml** — configured for CF Pages deployment
+- **D1 database** — already bound and working
+
+So it's deployed on CF Workers but hasn't adopted Hono yet. The worker routes use the raw `Request`/`Response` API.
+
+**To complete the herbaliciousbliss → rhonojs migration:**
+1. Replace the raw Worker handler with a Hono app (same pattern as demo.cogov.me)
+2. Replace Elysia imports in `app/index.server.ts` with Hono
+3. Change 43 `relysjs/server` imports to `rhonojs/server` across 7 app files and 36 lib files
+4. Update package.json: `hono` + `rhonojs` dependencies, drop `elysia`
+
+This is the largest consumer — want me to start the migration now, or save it for a dedicated session?
+
+## User
+
+
+## User
+
+herbaliciousbliss should use rhonojs
+
+Convert to `agent_doc_mode: template`. Compact this file.

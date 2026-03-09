@@ -833,4 +833,41 @@ Please review my correspondence again. I want to make sure that I'm not going ag
 4. **Company info** (name, ticker, industry) — non-proprietary public data.
 
 The key boundary: MSCI data stays behind auth (requires login). Public visitors see only Kaggle data (attributed) and Finnhub market data (attributed). This separation is the same architecture we established earlier.
+
+Reviewed all correspondence. Here's what's relevant:
+
+**1. SEC Compliance (Oct 2018) — Locke Lord LLP attorney review:**
+- Quiz: **ordered removed immediately** (done)
+- Portfolio rebalancer: wording changes required ("More Money, Less Problems" → neutral)
+- **Company lookup: attorney asked "should it be active?"** but didn't explicitly order removal. The quiz was the urgent item.
+- **Cannot provide stock recommendations** or claim to help investors find stocks. The ESG Tracker's current design (informational lookup, no recommendations) should be compliant — but the attorney's question suggests they were uncomfortable with it.
+
+**2. MSCI API Access (Sep 2023):**
+- MSCI confirmed API access is NOT in Martin Investment's agreement
+- Brian noticed criminal prosecution warning on MSCI portal
+- Separate API licensing would be needed
+
+**3. MSCI Contract (May 2023):**
+- Sandra Martin indicated the contract "may be coming due"
+- Current contract status is unclear — may have expired or been renewed
+
+**4. No explicit request to shut down esg.briantakita.me** — this is a separate deployment from censible.co/esg.censible.co.
+
+**Risk assessment for esg.briantakita.me:**
+
+| Area | Risk | Notes |
+|------|------|-------|
+| Public Kaggle data | Low | CC BY-NC-SA, non-commercial, attributed |
+| MSCI data behind auth | Medium | Depends on current contract status. If contract expired, even auth'd display may not be covered. |
+| Investment advice language | Low | Site says "informational purposes only," no recommendations |
+| Attorney's company lookup question | Medium | Was never definitively resolved. Different domain reduces risk but same concept. |
+
+**Recommendation:** Confirm with Mary Ellen:
+1. Is the MSCI contract still active?
+2. Is she comfortable with the ESG Tracker at esg.briantakita.me (separate from censible.co)?
+I don't think sh will be comfortable. I'm not planning on asking. I did some work for Martin Investments for their portfolio data. But Censible may not be covered. I'm wondering if I should remove data derived from MSCI data.
+
+3. Does the current disclaimer language satisfy the attorney's 2018 concerns?
+
+Until confirmed, the current architecture (public = Kaggle only, MSCI behind auth) is the safest position.
 <!-- /agent:exchange -->

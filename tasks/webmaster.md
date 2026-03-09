@@ -104,4 +104,19 @@ agent-skill/
 Each tool crate (`agent-doc`, `webmaster`) depends on `agent-skill` and calls `agent_skill::install(manifest)` from its `skill install` subcommand. The adapter handles placement.
 
 **vs. the "Ver" direction** — if you had a broader vision with that prefix (a framework beyond just skill management), I'd want to hear it. What were you going for with "Ver"?
+
+### crates.io availability
+
+| Name | Available? | Notes |
+|------|-----------|-------|
+| `agent-skill` | **Available** | Not taken |
+| `verba` | Taken | Latin words library (9.4k downloads) |
+| `verso` | Taken | Literate programming tool (6.5k downloads) |
+| `vertex` | Taken | 3D game engine (1.4k downloads) |
+
+`agent-skill` is the clear winner — available, self-documenting, and exactly describes the purpose.
+
+Ready to scaffold `src/agent-skill/` when you give the go-ahead, or if you had something else in mind with "Ver", let me know.
+
+I may want to expand the scope of agent-skill a bit. Trying to think of what other common needs that CLI tools have in integrating with different agent loops & models. 
 <!-- /agent:exchange -->

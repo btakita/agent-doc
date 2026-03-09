@@ -88,4 +88,20 @@ The ESG tracker app is now what you see at https://esg.briantakita.me — try re
 
 I'm looking at censible.co and it still has Company Search behind a login.
 I believe that it was removed. See correspondence with Mary Ellen where she requested that we remove esg.censible.co. Please advise.
+
+I searched through the mail conversations but couldn't find a specific email where Mary Ellen requested removal of esg.censible.co. The closest I found was:
+
+- **2018 SEC audit** — Mary Ellen requested the quiz be taken down for SEC compliance (attorney flagged that Censible couldn't provide investment advice). The company lookup was also flagged as potentially problematic.
+- **2023 invoice** — esg.censible.co was being converted to the latest data set and moved to mi-www.site architecture.
+
+Regarding censible.co still showing Company Search behind login — that's the original censible.co site (which we don't control in this migration). Our new deployment at **esg.briantakita.me** is separate and independent.
+
+For your white-label ESG Tracker at esg.briantakita.me:
+- The company search is **public** (no login required for basic search/browse)
+- ESG detail scores require login (licensed MSCI data — appropriate gating)
+- This is a separate deployment from censible.co — no conflict
+
+Do you want me to check if you have a specific email thread in mind, or is there anything else to adjust on esg.briantakita.me?
+
+https://censible.co/ has a "Company Search" navigation menu item. Which links to esg.censible.co...which is behind a login that does not work.
 <!-- /agent:exchange -->

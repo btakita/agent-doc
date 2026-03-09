@@ -1,7 +1,9 @@
 ---
 agent_doc_session: 53c928b3-2ad9-4007-9f13-f5035e35aafa
-tmux_session: '1'
+tmux_session: '0'
+agent_doc_mode: template
 ---
+
 
 # Gmail & Calendar Integration
 
@@ -38,3 +40,4 @@ corky cal delete "query" [--all] [--dry-run]  # delete events (--all for recurri
 
 ## User
 
+commit and push mail and submodules

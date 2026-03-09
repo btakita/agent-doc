@@ -395,7 +395,7 @@ With TMO replacement in Phase 2, she breaks even by end of year 2 and saves ~$7-
 
 **On the DST timing:** Clocks sprang forward last night. If Judith is thinking "10 AM" but forgot to adjust, she might think it's 9:33 right now. Give her until 11 PT (what would have been 10 pre-DST). If no call by then, a quick text is appropriate: "Hey Judith, just checking — still good for today? Happy to hop on whenever works."
 
-Robert Ward set up the call, so I feel a
+Robert Ward set up the call, so I feel a bit strange jumping in like this.
 
 **Your schedule:** You're free until 3:30 ET (12:30 PT). That gives Judith a ~2 hour window if she calls in the next 30 min, or a solid 90 min if she calls by 11 PT.
 
@@ -415,3 +415,19 @@ The pitch isn't a huge year-1 cost savings — it's ownership + compounding savi
 
 ## User
 
+## Assistant
+
+**Corky Calendar Integration** — noted. This is a separate feature request, not urgent for today's call. I'll add it to `tasks/corky.md` as an open item.
+
+Key capabilities to scope:
+- `corky calendar list` — show today's/this week's events
+- `corky calendar create` — create events (meetings, follow-ups)
+- `corky calendar check` — check availability for a time range
+- Uses Google Calendar API (same OAuth2 flow corky already has for Gmail, just add the calendar scope)
+
+This would let me check your schedule directly instead of asking. Good addition — but let's park it for after the Judith call. Want me to add it to the corky task backlog?
+
+## User
+
+Please convert to agent_doc_mode: template
+Move the corky calenday plan to tasks/corky.md

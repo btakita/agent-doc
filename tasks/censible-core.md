@@ -151,4 +151,15 @@ The public-facing app is now fully scrubbed of MSCI references:
 **Legal soundness caveat:** This white-label approach is common in the industry. However, given the MSCI portal notice, it's worth having an IP/securities attorney review the specific MSCI license terms to confirm teaser display is within bounds. The key question: does the license allow derivative display without attribution? Many data licenses do, but terms vary.
 
 I am not covered by the MSCI license. I did not sign anything.
+
+That's an important distinction. If you never signed an MSCI data license, displaying MSCI-sourced data — even scrubbed — is riskier. The data was obtained through Martin Investment's license, and redistributing it on a separate site you operate may not be covered.
+
+**Options:**
+1. **Remove all MSCI-sourced ESG scores from the public teaser** — safest. Company search/browse would show basic company info but no ESG scores publicly. Scores only behind auth (where Martin Investment's license applies).
+2. **Confirm with Mary Ellen** — ask whether Martin Investment's license permits a subcontractor/developer to display derivative data on a separate domain. Get it in writing if so.
+3. **Replace with freely available ESG data** — open/public ESG datasets exist (ESG Book, SEC filings, etc.) that don't carry licensing restrictions.
+
+Given the criminal liability prompt, option 1 is safest until you get clarity from Mary Ellen or an attorney. Want me to remove ESG scores from the public teaser pages?
+
+Is ESG Book data free to use? Is it an attribution license?
 <!-- /agent:exchange -->

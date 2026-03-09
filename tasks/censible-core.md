@@ -228,4 +228,19 @@ What public ESG data can we use?
 **Best practical path:** Finnhub is your most pragmatic option — you already have the API key, it provides company-level ESG scores, and it's separate from MSCI. SEC EDGAR supplements with actual filings data. Want me to look into integrating Finnhub ESG scores as the public-facing data source?
 
 Yes. Is this covered by their license?
+
+**Finnhub's free tier does NOT allow redistribution.** Their ToS explicitly prohibits redistributing data or derived results without written approval. Personal plans can't be used commercially.
+
+Commercial licenses: $50/month per dataset, all-in-one $500/month, enterprise from $3,000/month.
+
+**Revised options:**
+1. **Pay for Finnhub commercial license** ($50-500/month) — gives legitimate redistribution rights for ESG scores
+2. **SEC EDGAR only** — truly free, public domain, no restrictions. Raw filings, not pre-computed scores
+3. **Build your own ESG scoring** from public data — no licensing issues but significant dev effort
+4. **Keep current approach** — no public ESG scores, MSCI data behind auth only (safest, zero cost)
+5. **Contact Finnhub** about startup/demo terms — they may offer favorable pricing
+
+For a white-label demo, option 4 is probably the right call for now. The company search/browse works without ESG scores (company name, ticker, industry, sector are all non-proprietary). ESG scores become the value-add behind login. This also creates a natural licensing pitch: "want ESG scores? license the platform."
+
+Ok...should I bother having esg.briantakita.me or should I call it something like stocks.briantakita.me?
 <!-- /agent:exchange -->

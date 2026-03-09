@@ -234,4 +234,23 @@ Make sure SKILL.md is compatible with Codex, Pi, OpenCode, and other models + ag
 Create a github project. Make sure agent-kit has gh actions that include running tests and releasing to crates.
 
 Make sure webmaster has gh actions that include running tests and releasing to crates
+
+### GitHub repos and CI set up
+
+**agent-kit** — https://github.com/btakita/agent-kit
+- Created repo, pushed initial commit
+- CI workflow: clippy + test on push/PR to main
+- Release workflow: clippy + test + `cargo publish` on version tags
+
+**webmaster** — https://github.com/btakita/webmaster (existing repo)
+- Added CI workflow: clippy + test (checks out agent-kit as sibling for path dependency)
+- Added release workflow: clippy + test + `cargo publish` + GitHub Release with prebuilt binary
+
+**Both CI runs triggered and in progress.**
+
+**Submodule:** agent-kit added as submodule in agent-loop (`src/agent-kit/`)
+
+**Note:** Before the first tagged release, you'll need to add `CARGO_REGISTRY_TOKEN` as a secret in both repos' GitHub Settings → Secrets.
+
+Can this be done via the gh api?
 <!-- /agent:exchange -->

@@ -79,6 +79,25 @@ Want me to create the `corky` SKILL.md?
 
 Yes
 Use agent-kit
+Use agent-kit
 
 Why would corky have a separate agent-doc skill? agent-doc already has a skill. Is the corky agent-doc skill redundant?
+**Agent-doc skill in corky: yes, redundant.** The corky copy at `src/corky/.claude/skills/agent-doc/SKILL.md` is 98 lines — an older version. The canonical one (installed by `agent-doc skill install`) is 170 lines with claim detection, recovery, template mode, and auto-update. Corky's copy should be deleted — `agent-doc skill install` handles installation to wherever the agent session runs.
+
+**Creating corky SKILL.md with agent-kit:**
+
+Plan:
+1. Add `agent-kit` dependency to corky's `Cargo.toml`
+2. Bundle a `SKILL.md` via `include_str\!("../SKILL.md")` in corky's source
+3. Wire `corky skill install/check/uninstall` commands using `agent_kit::skill::SkillConfig`
+4. Write the actual `SKILL.md` content covering calendar, docs, filters, imports, linkedin, watch
+5. Delete `src/corky/.claude/skills/agent-doc/` (redundant)
+6. Keep `src/corky/.claude/skills/email/` (distinct workflow, installed by corky)
+
+The email skill should also be bundled via agent-kit and installed via `corky skill install` alongside the main corky skill.
+
+Shall I implement?
+
+The email skill is separate from the main corky skill? Why?
 <!-- /agent:exchange -->
+****

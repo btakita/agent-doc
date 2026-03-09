@@ -1092,4 +1092,34 @@ The ESG Tracker is now accessible at both:
 - **https://mi-www.site**
 
 I don't see https://mi-www.site in my browser.
+Your router (192.168.50.1) is caching the old A record (207.244.234.186) with ~25 min TTL remaining. Cloudflare DNS (1.1.1.1) already resolves correctly to CF IPs.
+
+**Quick fix — change your DNS temporarily:**
+
+Run with sudo:
+```bash
+sudo resolvectl dns enp14s0 1.1.1.1 1.0.0.1
+```
+
+Then flush:
+```bash
+resolvectl flush-caches
+```
+
+Or restart your router to clear its DNS cache.
+
+**Browser also caches DNS** — after fixing system DNS, you may also need to:
+- Chrome: `chrome://net-internals/#dns` → Clear host cache
+- Firefox: about:networking → DNS → Clear DNS Cache
+
+To restore your DNS later:
+```bash
+sudo resolvectl dns enp14s0 192.168.50.1
+```
+
+The site is confirmed working — `curl --resolve "mi-www.site:443:104.21.44.24" https://mi-www.site/` returns the ESG Tracker. It's purely a local DNS cache issue.
+
+The deployed mi-www.site is the incorrect app.
+It should be the same app that generated the xlsx files from the portfolio.
+It should also require a closed login. No open registration. Only prescribed accounts. Please use the same accounts as in the Contabo database.
 <!-- /agent:exchange -->

@@ -71,4 +71,8 @@ Already deployed — the rebrand went live a few minutes ago. Both URLs are acti
 - https://esg.briantakita.me
 
 https://esg.briantakita.me still redirects to https://esg.briantakita.me/solutions. Site is still branded as Censible.
+
+Good catch — the SVG logo file (`censible_logo_sm.svg`) had "CENSIBLE" rendered as vector paths, which my text replacement didn't touch. I've replaced it with an "ESG TRACKER" text SVG using the same geometric icon. Redeployed — should show correctly now. Try hard refresh (Ctrl+Shift+R) to clear cache.
+
+This site is still incorrect. This is the censible.co website. I want the esg tracker app. It used to be esg.censible.co
 <!-- /agent:exchange -->

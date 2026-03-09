@@ -913,4 +913,21 @@ bf4135840 feat: self-managed D1 auth, remove MSCI data for licensing compliance
 Parent repo submodule pointer updated and committed.
 
 Are there any active services on Contabo that can be decommissioned?
+Yes. Per `tasks/contabo.md`, three containers remain on Contabo:
+
+| Container | Purpose | Can decommission? |
+|-----------|---------|-------------------|
+| `mi-www_site-1` | Censible (Solid Start + Postgres + Redis + Auth0) | **Yes** — ESG Tracker now runs on CF Workers at esg.briantakita.me with D1 + self-managed auth |
+| `mi-redis` | Redis for Censible | **Yes** — no longer needed (D1 sessions replace Redis sessions) |
+| `traefik` | Reverse proxy | **Yes** — only existed to serve Censible; all other sites already migrated |
+
+**Before decommissioning, verify:**
+1. Is `mi-www.site` / `censible.co` DNS still pointing to Contabo? If so, does anyone use that URL directly? (The ESG Tracker is at `esg.briantakita.me` now, but `censible.co` may still serve the original Censible company site.)
+Please check if mi-www.site or censible.co DNS is pointing to Contabo or not.
+2. Is there any data in the Contabo Postgres database that hasn't been migrated to D1? (Portfolio data, user accounts, etc.)
+Please check. Can you find the Postgres credentials via ssh?
+3. Are there any other services on the VPS beyond these 3 containers?
+Not that I know of.
+
+If all clear, you could shut down all 3 containers and potentially cancel the Contabo VPS entirely — completing the full migration to Cloudflare.
 <!-- /agent:exchange -->

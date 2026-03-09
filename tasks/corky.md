@@ -1,9 +1,8 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 tmux_session: '0'
+agent_doc_mode: template
 ---
-
-
 
 ## Session History
 
@@ -560,3 +559,15 @@ The OAuth fixes from the previous session weren't on disk (clean working tree, n
 
 ## User
 
+Add Google Calendar integration to corky.
+
+Key capabilities:
+- `corky calendar list` — show today's/this week's events
+- `corky calendar create` — create events (meetings, follow-ups)
+- `corky calendar check` — check availability for a time range
+- Uses Google Calendar API (same OAuth2 flow corky already has for Gmail, just add the calendar scope)
+
+This enables AI agents to check schedule availability directly instead of asking the user.
+
+Convert to agent_doc_mode: template
+Implement corky calendar feature

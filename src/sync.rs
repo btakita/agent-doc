@@ -68,20 +68,33 @@ pub fn run_with_tmux(
         }
     }
 
-    // Post-sync: ensure each synced file's registry entry has the file path set.
-    // This makes `autoclaim` work for files arranged by sync (not just individually claimed).
-    update_registry_file_paths(&session_files.borrow());
+    // Post-sync: register/update claims for all synced files using the
+    // file→pane assignments from tmux-router. This ensures autoclaim works
+    // for files arranged by sync, even if they were never individually claimed.
+    register_synced_files(&session_files.borrow(), &result.file_panes);
 
     Ok(())
 }
 
-/// Update registry entries to include file paths for synced documents.
-/// Reads the registry once, patches entries that have empty `file` fields,
-/// then writes back if any changes were made.
-fn update_registry_file_paths(session_files: &[(String, PathBuf)]) {
-    if session_files.is_empty() {
+/// Register or update registry entries for synced files.
+///
+/// Uses the file→pane assignments from `SyncResult::file_panes` to create
+/// registry entries for files that don't have one yet, and update file paths
+/// for existing entries.
+fn register_synced_files(
+    session_files: &[(String, PathBuf)],
+    file_panes: &[(PathBuf, String)],
+) {
+    if session_files.is_empty() || file_panes.is_empty() {
         return;
     }
+
+    // Build file→pane lookup from sync result
+    let pane_lookup: std::collections::HashMap<&Path, &str> = file_panes
+        .iter()
+        .map(|(p, id)| (p.as_path(), id.as_str()))
+        .collect();
+
     let registry_path = sessions::registry_path();
     let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
         return;
@@ -91,9 +104,15 @@ fn update_registry_file_paths(session_files: &[(String, PathBuf)]) {
     };
 
     let mut changed = false;
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     for (session_id, file_path) in session_files {
+        let file_str = file_path.to_string_lossy().to_string();
+
         if let Some(entry) = registry.get_mut(session_id) {
-            let file_str = file_path.to_string_lossy().to_string();
+            // Existing entry — update file path if needed
             if entry.file != file_str {
                 eprintln!(
                     "[sync] updating file path for session {} → {}",
@@ -103,6 +122,40 @@ fn update_registry_file_paths(session_files: &[(String, PathBuf)]) {
                 entry.file = file_str;
                 changed = true;
             }
+            // Also update pane if sync assigned a different one
+            if let Some(&pane_id) = pane_lookup.get(file_path.as_path())
+                && entry.pane != pane_id
+            {
+                eprintln!(
+                    "[sync] updating pane for {} → {}",
+                    file_path.display(),
+                    pane_id
+                );
+                entry.pane = pane_id.to_string();
+                changed = true;
+            }
+        } else if let Some(&pane_id) = pane_lookup.get(file_path.as_path()) {
+            // New entry — file was synced but never claimed
+            let pane_pid = sessions::pane_pid(pane_id).unwrap_or(std::process::id());
+            let window = sessions::pane_window(pane_id).unwrap_or_default();
+            eprintln!(
+                "[sync] registering {} → pane {} (session {})",
+                file_path.display(),
+                pane_id,
+                &session_id[..8.min(session_id.len())]
+            );
+            registry.insert(
+                session_id.clone(),
+                sessions::SessionEntry {
+                    pane: pane_id.to_string(),
+                    pid: pane_pid,
+                    cwd: cwd.clone(),
+                    started: String::new(),
+                    file: file_str,
+                    window,
+                },
+            );
+            changed = true;
         }
     }
 

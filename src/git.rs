@@ -162,6 +162,76 @@ pub fn squash_session(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Get the content of a file from the last agent-doc commit (or HEAD).
+/// Returns None if the file is not tracked or no commits exist.
+pub fn show_head(file: &Path) -> Result<Option<String>> {
+    let (git_root, resolved) = resolve_to_git_root(file)?;
+
+    // Get the file path relative to the git root
+    let rel_path = if resolved.is_absolute() {
+        resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_path_buf()
+    } else {
+        resolved.clone()
+    };
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["show", &format!("HEAD:{}", rel_path.to_string_lossy())])
+        .output()?;
+
+    if !output.status.success() {
+        // File not tracked or no commits — not an error
+        return Ok(None);
+    }
+
+    Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+/// Get the author timestamp of the last commit touching a file.
+/// Returns None if the file has no commits.
+pub fn last_commit_mtime(file: &Path) -> Result<Option<std::time::SystemTime>> {
+    let (git_root, resolved) = resolve_to_git_root(file)?;
+
+    let rel_path = if resolved.is_absolute() {
+        resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_path_buf()
+    } else {
+        resolved.clone()
+    };
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "log",
+            "-1",
+            "--format=%ct",
+            "--",
+            &rel_path.to_string_lossy(),
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let ts_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ts_str.is_empty() {
+        return Ok(None);
+    }
+
+    let epoch: u64 = ts_str.parse().unwrap_or(0);
+    if epoch == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch)))
+}
+
 fn chrono_timestamp() -> String {
     // Use date command for simplicity — no extra dependency
     let output = Command::new("date")

@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Contabo decommissioned. All services on Cloudflare. VPS ready for cancellation.
+**Status:** mi-www.site live on Cloudflare. Contabo decommissioned. ESG Tracker at esg.briantakita.me + mi-www.site.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1076,4 +1076,20 @@ The bottleneck is Namecheap → .site registry. Namecheap hasn't pushed the NS d
 Once the .site TLD shows `dion.ns.cloudflare.com` / `tegan.ns.cloudflare.com`, propagation to public resolvers follows within minutes, and CF will activate the zone automatically.
 
 Has the DNS propagated? Can you loop until you detect propagation?
+DNS propagated. mi-www.site is live on Cloudflare:
+
+- **NS propagation:** ✓ Complete (Google, Cloudflare, local all show `dion`/`tegan.ns.cloudflare.com`)
+- **CF zone status:** `active`
+- **Worker serving:** ✓ Confirmed — returns 302 → `/companies` with `server: cloudflare`
+- **SSL:** ✓ Working (HTTP/2)
+
+One caveat: your local resolver has the old A record cached (pointing to Contabo 207.244.234.186) with ~29 min TTL remaining. If you try in a browser now, it may fail until the cache expires. You can:
+- Wait ~30 min, or
+- Use a different DNS resolver temporarily: `resolvectl dns <interface> 1.1.1.1`
+
+The ESG Tracker is now accessible at both:
+- **https://esg.briantakita.me**
+- **https://mi-www.site**
+
+I don't see https://mi-www.site in my browser.
 <!-- /agent:exchange -->

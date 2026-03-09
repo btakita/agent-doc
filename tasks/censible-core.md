@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. All features deployed at esg.briantakita.me. Auth: change Auth0 app type to Regular Web Application + enable Password grant.
+**Status:** Migration complete ✓. Rebranded to "ESG Tracker" white-label. Deployed at esg.briantakita.me. Auth: change Auth0 app type to enable login.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -47,10 +47,22 @@ The migration is complete. Summary of what's deployed:
 esg.briantakita.me should only be the company lookup app. censible.co already has the Censible company content.
 
 Perhaps we can rebrand esg.briantakita.me. Censible did not want to take on the liability of having the company lookup app.
-u
+
 Understood — since Censible doesn't want the liability, we can rebrand. The subdomain and all app branding (header, page titles, etc.) can be changed easily. What name/brand would you like to use instead of "Censible"?
 
 esg? Make it look like a white label sample app.
 
 I basically want SEO and a license deal from this site. I may also use it to funnel business to martin-investments. I will need to reach out to Mary Ellen about driving traffic to martin-investments.
+
+Done — rebranded to "ESG Tracker" and deployed. All user-visible "Censible" references replaced across 13 page files. Internal names (localStorage keys, DB fields, CSS classes) preserved.
+
+Live at **https://esg.briantakita.me**
+
+For the SEO + licensing + martin-investments funnel strategy:
+- The white-label positioning is good for licensing — shows the platform is brandable
+- For SEO, the ESG company/fund pages already have structured content (company names, tickers, ESG scores, industry data) that should index well
+- When ready to funnel to martin-investments, we can add a CTA banner or "Powered by" link on the site
+- Reach out to Mary Ellen when ready to discuss the traffic partnership
+
+Deploy
 <!-- /agent:exchange -->

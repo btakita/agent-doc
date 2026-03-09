@@ -99,5 +99,26 @@ The email skill should also be bundled via agent-kit and installed via `corky sk
 Shall I implement?
 
 The email skill is separate from the main corky skill? Why?
+Fair point — no good reason to keep them separate. The email skill was created before corky had calendar/docs/filters. Now corky is one tool, so one skill.
+
+**Revised plan — single `corky` skill:**
+1. Add `agent-kit` dependency to corky's `Cargo.toml`
+2. Write `SKILL.md` at corky repo root — covers ALL capabilities:
+   - Email: inbox review, drafting, threading, contact enrichment
+   - Calendar: list, create, check, delete events
+   - Documents: build PDF/DOCX
+   - Filters: check drift, push
+   - Imports: SMS, Telegram, Slack
+   - LinkedIn: posting
+   - Watch daemon
+3. Bundle via `include_str\!("../SKILL.md")` + `agent_kit::skill::SkillConfig`
+4. Wire `corky skill install/check/uninstall`
+5. Delete `src/corky/.claude/skills/agent-doc/` (redundant)
+6. Delete `src/corky/.claude/skills/email/` (merged into corky skill)
+7. Users invoke `/corky` for everything
+
+Implementing now.
+
+Do you have anything about diarized transcription of audio recordings?
 <!-- /agent:exchange -->
 ****

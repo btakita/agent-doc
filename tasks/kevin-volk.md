@@ -211,3 +211,53 @@ Anyways, I will follow up with my resume update soon. I took a look at the produ
 I've been putting much thought into agent harness tooling, so it will be a great conversation.
 
 Brian
+## Assistant
+
+Good — glad it's not sent yet. Converted to template mode.
+
+**Fix required:** "CursorKit" → **CopilotKit**
+
+**Draft review:**
+
+1. **"I hope he wasn't offended...as I enjoyed our exploring the opportunity"** — softens the Jordan connection unnecessarily. Suggest: *"I enjoyed the conversations we had"* — positive, no doubt.
+
+2. **Project list is good** — but Kevin is a recruiter. One-liners help him relay your value to CopilotKit's team.
+
+3. **"directly addresses & expands upon some of the workflows of CopilotKit"** — strong claim, just make sure you can back it up (agent-doc's document-as-interface pattern is the strongest parallel to CopilotKit's copilot UX layer).
+
+**Suggested revision:**
+
+---
+
+Hi Kevin,
+
+It was a pleasure speaking with you as well.
+
+Jordan Ritter is the CTO. https://www.linkedin.com/in/jordanritter/
+
+I got a job offer from Jordan back in 2010 for Cloud Crowd. I ended up turning it down because I stayed with Honk, which was then acquired by TrueCar. It was a critical point during the transition so I chose to stay loyal. I enjoyed the conversations we had. I also turned down a Yammer offer from David Sacks at that time.
+
+I will follow up with my resume update soon. I took a look at the product — my recent work directly addresses and expands upon some of the workflows of CopilotKit. Projects include:
+- agent-doc — document-as-interface for persistent AI agent sessions
+- tmux-router — multiplexed agent orchestration
+- agent-kit — SDK for building agent tooling
+- corky — git-native correspondence toolkit with agentic workflows
+
+I've been putting much thought into agent harness tooling, so it will be a great conversation.
+
+Brian
+
+---
+
+**Changes from your draft:**
+- Fixed CursorKit → CopilotKit
+- Changed "I hope he wasn't offended...as I enjoyed our exploring the opportunity" → "I enjoyed the conversations we had"
+- Added one-line descriptions to each project
+- Removed "Anyways" (filler)
+- Minor cleanup ("who was then" → "which was then")
+
+## User
+
+Should I send a followup reply re: existence-lang
+
+I feel like existence-lang is the crown jewel of human-agentic coherent alignment. But it's still very early.

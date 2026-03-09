@@ -42,4 +42,28 @@ More functionality will be added to webmaster.
 > and mentioning it in CLAUDE.md is sufficient
 
 Since we need to explicitlay add to CLAUDE.md, we should add a SKILL.md with the next release.
+
+### Agreed -- SKILL.md with next release
+
+Good point. If the CLI is growing, a bundled SKILL.md is the right vehicle -- self-updating (`webmaster skill install`), same pattern as agent-doc. Avoids manual CLAUDE.md maintenance.
+
+**SKILL.md scope for webmaster:**
+- Available commands and flags
+- Authentication setup (Google OAuth, Bing API key)
+- Site property format conventions
+- Common workflows (submit all sitemaps, check indexing status)
+
+Simple reference doc -- no complex agent workflow instructions needed. Just enough that Claude knows what's available and how to call it.
+
+Ok...since I now have multiple packages & cli tools that install a SKILL.md...this is a good time to extract a common package dependency that manages SKILL.md.
+
+Also, this new package should manage interactions with the agent loop...regardless of the model and program running the agent loop. This means compatability with a diverse range of environments such as:
+- Pi
+- OpenCode
+- Claude Code
+- Claude
+- Codex
+- Grok
+
+What should we name this package? Verify the suggested n
 <!-- /agent:exchange -->

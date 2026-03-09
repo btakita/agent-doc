@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Building apps/mi-web. Auth accounts identified from correspondence. Separate D1 database.
+**Status:** Deploying apps/mi-web to mi-www.site. D1 schema applied. Data migration in progress.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1231,4 +1231,21 @@ All will be seeded with temporary passwords that must be changed on first login.
 - Max code reuse from `apps/root-web`
 
 Please deploy mi-web to mi-www.site
+Deploying now. Progress:
+
+- **Worker built:** ✅ 688KB / 93KB gzipped — all features compiled
+- **D1 database:** ✅ `censible-mi-web-db` created, schema applied (all tables)
+Please rename censible-mi-web-db to mi-www-db...and app/mi-web to app/mi-www.
+- **Code:** ✅ Closed auth (login only), proprietary ESG, portfolio mgmt, XLSX, company search
+- **Data migration:** ⏳ Copying company/ESG/gender data from root-web DB
+- **Deploy + custom domain:** ⏳ Next (after data migration completes)
+- **User accounts:** ⏳ Will seed after deploy
+
+Key differences from root-web:
+- No `/api/register` endpoint (returns 403)
+- Admin seed endpoint (`POST /api/admin/seed-users` with X-Admin-Key header)
+- All pages auth-gated (client-side redirect to `/login` if no token)
+- Full proprietary ESG data on company detail pages (scores, overview, gender diversity)
+- `noindex, nofollow` meta tag (private site)
+- Martin Investment branding
 <!-- /agent:exchange -->

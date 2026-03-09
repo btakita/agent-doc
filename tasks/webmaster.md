@@ -212,4 +212,26 @@ Write the initial installable SKILL.md for webmaster.
 - Add more kit modules (structured output, context injection)
 
 Make sure SKILL.md is compatible with Codex, Pi, OpenCode, and other models + agent loop runtimes.
+
+### Tests added, SKILL.md updated
+
+**Webmaster tests** — 13 integration tests via `assert_cmd`:
+- Binary existence, CLI help, no-args error
+- `skill install` — creates file, idempotent
+- `skill check` — not installed, after install, outdated detection
+- Help output for all subcommands (auth, submit-sitemap, list-sitemaps, skill)
+
+**SKILL.md updated** for cross-environment compatibility:
+- Added "Agent Integration" section explicitly listing compatibility with Claude Code, Codex, OpenCode, Pi, Grok, and MCP-aware agents
+- All commands are standard CLI — no environment-specific syntax
+- Plain markdown readable by any agent or model
+
+**Test results:**
+- agent-kit: 10/10
+- agent-doc: 218/218
+- webmaster: 13/13
+
+Create a github project. Make sure agent-kit has gh actions that include running tests and releasing to crates.
+
+Make sure webmaster has gh actions that include running tests and releasing to crates
 <!-- /agent:exchange -->

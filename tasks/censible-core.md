@@ -12,26 +12,18 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-### Auth Updated to Embedded Password Grant ✓
+**Auth0 app compatibility:** A single Auth0 app can handle the Password Grant, but there's a type constraint:
 
-Switched from Auth0 Universal Login (redirect-based) to the **Resource Owner Password Grant** flow matching mi-www.site:
+- **SPA apps** (Single Page Web Applications) **cannot** use the Password grant type by default in Auth0
+- **Regular Web Applications** **can** enable the Password grant
 
-**What changed:**
-- Login form embedded directly in `/login` page (no redirect to Auth0)
-- Email + password entered on-site, POST to Auth0 `/oauth/token` with `grant_type: password-realm`
-- Signup via Auth0 `/dbconnections/signup` (auto-login after)
-- Forgot password via `/dbconnections/change_password`
-- Removed `/callback` route (no longer needed)
-- Token stored in `localStorage` same as before
+**Options:**
+1. **Change your existing app type** to "Regular Web Application" in Auth0 dashboard → Settings → Application Type. Then enable Password under Advanced Settings → Grant Types. Same Client ID works.
+2. **Use a separate app** — create a "Regular Web Application" with Password grant enabled, use its Client ID for the workers.dev deployment. Your original SPA app stays for censible.co if it uses a different auth flow.
 
-**Auth0 dashboard requirement:** The Auth0 application must have **Password** grant type enabled:
-1. **Applications** → your app → **Settings** → **Advanced Settings** → **Grant Types**
-2. Enable **Password** grant type
-3. Save
+Since censible.co and mi-www.site historically used different auth methods, you likely already have two Auth0 apps. Check your Auth0 dashboard — you probably have one "Regular Web Application" (for ROPG) and one SPA app. Use the Regular Web Application's Client ID.
 
-Does this support both logins or do I need another Auth0 app with this login?
+**To verify:** In Auth0 → Applications, check which app has `XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ` — if it's an SPA, either change its type or use the other app's Client ID instead.
 
-No callback URL configuration needed anymore since there are no redirects.
-
-**Test:** https://censible-root-web.brian-takita.workers.dev/login
+Did the original mi-www.site use auth0 or a different auth mechanism?
 <!-- /agent:exchange -->

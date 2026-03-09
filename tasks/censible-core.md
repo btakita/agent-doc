@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG dataset (722 companies, CC BY-NC-SA 4.0) downloaded — integration pending.
+**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data (722 companies, CC BY-NC-SA 4.0) integrated and deployed. MSCI data behind auth only.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -317,4 +317,25 @@ Noted. The site is **non-commercial and informational only**. Here's how we stay
 Ready to start the integration?
 
 Yes...do all of the steps
+
+Done — all 6 steps completed:
+
+1. **Created `public_esg` table** — new D1 migration with Kaggle data schema (ticker-keyed, grades/levels/scores)
+2. **Imported 722 companies** — generated SQL from `data.csv`, loaded into D1 via `wrangler d1 execute`
+3. **Updated public company pages** — company detail page now shows Kaggle ESG grades (A, BB, BBB, etc.) with level indicators (High/Medium/Low) instead of MSCI numeric tiers
+4. **Added CC BY-NC-SA 4.0 attribution** — inline on each ESG overview card AND in the site footer with links to the dataset and license
+5. **MSCI data stays behind auth** — `get_esg_overview()` (MSCI) still used for authenticated reports. Public pages use new `get_public_esg_overview()` which joins `public_esg` to `company` via ticker
+6. **Deployed** — live at https://esg.briantakita.me
+
+**Files changed:**
+- `migrations/0003_public_esg/up.sql` — new table
+- `scripts/import-kaggle-esg.ts` — CSV→SQL generator
+- `worker/db/search.ts` — added `PublicEsgOverview` interface + `get_public_esg_overview()` function
+- `worker/index.ts` — company detail page uses public ESG data with grade/level display
+- `pages/layout.ts` — footer attribution with dataset link + license link
+
+Try searching a company with Kaggle coverage (e.g., DIS, GM, AAPL, MSFT) at https://esg.briantakita.me/companies to see the public ESG grades.
+
+Provide a sitemap and full seo optimization. schema.org integration. Include llms.txt.
+Let's also setup google search console to register the site.
 <!-- /agent:exchange -->

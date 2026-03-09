@@ -207,4 +207,12 @@ Please add Anil as a contact.
 Done — created contact at `mail/contacts/anil-podduturi/CLAUDE.md` with his LinkedIn, BCG role, and the Censible/ESG Book context you provided.
 
 Sync my .corky.toml with my gmail. I will be receiving all of my *@neo.com correspondence...which include Anil.
+
+Done — `*@neo.com` was already in your `.corky.toml` "correspondence" filter but wasn't synced to Gmail. Pushed filters:
+
+- `corky filter push` — replaced 2 Gmail filters with the updated config
+- `*@neo.com` emails now get the `correspondence` label and are marked as important
+- Anil's emails (and all neo.com correspondence) will be captured automatically
+
+What public ESG data can we use?
 <!-- /agent:exchange -->

@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data (722 companies, CC BY-NC-SA 4.0) integrated and deployed. MSCI data behind auth only.
+**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO: sitemap, schema.org, llms.txt, robots.txt deployed. Google Search Console: pending verification.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -338,4 +338,48 @@ Try searching a company with Kaggle coverage (e.g., DIS, GM, AAPL, MSFT) at http
 
 Provide a sitemap and full seo optimization. schema.org integration. Include llms.txt.
 Let's also setup google search console to register the site.
+
+Done — full SEO optimization deployed:
+
+**1. Sitemap** (`/sitemap.xml`)
+- 7 static pages + all 9,056 company pages from DB
+- Priority: 1.0 for `/companies`, 0.8 for company pages, 0.5 for others
+- Dynamically generated on each request from D1
+
+Does it make sense to create static html files for each company?
+Or should we rely on edge caching?
+
+**2. robots.txt** (`/robots.txt`)
+- `Allow: /` with sitemap reference
+- Updated static file in `public/` (overrides route)
+
+**3. llms.txt** (`/llms.txt`)
+- Site description, page index, data coverage (722 companies), and license info
+- Helps AI crawlers understand the site
+
+**4. Schema.org JSON-LD**
+- **WebSite** schema on every page with `SearchAction` targeting `/companies?q=`
+- **Organization** schema on company detail pages (name, ticker, URL, description)
+- Both rendered as `<script type="application/ld+json">` in `<head>`
+
+**5. Enhanced meta tags**
+- `<meta name="robots" content="index, follow">`
+- `<link rel="canonical">` on company pages
+- Twitter Card meta tags (summary card)
+- Per-page dynamic descriptions (company pages use company description)
+- Open Graph tags already existed — now with dynamic descriptions
+
+**6. Google Search Console**
+Placeholder added in layout head. To complete:
+1. Go to https://search.google.com/search-console
+2. Click **Add Property** → enter `https://esg.briantakita.me`
+3. Choose **HTML tag** verification method
+4. Copy the `<meta name="google-site-verification" content="...">` tag
+5. Give me the content value and I'll add it to the layout
+
+All live at https://esg.briantakita.me. Try:
+- https://esg.briantakita.me/sitemap.xml
+- https://esg.briantakita.me/llms.txt
+- https://esg.briantakita.me/robots.txt
+- https://esg.briantakita.me/companies/DIS (check page source for JSON-LD)
 <!-- /agent:exchange -->

@@ -162,4 +162,22 @@ That's an important distinction. If you never signed an MSCI data license, displ
 Given the criminal liability prompt, option 1 is safest until you get clarity from Mary Ellen or an attorney. Want me to remove ESG scores from the public teaser pages?
 
 Is ESG Book data free to use? Is it an attribution license?
+
+**ESG Book is NOT freely usable for redistribution.** While marketed as "free" and a "public good," their terms restrict:
+
+- Cannot redistribute or repackage data on your own platform
+- Cannot create a "functional substitute" for their platform (an ESG tracker app would qualify)
+- They own all derived data and enhancements
+- No automated scraping/copying
+- Commercial redistribution requires a separate agreement
+
+**Other free/open ESG data alternatives:**
+- **SEC filings (EDGAR)** — public domain, no restrictions. ESG disclosures increasingly required.
+- **CDP (Carbon Disclosure Project)** — some data publicly available
+- **UN Global Compact** — public participant data
+- **Build your own scoring** from public data (SEC filings, news sentiment, controversy tracking)
+
+**Bottom line:** The most defensible path is: keep existing MSCI data behind auth (covered by Martin Investment's license), and either show no ESG scores publicly or source/build independent public-domain data for the teaser.
+
+ESG Book is developed by BCG...whom I applied to for work. I believe that Anil was familiar with Censible and chose to pursue Esg Book. Could you look into the history of ESG Book?
 <!-- /agent:exchange -->

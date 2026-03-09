@@ -1284,4 +1284,7 @@ Fixed both issues — deployed:
 Try navigating between pages on https://mi-www.site — should be clean now.
 
 What is the password for brian.takita@gmail.com?
+The password for `brian.takita@gmail.com` is `MartinInv2026!` — same temporary password used to seed all 6 accounts.
+
+What happened to the xlsx export?
 <!-- /agent:exchange -->

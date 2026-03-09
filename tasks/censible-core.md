@@ -114,4 +114,14 @@ Two options:
 Would you like to reach out to someone about getting DNS access, or is this something to discuss with Mary Ellen?
 
 Do I need any disclaimers on the company lookup stating that I am not a licensed stock advisor and this is not investment advice?
+
+Yes — a disclaimer is advisable, especially given the SEC compliance history. I've added one to the footer (visible on every page):
+
+> *ESG Tracker is for informational purposes only and does not constitute investment advice. The operator of this site is not a registered investment advisor. ESG data is sourced from third-party providers. Past performance is not indicative of future results. Always consult a qualified financial advisor before making investment decisions.*
+
+The reports (PDF/XLSX) already had similar disclaimers. Deployed.
+
+**Important caveat:** I'm not a lawyer. For a definitive answer on what disclaimers are legally required, especially given the Censible/Martin Investments SEC history, you should consult a securities attorney. The disclaimer I added covers standard bases but may need refinement.
+
+I don't want any tie to MSCI. I actually had a notice from MSCI about criminal liability for using their data. So I want to make sure there is nothing using their data.
 <!-- /agent:exchange -->

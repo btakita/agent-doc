@@ -930,4 +930,27 @@ Please check. Can you find the Postgres credentials via ssh?
 Not that I know of.
 
 If all clear, you could shut down all 3 containers and potentially cancel the Contabo VPS entirely — completing the full migration to Cloudflare.
+Checked everything:
+
+**DNS results:**
+- `mi-www.site` → `207.244.234.186` (Contabo) — serves old Censible app with Auth0 login
+- `censible.co` → Cloudflare → **Heroku** (not Contabo!) — the Censible company site is hosted on Heroku
+- `esg.censible.co` → same Cloudflare/Heroku route
+
+**Contabo containers (only 3, confirmed):**
+```
+traefik       traefik:beaufort   Up 3 days (healthy)
+mi-www_site-1 mi-www_site        Up 3 days
+mi-redis      redis:alpine       Up 3 days
+```
+
+**No Postgres database** — the old app uses Redis only (sessions + cache). No data to migrate.
+
+**No other services** — only SSH and system DNS resolver running outside Docker.
+
+**Verdict:** Safe to decommission all 3 containers and cancel the Contabo VPS. The `mi-www.site` domain can be left to expire or pointed elsewhere. `censible.co` is unaffected (it's on Heroku). Your ESG Tracker is fully on Cloudflare at `esg.briantakita.me`.
+
+Want me to stop the containers now? (`docker stop traefik mi-www_site-1 mi-redis`)
+
+Yes. Decommission and shut down the Contabo instance.
 <!-- /agent:exchange -->

@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::sessions::Tmux;
 use crate::{frontmatter, resync, sessions};
@@ -30,6 +30,8 @@ pub fn run_with_tmux(
     let _ = resync::prune(); // Clean stale entries before layout calculation
     let registry_path = sessions::registry_path();
     let files_needing_session = RefCell::new(Vec::new());
+    // Track session_id → file path for post-sync claim updates
+    let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
         let content = std::fs::read_to_string(path).ok()?;
@@ -39,6 +41,9 @@ pub fn run_with_tmux(
                 if fm.tmux_session.is_none() {
                     files_needing_session.borrow_mut().push(path.to_path_buf());
                 }
+                session_files
+                    .borrow_mut()
+                    .push((key.clone(), path.to_path_buf()));
                 Some(FileResolution::Registered {
                     key,
                     tmux_session: fm.tmux_session,
@@ -62,5 +67,46 @@ pub fn run_with_tmux(
             }
         }
     }
+
+    // Post-sync: ensure each synced file's registry entry has the file path set.
+    // This makes `autoclaim` work for files arranged by sync (not just individually claimed).
+    update_registry_file_paths(&session_files.borrow());
+
     Ok(())
+}
+
+/// Update registry entries to include file paths for synced documents.
+/// Reads the registry once, patches entries that have empty `file` fields,
+/// then writes back if any changes were made.
+fn update_registry_file_paths(session_files: &[(String, PathBuf)]) {
+    if session_files.is_empty() {
+        return;
+    }
+    let registry_path = sessions::registry_path();
+    let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
+        return;
+    };
+    let Ok(mut registry) = sessions::load() else {
+        return;
+    };
+
+    let mut changed = false;
+    for (session_id, file_path) in session_files {
+        if let Some(entry) = registry.get_mut(session_id) {
+            let file_str = file_path.to_string_lossy().to_string();
+            if entry.file != file_str {
+                eprintln!(
+                    "[sync] updating file path for session {} → {}",
+                    &session_id[..8.min(session_id.len())],
+                    file_path.display()
+                );
+                entry.file = file_str;
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        let _ = sessions::save(&registry);
+    }
 }

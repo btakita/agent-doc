@@ -65,5 +65,43 @@ Also, this new package should manage interactions with the agent loop...regardle
 - Codex
 - Grok
 
-What should we name this package? Verify the suggested n
+What should we name this package? Verify the suggested names are available on crates.io
+
+### Naming — "Ver" prefix
+
+You started typing "Ver" — interesting direction. Some possibilities:
+
+- **Verba** (Latin: "words") — the instruction layer that speaks to any agent
+- **Vertex** — connection point between tools and agent loops
+- **Verso** — a page/document term; fits the SKILL.md document management angle
+
+But given the actual function — **managing how tools describe themselves to agent loops** — I'd suggest:
+
+### `agent-skill`
+
+Direct, descriptive, no ambiguity. It's what it does: manage agent skills across environments.
+
+**What it provides as a Rust crate dependency:**
+
+1. **`SkillManifest`** — structured representation of a tool's capabilities (commands, flags, auth requirements, workflows)
+2. **`skill install`** subcommand scaffolding — `include_str!("SKILL.md")` pattern, target directory detection
+3. **Environment detection** — which agent loop is running (Claude Code → `.claude/skills/`, OpenCode → its equivalent, Pi/Grok → generic markdown injection)
+4. **Instruction file format abstraction** — emit SKILL.md for Claude Code, system prompt fragments for others, MCP tool descriptions for MCP-aware loops
+
+**Environment adapter pattern:**
+```
+agent-skill/
+  src/
+    lib.rs           # SkillManifest, install/upgrade API
+    detect.rs        # Detect active agent environment
+    adapters/
+      claude_code.rs # .claude/skills/<name>/SKILL.md
+      opencode.rs    # OpenCode equivalent
+      generic.rs     # Plain markdown fallback
+      mcp.rs         # MCP tool_description format
+```
+
+Each tool crate (`agent-doc`, `webmaster`) depends on `agent-skill` and calls `agent_skill::install(manifest)` from its `skill install` subcommand. The adapter handles placement.
+
+**vs. the "Ver" direction** — if you had a broader vision with that prefix (a framework beyond just skill management), I'd want to hear it. What were you going for with "Ver"?
 <!-- /agent:exchange -->

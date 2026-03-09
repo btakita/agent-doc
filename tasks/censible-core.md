@@ -274,4 +274,20 @@ Every pre-computed company ESG score source is either non-commercial, redistribu
 No code changes needed — the current setup already works this way.
 
 This website is non-commercial. It is purely informational.
+
+If the site is non-commercial, that opens up the **Kaggle "Public Company ESG Ratings"** dataset (CC BY-NC-SA 4.0). 700+ companies with E/S/G scores, grades, and levels from esgcompare.org.
+
+CC BY-NC-SA allows sharing/displaying as long as:
+- **Non-commercial** use
+- **Attribution** given (credit the source)
+- **Share-alike** (derivative works use same license)
+
+**Tension to consider:** You mentioned wanting SEO, a license deal, and funneling business to martin-investments. If the site generates revenue even indirectly (licensing fees, business referrals), the "non-commercial" defense weakens. CC BY-NC is notoriously ambiguous on this.
+
+I don't plan on having a license fee. I would have a consulting fee to build a website using whatever data source the prospect would have. The business referrals could just be traffic.
+
+**If you're confident the site is purely informational** (no ads, no paywalls, no direct revenue), the Kaggle dataset works. Want me to download and integrate it as the public-facing ESG scores, replacing the MSCI-sourced teaser data?
+
+Yes...I'm confident. Please note my intention to make this non-commercial. And to ensure that no commercial features are added to esg.briantakita.me.
+In complian
 <!-- /agent:exchange -->

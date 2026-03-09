@@ -53,4 +53,32 @@ Compacted 650 lines → ~50. Converted to template mode. What's next for corky?
 
 Does the corky library have a SKILL.md...similar to agent-doc and webmaster?
 If not, does it make sense to have a corky SKILL.md?
+Corky already has two skills in `src/corky/.claude/skills/`:
+
+- **`email`** (`SKILL.md`) — drafting, inbox review, contact enrichment, thread sync
+- **`agent-doc`** (`SKILL.md`) — the document session skill (shared with agent-doc repo)
+
+There is no top-level "corky" skill. **Yes, it makes sense to add one** — a `corky` skill would be the umbrella that orchestrates across all corky capabilities:
+
+**What a `corky` SKILL.md would cover:**
+- Calendar management (`corky cal list/create/check/delete`)
+- Document building (`corky doc build`)
+- Filter management (`corky filter check/push`)
+- SMS import (`corky sync sms-import`)
+- LinkedIn posting (`corky linkedin`)
+- Watch daemon (`corky watch`)
+- The email skill already handles correspondence — the corky skill would be for everything else
+
+**Two options:**
+1. **Single `corky` skill** — replaces `email`, covers all commands. Invoke as `/corky`.
+2. **Keep `email` separate, add `corky`** — email stays focused on correspondence, corky covers calendar, docs, filters, imports. Users invoke `/email` for drafting, `/corky` for everything else.
+
+Option 2 is cleaner — email has a distinct workflow (read thread → draft → review) that benefits from a focused skill. The corky skill handles utility commands.
+
+Want me to create the `corky` SKILL.md?
+
+Yes
+Use agent-kit
+
+Why would corky have a separate agent-doc skill? agent-doc already has a skill. Is the corky agent-doc skill redundant?
 <!-- /agent:exchange -->

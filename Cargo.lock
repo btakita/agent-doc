@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.12.2"
 dependencies = [
+ "agent-kit",
  "anyhow",
  "assert_cmd",
  "clap",
@@ -43,6 +44,13 @@ dependencies = [
  "ureq",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "agent-kit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

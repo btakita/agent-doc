@@ -866,7 +866,8 @@ Reviewed all correspondence. Here's what's relevant:
 1. Is the MSCI contract still active?
 2. Is she comfortable with the ESG Tracker at esg.briantakita.me (separate from censible.co)?
 I don't think sh will be comfortable. I'm not planning on asking. I did some work for Martin Investments for their portfolio data. But Censible may not be covered. I'm wondering if I should remove data derived from MSCI data.
-
+I have no agreement with Martin Investment to reuse their data.
+My primary goal is to demo my work and to gain SEO from the company search. Displaying ESG data specifics is not of strategic importance.
 3. Does the current disclaimer language satisfy the attorney's 2018 concerns?
 
 Until confirmed, the current architecture (public = Kaggle only, MSCI behind auth) is the safest position.

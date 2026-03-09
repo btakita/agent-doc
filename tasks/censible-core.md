@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** mi-www deployed and live. Renamed from mi-web. All data migrated. Auth working.
+**Status:** Migrating data to new `mi-www-db` D1 database. Schema applied. Batch import running.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1262,4 +1262,5 @@ Custom domain `mi-www.site` confirmed working.
 Can we create and migrate the database to mi-www-db? Shutting down censible-mi-web-db once the data is migrated.
 
 Also resolved the login 500 error — it was a shell escaping issue (zsh `printf` turning `!` into `\!`). Login works correctly from the browser. All 6 user accounts are active.
+On it. Created new D1 database `mi-www-db` (ID: `73908e9a-d4eb-4e60-8f85-ec2e27c15a8e`). Schema applied. Data migration in progress — copying all rows from old `censible-mi-web-db` to new `mi-www-db`. Will redeploy and delete old DB once complete.
 <!-- /agent:exchange -->

@@ -104,4 +104,14 @@ For your white-label ESG Tracker at esg.briantakita.me:
 Do you want me to check if you have a specific email thread in mind, or is there anything else to adjust on esg.briantakita.me?
 
 https://censible.co/ has a "Company Search" navigation menu item. Which links to esg.censible.co...which is behind a login that does not work.
+
+The "Company Search" nav on censible.co linking to esg.censible.co is part of the **old censible.co website** — not something we deployed. That broken link is on their infrastructure.
+
+Two options:
+1. **If you can get DNS access to censible.co** — add a CNAME for `esg.censible.co` pointing to `censible-root-web.brian-takita.workers.dev`, then add `esg.censible.co` as another custom domain in wrangler.toml. The old nav link would then serve your new ESG Tracker app.
+2. **If you can't** — the broken link is on Censible's side to fix. Your app at esg.briantakita.me works independently.
+
+Would you like to reach out to someone about getting DNS access, or is this something to discuss with Mary Ellen?
+
+Do I need any disclaimers on the company lookup stating that I am not a licensed stock advisor and this is not investment advice?
 <!-- /agent:exchange -->

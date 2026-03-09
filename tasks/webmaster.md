@@ -20,4 +20,26 @@ No. The webmaster crate (`src/webmaster/`) is a standalone Rust CLI tool — it 
 To add a webmaster skill, you'd create `.claude/skills/webmaster/SKILL.md` with instructions for sitemap management workflows.
 
 Does webmaster need a SKILL.md? Similar to how agent-doc has an installable SKILL.md.
+
+### Probably not yet
+
+**agent-doc needs a SKILL.md because** it has a complex multi-step workflow (diff, respond, 3-way merge write-back) that requires detailed agent instructions. The agent operates *inside* the document.
+
+**webmaster doesn't need one because:**
+- It's a straightforward CLI -- `webmaster submit-sitemap <url>` is self-explanatory
+- No agent-in-the-loop workflow; just fire-and-forget commands
+- Claude can use it via Bash tool calls; `--help` output is sufficient
+- No document coordination needed
+
+**When it would make sense:**
+- A `/webmaster` slash command for multi-step workflows (discover sites, submit all sitemaps, verify indexing, report status)
+- Integration with agent-doc template components (e.g., a dashboard showing sitemap status per site)
+
+For now, just installing the binary (`cargo install --path src/webmaster`) and mentioning it in CLAUDE.md is sufficient.
+
+More functionality will be added to webmaster.
+
+> and mentioning it in CLAUDE.md is sufficient
+
+Since we need to explicitlay add to CLAUDE.md, we should add a SKILL.md with the next release.
 <!-- /agent:exchange -->

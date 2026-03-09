@@ -739,5 +739,17 @@ I'm logged in and seeing the message:
 > Full ESG Scores & Ratings
 > Log in to view detailed ESG scores, ESG ratings, and gender diversity data.
 
-Please note that I want to re
+Please note that I want to remain legally unexposed.
+
+Fixed. The "Log in" prompt was hardcoded — the server-rendered page had no way to know about the client-side auth token.
+
+**What changed:** Added client-side JS to the company detail page (`/companies/:ticker`) that:
+1. Checks localStorage for `censible_access_token`
+2. If found: hides the login prompt, calls `GET /api/companies/:locator` with Bearer token
+3. Renders detailed ESG scores, key issues table, and gender diversity data inline
+4. If token is invalid (401): clears token, shows login prompt again
+
+Deployed — refresh the company page while logged in and you should see the detailed data.
+
+I log in but the session is not reflected in the UI. So when I go to a company page, I have the same error message.
 <!-- /agent:exchange -->

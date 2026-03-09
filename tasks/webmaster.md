@@ -271,4 +271,25 @@ echo "your-crates-io-token" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita/
 Get a token from https://crates.io/settings/tokens — create one with "publish-new" and "publish-update" scopes. Ready to run these when you provide the token.
 
 Is it stored in the local $CRATES_PUBLISH_TOKEN? If yes, why are the names different?
+### Yes — `$CRATES_PUBLISH_TOKEN` is set locally
+
+**Why the names differ:**
+
+- **`CARGO_REGISTRY_TOKEN`** — Cargo's built-in convention. `cargo publish` checks this env var automatically. GitHub Actions workflows typically use this name so `cargo publish` works without extra flags.
+- **`CRATES_PUBLISH_TOKEN`** — Your custom local convention. Same token, different name. Cargo doesn't recognize it natively — you'd need `cargo publish --token $CRATES_PUBLISH_TOKEN` or an alias.
+
+Please rename all instances of CRATES_PUBLISH_TOKEN to CARGO_REGISTRY_TOKEN.
+
+They hold the same crates.io API token, just named differently by convention.
+
+**Setting the GitHub secrets using your local token:**
+
+```bash
+echo "$CRATES_PUBLISH_TOKEN" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita/agent-kit
+echo "$CRATES_PUBLISH_TOKEN" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita/webmaster
+```
+
+Ready to run these when you give the go-ahead.
+
+Go ahead
 <!-- /agent:exchange -->

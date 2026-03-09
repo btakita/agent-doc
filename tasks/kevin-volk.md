@@ -1,6 +1,7 @@
 ---
 agent_doc_session: f3e0f1d5-b6ed-4fe8-a470-089f1cd5eb22
 tmux_session: '0'
+agent_doc_mode: template
 ---
 
 Help me prepare for my interview with Kevin Volk. See my correspondence & calendar.
@@ -110,3 +111,103 @@ The original invite was for Fri Mar 6 at 4pm, then Kevin updated it to Mon Mar 9
 
 Sync the corky labels to gmail. Sync the emails. 
 Please review my existing draft reply to kevin@staffingscience.io...re: Jordan Ritter.
+## Assistant
+
+**Labels synced** — 2 filters pushed to Gmail. **Emails synced** — no new messages.
+
+---
+
+### Major Update: The Company is CopilotKit
+
+The call already happened today! Kevin sent the JD afterward. The unnamed startup is **CopilotKit** — the #1 open-source platform for building AI Copilots (40k+ GitHub stars, millions of weekly installs, used by 10%+ of Fortune 500s). This is even better aligned than the generic job listing suggested.
+
+**CTO is Jordan Ritter** — you have history with him from 2010 (CloudCrowd job offer you declined to stay with Honk/TrueCar). This personal connection is a strong advantage.
+
+---
+
+### Review of Your Draft Reply
+
+Your reply is good — personal, shows genuine interest, references the Jordan Ritter connection. **One issue to fix:**
+
+> What I'm working on directly addresses & expands upon some of the workflows of **CursorKit**.
+
+You wrote **CursorKit** — should be **CopilotKit**. Fix this before sending if not already sent.
+
+**What works well:**
+- Jordan Ritter connection is compelling — shows you run in the same circles
+- "What I'm working on directly addresses & expands upon some of the workflows" — great hook
+- Promise to follow up with resume — keeps momentum
+
+**Suggestions if you haven't sent yet:**
+- Fix CursorKit → CopilotKit typo
+- Consider briefly naming what you're working on (agent-doc, corky) so Kevin has something concrete to tell CopilotKit
+- The tone is great — casual, confident, shows genuine product interest
+
+---
+
+### Updated Interview Prep (Post-Call)
+
+Now that we know it's **CopilotKit**, your talking points are even stronger:
+
+| JD Requirement | Your Direct Match |
+|----------------|-------------------|
+| TypeScript & Python SDKs | Built SDKs/libraries in both: ctx-core, rmemo, relysjs (TS), corky prototyped in Python, lazily-py |
+| React infrastructure | rmemo, RelementJS, hyopjs — you build React-level infra, not just apps |
+| AI-native workflow | You USE Claude Code as primary dev interface via agent-doc. You built the agent harness. |
+| Open source contributions | RSpec, SvelteJS, Nano Stores, 15+ published packages, 40k+ commits |
+| Real-time systems | Presence AI video pipeline on H100 GPUs via WebRTC |
+| Agent runtimes | agent-doc IS an agent runtime. corky has agentic workflows. |
+| Functional reactive programming | 15-year lineage: backbone-signal → ctx-core → rmemo → relysjs |
+| Clean API design | Every library you've built is an API-first design |
+
+**Next step:** Kevin asked for an updated resume highlighting TypeScript, Python, SDKs, and React. Use `make PROFILE=copilotkit` to build a tailored resume (create `resume/profiles/copilotkit.toml` first).
+
+## User
+
+## Assistant
+
+**Filters synced** — 2 filters pushed to Gmail.
+**Emails synced** — no new messages on either account.
+
+**Re: your reply to Kevin about Jordan Ritter:**
+
+Your reply was already **sent** (Mon Mar 9 at 7:04 PM EDT) — it's not a draft.
+
+**Review of the sent reply:**
+
+1. **"CursorKit" typo** — You wrote "CursorKit" but the company is **CopilotKit**. Kevin and the client will notice. Recommend sending a quick correction: *"Quick correction — I meant CopilotKit, not CursorKit. Looking forward to the next steps."*
+
+2. **Jordan Ritter connection** — Mentioning the 2010 offer is a smart play — shows you're known in the space. The "I hope he wasn't offended" line introduces unnecessary doubt, but it's already sent.
+
+3. **Resume update still pending** — Kevin explicitly asked for an updated resume emphasizing TypeScript, Python, SDK building, and React experience. You said you'd follow up "soon." This is the most time-sensitive action.
+
+**Action items:**
+- [ ] Send a brief correction email (CursorKit → CopilotKit typo)
+- [ ] Update resume with TypeScript/Python/SDK/React emphasis per Kevin's request
+- [ ] Send updated resume to Kevin (he said he'd submit to CopilotKit by EOW next week)
+
+Want me to draft the correction email and/or help tailor the resume?
+
+## User
+
+Convert to agent_doc_mode: template
+
+I have not sent the draft yet. Here is my draft.
+
+Hi Kevin,
+
+It was a pleasure speaking with you as well.
+
+Jordan Ritter is the CTO. https://www.linkedin.com/in/jordanritter/
+
+I got a job offer from Jordan back in 2010 for Cloud Crowd. I ended up turning it down because I stayed with Honk who was then acquired by TrueCar. It was a critical point during the transition so I chose to stay loyal. I hope he wasn't offended...as I enjoyed our exploring the opportunity. I also turned down a Yammer job offer from David Sacks at that time.
+
+Anyways, I will follow up with my resume update soon. I took a look at the product. My recent work directly addresses & expands upon some of the workflows of CursorKit. Projects include:
+- agent-doc
+- tmux-router (will be in resume)
+- agent-kit (will be in resume)
+- corky
+
+I've been putting much thought into agent harness tooling, so it will be a great conversation.
+
+Brian

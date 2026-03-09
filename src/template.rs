@@ -161,7 +161,7 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
 
     for (idx, patch) in &ops {
         let comp = &components[*idx];
-        let mode = configs.get(&patch.name).map(|s| s.as_str()).unwrap_or("replace");
+        let mode = configs.get(&patch.name).map(|s| s.as_str()).unwrap_or_else(|| default_mode(&patch.name));
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
         result = comp.replace_content(&result, &new_content);
     }
@@ -212,7 +212,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .iter()
         .map(|comp| {
             let content = comp.content(&doc).to_string();
-            let mode = configs.get(&comp.name).cloned().unwrap_or_else(|| "replace".to_string());
+            let mode = configs.get(&comp.name).cloned().unwrap_or_else(|| default_mode(&comp.name).to_string());
             // Compute line number from byte offset
             let line = doc[..comp.open_start].matches('\n').count() + 1;
             ComponentInfo {
@@ -250,6 +250,12 @@ fn load_component_configs(file: &Path) -> std::collections::HashMap<String, Stri
         }
     }
     result
+}
+
+/// Default mode for a component by name.
+/// `exchange` defaults to `append`; all others default to `replace`.
+fn default_mode(name: &str) -> &'static str {
+    if name == "exchange" { "append" } else { "replace" }
 }
 
 /// Apply mode logic (replace/append/prepend).

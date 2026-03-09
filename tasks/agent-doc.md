@@ -246,4 +246,14 @@ implement and release
 - SKILL.md: updated
 
 218 tests passing. The `.agent-doc/components.toml` in this project is now optional (but still works as an override).
+
+Still seeing file not found error...Do I need to restart the claude session?
+
+```
+● Bash(agent-doc recover tasks/webmaster.md 2>&1)
+  ⎿  Error: Exit code 1
+     Error: file not found: tasks/webmaster.md
+
+     Error: file not found: tasks/webmaster.md
+```
 <!-- /agent:exchange -->

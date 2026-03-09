@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** R2 buckets created. Waiting for R2 S3 API credentials to begin rclone sync from Contabo.
+**Status:** R2 buckets created (12/14). Waiting for S3 API credentials (R2 + Contabo) to run migration.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1399,4 +1399,34 @@ Once I have the credentials, I'll configure `rclone` (already installed) and syn
 | prescience-notes.public | prescience-notes-public | 73 KB |
 
 (2 empty buckets skipped: foresight-btakita-storage, linkument.pub)
+
+In the root .env
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+### R2 buckets ready, need S3 API credentials
+
+**R2 buckets already created** (12 buckets, all created today):
+`briantakita-assets`, `assets-brookebrodack`, `assets-cogov`, `brookebrodack-product`, `files-mi-www`, `foresight-nextcloud-backup`, `foresight-nextcloud-data`, `herbaliciousbliss-asset`, `import-mi-www`, `peakexistence-private`, `peakexistence-public`, `prescience-notes-public`
+
+**Missing buckets** (2 from Contabo not yet in R2):
+- `foresight-btakita-storage`
+- `linkument.pub`
+
+**Cloudflare Account ID:** `1e7e194ff8da4ad9e40ce041aea84f76`
+
+**Wrangler can't create R2 API tokens** — the S3-compatible credentials must be created manually:
+
+1. **R2 API Token** — Go to https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/r2/api-tokens
+   - Create token with "Admin Read & Write" permission for all R2 buckets
+   - This gives you an Access Key ID + Secret Access Key for S3-compatible access
+   - R2 endpoint: `https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com`
+
+2. **Contabo S3 Credentials** — Go to Contabo Object Storage panel
+   - Generate S3-compatible access keys (separate from API credentials in `pass`)
+   - S3 endpoint: typically `https://s3.contabo.com` or region-specific
+
+Once you provide both sets of S3 credentials, I'll configure rclone and run the sync for all 14 buckets.
+
+pass contabo/client_id
+pass contabo/client_secret
 <!-- /agent:exchange -->

@@ -196,44 +196,28 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 **Code-span parser fix:** Fixed `component.rs` to skip markers inside fenced code blocks and inline backtick spans. Released as v0.9.10.
 
-**v0.10.0 session:** Renamed `response_mode` → `agent_doc_mode` (canonical) with `mode` (shorthand) and `response_mode` (deprecated) as aliases. Discussed in-place conversation model and blog post.
+**v0.10.0 session:** Renamed `response_mode` -> `agent_doc_mode` (canonical) with `mode` (shorthand) and `response_mode` (deprecated) as aliases. Discussed in-place conversation model and blog post.
 
 **v0.10.1 session:** Designed `exchange` component convention for shared conversation surfaces. Diagnosed and fixed missing template-mode instructions in bundled SKILL.md. Released v0.10.1 to all targets. Converted this document from input/output to exchange component. Identified tmux claim-after-restart bug for next release.
 
 **v0.11.0 session:** Implemented append-friendly merge strategy. Created shared `merge.rs` module extracting duplicated logic from `write.rs` and `submit.rs`. `resolve_append_conflicts()` auto-resolves conflicts where both sides only appended (empty original section in diff3 format). Added `merge_strategy` config field to `ComponentConfig`. Released to all targets.
 
-**v0.11.1–v0.11.2 session:** Fixed duplicate `## Assistant` and `## User` headings. `strip_assistant_heading()` strips both leading `## Assistant` and trailing `## User` from response text before `agent-doc write` adds its own. Encountered CWD drift during release (relative path from wrong directory) — reinforces lesson #2 (always use absolute paths). Released both fixes to all targets.
+**v0.11.1-v0.11.2 session:** Fixed duplicate `## Assistant` and `## User` headings. `strip_assistant_heading()` strips both leading `## Assistant` and trailing `## User` from response text before `agent-doc write` adds its own. Encountered CWD drift during release (relative path from wrong directory) -- reinforces lesson #2 (always use absolute paths). Released both fixes to all targets.
 
-**v0.12.0 session:** Implemented `agent-doc compact` (archive old exchanges), `agent-doc convert` (append→template), template init uses `exchange` by default, lazy claim via `route --pane`, fixed flaky `recover_append_response` test (snapshot path_for absolute paths). 197 tests. Published to all targets.
+**v0.12.0 session:** Implemented `agent-doc compact` (archive old exchanges), `agent-doc convert` (append->template), template init uses `exchange` by default, lazy claim via `route --pane`, fixed flaky `recover_append_response` test (snapshot path_for absolute paths). 197 tests. Published to all targets.
+
+**v0.12.1 session:** Fixed lazy claim not working from JetBrains plugin. Root cause: plugin never passed `--pane` to `agent-doc route`. Fix: route now falls back to `tmux.active_pane("claude")` when no `--pane` provided. Priority chain: `--pane` (explicit) -> `active_pane("claude")` (fallback) -> auto-start (last resort). No plugin changes needed. 218 tests. Published to all targets.
 <!-- /agent:history -->
 
 ## Exchange
 
 <!-- agent:exchange -->
-*Compacted. All resolved items from v0.12.0 session (compact command, convert command, lazy claim, template init fix, flaky test fix, release) folded into history.*
+*Compacted. Lazy claim bug (v0.12.1) folded into history.*
 
-agent-doc run on a document with a stale claim still does not reclaim with an active tmux pane. I attempted to run this file. I had to Claim for Tmux Pane before it picked up the run.
+The exchange component keeps on replacing the previous response which I still wanted to see.
+For example in tasks/censible-core.md, there were instructions to change the Auth0 settings.
+I asked a question about whether or not the setting would support censible.co and mi-www.site style logins.
+The answer completely replaced the instructions to change the settings.
 
-### Fixed: Lazy claim now works without --pane
-
-**Root cause:** The v0.12.0 lazy claim only triggered when --pane was explicitly passed to agent-doc route. The JetBrains plugin never passes --pane -- it just calls agent-doc route file. So when the registered pane was dead, route fell through to auto-start instead of re-claiming.
-
-**Fix:** When the registered pane is dead (or no pane is registered) and no --pane was provided, route now falls back to tmux.active_pane("claude") -- the currently active pane in the claude session. If that pane is alive, it lazy-claims to it.
-
-**Priority chain:** --pane (explicit) -> active_pane("claude") (fallback) -> auto-start (last resort)
-
-release
-
-### v0.12.1 Released
-
-Published to all targets:
-- **crates.io**: agent-doc 0.12.1
-- **PyPI**: agent-doc 0.12.1
-- **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.12.1
-- **Binary**: agent-doc 0.12.1 installed
-- **SKILL.md**: updated to v0.12.1
-
-218 tests passing (197 unit + 21 CLI).
-
-compact this file
+We should make exchange more aware of the discussion and not replace the subject context.
 <!-- /agent:exchange -->

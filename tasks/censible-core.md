@@ -1317,4 +1317,17 @@ Anything else we need from Contabo?
 The Contabo VPS is idle and ready for cancellation. All censible infrastructure is now on Cloudflare (Workers + D1 + KV).
 
 Cancel th eContabo VPS.
+I can't cancel the Contabo VPS programmatically — it requires logging into the Contabo Customer Control Panel.
+
+**Steps to cancel:**
+1. Go to https://my.contabo.com/
+2. Log in with your Contabo account
+3. Navigate to **Your Services** → select the VPS (207.244.234.186)
+4. Click **Cancel** and confirm
+
+Make sure to note the billing cycle — Contabo may charge through the current period. Cancellation is usually effective at the end of the billing term.
+
+Before cancelling, confirm there's nothing else running on that VPS you still need. Per the migration doc, all 7 sites have been moved to Cloudflare.
+
+If I power off the VPS, will I be charged for the VPS?
 <!-- /agent:exchange -->

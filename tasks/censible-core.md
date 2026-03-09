@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Self-managed D1 auth deployed. Auth0 removed. ESG Tracker live at esg.briantakita.me.
+**Status:** MSCI data fully removed. ESG Tracker live at esg.briantakita.me with public Kaggle grades + Finnhub financials only.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -874,4 +874,27 @@ One difference with the esg detailed data is that our formula is our own proprie
 3. Does the current disclaimer language satisfy the attorney's 2018 concerns?
 
 Until confirmed, the current architecture (public = Kaggle only, MSCI behind auth) is the safest position.
+Good distinction about the proprietary formula. Here's the data breakdown after the removal I just completed:
+
+**What's removed (MSCI-sourced):**
+- Authenticated API endpoints (`/api/companies/:locator`, `/api/companies/:locator/esg`, `/api/companies/:locator/gender`, report.pdf, export.csv)
+- Client-side JS that fetched detailed ESG scores for logged-in users
+- "Log in to view detailed ESG scores" prompt on company pages
+- `/companies/:ticker/report` route (used MSCI data with auth)
+- Imports: `get_esg_scores`, `get_esg_overview`, `get_gender_data`, `report_html`, `try_extract_email_self`
+
+**What remains (clean):**
+- **Public Kaggle ESG grades** (A/AA/AAA/BBB/BB/B/CCC for E/S/G) — CC BY-NC-SA 4.0, attributed
+- **Finnhub market data** (price, P/E, market cap, etc.) — attributed, free tier compliant
+- **Company info** (name, ticker, industry, description) — non-proprietary
+- **Company search** with autocomplete — your original code
+- **Portfolio management** (rebalance tool) — your original code
+- **WIL rankings** — derived from public data
+- **Self-managed auth** — still functional for portfolio management
+
+**Re: your proprietary formula** — if you later want to display ESG scores derived from your own formula applied to public (non-MSCI) data, that would be legally clean. The formula is yours, and the input data (Kaggle CC BY-NC-SA) allows derivative works with attribution. Just don't use MSCI scores as inputs.
+
+Deployed to esg.briantakita.me. Company pages now show public ESG grades + Finnhub financials. No login prompt, no MSCI data.
+
+Commit censible-core. Push.
 <!-- /agent:exchange -->

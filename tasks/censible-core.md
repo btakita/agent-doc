@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** ESG Tracker live at esg.briantakita.me. Sitemap submitted to Google (9,063 URLs). `src/webmaster/` v0.1.0 working — ready for release.
+**Status:** ESG Tracker live. Sitemap submitted (9,063 URLs). `webmaster` v0.1.0 released on crates.io + GitHub.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -619,4 +619,16 @@ All files: `.gitignore`, `AGENTS.md`, `CLAUDE.md` (symlink), `Cargo.toml`, `Carg
 The `webmaster` tool is working end-to-end: auth → token cache → submit → verify. Ready for first release whenever you want to publish.
 
 release
+**Released webmaster v0.1.0:**
+
+- **crates.io:** https://crates.io/crates/webmaster
+- **GitHub:** https://github.com/btakita/webmaster
+- **Release:** https://github.com/btakita/webmaster/releases/tag/v0.1.0 (with prebuilt binary)
+
+Install globally: `cargo install webmaster`
+
+Published to crates.io, tagged v0.1.0, pushed to GitHub with release binary.
+
+Commit, add, and push submodules. commit and push agent-loop
+release whatever needs to be released.
 <!-- /agent:exchange -->

@@ -318,3 +318,61 @@ Note: corky requires `status: approved` (or `review`/`scheduled`) before `--send
 ## User
 
 From the transcribed conversations with robert-ward. Please come up with talking point for my upcoming call with Judith Krug and Robert Waldman. See tasks/robert-ward.md
+## Assistant
+
+### Talking Points for Judith + Robert Waldman Call
+
+**Opening — "Build is the new buy"** (Robert Ward said to lead with this)
+- With AI, custom software fits like a glove vs. SaaS one-size-fits-all
+- No vendor lock-in, no annual contracts, no per-seat pricing
+- She owns the code, perpetual license
+
+**Cost comparison — why replace MA first:**
+
+| | Mortgage Automator | Brian (custom) |
+|---|---|---|
+| Year 1 | ~$18K ($5K setup + $13K) | $8K flat |
+| Year 2+ | ~$13K/yr | $0 (own it) |
+| Lock-in | Yes (annual) | No |
+This would also need to include the costs of TMO. I will also propose replacing TMO with custom software...but that would have additional development costs.
+
+Savings: ~$10K year one, ~$13K/yr ongoing.
+
+**Staged payments** (Robert Ward coached this hard — Judith is emotional about big numbers):
+- M1 ($2-3K): Website + document upload portal
+- M2 ($2-3K): AI-powered OCR/document extraction
+- M3 ($2-3K): TMO integration + notification system
+- She pays as she sees results — low risk
+
+**What custom does that MA can't:**
+- OCR for ALL her document types (MA only handles their templates)
+- County record scraping for investor/lender sourcing
+- Custom investor pitch decks per risk profile
+- GoHighLevel integration (Robert Waldman has enterprise access)
+- Everything tailored to her exact workflow, not a generic SaaS
+
+**Phase 2 seed (mention, don't push):**
+- TMO costs ~$700/mo = $8.4K/yr
+- Eventually replace that too — she's already month-to-month, no lock-in risk
+- "Once Phase 1 is done, we can look at what else to bring in-house"
+
+**Communication style** (from Robert Ward's coaching):
+- Be concise, professional — she's a hardcore businesswoman, get to the point
+- Only talk about HER business — don't mention your other work
+- Don't re-pitch the $8K as a lump — let the stages frame it
+- She already called you a "genius" — the trust is established
+- Consider asking: "What would you like to start with?" (Robert's integrity play)
+
+**Robert Waldman alignment:**
+- He's her tech/marketing consultant, not a competitor
+- He has enterprise GoHighLevel — collaborate on CRM integration
+- Get his technical buy-in on the architecture (Hono + Cloudflare Workers)
+- He can validate the "build vs buy" approach from his perspective
+
+**If she pushes back on price:**
+- "What would you be comfortable starting with?" (Robert Ward's advice)
+- Offer a website-only Phase 1 for $2-3K as a foot-in-the-door
+- Remind her: MA is $18K year one — even at $8K she's saving $10K
+
+## User
+

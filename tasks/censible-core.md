@@ -1478,6 +1478,26 @@ R2 endpoint: `https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com`
 Contabo Object Storage can now be cancelled. The `CONTABO_*` vars in root `.env` can be removed once the VPS/Object Storage accounts are closed.
 
 What is the approximate monthly billing costs for storing the data in R2?
+### R2 monthly cost: ~$0.54/month
+
+**R2 pricing:**
+- Storage: $0.015/GB/month (first 10 GB free)
+- Egress: **Free** (no bandwidth charges — R2's main advantage over S3)
+- Class A ops (writes): $4.50/million
+- Class B ops (reads): $0.36/million
+
+**Your storage breakdown:**
+
+| Bucket Group | Size | Monthly Cost |
+|---|---|---|
+| Small buckets (10 total) | 3.2 GB | Free (under 10 GB) |
+| foresight-nextcloud-data | 9.1 GB | $0.14 |
+| foresight-nextcloud-backup | 34.1 GB | $0.40 |
+| **Total** | **46.3 GB** | **~$0.54/month** |
+
+Operations costs will be negligible for low-traffic sites — likely a few cents at most.
+
+**Comparison:** Contabo Object Storage starts at ~$2.49/month for 250 GB. R2 is cheaper for your usage AND has free egress.
 
 **R2 pricing** (no egress fees — the main advantage over S3):
 
@@ -1492,4 +1512,8 @@ What is the approximate monthly billing costs for storing the data in R2?
 R2 free tier: 10 GB storage + 10M Class B reads + 1M Class A writes per month.
 
 For comparison, Contabo Object Storage was likely $2.49-4.99/mo (250 GB plan minimum). So R2 is both cheaper and has zero egress fees.
+
+Delete the contabo buckets
+
+Are my apps using the R2 buckets?
 <!-- /agent:exchange -->

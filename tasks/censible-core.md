@@ -1043,4 +1043,13 @@ Zone created and worker custom domain configured:
 Done
 
 Once NS propagation completes (5-30 min), mi-www.site will serve the ESG Tracker from Cloudflare Workers.
+Nameservers not propagated yet — still resolving to `registrar-servers.com`. Zone status is `pending` on Cloudflare. This is normal; NS propagation usually takes 5-30 minutes. Cloudflare will automatically activate the zone once it detects the change.
+
+You can check progress:
+- `dig +short mi-www.site NS` — should change to `dion.ns.cloudflare.com` / `tegan.ns.cloudflare.com`
+- Or check the CF dashboard for zone activation
+
+Once active, `mi-www.site` will serve the ESG Tracker. I'll check again on the next submit if you'd like.
+
+Is mi-www.site already deployed to CF?
 <!-- /agent:exchange -->

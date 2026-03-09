@@ -571,3 +571,29 @@ This enables AI agents to check schedule availability directly instead of asking
 
 Convert to agent_doc_mode: template
 Implement corky calendar feature
+## Assistant
+
+**Google Calendar is already implemented.** The `corky cal` feature was built in the gmail.md session and released as v0.13.1. Here is the current state:
+
+**Released (v0.13.1):**
+- `corky cal auth` — Google Calendar OAuth2 (reuses Gmail credentials from `.corky.toml`)
+- `corky cal list` — upcoming events with `--query`/`--limit`/`--account`
+- `corky cal delete` — delete events by search, `--all` for recurring series, `--dry-run`
+
+**Implemented but uncommitted (found on `main` working tree):**
+- `corky cal create` — create events (RFC 3339 datetime or YYYY-MM-DD all-day, with `--description` and `--location`)
+- `corky cal check` — availability check for a time range (shows busy periods, free time summary)
+
+**Build status:** compiles clean, all 395 tests pass.
+
+**Gaps to close before release:**
+1. **SPEC.md** — no calendar section exists yet (need § for `cal` subcommands)
+2. **VERSIONS.md** — needs entry for `create` + `check` commands
+3. **Commit + tag + publish** the uncommitted `create.rs` and `check.rs`
+
+**Template mode conversion:** acknowledged. The document now uses `agent_doc_mode: template`. Future responses will use patch blocks targeting `<\!-- agent:... -->` components once you set them up.
+
+Shall I close the gaps (SPEC, VERSIONS) and release?
+
+## User
+

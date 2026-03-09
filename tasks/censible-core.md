@@ -180,4 +180,19 @@ Is ESG Book data free to use? Is it an attribution license?
 **Bottom line:** The most defensible path is: keep existing MSCI data behind auth (covered by Martin Investment's license), and either show no ESG scores publicly or source/build independent public-domain data for the teaser.
 
 ESG Book is developed by BCG...whom I applied to for work. I believe that Anil was familiar with Censible and chose to pursue Esg Book. Could you look into the history of ESG Book?
+
+**Correction: ESG Book was developed by Arabesque, not BCG.** BCG partnered with them later to launch "LEO" (a sustainability reporting tool), but didn't create ESG Book.
+
+**ESG Book history:**
+- **Founded by Arabesque** — AI/ESG asset management firm founded by **Omar Selim** in 2013 (MBO from Barclays Bank). **Georg Kell** (founding Executive Director of UN Global Compact) is Chairman.
+- **Incubated 2018**, publicly launched **December 2021**
+- Uses ML + big data: 200+ ESG metrics, news signals from 50,000+ sources across 15 languages
+- Backed by IFC (World Bank), HSBC, Deutsche Bank, Swiss Re, Allianz, Bridgewater, Glass Lewis, HKEX
+- BCG came in later as partner for the "LEO" reporting platform
+
+I couldn't find a connection between an "Anil" at Arabesque/ESG Book and Censible. The leadership is Omar Selim (CEO) and Georg Kell (Chairman). If you have a last name for Anil, I can search more specifically.
+
+Sources: [WBCSD](https://www.wbcsd.org/news/arabesque-develops-esg-book/), [WEF](https://www.weforum.org/stories/2021/12/esg-book-sustainability-sector-free-data/), [ESG Today](https://www.esgtoday.com/esg-book-bcg-launch-new-sustainability-reporting-platform/), [Wikipedia](https://en.wikipedia.org/wiki/Arabesque_Partners)
+
+https://www.linkedin.com/in/anilpod/
 <!-- /agent:exchange -->

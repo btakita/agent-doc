@@ -243,4 +243,15 @@ Commercial licenses: $50/month per dataset, all-in-one $500/month, enterprise fr
 For a white-label demo, option 4 is probably the right call for now. The company search/browse works without ESG scores (company name, ticker, industry, sector are all non-proprietary). ESG scores become the value-add behind login. This also creates a natural licensing pitch: "want ESG scores? license the platform."
 
 Ok...should I bother having esg.briantakita.me or should I call it something like stocks.briantakita.me?
+
+**Keep `esg.briantakita.me`.** The app IS an ESG tracker — scores are just behind auth. Reasons:
+
+- Public pages still serve ESG research (company search by industry/sector, controversies, executives)
+- "ESG" in the subdomain helps SEO for the niche you're targeting
+- Licensing conversations benefit from the ESG positioning
+- "stocks.briantakita.me" undersells it and puts you in a crowded space (stock trackers are everywhere)
+
+Your differentiation is the ESG platform + data pipeline + white-label positioning. The domain should reflect that. The gated ESG scores actually strengthen the licensing pitch — visitors see the platform works, then need a license to access the scored data.
+
+Is there a quick way to get public esg data in an api? Perhaps https://github.com/awesomedata/awesome-public-datasets has a source?
 <!-- /agent:exchange -->

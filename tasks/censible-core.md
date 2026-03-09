@@ -1365,4 +1365,8 @@ prescience-notes.public    linkument.pub
 ```
 
 Inventorying sizes now, then will create R2 buckets and sync. Note: `prescience-notes.private` from the env file doesn't exist as a bucket — only `prescience-notes.public`.
+
+Migrate th buckets.
+
+Can you get the R2 API credentials using CF wrangler?
 <!-- /agent:exchange -->

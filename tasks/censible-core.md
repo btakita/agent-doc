@@ -1287,4 +1287,13 @@ What is the password for brian.takita@gmail.com?
 The password for `brian.takita@gmail.com` is `MartinInv2026!` — same temporary password used to seed all 6 accounts.
 
 What happened to the xlsx export?
+The XLSX export endpoints were working (`/portfolios/:id/export.xlsx` and `/portfolios/:id/export_detailed.xlsx`) — they just had no UI links. Added download links to every portfolio page:
+
+- **Download XLSX** — summary export
+- **Detailed XLSX** — 5-worksheet detailed export
+- **View Report** — HTML report
+
+Deployed. Check any portfolio page on https://mi-www.site/portfolios (e.g., `/portfolios/urth`).
+
+The Holdings sheet should use a formula pointing to the ESG Detail sheet.
 <!-- /agent:exchange -->

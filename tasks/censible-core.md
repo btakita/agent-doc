@@ -124,4 +124,12 @@ The reports (PDF/XLSX) already had similar disclaimers. Deployed.
 **Important caveat:** I'm not a lawyer. For a definitive answer on what disclaimers are legally required, especially given the Censible/Martin Investments SEC history, you should consult a securities attorney. The disclaimer I added covers standard bases but may need refinement.
 
 I don't want any tie to MSCI. I actually had a notice from MSCI about criminal liability for using their data. So I want to make sure there is nothing using their data.
+
+The notice was a prompt on their web portal.
+
+The ESG report can use MSCI data since martin-investment is a MSCI customer and the data is within license.
+
+I just want to make sure that the public facing data is not tied to MSCI. We have the teaser, so it should be essentially scrubbed. Does this seem legally sound?
+
+We may be able to leave in the scrubbed "teaser" data.
 <!-- /agent:exchange -->

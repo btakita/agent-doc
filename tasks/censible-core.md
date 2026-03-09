@@ -12,35 +12,26 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-### Migration Status Assessment
+### Auth Updated to Embedded Password Grant ✓
 
-**Core migration is complete.** All primary features from mi-www.site are replicated:
+Switched from Auth0 Universal Login (redirect-based) to the **Resource Owner Password Grant** flow matching mi-www.site:
 
-| Feature | Old (SolidJS) | New (Hono/CF Workers) | Status |
-|---------|--------------|----------------------|--------|
-| Company search | esg-web | `/companies`, `/api/search` | ✓ |
-| Company detail + ESG | esg-web | `/companies/:locator` | ✓ |
-| Portfolio collections | mi-web | `/portfolios/:id` | ✓ |
-| Portfolio CRUD | esg-web | `/rebalance/portfolios/*` | ✓ |
-| Rankings (WIL + issues) | root-web | `/company-etf-and-mutual-fund-rankings/*` | ✓ |
-| Auth (Auth0) | esg-web | `/login`, `/callback`, `/logout` | ✓ |
-| XLSX export (simple + detailed) | mi-web | `/portfolios/:id/export*.xlsx` | ✓ |
-| SVG charts + PDF | mi-web | `/portfolios/:id/report` | ✓ |
-| CSV export | esg-web | `/api/companies/:locator/export.csv` | ✓ |
-| Finnhub financials | new | `/api/companies/:ticker/financials` | ✓ |
-| Benchmark portfolios | new | URTH/ERTH/PXWEX | ✓ |
-| Company browse (A-Z) | new | `/companies/browse` | ✓ |
+**What changed:**
+- Login form embedded directly in `/login` page (no redirect to Auth0)
+- Email + password entered on-site, POST to Auth0 `/oauth/token` with `grant_type: password-realm`
+- Signup via Auth0 `/dbconnections/signup` (auto-login after)
+- Forgot password via `/dbconnections/change_password`
+- Removed `/callback` route (no longer needed)
+- Token stored in `localStorage` same as before
 
-**Minor gaps** (secondary UI polish, not blocking):
-- Company executives table
-- Company peers comparison on detail page
-- HQ/contact info display
-- Interactive color bar navigation
-- Historical portfolio URL aliases
+**Auth0 dashboard requirement:** The Auth0 application must have **Password** grant type enabled:
+1. **Applications** → your app → **Settings** → **Advanced Settings** → **Grant Types**
+2. Enable **Password** grant type
+3. Save
 
-**Remaining setup:**
-- Custom domains (Cloudflare dashboard)
-- Auth0 callback URL configuration
+Does this support both logins or do I need another Auth0 app with this login?
 
-I used a different method of auth for mi-www.site vs censible.co. mi-www.site is more constrained. Please use the same method of auth
+No callback URL configuration needed anymore since there are no redirects.
+
+**Test:** https://censible-root-web.brian-takita.workers.dev/login
 <!-- /agent:exchange -->

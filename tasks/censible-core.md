@@ -1335,4 +1335,21 @@ If I power off the VPS, will I be charged for the VPS?
 To stop charges, you must **cancel the subscription** through the Contabo control panel. Billing is monthly in advance — cancellation takes effect at the end of the current billing period.
 
 Which of the buckets in Contabo Object Storage not migrated over to R2?
+Found 7 Contabo Object Storage buckets across 5 sites. **None have been migrated to R2 yet.** Only one R2 bucket exists (`briantakita-assets`).
+
+| Contabo Bucket | Site | R2 Status |
+|---|---|---|
+| `prescience-notes.public` | prescience-notes | Not migrated |
+| `prescience-notes.private` | prescience-notes | Not migrated |
+| `herbaliciousbliss.asset` | herbaliciousbliss | Not migrated |
+| `assets.brookebrodack` | brookebrodack | Not migrated |
+| `peakexistence.public` | peak-existence (drmanny) | Not migrated |
+| `peakexistence.private` | peak-existence (drmanny) | Not migrated |
+| `assets.cogov.me` | cogov | Not migrated |
+
+**Important:** If you cancel the Contabo account, these buckets and their contents will be deleted. Object Storage may be billed separately from the VPS — check your Contabo billing to confirm.
+
+Want me to migrate these to R2 before cancellation?
+
+Yes...migrate and switch the assets over in our config.
 <!-- /agent:exchange -->

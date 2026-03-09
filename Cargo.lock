@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.13.2"
+version = "0.13.3"
 dependencies = [
  "agent-kit",
  "anyhow",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "tmux-router"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "clap",

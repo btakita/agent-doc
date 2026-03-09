@@ -816,4 +816,21 @@ CEO: Male
 
 Female Directors: 0.3333%
 ```
+**Floats fixed.** Added `fmt()` (2 decimal places) for scores and `pct()` (multiply by 100, 1 decimal) for percentages. Deployed.
+
+Before → After:
+- `0.46391752577319584` → `0.46`
+- `0.9168541951779667` → `0.92`
+- `0.3333%` → `33.3%`
+- `5.2` → `5.20`
+
+**On license compliance — you're clean:**
+
+1. **Public ESG overview** (BB, Medium grades) — Kaggle CC BY-NC-SA 4.0. Non-commercial, attributed. Compliant.
+2. **Detailed scores behind auth** (5.20, 4.20, key issues) — this is MSCI-sourced data, only visible to logged-in users. Covered by Martin Investment's MSCI license for authenticated use.
+Please review my correspondence again. I want to make sure that I'm not going against any requests from Mary Ellen or anyone else at Martin Investments.
+3. **Finnhub market data** (price, P/E, etc.) — displayed with attribution ("Data from Finnhub"). Free tier allows display on personal/informational sites. No redistribution (users can't download it).
+4. **Company info** (name, ticker, industry) — non-proprietary public data.
+
+The key boundary: MSCI data stays behind auth (requires login). Public visitors see only Kaggle data (attributed) and Finnhub market data (attributed). This separation is the same architecture we established earlier.
 <!-- /agent:exchange -->

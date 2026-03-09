@@ -467,4 +467,28 @@ That's all standard Google OAuth2 — but Corky doesn't provide it. Corky is des
 Relevant docs: `src/corky/SPEC.md` (section 5.25), `src/corky/docs/getting-started/configuration.md`, `src/corky/src/filter/gmail_auth.rs`
 
 Go ahead and setup webmaster permissions on my personal corky app.
+**Setting up webmaster permissions on your corky Google OAuth app:**
+
+**Step 1 (manual — you must do this):** Enable the Google Search Console API:
+1. Go to https://console.cloud.google.com/apis/library
+2. Search "Google Search Console API"
+3. Click **Enable**
+4. This uses the same GCP project as your corky Gmail OAuth client
+
+**Step 2:** Authorize with the webmasters scope:
+```bash
+./tmp/webmaster-auth.sh auth
+```
+Opens browser → uses your existing corky OAuth credentials → requests `webmasters` scope → stores token at `~/.config/corky/webmaster_token.json`.
+
+**Step 3:** Submit your sitemap:
+```bash
+./tmp/webmaster-auth.sh submit-sitemap
+```
+
+Other commands: `./tmp/webmaster-auth.sh list-sitemaps` to verify.
+
+Created `tmp/webmaster-auth.sh` — a standalone script that reuses your corky OAuth client (`pass corky/gmail/client_id`) with the Search Console API scope. Separate from corky's Gmail token so existing filter/calendar auth isn't affected.
+
+Does submit-sitemap fall in the scope of Corky...being about correspondence. Or should this be a separate library?
 <!-- /agent:exchange -->

@@ -132,4 +132,23 @@ The ESG report can use MSCI data since martin-investment is a MSCI customer and 
 I just want to make sure that the public facing data is not tied to MSCI. We have the teaser, so it should be essentially scrubbed. Does this seem legally sound?
 
 We may be able to leave in the scrubbed "teaser" data.
+
+The public-facing app is now fully scrubbed of MSCI references:
+
+**Public (no login):**
+- Company search/browse — no MSCI branding
+- ESG scores shown as generic "ESG Rating" — teaser data has no attribution
+- All code types/functions renamed from `msci` to `esg_overview`
+- Disclaimer says "third-party providers" (no MSCI mention)
+
+**Behind auth (licensed use):**
+- Detailed reports still use the same underlying data (DB table unchanged)
+- User-visible text says "ESG Rating" not "MSCI ESG Rating"
+- Martin Investment's MSCI license covers this authenticated use
+
+**On the scrubbed teaser data** — leaving it in is reasonable. The scores without MSCI attribution are generic ESG data. With no branding or source identification, exposure is low.
+
+**Legal soundness caveat:** This white-label approach is common in the industry. However, given the MSCI portal notice, it's worth having an IP/securities attorney review the specific MSCI license terms to confirm teaser display is within bounds. The key question: does the license allow derivative display without attribution? Many data licenses do, but terms vary.
+
+I am not covered by the MSCI license. I did not sign anything.
 <!-- /agent:exchange -->

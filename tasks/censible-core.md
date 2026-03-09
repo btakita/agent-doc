@@ -215,4 +215,17 @@ Done — `*@neo.com` was already in your `.corky.toml` "correspondence" filter b
 - Anil's emails (and all neo.com correspondence) will be captured automatically
 
 What public ESG data can we use?
+
+**Freely usable ESG data sources:**
+
+1. **Finnhub ESG Scores** — you already have a `FINNHUB_API_KEY`. Free tier includes company-level ESG scores. Rate-limited but sufficient for a white-label demo. Display with attribution.
+2. **SEC EDGAR** — public domain, no restrictions. XBRL financial data via free API (no auth required at `data.sec.gov`). Climate risk disclosures from 10-K/10-Q filings. Real-time JSON.
+3. **World Bank ESG Data** — CC-BY 4.0 license. Sovereign/country-level ESG indicators at `esgdata.worldbank.org`. Good for portfolio benchmarking by country.
+4. **Open Sustainability Index** — open-source, community-contributed. Coverage may be thin.
+5. **Kaggle ESG Datasets** — CC0/CC-BY static datasets. Good for seeding a demo DB.
+6. **CDP** — some data freely searchable, bulk access requires partnership.
+
+**Best practical path:** Finnhub is your most pragmatic option — you already have the API key, it provides company-level ESG scores, and it's separate from MSCI. SEC EDGAR supplements with actual filings data. Want me to look into integrating Finnhub ESG scores as the public-facing data source?
+
+Yes. Is this covered by their license?
 <!-- /agent:exchange -->

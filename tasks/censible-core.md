@@ -1000,4 +1000,18 @@ What are the name servers that should be used?
 3. Tell me when done and I'll add the custom domain to the worker
 
 Or if you'd rather automate: export `CLOUDFLARE_API_TOKEN` (with zone write scope) and provide Namecheap API credentials.
+**Re: API token** — There's no `CLOUDFLARE_API_TOKEN` env var set anywhere. Wrangler authenticates via an OAuth token stored at `~/.config/.wrangler/config/default.toml`, but that OAuth flow only grants worker/pages/D1/KV permissions — it doesn't include zone creation (`com.cloudflare.api.account.zone.create`). You can't upgrade the existing OAuth token's scopes. You'd need to create a separate API token in the CF dashboard with zone write permissions.
+
+I updated the censible-core .env file to include CLOUDFLARE_API_TOKEN.
+Please add the zone.
+
+**Re: nameservers** — Cloudflare assigns nameservers per zone at creation time. You won't know the exact nameservers until the zone is added. They'll be something like `elsa.ns.cloudflare.com` / `todd.ns.cloudflare.com`.
+
+**Fastest path (genuinely 30 seconds):**
+1. Go to https://dash.cloudflare.com → **Add a Site** → type `mi-www.site` → select **Free** plan → click through
+2. CF will show you 2 nameservers — tell me what they are (or just paste them into Namecheap)
+3. At Namecheap: Domain List → mi-www.site → Nameservers → **Custom DNS** → paste the 2 CF nameservers
+4. Once NS propagation is done (I'll check), I'll add the custom domain to `censible-root-web`
+
+The zone must be created in the CF dashboard first — everything else I can automate from there.
 <!-- /agent:exchange -->

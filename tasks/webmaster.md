@@ -292,4 +292,20 @@ echo "$CRATES_PUBLISH_TOKEN" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita
 Ready to run these when you give the go-ahead.
 
 Go ahead
+### Done — secrets set, rename partially complete
+
+**GitHub secrets set:**
+- `CARGO_REGISTRY_TOKEN` → `btakita/agent-kit`
+- `CARGO_REGISTRY_TOKEN` → `btakita/webmaster`
+
+Both repos can now `cargo publish` in their release workflows.
+
+**Renaming `CRATES_PUBLISH_TOKEN`:**
+- Could not find the shell config file where `CRATES_PUBLISH_TOKEN` is defined — it's in the environment but not traceable to any dotfile (`~/.zshrc`, `~/.zprofile`, `~/.zshenv`, `~/.config/`, etc.)
+- The same token is already in `~/.cargo/credentials.toml` as the `[registry] token` — this is what `cargo publish` uses natively
+- You may have set it via a session-specific export, a tool like `direnv`, or a login script I can't read
+
+**To complete the rename:** find where `CRATES_PUBLISH_TOKEN` is exported and change it to `CARGO_REGISTRY_TOKEN`. Or just remove it — `~/.cargo/credentials.toml` already provides the token to Cargo.
+
+Release
 <!-- /agent:exchange -->

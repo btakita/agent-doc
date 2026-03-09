@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. ESG Tracker live at esg.briantakita.me. `src/webmaster/` scaffolded and committed. Pending: enable Search Console API in GCP, then retry sitemap submit.
+**Status:** ESG Tracker live at esg.briantakita.me. Sitemap submitted to Google (9,063 URLs). `src/webmaster/` v0.1.0 working — ready for release.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -601,4 +601,22 @@ cargo run --manifest-path src/webmaster/Cargo.toml -- submit-sitemap https://esg
 - Git initialized, initial commit `86eda0c`
 
 All files: `.gitignore`, `AGENTS.md`, `CLAUDE.md` (symlink), `Cargo.toml`, `Cargo.lock`, `README.md`, `SPEC.md`, `src/{main,lib,auth,config}.rs`, `src/engines/{mod,google,bing}.rs`
+**Sitemap submitted successfully!** Google already downloaded it:
+
+```json
+{
+  "path": "https://esg.briantakita.me/sitemap.xml",
+  "submitted": "9063",
+  "indexed": "0",
+  "errors": "0",
+  "warnings": "0",
+  "lastDownloaded": "2026-03-09T05:32:11.173Z"
+}
+```
+
+9,063 URLs submitted, 0 errors, 0 warnings. Indexing will begin shortly — check Search Console in a few days for coverage progress.
+
+The `webmaster` tool is working end-to-end: auth → token cache → submit → verify. Ready for first release whenever you want to publish.
+
+release
 <!-- /agent:exchange -->

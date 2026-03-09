@@ -276,4 +276,7 @@ agent-doc recover /home/brian/work/btakita/agent-loop/tasks/webmaster.md
 This is lesson #2 in action ("Project root resolution — walk up from file to find `.agent-doc/`, not CWD"). The SKILL.md already warns about this for snapshot operations, and the agent-doc skill workflow should always resolve file paths to absolute before calling any `agent-doc` command.
 
 Arguably `recover` could be improved to resolve relative paths by walking up to find `.agent-doc/`, but the real fix is in the skill workflow — always canonicalize paths.
+
+agent-doc run is not running in the tmux pane even after claimed previously in the session.
+Reclaiming does work.
 <!-- /agent:exchange -->

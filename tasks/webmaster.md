@@ -119,4 +119,42 @@ Each tool crate (`agent-doc`, `webmaster`) depends on `agent-skill` and calls `a
 Ready to scaffold `src/agent-skill/` when you give the go-ahead, or if you had something else in mind with "Ver", let me know.
 
 I may want to expand the scope of agent-skill a bit. Trying to think of what other common needs that CLI tools have in integrating with different agent loops & models. 
+
+### Expanded `agent-skill` scope
+
+Beyond SKILL.md management, here's what CLI tools commonly need when integrating with agent loops:
+
+**1. Skill Management** (already discussed)
+- `skill install` / `skill check` / `skill uninstall`
+- Environment-aware placement (Claude Code, OpenCode, generic)
+- Version tracking and auto-update detection
+
+**2. Structured Output for Agents**
+- Consistent JSON/markdown output format that agents can parse reliably
+- Error reporting in agent-friendly format (not just stderr text)
+- Progress indicators that agents can interpret (not just spinners)
+- `--agent-output` flag support — machine-readable mode for any command
+
+**3. Context Injection**
+- `CLAUDE.md` / `AGENTS.md` management — append/remove sections programmatically
+- MCP tool registration — generate `tool_description` JSON from the manifest
+- System prompt fragments for non-file-based loops (Claude API, Grok API)
+
+**4. Configuration Discovery**
+- Unified config location pattern (`~/.config/<tool>/config.toml`)
+- Project-local config (`.agent-doc/`, `.webmaster/`)
+- Credential management abstraction (pass, keyring, env vars)
+
+**5. Agent Loop Detection & Adaptation**
+- Detect which agent is running (Claude Code? OpenCode? API call?)
+- Adapt output verbosity, format, and error handling per environment
+- Feature flags per environment (e.g., Claude Code has file tools; Codex doesn't)
+
+**6. Instruction File Auditing**
+- The `instruction-files` crate already does this — could become a dependency of `agent-skill`
+- Shared audit logic for any tool that ships instruction files
+
+**Which of these resonate?** The core question is whether `agent-skill` stays narrow (skill management + environment detection) or becomes a broader "agent integration SDK" for CLI tools. The name `agent-skill` fits the narrow scope well; if it grows into an SDK, a different name might suit better.
+
+I think the scope should be broader. What are good names? Please verify availability.
 <!-- /agent:exchange -->

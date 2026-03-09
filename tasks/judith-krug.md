@@ -334,7 +334,6 @@ From the transcribed conversations with robert-ward. Please come up with talking
 | Year 1 | ~$18K ($5K setup + $13K) | $8K flat |
 | Year 2+ | ~$13K/yr | $0 (own it) |
 | Lock-in | Yes (annual) | No |
-This would also need to include the costs of TMO. I will also propose replacing TMO with custom software...but that would have additional development costs.
 
 Savings: ~$10K year one, ~$13K/yr ongoing.
 
@@ -376,3 +375,8 @@ Savings: ~$10K year one, ~$13K/yr ongoing.
 
 ## User
 
+Year 1 onward estimate would also need to include the costs of TMO + my work. I will also propose replacing TMO with custom software...but that would have additional development costs.
+
+Robert Ward said Judith was going to call at 10 Pacific Time. It's now 10:33 Pacific Time. We just had Daylight Savings Time.
+
+I have 2 calls starting at 3:30 Eastern Time ending just before 5:00 Eastern Time. Do you have access to my Google calendar?

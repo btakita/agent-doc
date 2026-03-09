@@ -375,6 +375,7 @@ Placeholder added in layout head. To complete:
 2. Click **Add Property** → enter `https://esg.briantakita.me`
 3. Choose **HTML tag** verification method
 4. Copy the `<meta name="google-site-verification" content="...">` tag
+Google Search Console told me that the site is already DNS certified.
 5. Give me the content value and I'll add it to the layout
 
 All live at https://esg.briantakita.me. Try:
@@ -382,4 +383,24 @@ All live at https://esg.briantakita.me. Try:
 - https://esg.briantakita.me/llms.txt
 - https://esg.briantakita.me/robots.txt
 - https://esg.briantakita.me/companies/DIS (check page source for JSON-LD)
+
+**Edge caching is the right approach** — no need for static HTML files.
+
+**Static HTML drawbacks:**
+- 9,056 files to generate and redeploy on every data change
+- Finnhub financial data is live — static files show stale prices
+- Deploy size balloons from ~800KB to 50MB+
+
+**Edge caching (what you already have):**
+- Cloudflare Workers run at 300+ edge locations — already at the edge
+- Pages render in ~5-10ms (D1 query + HTML template)
+- ESG data changes infrequently; Finnhub data already KV-cached
+- Add `Cache-Control: public, max-age=3600` to company pages for 1-hour CDN caching
+- Instant invalidation on redeploy
+
+I can add cache headers to the company routes if you want. This gives you the speed of static files with the flexibility of dynamic rendering.
+
+On "Help me" — looks like your message was cut off. What do you need help with?
+
+Can y
 <!-- /agent:exchange -->

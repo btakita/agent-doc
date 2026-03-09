@@ -868,6 +868,9 @@ Reviewed all correspondence. Here's what's relevant:
 I don't think sh will be comfortable. I'm not planning on asking. I did some work for Martin Investments for their portfolio data. But Censible may not be covered. I'm wondering if I should remove data derived from MSCI data.
 I have no agreement with Martin Investment to reuse their data.
 My primary goal is to demo my work and to gain SEO from the company search. Displaying ESG data specifics is not of strategic importance.
+
+The CC and non-proprietary data is good content. I don't want legal liability from using proprietary data.
+One difference with the esg detailed data is that our formula is our own proprietary formula.
 3. Does the current disclaimer language satisfy the attorney's 2018 concerns?
 
 Until confirmed, the current architecture (public = Kaggle only, MSCI behind auth) is the safest position.

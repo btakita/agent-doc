@@ -220,4 +220,16 @@ I asked a question about whether or not the setting would support censible.co an
 The answer completely replaced the instructions to change the settings.
 
 We should make exchange more aware of the discussion and not replace the subject context.
+
+### Exchange append mode enabled
+
+You're right — this is a real problem. The exchange component was using `replace` mode (default), so each response wiped out the existing content including original instructions.
+
+**Fix:** Created `.agent-doc/components.toml` with `[exchange] mode = "append"`. Now `<!-- patch:exchange -->` blocks append to the exchange instead of replacing it. This preserves the conversation history naturally.
+
+The same fix should be applied to any project using exchange components where conversation context matters. Projects can override by creating their own `.agent-doc/components.toml`.
+
+This is also a SKILL.md awareness issue — when responding in exchange mode, the agent should be aware that replace will wipe previous context. The append mode config is the structural fix; I'll also update the SKILL.md to document this convention.
+
+implement and release
 <!-- /agent:exchange -->

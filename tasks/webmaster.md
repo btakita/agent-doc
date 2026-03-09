@@ -446,4 +446,31 @@ https://crates.io/crates/agent-kit still shows v0.1.0
 - 16 tests
 - https://crates.io/crates/webmaster
 https://crates.io/crates/webmaster still shows v0.1.1
+
+### Fixed and confirmed
+
+Both are now live on crates.io:
+
+**agent-kit v0.2.0** — the first release attempt actually published successfully, but the workflow reported failure because `--allow-dirty` wasn't set (Cargo.lock drifted from the new `instruction-files` dependency). Fixed the workflow and confirmed: `agent-kit@0.2.0` is on crates.io.
+
+**webmaster v0.1.2** — failed initially because agent-kit v0.2.0 wasn't indexed yet on crates.io. The automatic re-run succeeded after crates.io caught up. Published to crates.io + GitHub Release with prebuilt binary.
+
+**Workflow fix:** agent-kit release.yml now uses `--allow-dirty` and `--all-features` for clippy/test (ensures the audit module is verified in CI).
+### Releases fixed and published
+
+Both release workflows had failed. Root causes and fixes:
+
+**agent-kit v0.2.0** — `cargo publish` failed due to dirty `Cargo.lock`
+- Fix: Added `--allow-dirty` to release workflow
+- Moved tag forward, re-triggered release
+- Now live on crates.io: https://crates.io/crates/agent-kit (v0.2.0)
+
+**webmaster v0.1.2** — `cargo publish` failed because agent-kit v0.2.0 wasn't on crates.io yet (circular dependency)
+- Fix: Published agent-kit first, then re-ran webmaster release
+- Now live on crates.io: https://crates.io/crates/webmaster (v0.1.2)
+- GitHub Release with prebuilt binary also created
+
+**Lesson:** Release workflows with cross-crate dependencies need ordered publishing. The webmaster release workflow should ideally wait for agent-kit to be indexed on crates.io before attempting `cargo publish`.
+
+compact this file
 <!-- /agent:exchange -->

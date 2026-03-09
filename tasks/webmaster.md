@@ -328,4 +328,12 @@ Release
 
 Please add a README and VERSIONS to agent-kit.
 Please add a README and VERSIONS to agent-kit.
+### Done — README and VERSIONS added to agent-kit
+
+- **README.md** — Description, features, usage example with `SkillConfig`, roadmap, license
+- **VERSIONS.md** — Changelog starting with v0.1.0
+
+Committed and pushed to https://github.com/btakita/agent-kit
+
+What are pending features for agent-kit?
 <!-- /agent:exchange -->

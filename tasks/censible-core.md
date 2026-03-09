@@ -504,4 +504,25 @@ I want seo tooling to use with the agent loop. src/cloudflare is dependent on us
 There are webmaster libraries in crates https://crates.io/search?q=webmaster
 Also there is data for seo
 https://crates.io/crates/data-for-seo
+**An SEO toolkit makes sense as a new submodule.** `src/cloudflare/` is Cloudflare-specific — SEO tooling is provider-agnostic.
+
+**Suggested: `src/seo/`** — new Rust kit following the corky pattern.
+
+**Rust crates to build on:**
+
+| Crate | Purpose | Notes |
+|-------|---------|-------|
+| **google-searchconsole1** | Google Search Console API v1 | Sitemap submission, search analytics, URL inspection |
+| **data-for-seo** | DataForSEO API wrapper | SERP data, keyword research, on-page analysis (commercial API) |
+| **spider** | Web crawling | Async, robots.txt-aware, headless Chrome |
+| **robotstxt** | robots.txt parsing | Google's production crawler code ported to Rust |
+
+**Minimal v0.1:** Google Search Console — sitemap submission, search analytics, URL inspection. Replaces `tmp/webmaster-auth.sh` with a proper tool. Reuses your corky GCP OAuth credentials.
+
+**Future:** DataForSEO keyword research, spider-based technical SEO audits, agent-doc ranking dashboards.
+
+Want me to scaffold `src/seo/`?
+
+seo is already taken as a crate name. Is there a different name?
+webmaster perhaps?
 <!-- /agent:exchange -->

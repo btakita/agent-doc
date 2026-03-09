@@ -1330,4 +1330,9 @@ Make sure to note the billing cycle — Contabo may charge through the current p
 Before cancelling, confirm there's nothing else running on that VPS you still need. Per the migration doc, all 7 sites have been moved to Cloudflare.
 
 If I power off the VPS, will I be charged for the VPS?
+**Yes — Contabo charges whether the VPS is powered on or off.** You're paying for reserved hardware (CPU, RAM, disk, IP), not usage. Powering off doesn't stop billing.
+
+To stop charges, you must **cancel the subscription** through the Contabo control panel. Billing is monthly in advance — cancellation takes effect at the end of the current billing period.
+
+Which of the buckets in Contabo Object Storage not migrated over to R2?
 <!-- /agent:exchange -->

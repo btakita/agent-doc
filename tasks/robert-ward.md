@@ -1,6 +1,7 @@
 ---
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
 tmux_session: '0'
+agent_doc_mode: template
 ---
 
 
@@ -16,3 +17,6 @@ He often needs help looking for housing on CraigsList.
 Also looking for a storage unit.
 
 I have been thinking of building a tool to scrape CraigsList `rooms / shared` category for specific areas in  Santa Monica, Venice, Palisades.
+
+Please transcribe and diarize phone calls with robert-ward.
+Brian Takita and Robert Ward are in the phone calls.

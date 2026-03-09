@@ -601,6 +601,31 @@ Yes
 
 ## Assistant
 
+**Released corky v0.13.3** — calendar create + check.
+
+**What shipped:**
+- `corky cal create SUMMARY --start DT --end DT` — create events (RFC 3339 or YYYY-MM-DD all-day), optional `--description`, `--location`, `--account`
+- `corky cal check --start DT --end DT` — availability check showing busy periods and free/total time summary
+
+**Gaps closed:**
+- SPEC.md § 15.3–15.8 — full docs for `cal create` and `cal check` with edge cases
+- VERSIONS.md — v0.13.3 entry added
+
+**Release checklist:**
+- [x] `make check` — clippy clean, all tests pass
+- [x] Version bump: 0.13.2 → 0.13.3 (Cargo.toml + pyproject.toml)
+- [x] Committed + pushed to GitHub
+- [x] Tagged `v0.13.3`
+- [x] Published to crates.io
+- [x] Published to PyPI (maturin)
+- [x] GitHub Release created
+- [x] Installed to `~/.cargo/bin/corky`
+- [x] Parent submodule pointer updated
+
+## User
+
+## Assistant
+
 **v0.13.3 released** with `cal create` and `cal check`.
 
 **Release checklist:**
@@ -622,3 +647,4 @@ corky cal check <START> <END> [--account NAME]
 
 ## User
 
+compact this file and convert to agent_doc_mode: template

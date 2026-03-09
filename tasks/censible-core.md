@@ -1052,4 +1052,18 @@ You can check progress:
 Once active, `mi-www.site` will serve the ESG Tracker. I'll check again on the next submit if you'd like.
 
 Is mi-www.site already deployed to CF?
+Yes, the CF side is fully configured:
+
+- **Worker custom domain:** `mi-www.site` → `censible-root-web` (production) — confirmed active with SSL cert
+- **Zone:** created on Free plan with correct nameservers assigned
+
+What's **not done yet:** NS propagation. Namecheap is still serving the old nameservers (`registrar-servers.com`). The zone status on CF is `pending` — CF is waiting to detect the nameserver change.
+
+The old Contabo server is shut down, so mi-www.site currently returns nothing (connection refused). Once NS propagation completes, DNS will resolve through Cloudflare and the worker will serve the ESG Tracker.
+
+Can you verify in Namecheap that the custom DNS was saved correctly? It should show `dion.ns.cloudflare.com` and `tegan.ns.cloudflare.com` as the nameservers for mi-www.site.
+
+Are there any DNS caches that can be cleared on my machine?
+
+
 <!-- /agent:exchange -->

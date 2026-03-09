@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migrating data to new `mi-www-db` D1 database. Schema applied. Batch import running.
+**Status:** mi-www fully deployed. New `mi-www-db` D1 database live. Old DB deleted. Auth working.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1263,4 +1263,17 @@ Can we create and migrate the database to mi-www-db? Shutting down censible-mi-w
 
 Also resolved the login 500 error — it was a shell escaping issue (zsh `printf` turning `!` into `\!`). Login works correctly from the browser. All 6 user accounts are active.
 On it. Created new D1 database `mi-www-db` (ID: `73908e9a-d4eb-4e60-8f85-ec2e27c15a8e`). Schema applied. Data migration in progress — copying all rows from old `censible-mi-web-db` to new `mi-www-db`. Will redeploy and delete old DB once complete.
+Done — fully migrated to new `mi-www-db`:
+
+1. **Created** new D1 database `mi-www-db` (ID: `73908e9a-d4eb-4e60-8f85-ec2e27c15a8e`)
+2. **Applied** schema (0001_schema.sql)
+3. **Migrated** all 37,143 rows across 7 tables (auth_users, company, esg_score, msci_esg, company_gender, geographic_classification, public_esg)
+4. **Redeployed** worker with new DB binding
+5. **Restored** secrets (FINNHUB_API_KEY + AUTH_SECRET)
+6. **Verified** login works on mi-www.site
+7. **Deleted** old `censible-mi-web-db` database
+
+Live at **https://mi-www.site** — fully functional with the new `mi-www-db` database.
+
+I'm seeing FOUC when I click on a link. Also, the global navigation should not be visible when not logged in.
 <!-- /agent:exchange -->

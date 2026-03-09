@@ -71,11 +71,15 @@ Instead of duplicating TMO's or MA's core operations, build a **complementary in
 - **Draft:** `mail/contacts/judith-krug/20260227-correction.md` → status: `sent`
 - **Threading failed** — Gmail broke thread due to subject change from empty to "Quick correction"
 
-## Corky Bugs Found & Fixed
+### Follow-up Email (2026-03-06)
+- **Draft:** `mail/drafts/20260306-judith-followup.md` → status: `sent`
+- Light follow-up confirming receipt, offering call. CC'd Robert Waldman.
 
-1. **Missing subject field in drafts** — `EmailDraftMeta` had no `subject` field. Fixed.
-2. **Gmail filter AND vs OR** — multi-field filters now use `query` criteria with OR logic. Fixed.
-3. **Reply threading heuristics** — documented in `corky/docs/guide/commands.md` and `corky/CLAUDE.md`.
+### Proposal Email (2026-03-05)
+- **Draft:** `mail/drafts/20260305-judith-proposal.md` → status: `sent`
+- **To:** judithkrug@gmail.com, **CC:** rwaldman100@gmail.com
+- **Subject:** Proposal — TMO + Custom Automation for Equity Funding Source
+- **Attachment:** `20260305-tmo-proposal.pdf`
 
 ## Key People
 
@@ -89,34 +93,21 @@ Instead of duplicating TMO's or MA's core operations, build a **complementary in
 - **Notes:** `mail/contacts/judith-krug/recordings/20260304-judith-krug-robert-waldman-notes.md`
 - **Shareable meeting notes:** `mail/contacts/judith-krug/recordings/20260304-meeting-notes-for-sharing.md`
 
-## Session Log (2026-03-05)
-
-### Platform Decision
-
-Judith chose **Mortgage Automator** initially but had second thoughts when the $1,800 pending charge hit. She texted asking for a comparison if she went with TMO instead. Robert Ward confirmed she was still deciding (silence ≠ rejection — she gets busy). Robert Waldman is advising on tech stack.
-
-### Proposal Development
+## Proposal (2026-03-05)
 
 Full proposal at: `mail/contacts/judith-krug/20260305-tmo-proposal.md` (PDF: `20260305-tmo-proposal.pdf`)
 
-**Key decisions made during drafting:**
+**Pricing:** $8,000 flat for 80+ hours, two $4,000 milestone payments. $100/hr for additional work.
 
-1. **Pricing:** Started at $5K → $6K → $7K/70hrs → $8K/80+hrs. Final: **$8,000 flat for 80+ hours**, two $4,000 milestone payments. $100/hr for additional work.
-2. **Milestones:** M1 = website + document upload portal. M2 = OCR/TMO integration + notification system.
-3. **Monthly costs:** ~$670–845/mo (TMO ~$600, Google Workspace 5 seats $35, AI/hosting $10-200+, Cloudflare $0-5, domain $0).
-4. **Support:** 1 month free post-completion, then $100/hr as needed.
-5. **Licensing:** Royalty-free perpetual license (non-exclusive). Optional exclusive reseller rights for mortgage market available.
+**Milestones:**
+- M1: Website + document upload portal
+- M2: OCR/TMO integration + notification system
 
-### Technical Stack Decisions
+**Monthly costs:** ~$670–845/mo (TMO ~$600, Google Workspace $35, AI/hosting $10-200+)
 
-- **Framework:** Hono + Cloudflare Workers/Pages (Astro considered but skipped — Hono is simpler, no framework overhead)
-- **Components:** relementjs + rmemo (Brian's libraries)
-- **CMS:** Keystatic (GitHub mode) for staff content editing via browser
-- **Hosting:** Cloudflare Pages (free tier, LAX PoP, email routing)
-- **Office suite:** Google Workspace Business Starter (5 seats, $35/mo)
-- **CRM:** GoHighLevel (Robert has free enterprise access) or HubSpot — in bonus scope
+**Technical stack:** Hono + Cloudflare Workers/Pages, relementjs + rmemo, Keystatic CMS, Google Workspace
 
-### Development Phases (63-90 hours, ~5 weeks)
+**Development Phases (63-90 hours, ~5 weeks):**
 
 | Phase | Deliverable | Hours |
 |-------|------------|-------|
@@ -124,220 +115,29 @@ Full proposal at: `mail/contacts/judith-krug/20260305-tmo-proposal.md` (PDF: `20
 | 2 | Document upload portal (secure links, Drive/Dropbox) | 12-16 |
 | 3 | AI-powered OCR + TMO API integration | 16-26 |
 | 4 | Notification system (Google Calendar-based) | 10-14 |
-| Cross-cutting | Event logging, testing, documentation, handoff | Inline |
 
-### TMO API
+**TMO API:** Developer portal at https://developers.themortgageoffice.com/, sandbox available.
 
-- **Developer Portal:** https://developers.themortgageoffice.com/
-- **Sandbox:** Token "TMO", Database "API Sandbox"
-- **Key endpoints:** NewLoan, UpdateLoan, GetLoan, NewLender, AddFunding, GetLoanAttachments, NewConversation
-- **OCR pipeline:** Upload → Claude vision extracts fields → staff reviews → push to TMO via API
+**Bonus scope:** Telephony, county record scraping, CRM integration, investor portal.
 
-### Bonus Scope (if core finishes early)
+## Cost Comparison
 
-- Phone recording + transcripts (telephony — separate plan in `tasks/telephony.md`)
-- County record scraping for lenders/investors (beneficiaries)
-- GoHighLevel or HubSpot CRM integration
-- Additional website features
-- Investor portal (minimal: 2-4 hrs; medium with TMO API: 8-14 hrs)
+| | Mortgage Automator | TMO + Brian (custom) |
+|---|---|---|
+| Year 1 | ~$18K | ~$15.2K ($8K dev + $7.2K TMO) |
+| Year 2+ | ~$13K/yr | ~$7.2K/yr (TMO only) |
+| Phase 2 (replace TMO) | N/A | +$8-12K dev, then $0/yr |
 
-### AI Cost Tiers
+Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO replacement (Phase 2), breaks even by end of year 2, saves ~$7-13K/yr after.
 
-| Usage level | Est. cost/mo |
-|-------------|-------------|
-| Light (OCR only, 1-5 docs/day) | $30-80 |
-| Moderate (+ phone transcription, 5-10 calls/day) | $80-200 |
-| Heavy (high call volume) | $200-500 |
+## Talking Points for Call
 
-### Website Audit (equityfundingsource.com)
-
-- Stack: WordPress + Elementor Pro + WPForms + Bookly + Infusionsoft
-- SEO gaps: no robots.txt/sitemap, no FAQ schema, no llms.txt, funded deals in images not text
-- Quick wins identified: robots.txt, FAQ page, llms.txt, text-ify funded deals
-- Site structure plan: main site (borrowers + brokers), separate investor portal, separate broker portal
-
-### Staff Tooling
-
-- **Content editing:** Keystatic browser UI (no git knowledge needed)
-- **Layout/structural changes:** Claude Code in plain English
-- **Text editor (if needed):** VS Code recommended
-- **Obsidian:** potential for internal knowledge base; agent-doc integration feasible but needs robustness work
-- **CLI tool (`efs`):** custom business tooling planned for structured workflows
-
-### Corky Feature: `corky doc build`
-
-Implemented during this session:
-- `corky doc build <file.md>` → PDF via pandoc + weasyprint
-- `corky doc build --format docx <file.md>` → DOCX via pandoc
-- Template selection via frontmatter (`template: proposal`)
-- Files: `corky/src/doc/{mod,build}.rs`
-- Proposal template: `mail/templates/proposal.css` + `mail/templates/build-pdf.sh`
-
-### Final Deliverable
-
-**Email drafted and pushed to Gmail:**
-- To: judithkrug@gmail.com
-- CC: rwaldman100@gmail.com (Robert Waldman)
-- Subject: Proposal — TMO + Custom Automation for Equity Funding Source
-- Attachment: 20260305-tmo-proposal.pdf
-- Draft file: `mail/drafts/20260305-judith-proposal.md`
-
-## Open Items
-
-- [ ] Judith reviews proposal and decides MA vs TMO + custom
-- [ ] Schedule Zoom call with Judith and Robert Waldman for deeper requirements
-- [ ] Talk to MA about website integration specs (if she stays with MA)
-- [ ] Telephony plan details (see `tasks/telephony.md`)
-- [ ] `corky filter apply` — retroactive filter application via Gmail Messages API
-- [ ] Auto-derive `Re: <original subject>` when `in_reply_to` is set
-- [ ] Proofreading check — flag factual claims against contact file before sending
-- [ ] `corky doc upload` — Google Docs upload feature (stubbed)
-
-## User
-
-Judith has not gotten back to me. Should I follow up to see what she decided to do?
-
-## Assistant
-
-**Wait until tomorrow or Friday.** The proposal was sent earlier today — same-day follow-up reads as pushy. From earlier context: Robert Ward confirmed "silence ≠ rejection — she gets busy." She'll want to review it and likely discuss with Robert Waldman first.
-
-When you do follow up, keep it light — confirm receipt, don't ask for a decision:
-
-> "Just wanted to make sure the proposal came through OK — happy to jump on a call whenever you're ready to discuss."
-
-Want me to draft that follow-up for tomorrow?
-
-## User
-
-No response from Judith. Let's have a followup. I'm not sure what she decided to do. I wonder if $8000 scared her off
-
-## Assistant
-
-**$8K probably didn't scare her off** — she was already looking at $18K year-one for MA. Your proposal saves her ~$5K in year one and ~$6K/year ongoing. The value prop is strong. More likely she's busy (Robert Ward's earlier read) or discussing with Robert Waldman.
-
-That said, a light follow-up is fine — proposal was sent yesterday. Keep it short, don't re-pitch, give her an easy off-ramp to ask questions:
-
-**Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
-
-> Hi Judith,
->
-> Just wanted to make sure the proposal came through OK yesterday. Happy to hop on a quick call with you and Robert whenever works — no rush at all.
->
-> Brian
-
-**Why this works:**
-- Confirms receipt (legitimate reason to follow up after 1 day)
-- Includes Robert Waldman (she'll want his input)
-- "No rush" removes pressure
-- Short = respectful of her time
-
-Want me to draft this as a corky email (threaded reply to the proposal)?
-
-## User
-
-Yes. Should an email for this or a sms text?
-
-## Assistant
-
-**Email.** The proposal was sent by email with Robert Waldman CC'd — follow up in the same channel so Robert sees it too. Text would feel like escalating pressure on a professional proposal, and you lose the paper trail.
-
-Draft created: `mail/drafts/20260306-judith-followup.md`
-
-- **To:** judithkrug@gmail.com
-- **CC:** rwaldman100@gmail.com
-- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
-
-> Hi Judith,
->
-> Just wanted to make sure the proposal came through OK yesterday. Happy to hop on a quick call with you and Robert whenever works — no rush at all.
->
-> Brian
-
-Review and run `corky draft push 20260306-judith-followup.md` when ready.
-
-## User
-
-Should I offer options with cost or supporting different directions?
-Maybe if Judith does go with Mortgage Optimizer?
-
-## Assistant
-
-**Not in this follow-up — save it for the call.** This email's only job is to confirm receipt and get her to respond. Adding pricing options or alternative scenarios would be negotiating against yourself before she's even objected, and makes the email longer (more likely to be put aside).
-
-The proposal already positions your work as platform-agnostic. Have these ready for the conversation, not in writing:
-
-| If Judith chooses... | Your play |
-|---------------------|-----------|
-| **TMO** (proposal as-is) | Execute the proposal |
-| **MA** | Drop Phase 1 website migration (MA has portals), focus on AI/OCR layer + website modernization. ~$5-6K instead of $8K |
-MA has OCR and AI I believe. We can have our own for other documents however.
-| **Neither** (stays manual) | Offer a smaller website-only engagement ($2-3K) as a foot in the door |
-
-Keep the follow-up email exactly as drafted — 3 sentences, receipt check, call offer. Present options verbally when she tells you what she's leaning toward.
-
-## User
-
-Ok...let's send the email as a reply to the thread.
- 
-## Assistant
-
-Done — draft pushed to Gmail as a reply to the proposal thread.
-
-- **To:** judithkrug@gmail.com
-- **CC:** rwaldman100@gmail.com
-- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
-
-Open your Gmail drafts to review and hit send.
-
-Re: your note about MA having OCR/AI — good catch. If she goes MA, the value shifts to: custom doc processing for non-MA documents, website modernization, and investor-facing tooling. MA's OCR is limited to their platform's document types.
-
-## User
-
-Are you able to directly send the email...rather than having to click send in gmail?
-
-## Assistant
-
-**Yes — `corky draft push --send` sends immediately.** I deliberately used draft-only because corky's safety rules say "never send directly — always save as draft for review first." It's a guardrail against sending something you haven't proofread.
-
-For a 3-line follow-up you've already approved — your call. Want me to send it now with `--send`? Or do you prefer the draft-then-send workflow going forward?
-
-The draft is already in your Gmail inbox — you can also just hit send there if that's easier right now.
-
-## User
-
-Yes. send it now
-
-## Assistant
-
-**Sent.** Follow-up email delivered to judithkrug@gmail.com (CC: rwaldman100@gmail.com).
-
-Draft file updated to `status: sent` at `mail/drafts/20260306-judith-followup.md`.
-
-Note: corky requires `status: approved` (or `review`/`scheduled`) before `--send` works — `draft` status is blocked as a safety check. I updated the status to `approved` then sent.
-
-## User
-
-From the transcribed conversations with robert-ward. Please come up with talking point for my upcoming call with Judith Krug and Robert Waldman. See tasks/robert-ward.md
-## Assistant
-
-### Talking Points for Judith + Robert Waldman Call
-
-**Opening — "Build is the new buy"** (Robert Ward said to lead with this)
-- With AI, custom software fits like a glove vs. SaaS one-size-fits-all
+**Opening — "Build is the new buy"** (Robert Ward coaching)
+- Custom software fits like a glove vs. SaaS one-size-fits-all
 - No vendor lock-in, no annual contracts, no per-seat pricing
 - She owns the code, perpetual license
 
-**Cost comparison — why replace MA first:**
-
-| | Mortgage Automator | Brian (custom) |
-|---|---|---|
-| Year 1 | ~$18K ($5K setup + $13K) | $8K flat |
-| Year 2+ | ~$13K/yr | $0 (own it) |
-| Lock-in | Yes (annual) | No |
-
-Savings: ~$10K year one, ~$13K/yr ongoing.
-
-**Staged payments** (Robert Ward coached this hard — Judith is emotional about big numbers):
+**Staged payments** (Judith is emotional about big numbers):
 - M1 ($2-3K): Website + document upload portal
 - M2 ($2-3K): AI-powered OCR/document extraction
 - M3 ($2-3K): TMO integration + notification system
@@ -348,86 +148,39 @@ Savings: ~$10K year one, ~$13K/yr ongoing.
 - County record scraping for investor/lender sourcing
 - Custom investor pitch decks per risk profile
 - GoHighLevel integration (Robert Waldman has enterprise access)
-- Everything tailored to her exact workflow, not a generic SaaS
 
-**Phase 2 seed (mention, don't push):**
-- TMO costs ~$700/mo = $8.4K/yr
-- Eventually replace that too — she's already month-to-month, no lock-in risk
-- "Once Phase 1 is done, we can look at what else to bring in-house"
-
-**Communication style** (from Robert Ward's coaching):
-- Be concise, professional — she's a hardcore businesswoman, get to the point
-- Only talk about HER business — don't mention your other work
-- Don't re-pitch the $8K as a lump — let the stages frame it
-- She already called you a "genius" — the trust is established
-- Consider asking: "What would you like to start with?" (Robert's integrity play)
-
-**Robert Waldman alignment:**
-- He's her tech/marketing consultant, not a competitor
-- He has enterprise GoHighLevel — collaborate on CRM integration
-- Get his technical buy-in on the architecture (Hono + Cloudflare Workers)
-- He can validate the "build vs buy" approach from his perspective
+**Communication style** (Robert Ward's coaching):
+- Be concise, professional — get to the point
+- Only talk about HER business
+- Don't re-pitch $8K as a lump — let the stages frame it
+- She already called you a "genius" — trust is established
+- Ask: "What would you like to start with?"
 
 **If she pushes back on price:**
-- "What would you be comfortable starting with?" (Robert Ward's advice)
-- Offer a website-only Phase 1 for $2-3K as a foot-in-the-door
-- Remind her: MA is $18K year one — even at $8K she's saving $10K
-If she uses TMO, the savings would be 18K - 8K - TMO 1 year price 
+- "What would you be comfortable starting with?"
+- Offer website-only Phase 1 for $2-3K as foot-in-the-door
+- MA is $18K year one — even at $8K + TMO she's saving money
 
-## User
+## Open Items
 
-Year 1 onward estimate would also need to include the costs of TMO + my work. I will also propose replacing TMO with custom software...but that would have additional development costs.
+- [ ] Judith reviews proposal and decides MA vs TMO + custom
+- [ ] Schedule Zoom call with Judith and Robert Waldman for deeper requirements
+- [ ] Talk to MA about website integration specs (if she stays with MA)
+- [ ] Telephony plan details (see `tasks/telephony.md`)
 
-Robert Ward said Judith was going to call at 10 Pacific Time. It's now 10:33 Pacific Time. We just had Daylight Savings Time.
+## Session Log (2026-03-09)
 
-I have 2 calls starting at 3:30 Eastern Time ending just before 5:00 Eastern Time. Do you have access to my Google calendar?
-## Assistant
+- Judith expected to call at 10 PT (per Robert Ward). DST just happened — may be confused about time.
+- Brian has calls 3:30-5:00 ET — free until 12:30 PT for Judith.
+- Robert Ward set up the call — Brian feels strange reaching out directly.
+- Corky calendar integration moved to `tasks/corky.md`.
 
-**Updated cost comparison (TMO + custom vs MA):**
+<!-- agent:exchange -->
+Please draft a quick text message to send to Judith. Note my schedule today.
+If we don't have a call before 3 ET, then I can have a call after 5 ET...or tomorrow.
+I have a call from 1-1:20 ET tomorrow.
 
-| | Mortgage Automator | TMO + Brian (custom) |
-|---|---|---|
-| Year 1 | ~$18K | ~$15.2K ($8K dev + $7.2K TMO) |
-| Year 2+ | ~$13K/yr | ~$7.2K/yr (TMO only) |
-| Phase 2 (replace TMO) | N/A | +$8-12K dev, then $0/yr |
-
-With TMO replacement in Phase 2, she breaks even by end of year 2 and saves ~$7-13K/yr after that. Strong long-term play.
-
-**On the DST timing:** Clocks sprang forward last night. If Judith is thinking "10 AM" but forgot to adjust, she might think it's 9:33 right now. Give her until 11 PT (what would have been 10 pre-DST). If no call by then, a quick text is appropriate: "Hey Judith, just checking — still good for today? Happy to hop on whenever works."
-
-Robert Ward set up the call, so I feel a bit strange jumping in like this.
-
-**Your schedule:** You're free until 3:30 ET (12:30 PT). That gives Judith a ~2 hour window if she calls in the next 30 min, or a solid 90 min if she calls by 11 PT.
-
-**Google Calendar:** No, I don't have access to your Google Calendar. Corky handles email via Gmail API but calendar is a separate API scope. If you want calendar integration, that would be a feature to add to corky (`corky calendar` commands). For now, just tell me your schedule and I'll work around it.
-
-Yes...let's add Calendar Integration into Corky
-
-## User
-
-## Assistant
-
-Good catch on the savings math. Here's the corrected talking point:
-
-**Corrected savings line:** If she uses TMO + custom, the year 1 savings vs MA is: $18K (MA) - $8K (your dev) - $7.2K (TMO @ $600/mo) = **$2.8K savings year 1**. The real win is year 2+: $13K (MA ongoing) vs $7.2K (TMO only) = **$5.8K/yr savings**.
-
-The pitch isn't a huge year-1 cost savings — it's ownership + compounding savings. Year 1 is roughly break-even with MA; years 2+ save ~$6K/yr; Phase 2 (replace TMO) saves another ~$7K/yr after that.
-
-## User
-
-## Assistant
-
-**Corky Calendar Integration** — noted. This is a separate feature request, not urgent for today's call. I'll add it to `tasks/corky.md` as an open item.
-
-Key capabilities to scope:
-- `corky calendar list` — show today's/this week's events
-- `corky calendar create` — create events (meetings, follow-ups)
-- `corky calendar check` — check availability for a time range
-- Uses Google Calendar API (same OAuth2 flow corky already has for Gmail, just add the calendar scope)
-
-This would let me check your schedule directly instead of asking. Good addition — but let's park it for after the Judith call. Want me to add it to the corky task backlog?
-
-## User
-
-Please convert to agent_doc_mode: template
-Move the corky calenday plan to tasks/corky.md
+Corky v0.13.3 just released. It has Google Calendar support.
+`corky cal create`
+`corky cal check`
+<!-- /agent:exchange -->

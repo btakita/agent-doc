@@ -1478,4 +1478,18 @@ R2 endpoint: `https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com`
 Contabo Object Storage can now be cancelled. The `CONTABO_*` vars in root `.env` can be removed once the VPS/Object Storage accounts are closed.
 
 What is the approximate monthly billing costs for storing the data in R2?
+
+**R2 pricing** (no egress fees — the main advantage over S3):
+
+| Category | Amount | Monthly Cost |
+|---|---|---|
+| Storage (46 GB - 10 GB free = 36 GB) | 36 GB | $0.54 |
+| Class A ops (writes) | minimal | ~$0.00 |
+| Class B ops (reads) | ~10K/mo est. | ~$0.004 |
+| Egress (bandwidth) | unlimited | **$0.00** |
+| **Total** | | **~$0.55/mo** |
+
+R2 free tier: 10 GB storage + 10M Class B reads + 1M Class A writes per month.
+
+For comparison, Contabo Object Storage was likely $2.49-4.99/mo (250 GB plan minimum). So R2 is both cheaper and has zero egress fees.
 <!-- /agent:exchange -->

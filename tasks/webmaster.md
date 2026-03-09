@@ -180,4 +180,36 @@ For a crate covering skill management, structured output, context injection, env
 agent-kit
 
 Please extract common skill logic from agent-doc. Use agent-kit in agent-doc and webmaster.
+
+### Done — `agent-kit` extracted and integrated
+
+**Created `src/agent-kit/`** (v0.1.0) — a shared Rust crate for CLI tools integrating with agent loops.
+
+**What was extracted:**
+- `agent_kit::skill::SkillConfig` — generic skill install/check/uninstall logic
+- Takes `name`, `content` (from `include_str!`), and `version` as config
+- Handles directory creation, idempotent install, content comparison, cleanup
+
+**Updated `agent-doc`** — now depends on `agent-kit`:
+- `skill.rs` reduced from 150 to 55 lines (delegates to `SkillConfig`)
+- All 218 tests pass, clippy clean
+
+**Updated `webmaster`** — now has `skill` subcommand:
+- `webmaster skill install` / `webmaster skill check`
+- Created `SKILL.md` with command reference, auth setup, site property format
+- Depends on `agent-kit` for the install/check logic
+
+**Test results:**
+- agent-kit: 10/10 tests pass
+- agent-doc: 218/218 tests pass (197 unit + 21 integration)
+- webmaster: builds clean, clippy clean
+Please add tests for webmaster.
+Write the initial installable SKILL.md for webmaster.
+
+**Next steps when ready:**
+- Publish `agent-kit` to crates.io (reserve the name)
+- Add environment detection (Claude Code vs OpenCode vs generic)
+- Add more kit modules (structured output, context injection)
+
+Make sure SKILL.md is compatible with Codex, Pi, OpenCode, and other models + agent loop runtimes.
 <!-- /agent:exchange -->

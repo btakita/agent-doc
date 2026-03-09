@@ -1027,4 +1027,20 @@ Or create a new token with: Account / Zone / Edit + Zone / Zone / Edit + Zone / 
 Once the token has zone write permission, submit again and I'll create the zone + add the custom domain.
 
 Alternatively, just add mi-www.site as a zone in the CF dashboard (Add a Site → mi-www.site → Free) and tell me the assigned nameservers.
+Zone created and worker custom domain configured:
+
+1. **Zone added:** `mi-www.site` (zone ID: `1fd793b80bae580202fe79161fb3902f`) — Free plan
+2. **Worker custom domain:** `mi-www.site` → `censible-root-web` (production) — SSL cert provisioned
+3. **Assigned nameservers:**
+   - `dion.ns.cloudflare.com`
+   - `tegan.ns.cloudflare.com`
+
+**Last step (you):** Update nameservers at Namecheap:
+1. Namecheap → Domain List → `mi-www.site` → Nameservers → **Custom DNS**
+2. Enter: `dion.ns.cloudflare.com` and `tegan.ns.cloudflare.com`
+3. Save
+
+Done
+
+Once NS propagation completes (5-30 min), mi-www.site will serve the ESG Tracker from Cloudflare Workers.
 <!-- /agent:exchange -->

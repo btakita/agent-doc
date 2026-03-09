@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO deployed. Cache headers live. `src/webmaster/` scaffolded — multi-engine sitemap CLI.
+**Status:** Migration complete ✓. ESG Tracker live at esg.briantakita.me. `src/webmaster/` scaffolded and committed. Pending: enable Search Console API in GCP, then retry sitemap submit.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -581,4 +581,24 @@ webmaster list-sitemaps                                  # List from Google
 
 Let's run the submit sitemap for google. And release the first version.
 webmaster is alpha quality. Include the readme, SPEC.md, AGENTS.md with CLAUDE.md symlink, and the rest of our usual project setup.
+**OAuth worked** — browser opened, token exchanged and stored at `~/.config/webmaster/tokens.json`.
+
+**Sitemap submission failed: Search Console API not enabled.** You need to click this link (project-specific):
+https://console.developers.google.com/apis/api/searchconsole.googleapis.com/overview?project=873280095295
+
+Enabled
+
+After enabling, retry (no re-auth needed — token is cached):
+```bash
+cargo run --manifest-path src/webmaster/Cargo.toml -- submit-sitemap https://esg.briantakita.me/sitemap.xml -e google
+```
+
+**Project setup complete:**
+- `README.md` — usage docs
+- `SPEC.md` — functional specification
+- `AGENTS.md` with `CLAUDE.md` → `AGENTS.md` symlink
+- `.gitignore` (target, local overrides)
+- Git initialized, initial commit `86eda0c`
+
+All files: `.gitignore`, `AGENTS.md`, `CLAUDE.md` (symlink), `Cargo.toml`, `Cargo.lock`, `README.md`, `SPEC.md`, `src/{main,lib,auth,config}.rs`, `src/engines/{mod,google,bing}.rs`
 <!-- /agent:exchange -->

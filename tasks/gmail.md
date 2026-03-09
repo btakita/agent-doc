@@ -41,3 +41,16 @@ corky cal delete "query" [--all] [--dry-run]  # delete events (--all for recurri
 ## User
 
 commit and push mail and submodules
+## Assistant
+
+Committed and pushed all submodules and parent:
+
+- **mail** → `cbbfaee` — 29 files (new conversations, contacts, mailboxes)
+- **censible-core** → `28bed29` — 192 files (mi-web → mi-www rename, new Worker app)
+- **agent-doc** → `771274d` — Cargo.lock, Cargo.toml, skill.rs
+- **agent-kit** → `a909d54` — Cargo.lock
+- **agent-loop** (parent) → `196a82c` — submodule pointers + task docs
+- **webmaster** — pointer updated (no submodule changes needed)
+
+## User
+

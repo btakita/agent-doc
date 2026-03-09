@@ -1,5 +1,6 @@
 mod agent;
 mod audit_docs;
+mod autoclaim;
 mod claim;
 mod clean;
 mod compact;
@@ -254,6 +255,8 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Re-establish claims after context compaction (SessionStart hook)
+    Autoclaim,
     /// Check for updates and upgrade to the latest version.
     Upgrade,
 }
@@ -398,6 +401,7 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Compact { file, keep } => compact::run(&file, keep),
         Commands::Convert { file } => convert::run(&file),
+        Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
     }
 }

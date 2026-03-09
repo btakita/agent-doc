@@ -105,7 +105,7 @@ fn match_html_comment(content: &str, pos: usize) -> Option<(usize, &str)> {
 pub fn compute(doc: &Path) -> Result<Option<String>> {
     let current = std::fs::read_to_string(doc)?;
     let snap_path = snapshot::path_for(doc)?;
-    let previous = snapshot::load(doc)?.unwrap_or_default();
+    let previous = snapshot::resolve(doc)?.unwrap_or_default();
 
     eprintln!(
         "[diff] doc={} snapshot={} doc_len={} snap_len={}",

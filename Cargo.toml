@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc"
-version = "0.12.2"
+version = "0.13.0"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"
@@ -23,7 +23,7 @@ tempfile = "3"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
 notify = "7"
-agent-kit = { path = "../agent-kit", version = "0.1" }
+agent-kit = { path = "../agent-kit", version = "0.2" }
 instruction-files = { path = "../instruction-files", version = "0.1" }
 tmux-router = { path = "../tmux-router", version = "0.2.2" }
 

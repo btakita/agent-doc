@@ -139,6 +139,54 @@ pub fn delete(doc: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Resolve the best snapshot content by comparing snapshot file mtime vs git commit mtime.
+///
+/// Uses whichever source is more recent to eliminate race conditions between
+/// snapshot files and git commits. Falls back gracefully when either source
+/// is unavailable.
+pub fn resolve(doc: &Path) -> Result<Option<String>> {
+    let snap_path = path_for(doc)?;
+    let snap_mtime = if snap_path.exists() {
+        std::fs::metadata(&snap_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+    } else {
+        None
+    };
+    let git_mtime = crate::git::last_commit_mtime(doc).unwrap_or(None);
+
+    match (snap_mtime, git_mtime) {
+        (Some(s), Some(g)) if s >= g => {
+            // Snapshot is newer or equal — use it (fast path)
+            load(doc)
+        }
+        (Some(_), Some(_)) => {
+            // Git commit is newer — snapshot is stale, use git
+            eprintln!("[snapshot] Git commit is newer than snapshot file, using git content");
+            match crate::git::show_head(doc)? {
+                Some(content) => Ok(Some(content)),
+                None => load(doc), // git show failed, fall back to snapshot
+            }
+        }
+        (Some(_), None) => {
+            // No git history — use snapshot
+            load(doc)
+        }
+        (None, Some(_)) => {
+            // No snapshot — use git (recovery mode)
+            eprintln!("[snapshot] No snapshot file, recovering from git");
+            match crate::git::show_head(doc)? {
+                Some(content) => Ok(Some(content)),
+                None => Ok(None),
+            }
+        }
+        (None, None) => {
+            // First submit — no previous state
+            Ok(None)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal unlocked helpers (caller must hold SnapshotLock)
 // ---------------------------------------------------------------------------

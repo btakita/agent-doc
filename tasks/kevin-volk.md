@@ -84,3 +84,29 @@ Most candidates will have "used React." You've **built React-level infrastructur
 
 
 See my recent corky sync
+## Assistant
+
+Found the calendar invites in your recent sync. Updated meeting details:
+
+**Call is TODAY — Mon Mar 9, 2026 @ 4:30 PM – 4:50 PM EDT** (20 minutes)
+
+| Detail | Value |
+|--------|-------|
+| **Google Meet** | [meet.google.com/dhw-xzmq-rsx](https://meet.google.com/dhw-xzmq-rsx?hs=224) |
+| **Phone backup** | +1 629-888-1552, PIN: 777562685 |
+| **Kevin's email** | kevin@staffingscience.io |
+| **Duration** | 20 minutes (originally scheduled Fri Mar 6, rescheduled to today) |
+
+The original invite was for Fri Mar 6 at 4pm, then Kevin updated it to Mon Mar 9 at 4:30pm. This is a short recruiter screen — 20 minutes means Kevin will want to quickly assess fit and move to the next step if there's a match.
+
+**For a 20-min call, keep it tight:**
+- 2 min — intro/pleasantries
+- 5 min — Kevin describes the role and client
+- 5 min — your 30-second pitch + 2-3 key talking points (open source infra, framework author, startup experience)
+- 3 min — salary/logistics
+- 5 min — your questions (focus on: what does the startup do, what's the interview process, team size)
+
+## User
+
+Sync the corky labels to gmail. Sync the emails. 
+Please review my existing draft reply to kevin@staffingscience.io...re: Jordan Ritter.

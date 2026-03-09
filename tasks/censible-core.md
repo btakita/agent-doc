@@ -982,4 +982,22 @@ Alternatively, if you don't want to keep the `mi-www.site` domain (it's not a pa
 Want me to proceed once you've added the domain to Cloudflare and updated nameservers? Or would you prefer to let mi-www.site go?
 
 I want to deploy mi-www.site with all of our data to Cloudflare.
+Can't do either via API with current credentials:
+
+1. **Cloudflare zone creation** — wrangler's OAuth token has `zone:read` but not `zone:write`. Error: `Requires permission "com.cloudflare.api.account.zone.create"`. You need to either:
+   - Add mi-www.site via the CF dashboard manually, or
+   - Create a CF API token with zone write permissions and export it as `CLOUDFLARE_API_TOKEN`
+
+How can I do this? Can the existing CLOUDFLARE_API_TOKEN be updated to have the zone write permissions?
+
+2. **Namecheap nameserver update** — requires Namecheap API credentials (API key + username). No Namecheap credentials are available.
+
+What are the name servers that should be used?
+
+**Quick manual path (2 minutes):**
+1. CF Dashboard → Add a Site → `mi-www.site` → Free plan → note the assigned nameservers
+2. Namecheap → Domain List → mi-www.site → Nameservers → Custom DNS → paste CF nameservers
+3. Tell me when done and I'll add the custom domain to the worker
+
+Or if you'd rather automate: export `CLOUDFLARE_API_TOKEN` (with zone write scope) and provide Namecheap API credentials.
 <!-- /agent:exchange -->

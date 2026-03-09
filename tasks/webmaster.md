@@ -371,4 +371,30 @@ Add skill uninstall subcommand
 - `SkillConfig` — install/check/uninstall SKILL.md
 - Used by agent-doc and webmaster
 - Published on crates.io with CI/CD
+### Done — Environment Detection, Skill Uninstall, and Discussion
+
+**Environment Detection (v0.2) — Implemented:**
+- `agent_kit::detect::Environment` enum: `ClaudeCode`, `OpenCode`, `Codex`, `Generic`
+- Auto-detection from env vars (`CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`)
+- `SkillConfig` now uses detected environment for path resolution
+- 11 new tests (agent-kit: 21 total)
+- Pushed to GitHub
+
+**Skill Uninstall — Implemented:**
+- `webmaster skill uninstall` subcommand added
+- 3 new tests (webmaster: 16 total)
+- Pushed to GitHub
+
+**Discussion: Configuration Discovery**
+For CLI tools, a unified `~/.config/<tool>/config.toml` pattern is useful but each tool already handles this individually (webmaster has `~/.config/webmaster/`, agent-doc has `.agent-doc/`). The value-add from agent-kit would be a `ConfigPaths` helper that resolves project-local vs user-level config with standard XDG conventions. **Recommendation:** low priority — defer until a third tool needs it.
+
+**Discussion: Credential Management**
+Currently agent-doc and webmaster handle credentials differently (pass, env vars, config files). A shared abstraction would standardize this: `agent_kit::creds::resolve("google_oauth_token")` checking env → pass → keyring → config file. High value but high complexity. **Recommendation:** defer until the third consumer arrives to validate the abstraction.
+
+How does agent-doc and webmaster handle the credentials. agent-doc is more evolved so I'm considering using the agent-doc logic.
+
+**Audit Logic — Ready to implement:**
+`instruction-files` crate already provides exactly this: staleness detection, tree path validation, line budget enforcement, actionable content filtering. Agent-kit should depend on it (optional dep) and re-export via `agent_kit::audit` with a preset config. Straightforward — say "go" to implement.
+
+go
 <!-- /agent:exchange -->

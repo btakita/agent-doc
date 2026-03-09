@@ -395,11 +395,23 @@ With TMO replacement in Phase 2, she breaks even by end of year 2 and saves ~$7-
 
 **On the DST timing:** Clocks sprang forward last night. If Judith is thinking "10 AM" but forgot to adjust, she might think it's 9:33 right now. Give her until 11 PT (what would have been 10 pre-DST). If no call by then, a quick text is appropriate: "Hey Judith, just checking — still good for today? Happy to hop on whenever works."
 
+Robert Ward set up the call, so I feel a
+
 **Your schedule:** You're free until 3:30 ET (12:30 PT). That gives Judith a ~2 hour window if she calls in the next 30 min, or a solid 90 min if she calls by 11 PT.
 
 **Google Calendar:** No, I don't have access to your Google Calendar. Corky handles email via Gmail API but calendar is a separate API scope. If you want calendar integration, that would be a feature to add to corky (`corky calendar` commands). For now, just tell me your schedule and I'll work around it.
 
 Yes...let's add Calendar Integration into Corky
+
+## User
+
+## Assistant
+
+Good catch on the savings math. Here's the corrected talking point:
+
+**Corrected savings line:** If she uses TMO + custom, the year 1 savings vs MA is: $18K (MA) - $8K (your dev) - $7.2K (TMO @ $600/mo) = **$2.8K savings year 1**. The real win is year 2+: $13K (MA ongoing) vs $7.2K (TMO only) = **$5.8K/yr savings**.
+
+The pitch isn't a huge year-1 cost savings — it's ownership + compounding savings. Year 1 is roughly break-even with MA; years 2+ save ~$6K/yr; Phase 2 (replace TMO) saves another ~$7K/yr after that.
 
 ## User
 

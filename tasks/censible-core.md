@@ -47,8 +47,10 @@ The migration is complete. Summary of what's deployed:
 esg.briantakita.me should only be the company lookup app. censible.co already has the Censible company content.
 
 Perhaps we can rebrand esg.briantakita.me. Censible did not want to take on the liability of having the company lookup app.
-
+u
 Understood — since Censible doesn't want the liability, we can rebrand. The subdomain and all app branding (header, page titles, etc.) can be changed easily. What name/brand would you like to use instead of "Censible"?
 
 esg? Make it look like a white label sample app.
+
+I basically want SEO and a license deal from this site. I may also use it to funnel business to martin-investments. I will need to reach out to Mary Ellen about driving traffic to martin-investments.
 <!-- /agent:exchange -->

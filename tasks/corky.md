@@ -599,3 +599,26 @@ Yes
 
 ## User
 
+## Assistant
+
+**v0.13.3 released** with `cal create` and `cal check`.
+
+**Release checklist:**
+- [x] `make check` — clippy clean, all 395 tests pass
+- [x] SPEC.md § 15 — full calendar section (15.1–15.8: auth, list, create, delete, check, edge cases)
+- [x] VERSIONS.md v0.13.3 entry added
+- [x] Committed + pushed to GitHub
+- [x] Tagged `v0.13.3`
+- [x] Published to crates.io
+- [x] Published to PyPI
+- [x] GitHub Release created
+- [x] Binary installed: `~/.cargo/bin/corky` → v0.13.3
+
+**New commands:**
+```
+corky cal create <SUMMARY> <START> <END> [--description TEXT] [--location TEXT] [--account NAME]
+corky cal check <START> <END> [--account NAME]
+```
+
+## User
+

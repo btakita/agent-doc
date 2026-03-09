@@ -157,4 +157,27 @@ Beyond SKILL.md management, here's what CLI tools commonly need when integrating
 **Which of these resonate?** The core question is whether `agent-skill` stays narrow (skill management + environment detection) or becomes a broader "agent integration SDK" for CLI tools. The name `agent-skill` fits the narrow scope well; if it grows into an SDK, a different name might suit better.
 
 I think the scope should be broader. What are good names? Please verify availability.
+
+### Broader SDK names — crates.io verified
+
+For a crate covering skill management, structured output, context injection, environment detection, and config discovery:
+
+| Name | Available? | Fit | Notes |
+|------|-----------|-----|-------|
+| `agent-kit` | **Available** | Excellent | "Kit" = toolkit — broader than one feature, practical, composable |
+| `agent-wire` | **Available** | Good | "Wire" = connection layer between tools and agent loops |
+| `agent-harness` | **Available** | Good | "Harness" = integration framework metaphor |
+| `agent-loop-sdk` | **Available** | Decent | Explicit but verbose; couples to "agent-loop" naming |
+| `tool-bridge` | **Available** | Good | Tool-centric perspective |
+| `toolmaker` | **Available** | Creative | Evocative but could be confused with general dev tooling |
+| `agent-sdk` | Taken | — | "Rust Agent SDK for building LLM agents" (active, v0.5.3) |
+| `agent-bridge` | Taken | — | "CLI to read/compare context across Codex, Claude, Gemini" |
+
+**Recommendation: `agent-kit`** — it's the right scope signal. A "kit" is a collection of utilities for building something; it doesn't claim to be the whole framework. It says "here's everything a CLI tool needs to integrate with agent loops."
+
+`agent-skill` still works if you want to keep it narrow initially and rename later, but `agent-kit` gives room to grow without the name becoming a misnomer.
+
+agent-kit
+
+Please extract common skill logic from agent-doc. Use agent-kit in agent-doc and webmaster.
 <!-- /agent:exchange -->

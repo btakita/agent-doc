@@ -752,4 +752,68 @@ Fixed. The "Log in" prompt was hardcoded — the server-rendered page had no way
 Deployed — refresh the company page while logged in and you should see the detailed data.
 
 I log in but the session is not reflected in the UI. So when I go to a company page, I have the same error message.
+
+Found the bug. The nav bar's session detection in `pages/layout.ts` was using `parseInt(expires_at, 10)` to parse the expiration timestamp, but the self-auth API returns ISO date strings (e.g., `"2026-04-08T..."`) — not epoch milliseconds. `parseInt("2026-04-08...")` returns `2026` (not a valid timestamp), so `Date.now() < 2026` is always `false`, causing the nav to delete the token immediately on every page load.
+
+**Fix:** Changed `parseInt(expires_at, 10)` → `new Date(expires_at).getTime()` in the nav script. Deployed.
+
+You'll need to log in again (the old token was already deleted by the bug). After login, refresh any company page — the nav should show "Log Out" and ESG detail data should load.
+
+This is what I'm seeing for AAPL. The floats need to be formatted.
+Is this data in compliance with all of my agreements? I don't want to break any licenses or have any legal issues.
+
+```
+ESG Overview
+Overall: BB (Medium)
+E: BB
+S: B
+G: B
+Log in for detailed scores, key issues, and gender diversity data.
+
+ESG data: Public Company ESG Ratings (CC BY-NC-SA 4.0)
+
+Market Data
+Price
+$257.47
+-2.82 (-1.08%)
+Market Cap
+$3.78T
+P/E Ratio
+32.09
+EPS
+$—
+52W High
+$288.62
+52W Low
+$169.21
+Beta
+1.12
+Data from Finnhub · Updated Mar 8, 2026
+
+ESG Detailed Scores
+Overall: 5.2
+
+Environmental: 4.2
+
+Social: 5.1
+
+Governance: 4.1
+
+Key ESG Issues
+Issue	Score
+carbon emissions	1
+electronic waste	0.38
+opportunities in clean tech	0.46391752577319584
+water stress	1
+controversial sourcing	0.82
+labor management	0.09
+privacy and data security	0.72
+supply chain labor standards	0.2
+corporate governance	0.6907216494845362
+gender diversity	0.9168541951779667
+Gender Diversity
+CEO: Male
+
+Female Directors: 0.3333%
+```
 <!-- /agent:exchange -->

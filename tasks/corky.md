@@ -595,5 +595,7 @@ Implement corky calendar feature
 
 Shall I close the gaps (SPEC, VERSIONS) and release?
 
+Yes
+
 ## User
 

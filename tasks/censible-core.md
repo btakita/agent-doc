@@ -12,15 +12,13 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-**Yes, mi-www.site used Auth0** — specifically the Resource Owner Password Grant (ROPG) flow, confirmed from source:
+From the screenshot, the "Censible" app (`XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ`) is a **Single Page Application** — this is the one we're using but it **cannot use Password grant**.
 
-- `libs/ui-solid/src/auth0/LoginForm_auth0.tsx` — embedded email/password form, POSTs to `https://{AUTH0_DOMAIN}/oauth/token`
-- `libs/ui-solid/src/auth0/login.ts` — uses `grant_type: password-realm`, `realm: Username-Password-Authentication`
-- `libs/ui-solid/src/auth0/SignupForm_auth0.tsx` — embedded signup
-- `libs/ui-solid/src/auth0/Auth0ForgotPasswordForm.tsx` — forgot password
-- All via `@ctx-core/auth0` library
+**Fix:** Click on "Censible" → **Settings** → change **Application Type** to **Regular Web Application** → then **Advanced Settings** → **Grant Types** → enable **Password** → **Save Changes**.
 
-The new implementation matches this exactly — same Auth0 ROPG flow, same realm, same embedded forms. So you can use the same Auth0 application that mi-www.site used. Just set that app's Client ID as `AUTH0_CLIENT_ID`.
+Same Client ID stays, no code changes needed. The ROPG login form will work after this change.
 
-Which app did it go to? See screenshot.
+Will the other type of self-serve signup/login work as well for censible.co?
+
+(The "Auth0 Management API" app is Machine-to-Machine for backend API access — don't touch that one.)
 <!-- /agent:exchange -->

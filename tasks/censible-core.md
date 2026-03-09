@@ -195,4 +195,12 @@ I couldn't find a connection between an "Anil" at Arabesque/ESG Book and Censibl
 Sources: [WBCSD](https://www.wbcsd.org/news/arabesque-develops-esg-book/), [WEF](https://www.weforum.org/stories/2021/12/esg-book-sustainability-sector-free-data/), [ESG Today](https://www.esgtoday.com/esg-book-bcg-launch-new-sustainability-reporting-platform/), [Wikipedia](https://en.wikipedia.org/wiki/Arabesque_Partners)
 
 https://www.linkedin.com/in/anilpod/
+
+**Anil Podduturi** — Managing Director & Partner at **BCG** (BCG X / BCG Digital Ventures). Based in Brooklyn, UC Berkeley alum. Specializes in AI product leadership, GenAI, digital transformation. Previously interim CPO at National Grid.
+
+**No public connection found** between Anil Podduturi and ESG Book, Arabesque, or Censible. His public profile focuses on AI/digital transformation, not ESG data specifically.
+
+The only BCG↔ESG Book link is the "LEO" sustainability reporting platform partnership. Anil could have been involved internally as a BCG partner, but nothing publicly documents it. If you believe he was familiar with Censible and influenced the ESG Book direction, that would have been through private channels not visible in public records.
+
+Please add Anil as a contact.
 <!-- /agent:exchange -->

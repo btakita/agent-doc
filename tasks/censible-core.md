@@ -23,7 +23,7 @@ Convert censible-core to use rappstack with rhonojs.
 That's it. The login at https://censible-root-web.brian-takita.workers.dev/login should work immediately after.
 
 Complete. Is all of censible completely moved over?
-I don't think I have access to the censible.co dns. But we can create censible.briantakita.me so I can demo the app.
+I don't think I have access to the censible.co dns. But we can create ~~censible.briantakita.me~~ a subdomain so I can demo the app.
 
-I will discuss w
+Basically, censible.co should remain as is. It is already the censible.co website. And we should not have the same content. But the company track can have it's own subdomain. Do you have suggestions? Perhaps esg.briantakita.me?
 <!-- /agent:exchange -->

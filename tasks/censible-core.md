@@ -411,6 +411,23 @@ Google Search Console already verified via DNS — no meta tag needed. Since `br
 4. Check **Coverage** report in a few days for indexing progress
 
 The sitemap is also referenced in `robots.txt`, so Googlebot will discover it automatically on next crawl. Want me to add cache headers to the company routes, or anything else?
+
+Yes
+
 Can you automate any info setting in Google Search Console.
 Such as https://search.google.com/search-console/sitemaps?resource_id=sc-domain%3Aesg.briantakita.me
+
+**Can't fully automate Search Console** — Google requires OAuth with the `webmasters` scope, and your existing Gmail tokens only have Gmail scopes. The options:
+
+1. **Already automatic via robots.txt** — your `robots.txt` references the sitemap URL. Googlebot discovers and processes it on next crawl without any manual action.
+
+2. **Manual submit (30 seconds)** — go to https://search.google.com/search-console/sitemaps?resource_id=sc-domain%3Aesg.briantakita.me, type `sitemap.xml`, click Submit. One-time action.
+
+3. **API automation** (if you want it for future use) — I'd need to add `https://www.googleapis.com/auth/webmasters` scope to corky's OAuth flow and re-authorize. Then I could script sitemap submission and monitoring. Worth it only if you plan to manage multiple sites.
+
+Does the Corky library support users accessing their gmail via this app?
+
+**Recommendation:** Just do the manual submit — it's a one-time 30-second task. The `robots.txt` reference handles future crawls automatically. Google also auto-discovers sitemaps referenced in robots.txt, so it may already be processing yours.
+
+"S" — looks like another incomplete message. What were you typing?
 <!-- /agent:exchange -->

@@ -1122,4 +1122,38 @@ The site is confirmed working — `curl --resolve "mi-www.site:443:104.21.44.24"
 The deployed mi-www.site is the incorrect app.
 It should be the same app that generated the xlsx files from the portfolio.
 It should also require a closed login. No open registration. Only prescribed accounts. Please use the same accounts as in the Contabo database.
+Understood — mi-www.site should be the **portfolio rebalancer app** (with XLSX generation), not the ESG company tracker. And it needs **closed auth** (no signup, only existing accounts).
+
+Current situation:
+- mi-www.site currently points to `censible-root-web` (the ESG Tracker)
+- The rebalancer routes already exist in `censible-root-web` at `/rebalance/*`
+- The old Contabo app used **Auth0** for accounts — those accounts are still in Auth0 (hosted service, not lost)
+
+**Two approaches:**
+
+**A. Same worker, hostname-based routing** (simpler)
+- If hostname is `mi-www.site` → serve rebalancer (require login, no signup)
+- If hostname is `esg.briantakita.me` → serve ESG Tracker (public)
+- Reuse the existing `censible-root-web` worker
+
+**B. Separate worker** (cleaner separation)
+- Deploy a second worker `censible-rebalancer` for mi-www.site
+- Only includes rebalancer routes + closed auth
+- Separate codebase/deployment
+
+Separate Worker please
+
+**For closed auth:**
+- Disable the `/api/register` endpoint (or restrict to admin)
+- Seed the D1 `auth_users` table with existing accounts
+
+Both.
+
+**Questions before proceeding:**
+1. Which approach? (A or B)
+B
+2. Do you know which accounts were in Auth0? (emails/names) I can look them up via Auth0 Management API if you have the credentials — the env from the old container had `AUTH0_MANAGEMENT_ID` and `AUTH0_CLIENT_SECRET`.
+It should be in censible-core/.env
+3. Should the rebalancer at mi-www.site include the ESG company data at all, or purely portfolio management?
+Yes. All of the proprietary data...since this is a closed membership and used by Martin Investment.
 <!-- /agent:exchange -->

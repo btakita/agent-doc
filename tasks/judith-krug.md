@@ -372,6 +372,7 @@ Savings: ~$10K year one, ~$13K/yr ongoing.
 - "What would you be comfortable starting with?" (Robert Ward's advice)
 - Offer a website-only Phase 1 for $2-3K as a foot-in-the-door
 - Remind her: MA is $18K year one — even at $8K she's saving $10K
+If she uses TMO, the savings would be 18K - 8K - TMO 1 year price 
 
 ## User
 
@@ -380,3 +381,25 @@ Year 1 onward estimate would also need to include the costs of TMO + my work. I 
 Robert Ward said Judith was going to call at 10 Pacific Time. It's now 10:33 Pacific Time. We just had Daylight Savings Time.
 
 I have 2 calls starting at 3:30 Eastern Time ending just before 5:00 Eastern Time. Do you have access to my Google calendar?
+## Assistant
+
+**Updated cost comparison (TMO + custom vs MA):**
+
+| | Mortgage Automator | TMO + Brian (custom) |
+|---|---|---|
+| Year 1 | ~$18K | ~$15.2K ($8K dev + $7.2K TMO) |
+| Year 2+ | ~$13K/yr | ~$7.2K/yr (TMO only) |
+| Phase 2 (replace TMO) | N/A | +$8-12K dev, then $0/yr |
+
+With TMO replacement in Phase 2, she breaks even by end of year 2 and saves ~$7-13K/yr after that. Strong long-term play.
+
+**On the DST timing:** Clocks sprang forward last night. If Judith is thinking "10 AM" but forgot to adjust, she might think it's 9:33 right now. Give her until 11 PT (what would have been 10 pre-DST). If no call by then, a quick text is appropriate: "Hey Judith, just checking — still good for today? Happy to hop on whenever works."
+
+**Your schedule:** You're free until 3:30 ET (12:30 PT). That gives Judith a ~2 hour window if she calls in the next 30 min, or a solid 90 min if she calls by 11 PT.
+
+**Google Calendar:** No, I don't have access to your Google Calendar. Corky handles email via Gmail API but calendar is a separate API scope. If you want calendar integration, that would be a feature to add to corky (`corky calendar` commands). For now, just tell me your schedule and I'll work around it.
+
+Yes...let's add Calendar Integration into Corky
+
+## User
+

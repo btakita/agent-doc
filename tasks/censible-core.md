@@ -525,4 +525,25 @@ Want me to scaffold `src/seo/`?
 
 seo is already taken as a crate name. Is there a different name?
 webmaster perhaps?
+**`webmaster` is available** on crates.io — and it's a solid choice:
+
+- Clear, descriptive — immediately communicates the domain
+- Matches Google's own terminology ("Webmaster Tools" → "Search Console")
+- Short, memorable, authoritative
+- Broader than just SEO — covers sitemaps, crawl management, search analytics, URL inspection
+
+Alternatives (all available):
+
+| Name | Vibe |
+|------|------|
+| **webmaster** | Classic, broad, authoritative |
+| **seo-kit** | Matches corky's "kit" pattern |
+| **webmaster-kit** | Explicit about being a toolkit |
+| **seo-tools** | Generic but clear |
+
+Recommendation: **`webmaster`** → `src/webmaster/`. Want me to scaffold it?
+
+Yes...Add a feature to submit the sitemap. Just want to make sure that google-webmasters3-cli doesn't alread cover this behavior. If it does, then we can have our webmaster tool support all search engines via cli.
+
+Let's run the sub
 <!-- /agent:exchange -->

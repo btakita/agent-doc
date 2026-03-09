@@ -1303,4 +1303,7 @@ The detailed XLSX (5-sheet version) already had this — the Fund sheet was usin
 Deployed. Download from any portfolio page to verify.
 
 The Copyright for Martin Investments is dated 1970.Seems incorrect.
+Fixed — copyright now shows 2026. The bug was that `footer_html` was a module-level constant. `new Date().getFullYear()` evaluated once at module init time, and Cloudflare Workers return epoch (1970) during module evaluation. Changed it to a function so the year is computed per-request. Deployed.
+
+Anything else we need from Contabo?
 <!-- /agent:exchange -->

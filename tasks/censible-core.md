@@ -1064,6 +1064,16 @@ The old Contabo server is shut down, so mi-www.site currently returns nothing (c
 Can you verify in Namecheap that the custom DNS was saved correctly? It should show `dion.ns.cloudflare.com` and `tegan.ns.cloudflare.com` as the nameservers for mi-www.site.
 
 Are there any DNS caches that can be cleared on my machine?
+Flushed your local systemd-resolved cache (`resolvectl flush-caches`), but the issue isn't local — it's upstream.
 
+Checked all levels:
+- **Your machine:** flushed ✓
+- **Google (8.8.8.8), Cloudflare (1.1.1.1), Quad9 (9.9.9.9):** all still show old NS
+- **.site TLD authority (`a.nic.site`):** still delegates to `registrar-servers.com`
 
+The bottleneck is Namecheap → .site registry. Namecheap hasn't pushed the NS delegation change to the `.site` TLD yet. This is on Namecheap's side and typically takes 30 min to a few hours. Nothing to do but wait.
+
+Once the .site TLD shows `dion.ns.cloudflare.com` / `tegan.ns.cloudflare.com`, propagation to public resolvers follows within minutes, and CF will activate the zone automatically.
+
+Has the DNS propagated? Can you loop until you detect propagation?
 <!-- /agent:exchange -->

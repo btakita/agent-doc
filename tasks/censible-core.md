@@ -402,5 +402,15 @@ I can add cache headers to the company routes if you want. This gives you the sp
 
 On "Help me" — looks like your message was cut off. What do you need help with?
 
-Can y
+Google Search Console already verified via DNS — no meta tag needed. Since `briantakita.me` is verified through Cloudflare, subdomains like `esg.briantakita.me` are automatically covered.
+
+**Next steps in Search Console:**
+1. Select `esg.briantakita.me` property (or add it as a URL-prefix property)
+2. Go to **Sitemaps** → enter `sitemap.xml` → click **Submit**
+3. Use **URL Inspection** to test a few URLs (e.g., `https://esg.briantakita.me/companies/DIS`)
+4. Check **Coverage** report in a few days for indexing progress
+
+The sitemap is also referenced in `robots.txt`, so Googlebot will discover it automatically on next crawl. Want me to add cache headers to the company routes, or anything else?
+Can you automate any info setting in Google Search Console.
+Such as https://search.google.com/search-console/sitemaps?resource_id=sc-domain%3Aesg.briantakita.me
 <!-- /agent:exchange -->

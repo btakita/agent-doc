@@ -897,4 +897,20 @@ Good distinction about the proprietary formula. Here's the data breakdown after 
 Deployed to esg.briantakita.me. Company pages now show public ESG grades + Finnhub financials. No login prompt, no MSCI data.
 
 Commit censible-core. Push.
+Done. Committed and pushed censible-core:
+
+```
+bf4135840 feat: self-managed D1 auth, remove MSCI data for licensing compliance
+```
+
+5 files changed, 293 insertions, 247 deletions:
+- `migrations/0004_self_auth/up.sql` — new auth tables
+- `worker/self_auth.ts` — new self-managed auth module
+- `pages/auth.ts` — login page rewritten for self-managed auth
+- `pages/layout.ts` — fixed session detection (parseInt → Date parse)
+- `worker/index.ts` — removed MSCI endpoints, Auth0 imports, login prompts
+
+Parent repo submodule pointer updated and committed.
+
+Are there any active services on Contabo that can be decommissioned?
 <!-- /agent:exchange -->

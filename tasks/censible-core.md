@@ -1259,7 +1259,7 @@ Custom domain `mi-www.site` confirmed working.
 
 **Note:** D1 has no rename command — the underlying database ID is unchanged. The Cloudflare dashboard may still show the old name `censible-mi-web-db`, but the worker binding uses `mi-www-db`. Same data, same UUID.
 
-Can we create and migrate the database to mi-www-db?
+Can we create and migrate the database to mi-www-db? Shutting down censible-mi-web-db once the data is migrated.
 
 Also resolved the login 500 error — it was a shell escaping issue (zsh `printf` turning `!` into `\!`). Login works correctly from the browser. All 6 user accounts are active.
 <!-- /agent:exchange -->

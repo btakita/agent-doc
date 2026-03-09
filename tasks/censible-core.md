@@ -1156,4 +1156,35 @@ B
 It should be in censible-core/.env
 3. Should the rebalancer at mi-www.site include the ESG company data at all, or purely portfolio management?
 Yes. All of the proprietary data...since this is a closed membership and used by Martin Investment.
+Got it. Separate worker (B), closed auth, all proprietary ESG data included.
+
+**Auth0 accounts:** Both credential sets in the .env are unauthorized for the Management API (`access_denied`). The Auth0 account may have been locked down or the management API grants expired. 
+
+**Can you list the email addresses that should have access?** I'll seed them directly in D1. Or if you can log into https://manage.auth0.com and go to User Management → Users, grab the list from there.
+
+It may be in the Postgres database. I don't recall using Auth0 for mi-www.site. Please verify one way or another.
+
+**Plan for `censible-rebalancer` worker:**
+
+The project should be in apps/mi-web. No need to create censible-rebalancer or rebalancer-web.
+
+Please make sure we use as much of the same logic as possible...while making it compatible with Cloudflare. And using Cloudflare native services.
+
+1. Create new wrangler project at `apps/rebalancer-web/`
+2. Copy relevant modules from `root-web`:
+   - Self-managed auth (closed — login only, no register endpoint)
+   - Portfolio management routes (`/rebalance/*`)
+   - ESG data routes (all proprietary data, behind auth)
+   - XLSX generation
+   - Company search/detail
+3. New D1 database `censible-rebalancer-db` (or share the existing one)
+4. Deploy as `censible-rebalancer` worker
+5. Point mi-www.site custom domain to this worker (remove from `censible-root-web`)
+6. Seed auth accounts
+
+I'll start building once I have the user list. In the meantime, should I share the same D1 database between both workers or create a separate one?
+
+A separate database is fine.
+
+The auth may also be in the redis instance.
 <!-- /agent:exchange -->

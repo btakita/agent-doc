@@ -76,3 +76,6 @@
 [submodule "src/webmaster"]
 	path = src/webmaster
 	url = git@github.com:btakita/webmaster.git
+[submodule "src/agent-kit"]
+	path = src/agent-kit
+	url = git@github.com:btakita/agent-kit.git

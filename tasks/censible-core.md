@@ -1296,4 +1296,11 @@ The XLSX export endpoints were working (`/portfolios/:id/export.xlsx` and `/port
 Deployed. Check any portfolio page on https://mi-www.site/portfolios (e.g., `/portfolios/urth`).
 
 The Holdings sheet should use a formula pointing to the ESG Detail sheet.
+Fixed — the Holdings sheet in the simple XLSX export now uses formulas pointing to the ESG Detail sheet instead of static values. For example, each ESG score cell is now `='ESG Detail'!G2` instead of a hardcoded number.
+
+The detailed XLSX (5-sheet version) already had this — the Fund sheet was using `'ESG Detail'!` formulas. Only the simple export needed updating.
+
+Deployed. Download from any portfolio page to verify.
+
+The Copyright for Martin Investments is dated 1970.Seems incorrect.
 <!-- /agent:exchange -->

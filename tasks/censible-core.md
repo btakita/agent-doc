@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** mi-www.site live on Cloudflare. Contabo decommissioned. ESG Tracker at esg.briantakita.me + mi-www.site.
+**Status:** Auth0 confirmed as old auth provider. Building apps/mi-web (separate worker for mi-www.site). Blocked on user account list.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1187,4 +1187,28 @@ I'll start building once I have the user list. In the meantime, should I share t
 A separate database is fine.
 
 The auth may also be in the redis instance.
+**Auth verification complete.** The old mi-www.site **does use Auth0** — confirmed by inspecting source at `/home/admin/work/censible-core/apps/mi-www.site/` on Contabo. The `auth__POST.ts` calls `auth0__oauth_token__fetch_post()` (Resource Owner Password Grant). Redis only has cached ESG/market data (28 keys, all `esg|*` or `iex|*`) — no user accounts.
+
+**No local user database exists.** All accounts were in Auth0. Since the Management API is locked out, you'll need to either:
+- Provide the email addresses for accounts that should have access, or
+- Log into https://manage.auth0.com → User Management → Users and grab the list
+
+**Updated plan for `apps/mi-web`:**
+
+1. Create `apps/mi-web/` — separate Cloudflare Worker
+2. Max code reuse from `apps/root-web`:
+   - Self-managed auth (login only, no register, admin-seeded)
+   - All proprietary ESG data routes (company detail, scores, gender data)
+   - Portfolio management + XLSX generation
+   - Company search/autocomplete
+3. Cloudflare native: D1 (separate database), Workers
+4. Deploy as `censible-mi-web` worker
+5. Move mi-www.site custom domain → `censible-mi-web`
+6. Seed accounts once you provide email list
+
+**Blocked on:** User account list. Please provide email addresses or check Auth0 dashboard.
+
+I don't see the account pointing to mi-www.site in Auth0.
+Please look at the correspondence, particularly with Sarah Winter and Mary Ellen re: mi-www.site.
+They should both have a login.
 <!-- /agent:exchange -->

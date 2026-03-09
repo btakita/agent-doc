@@ -421,4 +421,36 @@ I saw an issue where the snapshot diff was incomplete & stale. Make sure we dete
 **Advantages:** Eliminates race condition, survives compaction, no separate state to maintain. **Challenge:** Requires git repo (currently optional), comment stripping on git diff output.
 
 Will scope this for v0.13.0 alongside the autoclaim feature.
+
+### Snapshot drift detection — analysis of your proposal
+
+**Your proposal is almost right, but the rule should be: use whichever is more recent.**
+
+| Scenario | Snapshot vs Git | Correct source | Why |
+|----------|----------------|---------------|-----|
+| Race (commit ran, snapshot not updated) | Git newer | **Git** | Snapshot stale from race |
+| Response written, not committed yet | Snapshot newer | **Snapshot** | Write updated snapshot, no commit yet |
+| Both in sync | Same | Either (snapshot faster) | Happy path |
+| No git repo | Snapshot only | **Snapshot** | Fallback mode |
+| No snapshot (first submit) | Git only | **Git** | Recovery mode |
+
+**Detection logic (Rust pseudocode):**
+```rust
+fn resolve_snapshot(file: &Path) -> String {
+    let snapshot_mtime = snapshot_file_mtime(file);
+    let git_mtime = last_agent_doc_commit_mtime(file);
+    
+    match (snapshot_mtime, git_mtime) {
+        (Some(s), Some(g)) if s >= g => read_snapshot_file(file),
+        (Some(_), Some(_))           => git_show_head(file),
+        (Some(_), None)              => read_snapshot_file(file),
+        (None, Some(_))              => git_show_head(file),
+        (None, None)                 => String::new(),  // first submit
+    }
+}
+```
+
+This eliminates the race by always choosing the freshest source. Snapshot is the fast path; git is the safety net.
+
+Implement and release
 <!-- /agent:exchange -->

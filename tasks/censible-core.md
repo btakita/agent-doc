@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Deploying apps/mi-web to mi-www.site. D1 schema applied. Data migration in progress.
+**Status:** mi-www deployed and live. Renamed from mi-web. All data migrated. Auth working.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1248,4 +1248,18 @@ Key differences from root-web:
 - Full proprietary ESG data on company detail pages (scores, overview, gender diversity)
 - `noindex, nofollow` meta tag (private site)
 - Martin Investment branding
+Done — renamed:
+
+- **Directory**: `apps/mi-web` → `apps/mi-www`
+- **Worker name**: `censible-mi-web` → `mi-www` (deployed at `https://mi-www.brian-takita.workers.dev`)
+- **D1 database_name in config**: `censible-mi-web-db` → `mi-www-db`
+- **Old worker** `censible-mi-web` deleted
+
+Custom domain `mi-www.site` confirmed working.
+
+**Note:** D1 has no rename command — the underlying database ID is unchanged. The Cloudflare dashboard may still show the old name `censible-mi-web-db`, but the worker binding uses `mi-www-db`. Same data, same UUID.
+
+Can we create and migrate the database to mi-www-db?
+
+Also resolved the login 500 error — it was a shell escaping issue (zsh `printf` turning `!` into `\!`). Login works correctly from the browser. All 6 user accounts are active.
 <!-- /agent:exchange -->

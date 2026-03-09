@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO: sitemap, schema.org, llms.txt, robots.txt deployed. Google Search Console: pending verification.
+**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO deployed. Cache headers live (1hr edge cache). Google Search Console: DNS verified, submit sitemap manually.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -430,4 +430,23 @@ Does the Corky library support users accessing their gmail via this app?
 **Recommendation:** Just do the manual submit — it's a one-time 30-second task. The `robots.txt` reference handles future crawls automatically. Google also auto-discovers sitemaps referenced in robots.txt, so it may already be processing yours.
 
 "S" — looks like another incomplete message. What were you typing?
+**Cache headers added** — deployed `Cache-Control: public, max-age=3600, s-maxage=3600` on:
+- `/companies` (search page)
+- `/companies/browse` (A-Z browse)
+- `/companies/:ticker` (company detail pages)
+
+All public company pages now cache at the CDN edge for 1 hour. Instant invalidation on redeploy. Live at https://esg.briantakita.me.
+
+**Re: Corky and Gmail access** — No, Corky does **not** support end-users accessing their Gmail through an app. Corky is a **single-owner CLI tool** for managing your own email:
+
+- Runs locally on your machine — no web server or multi-user OAuth
+- Credentials (app passwords, OAuth tokens) stay in your private `mail/` directory
+- Designed for one owner + optional collaborators (agents/developers), not general public access
+- Gmail integration is for your own email management: filters, drafting, sync — not for building apps where users connect their Gmail
+
+If you wanted to build a web app where users authenticate with Gmail, you'd need a standard Google OAuth2 flow (consent screen, redirect URI, per-user token storage) — which is outside Corky's scope.
+
+Are there any docs on Corky about setting up an app for gmail access?
+
+Go ahead and setup webmaster permissions on my p
 <!-- /agent:exchange -->

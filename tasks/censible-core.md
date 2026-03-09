@@ -448,5 +448,23 @@ If you wanted to build a web app where users authenticate with Gmail, you'd need
 
 Are there any docs on Corky about setting up an app for gmail access?
 
-Go ahead and setup webmaster permissions on my p
+**Corky Gmail OAuth docs exist, but are CLI-only** — not for web apps:
+
+- `corky filter auth` — Gmail Filter API OAuth (`gmail.settings.basic`, `gmail.labels` scopes)
+- `corky cal auth` — Google Calendar OAuth
+- `corky sync-auth` — IMAP OAuth (instructions for Python fallback or app passwords)
+- Config: `.corky.toml` `[gmail]` section with `client_id`, `client_secret` (or `_cmd` variants)
+- Redirect URI: hard-coded `http://127.0.0.1:8484/callback` (localhost only)
+
+**No web app support.** The OAuth flow starts a local HTTP server on port 8484 for the callback — desktop/CLI pattern only. For a web app where users connect their Gmail, you'd need:
+1. Google Cloud Console project with web application OAuth client
+2. Proper web redirect URI (not localhost)
+3. Consent screen configured for external users
+4. Per-user token storage in your database
+
+That's all standard Google OAuth2 — but Corky doesn't provide it. Corky is designed for a single owner managing their own Gmail locally.
+
+Relevant docs: `src/corky/SPEC.md` (section 5.25), `src/corky/docs/getting-started/configuration.md`, `src/corky/src/filter/gmail_auth.rs`
+
+Go ahead and setup webmaster permissions on my personal corky app.
 <!-- /agent:exchange -->

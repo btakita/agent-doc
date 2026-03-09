@@ -75,4 +75,17 @@ https://esg.briantakita.me still redirects to https://esg.briantakita.me/solutio
 Good catch — the SVG logo file (`censible_logo_sm.svg`) had "CENSIBLE" rendered as vector paths, which my text replacement didn't touch. I've replaced it with an "ESG TRACKER" text SVG using the same geometric icon. Redeployed — should show correctly now. Try hard refresh (Ctrl+Shift+R) to clear cache.
 
 This site is still incorrect. This is the censible.co website. I want the esg tracker app. It used to be esg.censible.co
+
+You're right — the app was landing on `/solutions` (the old censible.co marketing page). Fixed:
+
+1. **Home `/` now redirects to `/companies`** (the ESG company search page)
+2. **Nav updated**: Companies | Rankings | Portfolios | My Portfolios (removed Solutions/FAQ/Team/Legal from main nav)
+3. **Footer updated** to match ESG app navigation
+4. **Logo SVG** replaced with "ESG TRACKER" text
+5. **Remaining "Censible" strings** in inline HTML fixed
+
+The ESG tracker app is now what you see at https://esg.briantakita.me — try refreshing.
+
+I'm looking at censible.co and it still has Company Search behind a login.
+I believe that it was removed. See correspondence with Mary Ellen where she requested that we remove esg.censible.co. Please advise.
 <!-- /agent:exchange -->

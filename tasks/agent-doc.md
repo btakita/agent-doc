@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.13.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.13.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.3, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -141,6 +141,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.12.2 | Exchange component defaults to append mode (no components.toml needed) |
 | v0.13.0 | `autoclaim` subcommand (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`) |
 | v0.13.1 | Sync updates registry file paths for autoclaim support |
+| v0.13.2 | Sync auto-registers claims for unregistered files (tmux-router v0.2.3 `file_panes`) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -505,4 +506,29 @@ agent-doc sync should also autoclaim the documents.
 - 218 tests passing
 
 agent-doc sync autoclaim not working when switching from agent-doc.md to castandcrew.md on the right editor side
+
+### v0.13.2 Released — sync auto-registers claims for all synced files
+
+**Root cause:** When switching from `agent-doc.md` to `castandcrew.md` on the right side via sync, `castandcrew.md` had a session ID but was never individually claimed — no registry entry existed. The v0.13.1 fix only updated _existing_ registry entries, so it couldn't help files with no entry.
+
+**Fix (two crates):**
+
+1. **tmux-router v0.2.3:** Added `file_panes: Vec<(PathBuf, String)>` to `SyncResult`. Returns all file→pane assignments resolved during sync.
+
+2. **agent-doc v0.13.2:** Rewrote `register_synced_files()` to handle three cases:
+   - **Existing entry, same pane** → update file path if needed
+   - **Existing entry, different pane** → update pane assignment (sync moved the file)
+   - **No entry** → create new registry entry with pane from sync result
+
+Now when sync arranges `castandcrew.md` to pane `%X`, the registry entry is created automatically. `autoclaim` will find it after compaction.
+
+**Published:**
+- tmux-router v0.2.3 → crates.io + GitHub
+- agent-doc v0.13.2 → crates.io + GitHub
+- 218 tests passing
+
+Add automated tests.
+
+Same issue.
+Do I need to restart Idea or the Claude sessions for this to work? Or is there still an issue with agent-doc? Please reference the logs. If logs are missing the smoking gun, add logging to present the "smoking gun".
 <!-- /agent:exchange -->

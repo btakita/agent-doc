@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** MSCI data fully removed. ESG Tracker live at esg.briantakita.me with public Kaggle grades + Finnhub financials only.
+**Status:** Contabo decommissioned. All services on Cloudflare. VPS ready for cancellation.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -953,4 +953,18 @@ mi-redis      redis:alpine       Up 3 days
 Want me to stop the containers now? (`docker stop traefik mi-www_site-1 mi-redis`)
 
 Yes. Decommission and shut down the Contabo instance.
+Done. Contabo VPS decommissioned:
+
+1. **Stopped and removed** all 3 containers (`mi-www_site-1`, `mi-redis`, `traefik`)
+2. **Disabled Docker** service and socket (won't restart on reboot)
+3. **Verified** — only SSH listening on the VPS now
+
+The VPS at `207.244.234.186` is idle. You can cancel it through the Contabo control panel whenever you're ready. The `mi-www.site` domain will stop resolving to anything useful.
+
+Please deploy mi-www.site to Cloudflare.
+
+**Full migration summary:**
+- 7/7 sites migrated from Contabo to Cloudflare
+- Monthly Contabo VPS cost → $0 (once cancelled)
+- All sites served via Cloudflare Pages/Workers with edge caching
 <!-- /agent:exchange -->

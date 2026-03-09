@@ -1014,4 +1014,17 @@ Please add the zone.
 4. Once NS propagation is done (I'll check), I'll add the custom domain to `censible-root-web`
 
 The zone must be created in the CF dashboard first — everything else I can automate from there.
+The `CLOUDFLARE_API_TOKEN` in your .env is valid and active, but it returns **403 Forbidden** when trying to create a zone — it doesn't have zone creation permission (`com.cloudflare.api.account.zone.create`).
+
+To fix, edit the token at https://dash.cloudflare.com/profile/api-tokens:
+1. Find the token (ID: `f50f94d58379408578ba2746a30e6fd5`)
+2. Click **Edit** → **Permissions** → add **Zone** / **Zone** / **Edit**
+3. Save
+
+Done
+Or create a new token with: Account / Zone / Edit + Zone / Zone / Edit + Zone / DNS / Edit
+
+Once the token has zone write permission, submit again and I'll create the zone + add the custom domain.
+
+Alternatively, just add mi-www.site as a zone in the CF dashboard (Add a Site → mi-www.site → Free) and tell me the assigned nameservers.
 <!-- /agent:exchange -->

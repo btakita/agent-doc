@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Rebranded to "ESG Tracker" white-label. Deployed at esg.briantakita.me. Auth: change Auth0 app type to enable login.
+**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG dataset (722 companies, CC BY-NC-SA 4.0) downloaded — integration pending.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -290,4 +290,31 @@ I don't plan on having a license fee. I would have a consulting fee to build a w
 
 Yes...I'm confident. Please note my intention to make this non-commercial. And to ensure that no commercial features are added to esg.briantakita.me.
 In compliance with Kaggle. Commercial work is ok if it does not violate the Kaggle agreement. So let's make sure that we are in compliance.
+
+Noted. The site is **non-commercial and informational only**. Here's how we stay in compliance with CC BY-NC-SA 4.0:
+
+**CC BY-NC-SA 4.0 compliance checklist:**
+- **Non-commercial** — no ads, paywalls, subscriptions, or direct revenue from esg.briantakita.me. Consulting fees are for building *separate* platforms for clients (using their own data sources), not for this site.
+- **Attribution** — credit "Public Company ESG Ratings Dataset" by esgcompare.org on every page displaying the data, plus a dedicated attribution page.
+- **Share-alike** — any derivative data or presentation on the site must be available under CC BY-NC-SA 4.0 (this is fine for an informational site).
+- **No commercial features** — no paid tiers, no premium access, no data export behind paywall. The site exists to demonstrate your platform-building capability, not to monetize the data itself.
+
+**What IS allowed:**
+- Display ESG scores publicly for informational purposes
+- Link to your consulting services (separate from the data)
+- Drive organic traffic through SEO
+- Use the site as a portfolio piece / demo
+
+**The Kaggle dataset** (722 companies, downloaded to `tmp/data.csv`) is ready to integrate. Integration plan:
+
+1. Import CSV into D1 database (new `public_esg` table or replace MSCI teaser data)
+2. Update worker to serve Kaggle ESG scores on public company pages
+3. Add CC BY-NC-SA 4.0 attribution in footer
+4. Remove MSCI-sourced teaser data from public pages
+5. Keep MSCI data behind auth for Martin Investment's licensed reports
+6. Deploy
+
+Ready to start the integration?
+
+Yes...do all of the steps
 <!-- /agent:exchange -->

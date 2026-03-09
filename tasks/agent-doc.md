@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.12.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.13.0 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -139,6 +139,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.12.0 | convert command, compact command, lazy claim via route --pane, exchange default for template init |
 | v0.12.1 | Lazy claim fallback to active_pane("claude") without --pane; no plugin changes needed |
 | v0.12.2 | Exchange component defaults to append mode (no components.toml needed) |
+| v0.13.0 | `autoclaim` subcommand (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -208,6 +209,10 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.12.0 session:** Implemented `agent-doc compact` (archive old exchanges), `agent-doc convert` (append->template), template init uses `exchange` by default, lazy claim via `route --pane`, fixed flaky `recover_append_response` test (snapshot path_for absolute paths). 197 tests. Published to all targets.
 
 **v0.12.1 session:** Fixed lazy claim not working from JetBrains plugin. Root cause: plugin never passed `--pane` to `agent-doc route`. Fix: route now falls back to `tmux.active_pane("claude")` when no `--pane` provided. Priority chain: `--pane` (explicit) -> `active_pane("claude")` (fallback) -> auto-start (last resort). No plugin changes needed. 218 tests. Published to all targets.
+
+**v0.12.2 session:** Exchange component defaults to append mode in the binary. `default_mode()` returns "append" for exchange, "replace" for everything else. No components.toml needed. Fixed CWD drift errors and stale claim after context compaction. 218 tests.
+
+**v0.13.0 session:** Implemented `agent-doc autoclaim` (SessionStart hook for re-establishing claims after context compaction) and git-based snapshot fallback (`snapshot::resolve()` — uses whichever source is more recent between snapshot file and git commit). Bumped agent-kit to v0.2. Published to crates.io + GitHub Releases.
 <!-- /agent:history -->
 
 ## Exchange
@@ -453,4 +458,36 @@ fn resolve_snapshot(file: &Path) -> String {
 This eliminates the race by always choosing the freshest source. Snapshot is the fast path; git is the safety net.
 
 Implement and release
+
+### v0.13.0 Released — autoclaim + git-based snapshot fallback
+
+Both features implemented and published to all targets.
+
+**Feature 1: `agent-doc autoclaim`** (`src/autoclaim.rs`, ~50 lines)
+- New subcommand for SessionStart hook
+- Reads current pane ID, looks up registry, outputs claim info
+- Usage in `.claude/hooks.json`:
+  ```json
+  { "hooks": { "SessionStart": [{ "command": "agent-doc autoclaim" }] } }
+  ```
+- Outputs human-readable claim info that Claude picks up as context
+
+**Feature 2: Git-based snapshot fallback** (`snapshot::resolve()`)
+- `snapshot::resolve(doc)` compares snapshot file mtime vs git commit mtime
+- Uses whichever source is more recent — eliminates race condition
+- `git::show_head(file)` — runs `git show HEAD:<file>` for content
+- `git::last_commit_mtime(file)` — parses `git log -1 --format=%ct`
+- `diff::compute()` now calls `snapshot::resolve()` instead of `snapshot::load()`
+- Graceful fallback: no git → snapshot only, no snapshot → git only, neither → first submit
+
+**Published:**
+- crates.io ✓
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.13.0
+- Binary installed: agent-doc 0.13.0
+- SKILL.md updated
+- 218 tests passing (197 unit + 21 integration)
+
+Also bumped `agent-kit` dependency from v0.1 to v0.2.
+
+agent-doc sync should also autoclaim the documents.
 <!-- /agent:exchange -->

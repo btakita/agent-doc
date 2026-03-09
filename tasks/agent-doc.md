@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.13.0 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.13.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -140,6 +140,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.12.1 | Lazy claim fallback to active_pane("claude") without --pane; no plugin changes needed |
 | v0.12.2 | Exchange component defaults to append mode (no components.toml needed) |
 | v0.13.0 | `autoclaim` subcommand (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`) |
+| v0.13.1 | Sync updates registry file paths for autoclaim support |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -212,7 +213,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 **v0.12.2 session:** Exchange component defaults to append mode in the binary. `default_mode()` returns "append" for exchange, "replace" for everything else. No components.toml needed. Fixed CWD drift errors and stale claim after context compaction. 218 tests.
 
-**v0.13.0 session:** Implemented `agent-doc autoclaim` (SessionStart hook for re-establishing claims after context compaction) and git-based snapshot fallback (`snapshot::resolve()` — uses whichever source is more recent between snapshot file and git commit). Bumped agent-kit to v0.2. Published to crates.io + GitHub Releases.
+**v0.13.0-v0.13.1 session:** Implemented `agent-doc autoclaim` (SessionStart hook for re-establishing claims after context compaction), git-based snapshot fallback (`snapshot::resolve()` — mtime comparison chooses freshest source), and sync-to-autoclaim integration (sync updates registry file paths so autoclaim works for synced files). Published both releases to all targets.
 <!-- /agent:history -->
 
 ## Exchange
@@ -490,4 +491,18 @@ Both features implemented and published to all targets.
 Also bumped `agent-kit` dependency from v0.1 to v0.2.
 
 agent-doc sync should also autoclaim the documents.
+
+### v0.13.1 Released — sync updates registry for autoclaim
+
+**Change:** After `agent-doc sync` arranges panes, it now updates each synced file's registry entry with the correct file path. This ensures `autoclaim` can find files mapped to panes even when they were arranged via sync rather than individually claimed.
+
+**Implementation:** Added `update_registry_file_paths()` in `sync.rs`. After `tmux_router::sync()` completes, reads the registry, patches entries with empty or mismatched `file` fields, writes back atomically under lock.
+
+**Published to all targets:**
+- crates.io ✓, GitHub Release ✓
+- Binary: agent-doc 0.13.1 installed
+- SKILL.md: updated
+- 218 tests passing
+
+agent-doc sync autoclaim not working when switching from agent-doc.md to castandcrew.md on the right editor side
 <!-- /agent:exchange -->

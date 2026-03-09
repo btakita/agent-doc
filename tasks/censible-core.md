@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** All submodules committed & pushed. ESG Tracker live at esg.briantakita.me. `webmaster` v0.1.0 released.
+**Status:** Self-managed D1 auth deployed. Auth0 removed. ESG Tracker live at esg.briantakita.me.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -719,4 +719,25 @@ I would like to change the login mechanism. Should I continue using auth0 with a
 This eliminates the CORS problem entirely and removes the dependency on Censible's Auth0 tenant. Want me to implement it?
 
 yes
+
+**Self-managed auth implemented and deployed.** Auth0 completely removed.
+
+**What changed:**
+
+1. **Migration `0004_self_auth`** — `auth_users` (email/password_hash) + `auth_sessions` (HMAC-signed tokens, 30-day TTL)
+2. **`worker/self_auth.ts`** — PBKDF2 password hashing (100k iterations, SHA-256), HMAC-signed session tokens, `/api/register`, `/api/login`, `/api/logout` endpoints
+3. **`pages/auth.ts`** — Rewritten login/signup form. POSTs to same-origin `/api/login` and `/api/register` (no CORS). Removed Auth0 dependencies, forgot password (no email sending).
+4. **`worker/index.ts`** — Auth0 imports/bindings/middleware removed. Self-auth middleware validates session tokens. `/logout` clears client token + server session.
+5. **`AUTH_SECRET`** — HMAC signing key set as wrangler secret (random 32-byte hex)
+
+**CORS problem eliminated** — all auth requests are same-origin.
+
+**Live at https://esg.briantakita.me/login** — try registering an account.
+
+I'm logged in and seeing the message:
+
+> Full ESG Scores & Ratings
+> Log in to view detailed ESG scores, ESG ratings, and gender diversity data.
+
+Please note that I want to re
 <!-- /agent:exchange -->

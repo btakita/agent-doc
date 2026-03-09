@@ -430,4 +430,20 @@ Added `instruction-files` integration as an optional feature:
 All tests pass: 21 agent-kit, 16 webmaster.
 
 release
+
+### Released
+
+**agent-kit v0.2.0** — tagged and pushed, release workflow triggered
+- Environment detection (`detect::Environment`)
+- Audit feature (`instruction-files` re-export behind `audit` Cargo feature)
+- 21 tests
+- https://crates.io/crates/agent-kit
+https://crates.io/crates/agent-kit still shows v0.1.0
+
+**webmaster v0.1.2** — tagged and pushed, release workflow triggered
+- New `webmaster audit-docs` subcommand
+- agent-kit 0.2 dependency with audit feature
+- 16 tests
+- https://crates.io/crates/webmaster
+https://crates.io/crates/webmaster still shows v0.1.1
 <!-- /agent:exchange -->

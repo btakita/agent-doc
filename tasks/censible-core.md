@@ -491,4 +491,17 @@ Other commands: `./tmp/webmaster-auth.sh list-sitemaps` to verify.
 Created `tmp/webmaster-auth.sh` — a standalone script that reuses your corky OAuth client (`pass corky/gmail/client_id`) with the Search Console API scope. Separate from corky's Gmail token so existing filter/calendar auth isn't affected.
 
 Does submit-sitemap fall in the scope of Corky...being about correspondence. Or should this be a separate library?
+**Sitemap submission does NOT belong in corky.** Corky's domain is correspondence — email sync, drafting, contacts, filters, calendar. Search Console is SEO/webmaster tooling, a completely different domain.
+
+**Options:**
+1. **Keep as standalone script** (recommended) — `tmp/webmaster-auth.sh` is a one-off. You'll run it once, then `robots.txt` handles future sitemap discovery automatically.
+2. **Add to `src/cloudflare/`** — if you build more site management tooling (deploy, cache purge, DNS), a webmaster module fits there.
+3. **New micro-tool** — only if managing Search Console for multiple sites. Overkill for one submission.
+
+The script reuses corky's OAuth *credentials* (same GCP project) but doesn't need to be part of corky's *codebase*. Keeping it separate preserves corky's clean scope.
+
+I want seo tooling to use with the agent loop. src/cloudflare is dependent on using cloudflare.
+There are webmaster libraries in crates https://crates.io/search?q=webmaster
+Also there is data for seo
+https://crates.io/crates/data-for-seo
 <!-- /agent:exchange -->

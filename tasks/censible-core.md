@@ -1306,4 +1306,15 @@ The Copyright for Martin Investments is dated 1970.Seems incorrect.
 Fixed — copyright now shows 2026. The bug was that `footer_html` was a module-level constant. `new Date().getFullYear()` evaluated once at module init time, and Cloudflare Workers return epoch (1970) during module evaluation. Changed it to a function so the year is computed per-request. Deployed.
 
 Anything else we need from Contabo?
+**Nothing else needed from Contabo for censible.** The VPS is fully decommissioned:
+
+- **mi-www.site** — migrated to Cloudflare Workers (live)
+- **Redis** — was only ephemeral cache/sessions, no data to preserve
+- **Auth0** — replaced with self-managed auth (PBKDF2 + HMAC sessions)
+- **Source code** at `/home/admin/work/censible-core/` — 2-year-old Solid Start app, superseded by the new Cloudflare Workers build
+- **censible.co** — runs on Heroku, not Contabo, unaffected
+
+The Contabo VPS is idle and ready for cancellation. All censible infrastructure is now on Cloudflare (Workers + D1 + KV).
+
+Cancel th eContabo VPS.
 <!-- /agent:exchange -->

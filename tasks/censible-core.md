@@ -254,4 +254,24 @@ Ok...should I bother having esg.briantakita.me or should I call it something lik
 Your differentiation is the ESG platform + data pipeline + white-label positioning. The domain should reflect that. The gated ESG scores actually strengthen the licensing pitch — visitors see the platform works, then need a license to access the scored data.
 
 Is there a quick way to get public esg data in an api? Perhaps https://github.com/awesomedata/awesome-public-datasets has a source?
+
+I checked awesome-public-datasets, Kaggle, and the main ESG API providers. **There is no freely available, commercially-licensable, company-level ESG score dataset** you can just drop in:
+
+| Source | License | Problem |
+|--------|---------|---------|
+| Kaggle "Public Company ESG Ratings" | CC BY-NC-SA 4.0 | **Non-commercial** |
+| Kaggle "ESG Data" (tunguz) | CC BY 4.0 | Country-level only, not companies |
+| awesome-public-datasets | Various | No ESG datasets |
+| Finnhub | Proprietary | Redistribution requires paid plan |
+| Financial Modeling Prep | Proprietary | Display requires licensing agreement |
+| ESG Book | Proprietary | No redistribution |
+| World Bank | CC BY 4.0 | Country-level only |
+
+Every pre-computed company ESG score source is either non-commercial, redistribution-restricted, or country-level only.
+
+**So the practical answer is:** stick with option 4 from earlier. Keep `esg.briantakita.me` with company search/browse publicly accessible (company names, tickers, industries — all non-proprietary). ESG scores stay behind auth. This is your strongest positioning anyway: the platform demo is public, the scored data is the licensed product.
+
+No code changes needed — the current setup already works this way.
+
+This website is non-commercial. It is purely informational.
 <!-- /agent:exchange -->

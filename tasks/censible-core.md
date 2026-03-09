@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** ESG Tracker live. Sitemap submitted (9,063 URLs). `webmaster` v0.1.0 released on crates.io + GitHub.
+**Status:** All submodules committed & pushed. ESG Tracker live at esg.briantakita.me. `webmaster` v0.1.0 released.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -631,4 +631,49 @@ Published to crates.io, tagged v0.1.0, pushed to GitHub with release binary.
 
 Commit, add, and push submodules. commit and push agent-loop
 release whatever needs to be released.
+
+compact this file
+
+**Session history (compacted):**
+
+**ESG Tracker (esg.briantakita.me):**
+- Migrated censible-core to Cloudflare Workers + D1, deployed at esg.briantakita.me
+- Rebranded from "Censible" to "ESG Tracker" (white-label, non-commercial)
+- Public ESG data from Kaggle CC BY-NC-SA 4.0 dataset (722 companies). MSCI data behind auth only.
+- Full SEO: sitemap.xml (9,063 URLs), robots.txt, llms.txt, Schema.org JSON-LD, meta tags
+- Cache-Control headers on company routes (1hr CDN edge caching)
+- Investment disclaimer in footer. CC BY-NC-SA attribution on ESG data pages.
+- Auth0 app type change still needed for login (Regular Web App + Password grant)
+
+**webmaster CLI (src/webmaster):**
+- v0.1.0 released on crates.io + GitHub with prebuilt binary
+- Multi-engine: Google (OAuth2), Bing (API key), Yandex (planned)
+- Sitemap submitted to Google Search Console (9,063 URLs, 0 errors)
+- Added as submodule to agent-loop
+
+**Contacts & email:**
+- Anil Podduturi added as contact (BCG, ESG Book context)
+- `*@neo.com` synced to Gmail correspondence filter
+
+**Key decisions:**
+- Site is non-commercial/informational only (CC BY-NC-SA compliance)
+- No MSCI data on public pages (criminal liability concern)
+- Consulting fees are for building separate platforms, not this site
+- censible.co DNS not controlled — broken esg.censible.co link is on their side
+
+**All repos pushed:**
+- censible-core: `4e55e43` (SEO, public ESG, cache headers)
+- webmaster: v0.1.0 (submodule added to agent-loop)
+- agent-doc: v0.12.2 (no changes)
+- agent-loop: `8e110df` (submodule updates)
+
+Error logging in to esg.briantakita.me:
+```
+Access to fetch at 'https://censible.us.auth0.com/oauth/token' from origin 'https://esg.briantakita.me' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+login:955  POST https://censible.us.auth0.com/oauth/token net::ERR_FAILED 200 (OK)
+doLogin @ login:955
+(anonymous) @ login:941
+```
+
+I would like to change the logi
 <!-- /agent:exchange -->

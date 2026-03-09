@@ -253,4 +253,22 @@ Make sure webmaster has gh actions that include running tests and releasing to c
 **Note:** Before the first tagged release, you'll need to add `CARGO_REGISTRY_TOKEN` as a secret in both repos' GitHub Settings → Secrets.
 
 Can this be done via the gh api?
+
+### Yes — via `gh secret set`
+
+```bash
+# Set for both repos (prompts for value):
+gh secret set CARGO_REGISTRY_TOKEN --repo btakita/agent-kit
+gh secret set CARGO_REGISTRY_TOKEN --repo btakita/webmaster
+```
+
+Or pipe the token:
+```bash
+echo "your-crates-io-token" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita/agent-kit
+echo "your-crates-io-token" | gh secret set CARGO_REGISTRY_TOKEN --repo btakita/webmaster
+```
+
+Get a token from https://crates.io/settings/tokens — create one with "publish-new" and "publish-update" scopes. Ready to run these when you provide the token.
+
+Is it stored in the local $CRATES_PUBLISH_TOKEN? If yes, why are the names different?
 <!-- /agent:exchange -->

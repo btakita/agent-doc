@@ -967,4 +967,19 @@ Please deploy mi-www.site to Cloudflare.
 - 7/7 sites migrated from Contabo to Cloudflare
 - Monthly Contabo VPS cost → $0 (once cancelled)
 - All sites served via Cloudflare Pages/Workers with edge caching
+`mi-www.site` DNS is on Namecheap (registrar-servers.com), not Cloudflare. To deploy it on CF Workers:
+
+**Required steps:**
+1. **Add mi-www.site to Cloudflare** — go to your CF dashboard → Add a Site → enter `mi-www.site`
+Please do this via Cloudflare api.
+2. **Update nameservers at Namecheap** — change from `dns1/dns2.registrar-servers.com` to the Cloudflare nameservers CF gives you
+Please do this via Cloudflare api.
+3. **Wait for NS propagation** (usually 5-30 min, up to 24h)
+4. I'll add it as a custom domain on `censible-root-web` worker
+
+Alternatively, if you don't want to keep the `mi-www.site` domain (it's not a particularly memorable name), you could just let it expire and use `esg.briantakita.me` exclusively.
+
+Want me to proceed once you've added the domain to Cloudflare and updated nameservers? Or would you prefer to let mi-www.site go?
+
+I want to deploy mi-www.site with all of our data to Cloudflare.
 <!-- /agent:exchange -->

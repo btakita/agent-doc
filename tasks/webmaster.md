@@ -336,4 +336,39 @@ Please add a README and VERSIONS to agent-kit.
 Committed and pushed to https://github.com/btakita/agent-kit
 
 What are pending features for agent-kit?
+### Pending features for agent-kit
+
+Based on the roadmap discussed earlier and what's shipped:
+
+**v0.2 — Environment Detection**
+- Detect active agent environment (Claude Code, OpenCode, Codex, generic)
+- Adapt skill placement per environment (`.claude/skills/` vs alternatives)
+- `agent_kit::detect::Environment` enum with auto-detection
+
+Do Environment Detection
+
+**v0.3 — Context Injection**
+- Programmatic `CLAUDE.md` / `AGENTS.md` section management (append/remove)
+- MCP tool description generation from skill manifests
+- System prompt fragment emission for non-file-based loops
+
+**v0.4 — Structured Output**
+- `--agent-output` flag support for machine-readable CLI output
+- Consistent JSON error reporting format
+- Agent-friendly progress reporting
+
+**Future / Backlog**
+- Configuration discovery (unified `~/.config/<tool>/` pattern)
+discuss
+- Credential management abstraction (pass, keyring, env vars)
+discuss
+- Integration with `instruction-files` crate for audit logic
+Add audit logic
+- `skill uninstall` subcommand scaffolding (currently in the API but not in CLI templates)
+Add skill uninstall subcommand
+
+**What's shipped (v0.1.0):**
+- `SkillConfig` — install/check/uninstall SKILL.md
+- Used by agent-doc and webmaster
+- Published on crates.io with CI/CD
 <!-- /agent:exchange -->

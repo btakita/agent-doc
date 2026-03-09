@@ -12,16 +12,18 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-**Yes.** Changing to "Regular Web Application" is a superset — it supports **all** grant types:
+**Steps to enable auth login:**
 
-- **Password** (ROPG) — embedded login form (current implementation)
-- **Authorization Code** — redirect-based flow (if you want Auth0 Universal Login later)
-- **Implicit** — original SPA flow
-- **Client Credentials** — M2M
+1. Go to https://manage.auth0.com/dashboard/us/censible/applications
+2. Click **Censible** (the SPA app)
+3. **Settings** tab → scroll to **Application Type** → change from "Single Page Application" to **Regular Web Application**
+4. Scroll down to **Advanced Setting** → **Grant Types** tab → check **Password** box
+5. Click **Save Changes**
 
-Self-serve signup (`/dbconnections/signup`) works regardless of app type — it's a database connection API, not a grant type.
+That's it. The login at https://censible-root-web.brian-takita.workers.dev/login should work immediately after.
 
-**One app handles both censible.co and workers.dev.** No need for separate applications.
+Complete. Is all of censible completely moved over?
+I don't think I have access to the censible.co dns. But we can create censible.briantakita.me so I can demo the app.
 
-What do I need to do again?
+I will discuss w
 <!-- /agent:exchange -->

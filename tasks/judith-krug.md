@@ -1,10 +1,8 @@
 ---
 agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
 tmux_session: '0'
+agent_doc_mode: template
 ---
-
-
-
 
 # Judith Krug — Equity Funding Source
 
@@ -319,3 +317,4 @@ Note: corky requires `status: approved` (or `review`/`scheduled`) before `--send
 
 ## User
 
+From the transcribed conversations with robert-ward. Please come up with talking point for my upcoming call with Judith Krug and Robert Waldman. See tasks/robert-ward.md

@@ -203,4 +203,8 @@ https://www.linkedin.com/in/anilpod/
 The only BCG↔ESG Book link is the "LEO" sustainability reporting platform partnership. Anil could have been involved internally as a BCG partner, but nothing publicly documents it. If you believe he was familiar with Censible and influenced the ESG Book direction, that would have been through private channels not visible in public records.
 
 Please add Anil as a contact.
+
+Done — created contact at `mail/contacts/anil-podduturi/CLAUDE.md` with his LinkedIn, BCG role, and the Censible/ESG Book context you provided.
+
+Sync my .corky.toml with my gmail. I will be receiving all of my *@neo.com correspondence...which include Anil.
 <!-- /agent:exchange -->

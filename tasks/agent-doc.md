@@ -279,4 +279,41 @@ Arguably `recover` could be improved to resolve relative paths by walking up to 
 
 agent-doc run is not running in the tmux pane even after claimed previously in the session.
 Reclaiming does work.
+### Claim persistence bug — investigating
+
+**What you described:** `agent-doc run` doesn't execute in the tmux pane after a claim was made earlier in the session. Reclaiming fixes it.
+
+**Current state:** Route is working now — `agent-doc route tasks/agent-doc.md` successfully sends to pane `%0`. The registry shows correct mappings.
+
+**Likely root cause candidates:**
+1. **PID mismatch** — the Claude process restarted (e.g., context compaction spawns a new process) but the registry still has the old PID. `route` may check if the PID is alive and skip sending.
+2. **Stale claim pruning** — `prune()` runs before route/claim operations and may have removed the claim if the original process was gone.
+3. **Window change** — if the pane moved to a different window, routing may not find it.
+
+**Can you reproduce?** Next time it happens, before reclaiming, run:
+```bash
+cat .agent-doc/sessions.json
+tmux list-panes -a -F '#{pane_id} #{pane_current_command}'
+```
+This will tell us whether the claim is still in the registry and whether the pane is alive.
+
+If this is a consistent issue, I can add diagnostic logging to `route` to trace exactly why it skips a pane.
+
+### Stale claim after context compaction — diagnosed
+
+The claim was registered to session `56f0c92a` + pane `%47`. After context compaction, the new Claude session doesn't remember the claim, so when `route` sends `/agent-doc <file>` to the pane, the new Claude instance treats it as a fresh prompt — not a claimed skill invocation.
+
+**Why reclaiming works:** It re-registers both in the tmux-router registry AND in the current Claude session's context.
+
+**Potential fixes (priority order):**
+1. **SessionStart hook** — auto-claim on session start if registry entry exists for current pane (most elegant, zero user intervention)
+2. **Auto-reclaim on route** — if route detects stale claim (no response within N seconds), re-send with claim
+3. **Heartbeat** — periodic check that claimed pane's Claude session is alive
+
+Option 1 could use Claude Code's `SessionStart` hook to run `agent-doc claim <file>` automatically. Want me to implement it?
+
+Yes
+
+It seems there is a race condition between the snapshot and the git commit for the document.
+Can we have the snapshot use the git commit to perform the diff?
 <!-- /agent:exchange -->

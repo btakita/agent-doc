@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO deployed. Cache headers live (1hr edge cache). Google Search Console: DNS verified, submit sitemap manually.
+**Status:** Migration complete ✓. Non-commercial ESG Tracker at esg.briantakita.me. Kaggle ESG data integrated. Full SEO deployed. Cache headers live. `src/webmaster/` scaffolded — multi-engine sitemap CLI.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -545,5 +545,40 @@ Recommendation: **`webmaster`** → `src/webmaster/`. Want me to scaffold it?
 
 Yes...Add a feature to submit the sitemap. Just want to make sure that google-webmasters3-cli doesn't alread cover this behavior. If it does, then we can have our webmaster tool support all search engines via cli.
 
-Let's run the sub
+Let's run 
+**`google-webmasters3-cli` is deprecated** — part of the older `google-apis-rs` project (maintenance mode). The modern API is Search Console API v1 via `google-searchconsole1`.
+
+**Scaffolded `src/webmaster/`** — compiles clean. Multi-engine CLI:
+
+```
+webmaster auth google                                    # OAuth2 flow
+webmaster submit-sitemap https://example.com/sitemap.xml # All engines
+webmaster submit-sitemap URL -e google                   # Google only
+webmaster list-sitemaps                                  # List from Google
+```
+
+**Engine support:**
+| Engine | Auth | Sitemap Submit | Status |
+|--------|------|----------------|--------|
+| Google | OAuth2 (reuses corky GCP creds) | Yes | Implemented |
+| Bing | API key (`BING_WEBMASTER_API_KEY`) | Yes | Implemented |
+| Yandex | OAuth | Planned | Stub |
+
+**Files created:**
+- `Cargo.toml` — deps: clap, ureq, serde, chrono, open, tiny_http
+- `src/main.rs` — CLI (clap derive)
+- `src/auth.rs` — Google OAuth2 flow
+- `src/config.rs` — Credential resolution (pass, env vars)
+- `src/engines/google.rs` — Search Console API (submit/list sitemaps)
+- `src/engines/bing.rs` — Bing URL submission API
+- `CLAUDE.md` — Project instructions
+
+**Next steps:**
+1. Enable Google Search Console API in your GCP project
+2. `cargo install --path src/webmaster` (or `cargo run --manifest-path src/webmaster/Cargo.toml`)
+3. `webmaster auth google` → browser OAuth
+4. `webmaster submit-sitemap https://esg.briantakita.me/sitemap.xml`
+
+Let's run the submit sitemap for google. And release the first version.
+webmaster is alpha quality. Include the readme, SPEC.md, AGENTS.md with CLAUDE.md symlink, and the rest of our usual project setup.
 <!-- /agent:exchange -->

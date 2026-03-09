@@ -65,4 +65,10 @@ For the SEO + licensing + martin-investments funnel strategy:
 - Reach out to Mary Ellen when ready to discuss the traffic partnership
 
 Deploy
+
+Already deployed — the rebrand went live a few minutes ago. Both URLs are active:
+- https://censible-root-web.brian-takita.workers.dev
+- https://esg.briantakita.me
+
+https://esg.briantakita.me still redirects to https://esg.briantakita.me/solutions. Site is still branded as Censible.
 <!-- /agent:exchange -->

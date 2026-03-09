@@ -12,18 +12,15 @@ Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:exchange -->
 
-**Auth0 app compatibility:** A single Auth0 app can handle the Password Grant, but there's a type constraint:
+**Yes, mi-www.site used Auth0** — specifically the Resource Owner Password Grant (ROPG) flow, confirmed from source:
 
-- **SPA apps** (Single Page Web Applications) **cannot** use the Password grant type by default in Auth0
-- **Regular Web Applications** **can** enable the Password grant
+- `libs/ui-solid/src/auth0/LoginForm_auth0.tsx` — embedded email/password form, POSTs to `https://{AUTH0_DOMAIN}/oauth/token`
+- `libs/ui-solid/src/auth0/login.ts` — uses `grant_type: password-realm`, `realm: Username-Password-Authentication`
+- `libs/ui-solid/src/auth0/SignupForm_auth0.tsx` — embedded signup
+- `libs/ui-solid/src/auth0/Auth0ForgotPasswordForm.tsx` — forgot password
+- All via `@ctx-core/auth0` library
 
-**Options:**
-1. **Change your existing app type** to "Regular Web Application" in Auth0 dashboard → Settings → Application Type. Then enable Password under Advanced Settings → Grant Types. Same Client ID works.
-2. **Use a separate app** — create a "Regular Web Application" with Password grant enabled, use its Client ID for the workers.dev deployment. Your original SPA app stays for censible.co if it uses a different auth flow.
+The new implementation matches this exactly — same Auth0 ROPG flow, same realm, same embedded forms. So you can use the same Auth0 application that mi-www.site used. Just set that app's Client ID as `AUTH0_CLIENT_ID`.
 
-Since censible.co and mi-www.site historically used different auth methods, you likely already have two Auth0 apps. Check your Auth0 dashboard — you probably have one "Regular Web Application" (for ROPG) and one SPA app. Use the Regular Web Application's Client ID.
-
-**To verify:** In Auth0 → Applications, check which app has `XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ` — if it's an SPA, either change its type or use the other app's Client ID instead.
-
-Did the original mi-www.site use auth0 or a different auth mechanism?
+Which app did it go to? See screenshot.
 <!-- /agent:exchange -->

@@ -120,5 +120,41 @@ Fair point — no good reason to keep them separate. The email skill was created
 Implementing now.
 
 Do you have anything about diarized transcription of audio recordings?
+**Yes — corky has diarized transcription built in.**
+
+`corky transcribe <FILE>` uses whisper-rs (Rust bindings to whisper.cpp):
+
+```sh
+# Basic transcription
+corky transcribe recording.wav
+
+# With manual speaker labels (assigns names to detected turns)
+corky transcribe recording.wav --speakers "Brian,Alice"
+
+# With automatic neural diarization (pyannote)
+corky transcribe recording.wav --diarize --speakers "Brian,Alice"
+
+# Custom model + language + output file
+corky transcribe call.amr --model large-v3-turbo --language en -o transcript.md
+```
+
+**Two diarization modes:**
+1. `--speakers "Name1,Name2"` — manual labeling, assigns speaker names to detected voice turns
+2. `--diarize` — pyannote-rs neural speaker segmentation (requires `--features diarize` compile flag + ONNX runtime)
+
+**Feature flags** (compile-time, in Cargo.toml):
+- `transcribe` — base whisper-rs engine (CPU)
+- `transcribe-cuda` — GPU acceleration via CUDA
+- `diarize` — pyannote-rs for automatic speaker detection
+
+**Source:** `src/transcribe/` — `engine.rs` (whisper), `audio.rs` (format conversion), `diarize.rs` (pyannote), `model.rs` (model download/cache)
+
+Are we currently using whisper-rs
+
+The current installed binary may not have the transcribe feature compiled in — it's behind a feature flag. Check with `corky transcribe test.wav` to see if it says "not compiled with transcribe feature".
+
+release...will work on including transcribe later
+
+Please help me with instructions for Lucas to get started using btakita/ma
 <!-- /agent:exchange -->
 ****

@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Auth0 confirmed as old auth provider. Building apps/mi-web (separate worker for mi-www.site). Blocked on user account list.
+**Status:** Building apps/mi-web. Auth accounts identified from correspondence. Separate D1 database.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1211,4 +1211,24 @@ The auth may also be in the redis instance.
 I don't see the account pointing to mi-www.site in Auth0.
 Please look at the correspondence, particularly with Sarah Winter and Mary Ellen re: mi-www.site.
 They should both have a login.
+Found the accounts from the correspondence (`re-stewardship-reports-confidential.md`):
+
+| # | Name | Email | Role |
+|---|------|-------|------|
+| 1 | Brian Takita | brian.takita@gmail.com | admin |
+| 2 | Sarah Winter | s.e.winter@martin-investments.com | user |
+| 3 | Mary Ellen Martin Zellerbach | c.m.zellerbach@martin-investments.com | user |
+| 4 | Sandra S. Martin | s.s.martin@martin-investments.com | user |
+| 5 | Patrick A. Martin | p.a.martin@martin-investments.com | user |
+| 6 | Caroline L. Sarles | c.l.sarles@martin-investments.com | user |
+
+All will be seeded with temporary passwords that must be changed on first login.
+
+**No longer blocked.** Building `apps/mi-web` now with:
+- Separate D1 database (`censible-mi-web-db`)
+- Closed auth (login only, admin-seeded accounts above)
+- All proprietary ESG data + portfolio management + XLSX
+- Max code reuse from `apps/root-web`
+
+Please deploy mi-web to mi-www.site
 <!-- /agent:exchange -->

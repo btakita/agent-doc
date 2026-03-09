@@ -308,4 +308,24 @@ Both repos can now `cargo publish` in their release workflows.
 **To complete the rename:** find where `CRATES_PUBLISH_TOKEN` is exported and change it to `CARGO_REGISTRY_TOKEN`. Or just remove it — `~/.cargo/credentials.toml` already provides the token to Cargo.
 
 Release
+### Released
+
+**agent-kit v0.1.0** — published to crates.io
+- https://crates.io/crates/agent-kit
+- CI + release workflows green
+
+**webmaster v0.1.1** — published to crates.io + GitHub Release
+- https://crates.io/crates/webmaster
+- https://github.com/btakita/webmaster/releases/tag/v0.1.1
+- v0.1.0 was already taken on crates.io, bumped to v0.1.1
+
+**CI fixes along the way:**
+- Webmaster release workflow now clones agent-kit as sibling (path dependency)
+- Added `--allow-dirty` for `cargo publish` (Cargo.lock drifts in CI due to path dep resolution)
+- Added `permissions: contents: write` for GitHub Release creation
+
+**GitHub secrets:** `CARGO_REGISTRY_TOKEN` set for both repos via `gh secret set --body`.
+
+Please add a README and VERSIONS to agent-kit.
+Please add a README and VERSIONS to agent-kit.
 <!-- /agent:exchange -->

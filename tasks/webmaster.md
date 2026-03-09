@@ -397,4 +397,37 @@ How does agent-doc and webmaster handle the credentials. agent-doc is more evolv
 `instruction-files` crate already provides exactly this: staleness detection, tree path validation, line budget enforcement, actionable content filtering. Agent-kit should depend on it (optional dep) and re-export via `agent_kit::audit` with a preset config. Straightforward — say "go" to implement.
 
 go
+
+### Credential Handling — Comparison
+
+**webmaster** has the more evolved credential management:
+- Cascading resolution: `pass` commands → env vars → helpful error messages
+- OAuth2 token lifecycle: store → auto-refresh → re-auth on expiry
+- Secure storage: `~/.config/webmaster/tokens.json` with 0600 permissions
+- Per-engine API key handling (Bing via env var, Google via OAuth2)
+
+**agent-doc** delegates entirely to the Claude CLI:
+- No credentials stored or managed in agent-doc itself
+- Config at `~/.config/agent-doc/config.toml` stores agent backend preferences only (command, args)
+- Auth failures surface as subprocess errors from the Claude CLI
+
+**Design implication for agent-kit:** These are fundamentally different philosophies. Webmaster owns the full token lifecycle; agent-doc is stateless and defers auth to higher-level tools. For agent-kit as a library, "delegate to the consuming CLI" is the right default — each CLI knows its own credential needs. Webmaster's `pass` → env var cascade is a good pattern to document as a recommended convention, but shouldn't be baked into the library.
+
+### Audit Logic — Implemented ✓
+
+Added `instruction-files` integration as an optional feature:
+****
+**agent-kit changes:**
+- New `audit` Cargo feature gating `instruction-files` dependency
+- `agent_kit::audit` module re-exports: `AuditConfig`, `Issue`, `run()`, all 4 check functions, discovery functions
+- Zero cost when feature is disabled
+
+**webmaster changes:**
+- `agent-kit` dependency now enables `features = ["audit"]`
+- New `webmaster audit-docs` subcommand using `AuditConfig::agent_doc()` preset
+- Runs full audit: tree path validation, actionable content checks, line budget, staleness detection
+
+All tests pass: 21 agent-kit, 16 webmaster.
+
+release
 <!-- /agent:exchange -->

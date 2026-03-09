@@ -316,4 +316,109 @@ Yes
 
 It seems there is a race condition between the snapshot and the git commit for the document.
 Can we have the snapshot use the git commit to perform the diff?
+
+### SessionStart auto-reclaim — design
+
+The hook would live in `.claude/hooks.json` (or per-project settings):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "agent-doc autoclaim"
+    }
+  ]
+}
+```
+
+`agent-doc autoclaim` would:
+1. Get the current pane ID (`$TMUX_PANE`)
+2. Look up the pane in the registry (`sessions.json`)
+3. If a file is registered to this pane, print `/agent-doc claim <file>` to stdout
+4. Claude Code's hook system pipes stdout back as context, so the session starts with the claim active
+
+**Key insight:** The hook doesn't need to _send_ the claim — it just needs to _inform_ the new Claude session that this pane is claimed. The registry already has the mapping; we just need the session to know about it.
+
+**Implementation:** ~30 lines in a new `autoclaim` subcommand. No changes to existing claim/route logic.
+
+### Snapshot vs git for diffing — analysis
+
+You're right that there's a race. The current flow:
+
+1. `agent-doc commit` → saves file state in git
+2. Read snapshot file → compute diff against current file
+3. Write response → update snapshot
+
+If the file changes between step 1 and 2, the snapshot and git commit are out of sync.
+
+**Proposed: git-based snapshot (hybrid approach)**
+
+Instead of maintaining separate snapshot files, use `git show HEAD:<file>` as the snapshot source:
+
+```
+agent-doc commit <file>     → git add + commit (this IS the snapshot)
+agent-doc diff <file>       → git show HEAD:<file> vs current file (after comment stripping)
+agent-doc write <file>      → no snapshot update needed (next commit handles it)
+```
+
+**Benefits:**
+- Eliminates race condition — git commit and snapshot are the same thing
+- Removes `.agent-doc/snapshots/` directory (less state to manage)
+- Git already handles atomic writes
+- `git show HEAD:<file>` is fast (~1ms)
+
+**Challenges:**
+- Non-git repos lose snapshot support (fallback to current system?)
+- Comment stripping still needs custom logic (can't use raw `git diff`)
+- First submit detection: `git log -1 -- <file>` instead of "no snapshot file"
+
+**Implementation plan:**
+1. Add `snapshot_source` config: `git` (default for git repos) | `file` (current behavior, fallback)
+2. Replace `read_snapshot()` with `git show HEAD:<file>` when source is `git`
+3. Remove snapshot write from `agent-doc write` (git commit handles it)
+4. Keep `file` mode for non-git repos and as a fallback
+5. ~50 lines changed in `snapshot.rs` + `diff.rs`
+
+Both features are small. Shall I implement them together in a single release?
+
+### SessionStart hook — design
+
+The hook goes in `.claude/hooks.json`:
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "command": "agent-doc autoclaim"
+    }]
+  }
+}
+```
+
+`agent-doc autoclaim` would:
+1. Get current tmux pane ID
+2. Look up all files registered to that pane in `sessions.json`
+3. Output claim confirmations for the new session context
+
+This is a new `autoclaim` subcommand in the binary + a hook config. Will implement in the next release cycle.
+
+### Snapshot vs git commit for diff — analysis
+
+**Yes, git commits can replace snapshots for diff computation.** The race condition exists because snapshot files are a separate state that can drift from git history.
+
+**Current flow:** user edits → commit → read snapshot → diff → respond → write → update snapshot (race window between commit and snapshot)
+
+**Git-based flow:** user edits → commit → `git diff` against last `agent-doc:` commit → respond → write → commit (no separate state to drift)
+
+**Recommended: hybrid approach**
+- Keep snapshots as fast path (file read ~1ms vs git ~10ms)
+- Use git as fallback when snapshot is stale/missing
+- `agent-doc commit` updates snapshot AND commits atomically
+- On diff: if snapshot doesn't match last git commit's content, auto-recover from git
+
+I saw an issue where the snapshot diff was incomplete & stale. Make sure we detect drift between the git commit and the snapshop...especially if the git commit is more recent than the snapshot. Proposal: If the snapshot is more recent than the git commit, use the snapshot...thought/analysis on the proposal?
+
+**Advantages:** Eliminates race condition, survives compaction, no separate state to maintain. **Challenge:** Requires git repo (currently optional), comment stripping on git diff output.
+
+Will scope this for v0.13.0 alongside the autoclaim feature.
 <!-- /agent:exchange -->

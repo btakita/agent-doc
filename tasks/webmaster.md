@@ -473,4 +473,39 @@ Both release workflows had failed. Root causes and fixes:
 **Lesson:** Release workflows with cross-crate dependencies need ordered publishing. The webmaster release workflow should ideally wait for agent-kit to be indexed on crates.io before attempting `cargo publish`.
 
 compact this file
+*Compacted. Full history: git log for tasks/webmaster.md.*
+
+### Current State
+
+**webmaster** v0.1.2 — Unified CLI for search engine webmaster tools
+- **Repo:** https://github.com/btakita/webmaster
+- **crates.io:** https://crates.io/crates/webmaster
+- **Engines:** Google (OAuth2), Bing (API key), Yandex (stub)
+- **Commands:** `auth`, `submit-sitemap`, `list-sitemaps`, `skill install/check/uninstall`, `audit-docs`
+- **CI/CD:** GitHub Actions — clippy + test on push, cargo publish + binary release on tags
+- **Credentials:** `pass corky/gmail/client_id` → env vars → helpful error (Google); `BING_WEBMASTER_API_KEY` env var (Bing)
+- **Tokens:** `~/.config/webmaster/tokens.json` (0600 permissions, auto-refresh)
+
+**agent-kit** v0.2.0 — Shared toolkit for CLI tools integrating with agent loops
+- **Repo:** https://github.com/btakita/agent-kit
+- **crates.io:** https://crates.io/crates/agent-kit
+- **Modules:** `skill` (install/check/uninstall SKILL.md), `detect` (Environment enum: ClaudeCode/OpenCode/Codex/Generic), `audit` (optional, re-exports instruction-files)
+- **Tests:** 21 passing
+- **Used by:** agent-doc, webmaster
+
+### Key Decisions
+
+1. **agent-kit over agent-skill** — broader SDK scope, not just skill management
+2. **Environment detection via env vars** — `CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`
+3. **Audit as optional feature** — `instruction-files` crate behind `audit` Cargo feature flag
+4. **Credential management deferred** — webmaster owns token lifecycle, agent-doc delegates to Claude CLI; no shared abstraction yet
+5. **Config discovery deferred** — each tool handles its own config paths
+6. **Cross-crate CI** — webmaster CI clones agent-kit as sibling; `--allow-dirty` for publish
+7. **Release ordering** — agent-kit must publish before webmaster (crates.io dependency)
+
+### Roadmap
+
+- **v0.3 — Context Injection:** CLAUDE.md/AGENTS.md section management, MCP tool descriptions
+- **v0.4 — Structured Output:** `--agent-output` flag, JSON error format
+- **Backlog:** Config discovery, credential abstraction, blog post
 <!-- /agent:exchange -->

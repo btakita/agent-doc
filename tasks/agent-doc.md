@@ -256,4 +256,24 @@ Still seeing file not found error...Do I need to restart the claude session?
 
      Error: file not found: tasks/webmaster.md
 ```
+
+### No restart needed — CWD drift issue
+
+The error happened because `agent-doc recover tasks/webmaster.md` was called with a **relative path** while CWD had drifted to the webmaster submodule directory (`src/webmaster/`). The file exists at `tasks/webmaster.md` relative to the agent-loop root, but not relative to `src/webmaster/`.
+
+**Fix applied in the same session:** Used absolute path `/home/brian/work/btakita/agent-loop/tasks/webmaster.md` and it worked fine. This is lesson #2 in action: always use absolute paths for agent-doc commands.
+
+The SKILL.md pre-flight step should always use absolute paths. This is already documented but the agent (me) slipped up on the first call and corrected immediately.
+### File not found error — CWD drift, not a restart issue
+
+The file `tasks/webmaster.md` exists and `agent-doc recover` works fine with it. The error was caused by **CWD drift** — Claude's working directory had shifted to a submodule, so the relative path `tasks/webmaster.md` couldn't be found.
+
+**No restart needed.** The fix is to always use absolute paths:
+```
+agent-doc recover /home/brian/work/btakita/agent-loop/tasks/webmaster.md
+```
+
+This is lesson #2 in action ("Project root resolution — walk up from file to find `.agent-doc/`, not CWD"). The SKILL.md already warns about this for snapshot operations, and the agent-doc skill workflow should always resolve file paths to absolute before calling any `agent-doc` command.
+
+Arguably `recover` could be improved to resolve relative paths by walking up to find `.agent-doc/`, but the real fix is in the skill workflow — always canonicalize paths.
 <!-- /agent:exchange -->

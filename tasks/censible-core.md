@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** mi-www fully deployed. New `mi-www-db` D1 database live. Old DB deleted. Auth working.
+**Status:** Inventorying 14 Contabo Object Storage buckets for R2 migration.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1352,4 +1352,17 @@ Found 7 Contabo Object Storage buckets across 5 sites. **None have been migrated
 Want me to migrate these to R2 before cancellation?
 
 Yes...migrate and switch the assets over in our config.
+Starting migration. Found **14 Contabo buckets** (more than the 7 from env files):
+
+```
+assets.briantakita.me      brookebrodack.product
+assets.brookebrodack       files.mi-www.site
+assets.cogov.me            foresight-btakita-storage
+herbaliciousbliss.asset    foresight-nextcloud-backup
+peakexistence.public       foresight-nextcloud-data
+peakexistence.private      import.mi-www.site
+prescience-notes.public    linkument.pub
+```
+
+Inventorying sizes now, then will create R2 buckets and sync. Note: `prescience-notes.private` from the env file doesn't exist as a bucket — only `prescience-notes.public`.
 <!-- /agent:exchange -->

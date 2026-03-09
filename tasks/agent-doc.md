@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.12.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
+**Version:** v0.12.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.2, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -138,6 +138,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.11.2 | Also strip trailing ## User heading from responses |
 | v0.12.0 | convert command, compact command, lazy claim via route --pane, exchange default for template init |
 | v0.12.1 | Lazy claim fallback to active_pane("claude") without --pane; no plugin changes needed |
+| v0.12.2 | Exchange component defaults to append mode (no components.toml needed) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -232,4 +233,17 @@ The same fix should be applied to any project using exchange components where co
 This is also a SKILL.md awareness issue — when responding in exchange mode, the agent should be aware that replace will wipe previous context. The append mode config is the structural fix; I'll also update the SKILL.md to document this convention.
 
 implement and release
+
+### v0.12.2 Released -- Exchange defaults to append mode
+
+**Change:** `exchange` components now default to `append` mode in the binary itself. No `components.toml` needed.
+
+**Implementation:** Added `default_mode()` function in `template.rs` -- returns `"append"` for components named `exchange`, `"replace"` for everything else. Applied in both `apply_patches()` and `template_info()`.
+
+**Published to all targets:**
+- crates.io, PyPI, GitHub Releases
+- Binary: agent-doc 0.12.2 installed
+- SKILL.md: updated
+
+218 tests passing. The `.agent-doc/components.toml` in this project is now optional (but still works as an override).
 <!-- /agent:exchange -->

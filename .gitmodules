@@ -73,3 +73,6 @@
 [submodule "src/rappstack-dev"]
 	path = src/rappstack-dev
 	url = git@github.com:rappstack/dev.git
+[submodule "src/webmaster"]
+	path = src/webmaster
+	url = git@github.com:btakita/webmaster.git

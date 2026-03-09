@@ -17,7 +17,6 @@ Operational task document for agent-loop workspace management.
 - `.sync-state.json` gitignore for corky/mail
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
-<!-- agent:output -->
-Compacted. Replaced 13 old User/Assistant exchanges with a summary. Full history preserved in git.
-convert agent:output to agent:exchange
-<!-- /agent:output -->
+<!-- agent:exchange -->
+Converted component from `output` to `exchange`. Write prompts here — both user and agent share this surface.
+<!-- /agent:exchange -->

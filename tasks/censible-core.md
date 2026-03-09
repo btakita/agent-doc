@@ -7,18 +7,21 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Migration complete ✓. All core features deployed. Minor UI polish gaps (executives, peers, contact info). Remaining setup: custom domains, Auth0 callback URLs.
+**Status:** Migration complete ✓. All features deployed. Auth: change Auth0 app type to Regular Web Application + enable Password grant. Remaining: custom domains.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
 
-From the screenshot, the "Censible" app (`XudvEP3pRwUXcXENXvZ7BXSQxS3zogqJ`) is a **Single Page Application** — this is the one we're using but it **cannot use Password grant**.
+**Yes.** Changing to "Regular Web Application" is a superset — it supports **all** grant types:
 
-**Fix:** Click on "Censible" → **Settings** → change **Application Type** to **Regular Web Application** → then **Advanced Settings** → **Grant Types** → enable **Password** → **Save Changes**.
+- **Password** (ROPG) — embedded login form (current implementation)
+- **Authorization Code** — redirect-based flow (if you want Auth0 Universal Login later)
+- **Implicit** — original SPA flow
+- **Client Credentials** — M2M
 
-Same Client ID stays, no code changes needed. The ROPG login form will work after this change.
+Self-serve signup (`/dbconnections/signup`) works regardless of app type — it's a database connection API, not a grant type.
 
-Will the other type of self-serve signup/login work as well for censible.co?
+**One app handles both censible.co and workers.dev.** No need for separate applications.
 
-(The "Auth0 Management API" app is Machine-to-Machine for backend API access — don't touch that one.)
+What do I need to do again?
 <!-- /agent:exchange -->

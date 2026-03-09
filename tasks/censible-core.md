@@ -675,5 +675,48 @@ doLogin @ login:955
 (anonymous) @ login:941
 ```
 
-I would like to change the logi
+**CORS fix — Auth0 dashboard change required:**
+
+The ROPG login flow makes a direct browser `fetch()` to `censible.us.auth0.com/oauth/token`, which is cross-origin from `esg.briantakita.me`. Auth0 blocks this without explicit origin whitelisting.
+
+**Steps:**
+1. Go to https://manage.auth0.com/dashboard/us/censible/applications
+2. Click the **Censible** application
+3. **Settings** tab → scroll to **Application URIs** section
+4. **Allowed Web Origins**: add `https://esg.briantakita.me`
+5. **Allowed Origins (CORS)**: add `https://esg.briantakita.me`
+6. Also add `https://censible-root-web.brian-takita.workers.dev` to both fields (for the workers.dev URL)
+7. Click **Save Changes**
+
+**Also still needed (from earlier):**
+- Change **Application Type** to **Regular Web Application**
+- Enable **Password** grant type under Advanced Settings → Grant Types
+
+**Code fixes deployed:**
+- Login success redirect: `/solutions` → `/companies`
+- Logout return URL: `/solutions` → `/companies`
+
+I would like to change the login mechanism. Should I continue using auth0 with another account or should I store the logins in our database?
+
+**Login mechanism options:**
+
+| | Auth0 (new tenant) | Self-managed (D1) |
+|--|---|---|
+| **CORS** | Still cross-origin (needs config) | Same-origin (no CORS) |
+| **Cost** | Free ≤7,500 users | Free (D1) |
+| **Dependency** | External service | None |
+| **Effort** | Config only | ~1 day implementation |
+| **Features** | Social login, MFA, brute force | Basic email/password |
+| **Control** | Auth0's rules | Full control |
+
+**Recommendation: Self-managed in D1.** For a non-commercial site, Auth0 is overkill. Implementation:
+- `users` table in D1 (email, bcrypt hash, created_at)
+- `/api/register` + `/api/login` endpoints (return signed JWT)
+- JWT verification middleware (replaces current Auth0 JWT verify)
+- Password reset via email (can use corky's SMTP or a transactional email service)
+- Workers' `crypto.subtle` handles password hashing and JWT signing
+
+This eliminates the CORS problem entirely and removes the dependency on Censible's Auth0 tenant. Want me to implement it?
+
+yes
 <!-- /agent:exchange -->

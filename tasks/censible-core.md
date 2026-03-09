@@ -1276,4 +1276,12 @@ Done — fully migrated to new `mi-www-db`:
 Live at **https://mi-www.site** — fully functional with the new `mi-www-db` database.
 
 I'm seeing FOUC when I click on a link. Also, the global navigation should not be visible when not logged in.
+Fixed both issues — deployed:
+
+1. **FOUC eliminated** — added a `<script>` in `<head>` (runs before body renders) that checks auth. If not logged in, sets `visibility: hidden` and redirects to `/login` instantly — no flash.
+2. **Nav/footer hidden when not logged in** — `site-nav` and `site-footer` are `display: none` for unauthenticated users. Only the login page content is visible.
+
+Try navigating between pages on https://mi-www.site — should be clean now.
+
+What is the password for brian.takita@gmail.com?
 <!-- /agent:exchange -->

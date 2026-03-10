@@ -1,10 +1,9 @@
 ---
-session: a953811a-bf72-4aa9-bbd6-5904a5a07a1d
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: a953811a-bf72-4aa9-bbd6-5904a5a07a1d
+tmux_session: '0'
+agent_doc_mode: template
 ---
+
 ### LinkedIn
 
 **About section** updated (copy-paste ready):
@@ -681,3 +680,25 @@ Post sent out successfully. So far no interaction.
 ## Assistant
 
 Congrats on the post going live. Engagement takes time — LinkedIn's algorithm seeds morning posts over 2-4 hours.
+
+Convert agent_doc_mode: template
+
+Can we allow corky to get the linkedin messages
+## Assistant
+
+**No — LinkedIn's Messaging API is partner-only.** Not available to self-service developer apps like yours.
+
+LinkedIn locks messaging behind formal partner programs:
+- **Send messages** — requires an approved partnership agreement. No self-service scope exists.
+- **Read messages** — only via the Compliance API, restricted to FINRA/SEC-registered financial services firms.
+- The old `/v1/people/~/mailbox` endpoint is deprecated.
+
+**Options:**
+1. **Accept it's out of scope** — safest path. LinkedIn intentionally gates this to prevent automation.
+2. **Third-party proxy** (Unipile, etc. ~$39/mo) — unofficial wrappers that scrape LinkedIn. Risks account suspension + ToS violation.
+3. **Partner program** — requires enterprise justification + LinkedIn Relationship Manager. Not realistic for a personal CLI tool.
+
+The Share API (`w_member_social`) that corky uses is one of the few self-service capabilities. Messaging is firmly enterprise-only.
+
+## User
+

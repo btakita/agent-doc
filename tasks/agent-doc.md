@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -145,6 +145,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.13.3 | Phase 1.75: spare pane assignment for unregistered sole-column files (tmux-router v0.2.4) |
 | v0.14.0 | Route focus fix, claim defaults to template mode, `agent-doc mode` CLI command |
 | v0.14.1 | Move git commit to after write — reduces IDE "file changed externally" notices |
+| v0.14.2 | Skill reload via `--reload compact/restart` flag, auto-prompt for /compact after updates |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -763,5 +764,36 @@ echo "$session_id" > /tmp/claude-session-id-$$
 **Recommendation:** Implement Option 1 (`/compact`) as the default, with Option 2 (`--resume`) as a flag (`agent-doc skill install --restart`). For now, the SKILL.md pre-flight can simply print a notice: "Skill updated to vX.Y.Z. Run /compact to reload, or it will take effect on the next /agent-doc invocation."
 
 Want me to implement the `/compact` approach?
+
+Yes...default compact with restart override
+### v0.14.2 Released — skill reload via /compact
+
+**Implementation:**
+
+1. `agent-doc skill install --reload compact` — after updating SKILL.md, outputs `SKILL_RELOAD=compact` to stdout
+2. `agent-doc skill install --reload restart` — outputs `SKILL_RELOAD=restart` instead
+3. When no update needed (already up to date), no reload output
+4. SKILL.md pre-flight now uses `--reload compact` and stops if skill was updated, telling the user to run `/compact`
+
+**How it works:**
+```
+Binary v0.14.2 installed, SKILL.md still at v0.14.1
+  → user runs /agent-doc tasks/foo.md
+  → pre-flight: agent-doc --version = 0.14.2, SKILL.md says 0.14.1 → mismatch
+  → runs: agent-doc skill install --reload compact
+  → output: "SKILL_RELOAD=compact" + "Skill updated. Please run /compact to reload..."
+  → Claude stops and tells user to /compact
+  → user runs /compact → context compresses, fresh SKILL.md loaded
+  → next /agent-doc uses v0.14.2 instructions
+```
+
+**Chicken-and-egg solved:** The OLD SKILL.md (v0.14.1) doesn't have the `--reload` flag in pre-flight. But `agent-doc skill install` (without `--reload`) still updates the file — the next `/compact` or new session picks up the new SKILL.md which has `--reload compact`. So:
+- First update after v0.14.2: silent update, takes effect on next session or /compact
+- All subsequent updates: automatic compact prompt
+
+**Published to all targets:**
+- crates.io ✓, GitHub Release ✓, Binary installed ✓
+- SKILL.md updated (v0.14.2)
+- 218 tests passing
 <!-- /agent:exchange -->
 

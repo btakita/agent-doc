@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.13.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.3, instruction-files v0.1
+**Version:** v0.13.3 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -142,6 +142,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.13.0 | `autoclaim` subcommand (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`) |
 | v0.13.1 | Sync updates registry file paths for autoclaim support |
 | v0.13.2 | Sync auto-registers claims for unregistered files (tmux-router v0.2.3 `file_panes`) |
+| v0.13.3 | Phase 1.75: spare pane assignment for unregistered sole-column files (tmux-router v0.2.4) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -214,7 +215,9 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 **v0.12.2 session:** Exchange component defaults to append mode in the binary. `default_mode()` returns "append" for exchange, "replace" for everything else. No components.toml needed. Fixed CWD drift errors and stale claim after context compaction. 218 tests.
 
-**v0.13.0-v0.13.1 session:** Implemented `agent-doc autoclaim` (SessionStart hook for re-establishing claims after context compaction), git-based snapshot fallback (`snapshot::resolve()` — mtime comparison chooses freshest source), and sync-to-autoclaim integration (sync updates registry file paths so autoclaim works for synced files). Published both releases to all targets.
+**v0.13.0-v0.13.2 session:** Implemented `agent-doc autoclaim` (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`), sync-to-autoclaim integration. Three iterations: v0.13.0 (core features), v0.13.1 (sync updates existing registry entries), v0.13.2 (sync creates entries for unregistered files via tmux-router `file_panes`).
+
+**v0.13.3 session:** Diagnosed sync autoclaim still failing for sole-column files. Root cause: tmux-router skipped files with no registry entry AND no column donor (Phase 1.5 `find_column_pane` returned None). Fix: Phase 1.75 assigns spare panes from the target window. Added 2 integration tests. Published tmux-router v0.2.4 + agent-doc v0.13.3.
 <!-- /agent:history -->
 
 ## Exchange
@@ -531,4 +534,46 @@ Add automated tests.
 
 Same issue.
 Do I need to restart Idea or the Claude sessions for this to work? Or is there still an issue with agent-doc? Please reference the logs. If logs are missing the smoking gun, add logging to present the "smoking gun".
+### v0.13.3 Released — sync spare pane fix + tests
+
+**Root cause found via logs.** The smoking gun:
+
+```
+skipping tasks/castandcrew.md — pane dead/missing (re-register to fix)
+```
+
+This happened because:
+1. `castandcrew.md` has session ID `d3df3cf3` but **no registry entry** (never individually claimed)
+2. `registry::lookup()` returns `None` → file goes to `unresolved_files`
+3. Phase 1.5 `find_column_pane()` can't find a donor because castandcrew.md is the **sole file in its column** — no sibling to borrow from
+4. With only 1 resolved file out of 2, sync gives up: "Not enough resolved panes for 2D layout"
+5. `register_synced_files` never sees the file in `file_panes` because it was skipped entirely
+
+**Fix: Phase 1.75 in tmux-router** — After Phase 1.5 fails for a file, look for spare panes in the target window (panes not already assigned to other files). Window @0 had %0 (agent-doc.md) and %32 (unassigned) → %32 gets assigned to castandcrew.md.
+
+After the fix:
+```
+auto-assign tasks/castandcrew.md → %32 (spare pane in window @0)
+[sync] registering tasks/castandcrew.md → pane %32 (session d3df3cf3)
+```
+
+**No restart of IDEA or Claude sessions needed** — this was a binary bug, not a session state issue. The updated binary (v0.13.3) fixes it.
+
+**Tests added (2 new integration tests in tmux-router):**
+1. `test_sync_spare_pane_for_unregistered_file` — verifies Phase 1.75 assigns spare panes to files with session keys but no registry entries
+2. `test_sync_file_panes_includes_all_resolved` — verifies `SyncResult::file_panes` includes column-donor assignments
+
+**Published:**
+- tmux-router v0.2.4 → crates.io + GitHub
+- agent-doc v0.13.3 → crates.io + GitHub
+- 58 tmux-router tests, 218 agent-doc tests
+- Binary installed: agent-doc 0.13.3
+
+Add automated tests.
+
+I called agent-doc run tasks/result.md. It performed the autoclaim. The right pane tmux session did not have any feedback. When I changed focus to this file on the left editor side, I saw the right pane tmux session was in the middle of processing the document.
+
+Please verify that the logs showed what happened. Please add tests that reproduce the bug of not immediately showing the tmux pane that is processing the autoclaimed agent doc.
+
+The same thing happened when 
 <!-- /agent:exchange -->

@@ -620,4 +620,29 @@ Write tests as well.
 
 This involves editing the document in Idea while a job is running but before a final answer is given.
 Is this a side-effect with the recently added stale check between the cache and git commit?
+### "File changed externally" notices — analysis
+
+**Root cause:** The SKILL.md workflow calls `agent-doc commit <FILE>` (git add + git commit) BEFORE generating the response. IntelliJ's VCS integration detects the git index/HEAD change and shows the "file was changed externally" dialog. Then later, `agent-doc write` modifies the file on disk → second notification. Two external changes during one submit cycle = "frequent" notices.
+
+**Not related to snapshot::resolve().** The git-based snapshot fallback (v0.13.0) only reads via `git show HEAD:<file>` and `git log`. It never writes to the document or the git index.
+
+**The timeline for tasks/bcg.md:**
+1. User submits → SKILL workflow starts
+2. `agent-doc commit` → `git add` + `git commit` → IntelliJ detects index change → **notice #1**
+3. Claude generates response (user continues editing in IntelliJ)
+4. `agent-doc write` → atomic write to document file → IntelliJ detects file change → **notice #2**
+
+**Fix options:**
+
+1. **Move commit to after write** — `agent-doc commit` runs AFTER `agent-doc write` instead of before. Eliminates notice #1 during the thinking phase. Downside: no diff gutters during response generation.
+
+2. **Skip pre-response commit entirely** — The git-based snapshot fallback already provides a safety net. The pre-response commit is redundant with `snapshot::resolve()` which uses the most recent source (snapshot file vs git).
+
+3. **Batch: commit only after write** — Single commit after write = one external change event (the write), and the commit happens atomically after.
+
+**Recommendation:** Option 3 — move the commit to after the write in the SKILL.md workflow. This gives exactly one external file change (the write-back) instead of two. The git-based snapshot fallback means we don't need the pre-response commit for diff computation anymore.
+
+Want me to update the SKILL.md workflow to move the commit to after the write?
+
+Yes
 <!-- /agent:exchange -->

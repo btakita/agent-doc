@@ -1,110 +1,67 @@
 ---
 agent_doc_session: cb5672cc-5d1d-4228-af30-640a336f692e
 tmux_session: '1'
+agent_doc_mode: template
 ---
 
+## Existence Lang — Composable Ontology Framework
 
+**Org:** [existence-lang](https://github.com/existence-lang) | **Crate:** [existence](https://crates.io/crates/existence) v0.3.1 | **Binaries:** `existence` + `xist`
+**Config:** `existence.toml` | **Data:** `~/.existence/`
 
-## Status Summary (compacted 2026-03-04)
-
-### Existence Lang — Composable Ontology Framework
-
-**Org:** [existence-lang](https://github.com/existence-lang) (renamed from existential-kernel)
-**Crate:** [existence](https://crates.io/crates/existence) v0.3.1 (renamed from exkernel)
-**Binaries:** `existence` (full) + `xist` (short alias)
-**Config:** `existence.toml`
-**Data dir:** `~/.existence/`
-
-### Repos (all submodules in `agent-loop/existence-lang/`)
+### Repos
 
 | Repo | Description |
 |------|-------------|
-| [existence](https://github.com/existence-lang/existence) | Rust CLI v0.3.1. Binaries: `existence` + `xist`. 36 tests. |
-| [ontology](https://github.com/existence-lang/ontology) | 114 term files across 3 rings, lint-clean. `existence.toml` config. |
-| [spec](https://github.com/existence-lang/spec) | SPEC.md node format + RINGS.md ring structure. |
-| [.github](https://github.com/existence-lang/.github) | Org profile README. |
-| [existence-lang.github.io](https://existence-lang.github.io) | Landing page. |
+| [existence](https://github.com/existence-lang/existence) | Rust CLI v0.3.1. 36 tests. |
+| [ontology](https://github.com/existence-lang/ontology) | 114 terms, 3 rings, lint-clean. |
+| [spec](https://github.com/existence-lang/spec) | SPEC.md + RINGS.md |
+| [.github](https://github.com/existence-lang/.github) | Org profile README |
+| [existence-lang.github.io](https://existence-lang.github.io) | Landing page |
 
-### Ring Structure
+### Rings
 
-- **Ring 0 (Kernel, 14 terms):** Universal existential scope, always loaded — existence, entity, abstraction, scope, context, resolution, pattern, system, domain, focus, perspective, consciousness, evolution, story
-- **Ring 1 (Software, 17 terms):** DDD bridge — project, model, algorithm, state, type, definition, information, signal, language, tool, environment, coherence, communication, collective, integrity, qualitative*, quantitative* (*pending)
-- **Ring 2 (Extended, 85 terms):** Philosophy, spirituality, cognition, linguistics
+- **R0 (Kernel, 14):** existence, entity, abstraction, scope, context, resolution, pattern, system, domain, focus, perspective, consciousness, evolution, story
+- **R1 (Software, 17):** project, model, algorithm, state, type, definition, information, signal, language, tool, environment, coherence, communication, collective, integrity, qualitative*, quantitative*
+- **R2 (Extended, 85):** Philosophy, spirituality, cognition, linguistics
 
-### CLI Commands (v0.3.1)
+### CLI (v0.3.1)
 
-| Command | Status |
-|---------|--------|
-| `lookup <term>` | Done — read node definition, `--json` output |
-| `search <query>` | Done — relevance scoring, `--json`, `--limit` |
-| `scope [ring]` | Done — list terms by ring |
-| `lint [path]` | Done — validate sections + links |
-| `graph [ring]` | Done — DOT/JSON relationship graphs |
-| `fetch [source]` | Done — clone/pull to `~/.existence/sources/` |
-| `new <term>` | Done — scaffold from SPEC.md template |
-| `completions <shell>` | Done — bash/zsh/fish/elvish/powershell |
-| `install` / `serve` / `build-site` / `context` | Stubs |
+Done: `lookup`, `search`, `scope`, `lint`, `graph`, `fetch`, `new`, `completions`
+Stubs: `install`, `serve`, `build-site`, `context`
 
-### Philosophy Integration
+### Integration
 
-- `philosophy/install.sh` — symlinks `~/.claude/philosophy` → git repo, writes 14-term kernel to `~/.claude/CLAUDE.md`
-- Domain overlays: repos extend base ontology via `## Domain Ontology` in their CLAUDE.md
-- `/existence` Claude skill at `.claude/skills/existence/SKILL.md` — supports lookup, search, new (interactive), lint, scope
+- `philosophy/install.sh` — symlinks + writes kernel to `~/.claude/CLAUDE.md`
+- Domain overlays via `## Domain Ontology` in repo CLAUDE.md files
+- `/existence` Claude skill — lookup, search, new, lint, scope
 
 ### DDD Mapping
 
 Ubiquitous Language = language + domain; Bounded Context = scope + context; Entity = entity; Aggregate = system; Domain Event = evolution + signal; Model = model; Value Object = state + type.
 
-### Naming History
-
-existential-kernel → existence-lang (org), exkernel → existence (crate), exk → xist (short alias). Rename completed in v0.3.0–v0.3.1.
-
 ### Key Decisions
 
-- **`existence-lang`** org: signals the project is evolving toward an executable language (LLM as runtime, ontology terms as instruction set)
-- **`xist`** short alias: punchy, sounds like "exist" spoken aloud, 4 chars
-- **Navigation:** Links to upstream, not copies. Build-time resolution, display-time linking.
-- **Ring system:** Composable scoping — Ring 0 always loaded, higher rings opt-in
-- **Four traditions synthesized:** Process philosophy (Whitehead), phenomenology (Husserl), information-theoretic ontology, existentialism
+- `existence-lang` org — evolving toward executable language (LLM runtime, ontology as instruction set)
+- `xist` short alias — punchy, 4 chars
+- Links to upstream, not copies; build-time resolution
+- Ring system: R0 always loaded, higher rings opt-in
+- Four traditions: process philosophy, phenomenology, info-theoretic ontology, existentialism
 
 ### Releases
 
-| Version | What shipped |
-|---------|-------------|
-| v0.1.0 | Initial: lookup, scope, lint, graph, fetch. 114 terms. |
-| v0.2.0 | search, completions, new commands. |
-| v0.2.1 | `exk` short binary alias. |
-| v0.3.0 | Renamed to `existence` crate + `existence-lang` org. |
-| v0.3.1 | `xist` replaces `exk` as short alias. |
+v0.1.0 (lookup/scope/lint/graph/fetch) → v0.2.0 (search/completions/new) → v0.2.1 (`exk`) → v0.3.0 (rename) → v0.3.1 (`xist`)
 
 ### Pending
 
-- `install` / `serve` / `build-site` / `context` stubs
+- Stub commands: install, serve, build-site, context
 - Executable language features: assertions, transforms, constraints, composition
 - Static JSON site generation (GitHub Pages)
-- Submodule internals still reference `existential-kernel` in test fixtures
+- Test fixtures still reference `existential-kernel`
 
-## User
+<!-- agent:input -->
+<!-- /agent:input -->
 
-~/work/btakita/agent-loop/philosophy master                                                                                                                                                                                            19:33:46
-❯ gp
-Username for 'https://github.com': ^C
-
-## Assistant
-
-The philosophy repo remote is HTTPS (`https://github.com/btakita/philosophy`) — it prompts for credentials because there's no PAT/credential helper configured. The rest of your repos use SSH (e.g. agent-loop is `git@github.com:btakita/agent-loop.git`).
-
-**Fix:** `cd philosophy && git remote set-url origin git@github.com:btakita/philosophy.git`
-
-Then `gp` will work via SSH. Want me to run that?
-
-## User
-
-yes
-
-## Assistant
-
-Done. Switched philosophy remote to SSH and pushed (already up-to-date). Checked all other submodules — they're all SSH already.
-
-## User
-
+<!-- agent:output -->
+Converted to template mode and compacted. Status summary reduced from ~110 lines to ~50. Use the input component above for future prompts.
+<!-- /agent:output -->

@@ -147,15 +147,29 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
     // Load component configs
     let configs = load_component_configs(file);
 
-    // Build a list of (component_index, patch) pairs, sorted by component position descending
+    // Build a list of (component_index, patch) pairs, sorted by component position descending.
+    // Patches targeting missing components are collected as overflow and routed to
+    // exchange/output (same as unmatched content) — this avoids silent failures when
+    // the agent uses a wrong component name.
     let mut ops: Vec<(usize, &PatchBlock)> = Vec::new();
+    let mut overflow = String::new();
     for patch in patches {
         if let Some(idx) = components.iter().position(|c| c.name == patch.name) {
             ops.push((idx, patch));
         } else {
-            eprintln!("[template] warning: patch target '{}' not found in document, skipping", patch.name);
+            let available: Vec<&str> = components.iter().map(|c| c.name.as_str()).collect();
+            eprintln!(
+                "[template] patch target '{}' not found, routing to exchange/output. Available: {}",
+                patch.name,
+                available.join(", ")
+            );
+            if !overflow.is_empty() {
+                overflow.push('\n');
+            }
+            overflow.push_str(&patch.content);
         }
     }
+
     // Sort by position descending so replacements don't shift earlier offsets
     ops.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -166,8 +180,21 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
         result = comp.replace_content(&result, &new_content);
     }
 
-    // Handle unmatched content
+    // Merge overflow (from missing-component patches) with unmatched content
+    let mut all_unmatched = String::new();
+    if !overflow.is_empty() {
+        all_unmatched.push_str(&overflow);
+    }
     if !unmatched.is_empty() {
+        if !all_unmatched.is_empty() {
+            all_unmatched.push('\n');
+        }
+        all_unmatched.push_str(unmatched);
+    }
+
+    // Handle unmatched content
+    if !all_unmatched.is_empty() {
+        let unmatched = &all_unmatched;
         // Re-parse after patches applied
         let components = component::parse(&result)
             .context("failed to re-parse components after patching")?;
@@ -398,6 +425,40 @@ All green.
         assert!(result.contains("new stuff"));
         // Should not create a second exchange component
         assert_eq!(result.matches("<!-- agent:exchange -->").count(), 1);
+    }
+
+    #[test]
+    fn apply_patches_missing_component_routes_to_exchange() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "# Dashboard\n\n<!-- agent:status -->\nok\n<!-- /agent:status -->\n\n<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "nonexistent".to_string(),
+            content: "overflow data\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Missing component content should be routed to exchange
+        assert!(result.contains("overflow data"), "missing patch content should appear in exchange");
+        assert!(result.contains("previous"), "existing exchange content should be preserved");
+    }
+
+    #[test]
+    fn apply_patches_missing_component_creates_exchange() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "# Dashboard\n\n<!-- agent:status -->\nok\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "nonexistent".to_string(),
+            content: "overflow data\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Should auto-create exchange component
+        assert!(result.contains("<!-- agent:exchange -->"), "should create exchange component");
+        assert!(result.contains("overflow data"), "overflow content should be in exchange");
     }
 
     #[test]

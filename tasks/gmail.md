@@ -226,5 +226,7 @@ Yes — implemented auto-label creation in corky. Running `corky filter push` no
 2. Google sends a confirmation email to `btak.dev@gmail.com` — click the link
 3. Then re-run: `corky filter push`
 
+Done
+
 After that, the filter will be created via the API with both the label and forwarding action.
 <!-- /agent:exchange -->

@@ -1,7 +1,10 @@
 ---
-session: 9c8a9b79-2d92-4000-8104-23c0606086a8
-tmux_session: claude
+agent_doc_session: 9c8a9b79-2d92-4000-8104-23c0606086a8
+tmux_session: '0'
+agent_doc_mode: template
 ---
+
+
 
 # Dave Franklin — BCG AI Factory Builder
 
@@ -50,3 +53,26 @@ Compacted. Reduced from 355 lines of back-and-forth to a structured reference do
 
 ## User
 
+Connect with Anil
+- BCG: Project Helix
+
+True Engineer builders
+People are "green"
+
+I'm building AI:
+What is it?
+How did you build it?
+Why did you build it?
+
+
+I'm in consideration for Project Helix
+If I gave you a name, could you put in a word for me?
+Do you know anyone?
+
+Steve Edison
+Inspyr Solutions
+Tony Tomai
+Eric Rose
+
+Please fill in tony-tomai contact with context.
+Please transcribe + diarize the call in main/contacts/tony-tomai/recordings

@@ -668,4 +668,44 @@ The pre-response commit was originally needed for snapshot-based diff computatio
 - 218 tests passing
 
 **Note:** This change takes effect in NEW sessions. Existing sessions (like this one) still have the old SKILL.md cached in their context.
+
+Can we make agent-kit restart and resume the session to pick up new skill changes?
+### Skill hot-reload via session restart — analysis
+
+**The challenge:** Skills are loaded once when the Claude session starts (or when first invoked). Updating SKILL.md on disk doesn't affect the running session — the old instructions are cached in the conversation context.
+
+**Claude Code supports `--resume`:** `claude --resume <session-id>` continues from a previous conversation. The key question is whether a resumed session reloads skill definitions.
+
+**Approach: restart-and-resume in pre-flight**
+
+When `agent-doc skill install` detects a newer version, instead of just updating the file:
+
+1. Save current session state (Claude session ID is available via `$CLAUDE_SESSION_ID` or similar)
+2. Kill the current Claude process in this pane
+3. Restart with `claude --resume <session-id>` in the same tmux pane
+4. The resumed session loads fresh skills from disk
+5. The skill workflow continues from where it left off
+
+**Implementation sketch:**
+```bash
+# In SKILL.md pre-flight (step 0):
+if skill_updated; then
+  # Send restart command to current pane
+  echo "Skill updated to v$NEW. Restarting session to reload..."
+  # Exit current Claude, start new one with resume
+  tmux send-keys -t $TMUX_PANE "claude --resume $SESSION_ID" Enter
+  exit 0  # This Claude instance exits
+fi
+```
+
+**Open questions:**
+1. Does `--resume` reload skills? Need to verify — if it just replays the context, the old skill text is still there
+2. Is there a `$CLAUDE_SESSION_ID` environment variable? Or do we need to capture it from Claude Code's API?
+3. Race condition: if the user is mid-edit when restart happens
+
+**Alternative: `/compact` trick** — Claude Code's `/compact` command compresses the context. If it also reloads skills during compaction, that would be a lighter-weight solution. But I suspect it doesn't reload skills.
+
+**Recommendation:** This needs investigation into Claude Code's session resume behavior. If `--resume` reloads skills from disk, the implementation is straightforward (~20 lines in the SKILL.md pre-flight). If not, we'd need Claude Code to add a skill-reload mechanism.
+
+Want me to test whether `--resume` picks up updated skills?
 <!-- /agent:exchange -->

@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.3 | **Tests:** 220 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.4 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -938,4 +938,16 @@ I autoclaimed tasks/corky.md. The tmux pane did not update. The panes should alw
 Also: no SessionStart hook is configured for autoclaim. The autoclaim code exists but isn't wired to a hook. The pane refresh issues the user reported were all from `claim` (via plugin), not `autoclaim` (via hook). The autoclaim fix from earlier is still correct for when the hook gets installed.
 
 Binary installed (v0.14.3, same version — not yet released as this is a minor fix on top).
+
+release
+
+**v0.14.4 released.**
+- crates.io ✓
+- GitHub Release ✓ — https://github.com/btakita/agent-doc/releases/tag/v0.14.4
+- Binary installed ✓
+- SKILL.md updated to v0.14.4
+
+Changes since v0.14.3:
+1. **claim.rs**: Use `Tmux::select_pane()` (select-window + select-pane) instead of raw select-pane — fixes cross-window pane focus after claim
+2. **convert.rs**: When frontmatter says template but no component markers exist, add exchange component instead of erroring
 <!-- /agent:exchange -->

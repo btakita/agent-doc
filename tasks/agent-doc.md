@@ -847,4 +847,19 @@ patch target(s) not found in document: output. Available components: status, arc
 - Error names the missing target AND lists all available components
 - Pending response is still saved in `.agent-doc/pending/` (via `save_pending` which runs before `apply_patches`), so `agent-doc recover` can retrieve it
 - Previously: stderr warning + exit 0 → response silently dropped
+
+I would rather it recover and not just fail. It would be better to write the output back to the agent doc. Create the component if needed, or use the appropriate component if available.
+
+The problem with it bailing is that if I'm working with multiple agent docs, it will be a "silent failure" since the tmux pane is not visible...when viewing another agent doc.
+
+**Changed missing-component behavior from hard error to graceful recovery.**
+
+Before: Hard error (exit 1) — response lost, invisible if tmux pane hidden.
+Now: Missing-component patches route to `exchange`/`output` (auto-created if needed), with stderr warning naming the missing target + available components.
+
+- Response content is **never lost** — always ends up in the document
+- Stderr warning still tells the agent which name was wrong
+- Multi-session workflows don't silently fail when a pane isn't visible
+- 2 new tests: `apply_patches_missing_component_routes_to_exchange` and `apply_patches_missing_component_creates_exchange`
+- All tests pass, clippy clean, binary installed (v0.14.2)
 <!-- /agent:exchange -->

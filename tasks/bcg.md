@@ -154,4 +154,28 @@ Contact updated: `mail/contacts/tony-tomai/CLAUDE.md`
 - [ ] When talking to BCG, mention working with Eric Rose at Inspyr
 
 Please draft a LinkedIn message for me to send to Anil.
+
+### Draft LinkedIn message to Anil Podduturi
+
+> Hi Anil,
+> 
+> Hope you're doing well! It's been a while since our Neo Innovation days — the Tenfore project.
+> 
+> I'm in consideration for an AI factory initiative at BCG called Project Helix, through Inspyr Solutions. Given your role there, I imagine you're familiar with it.
+> 
+> 
+> If you have a moment, would you be willing to put in a word for me? I've been building AI agents and developer tooling full-time — actually evolved that interactive document interface we built at Tenfore into an agentic system. Would love to catch up regardless.
+> 
+> Brian
+
+**Notes on the draft:**
+- Warm, personal — references shared history (Tenfore project)
+- Mentions Project Helix by name (Tony said Anil would know it)
+- Doesn't name-drop Steve Edison or Tony (per Tony's guidance)
+- The Tenfore→agent-doc connection is the strongest hook — Anil managed that exact project
+- Keeps the ask simple: "put in a word"
+- "Would love to catch up regardless" — leaves door open even if he can't help directly
+
+Should I also mention how Corky is used...how I'm using it with Judith at Equity Funding Source to save her money and streamline her Commercial Real Estate lending systems? See tasks/judith-krug.md
+
 <!-- /agent:exchange -->

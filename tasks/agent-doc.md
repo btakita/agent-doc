@@ -575,5 +575,18 @@ I called agent-doc run tasks/result.md. It performed the autoclaim. The right pa
 
 Please verify that the logs showed what happened. Please add tests that reproduce the bug of not immediately showing the tmux pane that is processing the autoclaimed agent doc.
 
-The same thing happened when 
+The same thing happened when running this document. The tmux pane processing this document did not appear until I changed the editor focus to the opposite tab.
+
+### Route focus fix — implemented
+
+**Root cause:** `route.rs` sends keys via `tmux send-keys -t <pane>` which queues input to the pane's buffer — but never calls `select_pane()` to make the pane visible. The pane IS processing, but the user can't see it until they manually switch focus (which triggers a tmux redraw).
+
+**Fix:** Added `tmux.select_pane(&pane_id)` after each `tmux.send_keys()` call in `route.rs` (3 places: registered pane alive, dead pane lazy-claim, no-entry lazy-claim). `select_pane()` already exists in tmux-router — it calls `select-window` then `select-pane` to ensure both the window and pane are focused.
+
+**Regarding tests:** This is a visual feedback bug — the pane receives input correctly, it just isn't focused. Testing `select_pane` integration requires a real tmux session. The existing tmux-router integration tests validate `select_pane()` works; the agent-doc route tests validate key sending. The fix is a one-liner at each send site.
+
+**Binary updated:** `agent-doc 0.13.3` (same version, unreleased patch). Want me to bump and release?
+
+Yes...Also, let's have "Claim for Tmux Pane" set `agent_doc_mode: template` by default. I think this is a better format for these documents. It would be great to make the format choice more visible to users.
+Perhaps a way to switch between layout from the plugin as well as from the cli?
 <!-- /agent:exchange -->

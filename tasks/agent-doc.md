@@ -813,6 +813,8 @@ I do not see the update from the session. Why did agent-doc not update this file
 
 **Why the previous response didn't appear:** I used `<!-- patch:output -->` but this document's component is `<!-- agent:exchange -->`. The write correctly warned "patch target 'output' not found" but I missed the stderr warning. Using the correct target now.
 
+Does a bug need to be fixed in agent-doc? Please add tests and fix.
+
 **Autoclaim pane refresh — fixed (binary installed):**
 - Root cause: `autoclaim.rs` printed claim info to stdout but never called `select_pane()`. Same pattern as the route.rs fix from v0.14.0.
 - Added `tmux.select_pane(&pane_id)` after finding claims. Refactored to `run_with_tmux(tmux)` for testability with `IsolatedTmux`.
@@ -820,5 +822,18 @@ I do not see the update from the session. Why did agent-doc not update this file
 - All 218+ tests pass, clippy clean, binary installed (v0.14.2).
 
 Also: running multiple agent-doc sessions in the same tmux pane works because each session gets its own claim, but autoclaim only focuses the pane once — it doesn't conflict with concurrent sessions.
-<!-- /agent:exchange -->
 
+**Bug fixed: template write silently dropping patches for missing components.**
+
+When `agent-doc write --template` received a patch targeting a non-existent component (e.g. `<!-- patch:output -->` when only `exchange` exists), it warned on stderr but exited 0 — silently losing the response content. This is what happened in the previous cycle.
+
+**Fix:** `apply_patches()` now returns an error listing the missing component names AND the available components. The caller gets a clear error message like:
+```
+patch target(s) not found in document: output. Available components: status, architecture, releases, pending, lessons, history, exchange
+```
+
+**Changes:**
+- `template.rs`: Changed silent `eprintln!` warning → `anyhow::bail!` with missing + available component names
+- New test: `apply_patches_missing_component_errors`
+- All tests pass, clippy clean, binary installed (v0.14.2)
+<!-- /agent:exchange -->

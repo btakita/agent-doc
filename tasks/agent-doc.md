@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.13.3 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.0 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -143,6 +143,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.13.1 | Sync updates registry file paths for autoclaim support |
 | v0.13.2 | Sync auto-registers claims for unregistered files (tmux-router v0.2.3 `file_panes`) |
 | v0.13.3 | Phase 1.75: spare pane assignment for unregistered sole-column files (tmux-router v0.2.4) |
+| v0.14.0 | Route focus fix, claim defaults to template mode, `agent-doc mode` CLI command |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -589,4 +590,34 @@ The same thing happened when running this document. The tmux pane processing thi
 
 Yes...Also, let's have "Claim for Tmux Pane" set `agent_doc_mode: template` by default. I think this is a better format for these documents. It would be great to make the format choice more visible to users.
 Perhaps a way to switch between layout from the plugin as well as from the cli?
+### v0.14.0 Released — route focus, template default, mode command
+
+**Three changes:**
+
+1. **Route focus fix:** `route.rs` now calls `tmux.select_pane()` after every `send_keys()`. Target pane is immediately visible when a command is routed.
+
+2. **Claim defaults to template mode:** `agent-doc claim` now sets `agent_doc_mode: template` in frontmatter if no mode is set. Existing documents with an explicit mode are not changed.
+
+3. **`agent-doc mode` command:** Get or set the document mode from CLI:
+   ```bash
+   agent-doc mode tasks/foo.md          # prints: template
+   agent-doc mode tasks/foo.md --set append   # switch to append
+   agent-doc mode tasks/foo.md --set template # switch to template
+   ```
+
+**Plugin integration:** The JetBrains/VS Code plugins can call `agent-doc mode <file> --set <mode>` to switch modes. A plugin action (e.g., in the popup menu alongside Submit/Claim/Sync) would be the natural UX. This needs a plugin update — adding a "Switch Mode" action that calls the CLI command.
+
+**Published to all targets:**
+- crates.io ✓, GitHub Release ✓, Binary installed ✓
+- SKILL.md updated
+- 218 tests passing
+
+agent-doc now seems a bit overeager in updating the document.
+As I'm typing while a job is running, I am seeing frequent notices that the file was changed externally.
+This happened in tasks/bcg.md while I was updating my answer.
+Please note logs, see if this conflict should be logged.
+Write tests as well.
+
+This involves editing the document in Idea while a job is running but before a final answer is given.
+Is this a side-effect with the recently added stale check between the cache and git commit?
 <!-- /agent:exchange -->

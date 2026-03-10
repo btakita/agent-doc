@@ -306,5 +306,14 @@ Changes committed to corky (`4a1cf5b`):
 - `cargo install corky --no-default-features` — minimal (no transcribe)
 
 **Not yet done:** version bump, crates.io publish, GitHub release. Per corky conventions, you'll bump the version explicitly when ready.
+
+release
+**Released v0.14.0** — CPU transcription by default.
+
+- Version bumped to 0.14.0 in Cargo.toml + pyproject.toml
+- All 408 tests pass
+- Published to crates.io, PyPI, GitHub Releases
+- Binary installed locally (.bin/corky v0.14.0)
+- GitHub release: https://github.com/btakita/corky/releases/tag/v0.14.0
 <!-- /agent:exchange -->
 ****

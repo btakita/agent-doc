@@ -107,10 +107,8 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
 
-    // Focus the claimed pane (select its window first for cross-window support)
-    let _ = std::process::Command::new("tmux")
-        .args(["select-pane", "-t", &pane_id])
-        .status();
+    // Focus the claimed pane (select-window + select-pane for cross-window support)
+    let _ = tmux.select_pane(&pane_id);
 
     // Show a brief notification on the target pane
     let msg = format!("Claimed {} (pane {})", file_str, pane_id);

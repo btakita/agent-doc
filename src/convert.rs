@@ -13,10 +13,15 @@ pub fn run(file: &Path) -> Result<()> {
 
     let (fm, body) = frontmatter::parse(&content)?;
 
-    // Reject if already template mode
+    // If already template mode, check if body has component markers
     let mode = fm.mode.as_deref().unwrap_or("append");
     if mode == "template" {
-        anyhow::bail!("{} is already in template mode", file.display());
+        let components = crate::component::parse(&content).unwrap_or_default();
+        if !components.is_empty() {
+            anyhow::bail!("{} is already in template mode with components", file.display());
+        }
+        // Frontmatter says template but no markers — add them
+        eprintln!("Mode is template but no component markers found, adding exchange component");
     }
 
     // Update frontmatter to template mode
@@ -123,13 +128,24 @@ mod tests {
     }
 
     #[test]
-    fn convert_rejects_template_mode() {
+    fn convert_rejects_template_mode_with_components() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        std::fs::write(&file, "---\nagent_doc_mode: template\n---\n\n# Doc\n").unwrap();
+        std::fs::write(&file, "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
         let result = run(&file);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already in template mode"));
+    }
+
+    #[test]
+    fn convert_adds_markers_when_template_but_no_components() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_mode: template\n---\n\n# Doc\n\n## User\n\nHello\n").unwrap();
+        run(&file).unwrap();
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(result.contains("<!-- agent:exchange -->"));
+        assert!(result.contains("Hello"));
     }
 
     #[test]

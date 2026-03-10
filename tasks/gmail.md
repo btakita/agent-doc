@@ -147,4 +147,27 @@ Yes. [voice.google.com](https://voice.google.com) in any browser, signed into `b
 **Summary:** After transfer, both of you have full access — you via phone app, Lucas via web on the iMac. Just re-link 424.249.2350 after the transfer completes.
 
 Does re-linking 424.249.2350 mean it will no longer be associated with brian.takita@gmail.com? I want it to be associated with brian.takita@gmail.com.
+
+### Re-linking does NOT affect brian.takita@gmail.com
+
+No — these are two separate things:
+
+- **Google Voice "linked number"** = a forwarding destination (tells Voice "ring this phone"). One phone can be linked to multiple Voice accounts.
+- **Google account phone** = recovery/verification number at myaccount.google.com. Completely independent.
+
+424.249.2350 stays as `brian.takita@gmail.com`'s account phone regardless of what you do with Voice.
+
+**Simpler alternative — skip the transfer entirely:**
+
+Given you want to keep everything on `brian.takita@gmail.com`, use **Option 2** instead:
+
+1. Keep Voice on `brian.takita@gmail.com` (no transfer)
+2. Turn ON "Forward messages to email" (the toggle in your screenshot)
+3. Gmail filter on `brian.takita@gmail.com`: From `voice-noreply@google.com` → Forward to `btak.dev@gmail.com`
+
+Is voice-noreply@google.com guaranteed to be the google voice phone number only?
+What if I have another Google voice number that I don't want to route?
+Can the filter distinguish between the phone numbers?
+
+Result: Voice texts arrive at both your Gmail and the shared `btak.dev@gmail.com`. Nothing changes about your account setup.
 <!-- /agent:exchange -->

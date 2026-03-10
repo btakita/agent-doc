@@ -178,4 +178,23 @@ Please draft a LinkedIn message for me to send to Anil.
 
 Should I also mention how Corky is used...how I'm using it with Judith at Equity Funding Source to save her money and streamline her Commercial Real Estate lending systems? See tasks/judith-krug.md
 
+
+### Don't add Judith/Corky to the LinkedIn message
+
+**No** — keep the Anil message short and focused. Here's why:
+
+1. **LinkedIn messages should be 3-5 sentences.** Anil is CPO-level; he'll skim.
+2. **Tenfore→agent-doc is already your strongest hook** — it's personal to Anil. Adding more dilutes it.
+3. **Different audiences:** Anil needs to remember you and do a favor. BCG interviewers need client cases.
+
+**Save Judith/Corky for the BCG interview instead.** It's your perfect "what, how, why" answer:
+- **What:** Agentic automation for a private mortgage brokerage (Equity Funding Source)
+- **How:** Custom AI workflows replacing an $18K/year SaaS vendor, using corky for correspondence management
+- **Why:** Client needed a system specific to their niche (non-conforming, equity-based loans in CA) — the vendor solutions were generic and overpriced. Custom AI automation cost less from year one onward.
+
+Tony specifically loved the mortgage broker example on the call. That's the story BCG wants to hear.
+
+I did not specifically evolve the actual Tenfore product. But I evolved the interaction for agent loops.
+
+I just want to remove any potential issues or misunderstanding re: IP.
 <!-- /agent:exchange -->

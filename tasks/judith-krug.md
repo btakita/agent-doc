@@ -222,7 +222,7 @@ Suggest a reply:
 
 Note my edit. Today is Tuesday..."tomorrow" relative to Judith's opening text.
 
-I will be proposing that she have a custom system to replace TMO. But that can 
+I will be proposing that she have a custom system to replace TMO. But that can happen later.
 
 **Why this works:**
 - Light humor validates her frustration without dwelling
@@ -231,4 +231,6 @@ I will be proposing that she have a custom system to replace TMO. But that can
 - Short — she's venting, not asking for a solution
 
 **Re: Corky text integration** — tracked for `tasks/corky.md`. Natural extension: `corky text send` / `corky text draft`. Main question: SMS gateway (Twilio, Google Messages API, or iMessage bridge).
+
+Good catch on the "Talk soon!" edit — Judith's "tmrw" was relative to Sunday 3/9, so "tomorrow" would be stale by Tuesday. "Talk soon!" is timeless and works regardless of when she reads it.
 <!-- /agent:exchange -->

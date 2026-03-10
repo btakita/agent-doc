@@ -78,4 +78,12 @@ You don't just USE Python — you've built production AI systems with it (Presen
 - [ ] Review Foxley Talent job listings at foxleytalent.com
 - [ ] Prepare for Python-specific questions
 Update corky filters
+
+### Corky filters — already up to date
+
+`*@foxleytalent.com` is already in the `for-lucas` filter in `.corky.toml`. Pushed all 3 filters to Gmail — synced.
+
+Any emails from Jon Gould (@foxleytalent.com) will auto-label `for-lucas`, star, forward to `dev@briantakita.me`, and mark important.
+
+How do I record session?
 <!-- /agent:exchange -->

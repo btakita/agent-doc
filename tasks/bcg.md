@@ -197,4 +197,30 @@ Tony specifically loved the mortgage broker example on the call. That's the stor
 I did not specifically evolve the actual Tenfore product. But I evolved the interaction for agent loops.
 
 I just want to remove any potential issues or misunderstanding re: IP.
+### IP clarification — LinkedIn message revised
+
+Good point — the distinction matters. You didn't fork or evolve the Tenfore codebase. You took the **interaction pattern** — document-as-interface — and applied it to a new domain (agent loops). That's inspiration and pattern evolution, not product lineage.
+
+**Revised line for the LinkedIn message:**
+
+> I've been building AI agents and developer tooling full-time — the document-as-interface pattern from our Tenfore work actually inspired the agent harness I'm building now. Would love to catch up regardless.
+
+**Why this wording is better:**
+- **"inspired"** instead of "evolved" — no product lineage implied
+- **"pattern from our Tenfore work"** — credits the shared experience without claiming the product
+- No IP ambiguity — it's clearly a new system informed by past experience
+
+**Full revised message:**
+
+> Hi Anil,
+> 
+> Hope you're doing well! It's been a while since our Neo Innovation days — the Tenfore project.
+> 
+> I'm in consideration for an AI factory initiative at BCG called Project Helix, through Inspyr Solutions. Given your role there, I imagine you're familiar with it.
+> 
+> If you have a moment, would you be willing to put in a word for me? I've been building AI agents and developer tooling full-time — the document-as-interface pattern from our Tenfore work actually inspired the agent harness I'm building now. Would love to catch up regardless.
+> 
+> Brian
+ 
+Please draft a text to send to Tony confirming that I reached out to Anil on LinkedIn.
 <!-- /agent:exchange -->

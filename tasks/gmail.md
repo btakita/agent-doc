@@ -183,4 +183,33 @@ Result: Voice texts arrive at both your Gmail and the shared `btak.dev@gmail.com
 **Bottom line:** For your setup, `from:voice-noreply@google.com` is sufficient and specific. One account = one Voice number = one filter catches exactly what you need.
 
 Please update .corky.toml with the filter and forwarding rule.
+
+### .corky.toml updated — one manual step needed
+
+Added to `.corky.toml`:
+
+```toml
+[[gmail.filters]]
+label = "voice-sms"
+match = ["from"]
+forward_to = "btak.dev@gmail.com"
+addresses = [
+    "voice-noreply@google.com",
+]
+```
+
+Also added `voice-sms` to the personal account's sync labels.
+
+**Issue:** `corky filter push` failed because the `voice-sms` label doesn't exist in Gmail yet. Corky can't create Gmail labels via the API (only reads them).
+
+**Manual step:** Create the label in Gmail:
+1. Open [Gmail](https://mail.google.com) → Left sidebar → scroll down → **"+ Create new label"**
+2. Name: `voice-sms`
+3. Then run: `corky filter push`
+
+Can I create the filter via the api?
+
+Alternatively, if you'd rather skip the label and just use the forwarding, you can create the filter manually in Gmail (Settings → Filters → Create: From `voice-noreply@google.com` → Forward to `btak.dev@gmail.com`). But having it in `.corky.toml` keeps it tracked and reproducible.
+
+**Also needed:** Add `btak.dev@gmail.com` as a forwarding address in Gmail settings first (Settings → Forwarding → Add). Google requires confirmation from the receiving account.
 <!-- /agent:exchange -->

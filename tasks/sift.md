@@ -52,16 +52,24 @@ How can we use this with our tooling to drive semantic search?
 
 **Deeper:** Embed Sift as a Rust library (same ecosystem as tagpath and existence-lang) for programmatic search pipeline access.
 
-### LinkedIn Reply Draft
+### LinkedIn Comment (with GitHub links)
 
-> Really impressed with the architecture — the BLAKE3 content-addressable cache and SIMD-optimized vector scoring are exactly the kind of design choices that make local-first tooling practical.
->
-> I'm building several Rust CLI tools that could benefit from Sift's search pipeline:
-> - **tagpath** — structural code search via tag-based identifiers (syntactic). Sift's semantic layer would complement it perfectly
-> - **existence-lang** — ontology term search (currently keyword-based). Semantic search would unlock cross-ring relationship discovery
-> - **agent-doc** — interactive document sessions. Cross-session retrieval over markdown files is a gap right now
->
-> Would love to explore integrating Sift as a library dependency or coordinating on a shared search interface. Happy to jump on a call if you're interested.
+```
+Really impressed with the architecture — the BLAKE3 content-addressable cache and SIMD-optimized vector scoring are exactly the kind of design choices that make local-first tooling practical.
+
+I'm building several Rust CLI tools that could benefit from Sift's search pipeline:
+
+- tagpath — structural code search via tag-based identifiers (syntactic). Sift's semantic layer would complement it perfectly
+https://github.com/btakita/tagpath
+
+- existence-lang — ontology term search (currently keyword-based). Semantic search would unlock cross-ring relationship discovery
+https://github.com/existence-lang/existence
+
+- agent-doc — interactive document sessions. Cross-session retrieval over markdown files is a gap right now
+https://github.com/btakita/agent-doc
+
+Would love to explore integrating Sift as a library dependency or coordinating on a shared search interface. Happy to jump on a call if you're interested.
+```
 
 ### Networking Guide: Public Comment → Call
 

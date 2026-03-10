@@ -86,4 +86,26 @@ Update corky filters
 Any emails from Jon Gould (@foxleytalent.com) will auto-label `for-lucas`, star, forward to `dev@briantakita.me`, and mark important.
 
 How do I record session?
+
+### Recording the session
+
+**Google Meet** (if available on your account):
+- During call → three dots (⋮) → **Record meeting**
+- Requires Google Workspace — free Gmail can't record
+
+**Local alternatives (CachyOS):**
+
+| Method | Command | What it captures |
+|--------|---------|-----------------|
+| **OBS Studio** | `sudo pacman -S obs-studio` | Screen + audio (recommended) |
+| **PipeWire audio only** | `pw-record --target 0 jon-gould.wav` | System audio only |
+| **ffmpeg screen** | `ffmpeg -f x11grab -video_size 1920x1080 -i :0 -f pulse -i default -c:v libx264 -preset ultrafast jon-gould.mkv` | Screen + audio |
+
+**Recommended:** OBS Studio — most reliable, captures both screen and audio, easy start/stop.
+
+**Etiquette:** Always say "Do you mind if I record this for my notes?" at the start.
+
+Jon is not there yet.
+Please draft an email for
+jon@foxleytalent.com
 <!-- /agent:exchange -->

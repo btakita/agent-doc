@@ -903,8 +903,27 @@ layout = "split"    # "exchange" (default) or "split"
 
 `split` makes sense for dashboards/status pages where prompts stay spatially separate from responses. Not built yet — `exchange` covers the common conversational case.
 
+`agent_doc_layout: exchange` can be used in the frontmatter to explicitly configure for the default exchange
+`agent_doc_layout: split` can be used in the frontmatter to override exchange
+
+I'm hesitant to introduce "split" as another piece of terminology. Since it leads to input/output. There is also no docs. It would be good to self-document somehow.
+
 **Changes:**
 - `convert.rs`: When frontmatter says template but no component markers exist, adds exchange component instead of erroring
 - 2 new tests: `convert_rejects_template_mode_with_components` and `convert_adds_markers_when_template_but_no_components`
 - All 221 tests pass, clippy clean, binary installed (v0.14.3)
+
+Good instinct to avoid "split" as new terminology. Simpler approach: **the component markers themselves ARE the configuration**. No extra frontmatter field needed.
+
+- Document has `<!-- agent:exchange -->` → conversation layout (shared zone)
+- Document has `<!-- agent:input -->` + `<!-- agent:output -->` → form layout (separate zones)
+
+The presence of components self-documents the layout. This aligns with agent-doc's core principle: the document IS the UI. No `agent_doc_layout` frontmatter, no "split" terminology, no `.agent-doc/components.toml` layout setting.
+
+For `convert`, it defaults to `exchange`. A future `agent-doc convert --layout input-output` flag could scaffold the alternative layout, but it's low priority since:
+1. `exchange` covers 90%+ of use cases
+2. Users who want input/output can add those markers manually
+3. The markers are self-explanatory — no docs needed beyond the SKILL.md conventions section
+
+This means we can drop the `[_defaults] layout = "split"` config idea entirely. The document structure speaks for itself.
 <!-- /agent:exchange -->

@@ -801,7 +801,12 @@ Binary v0.14.2 installed, SKILL.md still at v0.14.1
 - crates.io ✓, GitHub Release ✓, Binary installed ✓
 - SKILL.md updated (v0.14.2)
 - 218 tests passing
-compact this file
-*Compacted. v0.14.0-v0.14.2 sessions folded into history.*
+
+- *Compacted. v0.14.0-v0.14.2 sessions folded into history.*
+
+agent-doc autoclaim still does not refresh the tmux pane. Switching editor windows does cause the refresh.
+Please check the logs. Add logging if needed. Add tests to reproduce this issue. Fix the issue by refreshing.
+
+Note that calling Sync Tmux Layout also fixes the issue.
 <!-- /agent:exchange -->
 

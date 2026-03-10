@@ -1,6 +1,7 @@
 ---
 agent_doc_session: db08a891-c339-4a49-9f49-2d8a1f30ed10
 tmux_session: claude
+agent_doc_mode: template
 ---
 
 # Resume Session
@@ -80,3 +81,5 @@ Good catch — I incorrectly claimed Django experience. Revised Calendly notes:
 - **Foxley specializes in Django recruiting** — they'll appreciate honesty over discovering the gap mid-interview
 
 ## User
+
+Switch to agent_doc_mode: template

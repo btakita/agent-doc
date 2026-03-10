@@ -108,5 +108,6 @@ The phone number is linked to brian.takita@gmail.com
 - No forwarding needed
 
 **Recommendation:** If (508) 731-4882 is already on `btak.dev@gmail.com`, Option 3 is simplest. If it's on a different account, use Option 2 to pipe it to the shared inbox.
+
+Can I switch the email address or do I need to make a new Google Voice number?
 <!-- /agent:exchange -->
-![img_1.png](img_1.png)![img_2.png](img_2.png)

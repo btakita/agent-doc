@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.0 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.1 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -144,6 +144,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.13.2 | Sync auto-registers claims for unregistered files (tmux-router v0.2.3 `file_panes`) |
 | v0.13.3 | Phase 1.75: spare pane assignment for unregistered sole-column files (tmux-router v0.2.4) |
 | v0.14.0 | Route focus fix, claim defaults to template mode, `agent-doc mode` CLI command |
+| v0.14.1 | Move git commit to after write — reduces IDE "file changed externally" notices |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -645,4 +646,26 @@ Is this a side-effect with the recently added stale check between the cache and 
 Want me to update the SKILL.md workflow to move the commit to after the write?
 
 Yes
+### v0.14.1 Released — commit moved to after write
+
+**Change:** SKILL.md step 5 (git integration) now commits AFTER the write-back instead of before.
+
+**Before (v0.14.0):**
+1. `agent-doc commit` → git add + commit → IDE notice #1
+2. Claude thinks + generates response
+3. `agent-doc write` → IDE notice #2
+
+**After (v0.14.1):**
+1. Claude thinks + generates response
+2. `agent-doc write` → IDE notice (only one)
+3. `agent-doc commit` → git add + commit (file already saved, no new IDE notice)
+
+The pre-response commit was originally needed for snapshot-based diff computation, but `snapshot::resolve()` (v0.13.0) made it redundant — it uses `git show HEAD:<file>` as fallback when the snapshot is stale.
+
+**Published to all targets:**
+- crates.io ✓, GitHub Release ✓, Binary installed ✓
+- SKILL.md updated (v0.14.1)
+- 218 tests passing
+
+**Note:** This change takes effect in NEW sessions. Existing sessions (like this one) still have the old SKILL.md cached in their context.
 <!-- /agent:exchange -->

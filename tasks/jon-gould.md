@@ -108,4 +108,26 @@ How do I record session?
 Jon is not there yet.
 Please draft an email for
 jon@foxleytalent.com
+
+### Draft email created
+
+Saved to `mail/drafts/20260310-jon-gould-missed-meeting.md`
+
+**To:** jon@foxleytalent.com
+**Subject:** Brian Takita and Jon Gould
+
+> Hi Jon,
+>
+> I was on the Google Meet for our 1:00 PM ET call today but it looks like we missed each other. No worries — I know things come up.
+>
+> I'm happy to reschedule at your convenience. I'm flexible this week — just let me know what works for you.
+>
+> Looking forward to connecting.
+>
+> Brian Takita
+
+To send: `corky draft push` (from mail/ directory)
+To edit first: open `mail/drafts/20260310-jon-gould-missed-meeting.md`
+
+Please send.
 <!-- /agent:exchange -->

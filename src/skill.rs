@@ -20,13 +20,30 @@ fn config() -> SkillConfig {
 
 /// Install the bundled SKILL.md to the project.
 /// When `root` is None, paths are relative to CWD.
+#[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<()> {
     config().install(root)
 }
 
 /// Public entry point (CWD-relative, called from main).
+#[allow(dead_code)]
 pub fn install() -> Result<()> {
     install_at(None)
+}
+
+/// Install and return whether the file was actually updated (not just already up to date).
+pub fn install_and_check_updated() -> Result<bool> {
+    let cfg = config();
+    let path = cfg.skill_path(None);
+
+    // Check if already up to date before install
+    let was_current = path.exists()
+        && std::fs::read_to_string(&path)
+            .map(|existing| existing == cfg.content)
+            .unwrap_or(false);
+
+    cfg.install(None)?;
+    Ok(!was_current)
 }
 
 /// Check if the installed skill matches the bundled version.

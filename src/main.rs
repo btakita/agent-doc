@@ -289,7 +289,11 @@ enum PluginAction {
 #[derive(Subcommand)]
 enum SkillCommands {
     /// Install the skill definition to .claude/skills/agent-doc/SKILL.md
-    Install,
+    Install {
+        /// After install, output reload instructions: compact (default) or restart
+        #[arg(long)]
+        reload: Option<String>,
+    },
     /// Check if the installed skill matches the binary version
     Check,
 }
@@ -376,7 +380,24 @@ fn main() -> anyhow::Result<()> {
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync => resync::run(),
         Commands::Skill { command } => match command {
-            SkillCommands::Install => skill::install(),
+            SkillCommands::Install { reload } => {
+                let updated = skill::install_and_check_updated()?;
+                if updated
+                    && let Some(ref mode) = reload
+                {
+                    match mode.as_str() {
+                        "restart" => {
+                            println!("SKILL_RELOAD=restart");
+                            println!("Skill updated. Please restart this session with --resume to reload the skill.");
+                        }
+                        _ => {
+                            println!("SKILL_RELOAD=compact");
+                            println!("Skill updated. Please run /compact to reload the updated skill instructions.");
+                        }
+                    }
+                }
+                Ok(())
+            }
             SkillCommands::Check => skill::check(),
         },
         Commands::Plugin { action } => match action {

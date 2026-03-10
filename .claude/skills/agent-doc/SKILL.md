@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.10.0"
+agent-doc-version: "0.14.2"
 ---
 
 # agent-doc submit
@@ -34,7 +34,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 **Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
 
-**Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install` to update this SKILL.md, then continue with the updated instructions. If `agent-doc` is not installed or the version matches, skip this step.
+**Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install --reload compact` to update this SKILL.md. If the output contains `SKILL_RELOAD=compact`, tell the user "Skill updated — run /compact to reload" and stop (do not proceed with the document session). If `agent-doc` is not installed or the version matches, skip this step.
 
 **Recover orphaned responses:** Run `agent-doc recover <FILE>` via Bash. If a pending response exists (from a previous cycle interrupted by context compaction), it will be written to the document automatically. Print the output to confirm recovery. This must run before computing the diff.
 
@@ -133,9 +133,10 @@ Then pass it as `--baseline-file` so the 3-way merge can detect user edits accur
 ### 5. Git integration (optional)
 
 If the document is in a git repo:
-- Before responding: `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
+- **After writing response:** `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
 - **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- After writing response: do NOT commit (leave as uncommitted for diff gutters)
+- Do NOT commit before responding — this triggers "file changed externally" notices in IDEs
+- The git-based snapshot fallback (`snapshot::resolve()`) ensures diff computation works without a pre-response commit
 
 ## Document Format
 

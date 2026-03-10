@@ -54,3 +54,4 @@ Committed and pushed all submodules and parent:
 
 ## User
 
+Please convert to agent_doc_mode: template

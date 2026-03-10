@@ -700,5 +700,30 @@ LinkedIn locks messaging behind formal partner programs:
 
 The Share API (`w_member_social`) that corky uses is one of the few self-service capabilities. Messaging is firmly enterprise-only.
 
+Can I use email for communication?
+
+## User
+
+## Assistant
+
+**Yes — email is corky's sweet spot.** That's literally what it was built for.
+
+**What works today:**
+- `corky sync` pulls emails from Gmail/Protonmail into `mail/conversations/`
+- `corky draft new` creates email drafts with YAML frontmatter
+- `corky draft send` sends via SMTP
+- LinkedIn sends email notifications for messages, connection requests, and InMails — those land in your Gmail inbox and get synced by corky automatically
+
+**Strategy for LinkedIn contacts:**
+1. When someone messages you on LinkedIn, reply there to establish the connection
+2. Move the conversation to email — "Happy to continue over email: brian.takita@gmail.com"
+3. From that point, corky handles the thread via IMAP sync + draft/send
+4. The conversation lives in `mail/conversations/` with full git history
+
+**LinkedIn email notifications you already get:**
+- New messages, connection requests, InMail, post engagement → all synced to inbox by `corky sync`
+
+So you can *monitor* LinkedIn activity through email, and steer real conversations to email where corky has full control. LinkedIn messaging is just the handshake; email is the relationship.
+
 ## User
 

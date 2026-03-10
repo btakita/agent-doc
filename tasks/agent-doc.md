@@ -875,4 +875,36 @@ Changes:
 1. Autoclaim pane refresh — `select_pane()` after finding claims
 2. Template missing-component recovery — graceful fallback to exchange/output
 3. 4 new tests
+
+When the user changes the frontmatter:
+`agent_doc_mode: template`
+
+agent-doc should recognize the diff and automatically convert the document to the agent_doc_mode.
+
+When changing to `agent_doc_mode: template`, use `agent:exchange` by default. Only use `agent:input`/` agent:output` when configured to do so. What is the configuration of choosing input/output over exchange?
+
+**Auto-conversion on mode change — implemented.**
+
+`agent-doc convert` now handles the case where `agent_doc_mode: template` is already in frontmatter but the body lacks component markers. Instead of erroring, it adds `<!-- agent:exchange -->` around existing content. Workflow:
+
+1. User sets `agent_doc_mode: template` in frontmatter
+2. Agent detects the change in the diff
+3. Agent runs `agent-doc convert <FILE>` — adds exchange markers
+4. Agent responds via template mode
+
+**Exchange vs input/output configuration:**
+
+`exchange` is the default — single shared conversation surface. A `split` layout (separate `input`/`output` components) could be configured via `.agent-doc/components.toml` in the future:
+
+```toml
+[_defaults]
+layout = "split"    # "exchange" (default) or "split"
+```
+
+`split` makes sense for dashboards/status pages where prompts stay spatially separate from responses. Not built yet — `exchange` covers the common conversational case.
+
+**Changes:**
+- `convert.rs`: When frontmatter says template but no component markers exist, adds exchange component instead of erroring
+- 2 new tests: `convert_rejects_template_mode_with_components` and `convert_adds_markers_when_template_but_no_components`
+- All 221 tests pass, clippy clean, binary installed (v0.14.3)
 <!-- /agent:exchange -->

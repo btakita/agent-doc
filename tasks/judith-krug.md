@@ -215,4 +215,20 @@ I sent the previous response. We need a way to integrate corky to my text messag
 Suggest a reply:
 > Mortgage Automator is tripping on me with emails today. Omg
 
+
+**Draft reply to Judith's MA frustration:**
+
+> Ha, they're not making it easy to leave! That's a good sign you made the right call. Don't stress about it — once you're set up with TMO, you won't look back. Talk soon!
+
+Note my edit. Today is Tuesday..."tomorrow" relative to Judith's opening text.
+
+I will be proposing that she have a custom system to replace TMO. But that can 
+
+**Why this works:**
+- Light humor validates her frustration without dwelling
+- Reframes annoyance as confirmation she made the right decision
+- "Don't stress" — reassuring, protective
+- Short — she's venting, not asking for a solution
+
+**Re: Corky text integration** — tracked for `tasks/corky.md`. Natural extension: `corky text send` / `corky text draft`. Main question: SMS gateway (Twilio, Google Messages API, or iMessage bridge).
 <!-- /agent:exchange -->

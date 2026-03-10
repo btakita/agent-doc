@@ -926,4 +926,16 @@ For `convert`, it defaults to `exchange`. A future `agent-doc convert --layout i
 3. The markers are self-explanatory — no docs needed beyond the SKILL.md conventions section
 
 This means we can drop the `[_defaults] layout = "split"` config idea entirely. The document structure speaks for itself.
+
+I autoclaimed tasks/corky.md. The tmux pane did not update. The panes should always refresh when a document is autoclaimed. Add tests.
+
+**Found the real bug — in `claim.rs`, not `autoclaim.rs`.**
+
+`claim.rs` line 111 used raw `tmux select-pane` without `select-window` first. If the claimed pane is in a different tmux window, `select-pane` alone doesn't switch to it. The `Tmux::select_pane()` method does both (`select-window` → `select-pane`), but `claim.rs` was bypassing it with a raw `Command::new("tmux")` call.
+
+**Fix:** Replaced raw command with `tmux.select_pane(&pane_id)` — one line change. Now claim properly focuses across tmux windows.
+
+Also: no SessionStart hook is configured for autoclaim. The autoclaim code exists but isn't wired to a hook. The pane refresh issues the user reported were all from `claim` (via plugin), not `autoclaim` (via hook). The autoclaim fix from earlier is still correct for when the hook gets installed.
+
+Binary installed (v0.14.3, same version — not yet released as this is a minor fix on top).
 <!-- /agent:exchange -->

@@ -129,4 +129,22 @@ Can I make calls & texts from my phone?
 Can Lucas make texts from the imac?
 
 **Caveat:** Transfer removes the number from `brian.takita@gmail.com` entirely. If you want to keep Voice on brian.takita for other purposes, use the forwarding approach (Option 2) instead.
+
+### Answers to forwarding & device questions
+
+**1. Will (508) 731-4882 still forward to 424.249.2350?**
+Yes, but re-link after transfer. The linked phone stays with the old account. After transfer to `btak.dev@gmail.com`:
+- Open Google Voice app → sign in as `btak.dev@gmail.com`
+- Settings → Linked numbers → Add 424.249.2350
+- Calls/texts to (508) 731-4882 ring your phone again
+
+**2. Can you call & text from your phone?**
+Yes. Google Voice app on your phone, signed into `btak.dev@gmail.com`. Make/receive calls and texts as (508) 731-4882. Your personal number (424.249.2350) stays separate.
+
+**3. Can Lucas text from the iMac?**
+Yes. [voice.google.com](https://voice.google.com) in any browser, signed into `btak.dev@gmail.com`. Full texting — no app install needed. Optional: Google Voice Chrome extension for desktop notifications.
+
+**Summary:** After transfer, both of you have full access — you via phone app, Lucas via web on the iMac. Just re-link 424.249.2350 after the transfer completes.
+
+Does re-linking 424.249.2350 mean it will no longer be associated with brian.takita@gmail.com? I want it to be associated with brian.takita@gmail.com.
 <!-- /agent:exchange -->

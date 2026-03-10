@@ -61,4 +61,29 @@ How can I setup a google voice?
 6. **VoIP** — TextNow/TextFree (Google blocks some VoIP ranges).
 
 **Recommendation:** For truly separate inboxes → Google Workspace on your domain. For different addresses routing to one inbox → Gmail `+` aliases with corky filter rules.
+
+### Checking accounts associated with your phone
+
+I can't look that up — Google doesn't expose a "list all accounts by phone number" API. But you can check yourself:
+
+- [myaccount.google.com](https://myaccount.google.com) → **Personal info** → **Phone** — shows which account the phone is linked to
+- [accounts.google.com](https://accounts.google.com) → **"Forgot email?"** → enter your phone number — Google shows associated accounts (masked)
+- Or try creating a new account — Google will tell you if you've hit the limit
+
+### Setting up Google Voice
+
+1. Go to [voice.google.com](https://voice.google.com)
+2. Sign in with any Google account
+3. **"Get Google Voice"** → choose **Personal**
+4. Search for a number by area code → select one
+5. **Verify** with your existing phone number (one-time link)
+6. Done — free permanent US phone number for calls/texts via web or app
+
+Once you have the Voice number, use it to verify additional Gmail accounts. The Voice number is free and permanent. Requires an existing US phone to set up initially.
+
+I have a shared gmail account with contact lucas-huang.
+btak.dev@gmail.com
+
+I want to route text messages going to this google voice number to a common place where lucas & I can see it. Perhaps btak.dev@gmail.com?
+(508) 731-4882
 <!-- /agent:exchange -->

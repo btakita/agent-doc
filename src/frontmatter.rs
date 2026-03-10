@@ -81,6 +81,13 @@ pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     write(&fm, body)
 }
 
+/// Update the agent_doc_mode in a document string.
+pub fn set_mode(content: &str, mode: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.mode = Some(mode.to_string());
+    write(&fm, body)
+}
+
 /// Update the tmux_session name in a document string.
 pub fn set_tmux_session(content: &str, session_name: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;

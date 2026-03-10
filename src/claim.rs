@@ -87,6 +87,21 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
+    // Default to template mode if agent_doc_mode is not set
+    {
+        let content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let (fm, _) = frontmatter::parse(&content)?;
+        if fm.mode.is_none() {
+            let updated = frontmatter::set_mode(&content, "template")?;
+            if updated != content {
+                std::fs::write(file, &updated)
+                    .with_context(|| format!("failed to write agent_doc_mode to {}", file.display()))?;
+                eprintln!("set agent_doc_mode=template in {}", file.display());
+            }
+        }
+    }
+
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let file_str = file.to_string_lossy();
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());

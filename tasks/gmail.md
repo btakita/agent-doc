@@ -262,4 +262,26 @@ The previous failure was because `btak.dev@gmail.com` wasn't confirmed yet — t
 **Remaining manual step:** Turn ON "Forward messages to email" in Google Voice settings ([voice.google.com/settings](https://voice.google.com/settings)) so texts actually generate the emails that the filter will catch and forward.
 
 I sent 2 test sms messages. But I don't see either going to brian.takita@gmail.com
+
+### SMS not arriving — check Voice forwarding toggle
+
+The Gmail filter only catches emails — it doesn't generate them. Two things to check:
+
+1. **"Forward messages to email" toggle** — your earlier screenshot showed this was OFF. Go to [voice.google.com/settings](https://voice.google.com/settings) → Messages → turn **ON** "Forward messages to email". This makes Voice email `brian.takita@gmail.com` for each incoming text.
+
+2. **Check spam** — Voice notification emails from `voice-noreply@google.com` sometimes land in spam initially.
+
+**The flow:**
+```
+SMS to (508) 731-4882
+  → Google Voice receives it
+  → (toggle ON) emails brian.takita@gmail.com
+  → Gmail filter matches from:voice-noreply@google.com
+  → Labels "voice-sms" + forwards to btak.dev@gmail.com
+```
+
+Without the toggle, no email is generated and the filter has nothing to act on.
+
+The toggle is on. Please check the brian.takita@gmail.com for the sms emails.
+![img_1.png](img_1.png)
 <!-- /agent:exchange -->

@@ -102,4 +102,56 @@ Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
 | Eric Rose | BCG pipeline | (pending — transcription will clarify) |
 
 **Pending:** Transcription of Tony Tomai call — will update CLAUDE.md with specific context once complete.
+
+### Contact corrections applied
+
+Updated `mail/contacts/tony-tomai/CLAUDE.md`:
+- Tony Tomai: **Inspyr Solutions Account Manager** (BCG recruiting)
+- Steve Edison: **BCG** — Director of Engineering or Product
+
+Transcription still processing (~90s in). Will update when complete.
+
+### Transcription complete — Tony Tomai call summary
+
+Transcript saved to `mail/contacts/tony-tomai/recordings/phone_20260310-tony-tomai.txt`
+Contact updated: `mail/contacts/tony-tomai/CLAUDE.md`
+
+**Project Helix** — BCG's AI Factory:
+- Pre-built AI agent/bot solutions (70-80% complete), customized per end client
+- 3-5 year project, hiring 15-20 engineers in batches
+- Primarily using **Claude/Anthropic**
+- Inspyr Solutions is BCG's #1 supplier (replaced ProServe who underperformed)
+
+**Critical discovery — Anil Podduturi:**
+- CPO for Enterprise AI at BCG
+- Tony suspects Anil may **own** Project Helix
+- Brian worked directly with Anil at Neo Innovation (2015, ~3-4 months)
+- Tony: "I didn't realize he was this high level. He might even be involved... it's probably his project."
+
+**Org chart (Project Helix):**
+| Person | Role | Relationship |
+|--------|------|-------------|
+| Anil Podduturi | BCG CPO, Enterprise AI | Brian's former manager at Neo Innovation |
+| Steve Edison | BCG lead below CPO | Tony's direct contact on the project |
+| Tony Tomai | Inspyr Solutions Account Manager | BCG relationship manager |
+| Dave Franklin | Inspyr Solutions Recruiter | Initial contact |
+| Eric Rose | Inspyr Solutions | Mention when talking to BCG |
+
+**Brian's pitch points (from call):**
+1. agent-doc — document-as-interface (directly evolved from Tenfore/Neo work with Anil)
+2. Presence AI — real-time multimodal avatar pipeline
+3. Domain-driven design ontology — alignment tooling
+4. Mortgage broker automation — practical agentic AI application
+
+**Tony's assessment:** "I don't have anyone that has your background... the avatar, AI avatars, and the agentic stuff"
+
+**Interview process:** Usually 2x 30-min interviews, but strong candidates get hired off one.
+
+**Action items:**
+- [ ] **URGENT:** Reach out to Anil on LinkedIn — "I'm in consideration for Project Helix. Do you know anyone on the project? Could you put in a word?"
+- [ ] Tony pitching Brian on his 4pm BCG call today
+- [ ] Tony coordinating with Steve Edison
+- [ ] When talking to BCG, mention working with Eric Rose at Inspyr
+
+Please draft a LinkedIn message for me to send to Anil.
 <!-- /agent:exchange -->

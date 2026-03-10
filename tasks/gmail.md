@@ -40,4 +40,25 @@ corky cal check --start DT --end DT     # check availability (v0.13.3)
 Converted to template mode. Updated calendar section to include v0.13.3 commands (`cal create`, `cal check`). Session history compacted.
 
 How can I create additional gmail accounts after running into a limit with the number of email accounts allowed by google using a single phone number?
+
+### Gmail account limits — workarounds
+
+Google limits one phone number to **~4 Gmail accounts**.
+
+**No second phone needed:**
+
+1. **Google Workspace** ($7/mo per user) — unlimited accounts under your own domain. No phone verification for additional users. Cleanest long-term solution.
+2. **Gmail aliases (free)** — `brian.takita+project1@gmail.com` (plus addressing) or dot variations. All deliver to the same inbox. Use filters to auto-label by alias.
+3. **Skip phone verification** — sometimes works in incognito. Inconsistent.
+
+Can you see what email addresses I have associated with my phone number?
+
+**With a second number:**
+
+4. **Google Voice** — free US number, can verify additional Gmail accounts.
+How can I setup a google voice?
+5. **Prepaid SIM** — cheap throwaway for one-time verification.
+6. **VoIP** — TextNow/TextFree (Google blocks some VoIP ranges).
+
+**Recommendation:** For truly separate inboxes → Google Workspace on your domain. For different addresses routing to one inbox → Gmail `+` aliases with corky filter rules.
 <!-- /agent:exchange -->

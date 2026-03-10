@@ -249,4 +249,17 @@ It has already been forwarding. Did it go away?
 3. Re-run: `corky filter push`
 
 Note: `corky filter push` deletes all existing filters and recreates them, so if ANY filter's forwarding address is unverified, the entire push fails mid-way (filters 1 gets created, but 2 and 3 fail).
+
+### All filters pushed successfully
+
+`corky filter push` — all 3 filters created:
+1. **correspondence** — label only
+2. **for-lucas** — label + forward to `dev@briantakita.me`
+3. **voice-sms** — label + forward to `btak.dev@gmail.com`
+
+The previous failure was because `btak.dev@gmail.com` wasn't confirmed yet — the push fails on the first bad forwarding address and stops. `dev@briantakita.me` was still verified; it just never got reached.
+
+**Remaining manual step:** Turn ON "Forward messages to email" in Google Voice settings ([voice.google.com/settings](https://voice.google.com/settings)) so texts actually generate the emails that the filter will catch and forward.
+
+I sent 2 test sms messages. But I don't see either going to brian.takita@gmail.com
 <!-- /agent:exchange -->

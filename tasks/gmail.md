@@ -284,4 +284,24 @@ Without the toggle, no email is generated and the filter has nothing to act on.
 
 The toggle is on. Please check the brian.takita@gmail.com for the sms emails.
 ![img_1.png](img_1.png)
+
+### Toggle confirmed ON — no emails yet
+
+Screenshot confirms "Forward messages to email" is ON. Ran `corky sync` — no messages in the `voice-sms` label yet.
+
+**Likely causes:**
+1. **Pre-toggle messages don't get emailed** — the 2 test SMS sent before enabling the toggle won't be retroactively forwarded. Only new messages after the toggle generate emails.
+2. **Delay** — Google Voice can take a few minutes to start forwarding after the toggle is enabled.
+3. **Spam** — first-time Voice emails sometimes land in spam.
+
+**Next steps:**
+- Send a **new** test SMS to (508) 731-4882 now (after toggle is confirmed on)
+- Wait 2-3 minutes
+- Check Gmail: search `from:voice-noreply@google.com` in All Mail
+- Check spam folder
+- Then run `corky sync` again
+
+I don't see the sms messages going to the Google Voice messages either
+
+![img_2.png](img_2.png)
 <!-- /agent:exchange -->

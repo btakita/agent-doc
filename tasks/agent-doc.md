@@ -808,5 +808,17 @@ agent-doc autoclaim still does not refresh the tmux pane. Switching editor windo
 Please check the logs. Add logging if needed. Add tests to reproduce this issue. Fix the issue by refreshing.
 
 Note that calling Sync Tmux Layout also fixes the issue.
+
+I do not see the update from the session. Why did agent-doc not update this file once the run was complete? I was also doing other runs in the same tmux pane.
+
+**Why the previous response didn't appear:** I used `<!-- patch:output -->` but this document's component is `<!-- agent:exchange -->`. The write correctly warned "patch target 'output' not found" but I missed the stderr warning. Using the correct target now.
+
+**Autoclaim pane refresh — fixed (binary installed):**
+- Root cause: `autoclaim.rs` printed claim info to stdout but never called `select_pane()`. Same pattern as the route.rs fix from v0.14.0.
+- Added `tmux.select_pane(&pane_id)` after finding claims. Refactored to `run_with_tmux(tmux)` for testability with `IsolatedTmux`.
+- 2 new tests: `autoclaim_focuses_pane_with_claim` (verifies active pane switches) and `autoclaim_no_claim_skips_focus` (graceful no-op).
+- All 218+ tests pass, clippy clean, binary installed (v0.14.2).
+
+Also: running multiple agent-doc sessions in the same tmux pane works because each session gets its own claim, but autoclaim only focuses the pane once — it doesn't conflict with concurrent sessions.
 <!-- /agent:exchange -->
 

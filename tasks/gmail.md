@@ -86,4 +86,27 @@ btak.dev@gmail.com
 
 I want to route text messages going to this google voice number to a common place where lucas & I can see it. Perhaps btak.dev@gmail.com?
 (508) 731-4882
+
+### Routing Google Voice SMS to shared Gmail
+
+Google Voice has built-in SMS→email forwarding. Options for routing (508) 731-4882 texts to `btak.dev@gmail.com`:
+
+**Option 1: Direct forwarding (if Voice is on btak.dev)**
+- [voice.google.com/settings](https://voice.google.com/settings) → Messages → **"Forward messages to email"**
+- Texts arrive as emails in `btak.dev@gmail.com` — both you and Lucas see them
+The phone number is linked to brian.takita@gmail.com
+- See screenshot
+
+**Option 2: Cross-account forwarding (if Voice is on a different account)**
+- Enable SMS→email on the owning account
+- Gmail Settings → Forwarding → add `btak.dev@gmail.com`
+- Filter: `from:voice-noreply@google.com` → Forward to `btak.dev@gmail.com`
+
+**Option 3: Share the Voice account directly (recommended)**
+- If Voice is on `btak.dev@gmail.com`, both of you sign into the Google Voice app/web with that account
+- Both see texts in real-time, both can reply
+- No forwarding needed
+
+**Recommendation:** If (508) 731-4882 is already on `btak.dev@gmail.com`, Option 3 is simplest. If it's on a different account, use Option 2 to pipe it to the shared inbox.
 <!-- /agent:exchange -->
+![img_1.png](img_1.png)![img_2.png](img_2.png)

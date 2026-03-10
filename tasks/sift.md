@@ -62,4 +62,6 @@ How can we use this with our tooling to drive semantic search?
 > - **agent-doc** — interactive document sessions. Cross-session retrieval over markdown files is a gap right now
 >
 > Would love to explore integrating Sift as a library dependency or coordinating on a shared search interface. Happy to jump on a call if you're interested.
+
+**Re: DM vs public reply** — Post the reply publicly on his post first. Public engagement on a new project is valuable signal, and it gives visibility to your tools for others in the thread. If Alex responds positively, then move to DM for scheduling a call and coordination details.
 <!-- /agent:output -->

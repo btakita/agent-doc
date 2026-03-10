@@ -63,5 +63,17 @@ How can we use this with our tooling to drive semantic search?
 >
 > Would love to explore integrating Sift as a library dependency or coordinating on a shared search interface. Happy to jump on a call if you're interested.
 
-**Re: DM vs public reply** — Post the reply publicly on his post first. Public engagement on a new project is valuable signal, and it gives visibility to your tools for others in the thread. If Alex responds positively, then move to DM for scheduling a call and coordination details.
+### Networking Guide: Public Comment → Call
+
+**The escalation ladder:**
+1. **Public comment** (you're here) — shows genuine interest, gives Alex social proof
+2. **Alex replies** — even a brief "thanks, interesting!" opens the door
+3. **You DM** — "Hey, loved your post on Sift. I'm working on some Rust CLI tools where hybrid search would fit perfectly. Would you be up for a quick 20-min call to explore integration ideas?"
+4. **Call** — keep it short (20-30 min), focused on concrete integration
+
+**Why it's not bold:** Alex just shipped a new open-source project with 2 stars. He *wants* early adopters and integration partners. Someone reaching out with specific use cases (not just "cool project") is exactly what he's hoping for. You're bringing real value — working Rust tools that could become early consumers of his library.
+
+**The key phrase** "Happy to jump on a call if you're interested" is soft, no-pressure, and lets Alex opt in. Very standard in developer circles.
+
+**Shortcut option:** Skip the ladder — DM him directly. His post is fresh, you already commented asking about hooks/Tree Sitter, he knows who you are. A DM saying "I have some Rust tools that could use Sift, want to chat?" is perfectly appropriate.
 <!-- /agent:output -->

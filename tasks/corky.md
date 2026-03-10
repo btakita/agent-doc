@@ -155,6 +155,105 @@ The current installed binary may not have the transcribe feature compiled in —
 
 release...will work on including transcribe later
 
-Please help me with instructions for Lucas to get started using btakita/ma
+Please help me with instructions for Lucas to get started using btakita/mailbox-lucas
+
+**Q: Are we currently using whisper-rs?**
+No — the installed binary is compiled without the `transcribe` feature flag. Running `corky transcribe` says "Transcription support not compiled." To enable: `cargo install corky --features transcribe-cuda` (or `transcribe` for CPU-only). Will revisit later per your note.
+
+**Released v0.13.4** — unified corky skill via agent-kit.
+- Merged email + corky into single `/corky` skill
+- Deleted redundant agent-doc and email skills from `.claude/skills/`
+- `corky skill install` installs the unified SKILL.md
+- Published to crates.io, PyPI, GitHub Releases. Binary installed.
+**btakita/mailbox-lucas** already exists with a README quick start guide. However, **Lucas is not yet a collaborator** — only you (btakita) have access.
+
+**To onboard Lucas:**
+
+1. **Get his GitHub username** — ask him if you don't know it
+2. **Add him as collaborator:**
+   ```sh
+   gh api repos/btakita/mailbox-lucas/collaborators/HIS_GITHUB_USERNAME -X PUT -f permission=push
+   ```
+3. **Send him these instructions:**
+
+---
+
+Hey Lucas,
+
+I've set up a shared mailbox for us. Here's how to get started:
+
+**1. Accept the GitHub invite** — check your email or https://github.com/notifications
+
+**2. Clone and install:**
+```sh
+git clone https://github.com/btakita/mailbox-lucas.git
+cd mailbox-lucas
+curl -sSf https://raw.githubusercontent.com/btakita/corky/main/install.sh | sh
+```
+
+**3. Read conversations:**
+```sh
+git pull              # get latest threads
+ls conversations/     # browse synced email threads
+```
+
+**4. Find threads needing a reply:**
+```sh
+corky unanswered
+```
+
+**5. Draft a reply:**
+```sh
+corky draft new --to recipient@example.com "Subject line"
+# edit the file in drafts/, set Status: review when ready
+corky draft validate drafts/your-draft.md
+git add drafts/ && git commit -m "Draft reply to ..." && git push
+```
+
+I'll review your drafts and send from my account.
+
+---
+
+Want me to draft this as an email to Lucas via corky?
+
+I need to rethink this approach.
+Lucas wants the process to be easy to reply to recruiter emails.
+So I think giving lucas more context would be useful for more detailed correspondence.
+
+This means lucas having a monorepo with his own context and submodules to my context.
+I need to make this process easy & perceived as valuable enough to use.
+**Rethinking Lucas onboarding — making it worth his time.**
+
+You're right that the raw git+corky workflow is too much friction for someone who just wants to reply to recruiters. Here's a revised approach:
+
+**Core insight:** Lucas needs a system where he can see recruiter context, draft replies with AI help, and push them for your review — without learning git commands or CLI tools.
+
+**Proposed architecture:**
+
+1. **Lucas gets his own monorepo** (`lucas-agent-loop` or similar) with:
+   - Submodule pointing to shared context (your contact files, templates, recruiter threads)
+   - His own `CLAUDE.md` with his preferences, voice, and recruiter reply style
+   - A `mail/` directory for his correspondence
+
+2. **Claude Code as the interface** — Lucas uses Claude Code directly:
+   - `/corky` skill handles all the plumbing (git, threading, validation)
+   - He says "reply to the recruiter from Acme Corp" and gets a draft
+   - Review → approve → you send from your account
+
+3. **Shared context via submodules:**
+   - `src/shared-contacts/` — contact files with recruiter info, company notes
+   - `src/mail-brian/` (read-only submodule) — synced threads he needs to reply to
+   - His own `drafts/` — where his replies live
+
+**What makes it worth using:**
+- Zero git commands (Claude handles commits/pushes)
+- Rich context = better drafts (recruiter's company, role details, past correspondence)
+- Review loop gives you control before anything sends
+- Lucas builds his own AI workflow muscle
+
+**Open questions:**
+- Does Lucas already use Claude Code? If not, that's the onboarding bottleneck.
+- Should recruiter threads sync automatically or on-demand?
+- How much of your contact context should Lucas see?
 <!-- /agent:exchange -->
 ****

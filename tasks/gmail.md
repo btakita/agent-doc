@@ -170,4 +170,17 @@ What if I have another Google voice number that I don't want to route?
 Can the filter distinguish between the phone numbers?
 
 Result: Voice texts arrive at both your Gmail and the shared `btak.dev@gmail.com`. Nothing changes about your account setup.
+
+### Filter specificity for Voice emails
+
+**`voice-noreply@google.com`** sends ALL Voice notifications (calls, texts, voicemails) for the account. But:
+
+**Personal Voice = one number per account.** You can only have one Voice number on `brian.takita@gmail.com`. So `from:voice-noreply@google.com` already targets only (508) 731-4882. No ambiguity.
+
+**If you ever had multiple numbers** (requires Workspace Voice plan), you could filter by subject/body — the emails include the phone number:
+- `from:voice-noreply@google.com subject:508` — matches only that number
+
+**Bottom line:** For your setup, `from:voice-noreply@google.com` is sufficient and specific. One account = one Voice number = one filter catches exactly what you need.
+
+Please update .corky.toml with the filter and forwarding rule.
 <!-- /agent:exchange -->

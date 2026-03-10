@@ -108,13 +108,25 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
 
     // Focus the claimed pane (select-window + select-pane for cross-window support)
-    let _ = tmux.select_pane(&pane_id);
+    if tmux.pane_alive(&pane_id) {
+        if let Err(e) = tmux.select_pane(&pane_id) {
+            eprintln!("warning: failed to focus pane {}: {}", pane_id, e);
+        } else {
+            eprintln!("focused pane {}", pane_id);
+        }
+    } else {
+        eprintln!("warning: pane {} is not alive, skipping focus", pane_id);
+    }
 
     // Show a brief notification on the target pane
     let msg = format!("Claimed {} (pane {})", file_str, pane_id);
-    let _ = std::process::Command::new("tmux")
+    if let Err(e) = tmux
+        .cmd()
         .args(["display-message", "-t", &pane_id, "-d", "3000", &msg])
-        .status();
+        .status()
+    {
+        eprintln!("warning: display-message failed: {}", e);
+    }
 
     // Append to claims log so the skill can display it on next invocation
     let log_line = format!("Claimed {} for pane {}\n", file_str, pane_id);

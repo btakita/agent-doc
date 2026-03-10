@@ -4,7 +4,6 @@ tmux_session: '0'
 agent_doc_mode: template
 ---
 
-
 # Gmail & Calendar Integration
 
 ## Gmail Filters
@@ -19,39 +18,26 @@ agent_doc_mode: template
 - Note: `in_reply_to` was empty (corky doesn't store Message-IDs during sync) — Gmail threads by subject, so this works fine
 - Draft location: `~/Documents/mail/` is outside credential bubbling path — had to move to `~/work/btakita/mail/drafts/` for `corky draft push`
 
-## Calendar Management (corky v0.13.1)
+## Calendar Management (corky v0.13.1–v0.13.3)
 
-Implemented `corky cal` module with 3 subcommands:
+Implemented `corky cal` module with 5 subcommands:
 
 ```bash
 corky cal auth                          # OAuth2 (reuses Gmail credentials, calendar:* token keys)
 corky cal list [--limit N] [--query Q]  # list upcoming events
 corky cal delete "query" [--all] [--dry-run]  # delete events (--all for recurring series)
+corky cal create SUMMARY --start DT --end DT  # create events (v0.13.3)
+corky cal check --start DT --end DT     # check availability (v0.13.3)
 ```
 
-**Files:** `src/cal/{mod,auth,list,delete}.rs`, CLI wiring in `src/{cli,main,lib}.rs`
+**Bugs fixed:** 403 (Calendar API not enabled), 400 (`+` not URL-encoded in timeMin), recurring series dedup
 
-**Bugs fixed during implementation:**
-- 403: Calendar API must be enabled separately in Google Cloud Console
-- 400: `timeMin` RFC3339 `+00:00` not URL-encoded (`+` → space) — fixed with `urlencode_pub()`
-- Recurring series: `--all` now deduplicates by `recurring_event_id` and deletes series root event (one API call per series)
+## Session History
 
-**Released v0.13.1** — crates.io, PyPI, GitHub Releases: https://github.com/btakita/corky/releases/tag/v0.13.1
+- Committed and pushed all submodules: mail (`cbbfaee`), censible-core (`28bed29`), agent-doc (`771274d`), agent-kit (`a909d54`), agent-loop parent (`196a82c`)
 
-## User
+<!-- agent:exchange -->
+Converted to template mode. Updated calendar section to include v0.13.3 commands (`cal create`, `cal check`). Session history compacted.
 
-commit and push mail and submodules
-## Assistant
-
-Committed and pushed all submodules and parent:
-
-- **mail** → `cbbfaee` — 29 files (new conversations, contacts, mailboxes)
-- **censible-core** → `28bed29` — 192 files (mi-web → mi-www rename, new Worker app)
-- **agent-doc** → `771274d` — Cargo.lock, Cargo.toml, skill.rs
-- **agent-kit** → `a909d54` — Cargo.lock
-- **agent-loop** (parent) → `196a82c` — submodule pointers + task docs
-- **webmaster** — pointer updated (no submodule changes needed)
-
-## User
-
-Please convert to agent_doc_mode: template
+How can I create additional gmail accounts after running into a limit with the number of email accounts allowed by google using a single phone number?
+<!-- /agent:exchange -->

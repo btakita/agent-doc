@@ -13,6 +13,7 @@ mod git;
 mod init;
 mod layout;
 mod merge;
+mod mode;
 mod outline;
 mod patch;
 mod plugin;
@@ -255,6 +256,14 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Get or set the document mode (append/template)
+    Mode {
+        /// Path to the session document
+        file: PathBuf,
+        /// Set mode: append or template
+        #[arg(long)]
+        set: Option<String>,
+    },
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
@@ -401,6 +410,7 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Compact { file, keep } => compact::run(&file, keep),
         Commands::Convert { file } => convert::run(&file),
+        Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
     }

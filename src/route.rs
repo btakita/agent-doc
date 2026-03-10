@@ -46,6 +46,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
             // Pane is alive — send the command
             let command = format!("/agent-doc {}", file_path);
             tmux.send_keys(registered_pane, &command)?;
+            let _ = tmux.select_pane(registered_pane); // Focus pane for visual feedback
             eprintln!("Sent /agent-doc {} → pane {}", file_path, registered_pane);
             return Ok(());
         }
@@ -63,6 +64,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
             sessions::register(&session_id, &new_pane, &file_path)?;
             let command = format!("/agent-doc {}", file_path);
             tmux.send_keys(&new_pane, &command)?;
+            let _ = tmux.select_pane(&new_pane); // Focus pane for visual feedback
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
             return Ok(());
         }
@@ -83,6 +85,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
             sessions::register(&session_id, &new_pane, &file_path)?;
             let command = format!("/agent-doc {}", file_path);
             tmux.send_keys(&new_pane, &command)?;
+            let _ = tmux.select_pane(&new_pane); // Focus pane for visual feedback
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
             return Ok(());
         }

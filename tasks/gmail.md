@@ -110,4 +110,23 @@ The phone number is linked to brian.takita@gmail.com
 **Recommendation:** If (508) 731-4882 is already on `btak.dev@gmail.com`, Option 3 is simplest. If it's on a different account, use Option 2 to pipe it to the shared inbox.
 
 Can I switch the email address or do I need to make a new Google Voice number?
+
+### Transfer Google Voice number to another account
+
+Yes — you can transfer the number. No need for a new one.
+
+**Steps:**
+1. Sign into [voice.google.com](https://voice.google.com) with `brian.takita@gmail.com`
+2. Settings → **Transfer number**
+3. Enter destination: `btak.dev@gmail.com`
+4. Confirm via email sent to `btak.dev@gmail.com`
+5. Sign into voice.google.com with `btak.dev@gmail.com` to complete
+
+After transfer, (508) 731-4882 lives on `btak.dev@gmail.com`. Both you and Lucas use it directly — no forwarding needed.
+
+Will (508) 731-4882 still forward to my phone number 424.249.2350?
+Can I make calls & texts from my phone?
+Can Lucas make texts from the imac?
+
+**Caveat:** Transfer removes the number from `brian.takita@gmail.com` entirely. If you want to keep Voice on brian.takita for other purposes, use the forwarding approach (Option 2) instead.
 <!-- /agent:exchange -->

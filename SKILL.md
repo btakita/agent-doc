@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.10.0"
+agent-doc-version: "0.14.1"
 ---
 
 # agent-doc submit
@@ -133,9 +133,10 @@ Then pass it as `--baseline-file` so the 3-way merge can detect user edits accur
 ### 5. Git integration (optional)
 
 If the document is in a git repo:
-- Before responding: `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
+- **After writing response:** `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
 - **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- After writing response: do NOT commit (leave as uncommitted for diff gutters)
+- Do NOT commit before responding — this triggers "file changed externally" notices in IDEs
+- The git-based snapshot fallback (`snapshot::resolve()`) ensures diff computation works without a pre-response commit
 
 ## Document Format
 

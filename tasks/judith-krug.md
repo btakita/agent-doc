@@ -198,4 +198,21 @@ Warm, low-pressure, clear time slots. Doesn't mention the proposal — just avai
 Got this text message from Judith...help me with a reply:
 
 > It was a big decision but I sent a cancellation email to mortgage Automator. I'll join the mortgage office and get things going with u soon. Thx for your intelligence time and patience. I try to reach out tmrw sometime! 😊
+
+**Draft text reply to Judith:**
+
+> That's wonderful news, Judith — thank you for your trust! I'm excited to get started. Whenever you're ready tomorrow, just give me a call and we'll map out next steps. Talk soon!
+
+**Why this works:**
+- Acknowledges the weight of her decision ("wonderful news")
+- Reinforces trust without being sycophantic
+- "Excited to get started" — forward momentum
+- Puts the ball in her court for timing ("whenever you're ready")
+- Brief, warm, professional — matches text message tone
+
+I sent the previous response. We need a way to integrate corky to my text messages.
+
+Suggest a reply:
+> Mortgage Automator is tripping on me with emails today. Omg
+
 <!-- /agent:exchange -->

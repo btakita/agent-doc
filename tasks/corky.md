@@ -255,5 +255,41 @@ You're right that the raw git+corky workflow is too much friction for someone wh
 - Does Lucas already use Claude Code? If not, that's the onboarding bottleneck.
 - Should recruiter threads sync automatically or on-demand?
 - How much of your contact context should Lucas see?
+
+Please extract the lucas discussion into tasks/lucas.md
+Clear out lucas related content from this file.
+
+I want to focus on releasing corking with transcribe using the cpu by default...and having a gpu flag to use the gpu.
+**Extracted Lucas discussion to `tasks/lucas.md`.**
+
+Now for the transcribe release — here's the current state and plan:
+
+**Current state:**
+- `default = []` — transcribe is entirely opt-in via feature flags
+- `transcribe` feature = CPU-only (whisper-rs + symphonia + rubato + hound)
+- `transcribe-cuda` = extends transcribe with GPU acceleration
+- `diarize` = extends transcribe with pyannote-rs
+
+**Plan for release with CPU-default + GPU flag:**
+
+1. **Change default features** to include `transcribe`:
+   ```toml
+   [features]
+   default = ["transcribe"]
+   ```
+   This means `cargo install corky` gets CPU transcription out of the box.
+
+2. **GPU stays opt-in:** `cargo install corky --features transcribe-cuda` for CUDA acceleration.
+
+3. **No code changes needed** — the feature gating already works correctly. The `mod.rs` fallback message goes away when transcribe is default.
+
+4. **Build considerations:**
+   - whisper-rs compiles whisper.cpp from source — adds ~2-3 min to build time
+   - symphonia/rubato/hound are pure Rust — no system deps
+   - Users who want a minimal build can `--no-default-features`
+
+5. **Release as next version** — making transcribe default is a meaningful change.
+
+Want me to implement?
 <!-- /agent:exchange -->
 ****

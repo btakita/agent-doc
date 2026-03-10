@@ -229,4 +229,24 @@ Yes — implemented auto-label creation in corky. Running `corky filter push` no
 Done
 
 After that, the filter will be created via the API with both the label and forwarding action.
+
+### Filter push — two forwarding addresses need verification
+
+Re-ran `corky filter push` — still failing. The error is on filter [2] (`for-lucas`, forwards to `dev@briantakita.me`). The voice-sms filter (forwards to `btak.dev@gmail.com`) also needs its forwarding address confirmed.
+
+**Both forwarding addresses must be verified** in Gmail Settings for `brian.takita@gmail.com`:
+
+| Address | Status |
+|---------|--------|
+| `btak.dev@gmail.com` | Added? Check if confirmation email was clicked |
+Now Confirmed
+| `dev@briantakita.me` | Needs to be added as forwarding address |
+
+**Steps:**
+1. Gmail Settings → Forwarding → confirm both addresses show as "verified"
+2. If `dev@briantakita.me` isn't listed, add it → confirm via email
+It has already been forwarding. Did it go away?
+3. Re-run: `corky filter push`
+
+Note: `corky filter push` deletes all existing filters and recreates them, so if ANY filter's forwarding address is unverified, the entire push fails mid-way (filters 1 gets created, but 2 and 3 fail).
 <!-- /agent:exchange -->

@@ -183,4 +183,19 @@ I have a call from 1-1:20 ET tomorrow.
 Corky v0.13.3 just released. It has Google Calendar support.
 `corky cal create`
 `corky cal check`
+
+**Calendar check (via `corky cal check`):**
+- 3:30-4:00 ET — Interview (Cast & Crew)
+- 4:30-4:50 ET — Brian & Kevin
+- Free: now until 3:30 ET, 4:00-4:30 ET gap, after 5:00 ET
+
+**Draft text to Judith:**
+
+> Hi Judith, it's Brian. Robert mentioned you might be calling today — just wanted to touch base. I'm free until 12:30 Pacific or after 2:00 Pacific today. Tomorrow works too, I'm open most of the day. Let me know what works best!
+
+Warm, low-pressure, clear time slots. Doesn't mention the proposal — just availability.
+
+Got this text message from Judith...help me with a reply:
+
+> It was a big decision but I sent a cancellation email to mortgage Automator. I'll join the mortgage office and get things going with u soon. Thx for your intelligence time and patience. I try to reach out tmrw sometime! 😊
 <!-- /agent:exchange -->

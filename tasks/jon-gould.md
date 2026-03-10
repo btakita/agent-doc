@@ -7,3 +7,5 @@ agent_doc_mode: template
 Help me prepare for an interview with Jon Gould.
 
 See calendar
+
+I synced emails.

@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.2 | **Tests:** 218 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.3 | **Tests:** 220 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
 <!-- /agent:status -->
@@ -862,4 +862,17 @@ Now: Missing-component patches route to `exchange`/`output` (auto-created if nee
 - Multi-session workflows don't silently fail when a pane isn't visible
 - 2 new tests: `apply_patches_missing_component_routes_to_exchange` and `apply_patches_missing_component_creates_exchange`
 - All tests pass, clippy clean, binary installed (v0.14.2)
+
+release
+
+**v0.14.3 released.**
+- crates.io ✓
+- GitHub Release ✓ — https://github.com/btakita/agent-doc/releases/tag/v0.14.3
+- Binary installed ✓
+- SKILL.md updated to v0.14.3
+
+Changes:
+1. Autoclaim pane refresh — `select_pane()` after finding claims
+2. Template missing-component recovery — graceful fallback to exchange/output
+3. 4 new tests
 <!-- /agent:exchange -->

@@ -76,3 +76,30 @@ Eric Rose
 
 Please fill in tony-tomai contact with context.
 Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
+
+<!-- agent:exchange -->
+### Actions completed
+
+**1. Tony Tomai contact created** — `mail/contacts/tony-tomai/CLAUDE.md`
+- Relationship: BCG AI Factory opportunity pipeline
+- Related contacts: Dave Franklin, Steve Edison, Eric Rose, Anil Podduturi
+- Recording: `recordings/phone_20260310-tony-tomai.amr`
+
+**2. Transcription in progress** — Whisper diarized transcription of the call recording is processing. Will update with transcript when complete.
+
+**3. Call notes (Anil conversation) captured:**
+- BCG Project Helix
+- Looking for "true engineer builders" — people who are not "green"
+- Interview framework: What is it? How did you build it? Why did you build it?
+- Brian in consideration for Project Helix
+- Ask: Can Anil put in a word / does he know anyone?
+
+**New contacts from this session:**
+| Name | Org | Role |
+|------|-----|------|
+| Steve Edison | BCG | Director of Engineering or Product (pending - see transcript) |
+| Tony Tomai | Inspyr Solutions | Account Manager for BCG recruiting (pending — transcription will clarify) |
+| Eric Rose | BCG pipeline | (pending — transcription will clarify) |
+
+**Pending:** Transcription of Tony Tomai call — will update CLAUDE.md with specific context once complete.
+<!-- /agent:exchange -->

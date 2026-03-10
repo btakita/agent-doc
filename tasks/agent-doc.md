@@ -221,6 +221,12 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.13.0-v0.13.2 session:** Implemented `agent-doc autoclaim` (SessionStart hook), git-based snapshot fallback (`snapshot::resolve()`), sync-to-autoclaim integration. Three iterations: v0.13.0 (core features), v0.13.1 (sync updates existing registry entries), v0.13.2 (sync creates entries for unregistered files via tmux-router `file_panes`).
 
 **v0.13.3 session:** Diagnosed sync autoclaim still failing for sole-column files. Root cause: tmux-router skipped files with no registry entry AND no column donor (Phase 1.5 `find_column_pane` returned None). Fix: Phase 1.75 assigns spare panes from the target window. Added 2 integration tests. Published tmux-router v0.2.4 + agent-doc v0.13.3.
+
+**v0.14.0 session:** Route focus fix (select_pane after send_keys), claim defaults to template mode, `agent-doc mode` CLI command for get/set mode. Exchange-replace bug and CWD drift discussions folded into fixes. Published to all targets.
+
+**v0.14.1 session:** Moved git commit to after write in SKILL.md workflow. Root cause of IDE "file changed externally" notices: pre-response `agent-doc commit` ran `git add + commit` which IntelliJ VCS detected as external change. Fix: commit after write reduces notices from 2 to 1. Not related to `snapshot::resolve()` (read-only).
+
+**v0.14.2 session:** Skill reload via `--reload compact/restart` flag. `install_and_check_updated()` returns bool. SKILL.md pre-flight uses `--reload compact` and stops if skill updated, prompting user to `/compact`. Investigated Claude Code session resume/compact behavior. SessionStart hook fires with `source: "compact"` after /compact. Skills have live change detection but current invocation keeps old text. Feature request for `/reload-skills` exists (github.com/anthropics/claude-code/issues/20507).
 <!-- /agent:history -->
 
 ## Exchange
@@ -795,5 +801,7 @@ Binary v0.14.2 installed, SKILL.md still at v0.14.1
 - crates.io ✓, GitHub Release ✓, Binary installed ✓
 - SKILL.md updated (v0.14.2)
 - 218 tests passing
+compact this file
+*Compacted. v0.14.0-v0.14.2 sessions folded into history.*
 <!-- /agent:exchange -->
 

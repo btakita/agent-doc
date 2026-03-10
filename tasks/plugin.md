@@ -1,9 +1,8 @@
 ---
 agent_doc_session: d4eed435-cbf3-44ae-a96c-048b0b2e8025
 tmux_session: '1'
+agent_doc_mode: template
 ---
-
-
 
 ## agent-doc Plugin — Summary
 
@@ -44,3 +43,10 @@ Canonical source: `agent-doc/editors/jetbrains/` and `agent-doc/editors/vscode/`
 ## User
 
 
+
+<!-- agent:exchange -->
+Acknowledged switch to `agent_doc_mode: template`. The document currently uses append-style `## User` sections but has no template components defined yet.
+
+Ready for your next prompt — add content to `<!-- agent:input -->` or `<!-- agent:exchange -->` when you're ready, or let me know if you'd like me to restructure the document with template components.
+
+<!-- /agent:exchange -->

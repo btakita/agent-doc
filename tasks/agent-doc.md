@@ -700,12 +700,68 @@ fi
 
 **Open questions:**
 1. Does `--resume` reload skills? Need to verify — if it just replays the context, the old skill text is still there
+claude --resume <session-id> --dangerously-skip-permissions
+I personally want --dangerously-skip-permissions but other may not.
 2. Is there a `$CLAUDE_SESSION_ID` environment variable? Or do we need to capture it from Claude Code's API?
+When claude closes, it prints the claude --resume <session-id> to stdout.
 3. Race condition: if the user is mid-edit when restart happens
+If the user is mid-edit it should be ok. If the agent is processing a job, the work will be lost. So wait until the agent is idle.
 
 **Alternative: `/compact` trick** — Claude Code's `/compact` command compresses the context. If it also reloads skills during compaction, that would be a lighter-weight solution. But I suspect it doesn't reload skills.
+
+`/compact` is an option as well. Please evaluate and provide both as options.
 
 **Recommendation:** This needs investigation into Claude Code's session resume behavior. If `--resume` reloads skills from disk, the implementation is straightforward (~20 lines in the SKILL.md pre-flight). If not, we'd need Claude Code to add a skill-reload mechanism.
 
 Want me to test whether `--resume` picks up updated skills?
+
+Yes
+### Skill hot-reload — research results
+
+**Good news: Skills have live change detection.** Claude Code picks up edits to SKILL.md files without restarting. So when `agent-doc skill install` writes a new SKILL.md, the next `/agent-doc` invocation should use the updated instructions.
+
+**The real problem:** The CURRENT invocation already has the old skill text loaded into the conversation context. Live change detection helps future invocations, not the one that triggered the update.
+
+**Two reload strategies:**
+
+#### Option 1: `/compact` (lighter, recommended)
+
+After `agent-doc skill install`, send `/compact` to trigger context compaction. When compaction completes, a `SessionStart` hook fires with `source: "compact"`. The compacted context reloads skills from disk.
+
+```
+Pre-flight detects newer skill → agent-doc skill install → send /compact → compacted context loads new SKILL.md → next /agent-doc uses new instructions
+```
+
+**Pros:** No session restart, preserves conversation history (compressed), fast.
+**Cons:** Context compression may lose some nuance from earlier in the session.
+
+#### Option 2: `--resume` (heavier, full reload)
+
+After `agent-doc skill install`, exit Claude and restart with `--resume`.
+
+```
+Pre-flight detects newer skill → agent-doc skill install → capture session ID from hook JSON → tmux send-keys "/exit" → tmux send-keys "claude --resume <id>" → fresh session loads new SKILL.md
+```
+
+**Pros:** Clean reload, guaranteed fresh skills.
+**Cons:** Heavier, user sees session restart, `--dangerously-skip-permissions` loses consent history.
+
+#### Implementation details
+
+**Session ID:** Not available as `$CLAUDE_SESSION_ID` env var (feature request exists: github.com/anthropics/claude-code/issues/25642). Available in `SessionStart` hook JSON input on stdin. Can capture via:
+```bash
+#!/bin/bash
+read -r input
+session_id=$(echo "$input" | jq -r '.session_id')
+echo "$session_id" > /tmp/claude-session-id-$$
+```
+
+**Existing hooks in this project:** `Stop` and `UserPromptSubmit` hooks already configured in `.claude/settings.json` for tmux pane border colors. Can add `SessionStart` hook with `compact` matcher.
+
+**Feature request for `/reload-skills`:** Already exists at github.com/anthropics/claude-code/issues/20507 — this would be the ideal solution. Worth upvoting.
+
+**Recommendation:** Implement Option 1 (`/compact`) as the default, with Option 2 (`--resume`) as a flag (`agent-doc skill install --restart`). For now, the SKILL.md pre-flight can simply print a notice: "Skill updated to vX.Y.Z. Run /compact to reload, or it will take effect on the next /agent-doc invocation."
+
+Want me to implement the `/compact` approach?
 <!-- /agent:exchange -->
+

@@ -291,5 +291,20 @@ Now for the transcribe release — here's the current state and plan:
 5. **Release as next version** — making transcribe default is a meaningful change.
 
 Want me to implement?
+
+yes
+**Implemented — transcribe now default.**
+
+Changes committed to corky (`4a1cf5b`):
+1. `default = ["transcribe"]` in Cargo.toml
+2. Added `#[cfg(feature = "diarize")]` to `collect_whisper_segments` (was dead code without diarize feature)
+3. All 408 tests pass, release binary built
+
+**Install options now:**
+- `cargo install corky` — CPU transcription included
+- `cargo install corky --features transcribe-cuda` — GPU acceleration
+- `cargo install corky --no-default-features` — minimal (no transcribe)
+
+**Not yet done:** version bump, crates.io publish, GitHub release. Per corky conventions, you'll bump the version explicitly when ready.
 <!-- /agent:exchange -->
 ****

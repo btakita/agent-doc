@@ -834,6 +834,17 @@ patch target(s) not found in document: output. Available components: status, arc
 
 **Changes:**
 - `template.rs`: Changed silent `eprintln!` warning → `anyhow::bail!` with missing + available component names
+If a component is missing, what happens now?
 - New test: `apply_patches_missing_component_errors`
 - All tests pass, clippy clean, binary installed (v0.14.2)
+
+Now `agent-doc write --template` returns a **hard error** (exit 1) with a message like:
+```
+patch target(s) not found in document: output. Available components: status, architecture, releases, pending, lessons, history, exchange
+```
+
+- Write fails cleanly — no silent data loss
+- Error names the missing target AND lists all available components
+- Pending response is still saved in `.agent-doc/pending/` (via `save_pending` which runs before `apply_patches`), so `agent-doc recover` can retrieve it
+- Previously: stderr warning + exit 0 → response silently dropped
 <!-- /agent:exchange -->

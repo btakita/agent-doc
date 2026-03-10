@@ -211,5 +211,20 @@ Can I create the filter via the api?
 
 Alternatively, if you'd rather skip the label and just use the forwarding, you can create the filter manually in Gmail (Settings → Filters → Create: From `voice-noreply@google.com` → Forward to `btak.dev@gmail.com`). But having it in `.corky.toml` keeps it tracked and reproducible.
 
+mail/.corky.toml
+
 **Also needed:** Add `btak.dev@gmail.com` as a forwarding address in Gmail settings first (Settings → Forwarding → Add). Google requires confirmation from the receiving account.
+
+### Auto-label creation implemented
+
+Yes — implemented auto-label creation in corky. Running `corky filter push` now auto-creates missing Gmail labels via the Labels API. The `voice-sms` label was created successfully.
+
+**However**, the filter push still failed with **"Unrecognized forwarding address"** — Gmail requires `btak.dev@gmail.com` to be verified as a forwarding address before the Filters API can reference it.
+
+**Manual step (one-time):**
+1. Gmail Settings (brian.takita@gmail.com) → **Forwarding and POP/IMAP** → **Add a forwarding address** → enter `btak.dev@gmail.com`
+2. Google sends a confirmation email to `btak.dev@gmail.com` — click the link
+3. Then re-run: `corky filter push`
+
+After that, the filter will be created via the API with both the label and forwarding action.
 <!-- /agent:exchange -->

@@ -1180,4 +1180,23 @@ Each checkpoint is a separate `agent-doc write --stream` call. CRDT merge protec
 **Recommendation:** Start with Option A. It's zero code and gives meaningful progress updates. If the latency is unacceptable, upgrade to Option B later — the CRDT infrastructure supports both.
 
 Want me to update SKILL.md with checkpoint instructions?
+
+Yes. Let's implement option A. We may want to support both options in the future.
+
+### Re: Implement Option A
+
+Done. Updated SKILL.md with streaming checkpoint instructions:
+
+**What changed:**
+- Step 3 now includes "Streaming checkpoints (template mode only)" section
+- After each logical section, Claude flushes the accumulated response via `agent-doc write --template`
+- Re-saves baseline after each flush (document changed)
+- Checkpoint triggers: after each `### Re:` section, after code summaries, or after >15s of generation
+- Short single-topic responses skip checkpoints
+
+**Version bump:** v0.14.10 — installed binary + skill updated.
+
+**Effect:** On the next `/agent-doc` cycle with multiple questions, you should see partial responses appearing in your editor as each section completes, rather than waiting for the entire response.
+
+Skill updated — run /compact to reload the updated skill instructions.
 <!-- /agent:exchange -->

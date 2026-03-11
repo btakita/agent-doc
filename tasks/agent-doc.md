@@ -1357,4 +1357,22 @@ Watch daemon auto-detects `stream` and polls tmux pane every 500ms. Requires wat
 | Stream+CLI | `stream` | `agent-doc stream` | 2s | None (raw text) |
 
 **Switching:** `agent-doc mode <file> --set <append|template|stream>`. Only frontmatter changes — no content modified.
+
+Can we now test stream mode on this document?
+### Re: Testing stream mode on this document
+
+We can test **Option A (skill-level checkpoints)** right now — that's what you're already using. This document is in `template` mode, and the SKILL.md instructs me to flush partial responses at natural breakpoints.
+
+**Option B (watch daemon)** requires switching to `stream` mode:
+
+1. Switch: `agent-doc mode tasks/agent-doc.md --set stream`
+2. Claim: `agent-doc claim tasks/agent-doc.md` (auto-starts watch daemon)
+3. Daemon polls this pane via `tmux capture-pane` every 500ms
+4. Console output mirrors to the document in near-real-time
+
+**Catch:** Option B captures raw console output including tool calls and system messages — not just clean response text. The `extract_new_lines()` function flushes everything visible in the pane buffer.
+
+**Recommendation:** Keep this document in `template` mode. Create a test document (`tasks/stream-test.md`) with `agent_doc_mode: stream` and test the watch daemon on that in a separate pane.
+
+Want me to create a stream-test document?
 <!-- /agent:exchange -->

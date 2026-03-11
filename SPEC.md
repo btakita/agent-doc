@@ -129,12 +129,14 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 ### 7.8 route
 
-`agent-doc route <FILE>` — route a `/agent-doc` command to the correct tmux pane.
+`agent-doc route <FILE> [--pane P]` — route a `/agent-doc` command to the correct tmux pane.
 
-1. Read session UUID from frontmatter
-2. Look up pane in `sessions.json`
-3. If pane alive → `tmux send-keys` `/agent-doc <FILE>` + Enter
-4. If pane dead → auto-start cascade (create session/window, start Claude, register)
+1. Prune stale entries from `sessions.json`
+2. Ensure session UUID in frontmatter (generate if missing)
+3. Look up pane in `sessions.json`
+4. If pane alive → `tmux send-keys` `/agent-doc <FILE>` + Enter, focus pane
+5. If pane dead or unregistered → lazy-claim to active pane in `claude` tmux session (or `--pane P`), register, send command, auto-sync layout for all files in the same window
+6. If no active pane available → auto-start cascade (create session/window, start Claude, register)
 
 ### 7.9 claim
 

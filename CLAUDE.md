@@ -13,6 +13,7 @@ Interactive document sessions with AI agents.
 - Use `toml + serde` for config file parsing
 - No async — sequential per-run
 - Use `anyhow` for application errors
+- **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 
 ## Module Layout
 

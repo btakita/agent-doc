@@ -355,4 +355,32 @@ Published to all targets:
 - Autoclaim layout sync via `sync_after_autoclaim()` in SessionStart hook
 - Functional test: `autoclaim_syncs_layout_with_multiple_files`
 - 228 tests, clippy clean
+
+Add autocompletes for agent doc templates. What would be a good way to activate the template? The beginning of the comment?
+### Doc comments updated
+
+Updated module doc comments in 3 files:
+- **convert.rs** — added module doc describing bidirectional append↔template conversion
+- **autoclaim.rs** — documented the layout sync step (was missing)
+- **route.rs** — documented lazy claim + `sync_after_claim()` behavior (was incomplete)
+
+Committed and pushed to main. All 228 tests pass.
+
+### Template autocomplete — activation design
+
+Yes, `<!--` at the beginning of the comment is the natural trigger. Here's how it could work:
+
+**Trigger:** Typing `<!--` in a markdown file → autocomplete popup offers component markers:
+- `<!-- agent:NAME -->...<!-- /agent:NAME -->` — new paired component (cursor between markers)
+- Existing component names from `agent-doc template-info` for closing markers
+
+**Implementation (JetBrains):** Extend `SlashCommandCompletionContributor`:
+1. Add a second `extend()` for `CompletionType.BASIC` that triggers on `<!--` prefix
+2. Query `agent-doc template-info <file>` to get existing component names
+3. Offer completions: `agent:exchange`, `agent:status`, `agent:output`, plus custom names
+4. On selection, insert the full paired markers with cursor positioned inside
+
+**Implementation (VS Code):** Register a `CompletionItemProvider` for markdown with `<!--` as trigger characters.
+
+**Simpler alternative:** Live Templates / snippets — define `agc` → `<!-- agent:$NAME$ -->...<!-- /agent:$NAME$ -->`. No plugin change, but less context-aware.
 <!-- /agent:exchange -->

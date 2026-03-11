@@ -12,6 +12,7 @@
 use anyhow::Result;
 
 use crate::sessions::{self, Tmux};
+use crate::sync;
 
 pub fn run() -> Result<()> {
     run_with_tmux(&Tmux::default_server())
@@ -55,6 +56,10 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
         eprintln!("[autoclaim] Failed to focus pane {}: {}", pane_id, e);
     }
 
+    // Sync tmux layout so pane arrangement reflects claimed files.
+    // Without this, the layout remains stale after context compaction.
+    sync_after_autoclaim(tmux, &pane_id, &claimed);
+
     // Output claim commands for the new session context.
     // Claude Code's SessionStart hook pipes stdout back as context.
     for (_, entry) in &claimed {
@@ -69,6 +74,51 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Sync tmux layout after autoclaim, similar to `route::sync_after_claim`.
+///
+/// Collects all files with panes in the same window and triggers a layout sync.
+fn sync_after_autoclaim(
+    tmux: &Tmux,
+    pane_id: &str,
+    _claimed: &[(&String, &sessions::SessionEntry)],
+) {
+    let window_id = match tmux.pane_window(pane_id) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+
+    let registry = match sessions::load() {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    let window_files: Vec<String> = registry
+        .values()
+        .filter(|entry| {
+            !entry.pane.is_empty()
+                && tmux.pane_alive(&entry.pane)
+                && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
+                && !entry.file.is_empty()
+        })
+        .map(|entry| entry.file.clone())
+        .collect();
+
+    if window_files.len() < 2 {
+        return; // Single file — no layout sync needed
+    }
+
+    let col_args = vec![window_files.join(",")];
+    if let Err(e) = sync::run_with_tmux(&col_args, Some(&window_id), None, tmux) {
+        eprintln!("[autoclaim] warning: post-claim sync failed: {}", e);
+    } else {
+        eprintln!(
+            "[autoclaim] Auto-synced {} files in window {}",
+            window_files.len(),
+            window_id
+        );
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +176,74 @@ mod tests {
         // Verify select_pane was called: the active pane should now be pane_id, not pane2
         let active = iso.active_pane("test").expect("should have active pane");
         assert_eq!(active, pane_id, "autoclaim should have focused the claimed pane");
+
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    /// Helper: set up a multi-file registry for sync tests.
+    fn setup_multi_file_registry(
+        dir: &std::path::Path,
+        entries: &[(&str, &str, &str)], // (session_id, pane_id, file)
+    ) {
+        let mut reg = SessionRegistry::new();
+        for (session_id, pane_id, file) in entries {
+            reg.insert(
+                session_id.to_string(),
+                SessionEntry {
+                    pane: pane_id.to_string(),
+                    pid: std::process::id(),
+                    cwd: dir.to_string_lossy().to_string(),
+                    started: "2026-01-01T00:00:00Z".to_string(),
+                    file: file.to_string(),
+                    window: String::new(),
+                },
+            );
+        }
+        let sessions_dir = dir.join(".agent-doc");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        let sessions_path = sessions_dir.join("sessions.json");
+        let content = serde_json::to_string_pretty(&reg).unwrap();
+        std::fs::write(sessions_path, content).unwrap();
+    }
+
+    #[test]
+    #[ignore] // uses set_current_dir which is not thread-safe with other tests
+    fn autoclaim_syncs_layout_with_multiple_files() {
+        let iso = IsolatedTmux::new("agent-doc-test-autoclaim-sync");
+        let dir = TempDir::new().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // Create session documents with frontmatter so sync can resolve them
+        let doc1 = dir.path().join("tasks/test1.md");
+        let doc2 = dir.path().join("tasks/test2.md");
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(&doc1, "---\nagent_doc_session: session-1\nagent_doc_mode: template\n---\n# Doc 1\n").unwrap();
+        std::fs::write(&doc2, "---\nagent_doc_session: session-2\nagent_doc_mode: template\n---\n# Doc 2\n").unwrap();
+
+        // Create tmux session with two panes in the same window
+        let pane1 = iso.new_session("test", dir.path()).unwrap();
+        let pane2 = iso.new_window("test", dir.path()).unwrap();
+        iso.join_pane(&pane2, &pane1, "-dh").unwrap();
+
+        // Register both files in the same window
+        setup_multi_file_registry(
+            dir.path(),
+            &[
+                ("session-1", &pane1, "tasks/test1.md"),
+                ("session-2", &pane2, "tasks/test2.md"),
+            ],
+        );
+
+        // Set TMUX_PANE to pane1
+        unsafe { std::env::set_var("TMUX_PANE", &pane1) };
+
+        // Run autoclaim — should trigger sync for multi-file window
+        let result = run_with_tmux(&iso);
+        assert!(result.is_ok(), "autoclaim should succeed: {:?}", result);
+
+        // Verify both panes are still alive after sync
+        assert!(iso.pane_alive(&pane1), "pane1 should be alive after sync");
+        assert!(iso.pane_alive(&pane2), "pane2 should be alive after sync");
 
         unsafe { std::env::remove_var("TMUX_PANE") };
     }

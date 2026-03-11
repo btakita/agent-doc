@@ -399,4 +399,14 @@ Brian
 ---
 
 Ready to save as corky draft when you approve.
+
+Yes save as draft
+
+Saved as corky draft: `mail/drafts/20260311-judith-onboarding.md`
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+- **Status:** draft
+
+Send with `corky send mail/drafts/20260311-judith-onboarding.md` when ready.
 <!-- /agent:exchange -->

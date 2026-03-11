@@ -220,8 +220,10 @@ agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 **How it works:**
 1. Each document gets an `agent_doc_session` UUID in frontmatter (auto-generated if missing)
 2. agent-doc maps UUIDs to file paths, then delegates to tmux-router for pane routing
-3. `route` checks if the pane is alive — if so, sends the command; if dead, auto-starts a new one
-4. `sync` mirrors editor split layout in tmux using attach-first reconciliation
+3. `route` checks if the pane is alive — if so, sends the command and focuses the pane
+4. If the pane is dead or unregistered, `route` lazy-claims to an active pane in the `claude` tmux session, syncs the layout for all files in the same window, then sends the command
+5. If no active pane is available, auto-starts a new Claude session in tmux
+6. `sync` mirrors editor split layout in tmux using attach-first reconciliation
 
 ## Editor Integration
 

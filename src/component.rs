@@ -102,20 +102,47 @@ pub(crate) fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
             }
         }
 
-        // Inline code spans: `...`
-        if bytes[pos] == b'`' && (pos + 1 < len && bytes[pos + 1] != b'`') {
+        // Inline code spans: `...`, ``...``, ```...``` (CommonMark §6.1)
+        // A code span begins with N backticks and ends with exactly N backticks.
+        if bytes[pos] == b'`' {
             let span_start = pos;
-            pos += 1;
-            // Find closing backtick (not escaped, not newline-terminated)
-            while pos < len && bytes[pos] != b'`' && bytes[pos] != b'\n' {
-                pos += 1;
+            // Count opening backticks
+            let mut n = 0;
+            while pos + n < len && bytes[pos + n] == b'`' {
+                n += 1;
             }
-            if pos < len && bytes[pos] == b'`' {
-                ranges.push((span_start, pos + 1));
-                pos += 1;
+            // Skip if this is a fenced code block (3+ backticks at line start)
+            // — already handled above
+            if n >= 3 && (span_start == 0 || bytes[span_start - 1] == b'\n') {
+                pos += n;
                 continue;
             }
-            // No closing backtick found on same line — not a code span
+            pos += n;
+            // Find closing sequence of exactly N backticks (not more, not fewer)
+            loop {
+                if pos >= len {
+                    break;
+                }
+                // Inline code spans cannot span newlines in our context
+                if bytes[pos] == b'\n' {
+                    break;
+                }
+                if bytes[pos] == b'`' {
+                    let mut close_n = 0;
+                    while pos + close_n < len && bytes[pos + close_n] == b'`' {
+                        close_n += 1;
+                    }
+                    if close_n == n {
+                        ranges.push((span_start, pos + close_n));
+                        pos += close_n;
+                        break;
+                    }
+                    // Wrong number of backticks — skip past them
+                    pos += close_n;
+                    continue;
+                }
+                pos += 1;
+            }
             continue;
         }
 
@@ -459,5 +486,38 @@ example
         assert!(doc[ranges[0].0..ranges[0].1].contains("code"));
         // Inline span
         assert!(doc[ranges[1].0..ranges[1].1].contains("inline"));
+    }
+
+    #[test]
+    fn code_ranges_double_backtick() {
+        // CommonMark: `` `<!--` `` is a code span containing `<!--`
+        let doc = "text `` `<!--` `` more\n";
+        let ranges = find_code_ranges(doc);
+        assert_eq!(ranges.len(), 1);
+        let span = &doc[ranges[0].0..ranges[0].1];
+        assert!(span.contains("<!--"), "double-backtick span should contain <!--: {:?}", span);
+    }
+
+    #[test]
+    fn code_ranges_double_backtick_does_not_match_single() {
+        // `` should not match a single ` close
+        let doc = "text `` foo ` bar `` end\n";
+        let ranges = find_code_ranges(doc);
+        assert_eq!(ranges.len(), 1);
+        let span = &doc[ranges[0].0..ranges[0].1];
+        assert_eq!(span, "`` foo ` bar ``");
+    }
+
+    #[test]
+    fn double_backtick_comment_before_agent_marker() {
+        // Regression: `` `<!--` `` followed by agent marker should not be a huge comment
+        let doc = "\
+<!-- agent:exchange -->\n\
+text `` `<!--` `` description\n\
+new content here\n\
+<!-- /agent:exchange -->\n";
+        let stripped = crate::diff::strip_comments(doc);
+        assert!(stripped.contains("new content here"), "content must survive stripping");
+        assert!(stripped.contains("<!-- agent:exchange -->"), "agent markers must survive");
     }
 }

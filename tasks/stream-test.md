@@ -132,4 +132,29 @@ agent_doc_stream:
 **Tradeoff:** Lower interval = faster editor updates but more file I/O (flock + read + CRDT merge + atomic write per tick).
 
 **Could it flush early?** Yes — you could add a `Condvar` or `mpsc::channel` that the chunk consumer signals when the buffer changes, waking the timer thread immediately. That would give sub-second latency without the cost of frequent polling. Currently not implemented — the 2s default is a pragmatic choice.
+
+Can we flush for every newline completed?
+
+### Newline-triggered flush
+
+Yes — flush on newline boundaries instead of (or in addition to) time-based polling.
+
+**Implementation:** In the chunk consumer loop, after writing to the buffer, check if a new `\n` appeared. If so, signal the timer thread via a second `mpsc::channel`:
+
+```rust
+// Chunk consumer (main thread):
+let had_lines = buf.matches('\n').count();
+*buf = chunk.text.clone();
+if buf.matches('\n').count() > had_lines {
+    let _ = newline_tx.send(());  // wake timer
+}
+```
+
+Timer thread changes from `done_rx.recv_timeout(interval)` to checking both the done channel and the newline channel, waking on whichever fires first.
+
+**Tradeoff:** Gives line-by-line streaming in the editor (~1-3 flushes/sec matching Claude's output rate). I/O cost bounded by agent speed, not a fixed timer.
+
+**Simpler alternative:** Set `interval: 200` (200ms). Catches most newlines within 200ms. Less code, nearly the same UX. The newline-trigger is more precise but requires more plumbing.
+
+**Recommendation:** Start with the simpler `interval: 200` default, add newline-triggered flush as a follow-up if the latency isn't good enough. Both can coexist — the newline signal acts as an early wake, the timer acts as a fallback.
 <!-- /agent:exchange -->

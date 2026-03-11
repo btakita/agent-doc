@@ -157,4 +157,19 @@ Timer thread changes from `done_rx.recv_timeout(interval)` to checking both the 
 **Simpler alternative:** Set `interval: 200` (200ms). Catches most newlines within 200ms. Less code, nearly the same UX. The newline-trigger is more precise but requires more plumbing.
 
 **Recommendation:** Start with the simpler `interval: 200` default, add newline-triggered flush as a follow-up if the latency isn't good enough. Both can coexist — the newline signal acts as an early wake, the timer acts as a fallback.
+
+Sure...let's start with 200ms. Immediately build the binary and run 
+
+### Default interval → 200ms
+
+Done. Changed default from 2000ms to 200ms in three places:
+
+1. `src/agent-doc/src/main.rs:258` — CLI `--interval` default value
+2. `src/agent-doc/src/frontmatter.rs:8` — `StreamConfig` doc comment
+3. `src/agent-doc/CLAUDE.md` — documentation
+
+`make check` passes (281 tests, 0 failures). The frontmatter `interval` still overrides the default, so existing documents with `interval: 2000` won't change behavior.
+
+Sure...let's start with 200ms. Immediately build the binary and run it.
+Will this document now use the 200ms interval?
 <!-- /agent:exchange -->

@@ -1214,6 +1214,8 @@ publish. Is there a way for users to easily install the jetbrains or vscode plug
   - `agent-doc-jetbrains-0.1.0-signed.zip` (signed)
   - `agent-doc-0.1.0.vsix` (VS Code)
 
+We should increment the plugin versions as plugin changes are released.
+
 **Plugin install without store:**
 ```bash
 agent-doc plugin install jetbrains   # downloads from GitHub Release, installs to IDE
@@ -1225,4 +1227,13 @@ Users can also manually download from the GitHub Release page and install:
 - **VS Code:** Extensions → "..." → "Install from VSIX..." → select .vsix
 
 No store accounts needed. The `agent-doc plugin install` command handles everything automatically.
+
+Done. Plugin versions bumped to **0.2.0** for both JetBrains and VS Code:
+
+- `editors/jetbrains/gradle.properties`: `pluginVersion = 0.2.0`
+- `editors/vscode/package.json`: `"version": "0.2.0"`
+- GitHub Release updated: old 0.1.0 assets removed, new 0.2.0 assets uploaded
+- `agent-doc plugin install jetbrains|vscode` will now download 0.2.0
+
+Going forward, plugin versions should bump whenever plugin code changes ship in a release. The CLI version (0.14.x) and plugin version (0.2.x) are independent — the CLI can release without plugin changes and vice versa.
 <!-- /agent:exchange -->

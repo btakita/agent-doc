@@ -428,14 +428,29 @@ Sent /agent-doc /home/brian/work/btakita/agent-loop/tasks/lucas.md → pane %72
 
 This is a known race: `route` sends `start` to a new pane, then the plugin immediately sends `/agent-doc <file>` — but Claude isn't ready yet, so the second command gets lost in the shell.
 
+Please add tests for these race conditions. Fix the bug.
+
 **The re-route worked** because by the time I ran it, Claude was fully started in %72.
 
 **Potential fix:** `route` could wait for the pane to show a Claude prompt before sending the `/agent-doc` command. Or: detect this case and print a "wait for Claude to start, then re-submit" message (which it already does — check if the user saw that stderr output).
 
 Also found: `resync: orphaned stash window @76 in session '1'` — there's a stale stash window with an unregistered pane %73.
 
+What is the resolution for this stale stash window? Purge it?
+
 I just saw the run start in the tmux pane -> claude session. Did you just do that?
 Yes — that was me. During diagnosis I ran `agent-doc route tasks/lucas.md` to test if routing works. It successfully sent the command to pane %72, which is why you saw activity start.
 
 The original failure was the auto-start race: the plugin tried to send `/agent-doc tasks/lucas.md` before Claude was ready in the newly created pane. My manual re-route worked because Claude had finished starting by then.
+
+### Stale stash window — purged
+
+Checked window @76 in session '1':
+- Named "stash" with 1 pane (%73)
+- Pane contained an idle zsh shell with no Claude session or useful state
+- Created at 09:44:29 during the lucas.md auto-start
+
+Killed it: `tmux kill-window -t '@76'`. No data lost.
+
+This is a leftover from `route`'s auto-start cascade — it creates a new window, then `join_pane` moves it to the target window, but sometimes the empty source window persists as a stash. The `log_orphaned_windows()` function (added in v0.14.5 when we removed auto-prune) correctly flagged it. Safe to purge orphaned stash windows that only contain idle shells.
 <!-- /agent:exchange -->

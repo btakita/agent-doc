@@ -140,51 +140,30 @@ pub fn delete(doc: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the best snapshot content by comparing snapshot file mtime vs git commit mtime.
+/// Resolve the best snapshot content for diff computation.
 ///
-/// Uses whichever source is more recent to eliminate race conditions between
-/// snapshot files and git commits. Falls back gracefully when either source
-/// is unavailable.
+/// The snapshot file is always authoritative when it exists — it records the
+/// exact baseline written by `agent-doc write` / `submit`, excluding concurrent
+/// user edits. Git is only used as a recovery fallback when no snapshot file
+/// exists (e.g., first submit after cloning, or snapshot was deleted).
 pub fn resolve(doc: &Path) -> Result<Option<String>> {
     let snap_path = path_for(doc)?;
-    let snap_mtime = if snap_path.exists() {
-        std::fs::metadata(&snap_path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-    } else {
-        None
-    };
-    let git_mtime = crate::git::last_commit_mtime(doc).unwrap_or(None);
+    if snap_path.exists() {
+        // Snapshot file exists — always use it (authoritative baseline)
+        return load(doc);
+    }
 
-    match (snap_mtime, git_mtime) {
-        (Some(s), Some(g)) if s >= g => {
-            // Snapshot is newer or equal — use it (fast path)
-            load(doc)
+    // No snapshot file — try git as recovery fallback
+    let git_mtime = crate::git::last_commit_mtime(doc).unwrap_or(None);
+    if git_mtime.is_some() {
+        eprintln!("[snapshot] No snapshot file, recovering from git");
+        match crate::git::show_head(doc)? {
+            Some(content) => Ok(Some(content)),
+            None => Ok(None),
         }
-        (Some(_), Some(_)) => {
-            // Git commit is newer — snapshot is stale, use git
-            eprintln!("[snapshot] Git commit is newer than snapshot file, using git content");
-            match crate::git::show_head(doc)? {
-                Some(content) => Ok(Some(content)),
-                None => load(doc), // git show failed, fall back to snapshot
-            }
-        }
-        (Some(_), None) => {
-            // No git history — use snapshot
-            load(doc)
-        }
-        (None, Some(_)) => {
-            // No snapshot — use git (recovery mode)
-            eprintln!("[snapshot] No snapshot file, recovering from git");
-            match crate::git::show_head(doc)? {
-                Some(content) => Ok(Some(content)),
-                None => Ok(None),
-            }
-        }
-        (None, None) => {
-            // First submit — no previous state
-            Ok(None)
-        }
+    } else {
+        // First submit — no previous state
+        Ok(None)
     }
 }
 
@@ -597,5 +576,22 @@ mod tests {
             "unexpected content: {}",
             final_content
         );
+    }
+
+    #[test]
+    fn resolve_prefers_snapshot_over_git() {
+        // Verify that resolve() uses the snapshot file when it exists,
+        // regardless of git commit mtime. This prevents the bug where
+        // step 0b commit makes git newer than snapshot, causing resolve()
+        // to return git content (= current file) instead of the snapshot.
+        let (dir, doc) = setup();
+        let snapshot_content = "snapshot baseline content";
+        write_snapshot_directly(dir.path(), &doc, snapshot_content);
+
+        // Even though the doc file on disk has different content,
+        // resolve should return the snapshot file content.
+        let resolved = resolve(&doc).unwrap();
+        assert_eq!(resolved.as_deref(), Some(snapshot_content),
+            "resolve() should always prefer snapshot file when it exists");
     }
 }

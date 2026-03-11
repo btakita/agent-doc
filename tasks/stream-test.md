@@ -172,4 +172,17 @@ Done. Changed default from 2000ms to 200ms in three places:
 
 Sure...let's start with 200ms. Immediately build the binary and run it.
 Will this document now use the 200ms interval?
+
+### Binary built & installed
+
+Binary installed to `~/.cargo/bin/agent-doc`.
+
+Also fixed a pre-existing build error: `find_project_root` was private in `snapshot.rs` but called from `watch.rs`. Made it `pub`.
+
+**Will this document use 200ms?** No — the `/agent-doc` skill runs inside your current Claude Code session. It writes back once at the end via `agent-doc write --stream`, not via the timer loop. The 200ms interval only applies to `agent-doc stream tasks/stream-test.md` (which spawns its own Claude CLI process with the write-back loop).
+
+**To test 200ms streaming:** Run this from a terminal:
+```bash
+agent-doc stream tasks/stream-test.md
+```
 <!-- /agent:exchange -->

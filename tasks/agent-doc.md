@@ -7,9 +7,9 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.6 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.7 | **Tests:** 228 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
-**Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim
+**Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
 
 ## Architecture
@@ -148,6 +148,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.2 | Skill reload via `--reload compact/restart` flag, auto-prompt for /compact after updates |
 | v0.14.5 | Remove auto-prune (session-killing bug), `commands` subcommand, plugin autocomplete (JetBrains + VS Code), plugins v0.2.0 |
 | v0.14.6 | Auto-sync tmux layout on lazy claim in route, plugin autocomplete fixes (Gson removal, PlainPrefixMatcher) |
+| v0.14.7 | Bidirectional `convert` (append↔template), autoclaim layout sync, `AgentDocMode` enum |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -335,4 +336,23 @@ You're right that autoclaim should trigger a layout sync. The issue was:
 **Clarification on `agent-doc run`:** The `run` command (submit.rs) is the diff→send→write pipeline. It doesn't handle pane routing or claiming — that's `route`'s job. In the SKILL.md workflow, the plugin calls `route` which handles claiming, then Claude runs the skill which does diff/respond/write. `run` is a standalone CLI command for non-tmux use. If you want `run` to also claim/sync, that would be a separate feature.
 
 All 228 tests pass, clippy clean. Binary installed to `~/bin/agent-doc`.
+
+release
+
+Make sure docs are up to date across all *.rs source files
+### v0.14.7 Released
+
+Published to all targets:
+- **crates.io:** `cargo install agent-doc` → v0.14.7
+- **PyPI:** `pip install agent-doc` → v0.14.7
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.14.7
+  - Prebuilt binary (Linux x86_64)
+  - JetBrains plugin v0.2.0 (unsigned + signed)
+  - VS Code extension v0.2.0
+
+**Changes since v0.14.6:**
+- Bidirectional `convert` command with `AgentDocMode` enum (append|template)
+- Autoclaim layout sync via `sync_after_autoclaim()` in SessionStart hook
+- Functional test: `autoclaim_syncs_layout_with_multiple_files`
+- 228 tests, clippy clean
 <!-- /agent:exchange -->

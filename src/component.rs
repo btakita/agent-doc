@@ -63,7 +63,7 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
 
 /// Find byte ranges of code regions (fenced code blocks + inline code spans).
 /// Markers inside these ranges are treated as literal text, not component markers.
-fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
+pub(crate) fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let bytes = doc.as_bytes();
     let len = bytes.len();

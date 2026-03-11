@@ -9,7 +9,14 @@ use crate::{component, snapshot};
 /// Removes:
 /// - HTML comments `<!-- ... -->` (single and multiline) — EXCEPT agent range markers
 /// - Link reference comments `[//]: # (...)`
+///
+/// Skips `<!--` sequences inside fenced code blocks and inline backtick spans
+/// to prevent code examples containing `<!--` from being misinterpreted as
+/// comment starts.
 pub fn strip_comments(content: &str) -> String {
+    let code_ranges = component::find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
+
     let mut result = String::with_capacity(content.len());
     let bytes = content.as_bytes();
     let len = bytes.len();
@@ -18,6 +25,7 @@ pub fn strip_comments(content: &str) -> String {
     while pos < len {
         // Check for link reference comment: `[//]: # (...)`
         if bytes[pos] == b'['
+            && !in_code(pos)
             && is_line_start(bytes, pos)
             && let Some(end) = match_link_ref_comment(bytes, pos)
         {
@@ -28,6 +36,7 @@ pub fn strip_comments(content: &str) -> String {
         // Check for HTML comment: `<!-- ... -->`
         if pos + 4 <= len
             && &bytes[pos..pos + 4] == b"<!--"
+            && !in_code(pos)
             && let Some((end, inner)) = match_html_comment(content, pos)
         {
             if component::is_agent_marker(inner) {
@@ -391,5 +400,62 @@ mod tests {
         let document = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\n<!-- scratch -->\n\n## Assistant\n\nResponse\n\n## User\n\n";
         // Comments are stripped, so the user block between snapshot and new assistant is empty
         assert!(is_stale_snapshot(snapshot, document));
+    }
+
+    // --- Code-aware comment stripping tests ---
+
+    #[test]
+    fn strip_preserves_comment_syntax_in_inline_backticks() {
+        // `<!--` inside backticks should NOT be treated as a comment start
+        let input = "Use `<!--` to start a comment.\n<!-- agent:foo -->\ncontent\n<!-- /agent:foo -->\n";
+        let result = strip_comments(input);
+        assert_eq!(
+            result,
+            "Use `<!--` to start a comment.\n<!-- agent:foo -->\ncontent\n<!-- /agent:foo -->\n"
+        );
+    }
+
+    #[test]
+    fn strip_preserves_comment_syntax_in_fenced_code_block() {
+        let input = "before\n```\n<!-- not a comment -->\n```\nafter\n";
+        let result = strip_comments(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn strip_backtick_comment_before_agent_marker() {
+        // Regression: `<!--` in backticks matched `-->` in the agent marker,
+        // swallowing all content between them
+        let input = "\
+Text mentions `<!--` as a trigger.\n\
+More text here.\n\
+New user content.\n\
+<!-- /agent:exchange -->\n";
+        let result = strip_comments(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn strip_multiple_backtick_comments_in_exchange() {
+        // Real-world scenario: discussion about `<!--` syntax inside an exchange component
+        let snapshot = "\
+<!-- agent:exchange -->\n\
+Discussion about `<!--` triggers.\n\
+- `<!-- agent:NAME -->` paired markers\n\
+<!-- /agent:exchange -->\n";
+        let current = "\
+<!-- agent:exchange -->\n\
+Discussion about `<!--` triggers.\n\
+- `<!-- agent:NAME -->` paired markers\n\
+\n\
+Please fix the bug.\n\
+<!-- /agent:exchange -->\n";
+
+        let snap_stripped = strip_comments(snapshot);
+        let curr_stripped = strip_comments(current);
+        assert_ne!(
+            snap_stripped, curr_stripped,
+            "inline edits after backtick-comment text must be detected"
+        );
     }
 }

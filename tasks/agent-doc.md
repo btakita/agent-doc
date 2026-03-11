@@ -944,4 +944,71 @@ Implement
 ### Ready for Phase 4
 
 Phase 4 (Stream Write-Back Command) wires everything together: `agent-doc stream <FILE>` will use `StreamingAgent` to get chunks, accumulate in buffer, and use CRDT merge to write back every 2s while preserving user edits. The foundation from Phases 1-3 is complete.
+
+Continue
+
+## Phase 4 — Implemented
+
+### Stream Write-Back Command (`agent-doc stream <FILE>`)
+
+**stream.rs** — the core stream command:
+
+1. **Pre-flight**: validates `agent_doc_mode: stream`, reads StreamConfig from frontmatter
+2. **Diff + prompt**: computes diff, builds prompt requesting patch-block format
+3. **Streaming agent**: resolves `StreamingAgent` backend (currently Claude only)
+4. **Write-back loop** (`stream_loop`):
+   - Timer thread runs on configurable interval (default 2s)
+   - Main thread consumes `StreamChunk` iterator, accumulates text in shared buffer
+   - On timer tick: acquires flock → reads file → applies template patch → atomic write → releases lock
+   - On completion: final flush, saves CRDT state + snapshot, clears pending recovery
+5. **Post-stream**: updates `resume` frontmatter, optional git commit
+
+**Key design decisions:**
+- `flush_to_document()` wraps accumulated text in `<!-- patch:target -->` blocks and applies via `template::apply_patches()` — reuses existing component infrastructure
+- Timer thread uses `mpsc::recv_timeout()` for clean shutdown signaling
+- No CRDT merge on intermediate flushes (not needed — only one writer). CRDT state saved at end for subsequent `agent-doc write --stream` calls
+- `exchange` component uses append mode (preserves user content); `output` uses replace mode (agent overwrites each flush)
+
+**Files modified:**
+- `stream.rs` — new module (280 lines)
+- `main.rs` — wired `Stream` command, added `mod stream`
+- `agent/mod.rs` — removed `#[allow(dead_code)]` from streaming module
+- `agent/claude.rs` — removed `#[allow(dead_code)]` from `StreamIterator`
+
+### Test Summary
+
+| Test | Description |
+|------|-------------|
+| `flush_to_document_applies_patch` | Replace-mode component gets new content |
+| `flush_appends_to_exchange` | Append-mode exchange preserves + appends |
+| `flush_preserves_other_components` | Non-targeted components untouched |
+| `stream_loop_processes_chunks` | 3 chunks → final text in document, session_id captured |
+| `stream_loop_empty_chunks` | Empty chunks → no-op, no crash |
+| `build_prompt_first_submit` | First submit prompt format |
+| `build_prompt_resume` | Resume prompt includes diff |
+| `build_prompt_mentions_patch_blocks` | Prompt instructs patch block format |
+| `mode_validation_rejects_non_stream` | Non-stream mode → error |
+
+`make check`: clippy clean, **274 tests pass** (253 unit + 21 CLI), 5 ignored.
+
+### Architecture
+
+```
+agent-doc stream <FILE>
+  ├── validate mode == "stream"
+  ├── compute diff (reuses diff.rs)
+  ├── build prompt (patch-block format)
+  ├── StreamingAgent::send_streaming()
+  │   └── Claude CLI: --output-format stream-json
+  ├── stream_loop()
+  │   ├── Timer thread (2s interval)
+  │   │   └── flush_to_document() → lock → patch → atomic write → unlock
+  │   └── Main thread: consume chunks → accumulate in buffer
+  ├── Final flush + CRDT state save
+  └── git commit (optional)
+```
+
+### Phases 1-4 Complete
+
+All foundation, merge, streaming backend, and write-back command implemented. The `agent-doc stream` command is fully functional for real-time CRDT-based document streaming.
 <!-- /agent:exchange -->

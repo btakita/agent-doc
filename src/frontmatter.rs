@@ -5,7 +5,7 @@ use uuid::Uuid;
 /// Configuration for stream mode (real-time CRDT write-back).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-    /// Write-back interval in milliseconds (default: 2000)
+    /// Write-back interval in milliseconds (default: 200)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval: Option<u64>,
     /// Strip ANSI escape codes from agent output (default: true)
@@ -14,6 +14,13 @@ pub struct StreamConfig {
     /// Target component name for stream output (default: "exchange")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Include chain-of-thought (thinking) blocks in output (default: false)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    /// Route thinking to a separate component (e.g., "log"). If unset, thinking
+    /// is interleaved with response text in the target component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_target: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

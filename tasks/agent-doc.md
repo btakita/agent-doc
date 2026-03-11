@@ -411,6 +411,8 @@ So the plugin approach is clean: install adds templates, uninstall removes them,
 
 Want me to implement the Live Template approach in the JetBrains plugin? It's low-effort (XML config + template file, no Kotlin code) and gives immediate value.
 
+Implement
+
 `/agent-doc run tasks/lucas.md` just happened. This document is stale. I saw no activity in tmux. Please diagnose the issues. Did the log capture the issue?
 ### lucas.md routing diagnosis
 
@@ -429,6 +431,8 @@ Sent /agent-doc /home/brian/work/btakita/agent-loop/tasks/lucas.md → pane %72
 This is a known race: `route` sends `start` to a new pane, then the plugin immediately sends `/agent-doc <file>` — but Claude isn't ready yet, so the second command gets lost in the shell.
 
 Please add tests for these race conditions. Fix the bug.
+
+What is the status on this bug fix and tests?
 
 **The re-route worked** because by the time I ran it, Claude was fully started in %72.
 
@@ -490,4 +494,25 @@ fn purge_stash_windows(tmux: &Tmux) {
 Call it from `prune()` alongside `log_orphaned_windows()`.
 
 Want me to implement this? It's narrowly scoped — only targets "stash" windows with idle shells, so it can't kill active Claude sessions.
+
+Implement.
+
+### Stash window purge — implemented
+
+Added `purge_stash_windows()` to `resync.rs`. Called from `prune()` before `log_orphaned_windows()`.
+
+**Safety criteria (all must be true):**
+1. Window name is `"stash"` — never touches "claude" or user-named windows
+2. ALL panes are running idle shells (`zsh`, `bash`, `sh`, `fish`) — not `claude`/`agent-doc`
+3. Window last activity was 30+ seconds ago — grace period for auto-start race
+
+**How it works:**
+- `list-windows -a -F "#{window_id}\t#{window_name}\t#{window_activity}"` to find stash windows
+- `list-panes -t <window> -F "#{pane_current_command}"` to check what's running
+- `kill-window -t <window>` only if all checks pass
+- Logs `resync: purged stash window @XX (all panes idle)` on success
+
+228 tests pass, clippy clean. Binary installed to `~/bin/agent-doc`. Committed and pushed.
+
+This is safe because: an active Claude session shows `pane_current_command = claude` or `agent-doc`, which fails the idle shell check. The 30s grace period prevents killing during auto-start. And restricting to "stash" name means user workspace windows are never touched.
 <!-- /agent:exchange -->

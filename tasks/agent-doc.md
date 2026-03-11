@@ -1092,4 +1092,31 @@ Implementation plan:
 - `start.rs`: Replace `exec()` with child process + restart loop
 - Skill workflow: Save pending file before step 3, `agent-doc recover` in step 0 already handles it
 - Detect context exhaustion exit code from Claude CLI
+
+Implement and release.
+
+The claude session was closed again. What happened this time? Logs? Tests?
+
+The claude session exit yet again. Why? This is a CRITICAL REGRESSION. Look in the logs. Fix the bug. Add tests.
+
+Remove the auto cleanup "feature" that was recently added. It seems to be causing the claude sessions to close. Why is this happening? Where is the response in this document? agent-doc is fundamentally broken right now.
+
+The orphaned windows should be tracked. We may want to prune them in the future. But for now we should log so we can fix the underlying issues causing orphaned windows.
+
+> Tip: Use /btw to ask a quick side question without interrupting Claude's current work
+
+Can we add autocomplet for all claude commands in the plugin?
+
+**Root cause found and fixed.** The `prune_orphaned_windows()` function in `resync.rs` (commit `5853007`) was automatically killing tmux windows named "claude" or "stash" whenever all their panes were unregistered in `sessions.json`. This ran before every `claim`, `route`, and `sync` operation.
+
+**The bug:** If a Claude session was running in a "claude" window but its pane wasn't yet registered (or the registry was stale), the auto-prune would kill the entire window — closing your Claude session.
+
+**What I did:**
+1. **Removed `prune_orphaned_windows()`** — the function, its 4 tests, and all 3 call sites (claim.rs:29, route.rs:23, sync.rs:30)
+2. **Added `log_orphaned_windows()`** — same detection logic but logs to stderr instead of killing. Output includes window ID, session name, and unregistered pane IDs for debugging
+3. Registry pruning (`tmux_router::prune()`) is preserved — that only removes dead entries from `sessions.json`, it doesn't kill anything
+
+**Build:** passes. **Tests:** 21/21 passing.
+
+**Re: plugin autocomplete** — Yes, we can add completion for Claude commands (like `/agent-doc`, `/compact`, `/help`, etc.) in both JetBrains and VS Code plugins. The JetBrains plugin already has `ClaudeCommandCompletionContributor` infrastructure — we'd extend it with the full command list. For VS Code, we'd use `CompletionItemProvider` on the `/` trigger character. Want me to scope this out?
 <!-- /agent:exchange -->

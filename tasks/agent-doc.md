@@ -1315,4 +1315,19 @@ The root cause was likely a **ClassNotFoundException for Gson at runtime**. The 
 If still not working, check `Help → Show Log in Finder/Files` for lines containing `com.github.btakita.agentdoc` — the logs will show whether the contributor fires, whether `agent-doc` binary was found, and how many commands loaded.
 
 **Yes, you can also use `agent-doc plugin install jetbrains`** — it will prompt you to pick which IDE (you have 8+), then downloads the latest zip from GitHub Release.
+
+Same result. Could you look at the idea log?
+### Root cause found — stale binary in ~/bin
+
+The IDEA log revealed the real issue:
+
+```
+agent-doc commands failed (exit 2): error: unrecognized subcommand 'commands'
+```
+
+The contributor was firing correctly, finding the binary, but `~/bin/agent-doc` was **v0.14.4** (no `commands` subcommand). The v0.14.5 build with `commands` was only in `~/.cargo/bin/agent-doc`. The plugin's `resolveAgentDoc()` checks `~/bin/` first.
+
+**Fixed:** Copied v0.14.5 to `~/bin/agent-doc`. No more IDE restart needed — the commands are loaded fresh on each completion trigger (not cached until successful).
+
+Try it now: type `/` on a new line and press `Ctrl+Space`.
 <!-- /agent:exchange -->

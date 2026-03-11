@@ -114,4 +114,22 @@ CRDT State Persistence:
 5. **Write** atomically (flock + tmp + rename)
 
 The user's editor and the agent are both "clients" in the CRDT sense. Each has a unique ID. Concurrent inserts at the same position resolve deterministically without data loss.
+
+Is the poll time always 20s or will the buffer flush when there is new content before 20s?
+
+### Poll timing
+
+The default interval is **2 seconds** (2000ms), not 20s. The buffer flushes **strictly on the timer tick** — there is no early flush when new content arrives.
+
+The timer thread uses `recv_timeout(timer_interval)` — blocks for `interval` ms, then checks if the buffer changed (`text != last_written`). If yes, flush. If not, sleep again. No notification channel from chunk consumer to timer — purely time-based polling.
+
+**Configurable via frontmatter:**
+```yaml
+agent_doc_stream:
+  interval: 500   # flush every 500ms for faster feedback
+```
+
+**Tradeoff:** Lower interval = faster editor updates but more file I/O (flock + read + CRDT merge + atomic write per tick).
+
+**Could it flush early?** Yes — you could add a `Condvar` or `mpsc::channel` that the chunk consumer signals when the buffer changes, waking the timer thread immediately. That would give sub-second latency without the cost of frequent polling. Currently not implemented — the 2s default is a pragmatic choice.
 <!-- /agent:exchange -->

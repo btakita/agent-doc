@@ -1291,4 +1291,32 @@ Confirmed. The watch daemon design:
 - **Zero config:** no flags, no manual management
 
 This completes the Option B design. Ready to implement when you want to move forward — it would be a new phase building on the existing `watch.rs` infrastructure.
+
+commit first. Then implement Option B
+### Re: Commit + Implement Option B
+
+**Committed.** Implemented Option B — stream-mode support in the watch daemon.
+
+**What was built:**
+
+**`watch.rs` — enhanced watch daemon:**
+- `discover_entries()` — reads frontmatter mode per document from registry. Stream-mode docs get tmux capture polling; append/template docs get file-change watching.
+- **Stream polling loop**: On each 500ms tick, captures pane content via `tmux capture-pane`, diffs against last capture using `extract_new_lines()`, flushes new content via `stream::flush_to_document()`.
+- **Idle timeout**: Tracks last active session. Auto-exits after 60s with no active sessions.
+- **Dead pane pruning**: Every 10s rescan removes stream entries for dead panes.
+- `ensure_running()` — lazy start: checks PID file, spawns daemon in background if not running.
+- `is_running()` — check if daemon is alive.
+
+**`claim.rs` — lazy start integration:**
+- After registering session, calls `watch::ensure_running()` to auto-start the daemon.
+
+**`stream.rs` — `flush_to_document()` made `pub(crate)`:**
+- Reusable by watch daemon for flushing captured pane content.
+
+**New tests (7):**
+- `extract_new_lines_appended`, `extract_new_lines_modified`, `extract_new_lines_identical`
+- `extract_new_lines_empty_old`, `extract_new_lines_empty_new`
+- `stream_state_tracks_capture`, `doc_mode_eq`
+
+**`make check`: clippy clean, 281 tests pass** (260 unit + 21 CLI), 5 ignored.
 <!-- /agent:exchange -->

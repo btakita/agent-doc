@@ -1,5 +1,7 @@
 //! `agent-doc commands` — Output available commands as JSON for editor plugin autocomplete.
 
+#![allow(clippy::vec_init_then_push)]
+
 use serde::Serialize;
 
 #[derive(Serialize)]

@@ -692,4 +692,78 @@ The key insight: `agent-doc stream` already has the infrastructure for continuou
 
 Yes...add this to the blog post.
 I want to find investors at this point. I think this could be a means to have a startup.
+### Blog post updated + investor framing
+
+**Updated blog post** — added the nexus vision as the closing section:
+
+---
+
+**Blog Post: "Real-Time AI Document Collaboration with CRDT Merge"**
+
+**Hook:** What if you could edit a document while an AI writes to it — simultaneously, without merge conflicts, without losing a single character?
+
+**The Problem:** Traditional AI document tools have a turn-taking problem. You write, wait for the AI, then write again. If you edit during the AI's response, one of you loses work. 3-way merge helps but still produces conflicts during truly concurrent edits.
+
+**The Solution:** agent-doc uses CRDTs (Conflict-free Replicated Data Types) — the same technology behind Google Docs and Figma — to let you and an AI agent write to the same markdown file simultaneously. Every 200ms, the agent's output merges into your document without conflicts. Your cursor stays put. Your edits are preserved.
+
+**How it works:**
+1. You open a markdown file in your editor (IntelliJ, VS Code, vim — anything)
+2. You type a question or prompt in the document
+3. `agent-doc stream` detects the change, sends it to Claude, and streams the response back
+4. A CRDT merge runs every 200ms — reading the file, merging the agent's new text, writing atomically
+5. You see the response appear line-by-line in your editor. You can keep editing — no conflicts.
+
+**Under the hood:**
+- Each writer (you + the agent) has a unique CRDT client ID
+- Insertions are tracked at character-level with logical clocks
+- The merge is deterministic — same inputs always produce the same output
+- Atomic file writes (flock + tmpfile + rename) prevent partial reads
+
+**Why markdown?** It's the universal document format. No proprietary editor, no web app, no lock-in. Your files, your tools, your workflow.
+
+**The bigger picture: your document as a data nexus**
+
+agent-doc isn't just about AI conversations. The CRDT infrastructure supports N concurrent writers — not just you and one AI. Any process that produces text can merge into the same document:
+
+- **Database autocomplete** — a sidecar watches for entity names, queries the DB, streams results into `<!-- agent:autocomplete -->`
+- **RAG context injection** — a pipeline fetches relevant documents and streams summaries into `<!-- agent:context -->` for the AI to reference
+- **Service health** — monitoring streams live status into `<!-- agent:status -->`, turning the document into an ops runbook with real data
+- **Multi-agent collaboration** — multiple AI agents write to different components, each with unique CRDT client IDs, zero conflicts
+
+The document becomes the integration layer — a universal surface where humans, AI agents, databases, and services all contribute, mediated by CRDTs. No proprietary platform. Just markdown files, your editor, and a merge algorithm that never loses work.
+
+**Try it:** `cargo install agent-doc && agent-doc stream your-doc.md`
+
+---
+
+**Investor framing — what's the startup here?**
+
+The core thesis: **the document is the new API surface.** Instead of building apps that talk to other apps, you build a document that multiple agents and services write to concurrently. The user sees everything in one place, in their own editor.
+
+**Market positioning:**
+- **Not a chat UI** — those are commoditized (ChatGPT, Claude.ai, Copilot). agent-doc is infrastructure.
+- **Not a collaboration tool** — Google Docs, Notion, etc. are closed platforms. agent-doc works with any editor, any file, any agent.
+- **The "document protocol" layer** — like how HTTP is the protocol for web requests, agent-doc is the protocol for document-level agent collaboration. CRDTs are the transport. Markdown is the format. Components are the routing.
+
+**Revenue model ideas:**
+1. **Hosted agent-doc** — managed streaming infrastructure (the CRDT merge engine as a service). Free for local, paid for cloud sync + multi-user.
+2. **Agent marketplace** — prebuilt sidecar agents (DB autocomplete, RAG, monitoring) that plug into any document via `agent-doc write --stream`.
+3. **Enterprise** — audit logging, compliance, team document sessions with access control. The snapshot + git integration already provides an audit trail.
+4. **IDE plugins** — the IntelliJ plugin exists. VS Code, Neovim, Zed extensions with native CRDT integration (skip the file-level polling, use editor APIs directly).
+
+**Competitive moat:**
+- The CRDT merge is technically non-trivial (yrs/Yjs) — not easy to replicate correctly
+- The snapshot system (content_ours vs final_content) solves a subtle problem that most competitors will hit and struggle with
+- Git integration gives immediate versioning for free — no separate version history feature needed
+- Editor-agnostic by design — works with the user's existing workflow
+
+**Next steps for investor conversations:**
+1. Record the CRDT demo video (the `demo/` directory is ready)
+2. Ship 0.15.0 with the CRDT improvements from this session
+3. Build a landing page with the demo video + blog post
+4. Identify target investors — developer tools / AI infrastructure focused (a16z, Sequoia scout, Y Combinator)
+
+This is a legitimate technical moat. The CRDT + document-as-nexus positioning differentiates from the crowded "AI chat" space.
+
+Should I try to self-fund with consulting work. Or should I go after investors to work on this full time?
 <!-- /agent:exchange -->

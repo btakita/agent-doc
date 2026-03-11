@@ -235,4 +235,59 @@ I will be proposing that she have a custom system to replace TMO. But that can h
 Good catch on the "Talk soon!" edit — Judith's "tmrw" was relative to Sunday 3/9, so "tomorrow" would be stale by Tuesday. "Talk soon!" is timeless and works regardless of when she reads it.
 
 Noted — TMO is the stepping stone. Phase 2 (custom replacement) is already in the proposal's cost comparison table, so the seed is planted without needing to pitch it now. Let her get comfortable with TMO + your custom layer first, then the "why pay $600/mo for TMO when we can do it all?" conversation writes itself.
+
+Let's figure out the plan to get started with the work.
+
+How do we onboard Equity Funding Source (Judith's company)?
+What do we need from her side to get started with Phase 1?
+And Phase 2?
+
+/agent-doc run
+
+**Onboarding Plan — Equity Funding Source**
+
+### What We Need From Judith (Before Phase 1 Starts)
+
+**Accounts & Access:**
+1. **TMO account** — She needs to sign up with The Mortgage Office. Once active, request API/developer access via https://developers.themortgageoffice.com/
+2. **Domain access** — DNS credentials for `equityfundingsource.com` (currently on Weebly). We'll point it to Cloudflare
+3. **Google Workspace** — Either her existing Gmail/Google setup or we create a new Google Workspace ($35/mo for 5 seats). Needed for Calendar (notifications), Drive (document storage), and business email
+4. **Current website content** — Any pages, images, branding assets, or copy she wants preserved from the existing site
+5. **Cloudflare account** — We'll create one in her name (free tier)
+
+**Business Requirements (can gather on Zoom with Robert Waldman):**
+1. **Document types** — List of all document types she regularly collects (loan apps, bank statements, tax returns, construction budgets, etc.)
+2. **Workflow walkthrough** — How a loan flows from inquiry → closing in her current system
+3. **Staff roles** — Who does what? How many people need access?
+4. **Investor communication** — How she currently pitches deals to investors, what info they need
+5. **Notification preferences** — What reminders does she want automated? Current pain points with follow-ups?
+
+### Phase 1: Website Migration (~15-20 hrs, Week 1-2)
+
+**From Judith:** Domain credentials, branding assets, existing site content, desired pages
+**Deliverable:** New site live on Cloudflare — public-facing pages for borrowers, brokers, investors
+**Payment trigger:** M1 ($4,000) due at start
+
+### Phase 2: Document Upload Portal (~12-16 hrs, Week 2-3)
+
+**From Judith:** Document type list, sample documents (redacted), staff email addresses for admin access
+**Deliverable:** Secure upload links, document tracking dashboard, Google Drive/Dropbox integration
+
+### Phase 3: OCR + TMO Integration (~16-26 hrs, Week 3-4)
+
+**From Judith:** TMO API credentials (sandbox first), sample filled documents for OCR testing
+**Deliverable:** Upload → AI extract → staff review → push to TMO pipeline
+**Payment trigger:** M2 ($4,000) due at start of Phase 3
+
+### Phase 4: Notification System (~10-14 hrs, Week 4-5)
+
+**From Judith:** Notification rules (what triggers, frequency, recipients)
+**Deliverable:** Automated reminders via Google Calendar, drip sequences
+
+### Immediate Next Steps
+
+1. **Schedule Zoom** with Judith + Robert Waldman — requirements gathering + TMO signup walkthrough
+2. **Judith signs up for TMO** — she can start using it immediately for loan management while we build the custom layer
+3. **Judith provides domain credentials** — so we can begin Cloudflare migration
+4. **Agree on payment structure** — confirm the two $4K milestones work, or break into 3 smaller ones per the talking points ($2-3K each)
 <!-- /agent:exchange -->

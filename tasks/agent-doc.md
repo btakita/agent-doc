@@ -756,4 +756,33 @@ When would the CRDT log be pruned? Should a git commit prune the CRDT log?
 **Flow:** `user edits → ops accumulate → agent writes → ops accumulate → agent-doc commit → git + CRDT GC`
 
 CRDT state file (`.agent-doc/crdt/<hash>.yrs`) stays small — typically under 100KB after GC for a 50KB document. Operation log between commits is the only growing part, pruned at each commit.
+
+If we have a stream mode, how would it be activated?
+Would the plugin have a way to activate stream mode?
+Would it be in the front-matter?
+### Stream mode activation
+
+**Frontmatter (canonical):**
+```yaml
+agent_doc_mode: stream    # alongside append | template
+agent_doc_stream:
+  interval: 2s            # batch write interval
+  strip_ansi: true        # strip escape codes
+  target: exchange        # component to stream into
+```
+
+**CLI:** `agent-doc stream <FILE>` — starts stream regardless of frontmatter. `agent-doc mode <FILE> stream` — set via existing mode command.
+
+**Plugin:** New action — `Ctrl+Shift+Alt+S` (JetBrains) / command palette (VS Code) toggles between template and stream in frontmatter. Status bar indicator when active.
+
+**Stream vs template:**
+
+| | Template | Stream |
+|---|---|---|
+| When agent writes | After full response | Continuously during generation |
+| Write granularity | Entire response at once | Batched chunks (every 2s) |
+| Merge strategy | 3-way merge (or CRDT) | CRDT required |
+| Editor experience | Appears all at once | Streams in real-time |
+
+Stream mode is a superset of template — same component structure, different write-back timing. Plugin receives chunks via WebSocket/pipe, applies via `Document.replaceString()` for cursor-safe incremental updates.
 <!-- /agent:exchange -->

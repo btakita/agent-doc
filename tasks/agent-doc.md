@@ -376,11 +376,38 @@ Yes, `<!--` at the beginning of the comment is the natural trigger. Here's how i
 
 **Implementation (JetBrains):** Extend `SlashCommandCompletionContributor`:
 1. Add a second `extend()` for `CompletionType.BASIC` that triggers on `<!--` prefix
+  - This prefix is good...but the prefix is long. Perhaps shorter aliases would be useful.
 2. Query `agent-doc template-info <file>` to get existing component names
 3. Offer completions: `agent:exchange`, `agent:status`, `agent:output`, plus custom names
+   - `agent:input` and any other baseline components
 4. On selection, insert the full paired markers with cursor positioned inside
 
 **Implementation (VS Code):** Register a `CompletionItemProvider` for markdown with `<!--` as trigger characters.
 
 **Simpler alternative:** Live Templates / snippets — define `agc` → `<!-- agent:$NAME$ -->...<!-- /agent:$NAME$ -->`. No plugin change, but less context-aware.
+
+The plugin can add this live template. If the plugin were uninstalled, would it also remove this live template as part of cleanup?
+### Shorter aliases + cleanup behavior
+
+**Shorter aliases:** Good point about `<!--` being 4 chars. The plugin can register both:
+- `<!--` → natural HTML comment trigger (discoverable)
+- `agd` or `ad:` → short tab-expansion aliases via `LiveTemplateProvider`
+
+In JetBrains, `LiveTemplateProvider` + `defaultLiveTemplates` in `plugin.xml` gives us tab-triggered snippets with variable placeholders (`$NAME$`). These work alongside the completion contributor.
+
+**Plugin cleanup on uninstall:** Yes — JetBrains handles this correctly:
+- **Plugin-bundled templates** (via `defaultLiveTemplates` in `plugin.xml`) → **automatically removed** when the plugin is uninstalled. They live inside the plugin JAR, not in the user's config directory.
+- **User-created templates** (via Settings → Live Templates) → persist forever, unaffected by plugin lifecycle.
+
+So the plugin approach is clean: install adds templates, uninstall removes them, no leftover config.
+
+**Baseline components to offer:**
+- `agent:exchange` — shared conversation surface
+- `agent:input` — user prompt area
+- `agent:output` — agent response area
+- `agent:status` — status line
+- `agent:architecture`, `agent:history`, `agent:releases`, `agent:pending`, `agent:lessons` — common document sections
+- Plus any custom names discovered via `agent-doc template-info <file>`
+
+Want me to implement the Live Template approach in the JetBrains plugin? It's low-effort (XML config + template file, no Kotlin code) and gives immediate value.
 <!-- /agent:exchange -->

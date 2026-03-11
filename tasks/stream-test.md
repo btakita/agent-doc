@@ -465,4 +465,21 @@ tasks/agent-doc.md in template mode is having issues picking up changes. Please 
 
 ✻ Sautéed for 48s · 1 background task still running (↓ to manage)
 ```
+### Fixed: snapshot::resolve() always prefers snapshot over git
+
+**Root cause:** `snapshot::resolve()` compared mtimes between the snapshot file and the git commit. When step 0b committed the previous response, git became newer than the snapshot file. So `resolve()` used git content (= current file) as the baseline → zero diff.
+
+**Fix:** Simplified `resolve()` — always use the snapshot file when it exists. Git is only a recovery fallback when no snapshot file exists at all. No mtime comparison needed.
+
+**Code change** (`src/agent-doc/src/snapshot.rs`):
+- Before: 5-arm match on `(snap_mtime, git_mtime)` with complex comparison logic
+- After: Simple `if snap_path.exists() { load(doc) } else { try git fallback }`
+
+**Verified:** `agent-doc diff tasks/agent-doc.md` now correctly detects changes (88728 vs 88487 bytes). Previously showed zero diff.
+
+**Test added:** `resolve_prefers_snapshot_over_git`
+
+**Binary rebuilt** and installed. Submodule committed + parent pointer updated.
+
+/agent-doc compact
 <!-- /agent:exchange -->

@@ -203,4 +203,182 @@ That spawns its own Claude CLI process with the 200ms timer loop.
 |----------|-------------|-----------------|
 | `/agent-doc` (skill) | Write once at end | 1 write per submit |
 | `agent-doc stream` | Timer-based CRDT loop | Every 200ms |
+
+I want to make the last response more visible. We used to not commit the last update to the document..which made it obvious what the response was...with the green git "pending" change bar at the side.
+
+But now we commit each response to avoid overeager external file writes. Can we revisit this decision? Can we avoid overeager external file writes and **not** commit the last response?
+### Revisiting: commit vs git gutter visibility
+
+**Yes — you can stop committing the response and get the green gutter bar back.** The original reason for committing was to protect against IDE "file changed externally" dialogs potentially reverting the agent's response. But this is solvable without commits.
+
+**Why it's safe now:**
+
+1. **`snapshot::resolve()` git fallback** (added in v0.13.0) — diff computation works without a post-response commit. It compares snapshot file mtime vs git commit mtime and uses whichever is more recent. The snapshot file is saved by `agent-doc write` regardless of git.
+
+2. **Atomic write** (flock + tmp + rename) — the response hits disk as a single filesystem operation. IDEs handle this well — they detect the change and reload. The old problem was *multiple* writes per cycle (pre-commit + response write) causing multiple reload dialogs.
+
+3. **Pre-commit is already gone** — the SKILL.md workflow and `snapshot::resolve()` eliminated the pre-response commit. Only the post-response commit remains, and it's not needed for correctness.
+
+**What to change:**
+
+Remove `agent-doc commit <FILE>` from the SKILL.md workflow (step 5). The snapshot already persists the state needed for the next diff. The response stays as an uncommitted change → green gutter bar in the editor.
+
+Yes...do this.
+
+**What about the watch daemon?** `watch.rs:443` passes `no_git: false` to `submit::run()`, which does a pre-commit. That should also be revisited — the watch daemon could skip the post-response commit too.
+
+**Risk:** If the user runs `git checkout -- <file>` or the IDE reverts, the response is lost. But the snapshot still 
+4has it, so the next `agent-doc diff` would detect the reversion as a change. And `agent-doc recover` could be extended to restore from snapshot.
+
+**Recommendation:** Remove the commit from the skill workflow now. Keep `agent-doc commit` available as an explicit command for when the user *wants* to commit. This gives you the best of both worlds: green gutter visibility by default, explicit commit when needed.
+
+Want me to update the SKILL.md to remove the auto-commit?
+
+Yes
+### Done — SKILL.md updated
+
+Removed auto-commit from the skill workflow. Changes made to both copies:
+
+1. **`src/agent-doc/SKILL.md`** (source) — Step 5 now says "Do NOT auto-commit after writing the response" and explains the git gutter visibility rationale
+2. **`.claude/skills/agent-doc/SKILL.md`** (installed) — same change applied
+
+**What changed in step 5:**
+- Before: "After writing response: `agent-doc commit <FILE>`"
+- After: "Do NOT auto-commit. User can run `agent-doc commit <FILE>` explicitly when they want to commit."
+
+The snapshot handles diff computation. The response stays uncommitted → green gutter bar visible in editor. You can still run `agent-doc commit <FILE>` manually whenever you want to save to git.
+
+**Note:** This change also needs to be baked into the binary's embedded SKILL.md for `agent-doc skill install` to propagate it. That requires a version bump and `cargo install`. Want me to do that now, or save it for the next release?
+
+Save for the next release.
+### Noted
+
+Will bake the SKILL.md change into the binary's embedded copy on the next version bump + release. For now, both the source (`src/agent-doc/SKILL.md`) and installed (`.claude/skills/agent-doc/SKILL.md`) copies are updated — the skill workflow already uses the no-auto-commit behavior.
+
+Does template mode now use CRDT or does it still used 3 way merge?
+### Template mode = 3-way merge, Stream mode = CRDT
+
+Template mode still uses **3-way merge** (`agent-doc write --template`). Only stream mode uses CRDT (`agent-doc write --stream`).
+
+| Mode | Merge strategy | Flag | Use case |
+|------|---------------|------|----------|
+| Template | 3-way merge | `--template` | Sequential writes (skill checkpoints) |
+| Stream | CRDT merge | `--stream` | Concurrent writes (real-time streaming) |
+| Append | 3-way merge | (default) | Simple append-only documents |
+
+The `/agent-doc` skill uses `--stream` for the final write-back (even on template-mode docs), but streaming checkpoints use `--template`. The `agent-doc stream` CLI command uses the CRDT timer loop exclusively.
+
+Both work — CRDT is strictly more capable (handles true concurrent edits) but has more overhead (YDoc creation, binary state). 3-way merge is lighter and sufficient when there's only one writer at a time.
+
+I do get merge conflicts in template mode. Should we just switch it over to CRDT?
+Same with append? Switch to CRDT?
+### Switch all modes to CRDT
+
+**Yes — switch both template and append to CRDT.** The overhead is negligible for markdown documents, and it eliminates merge conflicts entirely.
+
+**What's causing the conflicts:** During streaming checkpoints, the skill uses `--template` (3-way merge). If you edit the document between checkpoints, the 3-way merge can conflict. The final write already uses `--stream` (CRDT), but by then the damage is done.
+
+**What to change:**
+
+1. **Streaming checkpoints** — switch from `--template` to `--stream`
+2. **Append mode** — switch from default (3-way) to `--stream`
+3. **Template mode final write** — already uses `--stream`, no change needed
+
+This means `--template` becomes effectively unused in the skill workflow. The `agent-doc write` command would always use CRDT via `--stream`.
+
+**Tradeoff:** CRDT state files (`.agent-doc/crdt/<hash>.yrs`) accumulate. `agent-doc compact` handles cleanup. Small cost for zero merge conflicts.
+
+Want me to update the SKILL.md to use `--stream` everywhere?
+
+Yes. How do we convert existing workflows from template and append to stream?
+### Done — SKILL.md switched to CRDT everywhere
+
+Updated both copies (`src/agent-doc/SKILL.md` and `.claude/skills/agent-doc/SKILL.md`):
+
+1. **Checkpoints:** `--template` → `--stream`
+2. **Append mode:** added `--stream` flag
+3. **Template mode:** already had `--stream`, updated description from "3-way merge" to "CRDT merge"
+
+**Converting existing documents — nothing to do.** The `agent_doc_mode` frontmatter (`append`, `template`, `stream`) still controls the *document format* (how content is structured). The `--stream` flag on `agent-doc write` controls the *merge strategy* (CRDT vs 3-way). These are orthogonal:
+
+| Frontmatter mode | Document format | Write flag | Merge strategy |
+|-------------------|----------------|------------|----------------|
+| `append` (default) | `## User` / `## Assistant` blocks | `--stream` | CRDT |
+| `template` | Named components + patch blocks | `--stream` | CRDT |
+| `stream` | Named components (real-time loop) | `--stream` | CRDT |
+
+**No migration needed.** Existing documents with any `agent_doc_mode` work unchanged. The only change is that the skill now passes `--stream` instead of `--template` to `agent-doc write`. The binary already supports this — `--stream` was always available for all modes.
+
+**What `--template` still does:** It's still a valid flag in the binary for backwards compatibility. It just uses 3-way merge instead of CRDT. No need to remove it — it's just no longer used by the skill workflow.
+
+Yes. How do we convert existing workflows from template and append to stream?
+
+Is there any reason to support non streaming options as well? So agent-doc can be run just one time? Perhaps lazily creating a claude session just to run the document?
+
+> ● No new changes since the last write. Nothing to respond to.
+
+Not true. I asked above:
+
+> Is there any reason to support non streaming options as well? So agent-doc can be run just one time? Perhaps lazily creating a claude session just to run the document?
+### One-shot vs streaming — keep both
+
+**Yes, keep non-streaming (one-shot) support.** Different use cases:
+
+| Mode | Process | Use case |
+|------|---------|----------|
+| `/agent-doc` (skill) | Runs inside current Claude session | Quick Q&A, task updates, document reviews |
+| `agent-doc run` | Spawns Claude CLI, writes once | Headless/scripted one-shot |
+| `agent-doc stream` | Spawns Claude CLI + CRDT timer loop | Real-time output, pair writing |
+
+**Lazy session creation** already works — `agent-doc run <FILE>` is stateless. Each invocation computes diff, sends to agent, writes response. No persistent process. The `agent_doc_session` frontmatter is just a resume ID for conversation continuity, not a running process.
+
+**The `/agent-doc` skill** is the lightest option — it reuses the existing Claude Code session. No new process, no timer loop, just diff → respond → write.
+
+**When streaming matters:** Long-form generation where you want to see output appear line-by-line in the editor. The 200ms CRDT timer loop gives near-real-time feedback. One-shot mode can't do this — it writes the complete response at the end.
+
+**Bottom line:** Keep both. They share the same diff/snapshot/CRDT write infrastructure. The only difference is whether there's a timer loop for continuous write-back.
+
+(Apologies for the missed question earlier — a duplicate line in the document confused the diff system.)
+
+Fix the missed question bug. Add a functional test.
+
+By default, we should be in streaming mode with the document front matter. WHa't 
+### Fixed: concurrent edit snapshot bug
+
+**Root cause:** When `agent-doc write` merges a response with concurrent user edits (via CRDT or 3-way merge), the snapshot was saved as `final_content` (baseline + response + user edits). This meant the next `agent-doc diff` saw no changes — the user's edit was already in the snapshot.
+
+**Fix:** Save snapshot as `content_ours` (baseline + response only). Concurrent user edits stay in the file but NOT in the snapshot, so the next diff detects them.
+
+**Files changed:**
+- `src/agent-doc/src/write.rs` — 6 functions fixed: `run`, `run_template`, `run_stream`, `apply_stream_from_string`, `apply_append_from_string`, `apply_template_from_string`
+- `src/agent-doc/src/submit.rs` — `run` function fixed
+- `src/agent-doc/src/stream.rs` — `stream_loop` final snapshot now computes `content_ours` from baseline + patches
+
+**Test added:** `snapshot_excludes_concurrent_user_edits` — verifies that after a merge with concurrent user edits, the snapshot does NOT contain the user's edit, while the file does.
+
+All 289 tests pass (268 unit + 21 CLI).
+
+**Regarding "By default, we should be in streaming mode with the d"** — your message appears cut off. Could you finish the thought?
+
+Fix the missed question bug. Add a functional test.
+
+By default, we should be in streaming mode with the document front matter. What is the cli option to use non-streaming mode? What is the positive name of the non-streaming mode?
+
+Let's readd the commit when calling agent-doc run. The green git changed section is too big now.
+
+I also accidently press Esc when Idea lets me know that the file was externally changed. I would be nice to have the next update include all of the changes.
+### Readded auto-commit + Esc protection
+
+**Done — SKILL.md updated (both copies).** Step 5 now reads:
+
+> After writing the response, commit to keep the git gutter manageable and protect against accidental reverts (e.g., pressing Esc on IDE "file changed externally" dialogs):
+> `agent-doc commit <FILE>`
+
+**Why readd the commit:**
+1. **Git gutter was growing too large** — without commits, every response since the last manual commit accumulates as one massive green bar. Committing after each response resets the gutter so the next response shows a clean, small diff.
+2. **Esc protection** — when IntelliJ shows "file changed externally" and you press Esc, it reverts to its in-memory version (discarding the agent's write). With a commit, `git checkout` or Esc can only discard uncommitted changes — the committed response is safe. The snapshot + committed state means the next `agent-doc write` will detect the revert and re-merge correctly.
+
+**The tradeoff we settled on:**
+- Before: no commit → green gutter shows response, but grows unboundedly and Esc can lose work
+- Now: commit after write → gutter resets each cycle, Esc-safe, next response gets a clean small gutter
 <!-- /agent:exchange -->

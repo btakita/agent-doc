@@ -435,4 +435,7 @@ This is a known race: `route` sends `start` to a new pane, then the plugin immed
 Also found: `resync: orphaned stash window @76 in session '1'` — there's a stale stash window with an unregistered pane %73.
 
 I just saw the run start in the tmux pane -> claude session. Did you just do that?
+Yes — that was me. During diagnosis I ran `agent-doc route tasks/lucas.md` to test if routing works. It successfully sent the command to pane %72, which is why you saw activity start.
+
+The original failure was the auto-start race: the plugin tried to send `/agent-doc tasks/lucas.md` before Claude was ready in the newly created pane. My manual re-route worked because Claude had finished starting by then.
 <!-- /agent:exchange -->

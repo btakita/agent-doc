@@ -8,7 +8,7 @@ agent_doc_mode: template
 
 **Contact:** `mail/contacts/judith-krug/CLAUDE.md`
 **LinkedIn:** https://www.linkedin.com/in/judith-krug-a4b71b15/
-**Company:** http://www.equityfundingsource.com/4
+**Company:** http://www.equityfundingsource.com/
 **Email:** judithkrug@gmail.com
 **Referral:** Robert Ward (`mail/contacts/robert-ward/`)
 
@@ -233,4 +233,6 @@ I will be proposing that she have a custom system to replace TMO. But that can h
 **Re: Corky text integration** — tracked for `tasks/corky.md`. Natural extension: `corky text send` / `corky text draft`. Main question: SMS gateway (Twilio, Google Messages API, or iMessage bridge).
 
 Good catch on the "Talk soon!" edit — Judith's "tmrw" was relative to Sunday 3/9, so "tomorrow" would be stale by Tuesday. "Talk soon!" is timeless and works regardless of when she reads it.
+
+Noted — TMO is the stepping stone. Phase 2 (custom replacement) is already in the proposal's cost comparison table, so the seed is planted without needing to pitch it now. Let her get comfortable with TMO + your custom layer first, then the "why pay $600/mo for TMO when we can do it all?" conversation writes itself.
 <!-- /agent:exchange -->

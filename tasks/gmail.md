@@ -304,4 +304,23 @@ Screenshot confirms "Forward messages to email" is ON. Ran `corky sync` — no m
 I don't see the sms messages going to the Google Voice messages either
 
 ![img_2.png](img_2.png)
+
+### SMS not reaching Google Voice at all
+
+Your Google Voice messages tab shows the most recent texts are from **2015**. The test SMS messages aren't arriving at Google Voice — this is upstream of the email forwarding issue.
+
+**Most likely cause: Google reclaimed the number.** Google Voice reclaims numbers after ~6 months of inactivity. Your last Voice activity was 2015 — over 10 years ago. The number (508) 731-4882 may no longer be yours.
+
+**To verify:**
+1. In Google Voice, click the **gear icon** (Settings) → check what number is listed under "Account"
+2. Or try sending a text FROM Google Voice (click "Send new message") to your phone — see if it goes through
+3. Check: [voice.google.com/settings](https://voice.google.com/settings) → look for your number in the "Phone number" section
+
+**If the number was reclaimed:**
+- You'll need to claim a new Google Voice number (free)
+- The old (508) 731-4882 number is gone — someone else may have it now
+- Your test texts went to whoever currently has that number (or nowhere)
+
+**If the number is still yours:**
+- Try texting (508) 731-4882 from a completely different phone (not 424.249.2350) to rule out linked-number routing issues
 <!-- /agent:exchange -->

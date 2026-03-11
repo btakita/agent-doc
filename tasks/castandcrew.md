@@ -79,3 +79,23 @@ The role is on the **Backstage engineering team** — Python/Django backend, tea
 
 How can I record the call using my screencast?
 With audio
+## Assistant
+
+You have **OBS Studio** (`/usr/bin/obs`) installed — best option for recording with audio.
+
+**Quick setup:**
+
+1. **Launch:** `obs &`
+2. **Add Sources** (bottom-left +):
+   - **Window Capture** → pick your Teams window
+   - **Audio Output Capture** (PulseAudio) → system audio (call audio)
+   - **Audio Input Capture** (PulseAudio) → your microphone
+3. **Settings → Output:** Recording format **mkv** (crash-safe), path `~/Videos/`
+4. **Start Recording** before the call
+5. **After:** Stop recording → File → Remux Recordings → .mkv to .mp4
+
+**Simpler alternative:** You also have **Kazam** (`/usr/bin/kazam`) — does fullscreen/window capture with audio, less setup but less control.
+
+**Tip:** Test audio levels before the call — OBS shows live audio meters in the mixer panel. Make sure both Desktop Audio and Mic/Aux are picking up signal.
+
+## User

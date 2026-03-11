@@ -19,4 +19,6 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 Converted component from `output` to `exchange`. Write prompts here — both user and agent share this surface.
+
+commit submodule. release any pending features + bug fixes. commit & push agent-loop
 <!-- /agent:exchange -->

@@ -223,4 +223,14 @@ Good point — the distinction matters. You didn't fork or evolve the Tenfore co
 > Brian
  
 Please draft a text to send to Tony confirming that I reached out to Anil on LinkedIn.
+### Draft text to Tony Tomai
+
+> Hey Tony, just wanted to let you know I reached out to Anil on LinkedIn. Mentioned Project Helix and that I'm in consideration through Inspyr. Kept it brief — referenced our shared work at Neo Innovation. Ball's in his court now. Let me know how your 4pm call goes!
+
+**Why this works:**
+- Confirms the action Tony specifically asked for (reach out to Anil before Tony's 4pm call)
+- "Kept it brief" — signals professionalism, reassures Tony you didn't overshare
+- Doesn't reveal specifics of what you said (Tony doesn't need to know)
+- "Let me know how your 4pm call goes" — keeps the loop open, shows you're engaged
+- Casual, direct tone — matches how Tony communicates
 <!-- /agent:exchange -->

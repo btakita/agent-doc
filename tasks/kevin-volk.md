@@ -261,3 +261,20 @@ Brian
 Should I send a followup reply re: existence-lang
 
 I feel like existence-lang is the crown jewel of human-agentic coherent alignment. But it's still very early.
+## Assistant
+
+**No — don't mention existence-lang to Kevin.** Save it for the technical interview.
+
+**Why not now:**
+1. **Kevin is a recruiter** — he needs to pattern-match your skills to the JD. Existence-lang requires deep context to appreciate. He can't relay it effectively.
+2. **It's too early** — you said so yourself. Mentioning an early-stage ontology project risks sounding abstract to someone without the philosophical context.
+3. **Your project list is already strong** — agent-doc, tmux-router, agent-kit, corky map directly to the JD. Adding existence-lang dilutes the concrete items.
+
+**When to bring it up:**
+- Technical interview with CopilotKit engineers (especially Jordan Ritter)
+- When they ask about agent coherence, context management, or alignment
+- In your resume's "Context Engineering" section (it's already there as the philosophy node system)
+
+Existence-lang IS the crown jewel for human-agentic coherence — but it's a second-conversation topic with technical stakeholders who can appreciate it, not a recruiter email.
+
+## User

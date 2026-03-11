@@ -19,12 +19,7 @@ agent_doc_mode: template
 Awaiting next action. Pending: btak-dev account setup in `.corky.toml`.
 <!-- /agent:status -->
 
-## Input
-
-<!-- agent:input -->
-<!-- /agent:input -->
-
-## Output
+## Exchange
 
 <!-- agent:output -->
 Converted to template mode and compacted conversation history. The document now uses `<!-- agent:input -->` / `<!-- agent:output -->` components.

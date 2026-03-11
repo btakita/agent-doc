@@ -130,4 +130,8 @@ To send: `corky draft push` (from mail/ directory)
 To edit first: open `mail/drafts/20260310-jon-gould-missed-meeting.md`
 
 Please send.
+
+### Email sent
+
+Sent from `brian.takita@gmail.com` to `jon@foxleytalent.com` — subject "Brian Takita and Jon Gould". Status updated to `sent`.
 <!-- /agent:exchange -->

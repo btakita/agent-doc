@@ -1,6 +1,7 @@
 ---
 agent_doc_session: 9ff575de-4c8b-4217-8b36-5287c77af629
 tmux_session: '0'
+agent_doc_mode: template
 ---
 
 Add a static site export feature.

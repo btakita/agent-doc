@@ -59,9 +59,6 @@ v0.1.0 (lookup/scope/lint/graph/fetch) → v0.2.0 (search/completions/new) → v
 - Static JSON site generation (GitHub Pages)
 - Test fixtures still reference `existential-kernel`
 
-<!-- agent:input -->
-<!-- /agent:input -->
-
-<!-- agent:output -->
+<!-- agent:exchange -->
 Converted to template mode and compacted. Status summary reduced from ~110 lines to ~50. Use the input component above for future prompts.
-<!-- /agent:output -->
+<!-- /agent:exchange -->

@@ -31,13 +31,8 @@ agent_doc_mode: template
 Stage 2 complete. OAuth working. Contabo decommissioned.
 <!-- /agent:status -->
 
-## Input
+## Exchange
 
-<!-- agent:input -->
-<!-- /agent:input -->
-
-## Output
-
-<!-- agent:output -->
+<!-- agent:exchange -->
 Converted to template mode and compacted conversation history (142 lines → ~30). Session history and architecture preserved as structured reference.
-<!-- /agent:output -->
+<!-- /agent:exchange -->

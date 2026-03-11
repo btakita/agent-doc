@@ -15,10 +15,7 @@ How can we use this with our tooling to drive semantic search?
 - corky
 - existence-lang
 
-<!-- agent:input -->
-<!-- /agent:input -->
-
-<!-- agent:output -->
+<!-- agent:exchange -->
 **Sift** is a local, daemonless Rust CLI for hybrid search (BM25 + vector + LLM reranking). Single binary, no cloud, SIMD-optimized. Searches text, HTML, PDF, and OOXML files. Uses local embeddings via Candle and content-addressable caching with BLAKE3.
 
 **Key capabilities:** `sift search <path> "<query>"` with configurable strategies (lexical, semantic, hybrid), query expansion, reciprocal rank fusion, and optional Qwen2.5 reranking. Sub-30ms latency on thousands of documents.
@@ -84,4 +81,4 @@ Would love to explore integrating Sift as a library dependency or coordinating o
 **The key phrase** "Happy to jump on a call if you're interested" is soft, no-pressure, and lets Alex opt in. Very standard in developer circles.
 
 **Shortcut option:** Skip the ladder — DM him directly. His post is fresh, you already commented asking about hooks/Tree Sitter, he knows who you are. A DM saying "I have some Rust tools that could use Sift, want to chat?" is perfectly appropriate.
-<!-- /agent:output -->
+<!-- /agent:exchange -->

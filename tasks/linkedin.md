@@ -59,9 +59,6 @@ agent_doc_mode: template
 
 - **Toby Hill** — D24 Search (DeepTech recruiter). Calendly note: "AI developer tooling in Rust — agent orchestration, automated workflows, full-stack. Open to DeepTech roles."
 
-<!-- agent:input -->
-<!-- /agent:input -->
-
-<!-- agent:output -->
+<!-- agent:exchange -->
 Compacted from 730-line append-mode conversation into template-mode reference document. All decisions, implementation details, and action items preserved. Ready for new prompts in the input component.
-<!-- /agent:output -->
+<!-- /agent:exchange -->

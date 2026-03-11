@@ -7,7 +7,7 @@ agent_doc_mode: template
 Convert censible-core to use rappstack with rhonojs.
 
 <!-- agent:status -->
-**Status:** Contabo → R2 migration complete. 12 buckets (46 GB) synced. All .env configs updated.
+**Status:** R2 migration done. Contabo bucket deletion in progress (7/14 deleted). Apps don't use S3 programmatically.
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -1516,4 +1516,18 @@ For comparison, Contabo Object Storage was likely $2.49-4.99/mo (250 GB plan min
 Delete the contabo buckets
 
 Are my apps using the R2 buckets?
+
+**Are the apps using R2 buckets?** No. None of the 5 apps have S3/AWS SDK code:
+
+| Project | S3 Usage | Deployed On |
+|---|---|---|
+| brookebrodack-dev | None | Cloudflare Workers/Pages |
+| cogov-dev | CloudFront only (no S3) | Cloudflare Pages + AWS CDK (CloudFront CDN) |
+| herbaliciousbliss-dev | None | Cloudflare Workers + D1 |
+| drmanny-dev | None | Cloudflare Pages |
+| prescience-notes-dev | None | Cloudflare Pages |
+
+The `AWS_BUCKET` / `AWS_ENDPOINT_URL` vars in the `.env` files are legacy config — the apps don't import any AWS SDK or reference buckets in code. The R2 buckets hold static assets (images, files, PDFs) that may be referenced by URL in content but aren't accessed programmatically by the apps.
+
+**Contabo bucket deletion:** In progress. 7 of 14 buckets deleted so far. The large nextcloud-data bucket (3,450 objects) is still being emptied. `foresight-btakita-storage` failed (was already empty/broken) — will retry after the rest finish.
 <!-- /agent:exchange -->

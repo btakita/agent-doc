@@ -117,4 +117,15 @@ That's the minimum for corky's git workflow. Optional extras if needed later:
 | **Issues** | Read and write | File/comment on issues |
 
 **Start with just Contents: Read and write** — it covers clone/pull/push which is all Lucas needs for the recruiter email workflow.
+
+Please verify the allowed repos and permissions.
+
+Verified `LUCAS_PAT` access:
+
+| Repo | admin | push | pull | Contents |
+|---|---|---|---|---|
+| **btakita/resume** | yes | yes | yes | read/write confirmed |
+| **btakita/mailbox-lucas** | yes | yes | yes | read/write confirmed |
+
+Both repos are fully accessible. Lucas can clone, pull, and push to both repos using this PAT.
 <!-- /agent:exchange -->

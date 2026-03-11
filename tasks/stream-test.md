@@ -185,4 +185,22 @@ Also fixed a pre-existing build error: `find_project_root` was private in `snaps
 ```bash
 agent-doc stream tasks/stream-test.md
 ```
+
+Is it currently running at a 200ms interval?
+I expect to see more updates coming from the claude code session.
+
+### Not streaming right now
+
+**No — there is no 200ms loop running right now.** You're using `/agent-doc` (the Claude Code skill), which writes the complete response once at the end. No streaming loop involved.
+
+To get real-time 200ms streaming:
+```bash
+agent-doc stream tasks/stream-test.md
+```
+That spawns its own Claude CLI process with the 200ms timer loop.
+
+| Approach | How it works | Update frequency |
+|----------|-------------|-----------------|
+| `/agent-doc` (skill) | Write once at end | 1 write per submit |
+| `agent-doc stream` | Timer-based CRDT loop | Every 200ms |
 <!-- /agent:exchange -->

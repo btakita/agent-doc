@@ -7,9 +7,9 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.5 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.6 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
-**Plugins:** JetBrains v0.2.0 (PlainPrefixMatcher fix) + VS Code v0.2.0 — autocomplete for 74 commands
+**Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim
 <!-- /agent:status -->
 
 ## Architecture
@@ -147,6 +147,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.1 | Move git commit to after write — reduces IDE "file changed externally" notices |
 | v0.14.2 | Skill reload via `--reload compact/restart` flag, auto-prompt for /compact after updates |
 | v0.14.5 | Remove auto-prune (session-killing bug), `commands` subcommand, plugin autocomplete (JetBrains + VS Code), plugins v0.2.0 |
+| v0.14.6 | Auto-sync tmux layout on lazy claim in route, plugin autocomplete fixes (Gson removal, PlainPrefixMatcher) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -271,4 +272,20 @@ Moved the sync from the JetBrains plugin to `agent-doc route` (Rust binary). Now
 - The CLI has direct access to the registry and tmux state
 
 **Commit 25c38da.** Binary rebuilt and installed to `~/bin/agent-doc`. Restart IntelliJ for the reverted plugin.
+
+release
+### v0.14.6 Released
+
+Published to all targets:
+- **crates.io:** `cargo install agent-doc` → v0.14.6
+- **PyPI:** `pip install agent-doc` → v0.14.6
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.14.6
+  - Prebuilt binary (Linux x86_64)
+  - JetBrains plugin v0.2.0 (unsigned + signed)
+  - VS Code extension v0.2.0
+
+**Changes since v0.14.5:**
+- Auto-sync tmux layout after lazy claim in `route` (CLI-side, works from any editor)
+- JetBrains autocomplete: removed Gson dependency, PlainPrefixMatcher for markdown
+- Clippy fixes (enum_variant_names, vec_init_then_push)
 <!-- /agent:exchange -->

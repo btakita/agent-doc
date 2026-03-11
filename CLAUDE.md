@@ -80,34 +80,77 @@ invocation, JSON parsing, and session flags.
 
 Streaming backends implement `StreamingAgent::send_streaming()` → `Iterator<StreamChunk>`.
 Used by `agent-doc stream` for real-time write-back. Currently only `claude` supports streaming
-(via `--output-format stream-json`). Each `StreamChunk` has cumulative text, `is_final` flag,
-and optional `session_id` on the final chunk.
+(via `--output-format stream-json`). Each `StreamChunk` has cumulative text, optional
+`thinking` content, `is_final` flag, and optional `session_id` on the final chunk.
 
 ## Stream Mode
 
 Stream mode (`agent_doc_mode: stream`) enables real-time agent output with CRDT-based conflict-free merge.
 
-**Usage:** `agent-doc stream <FILE> [--interval 2000] [--agent claude] [--model opus] [--no-git]`
+**Usage:** `agent-doc stream <FILE> [--interval 200] [--agent claude] [--model opus] [--no-git]`
 
 **How it works:**
 1. Validates document mode is `stream`, reads `StreamConfig` from frontmatter
 2. Computes diff, builds prompt requesting patch-block format
 3. Spawns streaming agent (`claude -p --output-format stream-json`)
-4. Timer thread (default 2s) periodically flushes accumulated text to document:
-   `flock → read file → apply template patch → atomic write → unlock`
+4. Timer thread (default 200ms) periodically flushes accumulated text to document:
+   `flock → read file → apply template patch (replace mode) → atomic write → unlock`
 5. On completion: saves CRDT state + snapshot, updates resume ID, optional git commit
 
 **Frontmatter:**
 ```yaml
 agent_doc_mode: stream
 agent_doc_stream:
-  interval: 2000     # write-back interval (ms)
-  strip_ansi: true   # strip ANSI codes from output
-  target: exchange   # target component name
+  interval: 200           # write-back interval (ms), default 200
+  strip_ansi: true        # strip ANSI codes from output
+  target: exchange        # target component name
+  thinking: false         # include chain-of-thought (default: false)
+  thinking_target: log    # route thinking to separate component (optional)
 ```
 
+### Chain of Thought
+
+Stream mode can capture the agent's chain-of-thought (thinking blocks) from Claude's
+`stream-json` output. Controlled by `thinking` and `thinking_target` in `StreamConfig`:
+
+| Config | Behavior |
+|--------|----------|
+| `thinking: false` (default) | Thinking blocks silently skipped |
+| `thinking: true` (no `thinking_target`) | Thinking interleaved in target component as `<details><summary>Thinking</summary>...</details>` |
+| `thinking: true` + `thinking_target: log` | Thinking routed to separate `<!-- agent:log -->` component; response goes to target |
+
+**Parser:** `extract_assistant_content()` in `streaming.rs` extracts both `"type": "text"` and
+`"type": "thinking"` content blocks. Thinking is buffered separately (`thinking_buffer`) and
+flushed on the same timer interval as response text.
+
+**Example document with thinking:**
+```markdown
+---
+agent_doc_mode: stream
+agent_doc_stream:
+  target: exchange
+  thinking: true
+  thinking_target: log
+---
+<!-- agent:exchange -->
+User prompt here.
+<!-- /agent:exchange -->
+<!-- agent:log -->
+<!-- /agent:log -->
+```
+
+### Flush Behavior
+
+Stream flushes use **replace mode** for the target component regardless of the component's
+configured mode. This is because the stream buffer is cumulative — each chunk contains the
+full text so far, not just the delta. Without replace mode, append-mode components (like
+`exchange`) would duplicate content on each flush.
+
+Implementation: `flush_to_document()` passes mode overrides to
+`template::apply_patches_with_overrides()`.
+
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
-`agent/streaming.rs` (StreamingAgent trait), `agent/claude.rs` (streaming impl)
+`agent/streaming.rs` (StreamingAgent trait + chunk parser), `agent/claude.rs` (streaming impl)
 
 **One session per document:** Each `agent-doc stream` spawns its own Claude CLI process.
 Multiple documents stream in parallel via separate tmux panes.

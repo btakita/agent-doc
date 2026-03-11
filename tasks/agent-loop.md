@@ -34,4 +34,15 @@ commit submodule. release any pending features + bug fixes. commit & push agent-
 Parent commit: `cca8d88` — includes all submodule pointers + 22 task doc updates. Pushed to `main`.
 
 Only untracked item remaining: `src/agent-kit` (new, not yet added to parent).
+
+audit docs
+
+**Audit docs completed.**
+
+| Project | Issues | Action |
+|---------|--------|--------|
+| agent-doc | 5 → 1 (warning only) | Updated README.md + SPEC.md for route cascade & sync_after_claim. Touched SKILL.md + CLAUDE.md (reviewed, not stale). Domain Ontology table stays in CLAUDE.md per convention. |
+| corky | 3 → 0 | Updated README.md + SPEC.md — transcribe now enabled by default (CPU). Touched AGENTS.md (reviewed, not stale). |
+
+Submodule commits pushed, parent pointers updated → `234d137`. Pushed to `main`.
 <!-- /agent:exchange -->

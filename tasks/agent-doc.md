@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.7 | **Tests:** 228 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.8 | **Tests:** 232 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
@@ -149,6 +149,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.5 | Remove auto-prune (session-killing bug), `commands` subcommand, plugin autocomplete (JetBrains + VS Code), plugins v0.2.0 |
 | v0.14.6 | Auto-sync tmux layout on lazy claim in route, plugin autocomplete fixes (Gson removal, PlainPrefixMatcher) |
 | v0.14.7 | Bidirectional `convert` (append↔template), autoclaim layout sync, `AgentDocMode` enum |
+| v0.14.8 | Fix `strip_comments` code-range awareness, safe stash window purge, 232 tests |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -543,6 +544,21 @@ Audited all `<!--` parsing across the codebase:
 `template.rs` is the only file without `find_code_ranges`, but it parses `<!-- patch:name -->` blocks from agent-generated output (not user documents with code blocks). The `patch:` prefix check prevents false matches even if code appears in responses. No fix needed.
 
 **Pattern established:** Any function that scans for `<!--` in user-facing documents MUST use `find_code_ranges()` to skip code regions. The two user-facing parsers (`component.rs` and `diff.rs`) are both now protected.
+### v0.14.8 Released
+
+Published to all targets:
+- **crates.io:** `cargo install agent-doc` → v0.14.8
+- **PyPI:** `pip install agent-doc` → v0.14.8
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.14.8
+  - Prebuilt binary (Linux x86_64)
+  - Plugins unchanged at v0.2.0 (no plugin changes in this release)
+
+**Changes since v0.14.7:**
+- Fix `strip_comments()` code-range awareness — skip `<!--` inside inline backtick spans and fenced code blocks
+- Safe `purge_stash_windows()` — kills orphaned stash windows with idle shells (30s grace period)
+- `component::find_code_ranges()` made `pub(crate)` for cross-module reuse
+- 4 regression tests for code-aware comment stripping
+- 232 tests, clippy clean
 <!-- /agent:exchange -->` at line 531 — swallowing **7799 bytes** of content including all user edits.
 
 **Diagnostic confirmation:**
@@ -564,5 +580,6 @@ Review the code for other instances of this **Same class of bug**
 - `strip_multiple_backtick_comments_in_exchange` — real-world scenario with inline edits after backtick-comment text
 
 232 tests pass, clippy clean. Binary installed. Commit 7f66cc2.
-<!-- /agent:exchange -->
 
+release
+<!-- /agent:exchange -->

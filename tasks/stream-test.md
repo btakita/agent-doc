@@ -623,4 +623,21 @@ I havn't yet had a screencast of agent-doc. I want to show 2 documents being edi
 
 See tasks/agent-doc.md for latest release info.
 Let's also add the reference to another doc that I just did in this session.
+### Session summary + cross-references
+
+This session produced significant agent-doc improvements. See `tasks/agent-doc.md` for the full release tracking document.
+
+**Changes made this session (for next release):**
+1. **Default stream interval 200ms** — `main.rs`, `frontmatter.rs`, `CLAUDE.md`
+2. **All write modes switched to CRDT** — SKILL.md, `--stream` everywhere
+3. **Snapshot bug fix** — save `content_ours` not `final_content` (write.rs, submit.rs, stream.rs)
+4. **snapshot::resolve() fix** — always prefer snapshot file over git (snapshot.rs)
+5. **Deferred commit workflow** — step 0b commits previous, step 5 leaves current uncommitted
+6. **find_project_root made pub** — snapshot.rs for watch.rs
+7. **Tests** — `snapshot_excludes_concurrent_user_edits`, `resolve_prefers_snapshot_over_git`
+8. **Demo directory** — `demo/crdt-demo-a.md`, `crdt-demo-b.md`, `README.md`
+9. **Blog post draft + video script** — above in this document
+
+I want to highlight the autocomplete with stream mode.
+This allow the document to be the "nexus" of not only claude sessions, but also dynamic autocomplete data from other custom sources. Such as databases, rag, and services.
 <!-- /agent:exchange -->

@@ -1251,4 +1251,17 @@ How do I use the autocomplete feature in the Jetbrains plugin?
 If the popup doesn't show automatically, press `Ctrl+Space` after `/` to trigger it.
 
 The plugin loads commands from `agent-doc commands` CLI on first invocation and caches them for the IDE session. It resolves the binary from `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin`, or `$PATH`.
+
+I'm seeing a different shortcut bound to Ctrl+Space...I believe it's expand template.
+What is the specific Jetbrains command that will invoke agent-doc commands?
+
+The autocomplete uses IntelliJ's standard **Code Completion → Basic** system — there's no separate "Agent Doc" action. The `SlashCommandCompletionContributor` hooks into whatever triggers basic completion in your IDE.
+
+**The issue:** `Ctrl+Space` is bound to "Expand Template" in your keymap instead of "Basic" code completion.
+
+**Fix options:**
+1. **Remap:** Settings → Keymap → search "Basic" → find "Code Completion → Basic" → assign a shortcut (e.g., `Ctrl+Space`, removing it from "Expand Template")
+2. **Auto-popup (no shortcut needed):** Settings → Editor → General → Code Completion → check "Show suggestions as you type". Then just type `/` on a new line and the popup appears automatically.
+
+Option 2 is probably better — you keep your template shortcut and autocomplete just works by typing.
 <!-- /agent:exchange -->

@@ -741,4 +741,19 @@ Original reasoning (exchange-only) was that replace-mode components have single 
 **Recommended hybrid:** Auto-commit after agent writes (durability), but CRDT state IS the canonical history. The operation log gives finer-grained replay than git (every keystroke vs every commit). Git commits become periodic snapshots for backup/sharing.
 
 `agent-doc undo` could use CRDT's `Y.UndoManager` instead of git revert — undo individual agent responses or user edits at operation granularity.
+
+When would the CRDT log be pruned? Should a git commit prune the CRDT log?
+### CRDT log pruning
+
+**Git commit as checkpoint (recommended):** When `agent-doc commit` runs, call `Y.Doc.gc(true)` — removes tombstones, collapses operation log to minimal state vector. Git commit preserves full text; CRDT only needs enough state for future merges.
+
+**Additional triggers:**
+- `/agent-doc compact` — already compacts exchange text, extend to GC CRDT log
+- Size-based — auto-compact if CRDT state file exceeds threshold (e.g., 1MB)
+
+**What pruning loses:** Fine-grained undo before the checkpoint. Can still revert to any git commit, just not arbitrary mid-session points.
+
+**Flow:** `user edits → ops accumulate → agent writes → ops accumulate → agent-doc commit → git + CRDT GC`
+
+CRDT state file (`.agent-doc/crdt/<hash>.yrs`) stays small — typically under 100KB after GC for a 50KB document. Operation log between commits is the only growing part, pruned at each commit.
 <!-- /agent:exchange -->

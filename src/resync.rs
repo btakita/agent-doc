@@ -17,9 +17,92 @@ pub fn prune() -> Result<usize> {
     if removed > 0 {
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
-    // Log orphaned windows for debugging (don't kill them)
+    // Purge stash windows with idle shells, then log remaining orphans
+    purge_stash_windows(&tmux);
     log_orphaned_windows(&tmux);
     Ok(removed)
+}
+
+/// Shells considered idle (not running an agent process).
+const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
+
+/// Purge stash windows where all panes are idle shells.
+///
+/// Safe criteria:
+/// 1. Window name is "stash" (never touch "claude" or user-named windows)
+/// 2. ALL panes are running idle shells (not claude/agent-doc/etc.)
+/// 3. Window was created more than 30 seconds ago (grace period for auto-start)
+fn purge_stash_windows(tmux: &Tmux) {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-windows",
+            "-a",
+            "-F",
+            "#{window_id}\t#{window_name}\t#{window_activity}",
+        ])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let (window_id, window_name, activity_str) = (parts[0], parts[1], parts[2]);
+
+        // Only target "stash" windows
+        if window_name != "stash" {
+            continue;
+        }
+
+        // Grace period: skip if last activity was within 30 seconds
+        if let Ok(activity) = activity_str.parse::<u64>()
+            && now.saturating_sub(activity) < 30
+        {
+            continue;
+        }
+
+        // Check that ALL panes are idle shells
+        let pane_output = tmux
+            .cmd()
+            .args([
+                "list-panes",
+                "-t",
+                window_id,
+                "-F",
+                "#{pane_current_command}",
+            ])
+            .output();
+        let pane_output = match pane_output {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        let all_idle = String::from_utf8_lossy(&pane_output.stdout)
+            .lines()
+            .all(|cmd| IDLE_SHELLS.contains(&cmd));
+
+        if all_idle {
+            if let Err(e) = tmux
+                .cmd()
+                .args(["kill-window", "-t", window_id])
+                .output()
+            {
+                eprintln!("resync: failed to purge stash window {}: {}", window_id, e);
+            } else {
+                eprintln!("resync: purged stash window {} (all panes idle)", window_id);
+            }
+        }
+    }
 }
 
 /// Log tmux windows named "claude" or "stash" whose panes are all unregistered.

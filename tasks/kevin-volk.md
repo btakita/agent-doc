@@ -131,6 +131,31 @@ Transcript diarized with speaker labels (Kevin/Brian) using contextual analysis.
 2. Use contextual/LLM-based diarization as a fallback (what we just did)
 
 This should be tracked as a corky feature in `tasks/corky.md`.
+
+### Session 3 — Mar 11, 2026: Resume updated for CopilotKit
+
+**Resume changes** (`resume/BrianTakita.md`):
+
+1. **AI Products Shipped** — Added agent-kit (Rust SDK for agent CLI tools) and tmux-router (declarative tmux pane routing)
+2. **Presence AI entry** — Enhanced with React/Next.js/TypeScript monorepo details: "Next.js + React frontend ↔ GraphQL (urql) ↔ API Services... TypeScript monorepo with 8 internal packages"
+3. **Open Source section** — Added full entries for agent-kit and tmux-router with detailed bullets
+4. **Enhanced descriptions**:
+   - ctx-core: "TypeScript SDK for reactive context management — 150+ composable packages"
+   - lazily-py: "Python SDK for lazy evaluation with context caching — decorator-based dependency injection"
+   - rmemo/RelementJS: "Smallest reactive isomorphic UI library in TypeScript — signals-based state management with zero-overhead hydration, used as React-level infrastructure"
+
+**New profile created** (`resume/profiles/copilotkit.toml`):
+- Highlights TypeScript, Python, React, Rust, Node.js, Agents in skills
+- Bolds SDK/framework/agent/open-source phrases throughout
+- Includes Open Source section (Kevin wants to see it)
+- Removes Freelance entry (Kevin flagged overlapping dates)
+- Keeps SocialChorus (React conversion experience)
+
+**PDF built**: `resume/BrianTakita-copilotkit.pdf`
+
+**Action items updated:**
+- [x] Update resume with TypeScript/Python/SDK/React emphasis
+- [ ] Send updated resume to Kevin
 <!-- /agent:exchange -->
 
 <!-- agent:input -->
@@ -140,12 +165,13 @@ Transcribe and diarize the recording.
 
 <!-- agent:output -->
 
-**All responses are in the exchange component above** (scroll up to `## Exchange`). Summary of what was completed:
+**Resume updated for CopilotKit.** Changes applied to `resume/BrianTakita.md`:
 
-1. **Contact created** — `mail/contacts/kevin-volk/CLAUDE.md` (Kevin Volk, Staffing Science, CopilotKit role details)
-2. **Transcription** — Whisper medium model, 34 min, saved to `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`
-3. **Diarization** — Speaker labels (Kevin/Brian) added via contextual analysis
-4. **Corky diarization feature** — tracked as feature request for `tasks/corky.md`
+- Added agent-kit and tmux-router to AI Products Shipped and Open Source sections
+- Enhanced Presence AI with React/Next.js/TypeScript monorepo details
+- Enhanced ctx-core, lazily-py, rmemo descriptions with SDK/framework language
+- Created `resume/profiles/copilotkit.toml` (TypeScript/Python/React/agent emphasis, no Freelance)
+- Built `resume/BrianTakita-copilotkit.pdf`
 
-**Note:** In template mode, write your prompts in `<!-- agent:input -->` or `<!-- agent:exchange -->`. The output component is for agent responses. I'll respond here going forward.
+Ready to send to Kevin.
 <!-- /agent:output -->

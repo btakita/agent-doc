@@ -1375,4 +1375,22 @@ We can test **Option A (skill-level checkpoints)** right now — that's what you
 **Recommendation:** Keep this document in `template` mode. Create a test document (`tasks/stream-test.md`) with `agent_doc_mode: stream` and test the watch daemon on that in a separate pane.
 
 Want me to create a stream-test document?
+
+Yes...create stream-test
+### Re: Create stream-test
+
+Created `tasks/stream-test.md` with:
+- `agent_doc_mode: stream`
+- `agent_doc_stream.interval: 500` (500ms polling)
+- `agent_doc_stream.target: exchange`
+- Status + exchange components
+
+**To test Option B:**
+1. Open `tasks/stream-test.md` in your editor
+2. In a separate tmux pane: `agent-doc claim tasks/stream-test.md`
+3. Watch daemon auto-starts, detects stream mode
+4. Run `/agent-doc tasks/stream-test.md` in that pane
+5. Document updates in editor as console output streams
+
+For a cleaner test, try `agent-doc stream tasks/stream-test.md` (CLI command — spawns own Claude process, no tools, but cleaner output).
 <!-- /agent:exchange -->

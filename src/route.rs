@@ -131,10 +131,9 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
     // auto_start creates a new window; we want the pane alongside existing panes.
     if let Some(active) = tmux.active_pane(TMUX_SESSION_NAME)
         && active != new_pane
+        && let Err(e) = tmux.join_pane(&new_pane, &active, "-dh")
     {
-        if let Err(e) = tmux.join_pane(&new_pane, &active, "-dh") {
-            eprintln!("warning: join_pane failed ({} → {}): {}", new_pane, active, e);
-        }
+        eprintln!("warning: join_pane failed ({} → {}): {}", new_pane, active, e);
     }
 
     // Register immediately so subsequent route calls find this pane

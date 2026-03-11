@@ -5,9 +5,11 @@
 //! { "hooks": { "SessionStart": [{ "command": "agent-doc autoclaim" }] } }
 //! ```
 //!
-//! Looks up the current tmux pane in the session registry and outputs
-//! claim information so the new Claude session knows which files are
-//! bound to this pane.
+//! 1. Looks up the current tmux pane in the session registry
+//! 2. Focuses the pane to refresh visual state
+//! 3. Syncs tmux layout to match claimed files in the window
+//! 4. Outputs claim information so the new Claude session knows which files are
+//!    bound to this pane.
 
 use anyhow::Result;
 

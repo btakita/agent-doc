@@ -61,4 +61,44 @@ agent_doc_mode: template
 
 <!-- agent:exchange -->
 Compacted from 730-line append-mode conversation into template-mode reference document. All decisions, implementation details, and action items preserved. Ready for new prompts in the input component.
+
+Please create a bookmarklet to export the selected conversation thread into a transcript. Here is the page html:
+
+### LinkedIn Conversation Export Bookmarklet
+
+Here's a bookmarklet that extracts the currently visible LinkedIn messaging thread:
+
+```javascript
+javascript:void(function(){const msgs=[];let currentDate='';document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const dateEl=li.querySelector('.msg-s-message-list__time-heading');if(dateEl)currentDate=dateEl.textContent.trim();const a11y=li.querySelector('.msg-s-event-listitem--group-a11y-heading');const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():(a11y?a11y.textContent.trim().split(' sent ')[0]:'Unknown');const time=timeEl?timeEl.textContent.trim():'';const text=bodyEl.innerText.trim();if(text)msgs.push((currentDate?'['+currentDate+'] ':'')+'['+time+'] '+name+':\n'+text)});const title=document.querySelector('.msg-overlay-conversation-bubble__title,.msg-s-message-list-container')?.closest('[class*=conversation]')?.querySelector('h2,a[class*=name]')?.textContent?.trim()||'LinkedIn Conversation';const content='# '+title+'\nExported: '+new Date().toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=title.replace(/[^a-zA-Z0-9]/g,'-').toLowerCase()+'.txt';a.click()})()
+```
+
+**How it works:**
+1. Iterates over all `msg-s-message-list__event` items in the conversation
+2. Extracts date headers (`msg-s-message-list__time-heading`)
+3. Gets sender name from `msg-s-message-group__name` (falls back to a11y heading)
+4. Gets timestamp from `msg-s-message-group__timestamp`
+5. Gets message text from `msg-s-event-listitem__body` via `innerText` (strips HTML)
+6. Downloads as a `.txt` file
+
+**To install:** Create a new bookmark, paste the `javascript:void(...)` code as the URL.
+
+**Note:** LinkedIn lazy-loads messages — only the currently visible messages in the thread will be exported. Scroll up to load older messages before clicking the bookmarklet.
+
+**Also note:** The HTML you pasted is 1.7MB — that's bloating this task file. Consider removing the raw HTML and keeping just the bookmarklet.
+
+Please get the name of the person in the conversation and use the name as part of the export file name.
+
+### Updated: name in filename
+
+Updated bookmarklet — now extracts the conversation partner's name from the thread header and uses it in the download filename (e.g., `linkedin-mia-tomeo.txt`):
+
+```javascript
+javascript:void(function(){const msgs=[];let currentDate='';document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const dateEl=li.querySelector('.msg-s-message-list__time-heading');if(dateEl)currentDate=dateEl.textContent.trim();const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';const time=timeEl?timeEl.textContent.trim():'';const text=bodyEl.innerText.trim();if(text)msgs.push((currentDate?'['+currentDate+'] ':'')+'['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');const contactName=headerEl?headerEl.textContent.trim():'Unknown';const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+new Date().toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='linkedin-'+slug+'.txt';a.click()})()
+```
+
+**Changes:**
+- Extracts contact name from the conversation header (`.msg-overlay-bubble-header__title a`, `.msg-thread__link-to-profile`, or `.msg-entity-lockup__entity-title`)
+- Slugifies the name for the filename: "Mia Tomeo" → `linkedin-mia-tomeo.txt`
+- Includes the contact name in the transcript header: `# LinkedIn Conversation with Mia Tomeo`
+Please remove the html bloat from the git history. I will have an external file next time.
 <!-- /agent:exchange -->

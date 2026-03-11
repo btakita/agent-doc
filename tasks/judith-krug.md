@@ -81,6 +81,10 @@ Instead of duplicating TMO's or MA's core operations, build a **complementary in
 - **Subject:** Proposal — TMO + Custom Automation for Equity Funding Source
 - **Attachment:** `20260305-tmo-proposal.pdf`
 
+### Onboarding Email (2026-03-11)
+- **Draft:** `mail/drafts/20260311-judith-onboarding.md` → status: `sent`
+- Onboarding next steps: TMO signup, domain access, branding assets, call scheduling. CC'd Robert Waldman.
+
 ## Key People
 
 - **Robert Ward** — referral who connected Brian to Judith
@@ -409,4 +413,18 @@ Saved as corky draft: `mail/drafts/20260311-judith-onboarding.md`
 - **Status:** draft
 
 Send with `corky send mail/drafts/20260311-judith-onboarding.md` when ready.
+
+Send it
+
+**Email sent!**
+- `mail/drafts/20260311-judith-onboarding.md` → status: `sent`
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+
+Add to Email Timeline section:
+
+### Onboarding Email (2026-03-11)
+- **Draft:** `mail/drafts/20260311-judith-onboarding.md` → status: `sent`
+- Onboarding next steps: TMO signup, domain access, branding assets, call scheduling. CC'd Robert Waldman.
 <!-- /agent:exchange -->

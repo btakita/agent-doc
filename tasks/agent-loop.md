@@ -45,4 +45,15 @@ audit docs
 | corky | 3 → 0 | Updated README.md + SPEC.md — transcribe now enabled by default (CPU). Touched AGENTS.md (reviewed, not stale). |
 
 Submodule commits pushed, parent pointers updated → `234d137`. Pushed to `main`.
+
+commit and push corky changes. Would it be possible to update the README on the crates.io docs for the current corky release?
+
+Corky is already committed and pushed (done in previous cycle — `7c3f4ea`).
+
+**crates.io README update:** crates.io serves the README embedded in the published crate tarball. There's no API to update docs for an existing version. Options:
+
+1. **Publish v0.14.1** — bump version, `cargo publish`. The only change is docs (README + SPEC reflecting transcribe-by-default). Clean and correct.
+2. **Do nothing** — the crates.io README is slightly stale but functionally harmless (just says "install with `--features transcribe`" instead of "enabled by default").
+
+Want me to publish v0.14.1 for the docs fix?
 <!-- /agent:exchange -->

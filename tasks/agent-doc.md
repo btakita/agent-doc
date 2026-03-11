@@ -1086,6 +1086,8 @@ What you want already exists in embryonic form: the **`/agent-doc` skill workflo
 Update SKILL.md to periodically flush partial output during step 3 (Respond):
 1. Respond in console as now
 2. Every ~30s or at natural breakpoints, pipe accumulated output through `agent-doc write --stream`
+~30s latency is too high. Can we get line changes as they occur...Flushing the buffer immediately?
+Claude code does not output many lines so it should be ok from a throughput & performance standpoint.
 3. CRDT merge handles concurrent user edits
 4. Final flush at end
 
@@ -1099,4 +1101,50 @@ This works today — `agent-doc write --stream` already exists. The skill just n
 Option A is simpler and immediately actionable. The Phase 4 `agent-doc stream` command remains useful for headless/batch use cases where tool access isn't needed.
 
 **Bottom line:** Stream mode and `/agent-doc` skill mode serve different use cases. For tool-use + streaming, Option A (skill-level write checkpoints) is the path forward.
+
+I would prefer Option B...
+
+### Re: Near-zero latency + Option B
+
+Good call. Here's the refined Option B architecture:
+
+**`agent-doc stream-watch <FILE> --pane <pane-id>`** — a sidecar process:
+
+```
+[Claude Code pane]  →  tmux capture-pane (200ms poll)
+                    →  extract new lines since last capture
+                    →  wrap in <!-- patch:exchange --> block
+                    →  agent-doc write --stream (CRDT merge)
+                    →  document updates in editor
+```
+
+**Why this works at line-level latency:**
+- `tmux capture-pane` is ~1ms (reads pane buffer directly)
+- Poll every 200ms → 5 flushes/sec → ~2-10 new lines per flush
+- Claude Code outputs ~10-50 lines/sec during streaming — well within budget
+- CRDT merge on each flush ensures user edits are never lost
+- No changes to the `/agent-doc` skill or Claude Code itself
+
+**Implementation plan:**
+1. New module `src/stream_watch.rs` — the sidecar command
+2. Uses `tmux-router::Tmux::capture_pane()` for pane content
+3. Diffs captured content against last-known state to extract new lines
+4. Wraps new lines in patch block, pipes through `agent-doc write --stream`
+5. Stops when: pane goes idle for N seconds, or receives SIGTERM, or detects the skill's final write-back
+
+**CLI:**
+```bash
+agent-doc stream-watch tasks/agent-doc.md --pane %42 --interval 200
+```
+
+**Integration with `/agent-doc` skill:**
+- Skill workflow unchanged — responds normally with full tool access
+- User (or skill pre-flight) starts stream-watch as a background process
+- Stream-watch captures console output and mirrors it to the document
+- Skill's final `agent-doc write --template` overwrites with the complete response
+- Stream-watch detects the final write and exits
+
+**Key question:** Should the stream-watch extract just the agent's text output, or capture everything (including tool calls, status messages)? For the exchange component, probably just text output — we'd need to filter out tool-use blocks and system messages from the captured pane content.
+
+Want me to implement this?
 <!-- /agent:exchange -->

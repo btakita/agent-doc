@@ -1,8 +1,9 @@
 ---
 agent_doc_session: db08a891-c339-4a49-9f49-2d8a1f30ed10
-tmux_session: claude
+tmux_session: '23'
 agent_doc_mode: template
 ---
+
 
 # Resume Session
 
@@ -44,4 +45,17 @@ agent_doc_mode: template
 Switched to template mode. All prior conversation history compacted into the Completed section above (including Foxley Talent Calendly notes). Your edits incorporated: "automated tests" added to Rails-Django comparison, "months" → "weeks".
 
 Write here for new topics.
+
+Is my resume at risk of being flagged for fraud?
+See https://www.linkedin.com/posts/amberio_ashbyhiddengems-activity-7437501367537229825-IgB8?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAC0KQ4BlxIAK5Vbm7Gssr6SzIaiyNG0e68
+
+### Resume Fraud Risk Assessment
+
+Re: [Ashby fraud detection post](https://www.linkedin.com/posts/amberio_ashbyhiddengems-activity-7437501367537229825-IgB8) — Ashby's ATS flags suspicious candidate profiles (identity/pattern-based, not AI writing detection).
+
+**Your main risk: overlapping dates.** Freelance (2019–2026) overlaps Presence AI and Censible. Kevin already flagged this. ATS systems with date-overlap checks would flag it too. The `copilotkit.toml` profile already removes Freelance — use filtered profiles for ATS submissions.
+
+**Not a risk:** AI-assisted writing style. ATS fraud detection focuses on identity/profile patterns, not prose. All your claims are verifiable (GitHub repos, crates.io, npm, named employers, public commit history since 2006).
+
+**Recommendation:** Always use a profile that removes overlapping Freelance dates for ATS submissions. For direct recruiter sends, explain overlap verbally.
 <!-- /agent:exchange -->

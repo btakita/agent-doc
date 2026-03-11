@@ -805,4 +805,66 @@ Stream doesn't invent new document structure. Uses the same `<!-- agent:exchange
 - **Stream:** continuous write (every 2s), CRDT sync, WebSocket/pipe chunks to plugin
 
 A stream-mode document IS a template-mode document — switch back anytime, all existing tools (compact, convert, template-info, patch) work unchanged. `agent_doc_mode: stream` just tells tooling: "use CRDT for writes, stream output in real-time."
+
+Implement. Document. Write full coverage testing.
+
+Please write all of the claude agent ouput since my last request prompt here.
+continue
+
+## Phase 1: CRDT Foundation Layer — Complete
+
+**Created `src/agent-doc/src/crdt.rs`** — pure library module wrapping `yrs::Doc`:
+
+### What was implemented:
+
+**`CrdtDoc` struct** — wraps `yrs::Doc` with:
+- `from_text(content: &str) -> CrdtDoc` — initialize from plain text
+- `to_text(&self) -> String` — extract current text
+- `apply_edit(offset, delete_len, insert)` — apply local edits
+- `encode_state() -> Vec<u8>` — serialize for persistence
+- `decode_state(bytes) -> Result<CrdtDoc>` — deserialize
+
+**`merge()` function** — conflict-free merge of concurrent edits:
+- Takes optional base CRDT state + two text versions (ours/theirs)
+- Uses `similar` crate's char-level diff to compute edit operations
+- Creates two independent CRDT actors (client_id 1 and 2)
+- Each actor replays its edits from the shared base
+- Merges updates via Yrs state vector exchange
+- Returns merged text — no conflict markers ever
+
+**`compact()` function** — GC tombstones by re-encoding state
+
+**Internal `compute_edit_ops()`** — converts text diff into `Retain/Delete/Insert` operations that map onto Yrs `Text` operations.
+
+### Files modified:
+- `Cargo.toml` — added `yrs = "0.21"`
+- `main.rs` — added `mod crdt;`
+
+### Storage plan:
+- `.agent-doc/crdt/<doc-hash>.yrs` alongside existing snapshots
+
+### Test coverage (14 tests, all passing):
+1. `roundtrip_text` — text → CrdtDoc → text
+2. `roundtrip_encode_decode` — encode → decode preserves content
+3. `apply_edit_insert` — insert at position
+4. `apply_edit_delete` — delete range
+5. `apply_edit_replace` — delete + insert
+6. `concurrent_append_merge_no_conflict` — agent + user append at end → both preserved
+7. `concurrent_insert_same_position` — both insert at same line → both preserved, no conflict
+8. `merge_no_base_state` — bootstrap from empty when no `.yrs` file
+9. `merge_identical_texts` — no-op merge
+10. `merge_one_side_unchanged` — only agent edits → exact result
+11. `compact_preserves_content` — compact doesn't lose data
+12. `compact_reduces_size_after_edits` — tombstone GC works
+13. `empty_document` — edge case
+14. `decode_invalid_bytes_errors` — graceful error on bad input
+
+### `make check` result:
+- clippy: clean (0 warnings)
+- tests: **249 passed** (228 unit + 21 CLI), 5 ignored
+- Zero regressions — append/template modes completely untouched
+
+### Next: Phases 2 & 3 (parallel)
+
+Phase 2 (CRDT Merge Path) and Phase 3 (Streaming Agent Backend) can proceed in parallel per the dependency graph. Ready to implement on your signal.
 <!-- /agent:exchange -->

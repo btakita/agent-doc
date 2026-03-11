@@ -1,7 +1,10 @@
 ---
-agent_doc_session: null
+agent_doc_session: 4ce06ad1-5c84-43b0-b32c-542e6c3d8ffb
+tmux_session: '1'
 agent_doc_mode: template
 ---
+
+
 
 # Lucas Onboarding — Recruiter Email Workflow
 
@@ -51,4 +54,23 @@ Repo already exists with a README quick start guide. Lucas is not yet a collabor
 
 <!-- agent:exchange -->
 Extracted from tasks/corky.md. Ready for next steps.
+
+I have a github PAT for lucas. Please track it by using the gh api. Make sure the PAT has edit access to btakita/resume
+
+A few important things to clarify:
+
+1. **GitHub PATs can't be "tracked" via the gh API** — PATs are personal tokens owned by Lucas. They aren't visible through the GitHub API from your account. The token is a secret Lucas manages.
+
+2. **What you CAN do** is use Lucas's PAT to verify it works and grant him repo access.
+
+**To grant push access to btakita/resume:**
+```bash
+gh api repos/btakita/resume/collaborators/LUCAS_GITHUB_USERNAME -X PUT -f permission=push
+```
+
+**I need from you:**
+- Lucas's **GitHub username** (to add as collaborator on `btakita/resume` and `btakita/mailbox-lucas`)
+- If you want to **test his PAT**, set it as `GH_TOKEN` and I can run API calls to verify its scopes
+
+What did you mean by "track it"? Store it somewhere, test it, or use it to configure his access?
 <!-- /agent:exchange -->

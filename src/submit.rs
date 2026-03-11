@@ -116,7 +116,7 @@ pub fn run(
 
     let final_content = if content_current == content_original {
         // No edits during submit — use our version directly
-        content_ours
+        content_ours.clone()
     } else {
         eprintln!("File was modified during submit. Merging changes...");
         merge::merge_contents(&content_original, &content_ours, &content_current)?
@@ -124,9 +124,10 @@ pub fn run(
 
     atomic_write(file, &final_content)?;
 
-    // Save snapshot (but don't commit — leave agent response as uncommitted
-    // so the editor shows diff gutters for what the agent added)
-    snapshot::save(file, &final_content)?;
+    // Save snapshot as content_ours (baseline + response), not final_content.
+    // If the user edited concurrently, final_content includes their edits.
+    // Saving content_ours ensures the next diff detects those concurrent edits.
+    snapshot::save(file, &content_ours)?;
 
     drop(doc_lock); // explicit release after both doc and snapshot are written
 

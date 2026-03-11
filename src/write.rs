@@ -66,7 +66,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     let final_content = if content_current == base {
         // No edits — use our version directly
-        content_ours
+        content_ours.clone()
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
@@ -74,8 +74,10 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    // Update snapshot
-    snapshot::save(file, &final_content)?;
+    // Save snapshot as content_ours (baseline + response), NOT final_content.
+    // If the user edited during response generation, final_content includes their
+    // edits via merge. Saving content_ours ensures the next diff detects those edits.
+    snapshot::save(file, &content_ours)?;
 
     drop(doc_lock);
 
@@ -133,7 +135,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
     let final_content = if content_current == base {
-        content_ours
+        content_ours.clone()
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
@@ -141,8 +143,8 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    // Update snapshot
-    snapshot::save(file, &final_content)?;
+    // Save snapshot as content_ours (baseline + response), not final_content
+    snapshot::save(file, &content_ours)?;
 
     drop(doc_lock);
 
@@ -204,21 +206,25 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, crdt_state) = if content_current == base {
+    let (final_content, _crdt_state) = if content_current == base {
         // No edits — build CRDT state from result
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours, doc.encode_state())
+        (content_ours.clone(), doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
+        eprintln!("[write] CRDT merge successful — no conflicts possible.");
         let crdt_state = snapshot::load_crdt(file)?;
         merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
 
-    // Update snapshot and CRDT state
-    snapshot::save(file, &final_content)?;
-    snapshot::save_crdt(file, &crdt_state)?;
+    // Save snapshot as content_ours (baseline + response), not final_content.
+    // If the user edited concurrently, final_content includes their edits via CRDT merge.
+    // Saving content_ours ensures the next diff detects those concurrent edits.
+    snapshot::save(file, &content_ours)?;
+    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
+    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
 
     drop(doc_lock);
 
@@ -251,17 +257,19 @@ pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, crdt_state) = if content_current == content {
+    let (final_content, _crdt_state) = if content_current == content {
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours, doc.encode_state())
+        (content_ours.clone(), doc.encode_state())
     } else {
         let crdt_state = snapshot::load_crdt(file)?;
         merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
-    snapshot::save(file, &final_content)?;
-    snapshot::save_crdt(file, &crdt_state)?;
+    // Save snapshot as content_ours, not final_content
+    snapshot::save(file, &content_ours)?;
+    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
+    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
     drop(doc_lock);
     eprintln!("[write] Stream patches applied to {}", file.display());
     Ok(())
@@ -291,13 +299,14 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
     let final_content = if content_current == content {
-        content_ours
+        content_ours.clone()
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
-    snapshot::save(file, &final_content)?;
+    // Save snapshot as content_ours, not final_content
+    snapshot::save(file, &content_ours)?;
     drop(doc_lock);
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
@@ -321,13 +330,14 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
     let final_content = if content_current == content {
-        content_ours
+        content_ours.clone()
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
-    snapshot::save(file, &final_content)?;
+    // Save snapshot as content_ours, not final_content
+    snapshot::save(file, &content_ours)?;
     drop(doc_lock);
     eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())
@@ -544,6 +554,60 @@ mod tests {
             final_content.starts_with("writer-") && final_content.ends_with("-content"),
             "unexpected content: {}",
             final_content
+        );
+    }
+
+    #[test]
+    fn snapshot_excludes_concurrent_user_edits() {
+        // Regression test: when the user edits during response generation,
+        // the snapshot should contain baseline + response ONLY (content_ours),
+        // NOT the merged content that includes user edits.
+        // This ensures the next diff detects the user's concurrent edits.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc").join("snapshots");
+        fs::create_dir_all(&agent_doc_dir).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let base = "---\nsession: test\n---\n\n## User\n\nOriginal question\n";
+        fs::write(&doc, base).unwrap();
+
+        // Build content_ours = baseline + response
+        let response = "Agent response here";
+        let mut content_ours = base.to_string();
+        content_ours.push_str("\n## Assistant\n\n");
+        content_ours.push_str(response);
+        content_ours.push_str("\n\n## User\n\n");
+
+        // Simulate user editing the file concurrently (adding a follow-up)
+        let user_edited = format!("{}Follow-up question\n", base);
+        fs::write(&doc, &user_edited).unwrap();
+
+        // Merge: content_ours + user edits
+        let merged = merge::merge_contents(base, &content_ours, &user_edited).unwrap();
+
+        // Write merged content (includes both response and user edit)
+        atomic_write(&doc, &merged).unwrap();
+        assert!(merged.contains(response), "response missing from merged");
+        assert!(merged.contains("Follow-up question"), "user edit missing from merged");
+
+        // KEY: Save snapshot as content_ours (NOT merged)
+        snapshot::save(&doc, &content_ours).unwrap();
+
+        // Verify: snapshot should NOT contain user's concurrent edit
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snap.contains(response), "snapshot should have response");
+        assert!(
+            !snap.contains("Follow-up question"),
+            "snapshot must NOT contain concurrent user edit — \
+             otherwise the next diff won't detect it"
+        );
+
+        // Verify: diff between snapshot and current file should detect user's edit
+        let current = fs::read_to_string(&doc).unwrap();
+        assert_ne!(snap, current, "snapshot and file should differ (user edit not in snapshot)");
+        assert!(
+            current.contains("Follow-up question"),
+            "current file should contain user's edit"
         );
     }
 }

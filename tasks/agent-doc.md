@@ -187,7 +187,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 10. **Stale snapshots from context compaction** — solved with `is_stale_snapshot()` auto-recovery in `diff.rs`
 11. **Durable pending store** — save response before write, clear after success; survives compaction and crashes
 12. **Distinct patch prefix** — patch markers vs agent markers prevents confusion between response directives and document components
-13. **Skip code spans in parser** — never invent custom escape syntax; follow the universal convention of treating code blocks as literal
+13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice: component.rs (v0.9.10) and diff.rs (v0.14.8). Check all `<!--` parsers when adding new ones.
 <!-- /agent:lessons -->
 
 ## Session History
@@ -530,7 +530,20 @@ Please fix the inline diffing for agent-doc run
 Add tests to replicate the bug and fix
 ### Comment stripping bug — fixed
 
-**Root cause:** `strip_comments()` in `diff.rs` didn't skip `<!--` inside inline backtick spans. When the exchange section discussed `<!--` syntax (template autocomplete), the parser saw `` `<!--` `` at line 392 as a comment start and matched the `-->` in `<!-- /agent:exchange -->` at line 531 — swallowing **7799 bytes** of content including all user edits.
+**Root cause:** `strip_comments()` in `diff.rs` didn't skip `<!--` inside inline backtick spans. When the exchange section discussed `<!--` syntax (template autocomplete), the parser saw `` `<!--` `` at line 392 as a comment start and matched the `-->` in `### Code-range audit — all clear
+
+Audited all `<!--` parsing across the codebase:
+
+| File | Parses `<!--` | Code-range aware | Status |
+|------|--------------|-----------------|--------|
+| `component.rs` | Yes | Yes (v0.9.10) | Safe |
+| `diff.rs` | Yes | Yes (just fixed) | Safe |
+| `template.rs` | Yes | No | Low risk — parses agent responses, not user documents |
+
+`template.rs` is the only file without `find_code_ranges`, but it parses `<!-- patch:name -->` blocks from agent-generated output (not user documents with code blocks). The `patch:` prefix check prevents false matches even if code appears in responses. No fix needed.
+
+**Pattern established:** Any function that scans for `<!--` in user-facing documents MUST use `find_code_ranges()` to skip code regions. The two user-facing parsers (`component.rs` and `diff.rs`) are both now protected.
+<!-- /agent:exchange -->` at line 531 — swallowing **7799 bytes** of content including all user edits.
 
 **Diagnostic confirmation:**
 ```
@@ -542,6 +555,8 @@ After fix:  [diff] stripped: doc_len=35107 snap_len=34743  ← different (correc
 
 **Same class of bug** as v0.9.10 (code-span parser fix in `component.rs`), but `diff.rs` was never updated.
 
+Review the code for other instances of this **Same class of bug**
+
 **4 regression tests added:**
 - `strip_preserves_comment_syntax_in_inline_backticks` — `` `<!--` `` not treated as comment
 - `strip_preserves_comment_syntax_in_fenced_code_block` — `<!-- -->` in code blocks preserved
@@ -550,3 +565,4 @@ After fix:  [diff] stripped: doc_len=35107 snap_len=34743  ← different (correc
 
 232 tests pass, clippy clean. Binary installed. Commit 7f66cc2.
 <!-- /agent:exchange -->
+

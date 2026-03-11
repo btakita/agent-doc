@@ -499,4 +499,13 @@ Hundreds of false positives from `node_modules/bun-types/CLAUDE.md` and `target/
 /agent-doc audit-docs
 
 include the response in this file
+### Response already in document
+
+The compact and audit results are already included in this exchange (the "### Compact + audit results" section above). They were written by the previous cycle via CRDT merge.
+
+If you want the **full raw audit output** (hundreds of lines of bun-types warnings), I can include that — but it's mostly noise from `node_modules/`. The 2 actionable warnings are in the summary.
+
+The duplicate `/agent-doc compact` and `/agent-doc audit-docs` lines can be cleaned up — they were concurrent edits preserved by the snapshot system.
+
+Why was there a duplicate run? I only called run once for compact and once for audit-docs. Did both get picked up from the first run?
 <!-- /agent:exchange -->

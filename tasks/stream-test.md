@@ -766,4 +766,38 @@ The core thesis: **the document is the new API surface.** Instead of building ap
 This is a legitimate technical moat. The CRDT + document-as-nexus positioning differentiates from the crowded "AI chat" space.
 
 Should I try to self-fund with consulting work. Or should I go after investors to work on this full time?
+### Self-fund vs investors — honest assessment
+
+**Short answer:** Start with consulting, validate with users, then raise if you want to scale fast.
+
+**The case for self-funding (consulting + building):**
+
+- **You have a working product.** agent-doc isn't a pitch deck — it's shipping software with real CRDT merge, IDE integration, and a demo-ready feature set. That's rare.
+- **Consulting generates revenue immediately.** Developer tooling consulting (AI integration, document automation, CRDT architecture) is billable now. Each engagement is also a potential agent-doc customer.
+- **You keep 100% equity.** Early-stage dev tools companies often don't need much capital — it's your time + API costs. No dilution, no board seats, no fundraising distraction.
+- **Consulting gives you user signal.** Every consulting client who uses agent-doc tells you what matters. You build what people pay for, not what investors think sounds good.
+- **Timeline flexibility.** No burn rate pressure. You ship when it's ready, not when the runway runs out.
+
+**The case for raising:**
+
+- **Speed matters if competitors emerge.** The "document as integration layer" thesis is compelling — if someone well-funded sees the same opportunity, they can outrun a solo developer.
+- **Full-time focus.** Consulting splits your attention. If you spend 60% on consulting and 40% on agent-doc, a funded competitor spending 100% will outpace you.
+- **Hiring.** IDE plugins for VS Code, Neovim, Zed — each is a person-month+ of work. The agent marketplace needs a platform team. One person can't build all of this.
+I worked with Nathan Sobo who is the CEO of Zed Industries. This tooling is written in Rust. It could be a natural fit with Zed. Should I approach him to be hired?
+- **Credibility signal.** "YC-backed" or "a16z portfolio" opens doors for enterprise sales and partnerships that are hard to get as a solo bootstrapper.
+
+**My recommendation — the hybrid path:**
+
+1. **Now → 3 months:** Self-fund. Ship 0.15.0, record the demo video, write the blog post, launch on Hacker News. Get real users. Consulting pays the bills.
+
+2. **3-6 months:** Measure traction. If you have 100+ active users, a few paying customers (enterprise or hosting), and a clear growth curve — you have leverage for fundraising.
+
+3. **6 months (if traction):** Apply to YC or raise a small pre-seed ($250K-500K). At this point you have: working product, demo video, blog post with traction data, consulting revenue as proof of market, and a technical moat you can demonstrate live.
+
+**Why this path works:**
+- Investors fund traction, not ideas. A working CRDT demo with real users is 10x more compelling than a pitch deck.
+- Consulting revenue de-risks the raise. You're not desperate — you have income. This gives you negotiating power.
+- If you never raise, you still have a business. Consulting + agent-doc as a product is a viable solo/small-team business.
+
+**The one scenario where you raise first:** If you're confident the market window is closing fast (e.g., Cursor or another well-funded player is about to ship CRDT-based document collaboration), then speed matters more than validation. Raise fast, hire fast, ship fast. But I don't see that happening imminently — the "document as nexus" framing is yours to define.
 <!-- /agent:exchange -->

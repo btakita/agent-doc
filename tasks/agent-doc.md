@@ -253,4 +253,22 @@ Previously, routing a reclaimed file sent the command to the right pane but left
 **Fix (commit 49bcd90):** One-line change in `SubmitAction.kt` — the `onComplete` callback now calls `syncLayout(notify = false)`.
 
 **Plugin rebuilt and installed.** Restart IntelliJ to pick up the change.
+
+Could this resync happen with agent-doc run instead? Only resyncing if there is an autoclaim...
+### Auto-sync moved to CLI — only on autoclaim
+
+Moved the sync from the JetBrains plugin to `agent-doc route` (Rust binary). Now when route performs a **lazy claim** (dead pane or unregistered session), it:
+
+1. Gets the tmux window ID of the claimed pane
+2. Loads the registry to find all files with panes in that window
+3. Calls `sync` with those files as a single column
+
+**Normal routes (pane alive, no claim) skip sync entirely** — no overhead on the hot path.
+
+**Why this is better than the plugin approach:**
+- Works from any editor (JetBrains, VS Code, CLI)
+- Only triggers on autoclaim, not every submit
+- The CLI has direct access to the registry and tmux state
+
+**Commit 25c38da.** Binary rebuilt and installed to `~/bin/agent-doc`. Restart IntelliJ for the reverted plugin.
 <!-- /agent:exchange -->

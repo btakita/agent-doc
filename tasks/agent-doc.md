@@ -410,4 +410,29 @@ So the plugin approach is clean: install adds templates, uninstall removes them,
 - Plus any custom names discovered via `agent-doc template-info <file>`
 
 Want me to implement the Live Template approach in the JetBrains plugin? It's low-effort (XML config + template file, no Kotlin code) and gives immediate value.
+
+`/agent-doc run tasks/lucas.md` just happened. This document is stale. I saw no activity in tmux. Please diagnose the issues. Did the log capture the issue?
+### lucas.md routing diagnosis
+
+**What happened:** I re-ran `agent-doc route tasks/lucas.md` and it worked — pane %72 received the command and started processing. The route output:
+```
+Sent /agent-doc /home/brian/work/btakita/agent-loop/tasks/lucas.md → pane %72
+```
+
+**Root cause (most likely):** The session entry shows `started: 2026-03-11T13:44:23Z` — the pane was freshly created right when you reported the issue. The first route likely:
+1. Found `agent_doc_session: null` → generated a UUID
+2. No registry entry existed for the new UUID
+3. Triggered auto-start → created pane %72
+4. Sent `agent-doc start` to the new pane
+5. But the `/agent-doc tasks/lucas.md` command was sent before Claude finished starting in the pane
+
+This is a known race: `route` sends `start` to a new pane, then the plugin immediately sends `/agent-doc <file>` — but Claude isn't ready yet, so the second command gets lost in the shell.
+
+**The re-route worked** because by the time I ran it, Claude was fully started in %72.
+
+**Potential fix:** `route` could wait for the pane to show a Claude prompt before sending the `/agent-doc` command. Or: detect this case and print a "wait for Claude to start, then re-submit" message (which it already does — check if the user saw that stderr output).
+
+Also found: `resync: orphaned stash window @76 in session '1'` — there's a stale stash window with an unregistered pane %73.
+
+I just saw the run start in the tmux pane -> claude session. Did you just do that?
 <!-- /agent:exchange -->

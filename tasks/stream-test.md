@@ -508,4 +508,18 @@ If you want the **full raw audit output** (hundreds of lines of bun-types warnin
 The duplicate `/agent-doc compact` and `/agent-doc audit-docs` lines can be cleaned up — they were concurrent edits preserved by the snapshot system.
 
 Why was there a duplicate run? I only called run once for compact and once for audit-docs. Did both get picked up from the first run?
+### Why the "duplicate" happened
+
+There was no duplicate run. Here's the timeline:
+
+1. You typed `/agent-doc compact` and `/agent-doc audit-docs` in the document
+2. I ran both commands and wrote the results (the "### Compact + audit results" section) via CRDT merge
+3. Because you edited the document *concurrently* (adding those lines while I was processing), the CRDT merge preserved your edits. But the **snapshot** was saved as `content_ours` (baseline + my response), which did NOT include your concurrent edits
+4. On the *next* cycle, the diff compared snapshot (no commands) vs current file (has commands) — detected them as "new" changes
+5. I mistakenly said they were "duplicates." They were the *original* edits that the snapshot correctly excluded per the concurrent edit fix
+
+**This is the snapshot fix working as designed** — concurrent user edits are always detected by the next diff. The issue was my response: I should have recognized them as already-handled instead of calling them "duplicates" and suggesting cleanup.
+
+I want to make a blog post with a demo of the CRDT feature in agent-doc.
+Please write a draft blog post and help me script the video.
 <!-- /agent:exchange -->

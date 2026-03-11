@@ -581,4 +581,36 @@ The response in question was for the diff showing `release`.
 v0.14.9 released to crates.io, PyPI, GitHub Releases. 235 tests, clippy clean.
 
 Note: the v0.14.8 response had a merge artifact — `<!-- /agent:exchange -->` appeared unescaped in body text, breaking the component parser. Cleaned up manually.
+
+Please review https://x.com/nummanali/status/2031477259689754734/photo/1
+
+Can we have a similar interface with agent-docs?
+
+Would it be possible to fuse the STDOUT/STDERR into a *.md file in realtime?
+So the shell is effectively the *.md file?
+This would also allow in-place updates for prompting.
+### STDOUT/STDERR → markdown file fusion — exploration
+
+Can't view the tweet image (X requires JavaScript for photos). Based on your questions:
+
+**Concept:** The shell output stream becomes the document — real-time updates visible in the editor.
+
+**How it could work:**
+1. `agent-doc stream <FILE>` — tees Claude's stdout/stderr into named components in real-time
+2. The document IS the terminal — each output chunk appended to `<!-- agent:output -->` live
+3. User edits `<!-- agent:input -->` while output streams — file is both input and output
+
+**Technical approach:**
+- PTY wrapper around Claude process, parse byte stream into markdown
+- Batch writes (every 2s or on paragraph boundaries) via `agent-doc patch`
+- `notify` crate watches for user edits while streaming output
+
+**Challenges:**
+- Merge conflicts from simultaneous user edits + agent writes (needs CRDT or OT, not 3-way merge)
+- IDE file watcher throttling — rapid writes cause flicker
+- ANSI escape sequences in terminal output aren't valid markdown
+
+**Pragmatic first step:** `agent-doc stream <FILE> -- claude` — wraps a Claude session, captures output in batches, patches the document periodically. Uses existing `agent-doc patch` infrastructure. Not true character-by-character, but close enough.
+
+Could you describe what the tweet screenshot shows? That would help target the specific UX pattern.
 <!-- /agent:exchange -->

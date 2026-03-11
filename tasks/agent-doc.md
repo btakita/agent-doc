@@ -1104,6 +1104,8 @@ Option A is simpler and immediately actionable. The Phase 4 `agent-doc stream` c
 
 I would prefer Option B...
 
+Actually...Option A may be better. Would Claude's `/loop` command help?
+
 ### Re: Near-zero latency + Option B
 
 Good call. Here's the refined Option B architecture:
@@ -1147,4 +1149,35 @@ agent-doc stream-watch tasks/agent-doc.md --pane %42 --interval 200
 **Key question:** Should the stream-watch extract just the agent's text output, or capture everything (including tool calls, status messages)? For the exchange component, probably just text output — we'd need to filter out tool-use blocks and system messages from the captured pane content.
 
 Want me to implement this?
+
+### Re: Option A + /loop
+
+`/loop` runs a command on a recurring interval (e.g., `/loop 5m /agent-doc tasks/agent-doc.md`). It triggers **new skill cycles**, not partial flushes within a response. So it wouldn't help for mid-response streaming.
+
+But your instinct that Option A is simpler is correct. Here's why:
+
+**Option A refined — skill-level checkpoints:**
+The `/agent-doc` skill instructions tell Claude to flush partial output at natural breakpoints:
+
+1. Respond to first question → `agent-doc write --stream` → document updates
+2. Respond to second question → `agent-doc write --stream` → document updates  
+3. Final response → `agent-doc write --template` → complete write
+
+Each checkpoint is a separate `agent-doc write --stream` call. CRDT merge protects concurrent edits. No sidecar process, no tmux capture, no new commands.
+
+**Latency:** Depends on Claude's response structure. For a multi-section response like this one, you'd see updates after each `### Re:` section — maybe every 10-30s. Not line-level, but meaningful progress.
+
+**vs Option B trade-offs:**
+
+| | Option A (checkpoints) | Option B (stream-watch) |
+|---|---|---|
+| Latency | 10-30s (per section) | 200ms (per line) |
+| Complexity | Zero — skill instructions only | New module + tmux capture |
+| Tool access | Full | Full |
+| Infrastructure | None | Sidecar process |
+| Reliability | High (same write path) | Medium (pane parsing is fragile) |
+
+**Recommendation:** Start with Option A. It's zero code and gives meaningful progress updates. If the latency is unacceptable, upgrade to Option B later — the CRDT infrastructure supports both.
+
+Want me to update SKILL.md with checkpoint instructions?
 <!-- /agent:exchange -->

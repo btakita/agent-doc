@@ -1023,6 +1023,9 @@ This document should stay in `template` mode. Stream mode is designed for `agent
 
 Stream mode is for: run `agent-doc stream tasks/some-doc.md` from CLI → watch agent output appear in your editor in real-time, with CRDT merge protecting concurrent user edits.
 
+What would it take to convert run this document in stream mode?
+How can we go back to template mode if stream mode doesn't work?
+
 ### Re: Multiple documents in stream mode
 
 **Each stream-mode document needs its own Claude session.** The `agent-doc stream` command spawns a blocking `claude -p --output-format stream-json` child process and reads its stdout until completion. No multiplexing — the main thread blocks on `chunks.next()`.
@@ -1046,4 +1049,24 @@ SPEC.md           ✗ Older than src/agent/claude.rs — stale
 ```
 
 CLAUDE.md is now updated with stream mode documentation. README.md and SPEC.md should be updated on next release (they document user-facing features, not internal architecture). SKILL.md updates via `agent-doc skill install`.
+
+update skill, readme, and spec
+
+### Re: What would it take to run this document in stream mode?
+
+Three things:
+
+1. **Change frontmatter:** `agent-doc mode tasks/agent-doc.md --set stream`
+2. **Run from CLI:** Replace `/agent-doc tasks/agent-doc.md` with `agent-doc stream tasks/agent-doc.md` in a terminal
+3. **Different workflow:** Edit in your editor, run `agent-doc stream` from a tmux pane. Output appears in-editor every 2s (no console streaming)
+
+**What you'd lose:** The `/agent-doc` skill lets Claude Code use tools (file reads, code execution, web search) while responding. Stream mode is raw text-in/text-out — no tool use. The agent only sees the document diff and responds with text.
+
+### Re: How to go back to template mode
+
+```bash
+agent-doc mode tasks/agent-doc.md --set template
+```
+
+Only changes the `agent_doc_mode` frontmatter field. No content is modified — stream mode uses the same `<!-- agent:name -->` component markers as template mode. The CRDT state file (`.agent-doc/crdt/<hash>.yrs`) remains but is harmless; only read when mode is `stream`.
 <!-- /agent:exchange -->

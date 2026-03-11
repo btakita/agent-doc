@@ -7,9 +7,12 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::{config::Config, sessions, submit};
+use crate::{config::Config, frontmatter, sessions, stream, submit};
 
 const PID_FILE: &str = ".agent-doc/watch.pid";
+
+/// Default idle timeout before daemon auto-exits (seconds).
+const IDLE_TIMEOUT_SECS: u64 = 60;
 
 /// Configuration for the watch daemon.
 pub struct WatchConfig {
@@ -17,7 +20,7 @@ pub struct WatchConfig {
     pub max_cycles: u32,
 }
 
-/// Per-file state for loop prevention.
+/// Per-file state for loop prevention (file-watch mode).
 struct FileState {
     last_submit: Option<Instant>,
     cycle_count: u32,
@@ -32,6 +35,30 @@ impl FileState {
             last_hash: None,
         }
     }
+}
+
+/// Per-file state for stream-mode capture polling.
+struct StreamState {
+    pane: String,
+    last_capture: String,
+    target: String,
+}
+
+/// Entry discovered from sessions registry with mode info.
+struct WatchEntry {
+    path: PathBuf,
+    pane: String,
+    mode: DocMode,
+    target: String,
+}
+
+/// Document mode determines how the watch daemon handles the file.
+#[derive(Debug, PartialEq)]
+enum DocMode {
+    /// append/template — use notify-based file watching, submit on change
+    FileWatch,
+    /// stream — poll tmux pane, flush new output to document
+    StreamCapture,
 }
 
 /// Hash file content for convergence detection.
@@ -68,16 +95,56 @@ fn remove_pid() {
     let _ = std::fs::remove_file(PID_FILE);
 }
 
+/// Check if the watch daemon is currently running.
+pub fn is_running() -> bool {
+    read_pid().is_some_and(pid_alive)
+}
+
+/// Ensure the watch daemon is running. If not, spawn it in the background.
+///
+/// Called from claim/pre-flight to implement lazy start.
+/// Returns Ok(true) if daemon was started, Ok(false) if already running.
+pub fn ensure_running() -> Result<bool> {
+    if is_running() {
+        return Ok(false);
+    }
+
+    // Spawn daemon in background via the agent-doc binary
+    let exe = std::env::current_exe().context("failed to resolve agent-doc binary path")?;
+    std::process::Command::new(exe)
+        .arg("watch")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("failed to spawn watch daemon")?;
+
+    // Wait briefly for daemon to write PID file
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(50));
+        if is_running() {
+            return Ok(true);
+        }
+    }
+
+    // Best-effort: daemon may still be starting
+    Ok(true)
+}
+
 /// Start the watch daemon.
 ///
 /// Watches files registered in sessions.json for changes. On file change
 /// (after debounce), runs `submit::run()` on the changed file.
+/// For stream-mode documents, polls tmux panes and flushes new output.
 ///
 /// Loop prevention:
 /// - Changes within the debounce window after a submit are treated as agent-triggered.
 /// - Agent-triggered changes increment a cycle counter.
 /// - If content hash matches previous submit, stop (convergence).
 /// - Hard cap at `max_cycles` agent-triggered cycles per file.
+///
+/// Idle timeout:
+/// - If no active sessions remain for 60s, daemon auto-exits.
 pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
     // Check if already running
     if let Some(pid) = read_pid() {
@@ -109,11 +176,7 @@ pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
 
 /// Simple signal handler registration (best-effort).
 fn ctrlc_handler<F: Fn() + Send + 'static>(f: F) {
-    // Use a thread that waits for SIGTERM/SIGINT via a basic mechanism.
-    // For simplicity, we just set the flag — the recv_timeout loop will pick it up.
     std::thread::spawn(move || {
-        // Block on signal — this is a simplified approach.
-        // The main loop checks `running` flag periodically via recv_timeout.
         signal_wait();
         f();
     });
@@ -121,8 +184,6 @@ fn ctrlc_handler<F: Fn() + Send + 'static>(f: F) {
 
 /// Wait for SIGTERM or SIGINT (Linux-specific, best-effort).
 fn signal_wait() {
-    // We rely on the main loop's PID file check and recv_timeout for shutdown.
-    // This thread just sleeps forever — the process exits when main returns.
     loop {
         std::thread::sleep(Duration::from_secs(3600));
     }
@@ -135,6 +196,7 @@ fn run_event_loop(
     running: &std::sync::atomic::AtomicBool,
 ) -> Result<()> {
     let debounce = Duration::from_millis(watch_config.debounce_ms);
+    let idle_timeout = Duration::from_secs(IDLE_TIMEOUT_SECS);
     let (tx, rx) = mpsc::channel();
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -144,23 +206,51 @@ fn run_event_loop(
     })
     .context("failed to create file watcher")?;
 
-    // Discover files to watch from sessions registry
-    let mut watched_files = discover_files()?;
-    for path in &watched_files {
-        if let Err(e) = watcher.watch(path, RecursiveMode::NonRecursive) {
-            eprintln!("Warning: could not watch {}: {}", path.display(), e);
+    // Discover files from sessions registry (with mode detection)
+    let entries = discover_entries()?;
+    let mut watched_files: Vec<PathBuf> = Vec::new();
+    let mut stream_states: HashMap<PathBuf, StreamState> = HashMap::new();
+
+    for entry in &entries {
+        match entry.mode {
+            DocMode::FileWatch => {
+                if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                    eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
+                } else {
+                    watched_files.push(entry.path.clone());
+                }
+            }
+            DocMode::StreamCapture => {
+                stream_states.insert(
+                    entry.path.clone(),
+                    StreamState {
+                        pane: entry.pane.clone(),
+                        last_capture: String::new(),
+                        target: entry.target.clone(),
+                    },
+                );
+            }
         }
     }
 
-    if watched_files.is_empty() {
+    let file_count = watched_files.len();
+    let stream_count = stream_states.len();
+
+    if file_count == 0 && stream_count == 0 {
         eprintln!("No session files found. Watching for new sessions...");
     } else {
-        eprintln!("Watching {} file(s)", watched_files.len());
+        eprintln!(
+            "Watching {} file(s), {} stream(s)",
+            file_count, stream_count
+        );
     }
 
     let mut states: HashMap<PathBuf, FileState> = HashMap::new();
     let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
     let mut last_rescan = Instant::now();
+    let mut idle_since: Option<Instant> = None;
+
+    let tmux = sessions::Tmux::default_server();
 
     while running.load(std::sync::atomic::Ordering::Relaxed) {
         // Check PID file still exists (external stop)
@@ -169,23 +259,104 @@ fn run_event_loop(
             break;
         }
 
+        // Idle timeout: exit if no active sessions for IDLE_TIMEOUT_SECS
+        let has_active = !watched_files.is_empty() || !stream_states.is_empty();
+        if has_active {
+            idle_since = None;
+        } else {
+            let idle_start = *idle_since.get_or_insert_with(Instant::now);
+            if Instant::now().duration_since(idle_start) >= idle_timeout {
+                eprintln!("No active sessions for {}s — shutting down.", IDLE_TIMEOUT_SECS);
+                break;
+            }
+        }
+
         // Rescan for new files periodically (every 10s)
         if last_rescan.elapsed() > Duration::from_secs(10) {
-            let new_files = discover_files().unwrap_or_default();
-            for path in &new_files {
-                if !watched_files.contains(path) {
-                    if let Err(e) = watcher.watch(path, RecursiveMode::NonRecursive) {
-                        eprintln!("Warning: could not watch {}: {}", path.display(), e);
-                    } else {
-                        eprintln!("Now watching {}", path.display());
-                        watched_files.push(path.clone());
+            let new_entries = discover_entries().unwrap_or_default();
+            for entry in &new_entries {
+                match entry.mode {
+                    DocMode::FileWatch => {
+                        if !watched_files.contains(&entry.path) {
+                            if let Err(e) =
+                                watcher.watch(&entry.path, RecursiveMode::NonRecursive)
+                            {
+                                eprintln!(
+                                    "Warning: could not watch {}: {}",
+                                    entry.path.display(),
+                                    e
+                                );
+                            } else {
+                                eprintln!("Now watching {}", entry.path.display());
+                                watched_files.push(entry.path.clone());
+                            }
+                        }
+                    }
+                    DocMode::StreamCapture => {
+                        if !stream_states.contains_key(&entry.path) {
+                            eprintln!("Now streaming {}", entry.path.display());
+                            stream_states.insert(
+                                entry.path.clone(),
+                                StreamState {
+                                    pane: entry.pane.clone(),
+                                    last_capture: String::new(),
+                                    target: entry.target.clone(),
+                                },
+                            );
+                        }
                     }
                 }
             }
+
+            // Prune dead stream entries (pane no longer alive)
+            let dead_streams: Vec<PathBuf> = stream_states
+                .iter()
+                .filter(|(_, ss)| !tmux.pane_alive(&ss.pane))
+                .map(|(p, _)| p.clone())
+                .collect();
+            for path in dead_streams {
+                eprintln!("Stream pane dead for {} — removing", path.display());
+                stream_states.remove(&path);
+            }
+
             last_rescan = Instant::now();
         }
 
-        // Receive events with timeout
+        // Poll stream-mode documents (tmux capture)
+        for (path, ss) in &mut stream_states {
+            match sessions::capture_pane(&tmux, &ss.pane) {
+                Ok(captured) => {
+                    if captured != ss.last_capture {
+                        // Extract new lines since last capture
+                        let new_content = extract_new_lines(&ss.last_capture, &captured);
+                        if !new_content.is_empty() {
+                            match stream::flush_to_document(path, &new_content, &ss.target, "") {
+                                Ok(()) => {
+                                    eprint!(".");
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[watch-stream] flush error for {}: {}",
+                                        path.display(),
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        ss.last_capture = captured;
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[watch-stream] capture error for {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
+        }
+
+        // Receive file-change events with timeout
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(event) => {
                 if matches!(
@@ -206,7 +377,7 @@ fn run_event_loop(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        // Process debounced events
+        // Process debounced file-change events
         let now = Instant::now();
         let ready: Vec<PathBuf> = pending
             .iter()
@@ -268,17 +439,80 @@ fn run_event_loop(
     Ok(())
 }
 
-/// Discover files to watch from the sessions registry.
-fn discover_files() -> Result<Vec<PathBuf>> {
+/// Discover files from sessions registry with mode detection.
+///
+/// Reads each document's frontmatter to determine whether it's
+/// file-watched (append/template) or stream-captured (stream mode).
+fn discover_entries() -> Result<Vec<WatchEntry>> {
     let registry = sessions::load()?;
-    let mut files = Vec::new();
+    let mut entries = Vec::new();
     for entry in registry.values() {
         let path = PathBuf::from(&entry.file);
-        if path.exists() {
-            files.push(path.canonicalize().unwrap_or(path));
+        if !path.exists() {
+            continue;
         }
+        let canonical = path.canonicalize().unwrap_or(path);
+
+        // Detect mode from frontmatter
+        let (mode, target) = match std::fs::read_to_string(&canonical) {
+            Ok(content) => match frontmatter::parse(&content) {
+                Ok((fm, _)) => {
+                    if fm.mode.as_deref() == Some("stream") {
+                        let target = fm
+                            .stream_config
+                            .as_ref()
+                            .and_then(|sc| sc.target.clone())
+                            .unwrap_or_else(|| "exchange".to_string());
+                        (DocMode::StreamCapture, target)
+                    } else {
+                        (DocMode::FileWatch, String::new())
+                    }
+                }
+                Err(_) => (DocMode::FileWatch, String::new()),
+            },
+            Err(_) => (DocMode::FileWatch, String::new()),
+        };
+
+        entries.push(WatchEntry {
+            path: canonical,
+            pane: entry.pane.clone(),
+            mode,
+            target,
+        });
     }
-    Ok(files)
+    Ok(entries)
+}
+
+/// Discover only file paths (backward-compat wrapper used by tests).
+#[cfg(test)]
+fn discover_files() -> Result<Vec<PathBuf>> {
+    Ok(discover_entries()?
+        .into_iter()
+        .map(|e| e.path)
+        .collect())
+}
+
+/// Extract new lines from a pane capture by diffing against the previous capture.
+///
+/// Compares line-by-line: finds the first divergence point and returns
+/// all lines from that point onward in the new capture.
+fn extract_new_lines(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    // Find the first line that differs
+    let common_prefix = old_lines
+        .iter()
+        .zip(new_lines.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Everything after the common prefix in the new capture is new content
+    if common_prefix < new_lines.len() {
+        new_lines[common_prefix..].join("\n")
+    } else {
+        String::new()
+    }
 }
 
 /// Stop the watch daemon by removing the PID file.
@@ -290,7 +524,10 @@ pub fn stop() -> Result<()> {
                 eprintln!("Signaled watch daemon (PID {}) to stop.", pid);
             } else {
                 remove_pid();
-                eprintln!("Watch daemon (PID {}) was not running. Cleaned up PID file.", pid);
+                eprintln!(
+                    "Watch daemon (PID {}) was not running. Cleaned up PID file.",
+                    pid
+                );
             }
         }
         None => {
@@ -343,7 +580,6 @@ mod tests {
 
     #[test]
     fn pid_alive_nonexistent() {
-        // PID 4294967295 is very unlikely to exist
         assert!(!pid_alive(4_294_967_295));
     }
 
@@ -394,8 +630,74 @@ mod tests {
     fn convergence_detection() {
         let mut state = FileState::new();
         state.last_hash = Some(42);
-        // Same hash = converged
         assert_eq!(state.last_hash, Some(42));
+    }
+
+    #[test]
+    fn extract_new_lines_appended() {
+        let old = "line 1\nline 2\nline 3";
+        let new = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let result = extract_new_lines(old, new);
+        assert_eq!(result, "line 4\nline 5");
+    }
+
+    #[test]
+    fn extract_new_lines_modified() {
+        let old = "line 1\nline 2\nline 3";
+        let new = "line 1\nchanged\nline 3\nline 4";
+        let result = extract_new_lines(old, new);
+        // Diverges at line 2; returns from there onward
+        assert_eq!(result, "changed\nline 3\nline 4");
+    }
+
+    #[test]
+    fn extract_new_lines_identical() {
+        let old = "line 1\nline 2";
+        let new = "line 1\nline 2";
+        let result = extract_new_lines(old, new);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn extract_new_lines_empty_old() {
+        let old = "";
+        let new = "line 1\nline 2";
+        let result = extract_new_lines(old, new);
+        assert_eq!(result, "line 1\nline 2");
+    }
+
+    #[test]
+    fn extract_new_lines_empty_new() {
+        let old = "line 1\nline 2";
+        let new = "";
+        let result = extract_new_lines(old, new);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn stream_state_tracks_capture() {
+        let mut ss = StreamState {
+            pane: "%42".to_string(),
+            last_capture: String::new(),
+            target: "exchange".to_string(),
+        };
+        let capture = "claude output line 1\nclaude output line 2".to_string();
+        let new_content = extract_new_lines(&ss.last_capture, &capture);
+        assert_eq!(new_content, "claude output line 1\nclaude output line 2");
+        ss.last_capture = capture;
+
+        // Second capture with more lines
+        let capture2 = "claude output line 1\nclaude output line 2\nclaude output line 3".to_string();
+        let new_content2 = extract_new_lines(&ss.last_capture, &capture2);
+        assert_eq!(new_content2, "claude output line 3");
+        ss.last_capture = capture2;
+    }
+
+    #[test]
+    fn doc_mode_eq() {
+        assert_eq!(DocMode::FileWatch, DocMode::FileWatch);
+        assert_eq!(DocMode::StreamCapture, DocMode::StreamCapture);
+        assert_ne!(DocMode::FileWatch, DocMode::StreamCapture);
     }
 
     #[test]

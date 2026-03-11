@@ -149,6 +149,13 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         &session_id[..8]
     );
 
+    // Lazy-start watch daemon if not running
+    match crate::watch::ensure_running() {
+        Ok(true) => eprintln!("Watch daemon started."),
+        Ok(false) => {} // already running
+        Err(e) => eprintln!("warning: could not start watch daemon: {}", e),
+    }
+
     Ok(())
 }
 

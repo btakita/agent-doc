@@ -231,11 +231,11 @@ fn stream_loop(
     Ok(StreamResult { session_id })
 }
 
-/// Flush accumulated text to the document via CRDT merge.
+/// Flush accumulated text to the document via template patch.
 ///
 /// Wraps the text in a patch block targeting the specified component,
-/// applies template patches, and uses CRDT merge for conflict-free writes.
-fn flush_to_document(
+/// applies template patches, and uses advisory locking for safe writes.
+pub(crate) fn flush_to_document(
     file: &Path,
     text: &str,
     target: &str,

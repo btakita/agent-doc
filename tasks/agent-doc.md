@@ -1296,4 +1296,23 @@ agent-doc plugin install jetbrains
 It will show a numbered list of your JetBrains IDEs (you have 8+) and ask you to pick one. Select IntelliJ IDEA 2025.3.
 
 **Note:** I already installed the updated plugin directly to your IntelliJ IDEA 2025.3 in the previous cycle. Just **restart IntelliJ** and the PlainPrefixMatcher fix will be active. The `agent-doc plugin install` command does the same thing — downloads the zip from the GitHub Release and extracts it to the IDE's plugins directory.
+
+I install plugin and restarted. Still only showing /foff and /fon.
+### Debugging autocomplete — Gson removed
+
+The root cause was likely a **ClassNotFoundException for Gson at runtime**. The plugin imported `com.google.gson.Gson` which is available at compile time (IntelliJ SDK), but may not be accessible in the plugin's classloader at runtime depending on IntelliJ version and module boundaries.
+
+**Fix (commit 908b743):**
+- Removed Gson dependency entirely
+- Replaced with a manual JSON parser (the `agent-doc commands` output format is simple `[{"name":"...","args":"...","description":"..."}]`)
+- Added diagnostic logging — enable via `Help → Diagnostic Tools → Debug Log Settings` → add `#com.github.btakita.agentdoc`
+
+**Plugin rebuilt and installed.** Restart IntelliJ and try again:
+1. Open any `.md` file
+2. Type `/` on a new line
+3. Press `Ctrl+Space`
+
+If still not working, check `Help → Show Log in Finder/Files` for lines containing `com.github.btakita.agentdoc` — the logs will show whether the contributor fires, whether `agent-doc` binary was found, and how many commands loaded.
+
+**Yes, you can also use `agent-doc plugin install jetbrains`** — it will prompt you to pick which IDE (you have 8+), then downloads the latest zip from GitHub Release.
 <!-- /agent:exchange -->

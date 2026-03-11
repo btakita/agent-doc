@@ -1,3 +1,10 @@
+//! `agent-doc convert` — Bidirectional mode conversion between append and template.
+//!
+//! Usage: agent-doc convert <FILE> [MODE]
+//!
+//! - Append → Template: wraps content from first `## User` in `<!-- agent:exchange -->` markers
+//! - Template → Append: strips component markers and `## Exchange` headings, preserving content
+
 use anyhow::{Context, Result};
 use std::path::Path;
 

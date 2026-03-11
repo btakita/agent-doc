@@ -5,7 +5,10 @@
 //! 1. Reads session UUID from file's frontmatter
 //! 2. Looks up pane in sessions.json
 //! 3. If pane alive: sends `/agent-doc <path>` via tmux send-keys
-//! 4. If dead/missing: auto-starts a new Claude session
+//! 4. If dead/missing: lazy-claims to an active pane, syncs layout, and sends command
+//! 5. If no registered/active pane: auto-starts a new Claude session
+//!
+//! After lazy claim, automatically syncs tmux layout via `sync_after_claim()`.
 
 use anyhow::{Context, Result};
 use std::path::Path;

@@ -138,6 +138,18 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 /// Returns the modified document. Unmatched content (outside patch blocks)
 /// is appended to `<!-- agent:output -->` if it exists, or creates one at the end.
 pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &Path) -> Result<String> {
+    apply_patches_with_overrides(doc, patches, unmatched, file, &std::collections::HashMap::new())
+}
+
+/// Apply patches with per-component mode overrides (e.g., stream mode forces "replace"
+/// for cumulative buffers even on append-mode components like exchange).
+pub fn apply_patches_with_overrides(
+    doc: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+    file: &Path,
+    mode_overrides: &std::collections::HashMap<String, String>,
+) -> Result<String> {
     let mut result = doc.to_string();
 
     // Apply patches in reverse order (by position) to preserve byte offsets
@@ -175,7 +187,11 @@ pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &
 
     for (idx, patch) in &ops {
         let comp = &components[*idx];
-        let mode = configs.get(&patch.name).map(|s| s.as_str()).unwrap_or_else(|| default_mode(&patch.name));
+        // Mode overrides take precedence over config and defaults
+        let mode = mode_overrides.get(&patch.name)
+            .map(|s| s.as_str())
+            .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
+            .unwrap_or_else(|| default_mode(&patch.name));
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
         result = comp.replace_content(&result, &new_content);
     }

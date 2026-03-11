@@ -599,4 +599,28 @@ Show: `cargo install agent-doc`
 4. The green git gutter showing what the AI wrote
 
 I havn't yet had a screencast of agent-doc. I want to show 2 documents being edited and run simultaneously. I also want to show switching between documents for each pane. Please add a demo directory with the different agent docs.
+
+See tasks/agen
+### Demo directory created
+
+Created `demo/` with 3 files:
+
+- **`crdt-demo-a.md`** — Stream-mode doc: "Explain CRDTs in 3 bullet points"
+- **`crdt-demo-b.md`** — Stream-mode doc: haiku about concurrent editing
+- **`README.md`** — Full screencast script (6 scenes, ~2:45)
+
+**Scenes:**
+1. Two panes, two documents streaming simultaneously
+2. Concurrent streaming — both receiving responses at once
+3. Edit while streaming — CRDT merge in action (money shot)
+4. Pane switching with `agent-doc claim` + `agent-doc focus`
+5. The snapshot system — independent baselines per document
+6. Closing — both documents intact, zero conflicts
+
+**To run:** `agent-doc stream demo/crdt-demo-a.md` and `agent-doc stream demo/crdt-demo-b.md` in separate tmux panes.
+
+I havn't yet had a screencast of agent-doc. I want to show 2 documents being edited and run simultaneously. I also want to show switching between documents for each pane. Please add a demo directory with the different agent docs.
+
+See tasks/agent-doc.md for latest release info.
+Let's also add the reference to another doc that I just did in this session.
 <!-- /agent:exchange -->

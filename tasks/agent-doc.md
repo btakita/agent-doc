@@ -1393,4 +1393,22 @@ Created `tasks/stream-test.md` with:
 5. Document updates in editor as console output streams
 
 For a cleaner test, try `agent-doc stream tasks/stream-test.md` (CLI command — spawns own Claude process, no tools, but cleaner output).
+
+I don't see any updates to tasks/stream-test.md yet. But the claude session is processing and has output stream to it's stdout.
+### Re: Stream-test not updating in real-time
+
+The Claude session in pane %72 DID respond (the document has the response now), but it was written via the `/agent-doc` skill's normal write-back — not via the watch daemon streaming.
+
+**Root cause:** Two issues:
+1. **Binary not installed:** When you ran `agent-doc claim`, the binary didn't have the `ensure_running()` lazy-start code yet. The daemon never auto-started.
+2. **CWD issue:** When I manually started the daemon with `agent-doc watch &`, it ran in the `src/agent-doc/` submodule directory — couldn't find `.agent-doc/sessions.json`.
+
+**Fixed:** Binary now installed with latest code. For next test:
+```bash
+cd /home/brian/work/btakita/agent-loop
+agent-doc watch &    # must start from project root
+```
+Or re-claim the document — `agent-doc claim tasks/stream-test.md` now auto-starts the daemon.
+
+**Note:** The watch daemon's `ensure_running()` spawns the binary, but it needs to run from the project root (where `.agent-doc/` lives). This is a bug to fix — the daemon should resolve the project root before starting the event loop.
 <!-- /agent:exchange -->

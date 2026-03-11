@@ -427,4 +427,50 @@ Add to Email Timeline section:
 ### Onboarding Email (2026-03-11)
 - **Draft:** `mail/drafts/20260311-judith-onboarding.md` → status: `sent`
 - Onboarding next steps: TMO signup, domain access, branding assets, call scheduling. CC'd Robert Waldman.
+
+What is the agenda for the Zoom call?
+
+**Zoom Call Agenda — Judith + Brian + Robert Waldman (~45-60 min)**
+
+**1. Welcome & Confirm Scope (5 min)**
+- Quick recap: MA cancelled, TMO + custom tools is the plan
+- Confirm the two-milestone payment structure ($4K + $4K)
+- Set expectations: what gets delivered at each milestone
+
+**2. TMO Signup (10 min)**
+- Walk through TMO signup if not already done
+- Discuss TMO seat needs (2 included, $400/mo per extra)
+- Request API/developer portal access for integration work later
+
+**3. Workflow Discovery (15 min)**
+- How does a loan flow through the office today? (inquiry → docs → funding → close)
+- What's the most painful/manual part?
+- Staff roles — who touches what?
+- Current document collection process (how do borrowers/investors submit docs today?)
+
+**4. Document Types Inventory (5 min)**
+- List all document types collected: loan apps (short/long form), bank statements, tax returns, construction budgets, company financials, title reports, appraisals
+- Which are most common? Which cause the most re-requests?
+
+**5. Cloudflare Account Setup (5 min)**
+- Create Cloudflare account in Judith's name
+- Add Brian as admin member
+- Point domain nameservers (existing site stays live until cutover)
+
+**6. Website Requirements (5 min)**
+- Domain access — Weebly login or need to crawl existing site?
+- Keep current design or fresh redesign?
+- Key pages: borrower-facing, broker section, investor portal
+- Branding assets: logo, photos, color/font preferences
+
+**7. Notification Preferences (5 min)**
+- What reminders does she want automated?
+- Document chasing frequency (daily, every other day, weekly?)
+- Who receives notifications — Judith only, or staff too?
+
+**8. Next Steps & Timeline (5 min)**
+- Confirm start date for Phase 1
+- First milestone payment ($4K)
+- Brian begins website migration immediately after call
+- Schedule check-in for Phase 1 demo (~2 weeks out)
 <!-- /agent:exchange -->

@@ -1062,6 +1062,10 @@ Three things:
 
 **What you'd lose:** The `/agent-doc` skill lets Claude Code use tools (file reads, code execution, web search) while responding. Stream mode is raw text-in/text-out — no tool use. The agent only sees the document diff and responds with text.
 
+How do we keep tool use? I want the streamed document to pair with the claude code console.
+Is it not implemented this way?
+The transition of template to/from stream mode should be seamless.
+
 ### Re: How to go back to template mode
 
 ```bash
@@ -1069,4 +1073,30 @@ agent-doc mode tasks/agent-doc.md --set template
 ```
 
 Only changes the `agent_doc_mode` frontmatter field. No content is modified — stream mode uses the same `<!-- agent:name -->` component markers as template mode. The CRDT state file (`.agent-doc/crdt/<hash>.yrs`) remains but is harmless; only read when mode is `stream`.
+
+### Re: How do we keep tool use?
+
+You're right to push on this — the current `agent-doc stream` spawns a **separate** `claude -p` process (no tools). That's not what you want.
+
+What you want already exists in embryonic form: the **`/agent-doc` skill workflow** (this conversation) runs inside Claude Code with full tool access AND writes to the document. The gap is that it writes the complete response **at the end** rather than streaming incrementally.
+
+**Two approaches to get streamed-document + tool-use:**
+
+**Option A: Skill-level streaming (no code change)**
+Update SKILL.md to periodically flush partial output during step 3 (Respond):
+1. Respond in console as now
+2. Every ~30s or at natural breakpoints, pipe accumulated output through `agent-doc write --stream`
+3. CRDT merge handles concurrent user edits
+4. Final flush at end
+
+This works today — `agent-doc write --stream` already exists. The skill just needs instructions to do periodic checkpoints.
+
+**Option B: Watch-based hybrid**
+1. `/agent-doc` skill responds normally (console + tools)
+2. A separate `agent-doc watch` instance monitors the Claude Code session's output
+3. Captures partial output and writes to document periodically
+
+Option A is simpler and immediately actionable. The Phase 4 `agent-doc stream` command remains useful for headless/batch use cases where tool access isn't needed.
+
+**Bottom line:** Stream mode and `/agent-doc` skill mode serve different use cases. For tool-use + streaming, Option A (skill-level write checkpoints) is the path forward.
 <!-- /agent:exchange -->

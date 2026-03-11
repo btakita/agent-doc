@@ -288,4 +288,51 @@ Published to all targets:
 - Auto-sync tmux layout after lazy claim in `route` (CLI-side, works from any editor)
 - JetBrains autocomplete: removed Gson dependency, PlainPrefixMatcher for markdown
 - Clippy fixes (enum_variant_names, vec_init_then_push)
+
+`/agent-doc convert` should support converting to template or append mode. So allow the agent_doc_mode as another argument. Make sure that the allowed agent_doc_mode values are an enum.
+
+`/agent-doc run` with autoclaim is still not activating the claiming tmux pane. I thought we just released a "fix" that forced the equivalsent of "Sync Tmux Layout" whenever an autoclaim occurs. Please add functional tests to verify bug.
+
+I looked in the docs of autoclaim.rs
+> Designed for use in a `.claude/hooks.json` SessionStart hook:
+
+I thought that autoclaim can also occur when `/agent-doc run` is called on a file with a stale claim.
+### `convert` bidirectional mode — implemented
+
+`agent-doc convert` now accepts an optional target mode argument as a `clap::ValueEnum` enum:
+
+```
+agent-doc convert <FILE> [MODE]   # MODE: append | template (default: template)
+```
+
+**Changes:**
+- Added `AgentDocMode` enum (`Append`, `Template`) with `ValueEnum` derive in `main.rs`
+- `convert::run()` now dispatches to `convert_to_template()` or `convert_to_append()` based on target
+- `template_to_append_body()` strips all `<!-- agent:name -->` / `<!-- /agent:name -->` markers and `## Exchange` headings, preserving content
+- Added 4 new tests: `convert_to_append_strips_markers`, `convert_to_append_rejects_already_append`, `convert_roundtrip_append_to_template_to_append`, `template_to_append_preserves_non_exchange_content`
+- All 228 tests pass (207 unit + 21 integration)
+
+**Backward compatible:** Default is still `template`, so `agent-doc convert file.md` behaves the same as before.
+
+### Autoclaim sync investigation
+
+Now I understand the issue. Let me investigate the route/autoclaim sync flow to see why tmux layout isn't updating after autoclaim.
+### Autoclaim sync — fixed
+
+You're right that autoclaim should trigger a layout sync. The issue was:
+
+1. **`autoclaim`** (SessionStart hook) — only called `select_pane` to focus, never synced the layout
+2. **`route`** — has `sync_after_claim()` but only fires on lazy claim (dead/new pane). After compaction restart, autoclaim re-confirms the pane so route sees it alive and skips sync
+
+**Fix:** Added `sync_after_autoclaim()` to `autoclaim.rs` that mirrors `route::sync_after_claim()`:
+- Gets window ID from the claimed pane
+- Loads registry, finds all files with panes in the same window
+- Calls `sync::run_with_tmux()` (not `sync::run()` — uses the passed tmux reference for testability)
+- Skips sync for single-file windows (no layout to arrange)
+
+**Functional test added:** `autoclaim_syncs_layout_with_multiple_files` — creates an isolated tmux session with two panes in the same window, registers two files, runs autoclaim, and verifies both panes survive the sync.
+
+**Clarification on `agent-doc run`:** The `run` command (submit.rs) is the diff→send→write pipeline. It doesn't handle pane routing or claiming — that's `route`'s job. In the SKILL.md workflow, the plugin calls `route` which handles claiming, then Claude runs the skill which does diff/respond/write. `run` is a standalone CLI command for non-tmux use. If you want `run` to also claim/sync, that would be a separate feature.
+
+All 228 tests pass, clippy clean. Binary installed to `~/bin/agent-doc`.
 <!-- /agent:exchange -->

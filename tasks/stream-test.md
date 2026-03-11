@@ -482,4 +482,21 @@ tasks/agent-doc.md in template mode is having issues picking up changes. Please 
 **Binary rebuilt** and installed. Submodule committed + parent pointer updated.
 
 /agent-doc compact
+### Compact + audit results
+
+**`agent-doc compact`:** Not available for stream-mode documents (append-mode only). CRDT state was compacted (29076 bytes, already clean).
+
+To compact a stream-mode document, manually trim older exchange content. This document is 488 lines — want me to summarize old exchanges and keep recent ones?
+
+**`agent-doc audit-docs`:** 2 real warnings in `src/agent-doc/CLAUDE.md`:
+- Line 127-140: Large code block (module layout) — consider moving to README
+- Line 165-179: Large table (domain ontology) — consider moving to README
+
+Hundreds of false positives from `node_modules/bun-types/CLAUDE.md` and `target/package/` build artifacts. The audit should exclude these directories.
+
+/agent-doc compact
+
+/agent-doc audit-docs
+
+include the response in this file
 <!-- /agent:exchange -->

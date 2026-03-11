@@ -98,4 +98,17 @@ No code-level bugs or pending features blocking a release. If you want to publis
 | `rust-port` | #1 | Merged, deleted |
 
 **Result:** Corky now has only `main`. 19 stale branches removed (local + remote).
+
+Release the doc fix.
+
+**Released corky v0.14.1:**
+
+- Version bumped in Cargo.toml + pyproject.toml
+- 373 tests pass (195 unit + 178 integration)
+- Published to **crates.io**: `cargo install corky` now gets v0.14.1 with updated README
+- Tagged `v0.14.1` and pushed
+- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.14.1 (with prebuilt binary)
+- Parent submodule pointer updated → `ff5ed22`, pushed to `main`
+
+PyPI publish (`maturin publish`) skipped — only docs changed, no Python-facing changes. Let me know if you want that too.
 <!-- /agent:exchange -->

@@ -28,26 +28,37 @@ class SlashCommandCompletionContributor : CompletionContributor() {
                     context: ProcessingContext,
                     result: CompletionResultSet
                 ) {
+                    val file = parameters.originalFile.virtualFile ?: return
+                    // Only activate in markdown files
+                    if (!file.name.endsWith(".md")) return
+
                     val document = parameters.editor.document
                     val offset = parameters.offset
                     val lineNumber = document.getLineNumber(offset)
                     val lineStart = document.getLineStartOffset(lineNumber)
-                    val textBeforeCaret = document.getText(com.intellij.openapi.util.TextRange(lineStart, offset))
+                    val textBeforeCaret = document.getText(
+                        com.intellij.openapi.util.TextRange(lineStart, offset)
+                    )
 
                     // Only trigger on lines starting with `/`
                     val trimmed = textBeforeCaret.trimStart()
                     if (!trimmed.startsWith("/")) return
 
                     val commands = getCommands(parameters.editor.project ?: return)
-                    val prefix = trimmed
+                    if (commands.isEmpty()) return
+
+                    // Use the full slash-prefixed text as the prefix matcher
+                    // so IntelliJ correctly filters our results
+                    val slashResult = result.withPrefixMatcher(
+                        PlainPrefixMatcher(trimmed)
+                    )
 
                     for (cmd in commands) {
-                        if (!cmd.name.startsWith(prefix.substringBefore(" ").ifEmpty { "/" })) continue
                         val element = LookupElementBuilder.create(cmd.name)
                             .withTailText(" ${cmd.args}", true)
                             .withTypeText(cmd.description, true)
-                            .withBoldness(cmd.name.count { it == ' ' } == 0) // Bold top-level commands
-                        result.addElement(element)
+                            .withBoldness(cmd.name.count { it == ' ' } == 0)
+                        slashResult.addElement(element)
                     }
                 }
             }
@@ -63,7 +74,11 @@ class SlashCommandCompletionContributor : CompletionContributor() {
         fun getCommands(project: com.intellij.openapi.project.Project): List<CommandInfo> {
             cachedCommands?.let { return it }
 
-            val agentDoc = try { TerminalUtil.resolveAgentDoc() } catch (_: Exception) { return emptyList() }
+            val agentDoc = try {
+                TerminalUtil.resolveAgentDoc()
+            } catch (_: Exception) {
+                return emptyList()
+            }
 
             return try {
                 val process = ProcessBuilder(agentDoc, "commands")

@@ -522,4 +522,81 @@ There was no duplicate run. Here's the timeline:
 
 I want to make a blog post with a demo of the CRDT feature in agent-doc.
 Please write a draft blog post and help me script the video.
+
+agent-doc 0.15.0
+### Blog Post Draft + Video Script
+
+---
+
+**Blog Post: "Real-Time AI Document Collaboration with CRDT Merge"**
+
+**Hook:** What if you could edit a document while an AI writes to it — simultaneously, without merge conflicts, without losing a single character?
+
+**The Problem:** Traditional AI document tools have a turn-taking problem. You write, wait for the AI, then write again. If you edit during the AI's response, one of you loses work. 3-way merge helps but still produces conflicts during truly concurrent edits.
+
+**The Solution:** agent-doc uses CRDTs (Conflict-free Replicated Data Types) — the same technology behind Google Docs and Figma — to let you and an AI agent write to the same markdown file simultaneously. Every 200ms, the agent's output merges into your document without conflicts. Your cursor stays put. Your edits are preserved.
+
+**How it works:**
+1. You open a markdown file in your editor (IntelliJ, VS Code, vim — anything)
+2. You type a question or prompt in the document
+3. `agent-doc stream` detects the change, sends it to Claude, and streams the response back
+4. A CRDT merge runs every 200ms — reading the file, merging the agent's new text, writing atomically
+5. You see the response appear line-by-line in your editor. You can keep editing — no conflicts.
+
+**Under the hood:**
+- Each writer (you + the agent) has a unique CRDT client ID
+- Insertions are tracked at character-level with logical clocks
+- The merge is deterministic — same inputs always produce the same output
+- Atomic file writes (flock + tmpfile + rename) prevent partial reads
+
+**Why markdown?** It's the universal document format. No proprietary editor, no web app, no lock-in. Your files, your tools, your workflow.
+
+**Try it:** `cargo install agent-doc && agent-doc stream your-doc.md`
+
+---
+
+**Video Script (2-3 min demo)**
+
+**[0:00-0:15] Opening**
+Split screen: editor on left, terminal on right.
+"Watch this — I'm going to edit a document while an AI writes to it. At the same time. No conflicts."
+
+**[0:15-0:30] Setup**
+Show the markdown file with frontmatter (`agent_doc_mode: stream`).
+Terminal: `agent-doc stream tasks/demo.md`
+"agent-doc is now watching this file. When I type, it detects the change and sends it to Claude."
+
+**[0:30-1:00] The demo — concurrent editing**
+Type a question: "Explain how CRDT merge works in 3 bullet points"
+Watch the response stream in, line by line.
+**Key moment:** While the AI is still writing, start typing a NEW question below.
+Show the green git gutter growing as the AI writes.
+"See that? I'm typing while the AI is responding. No conflict. No waiting."
+
+**[1:00-1:30] Show the merge in action**
+Type something in the MIDDLE of the AI's response (add an inline annotation).
+The AI continues writing below — your edit stays intact.
+Terminal shows: `[write] CRDT merge successful — no conflicts possible.`
+"That log line is the key. The CRDT ensures both edits land."
+
+**[1:30-2:00] Explain the magic (brief)**
+Show the stream architecture diagram.
+"Every 200 milliseconds, agent-doc reads the file, applies the agent's new text via CRDT merge, and writes it back atomically. Your editor and the AI are both CRDT clients with unique IDs."
+
+**[2:00-2:20] The snapshot system**
+"After the response, agent-doc saves a snapshot — but only the agent's changes, not yours. So if you edited during the response, the next diff catches your edits. No work is ever lost."
+
+**[2:20-2:45] Closing**
+"agent-doc turns any markdown file into a live collaboration surface between you and an AI. Install it with cargo, point it at a file, and start typing."
+Show: `cargo install agent-doc`
+
+---
+
+**Key moments to capture on video:**
+1. The response streaming in real-time (line by line in the editor)
+2. Typing while the AI writes (the money shot)
+3. The `CRDT merge successful` log message
+4. The green git gutter showing what the AI wrote
+
+I havn't yet had a screencast of agent-doc. I want to show 2 documents being edited and run simultaneously. I also want to show switching between documents for each pane. Please add a demo directory with the different agent docs.
 <!-- /agent:exchange -->

@@ -401,4 +401,68 @@ It would be nice to delineate the last response. So please don't commit the last
 This gives you both: green gutter visibility to delineate the last response AND Esc protection (the previous response is already committed before the new cycle starts).
 
 commit and rebuild local binary
+### Committed and rebuilt
+
+**Submodule committed** (`src/agent-doc` @ `3abf323`):
+- Deferred commit workflow (step 0b)
+- Snapshot bug fix (save `content_ours` not `final_content`)
+- All write modes switched to CRDT
+- Default stream interval 200ms
+- `find_project_root` made pub
+- Regression test added
+
+**Binary rebuilt** — `~/.cargo/bin/agent-doc` updated with all changes.
+
+**Parent pointer updated** — `agent-loop` submodule ref now points to the new commit.
+
+tasks/agent-doc.md in template mode is having issues picking up changes. Please add tests and fix.
+
+```
+● No changes since last submit. The document is up to date.
+
+❯ /agent-doc tasks/agent-doc.md
+
+● Bash(agent-doc recover tasks/agent-doc.md 2>&1)
+  ⎿  [recover] No pending response found for tasks/agent-doc.md
+
+● Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/agent-doc.md 2>&1)
+  ⎿  On branch main
+     Your branch is ahead of 'origin/main' by 67 commits.
+       (use "git push" to publish your local commits)
+     … +15 lines (ctrl+o to expand)
+
+● Bash(agent-doc diff tasks/agent-doc.md 2>&1 | grep '^[+-]')
+  ⎿  No matches found
+
+● Bash(agent-doc diff tasks/agent-doc.md 2>&1)
+  ⎿  [snapshot] Git commit is newer than snapshot file, using git content
+     [diff] doc=tasks/agent-doc.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/6242da3f164239
+     7f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a.md doc_len=88670 snap_len=88670
+     … +3 lines (ctrl+o to expand)
+
+● No changes since last submit. The document is up to date — edit the document to continue the conversation.
+
+❯ /agent-doc tasks/agent-doc.md
+
+● Bash(agent-doc recover tasks/agent-doc.md 2>&1)
+  ⎿  [recover] No pending response found for tasks/agent-doc.md
+
+● Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/agent-doc.md 2>&1)
+  ⎿  [main 6e6f2c0] agent-doc(agent-doc): 2026-03-11 16:25:31
+      1 file changed, 4 insertions(+)
+
+● Bash(agent-doc diff tasks/agent-doc.md 2>&1)
+  ⎿  [snapshot] Git commit is newer than snapshot file, using git content
+     [diff] doc=tasks/agent-doc.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/6242da3f164239
+     7f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a.md doc_len=88728 snap_len=88728
+     … +3 lines (ctrl+o to expand)
+
+● No changes since last submit. Edit the document to continue.
+
+✻ Sautéed for 48s · 1 background task still running (↓ to manage)
+```
 <!-- /agent:exchange -->

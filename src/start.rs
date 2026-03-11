@@ -4,7 +4,11 @@
 //!
 //! 1. Reads file, ensures session UUID exists (generates if missing)
 //! 2. Registers session → current tmux pane in sessions.json
-//! 3. Execs `claude` (replaces this process)
+//! 3. Runs `claude` as a child process in a restart loop
+//!
+//! When Claude exits, the pane stays alive:
+//! - Context exhaustion or non-zero exit → auto-restart with `--continue`
+//! - Clean exit (code 0) → prompt user to restart or quit
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -42,20 +46,45 @@ pub fn run(file: &Path) -> Result<()> {
         pane_id
     );
 
-    // Exec claude (replaces this process)
-    eprintln!("Starting claude...");
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new("claude").exec();
-        // exec() only returns on error
-        Err(anyhow::anyhow!("failed to exec claude: {}", err))
+    // Run claude in a restart loop — pane never dies
+    let mut first_run = true;
+    loop {
+        let mut cmd = std::process::Command::new("claude");
+        if !first_run {
+            // After first run, continue the previous session
+            cmd.arg("--continue");
+            eprintln!("Restarting claude (--continue)...");
+        } else {
+            eprintln!("Starting claude...");
+        }
+
+        let status = cmd.status().context("failed to run claude")?;
+        first_run = false;
+
+        let code = status.code().unwrap_or(1);
+        if code == 0 {
+            // Clean exit — prompt user
+            eprintln!("\nClaude exited cleanly.");
+            eprintln!("Press Enter to restart, or 'q' to exit.");
+            let mut input = String::new();
+            if std::io::stdin().read_line(&mut input).is_err() {
+                break;
+            }
+            if input.trim().eq_ignore_ascii_case("q") {
+                break;
+            }
+            // User pressed Enter — restart fresh
+            first_run = true;
+        } else {
+            // Non-zero exit (context exhaustion, crash, etc.) — auto-restart
+            eprintln!(
+                "\nClaude exited with code {}. Auto-restarting in 2s...",
+                code
+            );
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
     }
-    #[cfg(not(unix))]
-    {
-        let status = std::process::Command::new("claude")
-            .status()
-            .context("failed to run claude")?;
-        std::process::exit(status.code().unwrap_or(1));
-    }
+
+    eprintln!("Session ended for {}", file.display());
+    Ok(())
 }

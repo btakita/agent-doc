@@ -49,6 +49,25 @@ Write here for new topics.
 Is my resume at risk of being flagged for fraud?
 See https://www.linkedin.com/posts/amberio_ashbyhiddengems-activity-7437501367537229825-IgB8?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAC0KQ4BlxIAK5Vbm7Gssr6SzIaiyNG0e68
 
+### Re: Resume fraud risk (Ashby post)
+
+**No — your resume is not at risk of being flagged for fraud.** The Ashby post is about detecting fraudulent *candidates* (fake identities, fabricated backgrounds), not flagging resumes that are well-crafted or AI-assisted.
+
+**Why you're safe:**
+1. **Everything is verifiable** — GitHub repos, published crates, live portfolio, real company histories
+2. **No fabricated credentials** — companies, titles, timelines consistent with LinkedIn/public records
+3. **Open source IS your proof** — thousands of commits across 15+ years = extremely high-trust signal
+4. **AI-assisted ≠ fraudulent** — using AI to refine structure/emphasis is standard practice
+
+**What actually triggers fraud flags (Ashby et al):**
+- Fake names / stolen identities
+- Fabricated employment at real companies
+- Impossible timelines (overlapping full-time roles)
+- Copy-pasted descriptions from job postings
+- No verifiable online presence
+
+**One note:** The phrase-bolding system could theoretically trigger keyword-stuffing detection in aggressive ATS systems — but since phrases map to real content already in the resume, it's emphasis, not stuffing.
+
 ### Resume Fraud Risk Assessment
 
 Re: [Ashby fraud detection post](https://www.linkedin.com/posts/amberio_ashbyhiddengems-activity-7437501367537229825-IgB8) — Ashby's ATS flags suspicious candidate profiles (identity/pattern-based, not AI writing detection).

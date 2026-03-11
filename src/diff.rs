@@ -458,4 +458,71 @@ Please fix the bug.\n\
             "inline edits after backtick-comment text must be detected"
         );
     }
+
+    // --- Snapshot-based diff detection after stream write ---
+
+    #[test]
+    fn diff_detects_user_edits_after_stream_write() {
+        // Simulates: stream write saves snapshot, user edits document,
+        // then diff::compute() should detect the user's changes.
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+
+        // Agent writes response — snapshot saved as baseline + response
+        let content_after_write = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nUser prompt\n\nAgent response\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content_after_write).unwrap();
+        snapshot::save(&doc, content_after_write).unwrap();
+
+        // User edits document (adds text in exchange)
+        let content_after_edit = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nUser prompt\n\nAgent response\n\nNew user edit here\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content_after_edit).unwrap();
+
+        // Diff should detect the user's new edit
+        let diff = compute(&doc).unwrap();
+        assert!(diff.is_some(), "diff should detect user edit after stream write");
+        let diff_text = diff.unwrap();
+        assert!(diff_text.contains("New user edit here"), "diff should contain user's new text: {}", diff_text);
+    }
+
+    #[test]
+    fn diff_no_change_when_document_matches_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nContent\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let diff = compute(&doc).unwrap();
+        assert!(diff.is_none(), "no diff when document matches snapshot");
+    }
+
+    #[test]
+    fn diff_detects_change_after_cumulative_stream_flushes() {
+        // Simulates: stream mode does multiple cumulative flushes,
+        // then user edits. Snapshot should reflect last flush state.
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+
+        // Snapshot saved after stream completes (baseline + full response)
+        let snapshot_content = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nFull agent response here\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        // User adds new text
+        let edited = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nFull agent response here\n\nRelease agent-doc\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, edited).unwrap();
+
+        let diff = compute(&doc).unwrap();
+        assert!(diff.is_some(), "diff should detect user's edit");
+        assert!(diff.unwrap().contains("Release agent-doc"));
+    }
 }

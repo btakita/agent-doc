@@ -1,7 +1,7 @@
 ---
 agent_doc_session: a953811a-bf72-4aa9-bbd6-5904a5a07a1d
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_mode: stream
 ---
 
 # LinkedIn
@@ -101,4 +101,12 @@ javascript:void(function(){const msgs=[];let currentDate='';document.querySelect
 - Slugifies the name for the filename: "Mia Tomeo" → `linkedin-mia-tomeo.txt`
 - Includes the contact name in the transcript header: `# LinkedIn Conversation with Mia Tomeo`
 Please remove the html bloat from the git history. I will have an external file next time.
+
+The export name was `linkedin-mia-tomeo-status-is-reachable-mobile-16m-ago.txt`
+It should be `linkedin-mia-tomeo.txt`
+Actually, it should be `yyyymmdd-linkedin-mia-tomeo.txt`
+
+Please update the bookmarklet to format the export file name as `yyyymmdd-linkedin-mia-tomeo.txt`
+
+Convert this doc to agent_doc_mode: stream
 <!-- /agent:exchange -->

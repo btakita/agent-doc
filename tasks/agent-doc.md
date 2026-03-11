@@ -607,9 +607,11 @@ Can't view the tweet image (X requires JavaScript for photos). Based on your que
 
 **Challenges:**
 - Merge conflicts from simultaneous user edits + agent writes (needs CRDT or OT, not 3-way merge)
-W
+What is OT? Compare CRDT vs OT
 - IDE file watcher throttling — rapid writes cause flicker
+Is there a TUI markdown editor that can mitigate the flicker issue?
 - ANSI escape sequences in terminal output aren't valid markdown
+We can convert to styles?
 
 **Pragmatic first step:** `agent-doc stream <FILE> -- claude` — wraps a Claude session, captures output in batches, patches the document periodically. Uses existing `agent-doc patch` infrastructure. Not true character-by-character, but close enough.
 
@@ -641,4 +643,30 @@ This is **Agent of Empires (AoE) style orchestration** — coordinator + worker 
 1. `agent-doc deep <FILE> --workers N` — fan-out to N worker agents (pending)
 2. `agent-doc status` — Ratatui TUI for all sessions (pending)
 3. `agent-doc stream` — bridge terminal output to document components (new)
+### OT vs CRDT
+
+**OT (Operational Transformation):** Original real-time collab algorithm (Google Docs). Each edit is an operation; server transforms concurrent ops against each other. Centralized — requires ordering server.
+
+**CRDT (Conflict-free Replicated Data Type):** Newer approach (Yjs, Automerge). Each character gets unique ID. Operations commute — any order converges. Decentralized, no server needed.
+
+| | OT | CRDT |
+|---|---|---|
+| Architecture | Centralized server | Decentralized/P2P |
+| Complexity | Transform functions tricky | Data structure complex, ops simple |
+| Memory | Low (just ops) | Higher (tombstones) |
+| Used by | Google Docs, Firepad | Yjs, Automerge, Figma |
+
+**For agent-doc:** CRDT fits better (no central server — file IS shared state). But for batch writes (every 2s), existing 3-way merge is sufficient. CRDTs only matter for character-by-character streaming.
+
+### TUI markdown editors
+
+- **glow** (Charm) — beautiful terminal markdown renderer (read-only)
+- **Helix** — modal editor, no flicker on file changes
+- **Ki Editor** — TUI editor with markdown preview, virtual terminal buffer
+
+**Better IDE fix:** Plugin applies patches via `Document.replaceString()` (IntelliJ) / `TextEditor.edit()` (VS Code) — only changed region repaints, no full-file reload flash. Plugin subscribes to socket/pipe from `agent-doc stream` for incremental edits.
+
+### ANSI → styles
+
+Yes — strip ANSI for markdown file, keep for TUI display. Claude Code output is mostly markdown already; ANSI codes are just terminal formatting. `strip-ansi-escapes` (Rust) strips cleanly. Pragmatic: strip on write to document, preserve in terminal view.
 <!-- /agent:exchange -->

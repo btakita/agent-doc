@@ -1046,4 +1046,21 @@ Please make sure you have tests.
 **Error visibility (committed `902b17e`, `ab5528f`):** All `let _ = tmux.select_pane()` and `let _ = tmux.join_pane()` call sites in claim.rs and route.rs now log warnings on failure. CLAUDE.md convention: "NEVER swallow errors — no `let _ =` on fallible operations."
 
 All 208 tests pass (204 unit + 4 resync).
+
+I don't want the entire tmux session to exit. The pane layout should remain intact. Please propose options for keeping the tmux session with the pane layout. Each pane having a running claude session.
+The issue is in `start.rs`: it uses `exec()` to replace the process with `claude`. When Claude exits (context exhaustion, `/exit`, crash), the pane's process is gone and tmux kills the pane.
+
+**Options for keeping panes alive:**
+
+**A. Shell wrapper (recommended):** Change `agent-doc start` to run claude as a child process (not `exec`). After exit, print status and wait: `"Claude exited. Press Enter to restart, or 'q' to exit."` Pane stays alive, user can restart or run commands.
+
+**B. tmux `remain-on-exit` + `respawn-pane`:** Set `remain-on-exit on` on auto-started panes. Dead panes stay visible. `resync` or user can `respawn-pane` to restart. Pure tmux solution but panes are inert until respawned.
+
+**C. Shell loop in send-keys:** Send `while true; do agent-doc start <file>; sleep 3; done` instead of bare `agent-doc start`. Simplest change but hard to break out of.
+
+**D. Hybrid (A + B):** Wrapper approach + `remain-on-exit` as safety net. If wrapper crashes, pane still persists.
+
+Recommendation: **Option A** — gives user control, keeps panes alive, no tmux config needed. Option D for belt-and-suspenders.
+
+Which option?
 <!-- /agent:exchange -->

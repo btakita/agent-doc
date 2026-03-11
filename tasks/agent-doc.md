@@ -1536,4 +1536,7 @@ Not true. This is a bug. please fix before releasing. Add tests
 Release tmux-router (if any changes).
 Release agent-doc
 
+Release tmux-router (if any changes).
+Release agent-doc
+
 <!-- /agent:exchange -->

@@ -73,4 +73,19 @@ gh api repos/btakita/resume/collaborators/LUCAS_GITHUB_USERNAME -X PUT -f permis
 - If you want to **test his PAT**, set it as `GH_TOKEN` and I can run API calls to verify its scopes
 
 What did you mean by "track it"? Store it somewhere, test it, or use it to configure his access?
+
+I have a PAT on my account that Lucas uses. Please either get the PAT from the api or instruct me on how to find the PAT
+
+**The GitHub API cannot retrieve PAT secret values after creation** — the secret is only shown once. You can manage your tokens in the web UI:
+
+- **Classic tokens:** https://github.com/settings/tokens
+- **Fine-grained tokens:** https://github.com/settings/tokens?type=beta
+
+Look for a token named for Lucas. If you can't find the secret, you'll need to **regenerate** it (creates a new value).
+
+**To ensure the PAT has write access to `btakita/resume`:**
+- **Classic PAT**: needs the `repo` scope
+- **Fine-grained PAT**: add `btakita/resume` to repository access with "Contents: Read and write" permission
+
+If you regenerate the token, paste it here and I can verify its access and scopes.
 <!-- /agent:exchange -->

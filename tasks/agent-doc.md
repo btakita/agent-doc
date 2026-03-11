@@ -1283,4 +1283,17 @@ The `/foff` and `/fon` results were IntelliJ's built-in live templates, not our 
 4. You should see all 74 agent-doc/Claude commands alongside the live templates
 
 The updated plugin zip is also on the GitHub Release (v0.14.5) for future installs via `agent-doc plugin install jetbrains`.
+
+Can I run agent-doc plugin install jetbrains?
+### Plugin install
+
+Yes — run it interactively in your terminal:
+
+```bash
+agent-doc plugin install jetbrains
+```
+
+It will show a numbered list of your JetBrains IDEs (you have 8+) and ask you to pick one. Select IntelliJ IDEA 2025.3.
+
+**Note:** I already installed the updated plugin directly to your IntelliJ IDEA 2025.3 in the previous cycle. Just **restart IntelliJ** and the PlainPrefixMatcher fix will be active. The `agent-doc plugin install` command does the same thing — downloads the zip from the GitHub Release and extracts it to the IDE's plugins directory.
 <!-- /agent:exchange -->

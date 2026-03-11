@@ -99,4 +99,22 @@ Found `LUCAS_PAT` in `agent-loop/.env`. Verified:
 - **Also found:** `CORRESPONDENCE_SHARED_LUCAS_PAT` (second token, likely for corky)
 
 **To add mailbox-lucas access:** Go to https://github.com/settings/tokens?type=beta, find the LUCAS_PAT token, edit it, and add `btakita/mailbox-lucas` to the repository access list.
+
+What permissions should I add for the allowed repositories?
+
+**Recommended fine-grained permissions for `btakita/resume` and `btakita/mailbox-lucas`:**
+
+| Permission | Level | Why |
+|---|---|---|
+| **Contents** | Read and write | Clone, pull, push commits |
+| **Metadata** | Read-only | Auto-granted, required |
+
+That's the minimum for corky's git workflow. Optional extras if needed later:
+
+| Permission | Level | Why |
+|---|---|---|
+| **Pull requests** | Read and write | Create/review PRs |
+| **Issues** | Read and write | File/comment on issues |
+
+**Start with just Contents: Read and write** — it covers clone/pull/push which is all Lucas needs for the recruiter email workflow.
 <!-- /agent:exchange -->

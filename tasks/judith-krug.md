@@ -328,12 +328,15 @@ Here's a quick rundown of what we'll need to kick things off. Nothing urgent, ju
 **Before we begin:**
 1. **Sign up for The Mortgage Office (TMO)** — You can start using it right away for loan management while I build the custom tools on top. Their team can walk you through setup.
 2. **Domain access** — I'll need the login for wherever equityfundingsource.com is managed (likely Weebly or your domain registrar). This lets me set up your new site on Cloudflare.
+If we cannot get the Weebly login, I can crawl the existing site and appropriate the design + content. We can also redesign the website & change the content.
 3. **Branding assets** — Your logo, any photos or content from the current site you want to keep. If you have a style preference (colors, fonts), let me know — otherwise I'll work from what's on the current site.
 
 **On our first call together (you, me, and Robert):**
 - Walk through your current workflow so I understand exactly how loans flow through your office
 - List out the document types you collect from borrowers and investors
 - Set up your Cloudflare account (takes 2 minutes) and point your domain to it
+The existing website will remain pointed to the existing host until the new site is ready.
+We will need the Cloudflare account to develop the new site.
 - Discuss notification preferences — what reminders would save you the most time?
 
 **How payment works:**
@@ -350,4 +353,50 @@ Brian
 ---
 
 Ready to save as a corky draft when you approve. Let me know if you want to adjust tone, add/remove anything, or change the payment framing.
+
+**Updated Onboarding Email Draft (v2)**
+
+Incorporated both inline notes:
+- Domain access is now "if you have it, great — if not, I'll work around it"
+- Cloudflare bullet now clarifies the existing site stays live during development
+- Removed the parenthetical about "likely Weebly" — she knows where her site is hosted
+
+**To:** judithkrug@gmail.com
+**CC:** rwaldman100@gmail.com
+**Subject:** Getting Started — Next Steps for Your New System
+**In-Reply-To:** (thread with proposal email)
+
+---
+
+Hi Judith,
+
+Great to hear you're moving forward — I'm excited to get started!
+
+Here's a quick rundown of what we'll need to kick things off. Nothing urgent, just so you know what's coming:
+
+**Before we begin:**
+1. **Sign up for The Mortgage Office (TMO)** — You can start using it right away for loan management while I build the custom tools on top. Their team can walk you through setup.
+2. **Domain access** — If you have the login for wherever equityfundingsource.com is managed, that's helpful. If not, no worries — I can work from the existing site's design and content, or we can do a fresh redesign if you'd prefer a new look.
+3. **Branding assets** — Your logo, any photos or content you want to keep. If you have a style preference (colors, fonts), let me know — otherwise I'll work from what's on the current site.
+
+**On our first call together (you, me, and Robert):**
+- Walk through your current workflow so I understand exactly how loans flow through your office
+- List out the document types you collect from borrowers and investors
+- Set up your Cloudflare account (takes 2 minutes) — this is where the new site gets built. Your current site stays live until the new one is ready, so nothing changes for visitors until you're happy with the result.
+- Discuss notification preferences — what reminders would save you the most time?
+
+**How payment works:**
+- Milestone 1 ($4,000): Website + document upload portal — you'll see it live before we move to the next phase
+- Milestone 2 ($4,000): AI-powered document extraction + TMO integration + notification system
+- You pay as you see results, and you own everything we build
+
+When would be a good time for that first call? I'm flexible — happy to work around your schedule. A 45-60 minute Zoom should cover everything.
+
+Looking forward to it!
+
+Brian
+
+---
+
+Ready to save as corky draft when you approve.
 <!-- /agent:exchange -->

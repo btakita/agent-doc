@@ -313,6 +313,11 @@ fn stream_loop(
 ///
 /// Wraps the text in a patch block targeting the specified component,
 /// applies template patches, and uses advisory locking for safe writes.
+///
+/// Stream mode uses **replace** mode for the target component regardless of
+/// the component's configured mode (e.g., exchange defaults to append). This is
+/// because the stream buffer is cumulative — each flush contains the full text
+/// so far, not just the delta.
 pub(crate) fn flush_to_document(
     file: &Path,
     text: &str,
@@ -324,6 +329,10 @@ pub(crate) fn flush_to_document(
 
     let (patches, unmatched) = template::parse_patches(&patch_response)
         .context("failed to parse patch blocks")?;
+
+    // Force replace mode for stream target — buffer is cumulative, not incremental
+    let mut mode_overrides = std::collections::HashMap::new();
+    mode_overrides.insert(target.to_string(), "replace".to_string());
 
     // Acquire lock
     let lock_path = snapshot::lock_path_for(file)?;
@@ -341,9 +350,10 @@ pub(crate) fn flush_to_document(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    // Apply patches to current content (not baseline — we always work from latest)
-    let content_patched = template::apply_patches(&content_current, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    // Apply patches with replace override for stream target
+    let content_patched = template::apply_patches_with_overrides(
+        &content_current, &patches, &unmatched, file, &mode_overrides,
+    ).context("failed to apply template patches")?;
 
     // Write atomically
     crate::write::atomic_write_pub(file, &content_patched)?;
@@ -428,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn flush_appends_to_exchange() {
+    fn flush_replaces_exchange_in_stream_mode() {
         let dir = tempfile::TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
@@ -438,11 +448,35 @@ mod tests {
         let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\nExisting\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
 
+        // Stream flush uses replace mode — cumulative buffer replaces existing content
         flush_to_document(&doc, "New content", "exchange", content).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("Existing"), "exchange is append mode — existing content preserved");
-        assert!(result.contains("New content"), "new content should be appended");
+        assert!(!result.contains("Existing"), "stream flush should replace, not append: {}", result);
+        assert!(result.contains("New content"), "new content should be present");
+    }
+
+    #[test]
+    fn flush_cumulative_does_not_duplicate() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\nUser prompt\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        // First flush: partial response
+        flush_to_document(&doc, "Hello", "exchange", content).unwrap();
+        // Second flush: cumulative (full text so far)
+        flush_to_document(&doc, "Hello world", "exchange", content).unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        // Should contain "Hello world" exactly once, not "Hello\nHello world"
+        assert!(result.contains("Hello world"), "cumulative text should be present: {}", result);
+        let hello_count = result.matches("Hello").count();
+        assert_eq!(hello_count, 1, "Hello should appear exactly once (replace, not append): {}", result);
     }
 
     #[test]

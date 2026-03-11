@@ -1428,4 +1428,36 @@ The content is not continuously streaming to stream-test
 3. The watch daemon should now capture pane output and flush to the document every 500ms
 
 **Note:** The Claude session in pane %72 already finished its response — to see streaming in action, you'll need to trigger a new response cycle.
+
+Should the stream mode include the chain of thought?
+Should the stream mode include the chain of thought?
+
+### Chain of thought in stream mode
+
+**Currently no** — the stream-json parser (`streaming.rs:64-76`) only extracts `"type": "text"` content blocks from `"type": "assistant"` messages. Thinking blocks are silently skipped.
+
+**Can Claude Code emit thinking blocks via stream-json?** Yes — stream-json preserves the full message structure including `"type": "thinking"` content blocks when extended thinking is enabled. Currently, agent-doc invokes `claude -p` without `--thinking`.
+
+**Recommendation — opt-in via frontmatter:**
+
+```yaml
+agent_doc_stream:
+  interval: 200
+  target: exchange
+  thinking: true          # default: false
+  thinking_target: log    # route thinking to separate component
+```
+
+Three modes:
+- `thinking: false` (default) — skip thinking blocks, current behavior
+- `thinking: true` — interleave thinking with response (wrapped in `<details>`)
+- `thinking: true, thinking_target: log` — route thinking to a separate `<!-- agent:log -->` component
+
+**Implementation:**
+1. `streaming.rs` — extract `"type": "thinking"` content blocks alongside text
+2. `StreamChunk` — add `thinking: Option<String>` field
+3. `stream.rs` — buffer thinking separately, flush to `thinking_target` or interleave
+4. `claude.rs` — pass `--thinking` flag when `StreamConfig.thinking` is true
+
+**The `thinking_target: log` pattern is most elegant** — keeps conversation clean while providing a live reasoning trace. Log component with `mode = "append"` gives running history of thought process.
 <!-- /agent:exchange -->

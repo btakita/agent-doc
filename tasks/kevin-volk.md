@@ -113,6 +113,14 @@ The unnamed startup is **CopilotKit** — #1 open-source platform for building A
 **Session 1 — Mar 9, 2026:** Initial interview prep, corky sync revealed call details (Mon Mar 9, 4:30 PM EDT, Google Meet). Post-call: identified company as CopilotKit, CTO Jordan Ritter. Reviewed draft reply — caught CursorKit typo, suggested revision with project one-liners. Advised against mentioning existence-lang to recruiter (save for technical interview with Jordan).
 
 **Session 2 — Mar 11, 2026:** Converted document to template mode. User requests: create kevin-volk contact, transcribe and diarize recording.
+
+### Transcription complete
+
+Transcript saved to `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`
+- 34-minute call, 1215 Whisper segments merged into 372 paragraphs
+- Timestamps preserved, no speaker diarization (Whisper medium model)
+
+Contact file updated: `mail/contacts/kevin-volk/CLAUDE.md`
 <!-- /agent:exchange -->
 
 <!-- agent:input -->

@@ -10,6 +10,8 @@ use anyhow::Result;
 pub struct StreamChunk {
     /// The text content of this chunk (incremental or cumulative).
     pub text: String,
+    /// Chain-of-thought (thinking) content, if present.
+    pub thinking: Option<String>,
     /// True when this is the final chunk (response complete).
     pub is_final: bool,
     /// Session ID (only present on the final message).
@@ -57,19 +59,21 @@ pub fn parse_stream_line(line: &str) -> Result<StreamChunk> {
                 .map(|s| s.to_string());
             Ok(StreamChunk {
                 text,
+                thinking: None,
                 is_final: true,
                 session_id,
             })
         }
         "assistant" => {
-            // Extract text from content blocks
-            let text = extract_assistant_text(&json);
+            // Extract text and thinking from content blocks
+            let (text, thinking) = extract_assistant_content(&json);
             let session_id = json
                 .get("session_id")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             Ok(StreamChunk {
                 text,
+                thinking,
                 is_final: false,
                 session_id,
             })
@@ -78,6 +82,7 @@ pub fn parse_stream_line(line: &str) -> Result<StreamChunk> {
             // Other message types (system, tool_use, etc.) — return empty chunk
             Ok(StreamChunk {
                 text: String::new(),
+                thinking: None,
                 is_final: false,
                 session_id: None,
             })
@@ -85,21 +90,37 @@ pub fn parse_stream_line(line: &str) -> Result<StreamChunk> {
     }
 }
 
-/// Extract text content from an assistant message's content blocks.
-fn extract_assistant_text(json: &serde_json::Value) -> String {
+/// Extract text and thinking content from an assistant message's content blocks.
+/// Returns (text, Option<thinking>).
+fn extract_assistant_content(json: &serde_json::Value) -> (String, Option<String>) {
     let mut text = String::new();
+    let mut thinking = String::new();
     if let Some(message) = json.get("message")
         && let Some(content) = message.get("content").and_then(|c| c.as_array())
     {
         for block in content {
-            if block.get("type").and_then(|t| t.as_str()) == Some("text")
-                && let Some(t) = block.get("text").and_then(|t| t.as_str())
-            {
-                text.push_str(t);
+            let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match block_type {
+                "text" => {
+                    if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                        text.push_str(t);
+                    }
+                }
+                "thinking" => {
+                    if let Some(t) = block.get("thinking").and_then(|t| t.as_str()) {
+                        thinking.push_str(t);
+                    }
+                }
+                _ => {}
             }
         }
     }
-    text
+    let thinking = if thinking.is_empty() {
+        None
+    } else {
+        Some(thinking)
+    };
+    (text, thinking)
 }
 
 #[cfg(test)]
@@ -111,6 +132,7 @@ mod tests {
         let line = r#"{"type":"result","result":"Hello, world!","session_id":"abc-123"}"#;
         let chunk = parse_stream_line(line).unwrap();
         assert_eq!(chunk.text, "Hello, world!");
+        assert!(chunk.thinking.is_none());
         assert!(chunk.is_final);
         assert_eq!(chunk.session_id.as_deref(), Some("abc-123"));
     }
@@ -120,6 +142,7 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Partial output"}]}}"#;
         let chunk = parse_stream_line(line).unwrap();
         assert_eq!(chunk.text, "Partial output");
+        assert!(chunk.thinking.is_none());
         assert!(!chunk.is_final);
         assert!(chunk.session_id.is_none());
     }
@@ -143,6 +166,7 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"content":[]}}"#;
         let chunk = parse_stream_line(line).unwrap();
         assert_eq!(chunk.text, "");
+        assert!(chunk.thinking.is_none());
         assert!(!chunk.is_final);
     }
 
@@ -159,5 +183,29 @@ mod tests {
         let chunk = parse_stream_line(line).unwrap();
         assert!(chunk.is_final);
         assert!(chunk.session_id.is_none());
+    }
+
+    #[test]
+    fn parse_thinking_block() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me reason about this..."},{"type":"text","text":"Here is the answer."}]}}"#;
+        let chunk = parse_stream_line(line).unwrap();
+        assert_eq!(chunk.text, "Here is the answer.");
+        assert_eq!(chunk.thinking.as_deref(), Some("Let me reason about this..."));
+        assert!(!chunk.is_final);
+    }
+
+    #[test]
+    fn parse_thinking_only_no_text() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Reasoning..."}]}}"#;
+        let chunk = parse_stream_line(line).unwrap();
+        assert_eq!(chunk.text, "");
+        assert_eq!(chunk.thinking.as_deref(), Some("Reasoning..."));
+    }
+
+    #[test]
+    fn parse_no_thinking_returns_none() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Just text"}]}}"#;
+        let chunk = parse_stream_line(line).unwrap();
+        assert!(chunk.thinking.is_none());
     }
 }

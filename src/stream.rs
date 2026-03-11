@@ -47,8 +47,17 @@ pub fn run(
     let stream_config = fm.stream_config.clone().unwrap_or_default();
     let interval = stream_config.interval.unwrap_or(interval_ms);
     let target = stream_config.target.as_deref().unwrap_or("exchange");
+    let thinking_enabled = stream_config.thinking.unwrap_or(false);
+    let thinking_target = stream_config.thinking_target.clone();
 
-    eprintln!("[stream] starting for {} (interval: {}ms, target: {})", file.display(), interval, target);
+    eprintln!(
+        "[stream] starting for {} (interval: {}ms, target: {}, thinking: {}{})",
+        file.display(),
+        interval,
+        target,
+        thinking_enabled,
+        thinking_target.as_ref().map(|t| format!(", thinking_target: {}", t)).unwrap_or_default()
+    );
 
     // Compute diff
     let the_diff = match diff::compute(file)? {
@@ -96,8 +105,17 @@ pub fn run(
     let model = model.or(fm.model.as_deref());
     let chunks = streaming_agent.send_streaming(&prompt, fm.resume.as_deref(), fork, model)?;
 
+    // Build thinking config
+    let thinking_cfg = if thinking_enabled {
+        Some(ThinkingConfig {
+            target: thinking_target,
+        })
+    } else {
+        None
+    };
+
     // Run the write-back loop
-    let result = stream_loop(file, chunks, interval, target, &content_original)?;
+    let result = stream_loop(file, chunks, interval, target, &content_original, thinking_cfg.as_ref())?;
 
     // Update resume ID if we got a session_id
     if let Some(ref sid) = result.session_id {
@@ -118,6 +136,12 @@ pub fn run(
     Ok(())
 }
 
+/// Configuration for chain-of-thought streaming.
+struct ThinkingConfig {
+    /// If set, route thinking to this component. If None, interleave in target.
+    target: Option<String>,
+}
+
 /// Result of a completed stream.
 struct StreamResult {
     session_id: Option<String>,
@@ -130,56 +154,77 @@ fn stream_loop(
     interval_ms: u64,
     target: &str,
     baseline: &str,
+    thinking_cfg: Option<&ThinkingConfig>,
 ) -> Result<StreamResult> {
     let buffer = Arc::new(Mutex::new(String::new()));
+    let thinking_buffer = Arc::new(Mutex::new(String::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
 
     // Timer thread: periodically flush buffer to document
     let timer_buffer = Arc::clone(&buffer);
+    let timer_thinking = Arc::clone(&thinking_buffer);
     let file_path = file.to_path_buf();
     let target_name = target.to_string();
     let baseline_copy = baseline.to_string();
     let timer_interval = Duration::from_millis(interval_ms);
+    let thinking_target = thinking_cfg.and_then(|c| c.target.clone());
+    let has_thinking = thinking_cfg.is_some();
 
     let timer_handle = std::thread::spawn(move || {
         let mut last_written = String::new();
+        let mut last_thinking = String::new();
         loop {
-            match done_rx.recv_timeout(timer_interval) {
-                Ok(()) => {
-                    // Done signal — do final flush
-                    let text = timer_buffer.lock().unwrap().clone();
-                    if text != last_written && !text.is_empty()
-                        && let Err(e) = flush_to_document(&file_path, &text, &target_name, &baseline_copy)
-                    {
-                        eprintln!("[stream] final flush error: {}", e);
-                    }
-                    return;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Timer tick — flush if buffer changed
-                    let text = timer_buffer.lock().unwrap().clone();
-                    if text != last_written && !text.is_empty() {
-                        match flush_to_document(&file_path, &text, &target_name, &baseline_copy) {
-                            Ok(()) => {
-                                last_written = text;
-                                eprint!(".");
-                            }
-                            Err(e) => {
-                                eprintln!("[stream] flush error: {}", e);
-                            }
+            let is_done = match done_rx.recv_timeout(timer_interval) {
+                Ok(()) => true,
+                Err(mpsc::RecvTimeoutError::Timeout) => false,
+                Err(mpsc::RecvTimeoutError::Disconnected) => true,
+            };
+
+            let text = timer_buffer.lock().unwrap().clone();
+            let thinking_text = if has_thinking {
+                timer_thinking.lock().unwrap().clone()
+            } else {
+                String::new()
+            };
+
+            // Flush response text
+            if text != last_written && !text.is_empty() {
+                match flush_to_document(&file_path, &text, &target_name, &baseline_copy) {
+                    Ok(()) => {
+                        last_written = text;
+                        if !is_done {
+                            eprint!(".");
                         }
                     }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    // Channel dropped — do final flush
-                    let text = timer_buffer.lock().unwrap().clone();
-                    if text != last_written && !text.is_empty()
-                        && let Err(e) = flush_to_document(&file_path, &text, &target_name, &baseline_copy)
-                    {
-                        eprintln!("[stream] final flush error: {}", e);
+                    Err(e) => {
+                        let label = if is_done { "final flush" } else { "flush" };
+                        eprintln!("[stream] {} error: {}", label, e);
                     }
-                    return;
                 }
+            }
+
+            // Flush thinking text to separate component (or skip if interleaved)
+            if has_thinking
+                && thinking_text != last_thinking
+                && !thinking_text.is_empty()
+            {
+                if let Some(ref tt) = thinking_target {
+                    match flush_to_document(&file_path, &thinking_text, tt, &baseline_copy) {
+                        Ok(()) => {
+                            last_thinking = thinking_text;
+                        }
+                        Err(e) => {
+                            eprintln!("[stream] thinking flush error: {}", e);
+                        }
+                    }
+                } else {
+                    // Thinking interleaved — already part of text buffer
+                    last_thinking = thinking_text;
+                }
+            }
+
+            if is_done {
+                return;
             }
         }
     });
@@ -191,11 +236,34 @@ fn stream_loop(
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;
 
+        // Accumulate thinking first (before text, so interleaving can use it)
+        if let Some(ref thinking) = chunk.thinking
+            && thinking_cfg.is_some()
+        {
+            let mut tbuf = thinking_buffer.lock().unwrap();
+            *tbuf = thinking.clone();
+        }
+
         if !chunk.text.is_empty() {
             let mut buf = buffer.lock().unwrap();
             // For assistant messages, the text is cumulative (full text so far)
             // For result messages, it's the final full text
-            *buf = chunk.text.clone();
+            if thinking_cfg.is_some()
+                && thinking_cfg.unwrap().target.is_none()
+            {
+                // Interleave: prepend thinking as collapsible details
+                let thinking_text = thinking_buffer.lock().unwrap().clone();
+                if !thinking_text.is_empty() {
+                    *buf = format!(
+                        "<details>\n<summary>Thinking</summary>\n\n{}\n</details>\n\n{}",
+                        thinking_text, chunk.text
+                    );
+                } else {
+                    *buf = chunk.text.clone();
+                }
+            } else {
+                *buf = chunk.text.clone();
+            }
             chunk_count += 1;
         }
 
@@ -218,6 +286,16 @@ fn stream_loop(
         recover::save_pending(file, &final_text)?;
 
         flush_to_document(file, &final_text, target, baseline)?;
+
+        // Flush final thinking if routed to separate component
+        if let Some(cfg) = thinking_cfg
+            && let Some(ref tt) = cfg.target
+        {
+            let final_thinking = thinking_buffer.lock().unwrap().clone();
+            if !final_thinking.is_empty() {
+                flush_to_document(file, &final_thinking, tt, baseline)?;
+            }
+        }
 
         // Update snapshot and CRDT state
         let final_content = std::fs::read_to_string(file)?;
@@ -399,12 +477,12 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         let chunks = mock_chunks(vec![
-            StreamChunk { text: "Hello".to_string(), is_final: false, session_id: None },
-            StreamChunk { text: "Hello world".to_string(), is_final: false, session_id: None },
-            StreamChunk { text: "Hello world!".to_string(), is_final: true, session_id: Some("sess-1".to_string()) },
+            StreamChunk { text: "Hello".to_string(), thinking: None, is_final: false, session_id: None },
+            StreamChunk { text: "Hello world".to_string(), thinking: None, is_final: false, session_id: None },
+            StreamChunk { text: "Hello world!".to_string(), thinking: None, is_final: true, session_id: Some("sess-1".to_string()) },
         ]);
 
-        let result = stream_loop(&doc, chunks, 100, "exchange", content).unwrap();
+        let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
         assert_eq!(result.session_id.as_deref(), Some("sess-1"));
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
@@ -425,11 +503,11 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         let chunks = mock_chunks(vec![
-            StreamChunk { text: String::new(), is_final: false, session_id: None },
-            StreamChunk { text: String::new(), is_final: true, session_id: None },
+            StreamChunk { text: String::new(), thinking: None, is_final: false, session_id: None },
+            StreamChunk { text: String::new(), thinking: None, is_final: true, session_id: None },
         ]);
 
-        let result = stream_loop(&doc, chunks, 100, "exchange", content).unwrap();
+        let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
         assert!(result.session_id.is_none());
     }
 
@@ -462,6 +540,108 @@ mod tests {
         let fm = frontmatter::Frontmatter::default();
         let prompt = build_prompt(&fm, "diff", "content");
         assert!(prompt.contains("patch:exchange"), "prompt should mention patch block format");
+    }
+
+    #[test]
+    fn stream_loop_thinking_to_separate_component() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("pending")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:log -->\n<!-- /agent:log -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let chunks = mock_chunks(vec![
+            StreamChunk {
+                text: "".to_string(),
+                thinking: Some("Let me think...".to_string()),
+                is_final: false,
+                session_id: None,
+            },
+            StreamChunk {
+                text: "The answer is 42.".to_string(),
+                thinking: Some("Let me think... Yes, 42.".to_string()),
+                is_final: true,
+                session_id: Some("sess-2".to_string()),
+            },
+        ]);
+
+        let thinking_cfg = ThinkingConfig {
+            target: Some("log".to_string()),
+        };
+        let result = stream_loop(&doc, chunks, 100, "exchange", content, Some(&thinking_cfg)).unwrap();
+        assert_eq!(result.session_id.as_deref(), Some("sess-2"));
+
+        let final_doc = std::fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("The answer is 42."), "response text should be in exchange: {}", final_doc);
+        assert!(final_doc.contains("Yes, 42."), "thinking should be in log: {}", final_doc);
+    }
+
+    #[test]
+    fn stream_loop_thinking_interleaved() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("pending")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let chunks = mock_chunks(vec![
+            StreamChunk {
+                text: "The answer.".to_string(),
+                thinking: Some("Reasoning here.".to_string()),
+                is_final: true,
+                session_id: None,
+            },
+        ]);
+
+        let thinking_cfg = ThinkingConfig { target: None }; // interleave
+        let result = stream_loop(&doc, chunks, 100, "output", content, Some(&thinking_cfg)).unwrap();
+        assert!(result.session_id.is_none());
+
+        let final_doc = std::fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("<details>"), "interleaved thinking should use details tag: {}", final_doc);
+        assert!(final_doc.contains("Reasoning here."), "thinking content should be present: {}", final_doc);
+        assert!(final_doc.contains("The answer."), "response text should be present: {}", final_doc);
+    }
+
+    #[test]
+    fn stream_loop_no_thinking_skips_thinking_blocks() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("pending")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let chunks = mock_chunks(vec![
+            StreamChunk {
+                text: "Response only.".to_string(),
+                thinking: Some("Secret thoughts.".to_string()),
+                is_final: true,
+                session_id: None,
+            },
+        ]);
+
+        // No thinking config — thinking should be ignored
+        let result = stream_loop(&doc, chunks, 100, "output", content, None).unwrap();
+        assert!(result.session_id.is_none());
+
+        let final_doc = std::fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("Response only."), "response should be present: {}", final_doc);
+        assert!(!final_doc.contains("Secret thoughts"), "thinking should NOT appear: {}", final_doc);
     }
 
     #[test]

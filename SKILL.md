@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.14.4"
+agent-doc-version: "0.14.10"
 ---
 
 # agent-doc submit
@@ -58,7 +58,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 - The diff represents what the user changed since the last submit
 - If no diff (content unchanged after comment stripping), tell the user nothing changed and stop
 
-### 3. Respond
+### 3. Respond (with streaming checkpoints for template mode)
 
 - Address the user's changes naturally in the console (this gives real-time streaming feedback)
 - Respond to:
@@ -66,6 +66,24 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
   - Inline annotations (blockquotes, comments, edits to previous responses)
   - Structural changes (deletions, reorganization)
 - Your console response IS the document response — they should be the same content
+
+**Streaming checkpoints (template mode only):**
+When responding to a template-mode document with multiple user questions/topics, flush partial responses to the document at natural breakpoints so the user sees progress in their editor:
+
+1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
+   ```bash
+   echo '<partial response as patch blocks>' | agent-doc write <FILE> --baseline-file <baseline_tmp> --template
+   ```
+2. **Re-save the baseline** after each checkpoint flush (the document has changed):
+   ```bash
+   cp <FILE> /tmp/agent-doc-baseline-$$.md
+   ```
+3. Continue responding to the next section, then flush again
+4. The final write-back (step 4b) writes the complete response
+
+**When to checkpoint:** After each `### Re:` section, after completing a code implementation summary, or after any response block that takes >15s to generate. Skip checkpoints for short single-topic responses.
+
+**Important:** Each checkpoint write uses `--template` (not `--stream`). The `--stream` flag uses CRDT merge which is for concurrent-write scenarios. Template mode's 3-way merge is sufficient for checkpoints since you're the only writer during the response phase.
 
 ### 4. Write back to the document
 

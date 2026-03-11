@@ -1063,4 +1063,33 @@ The issue is in `start.rs`: it uses `exec()` to replace the process with `claude
 Recommendation: **Option A** — gives user control, keeps panes alive, no tmux config needed. Option D for belt-and-suspenders.
 
 Which option?
+
+Option A makes sense. We should never get to the Claude exited state. Claude should /clear or restart a new session if context exhaustion occurs.
+Did the exhausted session have content to write before the context was exhausted. I recall that we removed the preprocess write + commit to prevent over eager external writes to the file. Is that the conflict? If yes, should we readd the preprocess write? And is there another way to solve over eager external writes?
+**Option A confirmed.** The wrapper in `start.rs` will:
+1. Run `claude` as child process (not `exec`)
+2. On exit: if context exhaustion → auto-restart (`claude --continue` or fresh)
+3. If user `/exit` → prompt "Press Enter to restart, 'q' to exit"
+4. Loop — pane never dies unless user explicitly quits
+
+**On the missing write-back:** Yes, the exhausted session had content to write. The response was fully generated in the console but `agent-doc write` never executed — context ran out between generation and write-back. The `agent-doc recover` mechanism uses `.agent-doc/pending/<hash>.md` but the current skill workflow doesn't save to pending before generating.
+
+**The pre-response commit conflict:** You're right — we removed it because it triggered "file changed externally" IDE notifications. The tradeoff:
+- Pre-response commit → IDE notification noise
+- No pre-response commit → response lost if context exhausts before write-back
+
+**Solutions (not mutually exclusive):**
+
+1. **Durable pending store (recommended):** Before generating, save a pending marker. Stream/flush response to `.agent-doc/pending/<hash>.md` as it's generated. `agent-doc recover` picks it up next invocation. Already partially built — just needs skill workflow integration. No IDE notifications.
+
+2. **Snapshot-only pre-write:** Update snapshot (gitignored) before responding — no document change, no IDE notification. Preserves diff accuracy.
+
+3. **Progressive write-back:** Pipe response through `agent-doc write` as it streams (requires streaming stdin support).
+
+Recommendation: **Option 1** — cleanest, already partially built, no IDE side effects. Combine with Option A (wrapper loop) for full resilience: pane stays alive, response survives context exhaustion.
+
+Implementation plan:
+- `start.rs`: Replace `exec()` with child process + restart loop
+- Skill workflow: Save pending file before step 3, `agent-doc recover` in step 0 already handles it
+- Detect context exhaustion exit code from Claude CLI
 <!-- /agent:exchange -->

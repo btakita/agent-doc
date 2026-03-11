@@ -1219,7 +1219,7 @@ This fits the existing `agent-doc watch` pattern. Could be a `--stream` flag on 
 Can agent-doc watch also support streams?
 Can this daemon start lazily?
 If it were started lazily, can it end lazily when all of the managed processes stop?
-
+Or would it be better just to have it run as a daemon, even when started lazily?
 
 ### Re: Parent process to Claude session
 
@@ -1236,4 +1236,35 @@ Non-invasive observation (tmux capture) is better than wrapping Claude in a pare
 A parent wrapper only makes sense for a different deployment model (`agent-doc spawn-claude`) that manages the full lifecycle. That's a bigger architectural change.
 
 The tmux capture approach is **non-invasive** — it observes without modifying. The Claude session doesn't know it's being watched. This preserves all existing workflows.
+### Re: Watch daemon lifecycle — lazy start, lazy stop, or always-on
+
+**Yes, `agent-doc watch` should support streams.** Adding a `--stream` flag (or auto-detecting stream-mode documents in the registry) is the cleanest path. The existing watch daemon already:
+- Runs a per-file debounced event loop
+- Has PID file management
+- Knows about the registry
+
+Adding tmux capture-pane polling for stream-mode documents fits naturally alongside the existing file-change watching for append/template documents.
+
+**Lazy start — yes.** The daemon should start on demand:
+- First `/agent-doc` skill invocation (or `agent-doc claim`) checks if the watch daemon is running (PID file)
+- If not running, spawn it in the background
+- The skill pre-flight already runs `agent-doc recover` — adding a daemon health check is one more line
+
+**Lazy stop — yes, with idle timeout.** When all managed sessions end:
+- Watch loop detects empty registry (all panes dead after `prune()`)
+- Starts an idle timer (e.g., 60s)
+- If no new claims arrive within the timeout, daemon exits
+- If a new claim arrives, cancel the timer and resume
+
+This gives you **zero-config lifecycle**:
+```
+User claims a document → daemon auto-starts
+Sessions end, panes close → daemon auto-stops after 60s idle
+```
+
+**vs always-on daemon:** An always-on daemon is simpler (no start/stop logic) but wastes resources when idle. Since `agent-doc watch` already uses `notify` for file events, an idle daemon has near-zero CPU cost — the only overhead is the process itself. But lazy start/stop is more elegant and matches user expectations (no orphaned daemons after closing all sessions).
+
+**Recommendation:** Lazy start + idle-timeout stop. The daemon is invisible — users never manage it directly. It appears when needed and disappears when not.
+
+Your last question got cut off at "even when star" — I'm guessing "even when starting/stopping sessions?" The answer: the daemon should survive individual session starts/stops. Only goes idle when *all* sessions end.
 <!-- /agent:exchange -->

@@ -41,4 +41,77 @@ tell me how the agent-doc stream works
 **CRDT merge vs 3-way merge:** CRDT (`yrs`/Yjs) tracks character-level insertions/deletions — the user can edit the document while the agent writes without conflicts. 3-way merge (template mode) works for sequential edits but can conflict during truly concurrent writes.
 
 **To test the actual streaming pipeline:** Run `agent-doc stream tasks/stream-test.md` from a terminal. The `/agent-doc` skill runs inside the current Claude session and doesn't use the streaming write-back loop.
+
+Please draw a diagram from the write, diff, agent-doc stack, back to the document. Show what the crdt is doing.
+
+### Stream Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        DOCUMENT (file on disk)                  │
+│                     tasks/stream-test.md                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  <!-- agent:exchange -->                                │    │
+│  │  [user text] + [agent text growing in real-time]        │    │
+│  │  <!-- /agent:exchange -->                               │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└──────────┬──────────────────────────────────────┬───────────────┘
+           │ READ                                  ▲ WRITE
+           ▼                                       │
+┌──────────────────┐                    ┌──────────────────────┐
+│   1. SNAPSHOT    │                    │  5. ATOMIC WRITE     │
+│                  │                    │                      │
+│ .agent-doc/      │                    │ flock → write tmp    │
+│ snapshots/       │                    │ → rename → unlock    │
+│ <hash>.md        │                    └──────────┬───────────┘
+└────────┬─────────┘                               ▲
+         │                                         │
+         ▼                                         │
+┌──────────────────┐                    ┌──────────────────────┐
+│   2. DIFF        │                    │  4. CRDT MERGE       │
+│                  │                    │                      │
+│ strip comments   │                    │ file_doc (YDoc)      │
+│ compare snapshot │                    │   ← current file     │
+│ vs current file  │                    │ agent_doc (YDoc)     │
+│ → changed text   │                    │   ← buffered chunks  │
+│                  │                    │                      │
+└────────┬─────────┘                    │ merge_updates():     │
+         │                              │   encode(agent_doc)  │
+         ▼                              │   → apply to         │
+┌──────────────────┐                    │     file_doc         │
+│   3. AGENT       │                    │   → serialize to     │
+│                  │                    │     markdown          │
+│ claude -p        │                    │                      │
+│ --output-format  │──── chunks ────►   │ User edits file      │
+│  stream-json     │   (every ~50ms)    │ concurrently?        │
+│                  │                    │ → No conflict.        │
+│ StreamChunk {    │                    │   CRDT positions are  │
+│   text: "...",   │──► buffer ────►    │   stable across both  │
+│   is_final: bool │   (Arc<Mutex>)     │   writers.            │
+│ }                │                    └──────────────────────┘
+└──────────────────┘                               ▲
+                                                   │
+                                        ┌──────────────────────┐
+                                        │  TIMER THREAD        │
+                                        │  (every 2000ms)      │
+                                        │                      │
+                                        │  drain buffer →      │
+                                        │  trigger step 4      │
+                                        └──────────────────────┘
+
+CRDT State Persistence:
+  .agent-doc/crdt/<hash>.yrs
+  ├── Saved after each stream completes
+  ├── Loaded on next stream for continuity
+  └── Compacted via `agent-doc compact` (GC tombstones)
+```
+
+**What the CRDT does at each tick:**
+1. **Read** current file → `YDoc` (`file_doc`)
+2. **Apply** buffered agent chunks → separate `YDoc` (`agent_doc`)
+3. **Merge** — encode `agent_doc` as binary update, apply to `file_doc`. Yjs CRDTs use unique client IDs + logical clocks, so agent and user insertions never collide.
+4. **Serialize** merged `YDoc` → markdown
+5. **Write** atomically (flock + tmp + rename)
+
+The user's editor and the agent are both "clients" in the CRDT sense. Each has a unique ID. Concurrent inserts at the same position resolve deterministically without data loss.
 <!-- /agent:exchange -->

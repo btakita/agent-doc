@@ -35,7 +35,11 @@ class SubmitAction : AnAction() {
         FileDocumentManager.getInstance().saveAllDocuments()
 
         val relativePath = TerminalUtil.relativePath(project, file)
-        TerminalUtil.sendToTerminal(project, relativePath, onComplete = { routing.set(false) })
+        TerminalUtil.sendToTerminal(project, relativePath, onComplete = {
+            routing.set(false)
+            // Sync tmux layout after routing so panes match the editor split
+            SyncLayoutAction.syncLayout(project, notify = false)
+        })
 
         // Track file and ensure prompt poller is running
         PromptPoller.getInstance(project).addFile(file)

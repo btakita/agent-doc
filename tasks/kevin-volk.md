@@ -1,8 +1,10 @@
 ---
 agent_doc_session: f3e0f1d5-b6ed-4fe8-a470-089f1cd5eb22
-tmux_session: '0'
+tmux_session: '23'
 agent_doc_mode: template
 ---
+
+
 
 Help me prepare for my interview with Kevin Volk. See my correspondence & calendar.
 https://calendar.google.com/calendar/u/0/r/eventedit/MW5mZDFvbmt0N2htMzluM3IzajZqdWY4OWsgYnJpYW4udGFraXRhQG0
@@ -81,6 +83,9 @@ Most candidates will have "used React." You've **built React-level infrastructur
 - [ ] Know your salary range
 - [ ] Prepare 30-second pitch: "I build developer infrastructure — reactive frameworks, state management, build tools — and I've been doing it in open source for 15+ years"
 
+## Exchange
+
+<!-- agent:exchange -->
 ## User
 
 
@@ -278,3 +283,13 @@ I feel like existence-lang is the crown jewel of human-agentic coherent alignmen
 Existence-lang IS the crown jewel for human-agentic coherence — but it's a second-conversation topic with technical stakeholders who can appreciate it, not a recruiter email.
 
 ## User
+Convert this file to template mode
+
+<!-- agent:exchange -->
+
+Converted to template mode. The document now uses `<!-- agent:exchange -->` for the conversation surface.
+
+<!-- /agent:exchange -->
+
+
+<!-- /agent:exchange -->

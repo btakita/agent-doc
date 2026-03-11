@@ -1,7 +1,10 @@
 ---
 agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
-tmux_session: '0'
+tmux_session: '23'
+agent_doc_mode: template
 ---
+
+
 
 
 ## Status Summary (compacted 2026-03-05)
@@ -99,6 +102,9 @@ Workers have individual `wrangler.toml` in subdirectories — no root `wrangler.
 - [ ] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
 - [ ] Delete Contabo S3 bucket `assets.briantakita.me`
 
+## Exchange
+
+<!-- agent:exchange -->
 ## User
 
 Does briantakita.me-dev repos have yalc dependencies to all packages in ctx-core-dev?
@@ -126,3 +132,12 @@ Already done — all 11 ctx-core dependencies are already `yalc add`'d in briant
 
 ## User
 
+/agent-doc convert .
+
+## Assistant
+
+Converted to template mode. The existing conversation is now wrapped in an `<!-- agent:exchange -->` component. You can add more components (like `<!-- agent:status -->`, `<!-- agent:output -->`) as needed. Write prompts inside the exchange block and submit as usual.
+
+## User
+
+<!-- /agent:exchange -->

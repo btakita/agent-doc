@@ -255,7 +255,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
         /// Write-back interval in milliseconds
-        #[arg(long, default_value = "2000")]
+        #[arg(long, default_value = "200")]
         interval: u64,
         /// Agent backend to use
         #[arg(long)]

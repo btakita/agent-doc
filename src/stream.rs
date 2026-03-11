@@ -297,10 +297,17 @@ fn stream_loop(
             }
         }
 
-        // Update snapshot and CRDT state
-        let final_content = std::fs::read_to_string(file)?;
-        snapshot::save(file, &final_content)?;
-        let doc = crdt::CrdtDoc::from_text(&final_content);
+        // Compute content_ours: baseline + final response patches (without user edits).
+        // Save this as snapshot so the next diff detects any concurrent user edits.
+        let content_ours = {
+            let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
+            let (patches, unmatched) = crate::template::parse_patches(&patch)
+                .unwrap_or_default();
+            crate::template::apply_patches(baseline, &patches, &unmatched, file)
+                .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
+        };
+        snapshot::save(file, &content_ours)?;
+        let doc = crdt::CrdtDoc::from_text(&content_ours);
         snapshot::save_crdt(file, &doc.encode_state())?;
 
         recover::clear_pending(file)?;

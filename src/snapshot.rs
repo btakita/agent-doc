@@ -41,7 +41,7 @@ pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
 }
 
 /// Walk up from a path to find the directory containing `.agent-doc/`.
-fn find_project_root(path: &Path) -> Option<PathBuf> {
+pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     let mut current = if path.is_file() {
         path.parent()?
     } else {

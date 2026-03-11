@@ -18,6 +18,8 @@
                            displayType="BALLOON"
                            isLogByDefault="true"/>
         <actionPromoter implementation="com.github.btakita.agentdoc.AgentDocActionPromoter"/>
+        <completion.contributor language="any"
+                                implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>
     </extensions>
 
     <projectListeners>

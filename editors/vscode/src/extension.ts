@@ -67,6 +67,58 @@ function runCli(args: string[], cwd: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Slash Command Completion (Feature 10)
+// ---------------------------------------------------------------------------
+
+interface CommandInfo {
+    name: string;
+    args: string;
+    description: string;
+}
+
+let cachedCommands: CommandInfo[] | null = null;
+
+async function loadCommands(): Promise<CommandInfo[]> {
+    if (cachedCommands) return cachedCommands;
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return [];
+    try {
+        const output = await runCli(['commands'], root);
+        cachedCommands = JSON.parse(output) as CommandInfo[];
+        return cachedCommands;
+    } catch {
+        return [];
+    }
+}
+
+class SlashCommandCompletionProvider implements vscode.CompletionItemProvider {
+    async provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+    ): Promise<vscode.CompletionItem[]> {
+        const lineText = document.lineAt(position.line).text;
+        const textBeforeCursor = lineText.substring(0, position.character).trimStart();
+        if (!textBeforeCursor.startsWith('/')) return [];
+
+        const commands = await loadCommands();
+        const prefix = textBeforeCursor.split(' ')[0] || '/';
+
+        return commands
+            .filter(cmd => cmd.name.startsWith(prefix))
+            .map(cmd => {
+                const item = new vscode.CompletionItem(cmd.name, vscode.CompletionItemKind.Function);
+                item.detail = cmd.args ? `${cmd.name} ${cmd.args}` : cmd.name;
+                item.documentation = cmd.description;
+                item.insertText = cmd.name;
+                item.filterText = cmd.name;
+                // Bold top-level commands (no spaces in name beyond the initial /)
+                item.sortText = cmd.name.includes(' ') ? `1${cmd.name}` : `0${cmd.name}`;
+                return item;
+            });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Notifications (Feature 7)
 // ---------------------------------------------------------------------------
 
@@ -540,6 +592,15 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors(() => onTabChanged())
+    );
+
+    // Feature 10: Slash Command Autocomplete
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            { language: 'markdown' },
+            new SlashCommandCompletionProvider(),
+            '/'
+        )
     );
 
     // Status bar item cleanup

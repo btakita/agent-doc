@@ -64,12 +64,38 @@ Is there any pending features or bug fixes for corky?
 - **No open issues or PRs.** No TODO/FIXME/HACK in source.
 - **One pending task** from `tasks/email.md`: btak-dev Gmail account setup (`btak.dev@gmail.com` in `mail/.corky.toml`) — discussed but never applied.
 - **23 unmerged branches** — most are stale feature experiments. Notable ones:
-  - `telegram-html-import` / `telegram-slack-import` — Telegram import
-  - `contact-sync-v2` — contact sync v2
-  - `upgrade-self-update` — self-update mechanism
-  - `draft-attachments` — draft attachments
-  - `contact-enrichment` — contact enrichment
-  - `rust-2024-edition` — edition upgrade
+  - `telegram-html-import` / `telegram-slack-import` — Telegram import: status?
+  - `contact-sync-v2` — contact sync v2: status?
+  - `upgrade-self-update` — self-update mechanism: status?
+  - `draft-attachments` — draft attachments: status?
+  - `contact-enrichment` — contact enrichment: status?
+  - `rust-2024-edition` — edition upgrade: already done. delete
 
 No code-level bugs or pending features blocking a release. If you want to publish v0.14.1 (docs-only), it's clean to do so. The stale branches could be pruned if those features are abandoned.
+
+**Branch status — all merged via PRs, all deleted:**
+
+| Branch | PR | Status |
+|--------|-----|--------|
+| `telegram-html-import` | #5 | Merged, deleted |
+| `telegram-slack-import` | #4 | Merged, deleted |
+| `contact-sync-v2` | #6 | Merged, deleted |
+| `upgrade-self-update` | #8 | Merged, deleted |
+| `upgrade-check` | #7 | Merged, deleted |
+| `draft-attachments` | #17 | Merged, deleted |
+| `contact-enrichment` | #3 | Merged, deleted |
+| `rust-2024-edition` | #19 | Merged, deleted (edition=2024 on main) |
+| `linkedin-images` | — | Merged, deleted |
+| `social-credential-cmd` | #11 | Merged, deleted |
+| `topic-sync` | #9 | Merged, deleted |
+| `spec-rename` | #14 | Merged, deleted |
+| `v0.11.3` | #13 | Merged, deleted |
+| `transcribe-filter` | #16 | Merged, deleted |
+| `label-clear` | #15 | Merged, deleted |
+| `oauth-fixes` | #12 | Merged, deleted |
+| `social-to-linkedin` | #18 | Merged, deleted |
+| `rename-unanswered` | #2 | Merged, deleted |
+| `rust-port` | #1 | Merged, deleted |
+
+**Result:** Corky now has only `main`. 19 stale branches removed (local + remote).
 <!-- /agent:exchange -->

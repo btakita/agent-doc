@@ -1199,4 +1199,41 @@ Done. Updated SKILL.md with streaming checkpoint instructions:
 **Effect:** On the next `/agent-doc` cycle with multiple questions, you should see partial responses appearing in your editor as each section completes, rather than waiting for the entire response.
 
 Skill updated — run /compact to reload the updated skill instructions.
+
+Re: Option B:
+Is it a sidecar watch process per document in stream mode, or a multiplexed watch for all documents in stream mode?
+
+Should it be a parent process to the claude session instead?
+
+### Re: Sidecar per document vs multiplexed watch
+
+**Multiplexed — one daemon watches all documents.** It already has the data:
+
+- `sessions.json` registry maps documents → tmux panes
+- One event loop: `for (doc, pane) in registry { capture_pane(pane) → diff → flush(doc) }`
+- Dynamic: new claims auto-discovered, stale entries pruned
+- Cost: one process, one thread, N × 1ms capture calls per 200ms tick
+
+This fits the existing `agent-doc watch` pattern. Could be a `--stream` flag on the watch daemon, or a separate `agent-doc stream-watch` daemon sharing the registry.
+
+Can agent-doc watch also support streams?
+Can this daemon start lazily?
+If it were started lazily, can it end lazily when all of the managed processes stop?
+
+
+### Re: Parent process to Claude session
+
+Non-invasive observation (tmux capture) is better than wrapping Claude in a parent process:
+
+| | Parent wrapper | tmux capture |
+|---|---|---|
+| tmux attach/detach | Breaks | Works |
+| IDE plugin routing | Breaks | Works |
+| `agent-doc start/claim/route` | Incompatible | Compatible |
+| Output parsing | Direct (stdout) | Indirect (pane buffer) |
+| Process tree | Modified | Untouched |
+
+A parent wrapper only makes sense for a different deployment model (`agent-doc spawn-claude`) that manages the full lifecycle. That's a bigger architectural change.
+
+The tmux capture approach is **non-invasive** — it observes without modifying. The Claude session doesn't know it's being watched. This preserves all existing workflows.
 <!-- /agent:exchange -->

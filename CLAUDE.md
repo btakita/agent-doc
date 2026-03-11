@@ -46,9 +46,13 @@ src/
   resync.rs         # Validate sessions.json, remove dead panes
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   plugin.rs         # Editor plugin install/update/list via GitHub Releases
+  crdt.rs           # CRDT foundation (yrs-based conflict-free merge)
+  merge.rs          # 3-way merge + CRDT merge path
+  stream.rs         # Stream command: real-time CRDT write-back loop
   agent/
     mod.rs          # Agent trait
-    claude.rs       # Claude backend
+    claude.rs       # Claude backend (Agent + StreamingAgent)
+    streaming.rs    # StreamingAgent trait + stream-json parser
   audit_docs.rs     # Audit instruction files (via instruction-files crate)
 editors/
   jetbrains/        # IntelliJ plugin (Kotlin/Gradle)
@@ -71,6 +75,45 @@ editors/
 Each agent backend implements: take a prompt string, return (response_text, session_id).
 The prompt includes the diff and full document. The agent backend handles CLI
 invocation, JSON parsing, and session flags.
+
+### StreamingAgent Contract
+
+Streaming backends implement `StreamingAgent::send_streaming()` → `Iterator<StreamChunk>`.
+Used by `agent-doc stream` for real-time write-back. Currently only `claude` supports streaming
+(via `--output-format stream-json`). Each `StreamChunk` has cumulative text, `is_final` flag,
+and optional `session_id` on the final chunk.
+
+## Stream Mode
+
+Stream mode (`agent_doc_mode: stream`) enables real-time agent output with CRDT-based conflict-free merge.
+
+**Usage:** `agent-doc stream <FILE> [--interval 2000] [--agent claude] [--model opus] [--no-git]`
+
+**How it works:**
+1. Validates document mode is `stream`, reads `StreamConfig` from frontmatter
+2. Computes diff, builds prompt requesting patch-block format
+3. Spawns streaming agent (`claude -p --output-format stream-json`)
+4. Timer thread (default 2s) periodically flushes accumulated text to document:
+   `flock → read file → apply template patch → atomic write → unlock`
+5. On completion: saves CRDT state + snapshot, updates resume ID, optional git commit
+
+**Frontmatter:**
+```yaml
+agent_doc_mode: stream
+agent_doc_stream:
+  interval: 2000     # write-back interval (ms)
+  strip_ansi: true   # strip ANSI codes from output
+  target: exchange   # target component name
+```
+
+**Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
+`agent/streaming.rs` (StreamingAgent trait), `agent/claude.rs` (streaming impl)
+
+**One session per document:** Each `agent-doc stream` spawns its own Claude CLI process.
+Multiple documents stream in parallel via separate tmux panes.
+
+**CRDT state storage:** `.agent-doc/crdt/<hash>.yrs` — persisted after each stream for
+subsequent merges. Compacted via `agent-doc compact` to GC tombstones.
 
 ## Domain Ontology
 

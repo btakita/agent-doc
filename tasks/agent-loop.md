@@ -21,4 +21,17 @@ Operational task document for agent-loop workspace management.
 Converted component from `output` to `exchange`. Write prompts here — both user and agent share this surface.
 
 commit submodule. release any pending features + bug fixes. commit & push agent-loop
+
+**Completed** — submodules committed, pointers updated, agent-loop pushed.
+
+| Submodule | Version | Action |
+|-----------|---------|--------|
+| mail | main@a153669 | Committed 39 files (conversations, contacts, drafts) + pushed |
+| agent-doc | v0.14.5+2 | Pointer updated (JetBrains plugin fixes, no crate release needed) |
+| corky | v0.14.0 | Pointer updated |
+| tmux-router | v0.2.4 | Pointer updated |
+
+Parent commit: `cca8d88` — includes all submodule pointers + 22 task doc updates. Pushed to `main`.
+
+Only untracked item remaining: `src/agent-kit` (new, not yet added to parent).
 <!-- /agent:exchange -->

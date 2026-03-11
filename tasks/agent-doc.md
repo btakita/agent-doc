@@ -1319,4 +1319,42 @@ commit first. Then implement Option B
 - `stream_state_tracks_capture`, `doc_mode_eq`
 
 **`make check`: clippy clean, 281 tests pass** (260 unit + 21 CLI), 5 ignored.
+
+How do I switch between stream using skills, stream using watcher, template, and append modes?
+### Re: How to switch between modes
+
+There are four operating modes. Here's how to switch:
+
+**1. Append mode** (default)
+```bash
+agent-doc mode tasks/agent-doc.md --set append
+```
+Body alternates `## User` / `## Assistant` blocks. Use with `/agent-doc` skill or `agent-doc watch`.
+
+**2. Template mode**
+```bash
+agent-doc mode tasks/agent-doc.md --set template
+```
+Named components (`<!-- agent:exchange -->`). Use with `/agent-doc` skill (checkpoints flush sections as they complete) or `agent-doc watch` (file-change triggers submit).
+
+**3. Stream mode + skill checkpoints (Option A)**
+Keep document in **template** mode. Use `/agent-doc` as normal — it flushes partial responses at natural breakpoints. This is what you're using right now.
+
+**4. Stream mode + watch daemon (Option B)**
+```bash
+agent-doc mode tasks/agent-doc.md --set stream
+```
+Watch daemon auto-detects `stream` and polls tmux pane every 500ms. Requires watch daemon running (auto-started on `agent-doc claim`).
+
+**Quick reference:**
+
+| Mode | Frontmatter | Invocation | Latency | Tool access |
+|------|------------|------------|---------|-------------|
+| Append | `append` | `/agent-doc` or `watch` | End of response | Full |
+| Template | `template` | `/agent-doc` with checkpoints | 10-30s per section | Full |
+| Stream+Skill (A) | `template` | `/agent-doc` | 10-30s per section | Full |
+| Stream+Watch (B) | `stream` | `watch` daemon + `/agent-doc` | 500ms | Full |
+| Stream+CLI | `stream` | `agent-doc stream` | 2s | None (raw text) |
+
+**Switching:** `agent-doc mode <file> --set <append|template|stream>`. Only frontmatter changes — no content modified.
 <!-- /agent:exchange -->

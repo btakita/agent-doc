@@ -18,6 +18,9 @@ pub fn run(file: &Path) -> Result<()> {
     // Delete snapshot
     snapshot::delete(file)?;
 
+    // Delete CRDT state (stream mode)
+    snapshot::delete_crdt(file)?;
+
     eprintln!("Reset session for {}", file.display());
     Ok(())
 }

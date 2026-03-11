@@ -21,8 +21,8 @@ pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
 
     if let Some(mode) = set {
         match mode {
-            "append" | "template" => {}
-            _ => anyhow::bail!("invalid mode: {} (expected 'append' or 'template')", mode),
+            "append" | "template" | "stream" => {}
+            _ => anyhow::bail!("invalid mode: {} (expected 'append', 'template', or 'stream')", mode),
         }
         let updated = frontmatter::set_mode(&content, mode)?;
         std::fs::write(file, &updated)

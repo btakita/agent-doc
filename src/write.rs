@@ -157,6 +157,116 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Run the stream write command: template patches with CRDT merge (conflict-free).
+///
+/// Like `run_template`, but uses CRDT merge instead of git merge-file.
+/// `baseline` is the document content at the time the response was generated.
+pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Read response from stdin
+    let mut response = String::new();
+    std::io::stdin()
+        .read_to_string(&mut response)
+        .context("failed to read response from stdin")?;
+
+    if response.trim().is_empty() {
+        anyhow::bail!("empty response — nothing to write");
+    }
+
+    // Save response to pending store (survives context compaction)
+    recover::save_pending(file, &response)?;
+
+    // Parse patch blocks from response
+    let (patches, unmatched) = template::parse_patches(&response)
+        .context("failed to parse patch blocks from response")?;
+
+    if patches.is_empty() && unmatched.trim().is_empty() {
+        anyhow::bail!("no patch blocks or content found in response");
+    }
+
+    // Read document state
+    let content_at_start = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let base = baseline.unwrap_or(&content_at_start);
+
+    // Apply patches to baseline
+    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+
+    // Acquire advisory lock
+    let doc_lock = acquire_doc_lock(file)?;
+
+    // Re-read file to check for user edits
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+
+    let (final_content, crdt_state) = if content_current == base {
+        // No edits — build CRDT state from result
+        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+        (content_ours, doc.encode_state())
+    } else {
+        eprintln!("[write] File was modified during response generation. CRDT merging...");
+        let crdt_state = snapshot::load_crdt(file)?;
+        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
+    };
+
+    atomic_write(file, &final_content)?;
+
+    // Update snapshot and CRDT state
+    snapshot::save(file, &final_content)?;
+    snapshot::save_crdt(file, &crdt_state)?;
+
+    drop(doc_lock);
+
+    // Clear pending response after successful write
+    recover::clear_pending(file)?;
+
+    eprintln!(
+        "[write] Stream patches applied to {} ({} components patched, CRDT)",
+        file.display(),
+        patches.len()
+    );
+    Ok(())
+}
+
+/// Apply stream-mode patches from a string (not stdin).
+/// Used by `recover` to apply orphaned stream responses.
+#[allow(dead_code)] // Wired by recover module when stream mode recovery is added
+pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let (patches, unmatched) = template::parse_patches(response)
+        .context("failed to parse patch blocks from response")?;
+
+    let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+
+    let doc_lock = acquire_doc_lock(file)?;
+
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+
+    let (final_content, crdt_state) = if content_current == content {
+        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+        (content_ours, doc.encode_state())
+    } else {
+        let crdt_state = snapshot::load_crdt(file)?;
+        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
+    };
+
+    atomic_write(file, &final_content)?;
+    snapshot::save(file, &final_content)?;
+    snapshot::save_crdt(file, &crdt_state)?;
+    drop(doc_lock);
+    eprintln!("[write] Stream patches applied to {}", file.display());
+    Ok(())
+}
+
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `recover` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {

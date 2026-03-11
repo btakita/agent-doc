@@ -35,10 +35,28 @@ pub fn run(file: &Path, keep: usize) -> Result<()> {
 
     // Only works for append-mode documents
     let mode = fm.mode.as_deref().unwrap_or("append");
-    if mode == "template" {
-        anyhow::bail!(
-            "compact is for append-mode documents. Template-mode documents use bounded components."
-        );
+    match mode {
+        "template" => {
+            anyhow::bail!(
+                "compact is for append-mode documents. Template-mode documents use bounded components."
+            );
+        }
+        "stream" => {
+            // Stream mode: compact the CRDT log alongside the normal compact
+            if let Ok(Some(crdt_state)) = snapshot::load_crdt(file) {
+                let compacted = crate::crdt::compact(&crdt_state)?;
+                snapshot::save_crdt(file, &compacted)?;
+                eprintln!(
+                    "[compact] CRDT state compacted: {} → {} bytes",
+                    crdt_state.len(),
+                    compacted.len()
+                );
+            }
+            anyhow::bail!(
+                "compact is for append-mode documents. Stream-mode documents use bounded components. CRDT state has been compacted."
+            );
+        }
+        _ => {} // append mode — continue
     }
 
     // Parse exchanges from the body

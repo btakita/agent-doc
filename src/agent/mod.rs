@@ -1,5 +1,6 @@
 pub mod claude;
 pub mod junie;
+pub mod streaming;
 
 use anyhow::Result;
 

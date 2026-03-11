@@ -54,6 +54,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/agent-doc plugin list", "", "List installed editor plugins"));
     cmds.push(cmd("/agent-doc upgrade", "", "Check for updates and upgrade"));
     cmds.push(cmd("/agent-doc autoclaim", "", "Re-establish claims after context compaction"));
+    cmds.push(cmd("/agent-doc stream", "<FILE>", "Stream agent output to document in real-time (CRDT)"));
 
     // --- Claude Code built-in commands ---
     cmds.push(cmd("/help", "", "Show help and available commands"));

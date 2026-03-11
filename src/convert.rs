@@ -24,6 +24,16 @@ pub fn run(file: &Path, target_mode: &AgentDocMode) -> Result<()> {
     match target_mode {
         AgentDocMode::Template => convert_to_template(file, &content, fm, body, &current_mode_str),
         AgentDocMode::Append => convert_to_append(file, fm, body, &current_mode_str),
+        AgentDocMode::Stream => {
+            // Stream is a superset of template — convert to template first, then set mode to stream
+            convert_to_template(file, &content, fm, body, &current_mode_str)?;
+            let updated = std::fs::read_to_string(file)?;
+            let updated = frontmatter::set_mode(&updated, "stream")?;
+            write::atomic_write_pub(file, &updated)?;
+            snapshot::save(file, &updated)?;
+            eprintln!("Converted {} to stream mode", file.display());
+            Ok(())
+        }
     }
 }
 

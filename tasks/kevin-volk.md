@@ -139,25 +139,13 @@ Transcribe and diarize the recording.
 <!-- /agent:input -->
 
 <!-- agent:output -->
-Converted to template mode. The document is now restructured:
 
-- **Top section** — interview prep reference material (role, talking points, CopilotKit match table, action items)
-- **exchange** — condensed conversation history
-- **input** — write your prompts here
-- **output** — agent responses appear here
+**All responses are in the exchange component above** (scroll up to `## Exchange`). Summary of what was completed:
 
-Key changes:
-- Consolidated all reference material into the top section (no longer interleaved with conversation)
-- Condensed 6 rounds of conversation into a summary in the exchange component
-- Checked off completed checklist items (call happened, pitch prepared)
-- Added post-call CopilotKit section with JD match table
-- Added action items section (including your new requests: kevin-volk contact + recording transcription)
+1. **Contact created** — `mail/contacts/kevin-volk/CLAUDE.md` (Kevin Volk, Staffing Science, CopilotKit role details)
+2. **Transcription** — Whisper medium model, 34 min, saved to `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`
+3. **Diarization** — Speaker labels (Kevin/Brian) added via contextual analysis
+4. **Corky diarization feature** — tracked as feature request for `tasks/corky.md`
 
-**Re: your new requests** — I need more context:
-1. **kevin-volk contact** — Where do you store contacts? Is there a `mail/contacts/kevin-volk/` directory to create?
-2. **Recording** — What recording? Is there an audio file from the Mar 9 call? Where is it located?
-
-Please diarize the transcription. Have Corky diarize the transcripts by default.
-
-Please include the claude response in this file.
+**Note:** In template mode, write your prompts in `<!-- agent:input -->` or `<!-- agent:exchange -->`. The output component is for agent responses. I'll respond here going forward.
 <!-- /agent:output -->

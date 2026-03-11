@@ -867,4 +867,81 @@ continue
 ### Next: Phases 2 & 3 (parallel)
 
 Phase 2 (CRDT Merge Path) and Phase 3 (Streaming Agent Backend) can proceed in parallel per the dependency graph. Ready to implement on your signal.
+
+Implement
+
+## Phases 2 & 3 — Implemented
+
+### Phase 2: CRDT Merge Path
+
+**merge.rs** — added `merge_contents_crdt()`:
+- Takes optional base CRDT state + two text versions
+- Delegates to `crdt::merge()` for conflict-free merge
+- Returns `(merged_text, new_crdt_state)` tuple
+- 4 new tests: agent+user append, concurrent same-line, no-base bootstrap, one-side unchanged
+
+**snapshot.rs** — CRDT state persistence:
+- `crdt_path_for(doc)` → `<project_root>/.agent-doc/crdt/<hash>.yrs`
+- `save_crdt(doc, state)` / `load_crdt(doc)` / `delete_crdt(doc)`
+- Own advisory lock (`<hash>.yrs.lock`) to avoid CWD race conditions
+- 5 new tests: path extension, save/load roundtrip, load missing, delete, delete missing
+
+**frontmatter.rs** — `StreamConfig` struct:
+- `interval: Option<u64>` (ms, default 2000)
+- `strip_ansi: Option<bool>` (default true)
+- `target: Option<String>` (component name, default "exchange")
+- Added `stream_config: Option<StreamConfig>` to `Frontmatter` (serialized as `agent_doc_stream`)
+
+**mode.rs** — accepts `"stream"` as valid mode
+
+**write.rs** — stream-mode write functions:
+- `run_stream()` — template patches with CRDT merge
+- `apply_stream_from_string()` — recovery helper for stream mode
+- Auto-detects stream mode from frontmatter in `Write` command
+
+**compact.rs** — handles stream mode: compacts CRDT log, then bails (bounded components)
+
+**reset.rs** — deletes CRDT state alongside snapshot
+
+**convert.rs** — handles `Stream` variant: converts to template first, then sets mode to stream
+
+**commands.rs** — added `/agent-doc stream` to autocomplete list
+
+**main.rs**:
+- `AgentDocMode::Stream` variant added
+- `Stream` subcommand (placeholder for Phase 4)
+- `Write` command: `--stream` flag + auto-detect from frontmatter
+- Removed `#[allow(dead_code)]` from crdt module
+
+### Phase 3: Streaming Agent Backend
+
+**agent/streaming.rs** — streaming types and parsing:
+- `StreamChunk` struct: `text`, `is_final`, `session_id`
+- `StreamingAgent` trait: `send_streaming()` returns chunk iterator
+- `parse_stream_line()` — parses Claude Code `stream-json` format
+- Handles `result`, `assistant`, and unknown message types
+- 7 tests: result line, assistant line, unknown type, malformed JSON, empty blocks, multi-block, no session_id
+
+**agent/claude.rs** — `StreamingAgent` impl for `Claude`:
+- Spawns with `--output-format stream-json` instead of `json`
+- `StreamIterator` reads stdout via `BufReader::lines()` (blocking, no async)
+- Closes stdin after writing prompt
+- Skips empty lines in stream output
+
+**agent/mod.rs** — added `pub mod streaming;`
+
+### Test Summary
+
+| Phase | New Tests | Total |
+|-------|-----------|-------|
+| Phase 1 (CRDT) | 14 | 14 |
+| Phase 2 (Merge) | 9 | 9 |
+| Phase 3 (Stream) | 7 | 7 |
+| **Total new** | **30** | **265** |
+
+`make check`: clippy clean, **265 tests pass** (244 unit + 21 CLI), 5 ignored, stable across multiple runs.
+
+### Ready for Phase 4
+
+Phase 4 (Stream Write-Back Command) wires everything together: `agent-doc stream <FILE>` will use `StreamingAgent` to get chunks, accumulate in buffer, and use CRDT merge to write back every 2s while preserving user edits. The foundation from Phases 1-3 is complete.
 <!-- /agent:exchange -->

@@ -172,6 +172,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
 - Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
 - Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
+- `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
+- CRDT-based merge for exchange components (`yrs` library) — eliminate merge conflicts for concurrent user+agent edits
 <!-- /agent:pending -->
 
 ## Lessons
@@ -658,6 +660,9 @@ This is **Agent of Empires (AoE) style orchestration** — coordinator + worker 
 
 **For agent-doc:** CRDT fits better (no central server — file IS shared state). But for batch writes (every 2s), existing 3-way merge is sufficient. CRDTs only matter for character-by-character streaming.
 
+Would CRDT also fix the in place merge issues?
+I currently see merge conflicts with the 3-way merge approach. What would the behavior be for the CRDT approach?
+
 ### TUI markdown editors
 
 - **glow** (Charm) — beautiful terminal markdown renderer (read-only)
@@ -666,7 +671,31 @@ This is **Agent of Empires (AoE) style orchestration** — coordinator + worker 
 
 **Better IDE fix:** Plugin applies patches via `Document.replaceString()` (IntelliJ) / `TextEditor.edit()` (VS Code) — only changed region repaints, no full-file reload flash. Plugin subscribes to socket/pipe from `agent-doc stream` for incremental edits.
 
+CRDTs will help with this selective replacement.
+
 ### ANSI → styles
 
 Yes — strip ANSI for markdown file, keep for TUI display. Claude Code output is mostly markdown already; ANSI codes are just terminal formatting. `strip-ansi-escapes` (Rust) strips cleanly. Pragmatic: strip on write to document, preserve in terminal view.
+### CRDT vs 3-way merge for agent-doc
+
+**Current merge conflicts** happen because 3-way merge works at text level — two different file versions reconciled line-by-line. When agent writes to exchange while you edit the same component, merge sees overlapping changes and conflicts.
+
+**CRDT behavior — no conflicts ever:**
+1. Each character has a unique ID with causal ordering
+2. Concurrent inserts at same position get deterministically ordered by actor ID
+3. Your edit + agent's append happen independently — CRDT merges automatically
+   - You type at line 661, agent appends at end of component
+   - CRDT: both preserved, no conflict markers, deterministic order
+   - 3-way merge: may conflict if edits are near each other
+
+**Key difference:** 3-way merge compares *snapshots*. CRDT tracks *operations* (insert char X at position Y by actor Z). Operations compose; snapshots may not.
+
+**Selective replacement (plugin):** CRDTs make this natural. Plugin holds a `Y.Doc`, agent process holds another. Sync via shared file or socket. Plugin calls `Document.replaceString()` only for the delta.
+
+**Practical path:**
+1. `yrs` — Yjs port to Rust (mature, production-ready)
+2. Each document gets a `Y.Doc`. `agent-doc write` applies ops to CRDT instead of text replacement
+3. Plugin loads CRDT state, applies local edits as ops, receives agent ops via file watch/socket
+
+**Incremental approach:** CRDT only for `exchange` components (conflict-prone). Keep 3-way merge for replace-mode components (status, architecture) — single writer, no conflicts.
 <!-- /agent:exchange -->

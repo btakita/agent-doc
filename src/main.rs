@@ -3,6 +3,7 @@ mod audit_docs;
 mod autoclaim;
 mod claim;
 mod clean;
+mod commands;
 mod compact;
 mod config;
 mod convert;
@@ -268,6 +269,8 @@ enum Commands {
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+    /// List all available commands as JSON (for editor plugin autocomplete)
+    Commands,
 }
 
 #[derive(Subcommand)]
@@ -434,5 +437,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
+        Commands::Commands => commands::run(),
     }
 }

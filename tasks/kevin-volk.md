@@ -121,6 +121,16 @@ Transcript saved to `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt
 - Timestamps preserved, no speaker diarization (Whisper medium model)
 
 Contact file updated: `mail/contacts/kevin-volk/CLAUDE.md`
+
+### Diarization complete
+
+Transcript diarized with speaker labels (Kevin/Brian) using contextual analysis. Updated in place at `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`.
+
+**Re: Corky diarizing by default** — noted as a feature request. Currently Whisper transcription doesn't include diarization. Options:
+1. Add pyannote speaker diarization as a post-processing step in corky's transcription pipeline (pyannote has dependency issues on Python 3.14 currently)
+2. Use contextual/LLM-based diarization as a fallback (what we just did)
+
+This should be tracked as a corky feature in `tasks/corky.md`.
 <!-- /agent:exchange -->
 
 <!-- agent:input -->
@@ -146,4 +156,8 @@ Key changes:
 **Re: your new requests** — I need more context:
 1. **kevin-volk contact** — Where do you store contacts? Is there a `mail/contacts/kevin-volk/` directory to create?
 2. **Recording** — What recording? Is there an audio file from the Mar 9 call? Where is it located?
+
+Please diarize the transcription. Have Corky diarize the transcripts by default.
+
+Please include the claude response in this file.
 <!-- /agent:output -->

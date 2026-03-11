@@ -56,4 +56,20 @@ Corky is already committed and pushed (done in previous cycle — `7c3f4ea`).
 2. **Do nothing** — the crates.io README is slightly stale but functionally harmless (just says "install with `--features transcribe`" instead of "enabled by default").
 
 Want me to publish v0.14.1 for the docs fix?
+
+Is there any pending features or bug fixes for corky?
+
+**Corky pending work:**
+
+- **No open issues or PRs.** No TODO/FIXME/HACK in source.
+- **One pending task** from `tasks/email.md`: btak-dev Gmail account setup (`btak.dev@gmail.com` in `mail/.corky.toml`) — discussed but never applied.
+- **23 unmerged branches** — most are stale feature experiments. Notable ones:
+  - `telegram-html-import` / `telegram-slack-import` — Telegram import
+  - `contact-sync-v2` — contact sync v2
+  - `upgrade-self-update` — self-update mechanism
+  - `draft-attachments` — draft attachments
+  - `contact-enrichment` — contact enrichment
+  - `rust-2024-edition` — edition upgrade
+
+No code-level bugs or pending features blocking a release. If you want to publish v0.14.1 (docs-only), it's clean to do so. The stale branches could be pruned if those features are abandoned.
 <!-- /agent:exchange -->

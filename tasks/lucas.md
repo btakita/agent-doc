@@ -88,4 +88,15 @@ Look for a token named for Lucas. If you can't find the secret, you'll need to *
 - **Fine-grained PAT**: add `btakita/resume` to repository access with "Contents: Read and write" permission
 
 If you regenerate the token, paste it here and I can verify its access and scopes.
+
+The token is LUCAS_PAT in agent-root/.env
+
+Found `LUCAS_PAT` in `agent-loop/.env`. Verified:
+
+- **Authenticates as:** btakita (Brian's fine-grained PAT scoped for Lucas)
+- **btakita/resume:** full access (admin, push, pull)
+- **btakita/mailbox-lucas:** no access (404 — needs to be added to the token's repository list)
+- **Also found:** `CORRESPONDENCE_SHARED_LUCAS_PAT` (second token, likely for corky)
+
+**To add mailbox-lucas access:** Go to https://github.com/settings/tokens?type=beta, find the LUCAS_PAT token, edit it, and add `btakita/mailbox-lucas` to the repository access list.
 <!-- /agent:exchange -->

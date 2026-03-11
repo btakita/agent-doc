@@ -640,4 +640,56 @@ This session produced significant agent-doc improvements. See `tasks/agent-doc.m
 
 I want to highlight the autocomplete with stream mode.
 This allow the document to be the "nexus" of not only claude sessions, but also dynamic autocomplete data from other custom sources. Such as databases, rag, and services.
+### Stream mode as a document nexus
+
+Great framing. The document becomes a **live data surface** — not just a conversation with Claude, but a hub where multiple data sources stream into a single file that the user controls.
+
+**Autocomplete + stream mode vision:**
+
+The key insight: `agent-doc stream` already has the infrastructure for continuous write-back (200ms CRDT timer). Autocomplete sources don't need to be Claude — any process that produces text can feed into the same merge pipeline.
+
+**Architecture:**
+
+```
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  Claude API  │  │  RAG search  │  │  DB query    │
+│  (agent)     │  │  (context)   │  │  (live data) │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                 │
+       ▼                 ▼                 ▼
+┌─────────────────────────────────────────────────┐
+│           agent-doc write --stream              │
+│           (CRDT merge, 200ms tick)              │
+└─────────────────────┬───────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────┐
+│            document.md (the nexus)              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
+│  │ agent:   │ │ agent:   │ │ agent:        │    │
+│  │ exchange │ │ context  │ │ autocomplete  │    │
+│  └──────────┘ └──────────┘ └──────────────┘    │
+└─────────────────────────────────────────────────┘
+```
+
+**Concrete use cases:**
+
+1. **Database-backed autocomplete** — A sidecar process watches for `SELECT` or entity names in the document, queries the DB, and streams results into an `<!-- agent:autocomplete -->` component. The user sees live query results alongside the AI conversation.
+
+2. **RAG context injection** — When the user types a topic, a RAG pipeline fetches relevant documents and streams summaries into `<!-- agent:context -->`. The AI agent sees this context in its next diff cycle.
+
+3. **Service health dashboards** — A monitoring sidecar streams service status into `<!-- agent:status -->`. The document becomes an ops runbook with live data.
+
+4. **Multi-agent collaboration** — Multiple Claude instances stream into different components of the same document. Each has a unique CRDT client ID — no conflicts between agents.
+
+**What makes this work:**
+- CRDT merge handles N concurrent writers, not just 2
+- Named components (`<!-- agent:name -->`) route data to the right section
+- The user can edit any component at any time — their edits are never lost
+- Each source can write at its own cadence — the 200ms tick is per-writer
+
+**For the blog post / video**, this is the vision statement: agent-doc isn't just "AI writes to your file." It's **your document as the integration layer** — a universal surface where humans, AI agents, databases, and services all contribute, mediated by CRDTs.
+
+Yes...add this to the blog post.
+I want to find investors at this point. I think this could be a means to have a startup.
 <!-- /agent:exchange -->

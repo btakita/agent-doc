@@ -254,6 +254,9 @@ And Phase 2?
 3. **Google Workspace** — Either her existing Gmail/Google setup or we create a new Google Workspace ($35/mo for 5 seats). Needed for Calendar (notifications), Drive (document storage), and business email
 4. **Current website content** — Any pages, images, branding assets, or copy she wants preserved from the existing site
 5. **Cloudflare account** — We'll create one in her name (free tier)
+Does Judith need to sign up far a Cloudflare account? And add me as an admin?
+Can I transfer ownership to her? I expect we will need to use workers.
+I could host her site on my account, but one of my selling points is that she owns the accounts.
 
 **Business Requirements (can gather on Zoom with Robert Waldman):**
 1. **Document types** — List of all document types she regularly collects (loan apps, bank statements, tax returns, construction budgets, etc.)
@@ -290,4 +293,61 @@ And Phase 2?
 2. **Judith signs up for TMO** — she can start using it immediately for loan management while we build the custom layer
 3. **Judith provides domain credentials** — so we can begin Cloudflare migration
 4. **Agree on payment structure** — confirm the two $4K milestones work, or break into 3 smaller ones per the talking points ($2-3K each)
+
+Let's begin with an onboarding email. Just to lay it out what we know needs to be done in writing. We can have a call for the requirements gathering.
+
+**Re: Cloudflare Account Ownership**
+
+Best approach: **Create the account in Judith's name from the start.** She signs up with her business email, then adds you as a member (Cloudflare supports multi-user access on all plans, including free). This way she owns the account from day one — no transfer needed.
+
+If you start on your account, you *can* transfer individual zones (domains) between Cloudflare accounts later, but it's cleaner to just set it up right from the start. Full account transfers aren't supported — only zone-level moves.
+
+**Workers:** Free plan includes 100K requests/day (more than enough to start). If she needs more, Workers Paid is $5/mo for 10M requests/month. Either way, negligible cost.
+
+**Practical setup:** On the Zoom call, walk her through creating the Cloudflare account (takes 2 minutes), then she adds you as an admin right there. Same session, you point her domain's nameservers to Cloudflare.
+
+---
+
+**Onboarding Email Draft**
+
+CC's Robert Waldman so he's in the loop. Keeps it warm, actionable, and doesn't overwhelm with technical details — saves that for the call.
+
+**To:** judithkrug@gmail.com
+**CC:** rwaldman100@gmail.com
+**Subject:** Getting Started — Next Steps for Your New System
+**In-Reply-To:** (thread with proposal email)
+
+---
+
+Hi Judith,
+
+Great to hear you're moving forward — I'm excited to get started!
+
+Here's a quick rundown of what we'll need to kick things off. Nothing urgent, just so you know what's coming:
+
+**Before we begin:**
+1. **Sign up for The Mortgage Office (TMO)** — You can start using it right away for loan management while I build the custom tools on top. Their team can walk you through setup.
+2. **Domain access** — I'll need the login for wherever equityfundingsource.com is managed (likely Weebly or your domain registrar). This lets me set up your new site on Cloudflare.
+3. **Branding assets** — Your logo, any photos or content from the current site you want to keep. If you have a style preference (colors, fonts), let me know — otherwise I'll work from what's on the current site.
+
+**On our first call together (you, me, and Robert):**
+- Walk through your current workflow so I understand exactly how loans flow through your office
+- List out the document types you collect from borrowers and investors
+- Set up your Cloudflare account (takes 2 minutes) and point your domain to it
+- Discuss notification preferences — what reminders would save you the most time?
+
+**How payment works:**
+- Milestone 1 ($4,000): Website + document upload portal — you'll see it live before we move to the next phase
+- Milestone 2 ($4,000): AI-powered document extraction + TMO integration + notification system
+- You pay as you see results, and you own everything we build
+
+When would be a good time for that first call? I'm flexible — happy to work around your schedule. A 45-60 minute Zoom should cover everything.
+
+Looking forward to it!
+
+Brian
+
+---
+
+Ready to save as a corky draft when you approve. Let me know if you want to adjust tone, add/remove anything, or change the payment framing.
 <!-- /agent:exchange -->

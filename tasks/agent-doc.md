@@ -785,4 +785,24 @@ agent_doc_stream:
 | Editor experience | Appears all at once | Streams in real-time |
 
 Stream mode is a superset of template — same component structure, different write-back timing. Plugin receives chunks via WebSocket/pipe, applies via `Document.replaceString()` for cursor-safe incremental updates.
+
+Would agent-doc compact also compact the stream mode...via a summary?
+
+Wou the stream mode be a superset of template mode? With agent:exchange being the primary mechanism for the stream io?
+### Stream compact — yes, via summary
+
+`agent-doc compact` works the same in stream mode: summarize exchange into history, replace with compaction marker, GC the CRDT log. Stream just produces more content faster — compact handles it identically. Summary may need to be more aggressive (stream includes tool calls, intermediate thinking, retries vs template's clean responses).
+
+### Stream as superset of template — confirmed
+
+```
+append ⊂ template ⊂ stream
+```
+
+Stream doesn't invent new document structure. Uses the same `<!-- agent:exchange -->` as primary I/O surface. The difference is purely the write mechanism:
+
+- **Template:** batch write after full response, 3-way merge, file change notification
+- **Stream:** continuous write (every 2s), CRDT sync, WebSocket/pipe chunks to plugin
+
+A stream-mode document IS a template-mode document — switch back anytime, all existing tools (compact, convert, template-info, patch) work unchanged. `agent_doc_mode: stream` just tells tooling: "use CRDT for writes, stream output in real-time."
 <!-- /agent:exchange -->

@@ -1153,4 +1153,34 @@ Option 2 is cleaner. The CLI subcommand would output:
 Plugins call this once on activation and cache the result.
 
 Ready to implement? I'd start with option 2 (CLI subcommand first, then JetBrains, then VS Code).
+
+Implement Option 2
+Make sure **all** claude code commands are included.
+
+**Implemented Option 2 — all three layers:**
+
+**1. CLI: `agent-doc commands`** (`src/commands.rs`)
+- 74 commands total: 32 agent-doc CLI, 30 Claude Code built-in, 12 skill commands (existence + tagpath)
+- JSON output with `name`, `args`, `description` per command
+- 3 unit tests (count, format validation, JSON serialization)
+- Build: passes, all 24 tests passing
+
+**2. JetBrains: `SlashCommandCompletionContributor.kt`**
+- Registered in `plugin.xml` as `<completion.contributor language="any">`
+- Triggers on `/` at line start in any file
+- Loads commands from `agent-doc commands` CLI on first use, caches result
+- Shows command name (bold for top-level), args as tail text, description as type text
+- Uses Gson (bundled in IntelliJ platform) for JSON parsing
+- Build: `./gradlew buildPlugin` succeeds
+
+**3. VS Code: `SlashCommandCompletionProvider`**
+- Registered for markdown language with `/` trigger character
+- Same CLI-backed command loading with caching
+- Top-level commands sorted before subcommands
+- `CompletionItemKind.Function` with detail and documentation
+- Type-check: passes
+
+**Claude Code built-in commands included:** `/help`, `/model`, `/clear`, `/compact`, `/cost`, `/login`, `/logout`, `/status`, `/config`, `/memory`, `/review`, `/bug`, `/fast`, `/slow`, `/permissions`, `/terminal-setup`, `/doctor`, `/init`, `/pr-comments`, `/vim`, `/diff`, `/undo`, `/resume`, `/listen`, `/mcp`, `/approved-tools`, `/add-dir`, `/release-notes`, `/hooks`, `/btw`
+
+Next: bump version + release to get the new `commands` subcommand in the binary, then rebuild plugins.
 <!-- /agent:exchange -->

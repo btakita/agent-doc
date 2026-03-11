@@ -1460,4 +1460,72 @@ Three modes:
 4. `claude.rs` — pass `--thinking` flag when `StreamConfig.thinking` is true
 
 **The `thinking_target: log` pattern is most elegant** — keeps conversation clean while providing a live reasoning trace. Log component with `mode = "append"` gives running history of thought process.
+
+Implement.
+Implement.
+
+Looks like you reprinted Implement over here. Please add a test and fix this.
+
+### Chain-of-thought streaming — implemented
+
+**3 files changed, 287 insertions, 52 deletions. 287 tests passing.**
+
+**Changes:**
+
+1. **`frontmatter.rs`** — Added `thinking: Option<bool>` and `thinking_target: Option<String>` to `StreamConfig`
+
+2. **`agent/streaming.rs`** — Added `thinking: Option<String>` field to `StreamChunk`. Replaced `extract_assistant_text()` with `extract_assistant_content()` that extracts both `"type": "text"` and `"type": "thinking"` content blocks. 3 new tests for thinking parsing.
+
+3. **`stream.rs`** — `ThinkingConfig` struct controls routing. Separate `thinking_buffer` (Arc<Mutex>) accumulates thinking content. Three modes:
+   - **Disabled** (default) — thinking chunks ignored, buffer unused
+   - **Separate component** (`thinking_target: log`) — thinking flushed to `<!-- agent:log -->` on each timer tick
+   - **Interleaved** (`thinking: true`, no target) — prepended as `<details><summary>Thinking</summary>...</details>` in the response buffer
+
+**Frontmatter usage:**
+```yaml
+agent_doc_stream:
+  interval: 200
+  target: exchange
+  thinking: true
+  thinking_target: log    # or omit for interleaved
+```
+
+Binary installed. Committed in submodule.
+Looks like you reprinted Implement over here. Please add a test and fix this.
+
+### Stream flush duplication — fixed
+
+**Root cause:** `flush_to_document()` used `template::apply_patches()` which respects component modes. Exchange component defaults to **append** mode. But stream buffers are **cumulative** (each chunk contains the full text so far, not just the delta). So each flush appended the entire buffer on top of what was already there.
+
+**Fix:** `flush_to_document()` now forces **replace mode** for the stream target component, regardless of configured mode. Added `apply_patches_with_overrides()` to `template.rs` that accepts per-component mode overrides.
+
+**New tests:**
+- `flush_replaces_exchange_in_stream_mode` — verifies replace behavior (old content gone)
+- `flush_cumulative_does_not_duplicate` — two successive flushes ("Hello" then "Hello world") → "Hello" appears exactly once
+
+**288 tests passing** (267 unit + 21 integration). Binary installed. Committed in submodule.
+
+Add docs for stream mode. Ensure that chain of thought is included in the docs.
+Add docs for stream mode. Ensure that chain of thought is included in the docs.
+
+### Stream mode docs — updated
+
+Updated `src/agent-doc/CLAUDE.md` with comprehensive stream mode documentation:
+
+**New sections added:**
+
+1. **Chain of Thought** — 3-mode table (disabled / interleaved / separate component), parser details, example document with `thinking_target: log`
+
+2. **Flush Behavior** — explains why stream flushes use replace mode (cumulative buffers), references `apply_patches_with_overrides()`
+
+**Updated sections:**
+
+3. **StreamingAgent Contract** — now mentions `thinking` field on `StreamChunk`
+
+4. **Stream Mode frontmatter** — added `thinking` and `thinking_target` fields to the example YAML
+
+Committed in submodule.
+
+Release tmux-router (if any changes).
+Release agent-doc
 <!-- /agent:exchange -->

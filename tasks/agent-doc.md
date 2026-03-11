@@ -146,6 +146,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.0 | Route focus fix, claim defaults to template mode, `agent-doc mode` CLI command |
 | v0.14.1 | Move git commit to after write — reduces IDE "file changed externally" notices |
 | v0.14.2 | Skill reload via `--reload compact/restart` flag, auto-prompt for /compact after updates |
+| v0.14.5 | Remove auto-prune (session-killing bug), `commands` subcommand, plugin autocomplete (JetBrains + VS Code), plugins v0.2.0 |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -227,6 +228,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.14.1 session:** Moved git commit to after write in SKILL.md workflow. Root cause of IDE "file changed externally" notices: pre-response `agent-doc commit` ran `git add + commit` which IntelliJ VCS detected as external change. Fix: commit after write reduces notices from 2 to 1. Not related to `snapshot::resolve()` (read-only).
 
 **v0.14.2 session:** Skill reload via `--reload compact/restart` flag. `install_and_check_updated()` returns bool. SKILL.md pre-flight uses `--reload compact` and stops if skill updated, prompting user to `/compact`. Investigated Claude Code session resume/compact behavior. SessionStart hook fires with `source: "compact"` after /compact. Skills have live change detection but current invocation keeps old text. Feature request for `/reload-skills` exists (github.com/anthropics/claude-code/issues/20507).
+
+**v0.14.3-v0.14.5 session:** Removed auto-prune of orphaned tmux windows (was killing active Claude sessions). Replaced with `log_orphaned_windows()` that logs to stderr. Implemented `agent-doc commands` subcommand (74 commands as JSON for plugin autocomplete). JetBrains `SlashCommandCompletionContributor` + VS Code `SlashCommandCompletionProvider`. Plugin versions bumped to 0.2.0. Published to crates.io, PyPI, GitHub Releases. Debugged autocomplete: removed Gson dependency (ClassNotFoundException at runtime), added `PlainPrefixMatcher` for markdown, fixed stale binary in `~/bin/` (v0.14.4 lacked `commands` subcommand). 221 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -1330,4 +1333,9 @@ The contributor was firing correctly, finding the binary, but `~/bin/agent-doc` 
 **Fixed:** Copied v0.14.5 to `~/bin/agent-doc`. No more IDE restart needed — the commands are loaded fresh on each completion trigger (not cached until successful).
 
 Try it now: type `/` on a new line and press `Ctrl+Space`.
+
+/agent-doc compact
+*Compacted. v0.12.2 through v0.14.5 folded into history + releases.*
+
+Autocomplete is working — the `~/bin/agent-doc` stale binary issue is resolved. The `/agent-doc compact` command triggered successfully from the completion menu, confirming the full pipeline works: `SlashCommandCompletionContributor` → `agent-doc commands` → JSON parsing → IntelliJ completion popup.
 <!-- /agent:exchange -->

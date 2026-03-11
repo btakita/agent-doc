@@ -381,4 +381,24 @@ I also accidently press Esc when Idea lets me know that the file was externally 
 **The tradeoff we settled on:**
 - Before: no commit → green gutter shows response, but grows unboundedly and Esc can lose work
 - Now: commit after write → gutter resets each cycle, Esc-safe, next response gets a clean small gutter
+
+It would be nice to delineate the last response. So please don't commit the last agent response. Only commit when the user prompts again.
+### Deferred commit — green gutter between cycles
+
+**Done — SKILL.md updated (both copies).** The commit now happens at the *start* of the next cycle, not after writing:
+
+**New step 0b (before reading):**
+> Commit any uncommitted changes from the previous cycle: `agent-doc commit <FILE>`
+
+**Updated step 5 (after writing):**
+> Do NOT commit after writing. The response stays uncommitted so the green gutter delineates what the agent wrote. Committed automatically on the next submit.
+
+**The flow:**
+1. User submits → step 0b commits the *previous* response → gutter clears
+2. Agent responds → writes to file (uncommitted) → green gutter shows new response
+3. User sees exactly what changed in the gutter until next submit
+
+This gives you both: green gutter visibility to delineate the last response AND Esc protection (the previous response is already committed before the new cycle starts).
+
+commit and rebuild local binary
 <!-- /agent:exchange -->

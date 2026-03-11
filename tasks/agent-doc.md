@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.8 | **Tests:** 232 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.9 | **Tests:** 235 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
@@ -149,7 +149,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.5 | Remove auto-prune (session-killing bug), `commands` subcommand, plugin autocomplete (JetBrains + VS Code), plugins v0.2.0 |
 | v0.14.6 | Auto-sync tmux layout on lazy claim in route, plugin autocomplete fixes (Gson removal, PlainPrefixMatcher) |
 | v0.14.7 | Bidirectional `convert` (append↔template), autoclaim layout sync, `AgentDocMode` enum |
-| v0.14.8 | Fix `strip_comments` code-range awareness, safe stash window purge, 232 tests |
+| v0.14.8 | Fix `strip_comments` code-range awareness, safe stash window purge |
+| v0.14.9 | Multi-backtick code span support in `find_code_ranges`, 235 tests |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -233,6 +234,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.14.2 session:** Skill reload via `--reload compact/restart` flag. `install_and_check_updated()` returns bool. SKILL.md pre-flight uses `--reload compact` and stops if skill updated, prompting user to `/compact`. Investigated Claude Code session resume/compact behavior. SessionStart hook fires with `source: "compact"` after /compact. Skills have live change detection but current invocation keeps old text. Feature request for `/reload-skills` exists (github.com/anthropics/claude-code/issues/20507).
 
 **v0.14.3-v0.14.5 session:** Removed auto-prune of orphaned tmux windows (was killing active Claude sessions). Replaced with `log_orphaned_windows()` that logs to stderr. Implemented `agent-doc commands` subcommand (74 commands as JSON for plugin autocomplete). JetBrains `SlashCommandCompletionContributor` + VS Code `SlashCommandCompletionProvider`. Plugin versions bumped to 0.2.0. Published to crates.io, PyPI, GitHub Releases. Debugged autocomplete: removed Gson dependency (ClassNotFoundException at runtime), added `PlainPrefixMatcher` for markdown, fixed stale binary in `~/bin/` (v0.14.4 lacked `commands` subcommand). 221 tests.
+
+**v0.14.6-v0.14.9 session:** Auto-sync tmux layout on lazy claim + autoclaim. Bidirectional `convert` (append↔template). Fixed `strip_comments()` code-range awareness: single-backtick (v0.14.8), then multi-backtick CommonMark §6.1 (v0.14.9). Safe `purge_stash_windows()`. 235 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -531,7 +534,7 @@ Please fix the inline diffing for agent-doc run
 Add tests to replicate the bug and fix
 ### Comment stripping bug — fixed
 
-**Root cause:** `strip_comments()` in `diff.rs` didn't skip `<!--` inside inline backtick spans. When the exchange section discussed `<!--` syntax (template autocomplete), the parser saw `` `<!--` `` at line 392 as a comment start and matched the `-->` in `### Code-range audit — all clear
+### Code-range audit — all clear
 
 Audited all `<!--` parsing across the codebase:
 
@@ -559,27 +562,23 @@ Published to all targets:
 - `component::find_code_ranges()` made `pub(crate)` for cross-module reuse
 - 4 regression tests for code-aware comment stripping
 - 232 tests, clippy clean
-<!-- /agent:exchange -->` at line 531 — swallowing **7799 bytes** of content including all user edits.
 
-**Diagnostic confirmation:**
-```
-Before fix: [diff] stripped: doc_len=26393 snap_len=26393  ← identical (bug)
-After fix:  [diff] stripped: doc_len=35107 snap_len=34743  ← different (correct)
-```
+The response did not go in this file. Why not?
 
-**Fix:** Reuse `component::find_code_ranges()` (made `pub(crate)`) in `strip_comments()` to identify fenced code blocks and inline backtick spans. Skip comment detection at positions inside code ranges.
+> release
 
-**Same class of bug** as v0.9.10 (code-span parser fix in `component.rs`), but `diff.rs` was never updated.
+The response in question was for the diff showing `release`.
+### Comment stripping bug — fixed (v0.14.8-v0.14.9)
 
-Review the code for other instances of this **Same class of bug**
+**Root cause:** `strip_comments()` in `diff.rs` didn't skip `<!--` inside code spans. When the exchange section discussed `<!--` syntax, the parser matched `<!--` inside backticks with distant `-->` markers, swallowing thousands of bytes.
 
-**4 regression tests added:**
-- `strip_preserves_comment_syntax_in_inline_backticks` — `` `<!--` `` not treated as comment
-- `strip_preserves_comment_syntax_in_fenced_code_block` — `<!-- -->` in code blocks preserved
-- `strip_backtick_comment_before_agent_marker` — `` `<!--` `` + agent marker don't merge into one comment
-- `strip_multiple_backtick_comments_in_exchange` — real-world scenario with inline edits after backtick-comment text
+**Two iterations needed:**
+1. **v0.14.8** — Added `find_code_ranges()` to `strip_comments()`. Fixed single-backtick spans.
+2. **v0.14.9** — Fixed `find_code_ranges()` itself: only handled single backtick spans, not double (`` ... ``). CommonMark §6.1 requires N-backtick matching. Real-world content like `` `<!--` `` (double backticks around single backtick + comment) wasn't detected.
 
-232 tests pass, clippy clean. Binary installed. Commit 7f66cc2.
+**Code-range audit:** `component.rs` (v0.9.10), `diff.rs` (v0.14.8), `template.rs` (low risk — agent responses only). Pattern: any `<!--` parser on user documents MUST use `find_code_ranges()`.
 
-release
+v0.14.9 released to crates.io, PyPI, GitHub Releases. 235 tests, clippy clean.
+
+Note: the v0.14.8 response had a merge artifact — `<!-- /agent:exchange -->` appeared unescaped in body text, breaking the component parser. Cleaned up manually.
 <!-- /agent:exchange -->

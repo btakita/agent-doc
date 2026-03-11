@@ -156,6 +156,16 @@ This should be tracked as a corky feature in `tasks/corky.md`.
 **Action items updated:**
 - [x] Update resume with TypeScript/Python/SDK/React emphasis
 - [ ] Send updated resume to Kevin
+
+### Session 4 — Mar 11, 2026: Send timing
+
+**Recommendation: just wait and send tomorrow.** No need to message Kevin about the timeline — it's only been 2 days since the call. Sending a polished resume within 3 days of a recruiter screen is perfectly normal. Messaging about a sub-24h delay creates unnecessary noise.
+
+Plan:
+1. Finish CRDT stream feature
+2. Add agent-doc streams to resume (AI Products Shipped + Open Source bullets)
+3. Rebuild `BrianTakita-copilotkit.pdf`
+4. Send resume + reply email to Kevin in one clean touchpoint
 <!-- /agent:exchange -->
 
 <!-- agent:input -->
@@ -165,13 +175,5 @@ Transcribe and diarize the recording.
 
 <!-- agent:output -->
 
-**Resume updated for CopilotKit.** Changes applied to `resume/BrianTakita.md`:
-
-- Added agent-kit and tmux-router to AI Products Shipped and Open Source sections
-- Enhanced Presence AI with React/Next.js/TypeScript monorepo details
-- Enhanced ctx-core, lazily-py, rmemo descriptions with SDK/framework language
-- Created `resume/profiles/copilotkit.toml` (TypeScript/Python/React/agent emphasis, no Freelance)
-- Built `resume/BrianTakita-copilotkit.pdf`
-
-Ready to send to Kevin.
+**Just wait and send tomorrow.** It's only 2 days since the call — sending within 3 days is totally normal. One clean touchpoint (resume + reply) is better than two messages. When the CRDT stream feature is done, update the resume and send everything together.
 <!-- /agent:output -->

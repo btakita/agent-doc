@@ -1236,4 +1236,19 @@ Done. Plugin versions bumped to **0.2.0** for both JetBrains and VS Code:
 - `agent-doc plugin install jetbrains|vscode` will now download 0.2.0
 
 Going forward, plugin versions should bump whenever plugin code changes ship in a release. The CLI version (0.14.x) and plugin version (0.2.x) are independent — the CLI can release without plugin changes and vice versa.
+
+How do I use the autocomplete feature in the Jetbrains plugin?
+
+**Using JetBrains autocomplete:**
+
+1. Install the v0.2.0 plugin: `agent-doc plugin install jetbrains` (restart IDE if prompted)
+2. Open any markdown file
+3. On a new line, type `/`
+4. Completion popup appears with all 74 commands
+5. Keep typing to filter (e.g., `/agent` → agent-doc commands only)
+6. Select with Enter or Tab
+
+If the popup doesn't show automatically, press `Ctrl+Space` after `/` to trigger it.
+
+The plugin loads commands from `agent-doc commands` CLI on first invocation and caches them for the IDE session. It resolves the binary from `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin`, or `$PATH`.
 <!-- /agent:exchange -->

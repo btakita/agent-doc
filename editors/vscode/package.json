@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "btakita",
   "license": "MIT",
   "repository": {

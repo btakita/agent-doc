@@ -7,9 +7,9 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.4 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.14.5 | **Tests:** 221 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
-**Plugins:** JetBrains + VS Code at 9/9 SPEC feature parity
+**Plugins:** JetBrains v0.2.0 (PlainPrefixMatcher fix) + VS Code v0.2.0 — autocomplete for 74 commands
 <!-- /agent:status -->
 
 ## Architecture
@@ -1264,4 +1264,23 @@ The autocomplete uses IntelliJ's standard **Code Completion → Basic** system �
 2. **Auto-popup (no shortcut needed):** Settings → Editor → General → Code Completion → check "Show suggestions as you type". Then just type `/` on a new line and the popup appears automatically.
 
 Option 2 is probably better — you keep your template shortcut and autocomplete just works by typing.
+
+I was incorrect about the mapping. Basic Code Completion shows only:
+- /foff
+- /fon
+### Autocomplete fix — PlainPrefixMatcher
+
+The `/foff` and `/fon` results were IntelliJ's built-in live templates, not our commands. The `SlashCommandCompletionContributor` was registered but IntelliJ's default prefix matcher was filtering out our results because it didn't understand `/`-prefixed matching in markdown.
+
+**Fix applied (commit fddfd4d):**
+1. Added `.md` file extension check (was relying on PSI patterns that don't work reliably in Markdown plugin)
+2. Used `PlainPrefixMatcher(trimmed)` instead of the default prefix matcher — this tells IntelliJ to match against the full slash-prefixed text the user typed
+
+**Plugin rebuilt and installed.** Restart IntelliJ IDEA to load the updated plugin, then:
+1. Open any `.md` file
+2. Type `/` at the start of a line
+3. Press `Ctrl+Space` (Basic Code Completion)
+4. You should see all 74 agent-doc/Claude commands alongside the live templates
+
+The updated plugin zip is also on the GitHub Release (v0.14.5) for future installs via `agent-doc plugin install jetbrains`.
 <!-- /agent:exchange -->

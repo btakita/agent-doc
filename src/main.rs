@@ -36,8 +36,17 @@ mod watch;
 mod write;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
+
+/// Document mode for agent-doc sessions.
+#[derive(Clone, Debug, ValueEnum)]
+pub enum AgentDocMode {
+    /// Append-mode: alternating ## User / ## Assistant blocks
+    Append,
+    /// Template-mode: in-place component patching
+    Template,
+}
 
 #[derive(Parser)]
 #[command(name = "agent-doc", version, about = "Interactive document sessions with AI agents")]
@@ -252,10 +261,13 @@ enum Commands {
         #[arg(long, default_value = "2")]
         keep: usize,
     },
-    /// Convert an append-mode document to template mode
+    /// Convert a document between append and template modes
     Convert {
         /// Path to the session document
         file: PathBuf,
+        /// Target mode (default: template)
+        #[arg(value_enum, default_value = "template")]
+        mode: AgentDocMode,
     },
     /// Get or set the document mode (append/template)
     Mode {
@@ -435,7 +447,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Compact { file, keep } => compact::run(&file, keep),
-        Commands::Convert { file } => convert::run(&file),
+        Commands::Convert { file, mode } => convert::run(&file, &mode),
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),

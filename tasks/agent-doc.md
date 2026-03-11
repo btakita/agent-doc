@@ -1119,4 +1119,38 @@ Can we add autocomplet for all claude commands in the plugin?
 **Build:** passes. **Tests:** 21/21 passing.
 
 **Re: plugin autocomplete** — Yes, we can add completion for Claude commands (like `/agent-doc`, `/compact`, `/help`, etc.) in both JetBrains and VS Code plugins. The JetBrains plugin already has `ClaudeCommandCompletionContributor` infrastructure — we'd extend it with the full command list. For VS Code, we'd use `CompletionItemProvider` on the `/` trigger character. Want me to scope this out?
+
+Yes
+
+### Plugin Autocomplete Scope
+
+**Current state:** Both plugins have zero completion infrastructure — all commands via keybindings and popup menus only.
+
+**JetBrains (Kotlin):**
+- New `MarkdownCompletionContributor.kt` — triggers on `/` in markdown files
+- Register in `plugin.xml` as `<completion.contributor language="Markdown">`
+- Complete slash commands: `/agent-doc`, `/compact`, `/help`, `/clear`, `/model`, `/cost`, `/login`, `/status`, `/config`, `/memory`, etc.
+- Also complete agent-doc subcommands: `/agent-doc claim <FILE>`, `/agent-doc run`
+- Show command descriptions inline via `LookupElement.withTailText()`
+- ~100 lines of new code
+
+**VS Code (TypeScript):**
+- Register `CompletionItemProvider` for markdown language, trigger character `/`
+- Same command list with `CompletionItemKind.Function`
+- Include argument hints (e.g., `<FILE>` placeholders)
+- ~60 lines of new code
+
+**Command source options:**
+1. **Hardcode** — simple, fast, needs manual updates when Claude adds commands
+2. **`agent-doc commands --json`** — new CLI subcommand that outputs the full command list with descriptions. Both plugins consume it. Single source of truth. ~30 lines Rust.
+
+Option 2 is cleaner. The CLI subcommand would output:
+```json
+[{"name": "/agent-doc", "args": "<FILE>", "description": "Submit document session"},
+ {"name": "/agent-doc claim", "args": "<FILE>", "description": "Claim file for current tmux pane"}]
+```
+
+Plugins call this once on activation and cache the result.
+
+Ready to implement? I'd start with option 2 (CLI subcommand first, then JetBrains, then VS Code).
 <!-- /agent:exchange -->

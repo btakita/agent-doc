@@ -7,7 +7,7 @@ agent_doc_mode: template
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.14.9 | **Tests:** 235 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.15.0 | **Tests:** 293 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
@@ -151,6 +151,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.7 | Bidirectional `convert` (append↔template), autoclaim layout sync, `AgentDocMode` enum |
 | v0.14.8 | Fix `strip_comments` code-range awareness, safe stash window purge |
 | v0.14.9 | Multi-backtick code span support in `find_code_ranges`, 235 tests |
+| v0.15.0 | CRDT stream mode, chain-of-thought streaming, watch daemon stream support, cumulative flush fix. 293 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -1539,4 +1540,26 @@ Release agent-doc
 Release tmux-router (if any changes).
 Release agent-doc
 
+### v0.15.0 Released
+
+Published to all targets:
+- **crates.io:** `cargo install agent-doc` → v0.15.0
+- **PyPI:** `pip install agent-doc` → v0.15.0
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.15.0
+  - Prebuilt binary (Linux x86_64)
+
+**Changes since v0.14.9:**
+- CRDT-based stream mode (`agent-doc stream`) — real-time agent output with conflict-free merge
+- Chain-of-thought streaming — `thinking` + `thinking_target` in StreamConfig
+- Watch daemon stream support — tmux capture-pane polling for stream-mode documents
+- Stream flush uses replace mode for cumulative buffers (fixes duplication)
+- `apply_patches_with_overrides()` for per-component mode overrides
+- Deferred commit workflow — snapshot bug fix + CRDT everywhere
+- 3 diff detection tests for post-stream-write scenarios
+- 293 tests (up from 235)
+
+tmux-router: no changes, no release needed.
+
+convert this doc to stream mode.
+/agent-doc compact
 <!-- /agent:exchange -->

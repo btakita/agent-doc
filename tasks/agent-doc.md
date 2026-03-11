@@ -1201,4 +1201,28 @@ continue
 5. VS Code `SlashCommandCompletionProvider` — markdown-scoped, `/` trigger
 
 **Ready to push + publish?** (crates.io, PyPI, GitHub Release with prebuilt binary, tag v0.14.5)
+
+publish. Is there a way for users to easily install the jetbrains or vscode plugin without the store?
+
+**v0.14.5 published everywhere:**
+
+- **crates.io:** `cargo install agent-doc` → v0.14.5
+- **PyPI:** `pip install agent-doc` → v0.14.5
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.14.5
+  - Prebuilt binary (Linux x86_64)
+  - `agent-doc-jetbrains-0.1.0.zip` (unsigned)
+  - `agent-doc-jetbrains-0.1.0-signed.zip` (signed)
+  - `agent-doc-0.1.0.vsix` (VS Code)
+
+**Plugin install without store:**
+```bash
+agent-doc plugin install jetbrains   # downloads from GitHub Release, installs to IDE
+agent-doc plugin install vscode      # downloads .vsix, installs via code CLI
+```
+
+Users can also manually download from the GitHub Release page and install:
+- **JetBrains:** Settings → Plugins → gear icon → "Install Plugin from Disk..." → select zip
+- **VS Code:** Extensions → "..." → "Install from VSIX..." → select .vsix
+
+No store accounts needed. The `agent-doc plugin install` command handles everything automatically.
 <!-- /agent:exchange -->

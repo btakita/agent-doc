@@ -1532,4 +1532,8 @@ Release agent-doc
 > No changes since last submit. The document is up to date.
 
 Not true. This is a bug. please fix before releasing. Add tests
+
+Release tmux-router (if any changes).
+Release agent-doc
+
 <!-- /agent:exchange -->

@@ -1411,4 +1411,21 @@ agent-doc watch &    # must start from project root
 Or re-claim the document — `agent-doc claim tasks/stream-test.md` now auto-starts the daemon.
 
 **Note:** The watch daemon's `ensure_running()` spawns the binary, but it needs to run from the project root (where `.agent-doc/` lives). This is a bug to fix — the daemon should resolve the project root before starting the event loop.
+
+The content is not continuously streaming to stream-test
+### Re: Content not continuously streaming to stream-test
+
+**Root cause fixed.** The watch daemon had a CWD bug — when spawned, it couldn't find `.agent-doc/sessions.json` because it was running from the wrong directory.
+
+**What I fixed:**
+1. `start()` now resolves the project root (walks up looking for `.agent-doc/`) and `cd`s there before starting the event loop
+2. `ensure_running()` passes `current_dir(&project_root)` when spawning the daemon subprocess
+3. Added `find_project_root()` to the watch module
+
+**Binary reinstalled.** To test again:
+1. Re-claim: `agent-doc claim tasks/stream-test.md` (this auto-starts the daemon with correct CWD)
+2. Edit stream-test.md and run `/agent-doc tasks/stream-test.md` from the claimed pane
+3. The watch daemon should now capture pane output and flush to the document every 500ms
+
+**Note:** The Claude session in pane %72 already finished its response — to see streaming in action, you'll need to trigger a new response cycle.
 <!-- /agent:exchange -->

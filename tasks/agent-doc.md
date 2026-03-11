@@ -607,10 +607,38 @@ Can't view the tweet image (X requires JavaScript for photos). Based on your que
 
 **Challenges:**
 - Merge conflicts from simultaneous user edits + agent writes (needs CRDT or OT, not 3-way merge)
+W
 - IDE file watcher throttling — rapid writes cause flicker
 - ANSI escape sequences in terminal output aren't valid markdown
 
 **Pragmatic first step:** `agent-doc stream <FILE> -- claude` — wraps a Claude session, captures output in batches, patches the document periodically. Uses existing `agent-doc patch` infrastructure. Not true character-by-character, but close enough.
 
 Could you describe what the tweet screenshot shows? That would help target the specific UX pattern.
+
+![img_1.png](img_1.png)
+### RetailBook screenshot — multi-agent tmux orchestration
+
+The screenshot shows **RetailBook** — a multi-agent tmux workspace:
+
+**Left:** Coordinator agent spawning 3 builder agents, assigning tasks interactively. Chat-style conversation with `Agent(Spawn builder-N agent)` pattern.
+
+**Right:** Multiple Claude Code sessions stacked vertically — each with model info, token counts, active task progress (`Accomplishing`, `Summarizing`, `Exploring`). Standard Claude Code status bars.
+
+This is **Agent of Empires (AoE) style orchestration** — coordinator + worker agents, all visible simultaneously in tmux.
+
+### How agent-doc compares
+
+**Already have:** Tmux pane routing, 2D layout sync, multi-document sessions, registry-based tracking.
+
+**Gaps vs screenshot:**
+1. **Agent-to-agent communication** — coordinator talks TO other agents. Our `route` sends commands but doesn't read responses back.
+2. **Live status visibility** — all agents' progress visible at once. Our `agent-doc status` TUI is pending.
+3. **Spawn/assign pattern** — dynamic multi-agent spawning. We have auto-start but not programmatic fan-out.
+
+**STDOUT/STDERR fusion:** Their right-side panes ARE raw terminal output in tmux. The markdown approach gives the same visibility but in your editor. Both valid — ours adds editor integration (IntelliJ/VS Code), theirs gives raw terminal.
+
+**Path forward:**
+1. `agent-doc deep <FILE> --workers N` — fan-out to N worker agents (pending)
+2. `agent-doc status` — Ratatui TUI for all sessions (pending)
+3. `agent-doc stream` — bridge terminal output to document components (new)
 <!-- /agent:exchange -->

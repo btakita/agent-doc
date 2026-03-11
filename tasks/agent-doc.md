@@ -1242,6 +1242,7 @@ The tmux capture approach is **non-invasive** — it observes without modifying.
 - Runs a per-file debounced event loop
 - Has PID file management
 - Knows about the registry
+Why do we need to add a `--stream` flag? Just have it support streams.
 
 Adding tmux capture-pane polling for stream-mode documents fits naturally alongside the existing file-change watching for append/template documents.
 
@@ -1266,5 +1267,28 @@ Sessions end, panes close → daemon auto-stops after 60s idle
 
 **Recommendation:** Lazy start + idle-timeout stop. The daemon is invisible — users never manage it directly. It appears when needed and disappears when not.
 
+Yes...go with the recommendation
+
 Your last question got cut off at "even when star" — I'm guessing "even when starting/stopping sessions?" The answer: the daemon should survive individual session starts/stops. Only goes idle when *all* sessions end.
+### Re: No --stream flag — just support streams automatically
+
+You're right. No flag needed. The watch daemon should auto-detect stream-mode documents from the registry:
+
+1. On each tick, read `sessions.json` for active document→pane mappings
+2. For each document, check its frontmatter `agent_doc_mode`
+3. If `stream` → poll pane via `tmux capture-pane`, diff against last capture, flush new content
+4. If `append`/`template` → use existing `notify`-based file watching
+
+The daemon adapts its behavior per-document based on mode. Stream support is just another code path inside the same event loop — not a separate feature that needs opting into.
+
+### Re: Go with the recommendation — lazy start + idle-timeout stop
+
+Confirmed. The watch daemon design:
+
+- **Lazy start:** `agent-doc claim` or skill pre-flight auto-spawns the daemon if not running
+- **Idle-timeout stop:** 60s after last active session ends, daemon exits
+- **Per-document mode detection:** stream-mode docs get tmux capture polling, others get file-change watching
+- **Zero config:** no flags, no manual management
+
+This completes the Option B design. Ready to implement when you want to move forward — it would be a new phase building on the existing `watch.rs` infrastructure.
 <!-- /agent:exchange -->

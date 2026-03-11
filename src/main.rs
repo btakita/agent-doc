@@ -270,7 +270,9 @@ enum Commands {
     /// Check for updates and upgrade to the latest version.
     Upgrade,
     /// List all available commands as JSON (for editor plugin autocomplete)
-    Commands,
+    #[command(name = "commands")]
+    #[allow(clippy::enum_variant_names)]
+    ListCommands,
 }
 
 #[derive(Subcommand)]
@@ -437,6 +439,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
-        Commands::Commands => commands::run(),
+        Commands::ListCommands => commands::run(),
     }
 }

@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, resync, sessions};
+use crate::{frontmatter, resync, sessions, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
@@ -70,6 +70,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
                 eprintln!("warning: failed to focus pane {}: {}", new_pane, e);
             }
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
+            sync_after_claim(tmux, &new_pane);
             return Ok(());
         }
         eprintln!("Pane {} is dead, auto-starting...", registered_pane);
@@ -93,6 +94,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
                 eprintln!("warning: failed to focus pane {}: {}", new_pane, e);
             }
             eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
+            sync_after_claim(tmux, &new_pane);
             return Ok(());
         }
         eprintln!(
@@ -156,4 +158,44 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
 
     let _ = file; // suppress unused warning
     Ok(())
+}
+
+/// After a lazy claim, sync tmux layout for all files in the same window.
+///
+/// This ensures pane arrangement stays consistent when a file is reclaimed
+/// to a different pane. Only runs on autoclaim — normal routing skips this.
+fn sync_after_claim(tmux: &Tmux, pane_id: &str) {
+    let window_id = match tmux.pane_window(pane_id) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+
+    // Load registry and find all files whose panes are in the same window
+    let registry = match sessions::load() {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    let window_files: Vec<String> = registry
+        .values()
+        .filter(|entry| {
+            !entry.pane.is_empty()
+                && tmux.pane_alive(&entry.pane)
+                && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
+                && !entry.file.is_empty()
+        })
+        .map(|entry| entry.file.clone())
+        .collect();
+
+    if window_files.len() < 2 {
+        return; // Single file — no layout sync needed
+    }
+
+    // Call sync with all files as a single column
+    let col_args = vec![window_files.join(",")];
+    if let Err(e) = sync::run(&col_args, Some(&window_id), None) {
+        eprintln!("warning: post-claim sync failed: {}", e);
+    } else {
+        eprintln!("Auto-synced {} files in window {}", window_files.len(), window_id);
+    }
 }

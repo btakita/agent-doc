@@ -238,4 +238,19 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 *Compacted. v0.12.2 through v0.14.5 folded into history + releases.*
 
 Autocomplete is working — the `~/bin/agent-doc` stale binary issue is resolved. The `/agent-doc compact` command triggered successfully from the completion menu, confirming the full pipeline works: `SlashCommandCompletionContributor` → `agent-doc commands` → JSON parsing → IntelliJ completion popup.
+
+agent-doc run on a reclaimed file does not update the tmux panes to the claiming pane. It should Sync the Tmux layout...since the sync does update to show the claiming tmux pane.
+### Auto-sync after submit — fixed
+
+The JetBrains plugin's `SubmitAction` now calls `SyncLayoutAction.syncLayout()` after routing completes. This means pressing `Ctrl+Shift+Alt+A` (submit) will:
+
+1. Route the `/agent-doc <file>` command to the correct pane
+2. Wait for routing to complete
+3. Auto-sync the tmux layout to match the editor split
+
+Previously, routing a reclaimed file sent the command to the right pane but left the tmux layout stale — you'd have to manually press `Ctrl+Shift+Alt+L` (sync) to rearrange.
+
+**Fix (commit 49bcd90):** One-line change in `SubmitAction.kt` — the `onComplete` callback now calls `syncLayout(notify = false)`.
+
+**Plugin rebuilt and installed.** Restart IntelliJ to pick up the change.
 <!-- /agent:exchange -->

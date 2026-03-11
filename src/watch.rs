@@ -109,10 +109,16 @@ pub fn ensure_running() -> Result<bool> {
         return Ok(false);
     }
 
-    // Spawn daemon in background via the agent-doc binary
+    // Resolve project root (where .agent-doc/ lives)
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_root = crate::snapshot::find_project_root(&cwd)
+        .context("could not find .agent-doc/ directory — not in an agent-doc project")?;
+
+    // Spawn daemon in background from project root
     let exe = std::env::current_exe().context("failed to resolve agent-doc binary path")?;
     std::process::Command::new(exe)
         .arg("watch")
+        .current_dir(&project_root)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -146,6 +152,16 @@ pub fn ensure_running() -> Result<bool> {
 /// Idle timeout:
 /// - If no active sessions remain for 60s, daemon auto-exits.
 pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
+    // Resolve project root and cd there (critical for finding .agent-doc/)
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if let Some(root) = find_project_root(&cwd)
+        && root != cwd
+    {
+        std::env::set_current_dir(&root)
+            .with_context(|| format!("failed to cd to project root {}", root.display()))?;
+        eprintln!("Resolved project root: {}", root.display());
+    }
+
     // Check if already running
     if let Some(pid) = read_pid() {
         if pid_alive(pid) {
@@ -552,6 +568,21 @@ pub fn status() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Find the project root by walking up from `path` looking for `.agent-doc/`.
+fn find_project_root(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.is_file() {
+        path.parent()?
+    } else {
+        path
+    };
+    loop {
+        if current.join(".agent-doc").is_dir() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
 }
 
 #[cfg(test)]

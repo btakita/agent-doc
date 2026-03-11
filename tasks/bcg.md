@@ -246,4 +246,8 @@ Tony has not replied. Please draft a follow up sms with Tony. I want to know how
 - "Yesterday" anchors the specific call he mentioned
 - "Movement on my candidacy" is direct but professional
 - No re-explanation needed — Tony knows the context
+
+Should I say thank you at the end or no need?
+
+**No — skip the "thank you."** Tony is your recruiter; getting you placed is how he earns. This is a status check, not a favor request. "Let me know when you get a chance" already closes it warmly without being deferential. Save thanks for when he delivers something (interview booked, feedback relayed, etc.).
 <!-- /agent:exchange -->

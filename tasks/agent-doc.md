@@ -434,6 +434,8 @@ Please add tests for these race conditions. Fix the bug.
 
 **Potential fix:** `route` could wait for the pane to show a Claude prompt before sending the `/agent-doc` command. Or: detect this case and print a "wait for Claude to start, then re-submit" message (which it already does — check if the user saw that stderr output).
 
+Do we have tests for this? Is the bug fixed?
+
 Also found: `resync: orphaned stash window @76 in session '1'` — there's a stale stash window with an unregistered pane %73.
 
 What is the resolution for this stale stash window? Purge it?
@@ -453,4 +455,39 @@ Checked window @76 in session '1':
 Killed it: `tmux kill-window -t '@76'`. No data lost.
 
 This is a leftover from `route`'s auto-start cascade — it creates a new window, then `join_pane` moves it to the target window, but sometimes the empty source window persists as a stash. The `log_orphaned_windows()` function (added in v0.14.5 when we removed auto-prune) correctly flagged it. Safe to purge orphaned stash windows that only contain idle shells.
+
+Is there a gap in our sync logic? How can we safely pure orphaned windows?
+Note that we had to revert an earlier purge feature...due to it being overeagar with purging...killing active tmux sessions.
+### Safe orphan purge — design
+
+The old auto-prune (removed in v0.14.5) killed any window with all-unregistered panes. The bug: a Claude session that just started but hadn't registered yet got killed.
+
+**The gap:** `route`'s auto-start creates a new window, then `join_pane` moves the pane to the target window. The empty source window sometimes lingers as "stash". This isn't a sync logic gap — it's a cleanup gap after `join_pane`.
+
+**Safe purge strategy — check pane contents, not just registration:**
+
+A stash window is safe to kill when ALL its panes meet these criteria:
+1. **Window name is "stash"** (never kill "claude" or user-named windows)
+2. **Pane is running a shell** (`pane_current_command` is `zsh`/`bash`/`sh`, not `claude`/`agent-doc`)
+3. **Pane is idle** (no foreground process — `pane_current_command` matches the shell)
+4. **Not recently created** (grace period, e.g., 30 seconds — avoids race with in-flight auto-start)
+
+This is strictly safer than the old approach because:
+- The old version only checked registry → missed unregistered-but-active sessions
+- This version checks what's actually running in the pane
+- Restricting to "stash" windows avoids touching any real workspace windows
+- The grace period handles the auto-start race
+
+**Implementation:** Add a `purge_stash_windows()` function to `resync.rs`:
+```rust
+fn purge_stash_windows(tmux: &Tmux) {
+    // Only kill windows named "stash"
+    // Only kill if ALL panes are idle shells (not claude/agent-doc)
+    // Only kill if window is older than 30s (grace period)
+}
+```
+
+Call it from `prune()` alongside `log_orphaned_windows()`.
+
+Want me to implement this? It's narrowly scoped — only targets "stash" windows with idle shells, so it can't kill active Claude sessions.
 <!-- /agent:exchange -->

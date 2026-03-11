@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 const SNAP_DIR: &str = ".agent-doc/snapshots";
 const LOCK_DIR: &str = ".agent-doc/locks";
 const PENDING_DIR: &str = ".agent-doc/pending";
+const CRDT_DIR: &str = ".agent-doc/crdt";
 
 /// Compute the SHA256 hex hash of a document's canonical path.
 /// Used for both snapshot filenames and lock filenames.
@@ -214,6 +215,82 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
     tmp.persist(&snap)
         .with_context(|| format!("failed to rename temp file to {}", snap.display()))?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// CRDT state persistence (for stream mode)
+// ---------------------------------------------------------------------------
+
+/// Compute the CRDT state file path for a given document.
+/// Returns `<project_root>/.agent-doc/crdt/<hash>.yrs`.
+/// Falls back to doc's parent directory if no project root found.
+pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let filename = format!("{}.yrs", hash);
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root.join(CRDT_DIR).join(filename))
+}
+
+/// Load CRDT state bytes for a document (if any).
+pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
+    let path = crdt_path_for(doc)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let _lock = acquire_crdt_lock(doc)?;
+    let bytes = std::fs::read(&path)
+        .with_context(|| format!("failed to read CRDT state {}", path.display()))?;
+    Ok(Some(bytes))
+}
+
+/// Save CRDT state bytes for a document.
+pub fn save_crdt(doc: &Path, state: &[u8]) -> Result<()> {
+    let path = crdt_path_for(doc)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let _lock = acquire_crdt_lock(doc)?;
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    std::io::Write::write_all(&mut tmp, state)
+        .with_context(|| "failed to write CRDT state temp file")?;
+    tmp.persist(&path)
+        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    Ok(())
+}
+
+/// Delete CRDT state for a document.
+pub fn delete_crdt(doc: &Path) -> Result<()> {
+    let path = crdt_path_for(doc)?;
+    if path.exists() {
+        let _lock = acquire_crdt_lock(doc)?;
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Acquire an advisory lock for CRDT state operations.
+/// Uses a lock file adjacent to the CRDT state file.
+fn acquire_crdt_lock(doc: &Path) -> Result<File> {
+    let crdt_path = crdt_path_for(doc)?;
+    let lock_path = crdt_path.with_extension("yrs.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open CRDT lock {}", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to acquire CRDT lock on {}", lock_path.display()))?;
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -443,6 +520,45 @@ mod tests {
         tmp.persist(&target).unwrap();
 
         assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+    }
+
+    #[test]
+    fn crdt_path_has_correct_extension() {
+        let (_dir, doc) = setup();
+        let p = crdt_path_for(&doc).unwrap();
+        assert!(p.to_string_lossy().contains(".agent-doc/crdt/"));
+        assert!(p.to_string_lossy().ends_with(".yrs"));
+    }
+
+    #[test]
+    fn crdt_save_and_load_roundtrip() {
+        let (_dir, doc) = setup();
+        let state = vec![1u8, 2, 3, 4, 5];
+        save_crdt(&doc, &state).unwrap();
+        let loaded = load_crdt(&doc).unwrap();
+        assert_eq!(loaded, Some(state));
+    }
+
+    #[test]
+    fn crdt_load_returns_none_when_missing() {
+        let (_dir, doc) = setup();
+        let loaded = load_crdt(&doc).unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn crdt_delete_removes_file() {
+        let (_dir, doc) = setup();
+        save_crdt(&doc, &[1, 2, 3]).unwrap();
+        assert!(load_crdt(&doc).unwrap().is_some());
+        delete_crdt(&doc).unwrap();
+        assert!(load_crdt(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn crdt_delete_no_error_when_missing() {
+        let (_dir, doc) = setup();
+        delete_crdt(&doc).unwrap();
     }
 
     #[test]

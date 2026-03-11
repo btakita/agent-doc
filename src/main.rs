@@ -6,6 +6,7 @@ mod clean;
 mod commands;
 mod compact;
 mod config;
+mod crdt;
 mod convert;
 mod diff;
 mod focus;
@@ -28,6 +29,7 @@ mod sessions;
 mod skill;
 mod snapshot;
 mod start;
+mod stream;
 mod submit;
 mod sync;
 mod template;
@@ -46,6 +48,8 @@ pub enum AgentDocMode {
     Append,
     /// Template-mode: in-place component patching
     Template,
+    /// Stream-mode: real-time CRDT write-back (superset of template)
+    Stream,
 }
 
 #[derive(Parser)]
@@ -242,6 +246,26 @@ enum Commands {
         /// Template mode: parse <!-- patch:name --> blocks and apply to components
         #[arg(long)]
         template: bool,
+        /// Stream mode: template patches with CRDT merge (conflict-free)
+        #[arg(long)]
+        stream: bool,
+    },
+    /// Stream agent output to document in real-time (CRDT merge)
+    Stream {
+        /// Path to the session document
+        file: PathBuf,
+        /// Write-back interval in milliseconds
+        #[arg(long, default_value = "2000")]
+        interval: u64,
+        /// Agent backend to use
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Skip git commit after stream completes
+        #[arg(long)]
+        no_git: bool,
     },
     /// Show template structure of a document (components, modes, content)
     TemplateInfo {
@@ -422,17 +446,30 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream } => {
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)
                 .transpose()
                 .context("failed to read baseline file")?;
-            if is_template {
+            if is_stream {
+                write::run_stream(&file, baseline.as_deref())
+            } else if is_template {
                 write::run_template(&file, baseline.as_deref())
             } else {
-                write::run(&file, baseline.as_deref())
+                // Auto-detect stream mode from frontmatter
+                let content = std::fs::read_to_string(&file)
+                    .context("failed to read document for mode detection")?;
+                let (fm, _) = frontmatter::parse(&content)?;
+                if fm.mode.as_deref() == Some("stream") {
+                    write::run_stream(&file, baseline.as_deref())
+                } else {
+                    write::run(&file, baseline.as_deref())
+                }
             }
+        }
+        Commands::Stream { file, interval, agent, model, no_git } => {
+            stream::run(&file, interval, agent.as_deref(), model.as_deref(), no_git, &config)
         }
         Commands::TemplateInfo { file } => {
             let info = template::template_info(&file)?;

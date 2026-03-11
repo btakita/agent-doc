@@ -7,6 +7,24 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
+/// CRDT-based merge: conflict-free merge using Yrs CRDT.
+///
+/// Returns (merged_text, new_crdt_state).
+/// `base_state` is the CRDT state from the last write (None on first use).
+pub fn merge_contents_crdt(
+    base_state: Option<&[u8]>,
+    ours: &str,
+    theirs: &str,
+) -> Result<(String, Vec<u8>)> {
+    let merged = crate::crdt::merge(base_state, ours, theirs)
+        .context("CRDT merge failed")?;
+    // Build fresh CRDT state from the merged result
+    let doc = crate::crdt::CrdtDoc::from_text(&merged);
+    let state = doc.encode_state();
+    eprintln!("[write] CRDT merge successful — no conflicts possible.");
+    Ok((merged, state))
+}
+
 /// 3-way merge using `git merge-file --diff3`.
 ///
 /// Returns merged content. Append-only conflicts are auto-resolved by
@@ -295,6 +313,61 @@ User line 2.
         let theirs = "Line 1\nLine 2\n";
         let result = merge_contents(base, ours, theirs).unwrap();
         assert!(result.contains("Agent added"));
+    }
+
+    #[test]
+    fn crdt_merge_agent_and_user_append() {
+        let base = "# Doc\n\nBase content.\n";
+        let ours = "# Doc\n\nBase content.\n\nAgent response.\n";
+        let theirs = "# Doc\n\nBase content.\n\nUser addition.\n";
+
+        let base_doc = crate::crdt::CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(merged.contains("Agent response."));
+        assert!(merged.contains("User addition."));
+        assert!(merged.contains("Base content."));
+        assert!(!merged.contains("<<<<<<<"));
+    }
+
+    #[test]
+    fn crdt_merge_concurrent_same_line() {
+        let base = "Line 1\nLine 3\n";
+        let ours = "Line 1\nAgent\nLine 3\n";
+        let theirs = "Line 1\nUser\nLine 3\n";
+
+        let base_doc = crate::crdt::CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        // Both preserved, deterministic ordering, no conflict
+        assert!(merged.contains("Agent"));
+        assert!(merged.contains("User"));
+        assert!(merged.contains("Line 1"));
+        assert!(merged.contains("Line 3"));
+    }
+
+    #[test]
+    fn crdt_merge_no_base_state_bootstrap() {
+        let ours = "Agent content.\n";
+        let theirs = "User content.\n";
+
+        let (merged, state) = merge_contents_crdt(None, ours, theirs).unwrap();
+        assert!(merged.contains("Agent content."));
+        assert!(merged.contains("User content."));
+        assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn crdt_merge_one_side_unchanged() {
+        let base = "Original.\n";
+        let base_doc = crate::crdt::CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        let ours = "Original.\nAgent added.\n";
+        let (merged, _) = merge_contents_crdt(Some(&base_state), ours, base).unwrap();
+        assert_eq!(merged, ours);
     }
 
     #[test]

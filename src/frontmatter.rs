@@ -2,6 +2,20 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Configuration for stream mode (real-time CRDT write-back).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct StreamConfig {
+    /// Write-back interval in milliseconds (default: 2000)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<u64>,
+    /// Strip ANSI escape codes from agent output (default: true)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strip_ansi: Option<bool>,
+    /// Target component name for stream output (default: "exchange")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -37,6 +51,13 @@ pub struct Frontmatter {
         alias = "response_mode"
     )]
     pub mode: Option<String>,
+    /// Stream mode configuration (only used when agent_doc_mode: stream).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_stream"
+    )]
+    pub stream_config: Option<StreamConfig>,
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -189,6 +210,7 @@ mod tests {
             branch: Some("dev".to_string()),
             tmux_session: None,
             mode: None,
+            stream_config: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

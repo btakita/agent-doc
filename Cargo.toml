@@ -26,6 +26,7 @@ notify = "7"
 agent-kit = { path = "../agent-kit", version = "0.2" }
 instruction-files = { path = "../instruction-files", version = "0.1" }
 tmux-router = { path = "../tmux-router", version = "0.2.4" }
+yrs = "0.21"
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -690,6 +690,8 @@ Yes — strip ANSI for markdown file, keep for TUI display. Claude Code output i
 
 **Key difference:** 3-way merge compares *snapshots*. CRDT tracks *operations* (insert char X at position Y by actor Z). Operations compose; snapshots may not.
 
+What happens if I am writing at the end of the exchange component and the claude session output also writes to the end of the exchange component?
+
 **Selective replacement (plugin):** CRDTs make this natural. Plugin holds a `Y.Doc`, agent process holds another. Sync via shared file or socket. Plugin calls `Document.replaceString()` only for the delta.
 
 **Practical path:**
@@ -698,4 +700,22 @@ Yes — strip ANSI for markdown file, keep for TUI display. Claude Code output i
 3. Plugin loads CRDT state, applies local edits as ops, receives agent ops via file watch/socket
 
 **Incremental approach:** CRDT only for `exchange` components (conflict-prone). Keep 3-way merge for replace-mode components (status, architecture) — single writer, no conflicts.
+### Concurrent end-of-exchange writes
+
+**Current (3-way merge):**
+- Baseline saved before response, current file read after
+- If both append at same anchor (`<!-- /agent:exchange -->`):
+  - Best case: merge succeeds, your text first, agent after
+  - Worst case: both at exact same position → conflict markers (`<<<<<<<`)
+  - `resolve_append_conflicts()` tries auto-resolve but is heuristic
+
+**With CRDT:**
+- Your ops: `{user, insert 'H' after last_char}`
+- Agent ops: `{agent, insert 'R' after last_char}`
+- Tie broken deterministically by actor ID — both preserved, no conflict ever
+- Result: both texts appear at end, ordered by actor ID
+
+**This is the exact scenario CRDTs solve best** — concurrent appends to the same location. The 3-way merge is fighting a structural limitation (comparing snapshots, not tracking operations). CRDT would make exchange-mode writes conflict-free by construction.
+
+Why not just use CRDT for everything?
 <!-- /agent:exchange -->

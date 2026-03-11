@@ -1183,4 +1183,22 @@ Make sure **all** claude code commands are included.
 **Claude Code built-in commands included:** `/help`, `/model`, `/clear`, `/compact`, `/cost`, `/login`, `/logout`, `/status`, `/config`, `/memory`, `/review`, `/bug`, `/fast`, `/slow`, `/permissions`, `/terminal-setup`, `/doctor`, `/init`, `/pr-comments`, `/vim`, `/diff`, `/undo`, `/resume`, `/listen`, `/mcp`, `/approved-tools`, `/add-dir`, `/release-notes`, `/hooks`, `/btw`
 
 Next: bump version + release to get the new `commands` subcommand in the binary, then rebuild plugins.
+
+continue
+
+**v0.14.5 ready:**
+
+- Version bumped in `Cargo.toml` + `pyproject.toml`
+- Binary installed: `agent-doc 0.14.5` (74 commands)
+- Committed in submodule: `64db601`
+- All tests passing (21 + 3 commands tests)
+
+**Changes in v0.14.5:**
+1. Removed `prune_orphaned_windows()` — fixes the session-killing regression
+2. Added `log_orphaned_windows()` — logs orphaned windows for debugging
+3. Added `agent-doc commands` — 74 commands as JSON for plugin autocomplete
+4. JetBrains `SlashCommandCompletionContributor` — `/` trigger, CLI-backed
+5. VS Code `SlashCommandCompletionProvider` — markdown-scoped, `/` trigger
+
+**Ready to push + publish?** (crates.io, PyPI, GitHub Release with prebuilt binary, tag v0.14.5)
 <!-- /agent:exchange -->

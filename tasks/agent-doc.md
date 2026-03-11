@@ -157,7 +157,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 
 <!-- agent:pending -->
 - Response diff storage for undo/extract workflows
-- `agent-doc undo` — revert last response by applying inverse diff
+- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
 - `agent-doc extract` — move request+response pair to another document
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
@@ -173,7 +173,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 - Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
 - Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
 - `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
-- CRDT-based merge for exchange components (`yrs` library) — eliminate merge conflicts for concurrent user+agent edits
+- CRDT-based merge for all components (`yrs` library) — eliminate merge conflicts, uniform model, CRDT operation log as canonical history
 <!-- /agent:pending -->
 
 ## Lessons
@@ -715,7 +715,30 @@ What happens if I am writing at the end of the exchange component and the claude
 - Tie broken deterministically by actor ID — both preserved, no conflict ever
 - Result: both texts appear at end, ordered by actor ID
 
+Would the text inputs ever be interspersed?
+How can we keep the cursor in the current spot being actively edited by the user?
+
 **This is the exact scenario CRDTs solve best** — concurrent appends to the same location. The 3-way merge is fighting a structural limitation (comparing snapshots, not tracking operations). CRDT would make exchange-mode writes conflict-free by construction.
 
 Why not just use CRDT for everything?
+
+What is the answer to the above question?
+How can we preserve git history? Do we make a commit for every write? Or should we only make commits whenever the user requests a commit?
+### Text interspersing — no
+
+Each continuous typing session forms a causal chain in the CRDT (`f→i→x→ →t→h→i→s`). Your block stays contiguous, agent's block stays contiguous. They don't interleave character-by-character. The only question is which block comes first (actor ID ordering).
+
+### Cursor preservation
+
+The plugin handles this natively. Agent inserts at position 3200 via `Document.replaceString()` — if you're editing at position 1500, your cursor stays put. If agent inserts *before* your cursor, the IDE shifts it by insertion length. This is how Google Docs works. Range-based edits (not full-file replacement) preserve cursor position automatically.
+
+### Why not CRDT for everything — revised: yes, use it for everything
+
+Original reasoning (exchange-only) was that replace-mode components have single writers. But if we're already integrating `yrs`, extending to all components is minimal extra work. Overhead is negligible for document-sized content. Gives uniform merge model with no special cases. Future-proofs for multi-agent writes.
+
+### Git history with CRDT
+
+**Recommended hybrid:** Auto-commit after agent writes (durability), but CRDT state IS the canonical history. The operation log gives finer-grained replay than git (every keystroke vs every commit). Git commits become periodic snapshots for backup/sharing.
+
+`agent-doc undo` could use CRDT's `Y.UndoManager` instead of git revert — undo individual agent responses or user edits at operation granularity.
 <!-- /agent:exchange -->

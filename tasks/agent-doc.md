@@ -434,11 +434,15 @@ Please add tests for these race conditions. Fix the bug.
 
 What is the status on this bug fix and tests?
 
+Did agent-doc run pick up this diff? Why was there no response?
+
 **The re-route worked** because by the time I ran it, Claude was fully started in %72.
 
 **Potential fix:** `route` could wait for the pane to show a Claude prompt before sending the `/agent-doc` command. Or: detect this case and print a "wait for Claude to start, then re-submit" message (which it already does — check if the user saw that stderr output).
 
 Do we have tests for this? Is the bug fixed?
+
+Same here. There was no response.
 
 Also found: `resync: orphaned stash window @76 in session '1'` — there's a stale stash window with an unregistered pane %73.
 
@@ -515,4 +519,34 @@ Added `purge_stash_windows()` to `resync.rs`. Called from `prune()` before `log_
 228 tests pass, clippy clean. Binary installed to `~/bin/agent-doc`. Committed and pushed.
 
 This is safe because: an active Claude session shows `pane_current_command = claude` or `agent-doc`, which fails the idle shell check. The 30s grace period prevents killing during auto-start. And restricting to "stash" name means user workspace windows are never touched.
+
+I'm seeing
+> ● No changes since last submit — the document is unchanged after comment stripping.
+
+I have some inline prompts that should have shown up in the diff above.
+
+Please fix the inline diffing for agent-doc run
+
+Add tests to replicate the bug and fix
+### Comment stripping bug — fixed
+
+**Root cause:** `strip_comments()` in `diff.rs` didn't skip `<!--` inside inline backtick spans. When the exchange section discussed `<!--` syntax (template autocomplete), the parser saw `` `<!--` `` at line 392 as a comment start and matched the `-->` in `<!-- /agent:exchange -->` at line 531 — swallowing **7799 bytes** of content including all user edits.
+
+**Diagnostic confirmation:**
+```
+Before fix: [diff] stripped: doc_len=26393 snap_len=26393  ← identical (bug)
+After fix:  [diff] stripped: doc_len=35107 snap_len=34743  ← different (correct)
+```
+
+**Fix:** Reuse `component::find_code_ranges()` (made `pub(crate)`) in `strip_comments()` to identify fenced code blocks and inline backtick spans. Skip comment detection at positions inside code ranges.
+
+**Same class of bug** as v0.9.10 (code-span parser fix in `component.rs`), but `diff.rs` was never updated.
+
+**4 regression tests added:**
+- `strip_preserves_comment_syntax_in_inline_backticks` — `` `<!--` `` not treated as comment
+- `strip_preserves_comment_syntax_in_fenced_code_block` — `<!-- -->` in code blocks preserved
+- `strip_backtick_comment_before_agent_marker` — `` `<!--` `` + agent marker don't merge into one comment
+- `strip_multiple_backtick_comments_in_exchange` — real-world scenario with inline edits after backtick-comment text
+
+232 tests pass, clippy clean. Binary installed. Commit 7f66cc2.
 <!-- /agent:exchange -->

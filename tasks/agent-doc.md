@@ -1014,6 +1014,36 @@ Tmux state audit:
 
 Binary rebuilt and installed (v0.14.4).
 
+I see
+
+❯ tmux list-sessions              
+0: 6 windows (created Fri Mar  6 00:11:05 2026) (attached)
+1: 8 windows (created Fri Mar  6 00:12:33 2026) (attached)
+2: 1 windows (created Fri Mar  6 05:51:45 2026) (attached)
+3: 2 windows (created Fri Mar  6 06:49:12 2026) (attached)
+8: 1 windows (created Sat Mar  7 14:34:17 2026) (attached)
+claude: 8 windows (created Fri Mar  6 09:03:45 2026)
+
+Please clean up. tmux-router should also continuously clean up the windows.
+
+Log and write tests.
+
+I think you just closed the tmux session entirely. The response was not written to this file.
+What happened? Did you log it?
+Please make sure you have tests.
 ## User
 
+**What happened with the missing write-back:** The previous session ran out of context (context compaction) after completing all the work but *before* `agent-doc write` could execute. The response was generated in the console but never written to this file. No tmux session was intentionally closed — context exhaustion was the cause. This is an inherent risk of long sessions; the `agent-doc recover` mechanism exists to catch these cases, but here the response was generated inline (not via the durable pending store).
+
+**Orphaned window cleanup (committed `5853007`):** `resync::prune()` now auto-kills tmux windows named "claude" or "stash" where ALL panes are unregistered in the session registry. This runs automatically before every route/sync/claim operation — continuous cleanup as requested.
+
+**4 IsolatedTmux integration tests** in `resync.rs`:
+- `prune_kills_orphaned_claude_window` — orphaned claude window gets killed
+- `prune_preserves_window_with_registered_pane` — registered pane's window preserved
+- `prune_ignores_non_claude_windows` — user shell windows never touched
+- `prune_kills_orphaned_stash_window` — orphaned stash window killed
+
+**Error visibility (committed `902b17e`, `ab5528f`):** All `let _ = tmux.select_pane()` and `let _ = tmux.join_pane()` call sites in claim.rs and route.rs now log warnings on failure. CLAUDE.md convention: "NEVER swallow errors — no `let _ =` on fallible operations."
+
+All 208 tests pass (204 unit + 4 resync).
 <!-- /agent:exchange -->

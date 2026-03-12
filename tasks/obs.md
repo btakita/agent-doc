@@ -301,7 +301,7 @@ Want me to set up the YouTube metadata like the first video?
 
 Yes...Can you update it to post from Corky?
 
-An
+In obs, can I have my video camera show me in the corner?
 ### Re: LinkedIn Post via Corky
 
 **Draft created:** `mail/social/20260312-155456-linkedin.md` (status: `draft`)
@@ -317,6 +317,28 @@ corky linkedin publish mail/social/20260312-155456-linkedin.md
 ```
 
 Or tell me the YouTube URL and I'll update the draft and publish.
+
+Yes...Can you update it to post from Corky?
+
+Another question...should I post to Twitch as my primary platform...if I do live sessions?
+The LinkedIn draft is already created from the previous cycle — `mail/social/20260312-155456-linkedin.md`. Just needs the YouTube URL once you upload.
+
+### Re: Twitch vs YouTube for Live Sessions
+
+**Short answer:** YouTube as primary, Twitch optional.
+
+| Factor | YouTube | Twitch |
+|--------|---------|--------|
+| **Live chat** | Decent, improving | Best-in-class |
+| **VOD permanence** | Forever, searchable | 14 days (non-affiliate) |
+| **SEO / discoverability** | Excellent (Google indexes) | Poor for past content |
+| **CC/SRT support** | Native upload | Limited |
+| **Your content style** | 2-hour deep sessions benefit from permanence | Better for shorter, interactive streams |
+| **Audience** | Broader, less live-engaged | Smaller but more live-engaged dev community |
+
+**Recommendation:** Your sessions are long-form deep dives — the value compounds over time as people discover them via search. YouTube gives you live streaming + permanent archive + SRT captions (which you're already generating). If you want Twitch's live chat culture later, you can multistream or cross-post highlights.
+
+Start with YouTube Live → upload SRT → build catalog. Twitch can be an add-on once you have a rhythm.
 
 Yes...Can you update it to post from Corky?
 

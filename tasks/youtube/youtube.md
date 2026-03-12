@@ -181,4 +181,21 @@ Anyways, I'm going to hop off now. Got my buddy calling me. This is a good stopp
 
 Please add a closed captioned file with timestamps in /home/brian/work/btakita/agent-loop/mail/topics/brian-takita/videos
 
+
+### Closed Captions
+
+Done. Generated SRT closed caption file with timestamps using Whisper (medium model):
+
+**File:** `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc.srt`
+
+- 3,580 lines, 895 caption segments
+- Covers full 2:05:41 video duration
+- Standard SRT format — compatible with YouTube upload, VLC, and most video players
+
+To upload to YouTube: go to your video's Subtitles settings and upload the `.srt` file as "Upload file" > "With timing."
+
+Help me with a good reply to this comment:
+> This video is very interesting. I’m also interested in building agentic helpers and assistants. Can I ask why an agentic loop is required for us?
+> What is difference between this and using claude directly?
+
 <!-- /agent:exchange -->

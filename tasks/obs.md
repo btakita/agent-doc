@@ -318,6 +318,8 @@ corky linkedin publish mail/social/20260312-155456-linkedin.md
 
 Or tell me the YouTube URL and I'll update the draft and publish.
 
+Add publishing to YouTube as a corky feature. I don't want to post this to LinkedIn.
+
 Yes...Can you update it to post from Corky?
 
 Another question...should I post to Twitch as my primary platform...if I do live sessions?
@@ -343,4 +345,6 @@ Start with YouTube Live → upload SRT → build catalog. Twitch can be an add-o
 Yes...Can you update it to post from Corky?
 
 Another question...should I post to Twitch as my primary platform...if I do live sessions?
+
+How do I get my camera showing me in the corner full overlayed over the screencast
 <!-- /agent:exchange -->

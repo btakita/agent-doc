@@ -5,3 +5,53 @@ agent_doc_mode: stream
 ---
 
 obs did not record the entire screen. Please help me configure obs to record the entire screen
+
+<!-- agent:exchange -->
+## The Problem
+
+Your monitor is **3840x2160** (4K) but OBS is configured with a **1920x1080** canvas. The XSHM display capture source also has a 1920x1080 scale reference, so it's only capturing a quarter of your screen (or scaling it oddly).
+
+## Fix
+
+Two things need to change:
+
+### 1. Set OBS Canvas Resolution to 3840x2160
+
+In OBS: **Settings > Video**
+- **Base (Canvas) Resolution:** 3840x2160
+- **Output (Scaled) Resolution:** 3840x2160 (or 1920x1080 if you want smaller file sizes)
+- **FPS:** leave as-is
+
+Or edit `~/.config/obs-studio/basic/profiles/Untitled/basic.ini` directly:
+
+```ini
+[Video]
+BaseCX=3840
+BaseCY=2160
+OutputCX=3840
+OutputCY=2160
+```
+
+If you want to record in 4K but keep file sizes reasonable, set `OutputCX=1920` / `OutputCY=1080` — OBS will downscale for you.
+
+Please edit the obs config to capture the entire screen and downscale.
+
+### 2. Reset the Display Capture source
+
+After changing the canvas resolution, the existing Display Capture source will be misaligned. Easiest fix:
+
+1. Delete the existing "Display Capture (XSHM)" source in your Scene
+2. Add a new source: **Sources > + > Display Capture (XSHM)**
+3. Select screen 0 (your only monitor)
+4. It should now match the 3840x2160 canvas
+
+Alternatively, right-click the source in the preview > **Transform > Fit to Screen** (Ctrl+F).
+
+### 3. (Optional) Increase bitrate for 4K
+
+Your current bitrate is 6000 kbps which is fine for 1080p but low for 4K recording. In **Settings > Output > Simple**:
+- For 4K recording, set **Video Bitrate** to at least 20000-40000 kbps
+- Or switch to CQP/CRF mode for quality-based encoding (under Advanced output mode, set Rate Control to CQP with value 18-23)
+
+**Restart OBS** after making these changes.
+<!-- /agent:exchange -->

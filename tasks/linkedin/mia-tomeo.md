@@ -44,6 +44,19 @@ Be direct about the miscommunication. Acknowledge the awkward replies without ov
 - Does NOT mention income tax / federal employees — that's a conversation for after you've built rapport, not a LinkedIn DM opener
 
 ## User
+## Assistant
+
+**Wait until morning.** Send it between 8-10 AM ET. Reasons:
+
+1. **Perception** — a 12:12 AM message reads as impulsive or desperate, not as a thoughtful professional response
+2. **Notification timing** — she'll see it when she's in work mode, not as a "who's messaging me at midnight" notification
+3. **Your earlier replies were off** — a measured, well-timed reply helps reset the tone
+4. **LinkedIn best practices** — Tue-Thu 8-10 AM ET is peak engagement (today is Thursday, perfect timing)
+
+The message itself is good. Just queue it for the morning.
+
+## User
+Should I send it now at 12:12AM or wait until tomorrow morning?
 <!-- /agent:exchange -->
 
 Hey Mia — apologies for the confusion in my earlier replies, I completely misread your message. I'm actually very interested in what you're describing.

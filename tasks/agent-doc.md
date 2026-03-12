@@ -675,6 +675,8 @@ Good analysis. `agent_doc_mode` was indeed overloaded. Proposed split:
 | **Write timing** | `agent_doc_write` | `stream` / `batch` | When agent output reaches the document (continuous vs end-of-response) |
 | **Document format** | `agent_doc_format` | `template` / `append` | How the document is structured (components vs ## User/Assistant blocks) |
 
+Alias `write` & `format`?
+
 Current `agent_doc_mode: stream` would become:
 ```yaml
 agent_doc_write: stream
@@ -706,6 +708,9 @@ The `agent-doc recover` commands are run via `run_in_background` in the pre-flig
 
 **Fix:** Run recover in foreground (it's fast — <100ms), not background. The SKILL.md should NOT use `run_in_background` for the recover step. This is a skill instruction issue, not a binary bug.
 
+Why is `recover && cat claims.log && truncate` blocking?
+Please describe the intent behind this sequence.
+
 ### Re: `/agent-doc skill write` — doesn't exist
 
 That autocomplete entry is stale. The `commands` subcommand generates the list from `main.rs` subcommands. If `skill write` isn't a real subcommand, it shouldn't be in the autocomplete. Let me check.
@@ -725,4 +730,9 @@ No — "go" is a single word ≥2 chars but <3 chars. Let me check the heuristic
 Currently `looks_truncated()` considers single words ≥3 chars as NOT truncated. "go" is 2 chars, which would fall through to the punctuation check, and "o" is not terminal punctuation → it would be flagged as truncated.
 
 **Fix:** Lower the single-word threshold from 3 to 2 chars. Words like "go", "ok", "no", "yes" are all valid complete inputs.
+
+1 character words can also be legit. Such as when asked, Option A or Option B?
+B
+
+`B` should mean Option B is selected. So propose a system that would work in this case.
 <!-- /agent:exchange -->

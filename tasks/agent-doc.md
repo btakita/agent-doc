@@ -173,4 +173,9 @@ Published to all targets:
 Changes: native compact for template/stream mode, deterministic-in-Rust convention in CLAUDE.md. 309 tests.
 
 Is agent_doc_format and agent_doc_write implemented to replace agent_doc_mode?
+### Re: agent_doc_format / agent_doc_write
+
+No — not implemented. The codebase still uses `agent_doc_mode` as a single field (append | template | stream). The proposed split into `agent_doc_format` (document structure) and `agent_doc_write` (merge strategy) was discussed during v0.15.1-v0.16.0 but never built. It remains in the pending list as a future consideration.
+
+Yes...let's implement. Should we keep agent_doc_mode as deprecated? Can we have agent-doc deterministically migrate a agent_doc_mode value to the new agent_doc_write/agent_doc_format pair?
 <!-- /agent:exchange -->

@@ -186,4 +186,34 @@ agent-doc: https://crates.io/crates/agent-doc
 ---
 
 Feel free to adjust the tone or add/remove details. You might want to add the YouTube link once it's uploaded.
+
+### Updated LinkedIn Post (with YouTube link)
+
+---
+
+**My first dev video: Dog-fooding agent-doc live**
+
+I recorded myself debugging CRDT merge bugs in agent-doc — an interactive document system I'm building that lets you have structured conversations with AI agents directly in markdown files.
+
+What you'll see:
+- Real-time bug hunting across 10+ releases of a Rust CLI tool
+- Template mode, stream mode, and reactive architecture decisions
+- How I use Claude as a co-pilot for complex debugging sessions
+- A tangent about Existence Lang and why God = Existence = the universal set (yes, really)
+
+Fair warning: the screen recording only captured 1/4 of my display (XSHM + HiDPI — lesson learned). The content is all there though, and the audio carries the full story. Already fixed for the next one.
+
+This is what "vibe coding" actually looks like — messy, iterative, real. Not a polished tutorial. Just a developer eating his own dog food and sharing the experience.
+
+https://www.youtube.com/watch?v=B-9uI53cRVE
+
+agent-doc: https://crates.io/crates/agent-doc
+
+#AgentDoc #ClaudeCode #RustLang #VibeCoding #DeveloperTools #AI #CRDT #ExistenceLang #LiveCoding
+
+---
+
+Ready to copy-paste into LinkedIn. The YouTube link is positioned after the body text so LinkedIn will auto-generate the video preview card.
+
+Please post to LinkedIn using Corky
 <!-- /agent:exchange -->

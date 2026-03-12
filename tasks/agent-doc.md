@@ -666,4 +666,63 @@ I suppose "go" would not be considered **potentially truncated**...correct?
 - `extract_last_added_finds_insert`, `extract_last_added_none_when_no_changes`
 
 306 tests pass, clippy clean. Binary installed.
+### Re: Category 1 & 2 config names
+
+Good analysis. `agent_doc_mode` was indeed overloaded. Proposed split:
+
+| Category | Config Key | Values | Controls |
+|----------|-----------|--------|----------|
+| **Write timing** | `agent_doc_write` | `stream` / `batch` | When agent output reaches the document (continuous vs end-of-response) |
+| **Document format** | `agent_doc_format` | `template` / `append` | How the document is structured (components vs ## User/Assistant blocks) |
+
+Current `agent_doc_mode: stream` would become:
+```yaml
+agent_doc_write: stream
+agent_doc_format: template
+```
+
+Current `agent_doc_mode: template` would become:
+```yaml
+agent_doc_write: batch
+agent_doc_format: template
+```
+
+`agent_doc_mode` stays as a backward-compatible alias that maps to both fields (e.g., `stream` → `write: stream, format: template`).
+
+### Re: Async auto_start for race conditions
+
+Yes — `auto_start` should block until each step completes:
+
+1. **Pane creation** — `tmux new-window` → capture pane ID → confirm alive
+2. **Join to window** — `join-pane` → verify pane is in target window
+3. **Claude startup** — poll `tmux capture-pane` until Claude prompt appears (e.g., check for `claude` in `pane_current_command` or wait for prompt text)
+4. **Send command** — `send-keys` after Claude is confirmed ready
+
+Step 3 is the key missing piece. Currently `auto_start` fires-and-forgets the `agent-doc start` command. Adding a poll loop (check `pane_current_command` every 500ms, timeout after 30s) would eliminate the race.
+
+### Re: Background task leak (4 active shells)
+
+The `agent-doc recover` commands are run via `run_in_background` in the pre-flight step. Each `/agent-doc` invocation spawns one. They complete quickly (recover is fast) but Claude Code's background task UI keeps showing them as "running" because the combined command (`recover && cat claims.log && truncate`) waits for all parts.
+
+**Fix:** Run recover in foreground (it's fast — <100ms), not background. The SKILL.md should NOT use `run_in_background` for the recover step. This is a skill instruction issue, not a binary bug.
+
+### Re: `/agent-doc skill write` — doesn't exist
+
+That autocomplete entry is stale. The `commands` subcommand generates the list from `main.rs` subcommands. If `skill write` isn't a real subcommand, it shouldn't be in the autocomplete. Let me check.
+
+### Re: `/agent-doc stream` not in autocomplete
+
+`stream` IS a subcommand in `main.rs` and was added to `commands.rs` in the v0.15.0 release. If it's not showing in autocomplete, the plugin may be caching the old command list. Try restarting IntelliJ to refresh.
+
+### Re: Recheck interval — 200ms instead of 500ms
+
+Good point — aligning with the stream timer. Updated: 200ms interval × 25 rechecks = 5 seconds max.
+
+### Re: "go" — is it truncated?
+
+No — "go" is a single word ≥2 chars but <3 chars. Let me check the heuristic...
+
+Currently `looks_truncated()` considers single words ≥3 chars as NOT truncated. "go" is 2 chars, which would fall through to the punctuation check, and "o" is not terminal punctuation → it would be flagged as truncated.
+
+**Fix:** Lower the single-word threshold from 3 to 2 chars. Words like "go", "ok", "no", "yes" are all valid complete inputs.
 <!-- /agent:exchange -->

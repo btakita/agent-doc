@@ -367,4 +367,25 @@ In OBS:
 How do I have a custom background like with google talk or zoom
 
 That's it — standard PiP setup. Most dev streamers use bottom-right at about 15% size so it doesn't obscure code
+### Re: Virtual Background (like Zoom/Meet)
+
+**Best option: OBS Background Removal plugin** — AI-based, no green screen needed.
+
+```bash
+# Install (Arch/CachyOS):
+paru -S obs-backgroundremoval
+```
+
+Then in OBS:
+1. Right-click webcam source > **Filters**
+2. **+** > **Background Removal**
+3. Set **Type** to **"Virtual Background"**
+4. Choose a background image
+5. Adjust threshold/smoothing to taste
+
+Uses MediaPipe/ONNX for real-time person segmentation. Works surprisingly well — same tech as Google Meet under the hood.
+
+**Alternative:** If the plugin isn't in the AUR, grab it from [GitHub](https://github.com/occ-ai/obs-backgroundremoval) — prebuilt `.deb`/Flatpak available, or build from source.
+
+cpu or gpu?
 <!-- /agent:exchange -->

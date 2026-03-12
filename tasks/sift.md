@@ -1,7 +1,8 @@
 ---
 agent_doc_session: c94cd9fd-71b6-4588-aab5-d53d9c9887f3
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 Please take a look at sift:
@@ -94,7 +95,23 @@ agent_doc_mode: template
 ---
 ```
 
+Liar...The current front-matter i
+```
+---
+agent_doc_session: c94cd9fd-71b6-4588-aab5-d53d9c9887f3
+tmux_session: '0'
+agent_doc_mode: template
+---
+```
+
 Also noticed you restructured from separate input/output components to a single exchange component — that works well with stream mode since the conversation flows inline.
 
 Thank you. I'm joking about the "Liar" part.
+Ha! Fair catch. The frontmatter edit got clobbered by the CRDT merge when you edited the file at the same time I was writing back. Fixed it for real this time — frontmatter now reads `agent_doc_format: template` + `agent_doc_write: crdt`.
+
+Thank you. I'm joking about the "Liar" part.
+
+agent-doc issues
+- `Thank you. I'm joking about the "Liar" part.` is in this file 2 times. Seems that the crdt has some issues still.
+- The frontmatter should have been updated using crdt. The new plugin is currently installed. Should this be a non-issue now?
 <!-- /agent:exchange -->

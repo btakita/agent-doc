@@ -1,12 +1,8 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '2323'
-agent_doc_mode: sstrreaam
+tmux_session: '23'
+agent_doc_mode: stream
 ---
-
-
-
-
 
 # agent-doc
 
@@ -1605,4 +1601,53 @@ Please make `Claim for Tmux Pane` default to `agent_doc_mode: stream`.
 Also, when I called `agent-doc run` on this file...and there was no tmux session. Nothing seemed to happen. This issue has been occurring despite several releases attempting to fix it.
 
 I want to do a human review of the code. Please let me know where I should look to see why this issue keeps on occurring. And claude code has failed to fix the issue despite almost 10 attempts.
+### Re: CRDT merge bug — frontmatter character doubling
+
+The CRDT merge produced corrupt output — `'23'` became `'2323'`, `stream` became `sstrreaam`. This is a bug in `crdt.rs` where the character-level diff/merge is doubling characters in short strings. Fixed the frontmatter manually. This needs investigation in `crdt::merge()` — the `compute_edit_ops()` function may be generating duplicate insert operations for the frontmatter region.
+
+### Re: `agent-doc run` does nothing without tmux session — code review guide
+
+This is the recurring routing bug. Here are the files to review for a human code audit:
+
+**Primary files (start here):**
+
+`run_with_tmux` has duplicate code in the conditionals. Please extract methods.
+
+1. **`src/agent-doc/src/route.rs`** — The routing logic. This is where `/agent-doc <file>` gets dispatched to a tmux pane. Key functions:
+   - `run()` — main entry point
+   - `sync_after_claim()` — supposed to sync layout after lazy claim
+   - Look for the lazy claim path: what happens when the pane is dead or unregistered?
+
+```
+    if window_files.len() < 2 {
+        return; // Single file — no layout sync needed
+    }
+```
+Should this be `if window_files.len() == 1`? What happens if it's 0?
+
+2. **`src/agent-doc/src/claim.rs`** — Claims a file for a pane. Key function:
+   - `run()` — registers the file→pane mapping
+   - `sync_after_autoclaim()` — layout sync after SessionStart hook claim
+
+3. **`src/agent-doc/src/sessions.rs`** — Session registry (`sessions.json`). Look at:
+   - `with_registry()` — flock-based read-modify-write
+   - How entries are created/updated
+   - Whether dead pane detection works correctly
+
+4. **`src/agent-doc/src/start.rs`** — Starting a Claude session in a new pane. Key question: is `send_keys` racing with Claude startup?
+
+**Secondary files:**
+
+5. **`src/agent-doc/src/resync.rs`** — `prune()` removes dead panes. Is it too aggressive or not aggressive enough?
+
+6. **`src/agent-doc/src/autoclaim.rs`** — SessionStart hook. Does it correctly detect and re-register panes after context compaction?
+
+**The pattern of failure** (from session history): route sends the command before Claude is ready in the pane. The fix attempts have been:
+- v0.14.6: auto-sync after lazy claim
+- v0.14.7: autoclaim sync
+- Each fix addressed a specific path but the race persists in other paths
+
+**What to look for:** Follow the code path from `agent-doc route <file>` when no valid pane exists. Trace: Does it create a pane? Does it wait for Claude to start? Does it send the command? Is there a race between send and readiness?
+
+There are many steps in this process...Which seems like a code smell. This flow should be simpler. And we should log where we stop in the flow of the agent-doc run.
 <!-- /agent:exchange -->

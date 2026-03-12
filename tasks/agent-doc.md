@@ -7,9 +7,9 @@ agent_doc_mode: stream
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.0-dev | **Tests:** 303 + 67 tmux-router passing | **Dependencies:** tmux-router v0.2.5-dev, instruction-files v0.1
-**Published:** pending release
-**Plugins:** JetBrains v0.2.1-dev (IPC patch watcher) + VS Code v0.2.0
+**Version:** v0.17.0 | **Tests:** 303 + 67 tmux-router passing | **Dependencies:** tmux-router v0.2.5-dev, instruction-files v0.1
+**Published:** GitHub Release ✓ | crates.io ✗ (auth) | PyPI ✗ (auth)
+**Plugins:** JetBrains v0.2.1 (IPC patch watcher) + VS Code v0.2.0
 <!-- /agent:status -->
 
 ## Architecture
@@ -76,7 +76,7 @@ agent_doc_mode: stream
 | v0.15.1 | Claim defaults to stream mode, route.rs refactor (`send_command()`, `find_target_pane()`, `[route]` logging). |
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
 | v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
-| v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. CRDT default write strategy. Convert CLI with `--agent-doc-format`/`--agent-doc-write` flags. 303 tests. |
+| v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. IPC write (`--ipc` + JetBrains PatchWatcher v0.2.1). tmux layout fix (`first_pane_join_flag`). 303 + 67 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -536,4 +536,54 @@ Preparing v0.17.0 release. Changes since v0.16.1:
 Committing, bumping to v0.17.0, merging to main, tagging, and publishing now.
  
 The plugins should have a version bump as well.
+### Re: Plugin version bump
+
+Bumped JetBrains plugin from v0.2.0 → **v0.2.1** (PatchWatcher IPC feature). VS Code stays at v0.2.0 (no changes).
+
+**v0.17.0 release status:**
+
+| Target | Status |
+|--------|--------|
+| GitHub Release | Done — binary + plugin zips attached |
+| crates.io | **Auth error** (401) — needs `cargo login` re-auth |
+| PyPI | **Auth error** (403) — needs token refresh |
+| Binary installed | Done (v0.17.0 in PATH) |
+| Skill updated | Done (v0.17.0) |
+| Submodule pointers | Done (agent-doc + tmux-router) |
+| JetBrains plugin | Built (v0.2.1) — install from disk to test IPC |
+
+To fix publishing:
+- **crates.io**: `cargo login` with a fresh token from https://crates.io/settings/tokens
+- **PyPI**: `maturin publish` needs a fresh API token from https://pypi.org/manage/account/
+
+agent-doc should have a transfer command to transfer context from one document to another.
+
+### Transferred from tasks/sift.md — CRDT issues + plugin architecture
+
+**CRDT issues identified (filed as GitHub issues):**
+1. **Duplicate text after merge** ([#15](https://github.com/btakita/agent-doc/issues/15)) — When both user and agent produce identical text, CRDT merge keeps both copies. Fix: conservative post-merge dedup pass.
+2. **Frontmatter not updated via CRDT** ([#16](https://github.com/btakita/agent-doc/issues/16)) — Frontmatter changes via Edit tool get clobbered by CRDT merge. Fix: add patch:frontmatter target to CRDT pipeline.
+
+**Conservative dedup rule:** If two identical paragraph blocks appear adjacent after merge, and one came from "ours" and one from "theirs", collapse to one. Safe because keeping one copy of identical content loses nothing.
+
+**Frontmatter via CRDT:** Add a special patch target that applies YAML key/value updates through the same write path as content patches. No more Edit tool for frontmatter.
+
+**Thin plugin architecture (confirmed direction):**
+- Plugins are triggers only — detect save/focus events, call shell commands
+- agent-doc CLI is the controller — all merge, snapshot, patch, frontmatter, git logic
+- Cross-editor interface: just shell commands (claim, submit, status)
+- Works for JetBrains, VSCode, Neovim, Vim, Helix, Zed, Ki — any editor that runs shell commands on save
+
+> - Patch application
+> - Frontmatter management
+
+I want to avoid the file externally changed dialog. So the plugin does need to handle updating the file so external change dialog does not pop up.
+
+**Re: transfer command** — Yes, agent-doc should have a transfer command. Proposed:
+```
+agent-doc transfer <source> <target> [--lines START:END] [--component NAME]
+```
+Moves content (with proper snapshot/CRDT state updates) from one document to another. Could extract specific line ranges or named components. The transferred content gets appended to the target's exchange component.
+
+The transfer that I ran from tasks/sift.md to tasks/agent-doc.md truncated the context way too much. It should basically keep all of the context for the relevant topic.
 <!-- /agent:exchange -->

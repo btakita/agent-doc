@@ -228,4 +228,28 @@ The links are missing.
 Either edit or I need to repost
 
 https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162/
+
+Corky doesn't have an `edit` command yet — only draft/publish. The draft content did include the URLs, but LinkedIn's API sometimes doesn't render bare URLs as clickable links in text-only posts.
+
+**Options:**
+
+1. **Edit on LinkedIn web UI** (quickest) — Go to https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162/ > click the three dots > Edit post. The URLs should be there in the text but may not be hyperlinked. You can re-add them and LinkedIn's editor will auto-link them.
+
+2. **Delete and repost** — Delete the current post on LinkedIn, then I'll create a new draft and publish again.
+
+3. **Comment with links** — Add a comment to the existing post with the links:
+   - YouTube: https://www.youtube.com/watch?v=B-9uI53cRVE
+   - agent-doc: https://crates.io/crates/agent-doc
+
+Option 1 (edit on LinkedIn) is probably the fastest fix. Which would you prefer?
+
+The links are missing.
+
+Either edit or I need to repost
+
+https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162/
+
+I deleted it...will post manually for now
+
+I would like to have a screenshot for the video.
 <!-- /agent:exchange -->

@@ -940,4 +940,38 @@ Ran `agent-doc audit-docs`. Found 6 issues — 4 staleness warnings (all watch.r
 Audit now passes with 2 advisory warnings only.
 
 release
+### Re: release
+
+Released **v0.16.0** — pushed to main, tagged, publishing to all targets.
+
+**Changes:**
+- Reactive file-watching for stream-mode docs (zero debounce, CRDT handles concurrency)
+- Truncation detection with delayed recheck chain (200ms/25 rechecks/5s max)
+- Single-char alphanumeric bypass (A, B, 1, y, n) and short-word bypass (go, ok, release)
+- CRDT stale base detection preventing duplicate content on merge
+- Route.rs refactored: `send_command()`, `find_target_pane()`, `[route]` logging
+- Claim default changed from template to stream mode
+- Documentation: `docs/reference/reactive-stream.md` with flush cycle diagram
+- Updated CLAUDE.md, README.md, SPEC.md with reactive mode references
+
+**Publishing:** crates.io, PyPI, GitHub Releases (in progress).
+
+Why did agent-doc not upgrade after this build?
+
+```
+~/work/btakita/agent-loop main ⇡111 !11 ?1                                                                                                                                                                                            02:41:02
+❯ agent-doc --version
+agent-doc 0.14.9
+```
+
+I even tried
+
+```
+cargo install agent-doc
+...
+    Replaced package `agent-doc v0.16.0 (/home/brian/work/btakita/agent-loop/src/agent-doc)` with `agent-doc v0.16.0` (executable `agent-doc`)
+~/work/btakita/agent-loop main ⇡111 !11 ?1                                                                                                                                                                                        40s 02:40:53
+❯ agent-doc --version
+agent-doc 0.14.9
+```
 <!-- /agent:exchange -->

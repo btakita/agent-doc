@@ -85,6 +85,7 @@ agent_doc_mode: stream
 - Response diff storage for undo/extract workflows
 - `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
 - `agent-doc extract` — move request+response pair to another document
+- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
@@ -99,7 +100,8 @@ agent_doc_mode: stream
 - Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
 - Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
 - `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
-- CRDT-based merge for all components (`yrs` library) — eliminate merge conflicts, uniform model, CRDT operation log as canonical history
+- CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
+- CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
 <!-- /agent:pending -->
 
 ## Lessons
@@ -586,4 +588,38 @@ agent-doc transfer <source> <target> [--lines START:END] [--component NAME]
 Moves content (with proper snapshot/CRDT state updates) from one document to another. Could extract specific line ranges or named components. The transferred content gets appended to the target's exchange component.
 
 The transfer that I ran from tasks/sift.md to tasks/agent-doc.md truncated the context way too much. It should basically keep all of the context for the relevant topic.
+### Re: Transfer command + CRDT issues from sift.md
+
+**Transfer command proposal:**
+
+```
+agent-doc transfer <source> <target> [--component NAME] [--lines START:END] [--topic HEADING]
+```
+
+The `--topic` flag would extract all content under a matching heading (including nested subheadings and the full discussion thread). This addresses the truncation issue — a topic-based extraction keeps all context for the relevant discussion rather than summarizing.
+
+**Implementation approach:**
+1. Parse source document to identify content boundaries (by heading, component, or line range)
+2. Extract the full content block (preserving all user/agent exchanges, inline annotations, etc.)
+3. Append to target document's exchange component (or specified component)
+4. Update both documents' snapshots + CRDT state
+5. Optionally mark the source content as transferred (without deleting — user decides cleanup)
+
+**Regarding the truncated transfer from sift.md:** The full context is now preserved above in the transferred section. The key items:
+
+- **CRDT dedup (#15)**: Post-merge pass to collapse identical adjacent blocks. Filed: [#15](https://github.com/btakita/agent-doc/issues/15)
+- **Frontmatter via CRDT (#16)**: `patch:frontmatter` target for YAML key/value updates through the write path. Filed: [#16](https://github.com/btakita/agent-doc/issues/16)
+- **Plugin = thin layer + IPC**: Already implemented in v0.2.1 — PatchWatcher applies changes via `WriteCommandAction` (no external file dialog). Plugin triggers events, CLI controls logic. Cross-editor interface via shell commands.
+- **External change dialog**: Solved by IPC mechanism. Plugin watches `.agent-doc/patches/`, applies via Document API. No external file modification = no dialog, no cursor jump.
+
+Adding `agent-doc transfer` to the pending list.
+
+Do you have the following?
+
+> - Patch application
+> - Frontmatter management
+
+I want to avoid the file externally changed dialog. So the plugin does need to handle updating the file so external change dialog does not pop up.
+
+The plugin needs to handle the mechanics of the CRDT changes to gracefully integrate these updates with the editor process...avoiding externally changed file dialogs
 <!-- /agent:exchange -->

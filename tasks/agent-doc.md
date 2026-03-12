@@ -261,9 +261,13 @@ Removed 1,478 lines of old conversation. Exchange now starts clean. History comp
 
 **CRDT append mode issue:** The compact didn't work via patch block because exchange has `mode = "append"` in `components.toml`. Patch blocks respect component mode, so the compacted content was appended instead of replacing. Had to do manual deletion. For future: `agent-doc compact` should support stream/template mode documents by reading the exchange component and summarizing it.
 
+Ok...Why are we doing append mode? I thought we default to template mode.
+
 ### Re: `/agent-doc compact` duplicated in CRDT response
 
 Known issue. The CRDT merge in stream mode is producing duplicates — same root cause as the frontmatter character doubling bug from earlier. The `crdt::merge()` function's `compute_edit_ops()` is generating duplicate insert operations. This needs a focused debugging session on `crdt.rs`.
+
+Should we add detailed logging? Like log each function call? From an analysis of crdt.rs, what could the causes of the duplicates be?
 
 Should we add detailed logging? Like log each function call? From an analysis of crdt.rs, what could the causes of the duplicates be?
 
@@ -282,7 +286,261 @@ However, `tmux_session` is informational — `route` uses the UUID (`agent_doc_s
 
 **What specific failure are you seeing with gmail.md?** Is `/agent-doc tasks/gmail.md` not reaching pane %76? Or is the pane not responding? The `[route]` logging we just added in v0.15.1 should help trace the exact failure point — can you run it and share the stderr output?
 
+Two issues:
+- The tmux panes did not refresh when run was called.
+- When I switched the editor back to this file, the tmux panes refreshed. But the right side tmux pane ended up with a Claude session that did nothing. The run command was not called in the Claude session.
+
+Here is the copy of the tmux pane
+
+```
+ ▐▛███▜▌   Claude Code v2.1.72
+▝▜█████▛▘  Opus 4.6 · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  SessionStart:startup says: [agent-loop] recent context, 2026-03-12 12:26am EDT
+     ────────────────────────────────────────────────────────────
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+
+     Context Economics
+       Loading: 50 observations (17,179 tokens to read)
+       Work investment: 174,488 tokens spent on research, building, and decisions
+       Your savings: 90% reduction from reuse
+
+     Mar 11, 2026
+
+     src/agent-doc/src/write.rs
+       #4073  3:56 PM  🔴  Fixed snapshot bug in write::run() for append mode
+       #4074  3:58 PM  🔴  Fixed snapshot bug in all write.rs functions (6 code paths)
+
+     src/agent-doc/src/submit.rs
+       #4075           🔴  Fixed snapshot bug in submit::run() for agent submit workflow
+
+     src/agent-doc/src/stream.rs
+       #4076  3:59 PM  🔴  Fixed snapshot bug in stream::stream_loop() for real-time streaming
+
+     src/agent-doc/src/write.rs
+       #4078  4:05 PM  ✅  Added regression test for snapshot behavior during concurrent user edits
+
+     src/agent-doc/src/main.rs
+       #4079  4:06 PM  ✅  Streaming interval reduced from 2s to 200ms
+
+     src/agent-doc/src/snapshot.rs
+       #4080           🔴  Fixed build error by making find_project_root public
+
+     src/agent-doc/SKILL.md
+       #4081           ⚖️  Removed auto-commit to preserve git gutter visibility
+       #4082           ✅  Switched all write modes to CRDT merge strategy
+
+     src/agent-doc/src/write.rs
+       #4083           🔴  Fixed snapshot to exclude concurrent user edits
+
+     src/agent-doc/SKILL.md
+       #4084  4:09 PM  ⚖️  Reverted to auto-commit after response to manage git gutter size
+
+     tasks/stream-test.md
+       #4085  4:13 PM  ✅  Committed stream-test documentation
+
+     General
+       #4086  4:23 PM  🔵  Agent-doc recover command tested on stream-test.md
+
+     tasks/stream-test.md
+       #4087           ✅  Committed agent-doc response to tasks/stream-test.md
+       #4088           🔵  Agent-doc stream architecture and workflow design explored
+       #4090  4:27 PM  ✅  agent-doc submodule updated with CRDT and streaming improvements
+       #4091           ✅  Committed stream-test documentation using deferred workflow
+       #4096  4:33 PM  ✅  Agent documentation response committed for stream-test task
+       #4100  4:36 PM  🔵  agent-doc recover command handles orphaned responses
+       #4104  4:39 PM  ✅  CRDT merge preserves concurrent edits in agent-doc workflow
+       #4111  4:41 PM  ✅  Committed agent-doc response for stream-test task
+       #4113  4:43 PM  ✅  Committed stream-test.md documentation to version control
+
+     demo/
+       #4114  4:44 PM  ✅  Created demo directory for agent-doc demonstrations
+
+     tasks/stream-test.md
+       #4116  4:49 PM  ✅  Committed agent-doc response for stream-test task
+       #4117  4:51 PM  ⚖️  Stream mode as document nexus architecture
+       #4118  4:57 PM  ✅  Blog post and investor pitch documentation for agent-doc CRDT collaboration
+       #4119  4:59 PM  🟣  Tested agent-doc streaming write with CRDT merge
+
+     tasks/linkedin.md
+       #4120  7:27 PM  🔵  Agent-doc recover found no pending responses for linkedin.md
+       #4121           ✅  Agent-doc committed 5,598 lines to linkedin.md task
+       #4122  7:28 PM  🔵  LinkedIn task file contains new bookmarklet request with 1.8MB HTML structure
+
+     #S1202 Clean up tasks/linkedin.md file and git history (Mar 11, 7:37 PM)
+
+     tasks/linkedin.md
+       #4123  7:38 PM  ✅  LinkedIn task documentation drastically simplified
+       #4124           🟣  LinkedIn bookmarklet now extracts contact names for personalized exports
+
+     .git/HEAD
+       #4125  7:39 PM  ✅  Git history cleaned by squashing LinkedIn commits to remove HTML bloat
+
+     .git/objects/
+       #4126           ✅  Git repository garbage collected to remove orphaned HTML blob
+
+     #S1203 Background task completion check for git cleanup response writing (Mar 11, 7:43 PM)
+
+     tasks/linkedin.md
+       #4127  7:48 PM  ✅  Committed agent documentation updates to tasks/linkedin.md
+       #4128           🔵  LinkedIn task documentation and corky social integration workflow
+       #4129  7:51 PM  ✅  Updated LinkedIn bookmarklet with date prefix and improved name extraction
+
+     #S1204 Clean up tasks/linkedin.md documentation file and fix corrupted bookmarklet code (Mar 11, 8:48 PM)
+
+     #S1205 Monitor background task completion for tasks/linkedin.md cleanup (Mar 11, 9:29 PM)
+
+     #S1206 Fixed LinkedIn message extraction bookmarklet to properly extract names and timestamps (Mar 11, 9:29 PM)
+
+     #S1209 Agent-doc stream mode configuration and routing bug investigation (Mar 11, 9:33 PM)
+
+     tasks/linkedin.md
+       #4130  9:33 PM  ✅  Committed LinkedIn bookmarklet updates to version control
+       #4131           🔴  Fixed LinkedIn bookmarklet name extraction using newline splitting
+
+     tasks/agent-doc.md
+       #4135  10:10 PM  🔵  agent-doc project documentation reviewed
+
+     src/agent-doc/src/crdt.rs
+       #4136            🟣  CRDT-based stream mode implemented across 4 phases
+
+     src/agent-doc/src/watch.rs
+       #4137  10:11 PM  🟣  Watch daemon enhanced with stream mode polling (Option B)
+
+     src/agent-doc/src/frontmatter.rs
+       #4138            🟣  Chain-of-thought streaming with thinking blocks
+
+     src/agent-doc/src/watch.rs
+       #4139            🔴  Watch daemon CWD and stream flush duplication bugs fixed
+
+     tasks/agent-doc.md
+       #4140            ✅  agent-doc v0.15.0 released with CRDT stream mode
+
+     #S1210 Refactored route.rs and debugged auto-start command routing bug (Mar 11, 10:26 PM)
+
+     src/agent-doc/src/route.rs
+       #4141  10:28 PM  🔄  Refactored route.rs to eliminate duplicate code and improve logging
+
+     #S1211 Fixed CRDT-mangled LinkedIn bookmarklet for Mia Tomeo profile extraction (Mar 11, 11:38 PM)
+
+     src/agent-doc/Cargo.toml
+       #4142  11:41 PM  ✅  Released agent-doc v0.15.1 with claim mode change and route refactoring
+       #4143  11:43 PM  🟣  Deployed agent-doc v0.15.1 to crates.io and PyPI
+
+     Mar 12, 2026
+
+     #S1212 Released and integrated agent-doc v0.15.1 with stream mode defaults and route refactoring (Mar 12, 12:10
+     AM)
+
+     tasks/linkedin/mia-tomeo.md
+       #4144  12:13 AM  ⚖️  LinkedIn Recovery Strategy for Mia Tomeo Financial Advisor Conversation
+
+     src/agent-doc
+       #4145  12:24 AM  ✅  Updated agent-doc submodule to v0.15.1
+
+     #S1213 Completed agent-doc v0.15.1 multi-platform release with all background tasks finished (Mar 12, 12:25 AM)
+
+     Investigated: Background task completion status for binary installation, PyPI publishing, and release binary
+     builds
+
+     Learned: agent-doc release workflow includes parallel background tasks for binary installation, PyPI publishing,
+     and GitHub release binary builds that complete asynchronously
+
+     Completed: All v0.15.1 release tasks completed: binary installed to ~/bin/agent-doc, PyPI package published,
+     GitHub release binaries built, crates.io published, and agent-loop submodule updated to v0.15.1
+
+     Next Steps: Release workflow fully completed; v0.15.1 is live and available across all distribution channels
+
+
+     Access 174k tokens of past research & decisions for just 17,179t. Use the claude-mem skill to access memories by
+     ID.
+
+     View Observations Live @ http://localhost:37777
+```
+
+### Re: CRDT duplicate root cause + fix
+
+**Root cause:** Stale CRDT base state. When `merge(base_state, ours, theirs)` runs:
+1. `base_text` is extracted from the `.yrs` state file
+2. Char-level diffs computed: `base_text → ours` and `base_text → theirs`
+3. If `base_text` is stale (doesn't match the actual common ancestor), both diffs contain Insert ops for the same content
+4. CRDT sees two independent clients inserting the same text → duplicates
+
+**Example:** base had old frontmatter, both ours/theirs had `'23'` → both generated Insert `'23'` → CRDT merged to `'2323'`.
+
+**Fixes applied to `crdt.rs`:**
+
+1. **Short-circuit:** If `ours == theirs`, skip merge entirely and return ours
+2. **Stale base detection:** Compare common prefix length between base and each side. If both share < 50% with base, base is stale → use ours as base instead
+3. **Base rebuild:** When stale base is detected, rebuild `base_encoded` from the new base text
+4. **Logging:** `[crdt] merge: base_len=X ours_len=Y theirs_len=Z` on every merge + stale detection warnings
+
+All 293 tests pass. Binary installed.
+
+Tell me more about `apply_stream_from_string`. Why is it dead code? What is it supposed to be used for? I see:
+
+> /// Used by `recover` to apply orphaned stream responses.
+
+Is recover used to mitigate a stale claim?
+
+Could you create a diagram of the call paths that converge to `merge`?
+
 ### Re: "What should we do with"
 
-Your message was cut off. What were you asking about? We need to stop getting cut off. Can we build a heuristic to where if a message is cut off, try again for the next diff?
+Your message was cut off. What were you asking about?
+
+We need to stop getting cut off. Can we build a heuristic to where if a message is cut off, try again for the next diff?
+
+### Re: Cut-off message heuristic
+
+Good idea. Detection could work like:
+- If the last non-whitespace character before `<!-- /agent:exchange -->` is mid-word (no sentence-ending punctuation), flag as potentially truncated
+Yes...definately
+- Or: check if the last line ends without a newline or period/question mark/exclamation
+Don't do this unless the statement is obviously not complete. You can also check the document again after a short delay to see if more is added to that line.
+
+**Implementation options:**
+1. **In `diff.rs`** — after computing the diff, check if the last added line looks incomplete. Log a warning: `[diff] Warning: last change may be truncated`
+This should cause a delayed recheck. Like a double tap. To get the rest of the sentence. If the sentence is still being typed, keep on rechecking. At the end of the sentence, recheck one last time to ensure that more content is not added to the line.
+If the editing goes to the next line...Enter was pressed...present some options what can be done.
+I think we should just cut off this diff at the end of the line...and save the next line(s) for the next run.
+2. **In SKILL.md** — instruct Claude to detect incomplete messages and ask the user to complete them before responding
+Follow the chain of delayed rechecks until we hit a terminal case...then use that diff. If agent-doc handles this entirely, agent-doc can block until the chain of rechecks are complete.
+3. **In the binary** — `agent-doc diff --check-truncation` flag that returns a special exit code
+With the chain of delayed rechecks, `--check-truncation` does not seem necessary. Do you agree?
+
+Option 2 is zero-code. Want me to add it to SKILL.md, or implement option 1 in the binary? We need to stop getting cut off. Can we build a heuristic to where if a message is cut off, try again for the next diff?
+
+We want option 1. The chain of rechecks.
+
+There are 3 recovery bashes for this file. Why?
+
+```
+     ctrl+b ctrl+b (twice) to run in background
+
+✻ Doodling… (43s · ↓ 66 tokens)
+  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Background tasks
+  3 active shells
+
+  ❯ agent-doc recover tasks/agent-doc.md 2>&1; cat .agent-doc/claims.log 2>/dev/null && > .agent-… (running)
+    agent-doc recover tasks/agent-doc.md && cat .agent-doc/claims.log 2>/dev/null && > .agent-doc… (running)
+    agent-doc recover tasks/agent-doc.md && cat .agent-doc/claims.log 2>/dev/null && > .agent-doc… (running)
+
+  ↑/↓ to select · Enter to view · x to stop · Esc to close
+```
 <!-- /agent:exchange -->

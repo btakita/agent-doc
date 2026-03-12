@@ -543,4 +543,127 @@ There are 3 recovery bashes for this file. Why?
 
   ↑/↓ to select · Enter to view · x to stop · Esc to close
 ```
+### Re: Why append mode for exchange?
+
+The exchange component has `mode = "append"` in `.agent-doc/components.toml`. This is intentional — it means agent responses append to the conversation rather than replacing the entire exchange. The document itself is `agent_doc_mode: stream`, which controls the *write mechanism* (CRDT merge). The component mode controls *how patches are applied*.
+
+`agent_doc_mode: stream` should use template mode by default. In fact, this file uses the template format.
+
+We currently have ambiguity with agent_doc_mode. Here is what I propose:
+
+We have 2 categories:
+
+Category 1:
+- stream
+- batch
+
+Category 2:
+- template
+- append
+
+agent_doc_mode was doing double duty for Category 1 & 2. Please propose config names for Category 1 & 2.
+
+### Re: Tmux pane didn't refresh + Claude session did nothing
+
+The pasted tmux pane confirms the recurring bug: the Claude session started (SessionStart hook fired, context loaded) but **no `/agent-doc` command was sent to it**. This is the auto-start race from `route.rs`:
+
+1. `route` detected dead/missing pane → auto-started new Claude session
+2. `route` printed "Wait for Claude to start, then run route again"
+3. But the plugin/caller didn't re-route — so the Claude session just sat idle
+
+Should `auto_start` be async to handle the race condition(s)?
+Can we have the async loop block until async steps are complete before moving on...such as:
+- the tmux pane starting and being attached to the correct tmux window position slot
+- claude session is confirmed running and available
+- send was successfully sent? (if necessary)
+
+
+The `[route]` logging from v0.15.1 would show this flow. The fix is to make `auto_start()` poll until Claude is ready, then send the command automatically instead of telling the user to retry.
+
+### Re: `apply_stream_from_string` — dead code
+
+It's a recovery helper. When a stream-mode response is interrupted (context compaction, crash), the pending response is saved to `.agent-doc/pending/<hash>.md`. `agent-doc recover` reads this file and calls `apply_stream_from_string()` to replay it.
+
+It's marked `#[allow(dead_code)]` because `recover.rs` currently only handles append and template modes — stream-mode recovery isn't wired yet. It's pre-built infrastructure for when we add stream recovery.
+
+This is for batch in Category 1.
+
+**Not related to stale claims** — recover handles interrupted *writes*, not stale *routing*. Different problem domains.
+
+### Re: 3 recovery processes running
+
+Those are from multiple `/agent-doc tasks/agent-doc.md` invocations that queued up. Each invocation runs `agent-doc recover` in pre-flight. When you submitted `/agent-doc` multiple times in quick succession (or the previous cycles didn't complete before the next was triggered), the recover commands stacked up as background tasks. They're harmless — `recover` is idempotent and returns immediately when no pending response exists.
+
+But we now have 4 bashes...and there is no activity in the claude session...meaning the previous run has completed. It seems that we have a leak of these tasks.
+
+```
+  Background tasks
+  4 active shells
+
+  ❯ agent-doc recover tasks/agent-doc.md 2>&1; cat .agent-doc/claims.log 2>/dev/null && > .agent-… (running)
+    agent-doc recover tasks/agent-doc.md 2>&1; cat .agent-doc/claims.log 2>/dev/null && > .agent-… (running)
+    agent-doc recover tasks/agent-doc.md && cat .agent-doc/claims.log 2>/dev/null && > .agent-doc… (running)
+    agent-doc recover tasks/agent-doc.md && cat .agent-doc/claims.log 2>/dev/null && > .agent-doc… (running)
+
+  ↑/↓ to select · Enter to view · x to stop · Esc to close
+```
+
+### Re: Merge call path diagram
+
+```
+                                  crdt::merge()
+                                       ▲
+                                       │
+                              merge::merge_contents_crdt()
+                                       ▲
+                                       │
+                    ┌──────────────────┼──────────────────┐
+                    │                  │                   │
+            write.rs:217       write.rs:265       stream.rs:311
+          (run_stream)     (apply_stream_       (stream_loop
+           --stream)        from_string)         final save)
+                    │                  │                   │
+                    ▼                  ▼                   ▼
+              /agent-doc         agent-doc           agent-doc
+              skill write        recover              stream
+```
+
+What is `/agent-doc skill write`? In the autocomplete, I only see:
+- `/agent-doc skill check`
+- `/agent-doc skill install`
+
+`/agent-doc stream` is not in the autocomplete
+
+All three paths converge through `merge_contents_crdt()` → `crdt::merge()`. The `stream.rs:311` path saves CRDT state directly (no merge — single writer during streaming).
+### Re: Truncation detection — implemented
+
+Added delayed recheck chain to `diff.rs`:
+
+**`wait_for_stable_content()`** — called before computing the diff:
+1. Reads file, extracts the last added line vs snapshot
+2. Calls `looks_truncated()` to check if the line appears incomplete
+3. If truncated: waits 500ms, re-reads the file
+Why not 200ms just like the **Timer thread** in stream mode
+4. If content changed → recheck again (user still typing)
+5. If content unchanged → stable, proceed with diff
+6. Max 10 rechecks (5 seconds total) If we change the recheck period, make sure that we have n rechecks adding up to 5s.
+
+**`looks_truncated()`** heuristic — a line is NOT truncated if:
+- Empty or whitespace
+- Starts with `/` (command), `#` (heading), `` ``` `` (code block), `<!--` (marker)
+- Single word ≥3 chars (e.g., "release", "implement")
+What if I say `go`? That should mean "go"...do it...continue...
+- Ends with terminal punctuation: `. ! ? : ; ) ] " ' `` * - > |`
+
+Otherwise it's considered potentially truncated (mid-sentence, mid-word).
+I suppose "go" would not be considered **potentially truncated**...correct?
+
+**No `--check-truncation` flag needed** — the recheck chain runs automatically inside `compute()`. It blocks transparently until content stabilizes.
+
+**13 new tests:**
+- `truncated_mid_sentence`, `truncated_ends_mid_word`
+- `not_truncated_complete_sentence`, `not_truncated_question`, `not_truncated_command`, `not_truncated_single_word_command`, `not_truncated_heading`, `not_truncated_empty`, `not_truncated_ends_with_colon`, `not_truncated_ends_with_backtick`, `not_truncated_ends_with_period`
+- `extract_last_added_finds_insert`, `extract_last_added_none_when_no_changes`
+
+306 tests pass, clippy clean. Binary installed.
 <!-- /agent:exchange -->

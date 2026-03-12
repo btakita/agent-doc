@@ -778,4 +778,36 @@ The full `looks_truncated()` cascade is now:
 4. Single word ≥ 2 chars → not truncated
 5. Terminal punctuation → not truncated
 6. Otherwise → truncated (recheck chain fires)
+### Re: ~100ms latency concern
+
+The truncation detection (`wait_for_stable_content`) only runs when the last added line *actually looks truncated*. If the user writes "go", "B", a heading, a command, or any complete sentence, the function returns immediately with zero delay. The 200ms recheck only fires for lines like "But I think th" (mid-sentence, no terminal punctuation, multi-word).
+
+Most user inputs hit the fast-path bypasses. The latency only kicks in for the rare edge case of auto-save catching a mid-keystroke buffer.
+
+In the "fast path" best case scenario, how much latency is added?
+
+### Re: Race condition — only first character typed
+
+**Scenario:** Auto-save fires after user types "B" (first char of "But wait..."). "B" is single alphanumeric → bypasses truncation detection → processes immediately.
+
+**Is this okay? Yes.** Here's why:
+
+1. **The next run catches the rest.** User continues typing → auto-save → watch triggers → diff sees the full sentence.
+
+2. **This is actually rare.** Requires: editor auto-save at the 1-char point + watch debounce (500ms) doesn't absorb subsequent saves + user pauses >500ms after one char.
+
+3. **Debounce is the real protection.** The watch daemon's 500ms debounce means the file must be stable for half a second before triggering. Active typing gets absorbed.
+
+With debounce, I don't want to add latency. Can we have the 500ms debouce with optimistic concurrency...
+meaning we speculatively begin execution before the debounce period finished...
+- if there's a debounce hit, cancel execution and rerun with new diff
+- if there's a debounce miss, continue execution
+
+Would this strategy cost us much in terms of tokens?
+
+4. **Manual submit has no race.** `/agent-doc` is explicit — whatever's in the file is intentional.
+
+**Edge case:** User types "B" as choice selection AND more text follows. First run processes "B", second gets the rest. But this requires typing "B", pausing 500ms+, then resuming — unusual mid-word.
+
+**Verdict:** Current design is correct. Debounce = primary defense, truncation detection = secondary safety net, single-char fast-path = avoids false delays.
 <!-- /agent:exchange -->

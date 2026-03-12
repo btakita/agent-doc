@@ -514,4 +514,26 @@ echo '<patch blocks>' | agent-doc write tasks/foo.md --baseline-file /tmp/baseli
 The SKILL.md can be updated to pass `--ipc` instead of `--stream` for the write-back step, enabling seamless cursor-stable editing.
 
 release
+### Re: IPC documentation
+
+`/existence new ipc` would create a term in the existence-lang ontology repo — that's for universal concepts. For agent-doc-scoped documentation, I created `docs/reference/ipc.md` directly, using existence-lang's Ontology/Axiology/Epistemology structure:
+
+**Created:** `src/agent-doc/docs/reference/ipc.md`
+- **Ontology:** IPC as a System bridging CLI and IDE Domains, preserving user Focus
+- **Axiology:** Why file-based writes cause cursor jump, dialogs, and undo disruption
+- **Epistemology:** Architecture diagram, sequence diagram, JSON format spec, fallback behavior, component mapping, pattern expression at IDE and CLI scopes
+- Added to `docs/SUMMARY.md` under Reference
+
+### Re: Release
+
+Preparing v0.17.0 release. Changes since v0.16.1:
+
+1. **format/write split** — `agent_doc_mode` → `agent_doc_format` + `agent_doc_write` (12 files, backward-compatible)
+2. **tmux layout fix** — `first_pane_join_flag()` replaces hardcoded `-dbh` (67 tmux-router tests)
+3. **IPC write** — `--ipc` flag + JetBrains PatchWatcher (cursor-stable editing)
+4. **IPC docs** — `docs/reference/ipc.md`
+
+Committing, bumping to v0.17.0, merging to main, tagging, and publishing now.
+ 
+The plugins should have a version bump as well.
 <!-- /agent:exchange -->

@@ -122,4 +122,27 @@ Canvas captures full 4K screen, output downscales to 1080p. OBS auto-corrected t
 *Compacted from 4-round troubleshooting session.*
 
 obs still is showing quarter view
+
+### Root Cause: XSHM + HiDPI
+
+The real issue is **XSHM can't capture full 4K on your HiDPI setup**. Your `~/.Xresources` has `Xft.dpi: 240` (2.5x scaling). XSHM captures at the X server's logical resolution (1920x1080), not the physical pixels (3840x2160). No amount of config tweaking will fix this — it's an inherent XSHM limitation with HiDPI.
+
+### Fix: Switch to PipeWire Screen Capture
+
+PipeWire captures at native pixel resolution regardless of DPI. You have PipeWire running (v1.6.1).
+
+**In OBS (must be done through the UI — PipeWire requires a portal screen picker):**
+
+1. Close OBS if running
+2. Open OBS
+3. In your Scene, right-click "Display Capture (XSHM)" > **Remove**
+4. Click **+** under Sources > **Screen Capture (PipeWire)**
+5. A portal dialog will appear — select your screen and click Share
+6. The source should now show at full 3840x2160 resolution
+7. Right-click the source > **Transform > Fit to Screen** (Ctrl+F) if needed
+
+This will capture the full 4K screen and OBS will downscale to 1080p output per your existing settings.
+
+Should I post my video showing 1/4 screen to linked in this morning?
+I will make another video with the full screen. But my first video had some interesting content.
 <!-- /agent:exchange -->

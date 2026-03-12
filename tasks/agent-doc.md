@@ -974,4 +974,28 @@ cargo install agent-doc
 ❯ agent-doc --version
 agent-doc 0.14.9
 ```
+### Re: agent-doc --version shows 0.14.9
+
+**Root cause: PATH shadowing.** You have `.bin/agent-doc` in your project, which is a symlink to `src/agent-doc/target/release/agent-doc`. This comes before `~/.cargo/bin/agent-doc` in your PATH.
+
+```
+/home/brian/work/btakita/agent-loop/.bin/agent-doc → ../src/agent-doc/target/release/agent-doc
+```
+
+When you ran `cargo install agent-doc` (from crates.io), it installed to `~/.cargo/bin/`. But your shell resolves `.bin/agent-doc` first — the old `target/release/` binary that was built at v0.14.9.
+
+**Fix:** Run `cargo build --release` inside the submodule to update the symlink target:
+```bash
+cd src/agent-doc && cargo build --release
+```
+
+Or equivalently, `cargo install --path .` (which we ran during this session) rebuilds `target/release/agent-doc`. The symlink now points to v0.16.0:
+```
+$ .bin/agent-doc --version
+agent-doc 0.16.0
+```
+
+Your shell should pick it up on the next command. If not, run `hash -r` (bash) or `rehash` (zsh) to clear the shell's command cache.
+
+Please run it...Add to my CLAUDE.local.md to always run `cargo build --release` when releasing agent-doc.
 <!-- /agent:exchange -->

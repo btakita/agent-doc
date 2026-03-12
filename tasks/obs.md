@@ -300,4 +300,25 @@ Video is at [2026-03-12 03-50-55.mp4](../../../../Videos/2026-03-12%2003-50-55.m
 Want me to set up the YouTube metadata like the first video?
 
 Yes...Can you update it to post from Corky?
+
+An
+### Re: LinkedIn Post via Corky
+
+**Draft created:** `mail/social/20260312-155456-linkedin.md` (status: `draft`)
+
+Content highlights rmemo (358-byte reactive lib), tag-path (TreeSitter semantic search), agent-doc compaction, and v0.16.1 release.
+
+**Note:** No YouTube link included yet — add it to the draft once you upload the second video. Then:
+
+```bash
+# Edit the draft to add YouTube link, then:
+corky linkedin status mail/social/20260312-155456-linkedin.md ready
+corky linkedin publish mail/social/20260312-155456-linkedin.md
+```
+
+Or tell me the YouTube URL and I'll update the draft and publish.
+
+Yes...Can you update it to post from Corky?
+
+Another question...should I post to Twitch as my primary platform...if I do live sessions?
 <!-- /agent:exchange -->

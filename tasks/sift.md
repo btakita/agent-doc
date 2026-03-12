@@ -120,11 +120,21 @@ agent-doc issues
 
 Can we have a conservative deduplication? Where we can ensure that no data is lost, we dedupe?
 
+Can we have a conservative deduplication? Where we can ensure that no data is lost, we dedupe?
+
 **2. Frontmatter not updated via CRDT:** The frontmatter update was done via the Edit tool (direct file edit), NOT via the CRDT write path. Then when the CRDT merge ran for the response write-back, it saw two conflicting versions of the frontmatter and kept the user's version (which still had the old field). The fix: frontmatter changes should go through the same CRDT pipeline as content patches, or be applied AFTER the CRDT write.
 
 Same CRDT pipeline as content patches.
 
+Same CRDT pipeline as content patches.
+
 **Should the new plugin fix this?** Partially. The JetBrains plugin triggers claims and submits, but the CRDT merge logic lives in the agent-doc binary. The duplication issue needs a fix in agent-doc's merge algorithm (dedup identical lines that appear in both sides). The frontmatter issue needs the agent to use the CRDT write path for frontmatter changes instead of Edit tool.
+
+I want the plugin to be a thin layer that run operations with ide. agent-doc is the controller.
+These instructions need to be equivalent between JetBrains and VSCode.
+I also want to consider future integrations with nvim, vim, ki, helix, Zed, and other editors.
+
+What options do you propose?
 
 I want the plugin to be a thin layer that run operations with ide. agent-doc is the controller.
 These instructions need to be equivalent between JetBrains and VSCode.
@@ -138,4 +148,62 @@ What options do you propose?
 3. Or: apply frontmatter changes AFTER the CRDT write completes
 
 I also cleaned up the duplicate blocks in this file. Want me to file these as issues on agent-doc? Yes
+
+Let's transfer all of this cont
+**Re: Conservative deduplication**
+
+Yes — a safe dedup pass after CRDT merge. The rule: if two identical multi-line blocks appear adjacent (or within N lines), and one came from "ours" and one from "theirs", collapse to one. This is safe because:
+- If only the user wrote it, there is one copy (no conflict)
+- If only the agent wrote it, there is one copy (no conflict)
+- If both wrote the same thing, keeping one copy loses nothing
+
+Implementation: post-merge pass in `crdt.rs` that scans for duplicated paragraph blocks (split on blank lines, compare, remove second copy if identical to first).
+
+**Re: Frontmatter via CRDT pipeline**
+
+Agreed. Add a `<!-- patch:frontmatter -->` target that applies YAML key/value updates through the same write path. The agent-doc write command would:
+1. Parse patch:frontmatter content as YAML key/value pairs
+2. Merge into existing frontmatter (add/update keys, never remove)
+3. Apply atomically alongside content patches
+
+This means the SKILL.md instructions change from "use Edit tool for frontmatter" to "use patch:frontmatter block."
+
+**Re: Thin plugin architecture**
+
+The right model: **agent-doc CLI is the controller, plugins are triggers.**
+
+**Plugin responsibilities (thin layer):**
+- Detect file save / editor focus events
+- Call `agent-doc claim <file>` on focus
+- Call `agent-doc submit <file>` on save (or explicit trigger)
+- Display notifications from agent-doc output
+- NO business logic, NO merge logic, NO patch parsing
+
+**agent-doc CLI responsibilities (controller):**
+- All merge/CRDT logic
+- Snapshot management
+- Patch application
+- Frontmatter management
+- Git integration
+
+**Cross-editor interface:** The plugin contract is just shell commands:
+```
+agent-doc claim <file>        # on focus/open
+agent-doc submit <file>       # on save/trigger
+agent-doc status <file>       # poll for state (optional)
+```
+
+Any editor that can run shell commands and read stdout can integrate. This covers:
+- **JetBrains** — ExternalToolAction or FileDocumentManagerListener
+- **VSCode** — Task/terminal or extension calling child_process
+- **Neovim/Vim** — autocmd on BufWritePost calling system()
+- **Helix** — shell command via :sh
+- **Zed** — Task system or extension API
+- **Ki** — shell integration
+
+The key insight: if the interface is "run a shell command on save," every editor supports it. No editor-specific logic needed beyond the trigger mechanism.
+
+**Filing issues now.** Yes
+
+Let's transfer all of this context over to tasks/agent-doc.md
 <!-- /agent:exchange -->

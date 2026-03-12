@@ -76,6 +76,7 @@ agent_doc_mode: stream
 | v0.15.1 | Claim defaults to stream mode, route.rs refactor (`send_command()`, `find_target_pane()`, `[route]` logging). |
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
 | v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
+| v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. CRDT default write strategy. Convert CLI with `--agent-doc-format`/`--agent-doc-write` flags. 303 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -136,7 +137,11 @@ agent_doc_mode: stream
 
 **v0.15.1:** Claim defaults to stream mode. Refactored `route.rs` (extracted methods, `[route]` logging). Identified CRDT merge bug + auto-start race condition.
 
-**v0.15.1-v0.16.0:** Fixed CRDT stale base detection (common-prefix <50% → use ours as base). Truncation detection: `looks_truncated()` cascade + delayed recheck chain (200ms × 25). Proposed `agent_doc_write`/`agent_doc_format` config split. Reactive stream mode: zero debounce for stream docs, `HashSet<PathBuf>` reactive tracking. Docs: `reactive-stream.md` with diagrams. Diagnosed PATH shadowing (`.bin/agent-doc` symlink). Added release checklist to `CLAUDE.local.md`. Published v0.16.0. 308 tests.
+**v0.15.1-v0.16.0:** Fixed CRDT stale base detection (common-prefix <50% → use ours as base). Truncation detection: `looks_truncated()` cascade + delayed recheck chain (200ms x 25). Proposed `agent_doc_write`/`agent_doc_format` config split. Reactive stream mode: zero debounce for stream docs, `HashSet<PathBuf>` reactive tracking. Docs: `reactive-stream.md` with diagrams. Diagnosed PATH shadowing (`.bin/agent-doc` symlink). Added release checklist to `CLAUDE.local.md`. Published v0.16.0. 308 tests.
+
+**v0.16.1:** Native compact for template/stream mode. Published v0.16.1.
+
+**v0.17.0:** Split `agent_doc_mode` into `agent_doc_format` (append | template) + `agent_doc_write` (merge | crdt). `resolve_mode()` with backward-compatible deprecation. CRDT as default write strategy. Convert CLI extended with `--agent-doc-format`/`--agent-doc-write` flags. Refactored 12 files, removed dead code. 303 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -236,4 +241,32 @@ Options:
 Ready to implement? I'd work in a branch, phase by phase, with `make check` between each phase.
 
 Go
+### Re: Implement format/write split
+
+Phases 1-3 complete. All 303 tests pass, clippy clean.
+
+**Phase 1 — Data model** (`frontmatter.rs`):
+- Added `AgentDocFormat` (append | template) and `AgentDocWrite` (merge | crdt) enums with serde + clap derives
+- Added `format` and `write_mode` fields to `Frontmatter` struct
+- `resolve_mode()` returns `ResolvedMode { format, write }` — priority: explicit new fields > deprecated `agent_doc_mode` > defaults (template + crdt)
+- `set_format_and_write()` sets both fields and clears deprecated `mode`
+- 37 frontmatter tests pass
+
+**Phase 2 — Callsite refactor** (12 files):
+- All `mode` string comparisons → `fm.resolve_mode()` pattern matches
+- `claim.rs` sets `format=Template, write_mode=Crdt` instead of `mode="stream"`
+- `compact.rs`, `stream.rs`, `watch.rs`, `template.rs` use `resolved.is_template()` / `resolved.is_crdt()`
+- Removed dead code: `set_mode`, `set_format`, `set_write_mode`, `is_template_mode_resolved`
+
+**Phase 3 — CLI + convert**:
+- `agent-doc convert` now accepts `--agent-doc-format` and `--agent-doc-write` optional flags
+- Positional `MODE` arg kept as deprecated (backward compat)
+- Resolution priority: explicit flags > legacy positional > existing values > defaults (template + crdt)
+- `convert_to_template` and `convert_to_append` use `target_write` parameter
+- Write-only changes (same format, different write strategy) handled as frontmatter-only update
+- Updated tests for new defaults and error messages
+
+**Remaining: Phase 4** — Update SKILL.md, docs, add deprecation warning for `agent_doc_mode`. Should I proceed?
+
+Continue. Audit docs. Code review.
 <!-- /agent:exchange -->

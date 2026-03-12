@@ -350,5 +350,27 @@ The LinkedIn API supports updating published posts via `POST /rest/posts/{encode
 Shall I implement?
 
 yes...note that we implemented YouTube uploads...see tasks/obs.md. 
+**Implemented `corky linkedin edit`.**
+
+4 files changed:
+1. **`linkedin.rs`** — `update_post()` / `update_post_at()`: POST to `/rest/posts/{url_encoded_urn}` with `X-RestLi-Method: PARTIAL_UPDATE`, body `{"patch":{"$set":{"commentary":"..."}}}`. 3000-char limit enforced.
+2. **`cli.rs`** — `Edit { file, body }` variant on `LinkedinCommands`
+3. **`mod.rs`** — `run_edit(file, body)`: reads draft, extracts `post_id`, resolves author/token, calls API, optionally updates draft body
+4. **`main.rs`** — wired `LinkedinCommands::Edit` dispatch
+
+Usage:
+```sh
+# Edit body in the draft file, then push to LinkedIn:
+corky linkedin edit mail/social/my-post.md
+
+# One-liner text fix:
+corky linkedin edit mail/social/my-post.md --body "Updated text here"
+```
+
+Compiles clean, clippy passes. Some pre-existing test failures from the uncommitted YouTube draft field changes — not related to this work.
+
+**Note:** YouTube upload (`corky youtube auth/draft/publish`) is also implemented and uncommitted in the tree. Both features are ready for review/commit together or separately.
+
+release
 <!-- /agent:exchange -->
 ****

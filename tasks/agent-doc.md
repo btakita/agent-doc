@@ -998,4 +998,14 @@ agent-doc 0.16.0
 Your shell should pick it up on the next command. If not, run `hash -r` (bash) or `rehash` (zsh) to clear the shell's command cache.
 
 Please run it...Add to my CLAUDE.local.md to always run `cargo build --release` when releasing agent-doc.
+### Re: cargo build --release
+
+Done. `.bin/agent-doc` now shows v0.16.0.
+
+Added release checklist to `CLAUDE.local.md`:
+> When releasing agent-doc, always run `cargo build --release` inside the submodule after publishing. The `.bin/agent-doc` symlink points to `src/agent-doc/target/release/agent-doc` — without a release build, the symlink target stays stale.
+ 
+Please extract lifecycle diagrams into the documentation. Explaining the Reactive stream flush diagram in the docs as well.
+
+compact this file
 <!-- /agent:exchange -->

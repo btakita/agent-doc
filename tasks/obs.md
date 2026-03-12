@@ -252,4 +252,30 @@ https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162/
 I deleted it...will post manually for now
 
 I would like to have a screenshot for the video.
+Understood — LinkedIn post deleted, you'll post manually.
+
+### Screenshot Candidates for YouTube Thumbnail
+
+Extracted 4 screenshots to `mail/topics/brian-takita/videos/thumbnails/`:
+
+| File | Timestamp | Content |
+|------|-----------|---------|
+| `screenshot-02m00s.jpg` | 2:00 | agent-doc version history/release notes in IntelliJ |
+| `screenshot-10m00s.jpg` | 10:00 | CRDT bug fixes in `crdt.rs` — numbered fix list, "Find in All Places" |
+| `screenshot-30m00s.jpg` | 30:00 | Claude Code "Doodling..." with background tasks, interactive session |
+| `screenshot-60m00s.jpg` | 60:00 | Philosophy project tree (energy.md, entity.md) + race condition debugging |
+
+**Recommendation:** `screenshot-10m00s.jpg` — shows active CRDT debugging with clear, readable code. Best represents the "dog-fooding agent-doc" story.
+
+**Alternative:** `screenshot-60m00s.jpg` — if you want to highlight the Existence Lang / philosophy angle for the "Proof that God Exists" hook.
+
+Tell me a specific timestamp if you want a different frame extracted.
+
+The screenshot is not important.
+
+Now I made a second video. It still has the 1/4 screen view. I have since fixed the obs screen capture.
+
+Please transcribe for CC. Should I post it on YouTube? Should I also post on LinkedIn or make another video with the correct screen resolution?
+
+Video is at [2026-03-12 03-50-55.mp4](../../../../Videos/2026-03-12%2003-50-55.mp4)
 <!-- /agent:exchange -->

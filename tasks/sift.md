@@ -186,6 +186,11 @@ The right model: **agent-doc CLI is the controller, plugins are triggers.**
 - Frontmatter management
 - Git integration
 
+> - Patch application
+> - Frontmatter management
+
+I want to avoid the file externally changed dialog. So the plugin does need to handle updating the file so external change dialog does not pop up.
+
 **Cross-editor interface:** The plugin contract is just shell commands:
 ```
 agent-doc claim <file>        # on focus/open
@@ -206,4 +211,11 @@ The key insight: if the interface is "run a shell command on save," every editor
 **Filing issues now.** Yes
 
 Let's transfer all of this context over to tasks/agent-doc.md
+**Transferred agent-doc discussion to tasks/agent-doc.md.** The CRDT issues (#15, #16), plugin architecture direction, and transfer command proposal are now in the agent-doc session document.
+
+This file (sift.md) retains the Sift integration opportunities and networking guide. The agent-doc issues are better tracked in their dedicated session.
+
+Note: the duplicated blocks you see in this file (lines 98-105, 121-123, 127-129, 133-143) are themselves examples of the CRDT dedup bug we just filed as #15.
+
+compact this file
 <!-- /agent:exchange -->

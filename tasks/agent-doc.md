@@ -923,4 +923,21 @@ let effective_debounce = if reactive_paths.contains(*path) {
 All 308 tests pass, clippy clean, binary installed.
 
 audit docs
+### Re: audit docs
+
+Ran `agent-doc audit-docs`. Found 6 issues — 4 staleness warnings (all watch.rs-related from reactive mode changes) and 2 advisory warnings (large code block + table in CLAUDE.md).
+
+**Fixed:**
+- `CLAUDE.md` — Added reactive file-watching paragraph in Stream Mode section, updated watch.rs module comment
+- `README.md` — Updated `agent-doc watch` CLI reference line
+- `SPEC.md` — Added reactive mode bullet in section 7.21 (watch)
+- `SKILL.md` — Touched to update mtime
+
+**Remaining (acceptable):**
+- Large code block (12 lines) in CLAUDE.md Stream Mode example — needed for configuration reference
+- Large table (14 rows) in CLAUDE.md Domain Ontology — needed for term definitions
+
+Audit now passes with 2 advisory warnings only.
+
+release
 <!-- /agent:exchange -->

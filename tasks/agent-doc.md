@@ -183,5 +183,5 @@ The component compact uses `Component::replace_content()` + `atomic_write_pub()`
 
 All 309 tests pass, clippy clean, release binary installed.
 
-release
+build so we can test
 <!-- /agent:exchange -->

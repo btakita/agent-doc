@@ -7,8 +7,8 @@ agent_doc_mode: stream
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.16.1 | **Tests:** 309 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
-**Published:** crates.io, PyPI, GitHub Releases
+**Version:** v0.17.0-dev | **Tests:** 303 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Published:** pending release
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
 
@@ -269,4 +269,29 @@ Phases 1-3 complete. All 303 tests pass, clippy clean.
 **Remaining: Phase 4** — Update SKILL.md, docs, add deprecation warning for `agent_doc_mode`. Should I proceed?
 
 Continue. Audit docs. Code review.
+### Re: Phase 4 + Audit + Code Review
+
+**Phase 4 — Docs updated.** All 4 stale files fixed:
+
+- **CLAUDE.md**: Stream mode section now references `agent_doc_format: template` + `agent_doc_write: crdt` instead of `agent_doc_mode: stream`. Reactive file-watching references `resolved.is_crdt()`.
+- **SPEC.md**: Added `agent_doc_format`, `agent_doc_write`, and deprecated `agent_doc_mode` to §2.1 frontmatter fields. Updated §7.21 watch reactive mode.
+- **README.md**: Added `agent_doc_format`, `agent_doc_write`, `agent_doc_mode` (deprecated) to frontmatter fields table.
+- **SKILL.md**: Updated Document Format section with new field names and deprecation note. Updated mode detection references in §4a/§4b.
+
+**Audit docs:** 6 issues → 3 (2 pre-existing large-block warnings in CLAUDE.md + 1 SKILL.md cross-repo staleness). All staleness against `convert.rs` resolved.
+
+**Code review** (subagent, thorough):
+- All 303 tests pass, clippy clean
+- All callsites properly migrated — no leftover string comparisons
+- `agent_doc_mode: stream` backward compat fully preserved
+- Default (template+crdt) consistently applied across all paths
+- Edge cases handled: partial fields, null fields, unknown mode strings
+- `set_format_and_write()` correctly clears deprecated `mode` field
+- Stream validation rejects non-CRDT with instructive error message
+- No dead code detected
+- **Verdict: approved for merge**
+
+`make check` passes. Ready to commit, release, and publish.
+
+I called `agent-doc run tasks/corky.md`...The tmux pane layout briefly went to row major layout. Are there logs of this event. Please diagnose. Add tests replicating this issue. Fix issue.
 <!-- /agent:exchange -->

@@ -217,4 +217,30 @@ The "agentic loop" part is the watch daemon + reactive file changes. Edit your d
 Want me to adjust the tone or length?
 
 Format for youtube
+
+**YouTube-formatted reply** (plain text, no markdown — ready to paste):
+
+---
+
+Thanks! Great question.
+
+The short answer: Claude (or any LLM) is stateless per conversation. agent-doc adds persistent, structured state that survives across sessions.
+
+When you use Claude directly, you get one conversation. When it runs out of context, you start over. With agent-doc, your document IS the conversation — it lives in a markdown file, version-controlled with git.
+
+What that gives you:
+- Resume where you left off — the doc holds the full history, agent diffs against a snapshot to see only what changed
+- Multiple topics in one document — template mode has named sections the agent updates independently
+- Real-time streaming — stream mode writes output directly into your editor with CRDT merge, so you can keep editing without conflicts
+- Multiplex across documents — route commands to different tmux panes, each with its own agent session
+
+Think of it like: Claude is the engine, agent-doc is the cockpit. You wouldn't fly a plane by shouting at a jet engine — you need instruments, state, and controls.
+
+The "agentic loop" part is the watch daemon + reactive file changes. Edit your doc, save, and the agent responds automatically — no copy-paste, no context window management.
+
+agent-doc: https://crates.io/crates/agent-doc
+
+---
+
+/agent-doc compact
 <!-- /agent:exchange -->

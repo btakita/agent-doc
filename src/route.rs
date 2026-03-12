@@ -35,83 +35,66 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
     if updated_content != content {
         std::fs::write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
-        eprintln!("Generated session UUID: {}", session_id);
+        eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    // Compute the file path to send (relative to cwd)
     let file_path = file.to_string_lossy();
-
-    // Look up pane for this session
     let registered = sessions::lookup(&session_id)?;
 
+    // Step 1: Check if registered pane is alive
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            // Pane is alive — send the command
-            let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(registered_pane, &command)?;
-            if let Err(e) = tmux.select_pane(registered_pane) {
-                eprintln!("warning: failed to focus pane {}: {}", registered_pane, e);
-            }
-            eprintln!("Sent /agent-doc {} → pane {}", file_path, registered_pane);
-            return Ok(());
+            eprintln!("[route] Pane {} is alive", registered_pane);
+            return send_command(tmux, registered_pane, &file_path);
         }
-        // Pane is dead — try lazy claim
-        let target_pane = pane
-            .map(|p| p.to_string())
-            .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
-        if let Some(new_pane) = target_pane
-            && tmux.pane_alive(&new_pane)
-        {
-            eprintln!(
-                "Pane {} is dead, lazy-claiming to pane {}",
-                registered_pane, new_pane
-            );
-            sessions::register(&session_id, &new_pane, &file_path)?;
-            let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(&new_pane, &command)?;
-            if let Err(e) = tmux.select_pane(&new_pane) {
-                eprintln!("warning: failed to focus pane {}: {}", new_pane, e);
-            }
-            eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
-            sync_after_claim(tmux, &new_pane);
-            return Ok(());
-        }
-        eprintln!("Pane {} is dead, auto-starting...", registered_pane);
+        eprintln!("[route] Pane {} is dead", registered_pane);
     } else {
-        // No registered pane — try lazy claim
-        let target_pane = pane
-            .map(|p| p.to_string())
-            .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
-        if let Some(new_pane) = target_pane
-            && tmux.pane_alive(&new_pane)
-        {
-            eprintln!(
-                "No pane registered for session {}, lazy-claiming to pane {}",
-                &session_id[..std::cmp::min(8, session_id.len())],
-                new_pane
-            );
-            sessions::register(&session_id, &new_pane, &file_path)?;
-            let command = format!("/agent-doc {}", file_path);
-            tmux.send_keys(&new_pane, &command)?;
-            if let Err(e) = tmux.select_pane(&new_pane) {
-                eprintln!("warning: failed to focus pane {}: {}", new_pane, e);
-            }
-            eprintln!("Sent /agent-doc {} → pane {}", file_path, new_pane);
-            sync_after_claim(tmux, &new_pane);
-            return Ok(());
-        }
         eprintln!(
-            "No pane registered for session {}, auto-starting...",
+            "[route] No pane registered for session {}",
             &session_id[..std::cmp::min(8, session_id.len())]
         );
     }
 
-    // Auto-start cascade (can be disabled for testing)
+    // Step 2: Try lazy claim to an active pane
+    if let Some(new_pane) = find_target_pane(tmux, pane) {
+        let reason = if registered.is_some() {
+            "dead pane"
+        } else {
+            "no registration"
+        };
+        eprintln!("[route] Lazy-claiming to pane {} ({})", new_pane, reason);
+        sessions::register(&session_id, &new_pane, &file_path)?;
+        send_command(tmux, &new_pane, &file_path)?;
+        sync_after_claim(tmux, &new_pane);
+        return Ok(());
+    }
+
+    // Step 3: Auto-start a new Claude session
+    eprintln!("[route] No active pane found, auto-starting...");
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
     auto_start(tmux, file, &session_id, &file_path)?;
     Ok(())
+}
+
+/// Send `/agent-doc <file>` to a pane and focus it.
+fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
+    let command = format!("/agent-doc {}", file_path);
+    tmux.send_keys(pane, &command)?;
+    if let Err(e) = tmux.select_pane(pane) {
+        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
+    }
+    eprintln!("[route] Sent /agent-doc {} → pane {}", file_path, pane);
+    Ok(())
+}
+
+/// Find an active target pane for lazy claiming.
+fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>) -> Option<String> {
+    let target = explicit_pane
+        .map(|p| p.to_string())
+        .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
+    target.filter(|p| tmux.pane_alive(p))
 }
 
 /// Auto-start a new Claude session in tmux.
@@ -138,7 +121,7 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
         && active != new_pane
         && let Err(e) = tmux.join_pane(&new_pane, &active, "-dh")
     {
-        eprintln!("warning: join_pane failed ({} → {}): {}", new_pane, active, e);
+        eprintln!("[route] warning: join_pane failed ({} → {}): {}", new_pane, active, e);
     }
 
     // Register immediately so subsequent route calls find this pane
@@ -149,13 +132,13 @@ fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Re
     tmux.send_keys(&new_pane, &start_cmd)?;
 
     eprintln!(
-        "Started Claude for {} in pane {} (session {})",
+        "[route] Started Claude for {} in pane {} (session {})",
         file_path,
         new_pane,
         &session_id[..std::cmp::min(8, session_id.len())]
     );
     eprintln!(
-        "Wait for Claude to start, then run `agent-doc route {}` again to send the command.",
+        "[route] Wait for Claude to start, then run `agent-doc route {}` again to send the command.",
         file_path
     );
 
@@ -191,14 +174,14 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str) {
         .collect();
 
     if window_files.len() < 2 {
-        return; // Single file — no layout sync needed
+        return; // 0 or 1 files — no layout sync needed
     }
 
     // Call sync with all files as a single column
     let col_args = vec![window_files.join(",")];
     if let Err(e) = sync::run(&col_args, Some(&window_id), None) {
-        eprintln!("warning: post-claim sync failed: {}", e);
+        eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
-        eprintln!("Auto-synced {} files in window {}", window_files.len(), window_id);
+        eprintln!("[route] Auto-synced {} files in window {}", window_files.len(), window_id);
     }
 }

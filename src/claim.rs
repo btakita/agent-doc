@@ -87,17 +87,17 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
-    // Default to template mode if agent_doc_mode is not set
+    // Default to stream mode if agent_doc_mode is not set
     {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
         if fm.mode.is_none() {
-            let updated = frontmatter::set_mode(&content, "template")?;
+            let updated = frontmatter::set_mode(&content, "stream")?;
             if updated != content {
                 std::fs::write(file, &updated)
                     .with_context(|| format!("failed to write agent_doc_mode to {}", file.display()))?;
-                eprintln!("set agent_doc_mode=template in {}", file.display());
+                eprintln!("set agent_doc_mode=stream in {}", file.display());
             }
         }
     }

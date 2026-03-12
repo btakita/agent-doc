@@ -7,9 +7,9 @@ agent_doc_mode: stream
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.0-dev | **Tests:** 303 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.17.0-dev | **Tests:** 303 + 67 tmux-router passing | **Dependencies:** tmux-router v0.2.5-dev, instruction-files v0.1
 **Published:** pending release
-**Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
+**Plugins:** JetBrains v0.2.1-dev (IPC patch watcher) + VS Code v0.2.0
 <!-- /agent:status -->
 
 ## Architecture
@@ -380,4 +380,138 @@ Please explain how the IPC works. Is the recevier the JetBrains process or does 
 This is a larger change that touches both the binary and the plugin. Should I implement it?
 
 Explain first...flush buffer to this file...and implement
+### Re: Comprehensive layout tests
+
+Added 6 more tests covering all requested layouts. **67 tests total, all passing.**
+
+| Test | Layout | Verifies |
+|------|--------|----------|
+| `test_sync_single_pane_layout` | `[A]` — single pane | Fast path (no joins needed) |
+| `test_sync_anchor_joins_above_in_same_column` | `[A / B]` — vertical stack | Anchor joins above with `-dbv` |
+| `test_sync_anchor_joins_left_of_desired_pane` | `[A \| B]` — horizontal pair | Anchor joins left with `-dbh` |
+| `test_sync_2x2_grid_layout` | `[A/B \| C/D]` — 2x2 grid | Column-major order from setup_panes |
+| `test_sync_2x2_grid_anchor_elsewhere` | `[A/B \| C/D]` — anchor not in target | Correct flag when A joins C's window |
+| `test_sync_3col_horizontal_layout` | `[A \| B \| C]` — 3 columns | Left-to-right horizontal order |
+| `test_sync_asymmetric_3_1_layout` | `[A/B/C \| D]` — tall left, short right | Asymmetric column-major |
+| `test_first_pane_join_flag_3col_grid` | `[A/B/C \| D/E \| F]` — 3-col grid | Flag computation for all positions |
+
+All integration tests verify final ordered layout matches desired column-major order. Tests that involve anchor joining a window with an existing desired pane also assert no REORDER phase was needed.
+
+### Re: JetBrains Plugin IPC mechanism
+
+**The receiver is the JetBrains plugin directly — no sidecar process.** Here's how it works:
+
+**Architecture:**
+```
+agent-doc write ──→ .agent-doc/patches/<hash>.json (atomic write)
+                         ↑
+JetBrains plugin ──→ VirtualFileListener watches .agent-doc/patches/
+                    ──→ Reads patch JSON
+                    ──→ WriteCommandAction.runWriteCommandAction {
+                           document.replaceString(start, end, newText)
+                        }
+                    ──→ Deletes patch file (ACK)
+```
+
+**Flow:**
+1. `agent-doc write --ipc` writes a patch file to `.agent-doc/patches/<doc-hash>.json` instead of modifying the document directly
+2. The patch file contains: `{ "file": "/path/to/doc.md", "patches": [{ "component": "exchange", "content": "...", "mode": "replace" }], "baseline_hash": "abc123" }`
+3. The JetBrains plugin already has a `VirtualFileListener` (for claims.log). We extend it to watch `.agent-doc/patches/`
+4. When a patch file appears, the plugin:
+   - Reads the JSON
+   - Opens the target document's `com.intellij.openapi.editor.Document`
+   - Applies each patch inside `WriteCommandAction.runWriteCommandAction` — this is IntelliJ's API for in-process document edits. It:
+     - Holds the document write lock
+     - Batches undo
+     - Does NOT trigger "external file change" dialogs
+     - Preserves cursor position
+   - Saves the document via `FileDocumentManager.saveDocument()`
+   - Deletes the patch file (signals completion)
+5. `agent-doc write --ipc` can optionally poll for the patch file deletion as an ACK, or fire-and-forget
+
+**Why no sidecar:** IntelliJ plugins run inside the JDK process. The `VirtualFileListener` is event-driven (inotify on Linux, FSEvents on macOS) — no polling loop needed. The plugin already watches `.agent-doc/` for claims, so adding patch watching is ~50 lines of Kotlin.
+
+**Fallback:** If the plugin is not installed or the patch file isn't consumed within a timeout (e.g., 2s), `agent-doc write` falls back to the current atomic file write.
+
+Implementing now — binary side first (`--ipc` flag), then plugin side.
+### Re: Comprehensive layout tests
+
+Added 6 more tests covering all requested layouts. **67 tmux-router tests total, all passing.**
+
+| Test | Layout | Verifies |
+|------|--------|----------|
+| `test_sync_single_pane_layout` | `[A]` — single pane | Fast path (no joins needed) |
+| `test_sync_anchor_joins_above_in_same_column` | `[A / B]` — vertical stack | Anchor joins above with `-dbv` |
+| `test_sync_anchor_joins_left_of_desired_pane` | `[A \| B]` — horizontal pair | Anchor joins left with `-dbh` |
+| `test_sync_2x2_grid_layout` | `[A/B \| C/D]` — 2x2 grid | Column-major order from setup_panes |
+| `test_sync_2x2_grid_anchor_elsewhere` | `[A/B \| C/D]` — anchor not in target | Correct flag when A joins C's window |
+| `test_sync_3col_horizontal_layout` | `[A \| B \| C]` — 3 columns | Left-to-right horizontal order |
+| `test_sync_asymmetric_3_1_layout` | `[A/B/C \| D]` — tall left, short right | Asymmetric column-major |
+| `test_first_pane_join_flag_3col_grid` | `[A/B/C \| D/E \| F]` — 3-col grid | Flag computation for all positions |
+
+All integration tests verify final ordered layout matches desired column-major order. Tests that involve anchor joining a window with an existing desired pane also assert no REORDER phase was needed.
+
+### Re: JetBrains Plugin IPC — explanation + implementation
+
+**The receiver is the JetBrains plugin directly — no sidecar process.**
+
+**Architecture:**
+```
+agent-doc write --ipc ──→ .agent-doc/patches/<hash>.json (atomic write)
+                               ↑
+JetBrains plugin ──→ NIO WatchService on .agent-doc/patches/
+                    ──→ Reads patch JSON
+                    ──→ WriteCommandAction.runWriteCommandAction {
+                           document.setText(patched)
+                        }
+                    ──→ FileDocumentManager.saveDocument()
+                    ──→ Deletes patch file (ACK)
+                               ↓
+agent-doc write --ipc ←── polls for deletion (100ms intervals, 2s timeout)
+                    ──→ reads file, saves snapshot + CRDT state
+```
+
+Please document ipc.md scoped to agent-doc according to existence-lang.
+Would this be done using `/existence new ipc`?
+
+In ipc, show the plugin ipc mechanism...with diagrams.
+
+Save the diagram above in ipc.md
+
+**Why no sidecar:** IntelliJ plugins run inside the JDK process. NIO `WatchService` is event-driven (inotify on Linux, FSEvents on macOS). The plugin starts the watcher on `projectOpened` — no polling loop, no extra process.
+
+**Fallback:** If the patch file isn't consumed within 2s (plugin not installed or not running), `agent-doc write --ipc` falls back to the current direct CRDT write. This makes `--ipc` safe to use unconditionally.
+
+**Implemented:**
+
+1. **Binary side** (`src/agent-doc/src/write.rs`): Added `run_ipc()` function
+   - Reads response from stdin, parses patch blocks
+   - Writes JSON to `.agent-doc/patches/<doc-hash>.json`
+   - Polls for deletion (100ms x 20 = 2s timeout)
+   - If consumed: reads current file, saves snapshot + CRDT state
+   - If timeout: falls back to full `run_stream()` logic
+
+2. **CLI** (`src/agent-doc/src/main.rs`): Added `--ipc` flag to `write` command
+
+3. **Plugin** (`editors/jetbrains/.../PatchWatcher.kt`): New class
+   - NIO `WatchService` on `.agent-doc/patches/` directory
+   - `processPatchFile()`: reads JSON, applies patches via Document API
+   - `applyComponentPatch()`: finds `<!-- agent:name -->` markers, replaces content
+   - `WriteCommandAction.runWriteCommandAction`: holds document lock, batches undo, NO external file change dialog, preserves cursor
+   - Hand-written JSON parser (no library dependency, consistent with plugin conventions)
+
+4. **Lifecycle** (`PluginLifecycleListener.kt`): Wired `PatchWatcher.getInstance()` on `projectOpened`, `PatchWatcher.disposeProject()` on `projectClosed`
+
+**All builds pass:**
+- agent-doc: 303 tests, clippy clean
+- JetBrains plugin: buildPlugin + signPlugin both succeed
+- tmux-router: 67 tests
+
+**To test:** Install the updated plugin zip, then use `--ipc` flag:
+```bash
+echo '<patch blocks>' | agent-doc write tasks/foo.md --baseline-file /tmp/baseline.md --ipc
+```
+The SKILL.md can be updated to pass `--ipc` instead of `--stream` for the write-back step, enabling seamless cursor-stable editing.
+
+release
 <!-- /agent:exchange -->

@@ -198,4 +198,23 @@ Help me with a good reply to this comment:
 > This video is very interesting. I’m also interested in building agentic helpers and assistants. Can I ask why an agentic loop is required for us?
 > What is difference between this and using claude directly?
 
+
+**Reply draft:**
+
+Thanks! Great question. The short answer: Claude (or any LLM) is stateless per conversation. agent-doc adds **persistent, structured state** that survives across sessions.
+
+When you use Claude directly, you get one conversation. When it runs out of context, you start over. With agent-doc, your document IS the conversation — it lives in a markdown file, version-controlled with git. You can:
+
+- **Resume where you left off** — the document holds the full history, and the agent diffs against a snapshot to see only what changed
+- **Work on multiple topics in one document** — template mode lets you have named sections (status, architecture, exchange) that the agent updates independently
+- **Real-time streaming** — stream mode writes agent output directly into your editor as it generates, with CRDT merge so you can keep editing without conflicts
+- **Multiplex across documents** — route commands to different tmux panes, each running its own agent session on different files
+
+Think of it like: Claude is the engine, agent-doc is the cockpit. You wouldn't fly a plane by shouting at a jet engine — you need instruments, state, and controls.
+
+The "agentic loop" part is the watch daemon + reactive file changes. Edit your doc, save, and the agent responds automatically — no copy-paste, no context window management.
+
+Want me to adjust the tone or length?
+
+Format for youtube
 <!-- /agent:exchange -->

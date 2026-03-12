@@ -377,4 +377,40 @@ Understood — no LinkedIn for the second video. YouTube upload as a Corky featu
 This is a real feature (~2-3 hours). Want me to implement it now, or should I create a task/issue for it? For today, you can upload the second video to YouTube manually and add the SRT captions (`mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-2.srt`).
 
 Implement
+On it. Implementing YouTube upload for Corky now. Will work through the submodule at `src/corky/`.
+### YouTube Upload — Implemented
+
+Compiles clean. 10 files changed (1 new, 9 modified) in `src/corky/`.
+
+**New commands:**
+```bash
+corky youtube auth --profile btakita     # Google OAuth2
+corky youtube draft --author btakita --video ~/Videos/file.mp4
+corky youtube publish mail/social/YYYYMMDD-HHMMSS-youtube.md
+```
+
+**Key features:**
+- Resumable upload (8MB chunks, streamed from disk — handles large video files)
+- Optional SRT captions upload (`captions:` field in draft frontmatter)
+- Title from frontmatter `title:` field, first body line, or filename fallback
+- Visibility: public/unlisted/private
+
+**To use, you need:**
+1. Google Cloud project with YouTube Data API v3 enabled
+2. OAuth2 Desktop app credentials
+3. Add to `.corky.toml`:
+   ```toml
+   [youtube]
+   client_id = "your-client-id"
+   client_secret = "your-client-secret"
+   ```
+4. Add YouTube to `profiles.toml`:
+   ```toml
+   [btakita.youtube]
+   handle = "your-channel-handle"
+   ```
+   
+Let's consolidate profiles.toml into .corky.toml. Please add the preference in corky's AGENTS.md to consolidate corky configuration into .corky.toml rather than use a separate *.toml file. It seems that you have wanted to break out separate *.toml files for new feature configurations.
+
+Ready for review — changes are uncommitted in `src/corky/`.
 <!-- /agent:exchange -->

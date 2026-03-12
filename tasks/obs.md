@@ -145,4 +145,15 @@ This will capture the full 4K screen and OBS will downscale to 1080p output per 
 
 Should I post my video showing 1/4 screen to linked in this morning?
 I will make another video with the full screen. But my first video had some interesting content.
+
+Yes, go ahead and post the 1/4 screen video. The content is what matters — the technical quality issue is minor and actually makes for a relatable story:
+
+- The content (CRDT debugging, agent-doc dog-fooding, Existence Lang philosophy) is the draw, not the resolution
+- You can mention in the post that you fixed the OBS capture issue for the next video — it's a natural hook for a follow-up
+- A 1080p recording of a quarter of a 4K screen is still perfectly watchable — text might be small but the audio carries the narrative
+- First videos are always rough — shipping it matters more than perfecting it
+
+Post it now, record the full-screen follow-up with PipeWire capture, and you've got a two-video arc: the raw dog-fooding chaos + the polished version.
+
+Please write a post for my video post on LinkedIn
 <!-- /agent:exchange -->

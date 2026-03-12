@@ -388,4 +388,24 @@ Uses MediaPipe/ONNX for real-time person segmentation. Works surprisingly well �
 **Alternative:** If the plugin isn't in the AUR, grab it from [GitHub](https://github.com/occ-ai/obs-backgroundremoval) — prebuilt `.deb`/Flatpak available, or build from source.
 
 cpu or gpu?
+**GPU.** You have an RTX 5090 — the background removal will be essentially zero overhead on that card.
+
+The plugin supports multiple inference backends:
+- **CUDA** (NVIDIA) — use this. Near-zero impact on your 5090.
+- **CPU** (ONNX) — default fallback, uses ~5-15% CPU depending on resolution
+- **DirectML** — Windows only
+- **CoreML** — macOS only
+
+In the filter settings, set **Inference Device** to **GPU/CUDA**. The segmentation model is tiny (~few MB) — your 5090 won't even notice it.
+
+```
+❯ yay -S obs-backgroundremoval
+Sync Explicit (1): obs-backgroundremoval-1.3.6-1.1
+resolving dependencies...
+:: There are 5 providers available for onnxruntime:
+:: Repository extra
+   1) onnxruntime-cpu  2) onnxruntime-cuda  3) onnxruntime-opt-cuda  4) onnxruntime-opt-rocm  5) onnxruntime-rocm
+
+Enter a number (default=1):
+```
 <!-- /agent:exchange -->

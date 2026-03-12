@@ -278,4 +278,26 @@ Now I made a second video. It still has the 1/4 screen view. I have since fixed 
 Please transcribe for CC. Should I post it on YouTube? Should I also post on LinkedIn or make another video with the correct screen resolution?
 
 Video is at [2026-03-12 03-50-55.mp4](../../../../Videos/2026-03-12%2003-50-55.mp4)
+### Re: Second Video Transcription & Posting
+
+**CC done.** SRT saved to `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-2.srt` (281 segments, 41 min).
+
+**Video summary:** OBS full-screen test, rappstack/context-core/rmemo showcase (358-byte reactive library), tag-path with TreeSitter integration, agent-doc compaction workflow, agent-doc v0.16.1 release.
+
+**Recommendations:**
+
+| Platform | Recommendation |
+|----------|---------------|
+| **YouTube** | Yes, post it. Natural "Part 2" companion to the 2-hour session. Shows the release + library showcase. |
+| **LinkedIn** | Wait. Record a proper full-screen video first — LinkedIn is about first impressions. Or post a short teaser "follow-up coming." |
+| **New video** | Definitely. PipeWire capture is fixed now. That becomes the "real" showcase. First two videos are the authentic "learning in public" arc. |
+
+**Suggested YouTube title:** "Dog-fooding agent-doc Part 2: rmemo, tag-path, and releasing v0.16.1"
+
+**Suggested description:**
+> Follow-up to my first dev session. Testing OBS screen capture (still quarter-screen — fixed for next time!), showcasing rmemo (358-byte reactive library), tag-path (semantic code search with TreeSitter), and shipping agent-doc v0.16.1 live.
+
+Want me to set up the YouTube metadata like the first video?
+
+Yes...Can you update it to post from Corky?
 <!-- /agent:exchange -->

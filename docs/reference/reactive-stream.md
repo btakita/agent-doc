@@ -111,3 +111,58 @@ Fast-path bypasses ensure zero latency for common inputs:
 5. Lines ending with terminal punctuation
 
 Only genuinely suspicious fragments trigger the recheck delay.
+
+## Merge Call Path Diagram
+
+All write-back paths converge through `merge_contents_crdt()` before reaching the CRDT layer:
+
+```
+                                  crdt::merge()
+                                       ▲
+                                       │
+                              merge::merge_contents_crdt()
+                                       ▲
+                                       │
+                    ┌──────────────────┼──────────────────┐
+                    │                  │                   │
+            write.rs             write.rs              stream.rs
+          (run_stream)     (apply_stream_           (stream_loop
+           --stream)        from_string)             final save)
+                    │                  │                   │
+                    ▼                  ▼                   ▼
+              agent-doc          agent-doc            agent-doc
+              write --stream     recover              stream
+```
+
+- **`agent-doc write --stream`**: The SKILL-level write-back path. Used when Claude Code's `/agent-doc` skill writes a response to the document.
+- **`agent-doc recover`**: Replays orphaned stream responses from `.agent-doc/pending/`. Used when a previous cycle was interrupted by context compaction.
+- **`agent-doc stream`**: The real-time streaming path. Timer-based flush loop writes cumulative agent output to the document every 200ms.
+
+All three converge through `merge_contents_crdt()` which handles CRDT state loading, merging, and persistence.
+
+## Truncation Detection
+
+The `looks_truncated()` function in `diff.rs` uses a cascade of fast-path checks to determine whether the last added line is a complete thought or a mid-sentence fragment:
+
+```
+Input line
+    │
+    ├── empty/whitespace? ──── YES → not truncated
+    │
+    ├── starts with / # ``` <!-- ? ── YES → not truncated (structural)
+    │
+    ├── single alphanumeric char? ── YES → not truncated (choice: A,B,1,y,n)
+    │
+    ├── single word ≥ 2 chars? ── YES → not truncated (command: go, ok)
+    │
+    ├── ends with terminal punctuation? ── YES → not truncated
+    │   (. ! ? : ; ) ] " ' ` * - > |)
+    │
+    └── OTHERWISE → potentially truncated
+        │
+        └── recheck chain: 200ms × 25 = 5s max
+            ├── content changed → recheck again
+            └── content stable → proceed with diff
+```
+
+Fast-path bypasses ensure zero latency for common inputs — only genuinely suspicious fragments (mid-sentence, no terminal punctuation) trigger the recheck delay via `wait_for_stable_content()`.

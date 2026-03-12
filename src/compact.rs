@@ -1,15 +1,17 @@
-//! `agent-doc compact` — Archive old exchanges from append-mode documents.
+//! `agent-doc compact` — Archive old exchanges and compact components.
 //!
-//! Usage: agent-doc compact <file.md> [--keep N]
+//! Usage: agent-doc compact <file.md> [--keep N] [--component NAME] [--message MSG]
 //!
-//! Moves old User/Assistant exchange pairs to an archive file under
-//! `.agent-doc/archives/`, leaving only the most recent N exchanges
-//! in the document. A summary marker replaces the archived content.
+//! **Append mode:** Moves old User/Assistant exchange pairs to an archive file
+//! under `.agent-doc/archives/`, leaving only the most recent N exchanges.
+//!
+//! **Template/stream mode:** Replaces the content of a named component
+//! (default: `exchange`) with a summary marker. Archives old content.
 
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{frontmatter, snapshot};
+use crate::{component, frontmatter, snapshot};
 
 /// A parsed exchange pair (User prompt + Assistant response).
 #[derive(Debug)]
@@ -23,7 +25,14 @@ struct Exchange {
 /// Run the compact command.
 ///
 /// `keep` is the number of recent exchanges to keep in the document.
-pub fn run(file: &Path, keep: usize) -> Result<()> {
+/// `component_name` targets a specific component in template/stream mode.
+/// `message` is the summary marker text (default: auto-generated).
+pub fn run(
+    file: &Path,
+    keep: usize,
+    component_name: Option<&str>,
+    message: Option<&str>,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -33,28 +42,24 @@ pub fn run(file: &Path, keep: usize) -> Result<()> {
 
     let (fm, body) = frontmatter::parse(&content)?;
 
-    // Only works for append-mode documents
     let mode = fm.mode.as_deref().unwrap_or("append");
     match mode {
-        "template" => {
-            anyhow::bail!(
-                "compact is for append-mode documents. Template-mode documents use bounded components."
-            );
-        }
-        "stream" => {
-            // Stream mode: compact the CRDT log alongside the normal compact
-            if let Ok(Some(crdt_state)) = snapshot::load_crdt(file) {
-                let compacted = crate::crdt::compact(&crdt_state)?;
-                snapshot::save_crdt(file, &compacted)?;
+        "template" | "stream" => {
+            // Compact CRDT state if stream mode
+            if mode == "stream"
+                && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
+            {
+                let compacted_crdt = crate::crdt::compact(&crdt_state)?;
+                snapshot::save_crdt(file, &compacted_crdt)?;
                 eprintln!(
                     "[compact] CRDT state compacted: {} → {} bytes",
                     crdt_state.len(),
-                    compacted.len()
+                    compacted_crdt.len()
                 );
             }
-            anyhow::bail!(
-                "compact is for append-mode documents. Stream-mode documents use bounded components. CRDT state has been compacted."
-            );
+
+            let target = component_name.unwrap_or("exchange");
+            return run_component_compact(file, &content, target, message);
         }
         _ => {} // append mode — continue
     }
@@ -101,6 +106,80 @@ pub fn run(file: &Path, keep: usize) -> Result<()> {
     );
 
     Ok(())
+}
+
+/// Compact a named component in a template/stream-mode document.
+///
+/// Archives the component content and replaces it with a summary marker.
+/// Single atomic write — no intermediate state.
+fn run_component_compact(
+    file: &Path,
+    content: &str,
+    target: &str,
+    message: Option<&str>,
+) -> Result<()> {
+    let components = component::parse(content)?;
+    let comp = components
+        .iter()
+        .find(|c| c.name == target)
+        .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
+
+    let old_content = comp.content(content);
+    let trimmed = old_content.trim();
+
+    if trimmed.is_empty() {
+        eprintln!("[compact] Component '{}' is already empty", target);
+        return Ok(());
+    }
+
+    // Archive old content
+    let archive_path = save_archive(file, &build_component_archive(content, target, old_content))?;
+
+    // Build summary marker
+    let summary = match message {
+        Some(msg) => format!("{}\n", msg),
+        None => format!(
+            "*Compacted. Content archived to `{}`*\n",
+            archive_path.display()
+        ),
+    };
+
+    // Single atomic write: replace component content + update snapshot
+    let compacted = comp.replace_content(content, &summary);
+    crate::write::atomic_write_pub(file, &compacted)?;
+    snapshot::save(file, &compacted)?;
+
+    let line_count = old_content.lines().count();
+    eprintln!(
+        "[compact] Archived {} lines from component '{}' to {}",
+        line_count,
+        target,
+        archive_path.display()
+    );
+
+    Ok(())
+}
+
+/// Build archive content from a component.
+fn build_component_archive(original: &str, component_name: &str, content: &str) -> String {
+    let mut archive = String::new();
+
+    archive.push_str("---\n");
+    archive.push_str("archived_from: compact\n");
+    archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
+    archive.push_str(&format!("component: {}\n", component_name));
+
+    if let Ok((fm, _)) = frontmatter::parse(original)
+        && let Some(session) = &fm.session
+    {
+        archive.push_str(&format!("session: {}\n", session));
+    }
+
+    archive.push_str("---\n\n");
+    archive.push_str(content.trim());
+    archive.push('\n');
+
+    archive
 }
 
 /// Parse the document body into User/Assistant exchange pairs.
@@ -407,5 +486,15 @@ mod tests {
         // Should be YYYYMMDD-HHMMSS format
         assert_eq!(ts.len(), 15);
         assert_eq!(&ts[8..9], "-");
+    }
+
+    #[test]
+    fn build_component_archive_format() {
+        let doc = "---\nagent_doc_session: abc-123\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\nOld conversation\n<!-- /agent:exchange -->\n";
+        let archive = build_component_archive(doc, "exchange", "\nOld conversation\n");
+        assert!(archive.contains("archived_from: compact"));
+        assert!(archive.contains("component: exchange"));
+        assert!(archive.contains("session: abc-123"));
+        assert!(archive.contains("Old conversation"));
     }
 }

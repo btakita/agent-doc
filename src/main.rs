@@ -277,13 +277,19 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Archive old exchanges to reduce document size (append-mode only)
+    /// Archive old exchanges / compact component content
     Compact {
         /// Path to the session document
         file: PathBuf,
-        /// Number of recent exchanges to keep (default: 2)
+        /// Number of recent exchanges to keep (default: 2, append-mode only)
         #[arg(long, default_value = "2")]
         keep: usize,
+        /// Component to compact (template/stream mode, default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+        /// Summary message to replace content with
+        #[arg(long)]
+        message: Option<String>,
     },
     /// Convert a document between append and template modes
     Convert {
@@ -483,7 +489,12 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Compact { file, keep } => compact::run(&file, keep),
+        Commands::Compact {
+            file,
+            keep,
+            component,
+            message,
+        } => compact::run(&file, keep, component.as_deref(), message.as_deref()),
         Commands::Convert { file, mode } => convert::run(&file, &mode),
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),

@@ -64,7 +64,17 @@ impl CrdtDoc {
 /// Creates three CRDT actors: base, ours, theirs.
 /// Applies each side's edits as diffs from the base, then merges updates.
 /// Returns the merged text (conflict-free).
+///
+/// **Stale base detection:** If the CRDT base text doesn't match either ours
+/// or theirs as a prefix/substring, the base is stale. In that case, we use
+/// `ours_text` as the base to prevent duplicate insertions.
 pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> Result<String> {
+    // Short-circuit: if both sides are identical, no merge needed
+    if ours_text == theirs_text {
+        eprintln!("[crdt] ours == theirs, skipping merge");
+        return Ok(ours_text.to_string());
+    }
+
     // Bootstrap base doc from state or empty
     let base_doc = if let Some(bytes) = base_state {
         CrdtDoc::decode_state(bytes)
@@ -72,14 +82,46 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     } else {
         CrdtDoc::from_text("")
     };
-    let base_text = base_doc.to_text();
+    let mut base_text = base_doc.to_text();
+
+    eprintln!(
+        "[crdt] merge: base_len={} ours_len={} theirs_len={}",
+        base_text.len(),
+        ours_text.len(),
+        theirs_text.len()
+    );
+
+    // Stale base detection: if the base text doesn't share a common prefix
+    // with both sides, it's stale. Use ours as the base instead.
+    // This prevents duplicate insertions when both sides contain text
+    // that the stale base doesn't have.
+    let ours_common = common_prefix_len(&base_text, ours_text);
+    let theirs_common = common_prefix_len(&base_text, theirs_text);
+    let base_len = base_text.len();
+
+    if base_len > 0
+        && (ours_common as f64 / base_len as f64) < 0.5
+        && (theirs_common as f64 / base_len as f64) < 0.5
+    {
+        eprintln!(
+            "[crdt] Stale CRDT base detected (common prefix: ours={}%, theirs={}%). Using ours as base.",
+            (ours_common * 100) / base_len,
+            (theirs_common * 100) / base_len
+        );
+        base_text = ours_text.to_string();
+    }
 
     // Compute diffs from base to each side
     let ours_ops = compute_edit_ops(&base_text, ours_text);
     let theirs_ops = compute_edit_ops(&base_text, theirs_text);
 
-    // Create two independent docs from the base state
-    let base_encoded = base_doc.encode_state();
+    // Create two independent docs from the base state.
+    // If base was overridden (stale detection), rebuild from the new base_text.
+    let base_encoded = if base_text == base_doc.to_text() {
+        base_doc.encode_state()
+    } else {
+        CrdtDoc::from_text(&base_text).encode_state()
+    };
 
     let ours_doc = Doc::with_client_id(1);
     {
@@ -140,6 +182,11 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
 pub fn compact(state: &[u8]) -> Result<Vec<u8>> {
     let doc = CrdtDoc::decode_state(state)?;
     Ok(doc.encode_state())
+}
+
+/// Count the number of bytes in the common prefix of two strings.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 
 /// Edit operation for replaying diffs onto a CRDT text.

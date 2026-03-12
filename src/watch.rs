@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -50,6 +50,9 @@ struct WatchEntry {
     pane: String,
     mode: DocMode,
     target: String,
+    /// Reactive mode: skip debounce for stream-mode documents.
+    /// CRDT merge handles concurrent edits, so no debounce is needed.
+    reactive: bool,
 }
 
 /// Document mode determines how the watch daemon handles the file.
@@ -225,6 +228,7 @@ fn run_event_loop(
     // Discover files from sessions registry (with mode detection)
     let entries = discover_entries()?;
     let mut watched_files: Vec<PathBuf> = Vec::new();
+    let mut reactive_paths: HashSet<PathBuf> = HashSet::new();
     let mut stream_states: HashMap<PathBuf, StreamState> = HashMap::new();
 
     for entry in &entries {
@@ -237,6 +241,7 @@ fn run_event_loop(
                 }
             }
             DocMode::StreamCapture => {
+                // Stream-mode: tmux capture polling
                 stream_states.insert(
                     entry.path.clone(),
                     StreamState {
@@ -245,6 +250,15 @@ fn run_event_loop(
                         target: entry.target.clone(),
                     },
                 );
+                // Reactive: also file-watch with zero debounce (CRDT handles concurrency)
+                if entry.reactive {
+                    if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                        eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
+                    } else {
+                        watched_files.push(entry.path.clone());
+                        reactive_paths.insert(entry.path.clone());
+                    }
+                }
             }
         }
     }
@@ -320,6 +334,27 @@ fn run_event_loop(
                                 },
                             );
                         }
+                        // Add reactive file-watch for stream-mode docs
+                        if entry.reactive && !reactive_paths.contains(&entry.path) {
+                            if !watched_files.contains(&entry.path) {
+                                if let Err(e) =
+                                    watcher.watch(&entry.path, RecursiveMode::NonRecursive)
+                                {
+                                    eprintln!(
+                                        "Warning: could not watch {}: {}",
+                                        entry.path.display(),
+                                        e
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "Now watching {} (reactive)",
+                                        entry.path.display()
+                                    );
+                                    watched_files.push(entry.path.clone());
+                                }
+                            }
+                            reactive_paths.insert(entry.path.clone());
+                        }
                     }
                 }
             }
@@ -393,11 +428,18 @@ fn run_event_loop(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        // Process debounced file-change events
+        // Process debounced file-change events (reactive paths skip debounce)
         let now = Instant::now();
         let ready: Vec<PathBuf> = pending
             .iter()
-            .filter(|(_, when)| now.duration_since(**when) >= debounce)
+            .filter(|(path, when)| {
+                let effective_debounce = if reactive_paths.contains(*path) {
+                    Duration::ZERO
+                } else {
+                    debounce
+                };
+                now.duration_since(**when) >= effective_debounce
+            })
             .map(|(path, _)| path.clone())
             .collect();
 
@@ -470,7 +512,7 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
         let canonical = path.canonicalize().unwrap_or(path);
 
         // Detect mode from frontmatter
-        let (mode, target) = match std::fs::read_to_string(&canonical) {
+        let (mode, target, reactive) = match std::fs::read_to_string(&canonical) {
             Ok(content) => match frontmatter::parse(&content) {
                 Ok((fm, _)) => {
                     if fm.mode.as_deref() == Some("stream") {
@@ -479,14 +521,14 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
                             .as_ref()
                             .and_then(|sc| sc.target.clone())
                             .unwrap_or_else(|| "exchange".to_string());
-                        (DocMode::StreamCapture, target)
+                        (DocMode::StreamCapture, target, true)
                     } else {
-                        (DocMode::FileWatch, String::new())
+                        (DocMode::FileWatch, String::new(), false)
                     }
                 }
-                Err(_) => (DocMode::FileWatch, String::new()),
+                Err(_) => (DocMode::FileWatch, String::new(), false),
             },
-            Err(_) => (DocMode::FileWatch, String::new()),
+            Err(_) => (DocMode::FileWatch, String::new(), false),
         };
 
         entries.push(WatchEntry {
@@ -494,6 +536,7 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
             pane: entry.pane.clone(),
             mode,
             target,
+            reactive,
         });
     }
     Ok(entries)

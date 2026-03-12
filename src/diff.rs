@@ -112,9 +112,11 @@ fn match_html_comment(content: &str, pos: usize) -> Option<(usize, &str)> {
 ///
 /// Both snapshot and current content are comment-stripped before comparison.
 pub fn compute(doc: &Path) -> Result<Option<String>> {
-    let current = std::fs::read_to_string(doc)?;
-    let snap_path = snapshot::path_for(doc)?;
     let previous = snapshot::resolve(doc)?.unwrap_or_default();
+    let snap_path = snapshot::path_for(doc)?;
+
+    // Wait for user to finish typing (truncation detection with delayed rechecks)
+    let current = wait_for_stable_content(doc, &previous)?;
 
     eprintln!(
         "[diff] doc={} snapshot={} doc_len={} snap_len={}",
@@ -165,6 +167,123 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         output.push_str(change.value());
     }
     Ok(Some(output))
+}
+
+/// Wait for stable content by detecting truncated lines and rechecking.
+///
+/// When the user is mid-typing, the last added line may be incomplete.
+/// This function rechecks the file at short intervals until:
+/// - The last line appears complete (ends with terminal punctuation or newline)
+/// - The content hasn't changed between two consecutive rechecks
+/// - Maximum recheck attempts reached (prevents infinite loops)
+///
+/// Returns the stable file content.
+fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
+    const RECHECK_DELAY_MS: u64 = 200;
+    const MAX_RECHECKS: u32 = 25; // 5 seconds max
+
+    let mut current = std::fs::read_to_string(doc)?;
+
+    for attempt in 0..MAX_RECHECKS {
+        let last_added = extract_last_added_line(&strip_comments(previous), &strip_comments(&current));
+
+        if let Some(line) = &last_added
+            && looks_truncated(line)
+        {
+            eprintln!(
+                "[diff] Last line may be truncated (recheck {}/{}): {:?}",
+                attempt + 1,
+                MAX_RECHECKS,
+                truncate_for_log(line, 60)
+            );
+            std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
+            let refreshed = std::fs::read_to_string(doc)?;
+            if refreshed == current {
+                // Content unchanged — user stopped typing
+                eprintln!("[diff] Content stable after recheck");
+                break;
+            }
+            current = refreshed;
+            continue;
+        }
+        // Line looks complete — no recheck needed
+        break;
+    }
+
+    Ok(current)
+}
+
+/// Extract the last added (non-empty) line from the diff.
+fn extract_last_added_line(previous_stripped: &str, current_stripped: &str) -> Option<String> {
+    let diff = TextDiff::from_lines(previous_stripped, current_stripped);
+    let mut last_insert: Option<String> = None;
+
+    for change in diff.iter_all_changes() {
+        if change.tag() == ChangeTag::Insert {
+            let val = change.value().trim();
+            if !val.is_empty() {
+                last_insert = Some(val.to_string());
+            }
+        }
+    }
+
+    last_insert
+}
+
+/// Check if a line looks truncated (user may still be typing).
+///
+/// A line looks truncated if:
+/// - It ends mid-word (no space or punctuation at end)
+/// - It's very short (< 3 chars) and doesn't look like a command
+/// - It ends with common incomplete patterns
+///
+/// A line does NOT look truncated if:
+/// - It ends with terminal punctuation (. ! ? : ;)
+/// - It's a markdown heading (starts with #)
+/// - It's a command (starts with / or `)
+/// - It ends with a closing marker (-->)
+/// - It's empty or whitespace-only
+fn looks_truncated(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    // Empty or whitespace — not truncated
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Commands, headings, code blocks — never truncated
+    if trimmed.starts_with('/')
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("<!--")
+    {
+        return false;
+    }
+
+    // Single alphanumeric char — choice selection (A, B, 1, 2, y, n)
+    if trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_alphanumeric()) {
+        return false;
+    }
+
+    // Single word that looks like a command/keyword (e.g., "go", "ok", "release")
+    if !trimmed.contains(' ') && trimmed.len() >= 2 {
+        return false;
+    }
+
+    // Check last character for terminal punctuation
+    let last_char = trimmed.chars().last().unwrap();
+    let terminal = matches!(last_char, '.' | '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|');
+
+    !terminal
+}
+
+/// Truncate a string for log display.
+fn truncate_for_log(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max])
+    }
 }
 
 /// Detect whether the diff between snapshot and document is a stale snapshot
@@ -524,5 +643,97 @@ Please fix the bug.\n\
         let diff = compute(&doc).unwrap();
         assert!(diff.is_some(), "diff should detect user's edit");
         assert!(diff.unwrap().contains("Release agent-doc"));
+    }
+
+    // --- Truncation detection tests ---
+
+    #[test]
+    fn truncated_mid_sentence() {
+        assert!(looks_truncated("Also, when I called agent-doc run on this file...and ther"));
+    }
+
+    #[test]
+    fn not_truncated_complete_sentence() {
+        assert!(!looks_truncated("This is a complete sentence."));
+    }
+
+    #[test]
+    fn not_truncated_question() {
+        assert!(!looks_truncated("What should we do?"));
+    }
+
+    #[test]
+    fn not_truncated_command() {
+        assert!(!looks_truncated("/agent-doc compact"));
+    }
+
+    #[test]
+    fn not_truncated_single_word_command() {
+        assert!(!looks_truncated("release"));
+    }
+
+    #[test]
+    fn not_truncated_short_words() {
+        assert!(!looks_truncated("go"));
+        assert!(!looks_truncated("ok"));
+        assert!(!looks_truncated("no"));
+        assert!(!looks_truncated("yes"));
+    }
+
+    #[test]
+    fn not_truncated_single_alphanumeric() {
+        // Choice selections
+        assert!(!looks_truncated("A"));
+        assert!(!looks_truncated("B"));
+        assert!(!looks_truncated("1"));
+        assert!(!looks_truncated("2"));
+        // Yes/no shortcuts
+        assert!(!looks_truncated("y"));
+        assert!(!looks_truncated("n"));
+    }
+
+    #[test]
+    fn not_truncated_heading() {
+        assert!(!looks_truncated("### Re: Fix the bug"));
+    }
+
+    #[test]
+    fn not_truncated_empty() {
+        assert!(!looks_truncated(""));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_colon() {
+        assert!(!looks_truncated("Here is the issue:"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_backtick() {
+        assert!(!looks_truncated("Check `crdt.rs`"));
+    }
+
+    #[test]
+    fn truncated_ends_mid_word() {
+        assert!(looks_truncated("Please make Claim for Tmux Pan"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_period() {
+        assert!(!looks_truncated("Fixed the bug."));
+    }
+
+    #[test]
+    fn extract_last_added_finds_insert() {
+        let prev = "line1\n";
+        let curr = "line1\nnew content here\n";
+        let last = extract_last_added_line(prev, curr);
+        assert_eq!(last, Some("new content here".to_string()));
+    }
+
+    #[test]
+    fn extract_last_added_none_when_no_changes() {
+        let content = "line1\nline2\n";
+        let last = extract_last_added_line(content, content);
+        assert_eq!(last, None);
     }
 }

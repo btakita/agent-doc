@@ -292,6 +292,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 - Watches files registered in `sessions.json` for modifications (via `notify` crate)
 - On file change (after debounce), runs `submit::run()` on the changed file
+- **Reactive mode:** Stream-mode documents (`agent_doc_mode: stream`) are discovered with `reactive: true` and use zero debounce (`Duration::ZERO`) for instant re-submit on file change. Reactive paths are tracked in a `HashSet<PathBuf>`.
 - **Loop prevention:** changes within the debounce window after a submit are treated as agent-triggered; agent-triggered changes increment a cycle counter; if content hash matches previous submit, stop (convergence); hard cap at `--max-cycles` (default 3)
 - `--stop` sends SIGTERM to the running daemon (via `.agent-doc/watch.pid`)
 - `--status` reports whether the daemon is running

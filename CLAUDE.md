@@ -29,7 +29,7 @@ src/
   clean.rs          # Squash git history
   component.rs      # Component parser (<!-- agent:name --> markers) + name validation
   patch.rs          # Replace/append/prepend component content, config + shell hooks
-  watch.rs          # Watch daemon: auto-submit on file change with debounce + loop prevention
+  watch.rs          # Watch daemon: auto-submit on file change with debounce + loop prevention (reactive mode for stream docs)
   frontmatter.rs    # YAML frontmatter parse/write
   snapshot.rs       # Snapshot path/read/write
   git.rs            # Commit, branch, squash (includes `commit` subcommand)
@@ -151,6 +151,8 @@ Implementation: `flush_to_document()` passes mode overrides to
 
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
 `agent/streaming.rs` (StreamingAgent trait + chunk parser), `agent/claude.rs` (streaming impl)
+
+**Reactive file-watching:** Stream-mode documents get reactive file-watching (zero debounce) from the watch daemon. The `WatchEntry` has a `reactive: bool` field set by `discover_entries()` for stream-mode docs. Reactive paths are tracked in a `HashSet<PathBuf>` and use `Duration::ZERO` for the debounce check, enabling instant re-submit on file change.
 
 **One session per document:** Each `agent-doc stream` spawns its own Claude CLI process.
 Multiple documents stream in parallel via separate tmux panes.

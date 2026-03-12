@@ -403,5 +403,39 @@ Do we have automated tests for the new features.
 Want me to add these tests?
 
 Yes. We should always write tests, do code reviews, and audit docs. Should we have a custom skill? Should this be part of agent-doc's skill?
+**Tests added** — 5 new tests in `test_social_draft.rs`, all 268 pass:
+- `yt1_roundtrip_with_video_fields` — video/captions/title survive render/parse
+- `yt2_youtube_platform_parsing` — platform: youtube YAML parsing
+- `li1_parse_draft_with_post_id` — post_id/post_url deserialization
+- `li2_roundtrip_with_post_id` — post_id survives round-trip
+- `yt3_none_video_fields_omitted` — None fields omitted from YAML output
+
+**On the skill question — tests, code review, audit docs:**
+
+This should be a **separate skill**, not part of agent-doc. Here is why:
+
+1. **agent-doc is document sessions** — its concern is the interactive edit/diff/respond loop. Adding code review and testing would bloat its scope.
+
+2. **A /review or /quality skill makes more sense** — it would orchestrate:
+   - Run tests and clippy
+   - Audit instruction files and SPEC consistency
+   - Code review of uncommitted changes (diff analysis and suggestions)
+   - Test coverage gap analysis for new code
+   
+3. **Where it lives:** This could be a generic skill in agent-loop (applies across all submodules) or bundled with each project. A generic /review skill that reads the project CLAUDE.md for project-specific commands is the most reusable approach.
+
+4. **Trigger:** Could be invoked explicitly (/review) or automatically as a post-implementation step in corky's workflow (step 5: Precommit).
+
+**Proposed /review skill scope:**
+- /review — full review: tests + clippy + audit-docs + code review
+- /review tests — just run tests, report failures
+- /review code — code review of staged/unstaged changes
+- /review docs — audit instruction files + SPEC consistency
+
+Want me to create this skill?
+
+Sure. I know that many people have been working on code review skills.
+So it may make sense to do more research.
+
 <!-- /agent:exchange -->
 ****

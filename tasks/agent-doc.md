@@ -144,4 +144,13 @@ agent_doc_mode: stream
 *Compacted. All sessions through v0.16.0 folded into history + releases.*
 
 When I compacted this file...it showed an intermediate state in Idea where some of the lines were removed but it was still over 1000 lines. Then I ran refresh on the file and now see the state of less than 150 lines.
+### Re: Intermediate state in IntelliJ during compaction
+
+Expected behavior. Compaction was two steps: (1) `agent-doc write --stream` patched architecture/releases/history but exchange append-mode kept old content (~900 lines), (2) direct Python replace cleared exchange (145 lines). IntelliJ's VFS polling (~300ms) caught the intermediate state between the two writes. Refresh resolved it. The atomic rename in `agent-doc write` helps but doesn't eliminate the race with IDE VFS polling.
+
+
+
+> direct Python replace cleared exchange (145 lines)
+
+Why did you say Python here? I thought agent-doc was implemented in rust.
 <!-- /agent:exchange -->

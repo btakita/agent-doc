@@ -178,4 +178,62 @@ Is agent_doc_format and agent_doc_write implemented to replace agent_doc_mode?
 No — not implemented. The codebase still uses `agent_doc_mode` as a single field (append | template | stream). The proposed split into `agent_doc_format` (document structure) and `agent_doc_write` (merge strategy) was discussed during v0.15.1-v0.16.0 but never built. It remains in the pending list as a future consideration.
 
 Yes...let's implement. Should we keep agent_doc_mode as deprecated? Can we have agent-doc deterministically migrate a agent_doc_mode value to the new agent_doc_write/agent_doc_format pair?
+### Re: Implement agent_doc_format / agent_doc_write
+
+Yes — `agent_doc_mode` can be kept as a deprecated alias with deterministic migration. The mapping is 1:1:
+
+| `agent_doc_mode` | `agent_doc_format` | `agent_doc_write` |
+|---|---|---|
+| `append` (default) | `append` | `merge` (default) |
+| `template` | `template` | `merge` |
+| `stream` | `template` | `crdt` |
+
+I prefer that we always use crdt instead of merge. Please migrate append and template to crdt.
+
+**Migration logic:** When parsing frontmatter, if `agent_doc_mode` is present and `agent_doc_format`/`agent_doc_write` are absent, auto-expand to the pair. When both exist, new fields take precedence. `agent-doc convert` can also do explicit migration (rewrite frontmatter in-place).
+
+agent-doc convert currently does append or template. It should now handle both agent_doc_write and agent_doc_format. Perhaps these should be options `--agent_doc_format`/`--agent_doc_write` to set the values explicitly. If either or both options are not present, then infer the values for agent_doc_format and/or agent_doc_write. This inference should be based on:
+- existing agent_doc_write/agent_doc_format value
+- existing agent_doc_mode value
+- default value of `agent_doc_write: crdt` and `agent_doc_format: template`
+
+```
+❯ agent-doc convert --help
+Convert a document between append and template modes
+
+Usage: agent-doc convert <FILE> [MODE]
+
+Arguments:
+  <FILE>
+          Path to the session document
+
+  [MODE]
+          Target mode (default: template)
+
+          Possible values:
+          - append:   Append-mode: alternating ## User / ## Assistant blocks
+          - template: Template-mode: in-place component patching
+
+          [default: template]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+**Implementation plan (4 phases):**
+
+1. **Phase 1 — Data model** (`frontmatter.rs`): Add `AgentDocFormat` (append | template) and `AgentDocWrite` (merge | crdt) enums. Add fields to `Frontmatter` struct. Implement `resolve_mode()` that reads all three fields and returns `(AgentDocFormat, AgentDocWrite)` with deprecation precedence. Tests for all migration paths.
+
+2. **Phase 2 — Refactor callsites** (12 files, 22 locations): Replace all `fm.mode.as_deref() == Some("stream")` and similar string comparisons with `fm.resolve_mode()` pattern matches. Update `is_template_mode()` → check format, `is_stream_mode()` → check write strategy.
+
+3. **Phase 3 — CLI + convert**: Update `agent-doc mode` command to show/set both fields. Add `agent-doc convert --migrate-frontmatter` to rewrite `agent_doc_mode` → new pair in-place. Update `claim` to set `agent_doc_format: template, agent_doc_write: crdt` instead of `agent_doc_mode: stream`.
+
+4. **Phase 4 — SKILL.md + docs**: Update bundled SKILL.md to reference new fields. Update SPEC.md, README.md, CLAUDE.md. Deprecation warning when `agent_doc_mode` is encountered.
+
+**Scope:** ~150 lines changed across 12 files. All existing tests must pass. New tests for migration paths. Backward compatible — old documents work without modification.
+
+Ready to implement? I'd work in a branch, phase by phase, with `make check` between each phase.
+
+Go
 <!-- /agent:exchange -->

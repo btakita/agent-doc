@@ -78,4 +78,25 @@ OBS restarted and auto-corrected the scene source — it now shows `scale: 2.07x
 To verify the recording captures your full screen, do a quick test recording (10 seconds), then check the output in `~/Videos/` — it should show your entire 4K desktop downscaled to 1080p. If text looks too small in the recording, you might want to bump output to `OutputCX=2560` / `OutputCY=1440` (1440p) for a better balance of readability and file size.
 
 compact this file
+
+## OBS Full-Screen Recording Setup (Resolved)
+
+**Problem:** Monitor is 3840x2160 (4K) but OBS canvas was 1920x1080, capturing only part of the screen.
+
+**Fix applied:**
+
+`~/.config/obs-studio/basic/profiles/Untitled/basic.ini`:
+```ini
+[Video]
+BaseCX=3840
+BaseCY=2160
+OutputCX=1920
+OutputCY=1080
+```
+
+Canvas captures full 4K screen, output downscales to 1080p. OBS auto-corrected the Display Capture source scaling on restart (scale: 2.07x).
+
+**If text is too small in recordings:** bump to `OutputCX=2560` / `OutputCY=1440` (1440p).
+
+/agent-doc compact
 <!-- /agent:exchange -->

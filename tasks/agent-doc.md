@@ -897,4 +897,30 @@ Confirmed. Implementation in `watch.rs`:
 I like the diagrams. Pleas add to the documentation. Make this somewhat robust for changes to implementation. method names are ok...as long as we update the methods names when we audit the docs.
 
 Implement
+### Re: Add diagrams to documentation
+
+Added `docs/reference/reactive-stream.md` with the full flush cycle diagram, CRDT merge explanation, loop prevention details, truncation detection, and configuration guide.
+
+### Re: Implement reactive mode
+
+Done. Changes to `watch.rs`:
+
+1. **`discover_entries()`** — stream-mode docs get `reactive: true`
+2. **Initial setup** — reactive docs are added to both `watched_files` (file-change events) and `stream_states` (tmux capture polling)
+3. **Debounce bypass** — reactive paths use `Duration::ZERO` instead of the configured 500ms debounce
+4. **Rescan loop** — newly discovered stream-mode docs also get reactive file-watching
+5. **Loop prevention unchanged** — convergence detection + cycle counter still apply
+
+Key code change in the debounce check:
+```rust
+let effective_debounce = if reactive_paths.contains(*path) {
+    Duration::ZERO
+} else {
+    debounce
+};
+```
+
+All 308 tests pass, clippy clean, binary installed.
+
+audit docs
 <!-- /agent:exchange -->

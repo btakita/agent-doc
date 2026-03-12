@@ -114,4 +114,28 @@ Thank you. I'm joking about the "Liar" part.
 agent-doc issues
 - `Thank you. I'm joking about the "Liar" part.` is in this file 2 times. Seems that the crdt has some issues still.
 - The frontmatter should have been updated using crdt. The new plugin is currently installed. Should this be a non-issue now?
+**agent-doc issues — analysis:**
+
+**1. Duplicate "Thank you" text:** Yes, this is a CRDT merge artifact. What happened: you edited the file while I was writing my response. The CRDT merge algorithm preserved both your edit AND the version from the baseline, resulting in duplication. The CRDT implementation uses a 3-way merge (base, yours, theirs) — when the same text appears in both "yours" and "theirs" at different positions, both copies survive. This is a known limitation of the current CRDT approach: it favors data preservation over deduplication.
+
+Can we have a conservative deduplication? Where we can ensure that no data is lost, we dedupe?
+
+**2. Frontmatter not updated via CRDT:** The frontmatter update was done via the Edit tool (direct file edit), NOT via the CRDT write path. Then when the CRDT merge ran for the response write-back, it saw two conflicting versions of the frontmatter and kept the user's version (which still had the old field). The fix: frontmatter changes should go through the same CRDT pipeline as content patches, or be applied AFTER the CRDT write.
+
+Same CRDT pipeline as content patches.
+
+**Should the new plugin fix this?** Partially. The JetBrains plugin triggers claims and submits, but the CRDT merge logic lives in the agent-doc binary. The duplication issue needs a fix in agent-doc's merge algorithm (dedup identical lines that appear in both sides). The frontmatter issue needs the agent to use the CRDT write path for frontmatter changes instead of Edit tool.
+
+I want the plugin to be a thin layer that run operations with ide. agent-doc is the controller.
+These instructions need to be equivalent between JetBrains and VSCode.
+I also want to consider future integrations with nvim, vim, ki, helix, Zed, and other editors.
+
+What options do you propose?
+
+**Actionable fixes for agent-doc:**
+1. Add post-merge dedup pass for identical adjacent blocks
+2. Support frontmatter patches in the patch block format (e.g., a special patch target)
+3. Or: apply frontmatter changes AFTER the CRDT write completes
+
+I also cleaned up the duplicate blocks in this file. Want me to file these as issues on agent-doc? Yes
 <!-- /agent:exchange -->

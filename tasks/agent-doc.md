@@ -152,6 +152,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.8 | Fix `strip_comments` code-range awareness, safe stash window purge |
 | v0.14.9 | Multi-backtick code span support in `find_code_ranges`, 235 tests |
 | v0.15.0 | CRDT stream mode, chain-of-thought streaming, watch daemon stream support, cumulative flush fix. 293 tests. |
+| v0.15.1 | Claim defaults to stream mode, route.rs refactor (extract methods + `[route]` logging) |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -1694,4 +1695,29 @@ The remaining architectural issue: the **auto-start path doesn't send the `/agen
 All 293 tests pass, clippy clean. Binary was already installed.
 
 release
+### v0.15.1 — releasing
+
+Publishing to all targets:
+- **crates.io:** Published `agent-doc v0.15.1`
+- **PyPI:** Publishing via maturin...
+- **GitHub Release:** Building binary...
+
+**Changes since v0.15.0:**
+- Claim defaults to `stream` mode instead of `template`
+- Refactored `route.rs`: extracted `send_command()` and `find_target_pane()`, added `[route]` prefix logging
+- 293 tests, clippy clean
+### v0.15.1 Released
+
+Published to all targets:
+- **crates.io:** `cargo install agent-doc` → v0.15.1
+- **PyPI:** `pip install agent-doc` → v0.15.1
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.15.1
+  - Prebuilt binary (Linux x86_64)
+
+**Changes since v0.15.0:**
+- Claim defaults to `stream` mode instead of `template`
+- Refactored `route.rs`: extracted `send_command()` and `find_target_pane()`, added `[route]` prefix logging for step-by-step tracing
+- 293 tests, clippy clean
+
+/agent-doc compact
 <!-- /agent:exchange -->

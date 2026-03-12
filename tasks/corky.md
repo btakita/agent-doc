@@ -386,5 +386,22 @@ release
 release
 
 Do we have automated tests for the new features.
+**Registry publish fixed — v0.15.0 fully released.**
+
+- crates.io: published (the `CARGO_REGISTRY_TOKEN` env var was set to the literal string `(pass cargo/registry_token)` instead of being evaluated — fixed by explicitly expanding `$(pass ...)`)
+- PyPI: published (pass key was `pypi/publish_token`, not `pypi/token`)
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.15.0
+
+**Tests for new features:** No — there are no automated tests for YouTube upload or LinkedIn edit. The existing test suite (408 tests) covers draft parsing, profile validation, sync, calendar, etc. but the new features only have the test struct fixes (adding `video`/`captions`/`title` to existing constructors).
+
+**What would be worth testing:**
+- `update_post_at()` — mock HTTP response for 204 and error cases
+- `youtube::upload_video()` — mock resumable upload init + chunk flow
+- Draft round-trip with `video`/`captions`/`title` fields
+- `run_edit()` error path: missing `post_id` → error
+
+Want me to add these tests?
+
+Yes. We should always write tests, do code reviews, and audit docs. Should we have a custom skill? Should this be part of agent-doc's skill?
 <!-- /agent:exchange -->
 ****

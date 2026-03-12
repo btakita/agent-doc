@@ -87,17 +87,21 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
-    // Default to stream mode if agent_doc_mode is not set
+    // Default to template+crdt if neither format nor write_mode nor legacy mode is set
     {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
-        if fm.mode.is_none() {
-            let updated = frontmatter::set_mode(&content, "stream")?;
+        if fm.format.is_none() && fm.write_mode.is_none() && fm.mode.is_none() {
+            let updated = frontmatter::set_format_and_write(
+                &content,
+                frontmatter::AgentDocFormat::Template,
+                frontmatter::AgentDocWrite::Crdt,
+            )?;
             if updated != content {
                 std::fs::write(file, &updated)
-                    .with_context(|| format!("failed to write agent_doc_mode to {}", file.display()))?;
-                eprintln!("set agent_doc_mode=stream in {}", file.display());
+                    .with_context(|| format!("failed to write agent_doc_format/write to {}", file.display()))?;
+                eprintln!("set agent_doc_format=template, agent_doc_write=crdt in {}", file.display());
             }
         }
     }

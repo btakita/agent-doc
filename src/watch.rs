@@ -515,7 +515,8 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
         let (mode, target, reactive) = match std::fs::read_to_string(&canonical) {
             Ok(content) => match frontmatter::parse(&content) {
                 Ok((fm, _)) => {
-                    if fm.mode.as_deref() == Some("stream") {
+                    let resolved = fm.resolve_mode();
+                    if resolved.is_crdt() {
                         let target = fm
                             .stream_config
                             .as_ref()

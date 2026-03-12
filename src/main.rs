@@ -249,6 +249,9 @@ enum Commands {
         /// Stream mode: template patches with CRDT merge (conflict-free)
         #[arg(long)]
         stream: bool,
+        /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
+        #[arg(long)]
+        ipc: bool,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -295,15 +298,21 @@ enum Commands {
     Convert {
         /// Path to the session document
         file: PathBuf,
-        /// Target mode (default: template)
-        #[arg(value_enum, default_value = "template")]
-        mode: AgentDocMode,
+        /// Target mode (deprecated positional — use --agent-doc-format / --agent-doc-write instead)
+        #[arg(value_enum)]
+        mode: Option<AgentDocMode>,
+        /// Set document format (append | template)
+        #[arg(long, value_enum)]
+        agent_doc_format: Option<frontmatter::AgentDocFormat>,
+        /// Set write strategy (merge | crdt)
+        #[arg(long, value_enum)]
+        agent_doc_write: Option<frontmatter::AgentDocWrite>,
     },
-    /// Get or set the document mode (append/template)
+    /// Get or set the document mode (format + write strategy)
     Mode {
         /// Path to the session document
         file: PathBuf,
-        /// Set mode: append or template
+        /// Set mode: append or template (deprecated — use --format / --write)
         #[arg(long)]
         set: Option<String>,
     },
@@ -452,22 +461,24 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc } => {
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)
                 .transpose()
                 .context("failed to read baseline file")?;
-            if is_stream {
+            if is_ipc {
+                write::run_ipc(&file, baseline.as_deref())
+            } else if is_stream {
                 write::run_stream(&file, baseline.as_deref())
             } else if is_template {
                 write::run_template(&file, baseline.as_deref())
             } else {
-                // Auto-detect stream mode from frontmatter
+                // Auto-detect write strategy from frontmatter
                 let content = std::fs::read_to_string(&file)
                     .context("failed to read document for mode detection")?;
                 let (fm, _) = frontmatter::parse(&content)?;
-                if fm.mode.as_deref() == Some("stream") {
+                if fm.resolve_mode().is_crdt() {
                     write::run_stream(&file, baseline.as_deref())
                 } else {
                     write::run(&file, baseline.as_deref())
@@ -495,7 +506,9 @@ fn main() -> anyhow::Result<()> {
             component,
             message,
         } => compact::run(&file, keep, component.as_deref(), message.as_deref()),
-        Commands::Convert { file, mode } => convert::run(&file, &mode),
+        Commands::Convert { file, mode, agent_doc_format, agent_doc_write } => {
+            convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
+        }
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),

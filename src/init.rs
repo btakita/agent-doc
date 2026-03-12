@@ -22,9 +22,9 @@ pub fn run(
     let session_id = Uuid::new_v4();
     let mode = mode.unwrap_or("append");
 
-    let content = if mode == "template" {
+    let content = if mode == "template" || mode == "stream" {
         format!(
-            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_mode: template\n---\n\n# {}\n\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {}\n\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
             session_id, agent, title
         )
     } else {

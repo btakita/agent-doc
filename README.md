@@ -79,6 +79,9 @@ Follow-up. You can also annotate inline:
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `agent_doc_session` | no | (generated on first run) | Document UUID for tmux pane routing (legacy: `session`) |
+| `agent_doc_format` | no | `template` | Document format: `append` or `template` |
+| `agent_doc_write` | no | `crdt` | Write strategy: `merge` or `crdt` |
+| `agent_doc_mode` | no | — | **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead |
 | `resume` | no | (none) | Claude conversation ID for `--resume` |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |

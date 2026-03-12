@@ -8,9 +8,14 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{frontmatter, snapshot, write, AgentDocMode};
+use crate::{frontmatter::{self, AgentDocFormat, AgentDocWrite}, snapshot, write, AgentDocMode};
 
-pub fn run(file: &Path, target_mode: &AgentDocMode) -> Result<()> {
+pub fn run(
+    file: &Path,
+    legacy_mode: Option<&AgentDocMode>,
+    explicit_format: Option<AgentDocFormat>,
+    explicit_write: Option<AgentDocWrite>,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -19,22 +24,56 @@ pub fn run(file: &Path, target_mode: &AgentDocMode) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let (fm, body) = frontmatter::parse(&content)?;
-    let current_mode_str = fm.mode.clone().unwrap_or_else(|| "append".to_string());
+    let current = fm.resolve_mode();
 
-    match target_mode {
-        AgentDocMode::Template => convert_to_template(file, &content, fm, body, &current_mode_str),
-        AgentDocMode::Append => convert_to_append(file, fm, body, &current_mode_str),
-        AgentDocMode::Stream => {
-            // Stream is a superset of template — convert to template first, then set mode to stream
-            convert_to_template(file, &content, fm, body, &current_mode_str)?;
-            let updated = std::fs::read_to_string(file)?;
-            let updated = frontmatter::set_mode(&updated, "stream")?;
-            write::atomic_write_pub(file, &updated)?;
-            snapshot::save(file, &updated)?;
-            eprintln!("Converted {} to stream mode", file.display());
-            Ok(())
-        }
+    // Resolve target format: explicit flag > legacy positional > existing > default (template)
+    let target_format = explicit_format
+        .or_else(|| legacy_mode.map(|m| match m {
+            AgentDocMode::Append => AgentDocFormat::Append,
+            AgentDocMode::Template | AgentDocMode::Stream => AgentDocFormat::Template,
+        }))
+        .unwrap_or(AgentDocFormat::Template);
+
+    // Resolve target write: explicit flag > legacy positional > existing > default (crdt)
+    let target_write = explicit_write
+        .or_else(|| legacy_mode.and_then(|m| match m {
+            AgentDocMode::Stream => Some(AgentDocWrite::Crdt),
+            _ => None,
+        }))
+        .unwrap_or(AgentDocWrite::Crdt);
+
+    // Determine what conversions are needed
+    let format_change = target_format != current.format;
+    let write_change = target_write != current.write;
+
+    if !format_change && !write_change {
+        anyhow::bail!(
+            "{} is already in {} format with {} write strategy",
+            file.display(), current.format, current.write
+        );
     }
+
+    if format_change {
+        match target_format {
+            AgentDocFormat::Template => {
+                convert_to_template(file, &content, fm, body, &current, target_write)?;
+            }
+            AgentDocFormat::Append => {
+                convert_to_append(file, fm, body, &current, target_write)?;
+            }
+        }
+    } else {
+        // Only write strategy changed — update frontmatter
+        let updated = frontmatter::set_format_and_write(&content, target_format, target_write)?;
+        write::atomic_write_pub(file, &updated)?;
+        snapshot::save(file, &updated)?;
+        eprintln!(
+            "Updated {} write strategy: {} → {}",
+            file.display(), current.write, target_write
+        );
+    }
+
+    Ok(())
 }
 
 fn convert_to_template(
@@ -42,9 +81,10 @@ fn convert_to_template(
     content: &str,
     fm: frontmatter::Frontmatter,
     body: &str,
-    current_mode: &str,
+    resolved: &frontmatter::ResolvedMode,
+    target_write: AgentDocWrite,
 ) -> Result<()> {
-    if current_mode == "template" {
+    if resolved.is_template() {
         let components = crate::component::parse(content).unwrap_or_default();
         if !components.is_empty() {
             anyhow::bail!("{} is already in template mode with components", file.display());
@@ -53,7 +93,9 @@ fn convert_to_template(
     }
 
     let mut fm = fm;
-    fm.mode = Some("template".to_string());
+    fm.format = Some(AgentDocFormat::Template);
+    fm.write_mode = Some(target_write);
+    fm.mode = None; // clear deprecated field
 
     let exchange_content = append_to_template_body(body);
     let new_doc = frontmatter::write(&fm, &exchange_content)?;
@@ -69,14 +111,17 @@ fn convert_to_append(
     file: &Path,
     fm: frontmatter::Frontmatter,
     body: &str,
-    current_mode: &str,
+    resolved: &frontmatter::ResolvedMode,
+    target_write: AgentDocWrite,
 ) -> Result<()> {
-    if current_mode == "append" {
+    if resolved.is_append() {
         anyhow::bail!("{} is already in append mode", file.display());
     }
 
     let mut fm = fm;
-    fm.mode = Some("append".to_string());
+    fm.format = Some(AgentDocFormat::Append);
+    fm.write_mode = Some(target_write);
+    fm.mode = None; // clear deprecated field
 
     let append_content = template_to_append_body(body);
     let new_doc = frontmatter::write(&fm, &append_content)?;
@@ -229,21 +274,21 @@ mod tests {
     }
 
     #[test]
-    fn convert_rejects_template_mode_with_components() {
+    fn convert_rejects_already_template_crdt() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        std::fs::write(&file, "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
-        let result = run(&file, &AgentDocMode::Template);
+        std::fs::write(&file, "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+        let result = run(&file, Some(&AgentDocMode::Template), None, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already in template mode"));
+        assert!(result.unwrap_err().to_string().contains("already in template format"));
     }
 
     #[test]
-    fn convert_adds_markers_when_template_but_no_components() {
+    fn convert_append_to_template_adds_markers() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        std::fs::write(&file, "---\nagent_doc_mode: template\n---\n\n# Doc\n\n## User\n\nHello\n").unwrap();
-        run(&file, &AgentDocMode::Template).unwrap();
+        std::fs::write(&file, "---\nagent_doc_format: append\n---\n\n# Doc\n\n## User\n\nHello\n").unwrap();
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
         let result = std::fs::read_to_string(&file).unwrap();
         assert!(result.contains("<!-- agent:exchange -->"));
         assert!(result.contains("Hello"));
@@ -253,10 +298,10 @@ mod tests {
     fn convert_updates_frontmatter() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        std::fs::write(&file, "---\nagent_doc_session: abc-123\nagent: claude\n---\n\n# Session: Test\n\n## User\n\nHello\n").unwrap();
-        run(&file, &AgentDocMode::Template).unwrap();
+        std::fs::write(&file, "---\nagent_doc_session: abc-123\nagent: claude\nagent_doc_format: append\n---\n\n# Session: Test\n\n## User\n\nHello\n").unwrap();
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
         let result = std::fs::read_to_string(&file).unwrap();
-        assert!(result.contains("agent_doc_mode: template"));
+        assert!(result.contains("agent_doc_format: template"));
         assert!(result.contains("<!-- agent:exchange -->"));
         assert!(result.contains("Hello"));
     }
@@ -289,29 +334,29 @@ mod tests {
     fn convert_to_append_rejects_already_append() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        std::fs::write(&file, "---\nagent_doc_mode: append\n---\n\n## User\n\nHello\n").unwrap();
-        let result = run(&file, &AgentDocMode::Append);
+        std::fs::write(&file, "---\nagent_doc_format: append\n---\n\n## User\n\nHello\n").unwrap();
+        let result = run(&file, Some(&AgentDocMode::Append), None, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already in append mode"));
+        assert!(result.unwrap_err().to_string().contains("already in append format"));
     }
 
     #[test]
     fn convert_roundtrip_append_to_template_to_append() {
         let dir = setup_project();
         let file = dir.path().join("test.md");
-        let original = "---\nagent_doc_session: abc-123\n---\n\n# Session\n\n## User\n\nHello\n\n## Assistant\n\nWorld\n";
+        let original = "---\nagent_doc_session: abc-123\nagent_doc_format: append\n---\n\n# Session\n\n## User\n\nHello\n\n## Assistant\n\nWorld\n";
         std::fs::write(&file, original).unwrap();
 
         // append -> template
-        run(&file, &AgentDocMode::Template).unwrap();
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
         let template = std::fs::read_to_string(&file).unwrap();
-        assert!(template.contains("agent_doc_mode: template"));
+        assert!(template.contains("agent_doc_format: template"));
         assert!(template.contains("<!-- agent:exchange -->"));
 
         // template -> append
-        run(&file, &AgentDocMode::Append).unwrap();
+        run(&file, Some(&AgentDocMode::Append), None, None).unwrap();
         let append = std::fs::read_to_string(&file).unwrap();
-        assert!(append.contains("agent_doc_mode: append"));
+        assert!(append.contains("agent_doc_format: append"));
         assert!(!append.contains("<!-- agent:exchange -->"));
         assert!(append.contains("## User"));
         assert!(append.contains("Hello"));

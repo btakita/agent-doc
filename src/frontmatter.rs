@@ -1,6 +1,66 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use uuid::Uuid;
+
+/// Document format: controls document structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentDocFormat {
+    /// Alternating ## User / ## Assistant blocks
+    Append,
+    /// In-place component patching with <!-- agent:name --> markers
+    Template,
+}
+
+impl fmt::Display for AgentDocFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Append => write!(f, "append"),
+            Self::Template => write!(f, "template"),
+        }
+    }
+}
+
+/// Write strategy: controls how responses are merged into the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentDocWrite {
+    /// 3-way merge via git merge-file
+    Merge,
+    /// CRDT-based conflict-free merge (yrs)
+    Crdt,
+}
+
+impl fmt::Display for AgentDocWrite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Merge => write!(f, "merge"),
+            Self::Crdt => write!(f, "crdt"),
+        }
+    }
+}
+
+/// Resolved mode pair — the canonical representation after deprecation migration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedMode {
+    pub format: AgentDocFormat,
+    pub write: AgentDocWrite,
+}
+
+impl ResolvedMode {
+    pub fn is_template(&self) -> bool {
+        self.format == AgentDocFormat::Template
+    }
+
+    pub fn is_append(&self) -> bool {
+        self.format == AgentDocFormat::Append
+    }
+
+    pub fn is_crdt(&self) -> bool {
+        self.write == AgentDocWrite::Crdt
+    }
+}
 
 /// Configuration for stream mode (real-time CRDT write-back).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -48,7 +108,8 @@ pub struct Frontmatter {
     /// Set by `claim` or `sync` on first use; used to keep panes in the same session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
-    /// Document mode: "append" (default) or "template" (in-place component patching).
+    /// **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead.
+    /// Kept for backward compatibility. Values: "append", "template", "stream".
     /// Serialized as `agent_doc_mode` in YAML; reads legacy `response_mode` and shorthand `mode` via aliases.
     #[serde(
         default,
@@ -58,13 +119,70 @@ pub struct Frontmatter {
         alias = "response_mode"
     )]
     pub mode: Option<String>,
-    /// Stream mode configuration (only used when agent_doc_mode: stream).
+    /// Document format: controls document structure (append | template).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_format"
+    )]
+    pub format: Option<AgentDocFormat>,
+    /// Write strategy: controls merge behavior (merge | crdt).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_write"
+    )]
+    pub write_mode: Option<AgentDocWrite>,
+    /// Stream mode configuration (used when write strategy is CRDT).
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         rename = "agent_doc_stream"
     )]
     pub stream_config: Option<StreamConfig>,
+}
+
+impl Frontmatter {
+    /// Resolve the canonical (format, write) pair from all three fields.
+    ///
+    /// Priority:
+    /// 1. Explicit `agent_doc_format` / `agent_doc_write` fields (highest)
+    /// 2. Deprecated `agent_doc_mode` field (auto-migrated)
+    /// 3. Defaults: format=template, write=crdt
+    pub fn resolve_mode(&self) -> ResolvedMode {
+        // Start with defaults
+        let mut format = AgentDocFormat::Template;
+        let mut write = AgentDocWrite::Crdt;
+
+        // Apply deprecated mode if present (lowest priority)
+        if let Some(ref mode_str) = self.mode {
+            match mode_str.as_str() {
+                "append" => {
+                    format = AgentDocFormat::Append;
+                    // write stays crdt (user preference: always crdt)
+                }
+                "template" => {
+                    format = AgentDocFormat::Template;
+                    // write stays crdt
+                }
+                "stream" => {
+                    format = AgentDocFormat::Template;
+                    write = AgentDocWrite::Crdt;
+                }
+                _ => {} // unknown mode, use defaults
+            }
+        }
+
+        // Override with explicit new fields (highest priority)
+        if let Some(f) = self.format {
+            format = f;
+        }
+        if let Some(w) = self.write_mode {
+            write = w;
+        }
+
+        ResolvedMode { format, write }
+    }
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -109,10 +227,16 @@ pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     write(&fm, body)
 }
 
-/// Update the agent_doc_mode in a document string.
-pub fn set_mode(content: &str, mode: &str) -> Result<String> {
+/// Set both agent_doc_format and agent_doc_write, clearing deprecated agent_doc_mode.
+pub fn set_format_and_write(
+    content: &str,
+    format: AgentDocFormat,
+    write_mode: AgentDocWrite,
+) -> Result<String> {
     let (mut fm, body) = parse(content)?;
-    fm.mode = Some(mode.to_string());
+    fm.format = Some(format);
+    fm.write_mode = Some(write_mode);
+    fm.mode = None;
     write(&fm, body)
 }
 
@@ -217,6 +341,8 @@ mod tests {
             branch: Some("dev".to_string()),
             tmux_session: None,
             mode: None,
+            format: None,
+            write_mode: None,
             stream_config: None,
         };
         let body = "# Hello\n\nBody text.\n";
@@ -342,6 +468,7 @@ mod tests {
 
     #[test]
     fn write_uses_agent_doc_mode_field() {
+        #[allow(deprecated)]
         let fm = Frontmatter {
             mode: Some("template".to_string()),
             ..Default::default()
@@ -361,5 +488,134 @@ mod tests {
         let result = write(&fm, "body\n").unwrap();
         assert!(result.contains("agent_doc_session:"));
         assert!(!result.contains("\nsession:"));
+    }
+
+    // --- resolve_mode tests ---
+
+    #[test]
+    fn resolve_mode_defaults() {
+        let fm = Frontmatter::default();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Template);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt);
+    }
+
+    #[test]
+    fn resolve_mode_from_deprecated_append() {
+        let content = "---\nagent_doc_mode: append\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Append);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt);
+    }
+
+    #[test]
+    fn resolve_mode_from_deprecated_template() {
+        let content = "---\nagent_doc_mode: template\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Template);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt);
+    }
+
+    #[test]
+    fn resolve_mode_from_deprecated_stream() {
+        let content = "---\nagent_doc_mode: stream\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Template);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt);
+    }
+
+    #[test]
+    fn resolve_mode_new_fields_override_deprecated() {
+        let content = "---\nagent_doc_mode: append\nagent_doc_format: template\nagent_doc_write: merge\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Template);
+        assert_eq!(resolved.write, AgentDocWrite::Merge);
+    }
+
+    #[test]
+    fn resolve_mode_explicit_new_fields_only() {
+        let content = "---\nagent_doc_format: append\nagent_doc_write: crdt\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Append);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt);
+    }
+
+    #[test]
+    fn resolve_mode_partial_new_field_format_only() {
+        let content = "---\nagent_doc_format: append\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Append);
+        assert_eq!(resolved.write, AgentDocWrite::Crdt); // default
+    }
+
+    #[test]
+    fn resolve_mode_partial_new_field_write_only() {
+        let content = "---\nagent_doc_write: merge\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        let resolved = fm.resolve_mode();
+        assert_eq!(resolved.format, AgentDocFormat::Template); // default
+        assert_eq!(resolved.write, AgentDocWrite::Merge);
+    }
+
+    #[test]
+    fn resolve_mode_helper_methods() {
+        let fm = Frontmatter::default();
+        let resolved = fm.resolve_mode();
+        assert!(resolved.is_template());
+        assert!(!resolved.is_append());
+        assert!(resolved.is_crdt());
+    }
+
+    #[test]
+    fn parse_new_format_field() {
+        let content = "---\nagent_doc_format: template\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.format, Some(AgentDocFormat::Template));
+    }
+
+    #[test]
+    fn parse_new_write_field() {
+        let content = "---\nagent_doc_write: crdt\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.write_mode, Some(AgentDocWrite::Crdt));
+    }
+
+    #[test]
+    fn write_uses_new_format_write_fields() {
+        let fm = Frontmatter {
+            format: Some(AgentDocFormat::Template),
+            write_mode: Some(AgentDocWrite::Crdt),
+            ..Default::default()
+        };
+        let result = write(&fm, "body\n").unwrap();
+        assert!(result.contains("agent_doc_format:"));
+        assert!(result.contains("agent_doc_write:"));
+        assert!(!result.contains("agent_doc_mode:"));
+    }
+
+    #[test]
+    fn set_format_and_write_clears_deprecated_mode() {
+        let content = "---\nagent_doc_mode: stream\n---\nBody\n";
+        let result = set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert!(fm.mode.is_none());
+        assert_eq!(fm.format, Some(AgentDocFormat::Template));
+        assert_eq!(fm.write_mode, Some(AgentDocWrite::Crdt));
+    }
+
+    #[test]
+    fn set_format_and_write_clears_deprecated() {
+        let content = "---\nagent_doc_mode: append\n---\nBody\n";
+        let result = set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert!(fm.mode.is_none());
+        assert_eq!(fm.format, Some(AgentDocFormat::Template));
+        assert_eq!(fm.write_mode, Some(AgentDocWrite::Crdt));
     }
 }

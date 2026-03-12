@@ -26,4 +26,5 @@
 # Reference
 
 - [Specification](reference/specs.md)
+- [IPC](reference/ipc.md)
 - [Changelog](reference/changelog.md)

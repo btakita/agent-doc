@@ -16,11 +16,14 @@ and git commits.
 
 Frontmatter fields:
 - `agent_doc_session`: Document/routing UUID — permanent identifier for tmux pane routing. Legacy alias: `session` (read but not written).
+- `agent_doc_format`: Document format — `append` or `template` (default: `template`).
+- `agent_doc_write`: Write strategy — `merge` or `crdt` (default: `crdt`).
+- `agent_doc_mode`: **Deprecated.** Single field mapping: `append` → format=append, `template` → format=template, `stream` → format=template+write=crdt. Explicit `agent_doc_format`/`agent_doc_write` take precedence. Legacy aliases: `mode`, `response_mode`.
 - `agent`: Agent backend name (overrides config default)
 - `model`: Model override (passed to agent backend)
 - `branch`: Reserved for branch tracking
 
-All fields are optional and default to null. The body alternates `## User` and `## Assistant` blocks.
+All fields are optional and default to null. Resolution: explicit `agent_doc_format`/`agent_doc_write` > deprecated `agent_doc_mode` > defaults (template + crdt). The body alternates `## User` and `## Assistant` blocks (append format) or uses named components (template format).
 
 ### 2.2 Frontmatter Parsing
 
@@ -292,7 +295,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 - Watches files registered in `sessions.json` for modifications (via `notify` crate)
 - On file change (after debounce), runs `submit::run()` on the changed file
-- **Reactive mode:** Stream-mode documents (`agent_doc_mode: stream`) are discovered with `reactive: true` and use zero debounce (`Duration::ZERO`) for instant re-submit on file change. Reactive paths are tracked in a `HashSet<PathBuf>`.
+- **Reactive mode:** CRDT-mode documents (`agent_doc_write: crdt`) are discovered with `reactive: true` and use zero debounce (`Duration::ZERO`) for instant re-submit on file change. Reactive paths are tracked in a `HashSet<PathBuf>`.
 - **Loop prevention:** changes within the debounce window after a submit are treated as agent-triggered; agent-triggered changes increment a cycle counter; if content hash matches previous submit, stop (convergence); hard cap at `--max-cycles` (default 3)
 - `--stop` sends SIGTERM to the running daemon (via `.agent-doc/watch.pid`)
 - `--status` reports whether the daemon is running

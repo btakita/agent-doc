@@ -34,7 +34,8 @@ pub struct ComponentInfo {
     pub max_entries: Option<usize>,
 }
 
-/// Check if a document is in template mode.
+/// Check if a document is in template mode (deprecated — use `fm.resolve_mode().is_template()`).
+#[cfg(test)]
 pub fn is_template_mode(mode: Option<&str>) -> bool {
     matches!(mode, Some("template"))
 }
@@ -244,7 +245,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let (fm, _body) = crate::frontmatter::parse(&doc)?;
-    let template_mode = is_template_mode(fm.mode.as_deref());
+    let template_mode = fm.resolve_mode().is_template();
 
     let components = component::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
@@ -488,7 +489,7 @@ All green.
     fn template_info_works() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
-        let doc = "---\nresponse_mode: template\n---\n\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
+        let doc = "---\nagent_doc_format: template\n---\n\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
         let info = template_info(&doc_path).unwrap();
@@ -499,10 +500,21 @@ All green.
     }
 
     #[test]
+    fn template_info_legacy_mode_works() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "---\nresponse_mode: template\n---\n\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let info = template_info(&doc_path).unwrap();
+        assert!(info.template_mode);
+    }
+
+    #[test]
     fn template_info_append_mode() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
-        let doc = "---\nresponse_mode: append\n---\n\n# Doc\n";
+        let doc = "---\nagent_doc_format: append\n---\n\n# Doc\n";
         std::fs::write(&doc_path, doc).unwrap();
 
         let info = template_info(&doc_path).unwrap();

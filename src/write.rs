@@ -12,6 +12,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::{merge, recover, snapshot, template};
+use crate::snapshot::find_project_root;
 
 /// Run the write command: append assistant response to document.
 ///
@@ -233,6 +234,132 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     eprintln!(
         "[write] Stream patches applied to {} ({} components patched, CRDT)",
+        file.display(),
+        patches.len()
+    );
+    Ok(())
+}
+
+/// IPC mode: write a JSON patch file for IDE plugin consumption.
+///
+/// Instead of modifying the document directly, writes a JSON file to
+/// `.agent-doc/patches/<hash>.json`. The IDE plugin picks it up, applies
+/// patches via Document API (no external file change dialog), and deletes
+/// the file as ACK. Falls back to direct stream write on timeout.
+pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Read response from stdin
+    let mut response = String::new();
+    std::io::stdin()
+        .read_to_string(&mut response)
+        .context("failed to read response from stdin")?;
+
+    if response.trim().is_empty() {
+        anyhow::bail!("empty response — nothing to write");
+    }
+
+    // Save response to pending store (survives context compaction)
+    recover::save_pending(file, &response)?;
+
+    // Parse patch blocks from response
+    let (patches, unmatched) = template::parse_patches(&response)
+        .context("failed to parse patch blocks from response")?;
+
+    if patches.is_empty() && unmatched.trim().is_empty() {
+        anyhow::bail!("no patch blocks or content found in response");
+    }
+
+    // Build IPC patch file
+    let canonical = file.canonicalize()?;
+    let hash = snapshot::doc_hash(file)?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let patches_dir = project_root.join(".agent-doc/patches");
+    std::fs::create_dir_all(&patches_dir)?;
+    let patch_file = patches_dir.join(format!("{}.json", hash));
+
+    let ipc_patches: Vec<serde_json::Value> = patches
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "component": p.name,
+                "content": p.content,
+            })
+        })
+        .collect();
+
+    let ipc_payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": ipc_patches,
+        "unmatched": unmatched.trim(),
+        "baseline": baseline.unwrap_or(""),
+    });
+
+    // Atomic write of patch file
+    atomic_write(
+        &patch_file,
+        &serde_json::to_string_pretty(&ipc_payload)?,
+    )?;
+
+    eprintln!(
+        "[write] IPC patch written to {} ({} components)",
+        patch_file.display(),
+        patches.len()
+    );
+
+    // Poll for ACK (plugin deletes file after applying)
+    let timeout = std::time::Duration::from_secs(2);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if !patch_file.exists() {
+            // Plugin consumed the patch — update snapshot from current file
+            let content = std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {} after IPC", file.display()))?;
+            snapshot::save(file, &content)?;
+            let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
+            snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+            recover::clear_pending(file)?;
+            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
+            return Ok(());
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    // Timeout — fall back to direct stream write
+    eprintln!("[write] IPC timeout ({}s) — falling back to direct write", timeout.as_secs());
+    // Clean up the unconsumed patch file
+    let _ = std::fs::remove_file(&patch_file);
+
+    // Fall back to stream write logic
+    let content_at_start = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let base = baseline.unwrap_or(&content_at_start);
+    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+    let doc_lock = acquire_doc_lock(file)?;
+    let content_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let (final_content, _crdt_state) = if content_current == base {
+        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+        (content_ours.clone(), doc.encode_state())
+    } else {
+        eprintln!("[write] File was modified during response generation. CRDT merging...");
+        let crdt_state = snapshot::load_crdt(file)?;
+        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
+    };
+    atomic_write(file, &final_content)?;
+    snapshot::save(file, &content_ours)?;
+    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
+    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
+    drop(doc_lock);
+    recover::clear_pending(file)?;
+    eprintln!(
+        "[write] Stream patches applied to {} ({} components patched, CRDT fallback)",
         file.display(),
         patches.len()
     );

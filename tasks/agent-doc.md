@@ -141,47 +141,23 @@ agent_doc_mode: stream
 ## Exchange
 
 <!-- agent:exchange -->
-*Compacted. All sessions through v0.16.0 folded into history + releases.*
+*Compacted through v0.16.0. Native compact test.*
+### Re: Build so we can test
 
-When I compacted this file...it showed an intermediate state in Idea where some of the lines were removed but it was still over 1000 lines. Then I ran refresh on the file and now see the state of less than 150 lines.
-### Re: Intermediate state in IntelliJ during compaction
+Already built and tested. Native compact works:
 
-Expected behavior. Compaction was two steps: (1) `agent-doc write --stream` patched architecture/releases/history but exchange append-mode kept old content (~900 lines), (2) direct Python replace cleared exchange (145 lines). IntelliJ's VFS polling (~300ms) caught the intermediate state between the two writes. Refresh resolved it. The atomic rename in `agent-doc write` helps but doesn't eliminate the race with IDE VFS polling.
+```
+$ agent-doc compact tasks/agent-doc.md --component exchange --message "*Compacted through v0.16.0.*"
+[compact] CRDT state compacted: 12691 → 12691 bytes
+[compact] Archived 43 lines from component 'exchange'
+```
 
-Can we prevent the race condition?
-
-> direct Python replace cleared exchange (145 lines)
-
-Why did you say Python here? I thought agent-doc was implemented in rust.
-### Re: Preventing the IntelliJ race condition
-
-Two approaches: (1) Make `agent-doc compact` handle stream/template-mode documents natively — single atomic write replaces exchange content + updates other components in one operation. No intermediate state for IntelliJ to observe. (2) Batch all writes into one — instead of two separate writes (patch + clear), build the entire document in memory and do one atomic rename. Fix (1) is the right path — adds it to the pending list.
-
-Let's do 1 & 2.
-
-### Re: Why "Python"?
-
-Because the exchange component is in append mode — `agent-doc write --stream` patch blocks can't *replace* append-mode content, they just prepend. I used a Python script as a one-off workaround to do the direct string replacement. The agent-doc binary is Rust. This is exactly why `agent-doc compact` needs native template/stream-mode support — so we don't need external hacks.
-
-Yes...make sure that all of the behavior is in Rust. Please add to CLAUDE.md for agent-doc to write the deterministic software in Rust. We should have all agent-doc deterministic behavior in the agent-doc binary...not in the skill. 
-### Re: Let's do 1 & 2 — native compact + all deterministic logic in Rust
-
-Done. Implemented both:
-
-**1. Native `agent-doc compact` for template/stream mode:**
-- `compact.rs`: Added `run_component_compact()` — reads target component, archives content to `.agent-doc/archives/`, replaces with summary marker. Single atomic write (no intermediate state).
-- New CLI flags: `--component NAME` (default: `exchange`), `--message MSG` (custom summary text)
-- Stream mode also compacts CRDT state alongside component content
-- Usage: `agent-doc compact tasks/agent-doc.md` (auto-detects mode)
-- Usage: `agent-doc compact tasks/agent-doc.md --component exchange --message "Compacted through v0.16.0"`
-
-**2. Batched atomic write:**
-The component compact uses `Component::replace_content()` + `atomic_write_pub()` — one atomic rename, no intermediate state for IntelliJ to observe.
-
-**Convention added to CLAUDE.md:**
-> All deterministic behavior in the binary — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator. Never implement deterministic document logic in the skill or ad-hoc scripts.
-
-All 309 tests pass, clippy clean, release binary installed.
+- Single atomic write — no intermediate IntelliJ state
+- Archive saved to `.agent-doc/archives/` with session ID + component name + timestamp
+- Exchange replaced with summary marker in one operation
+- CRDT state also compacted (no size reduction this time — no tombstones to GC)
 
 build so we can test
+
+release
 <!-- /agent:exchange -->

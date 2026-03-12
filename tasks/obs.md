@@ -350,4 +350,31 @@ How do I get my camera showing me in the corner full overlayed over the screenca
 (LinkedIn draft and Twitch recommendation already addressed above.)
 
 Please add a feature to corky to upload a video to YouTube
+(Webcam PiP already answered above.)
+
+### Re: YouTube Upload Feature for Corky
+
+Understood — no LinkedIn for the second video. YouTube upload as a Corky feature makes sense.
+
+**Scope:** Corky currently has LinkedIn publish working. Adding YouTube requires:
+
+| Component | What | Effort |
+|-----------|------|--------|
+| Platform enum | Add `Youtube` variant | 5 min |
+| `youtube.rs` | YouTube Data API v3 client (resumable upload + metadata) | 1-2 hrs |
+| OAuth | Google OAuth2 (accounts.google.com), scope `youtube.upload` | 30 min |
+| CLI | `corky youtube auth/draft/publish` commands | 10 min |
+| Draft format | Video path in frontmatter, title/description/tags in body | 10 min |
+| Profiles | Add `youtube:` entry to profiles.toml | 5 min |
+
+**Key difference from LinkedIn:** YouTube uploads video files (not text posts), uses resumable upload protocol for large files, and Google OAuth2 has long-lived refresh tokens.
+
+**Prerequisites:**
+1. Create a Google Cloud project with YouTube Data API v3 enabled
+2. Create OAuth2 credentials (Desktop app type)
+3. Add client_id/client_secret to `.corky.toml`
+
+This is a real feature (~2-3 hours). Want me to implement it now, or should I create a task/issue for it? For today, you can upload the second video to YouTube manually and add the SRT captions (`mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-2.srt`).
+
+Implement
 <!-- /agent:exchange -->

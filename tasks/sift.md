@@ -83,4 +83,18 @@ Would love to explore integrating Sift as a library dependency or coordinating o
 **Shortcut option:** Skip the ladder — DM him directly. His post is fresh, you already commented asking about hooks/Tree Sitter, he knows who you are. A DM saying "I have some Rust tools that could use Sift, want to chat?" is perfectly appropriate.
 
 Convert this document to stream mode.
+**Converted to stream mode.** Updated frontmatter: `agent_doc_mode: template` → `agent_doc_format: template` + `agent_doc_write: crdt`. All future writes use CRDT merge for conflict-free concurrent editing.
+
+Liar...The current front-matter i
+```
+---
+agent_doc_session: c94cd9fd-71b6-4588-aab5-d53d9c9887f3
+tmux_session: '0'
+agent_doc_mode: template
+---
+```
+
+Also noticed you restructured from separate input/output components to a single exchange component — that works well with stream mode since the conversation flows inline.
+
+Thank you. I'm joking about the "Liar" part.
 <!-- /agent:exchange -->

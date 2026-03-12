@@ -216,4 +216,16 @@ agent-doc: https://crates.io/crates/agent-doc
 Ready to copy-paste into LinkedIn. The YouTube link is positioned after the body text so LinkedIn will auto-generate the video preview card.
 
 Please post to LinkedIn using Corky
+
+### LinkedIn Post Published
+
+Posted via Corky. Live at: https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162
+
+Draft file: `mail/social/20260312-111049-linkedin.md` (status updated to `published`).
+
+The links are missing.
+
+Either edit or I need to repost
+
+https://www.linkedin.com/feed/update/urn:li:share:7437877831042396162/
 <!-- /agent:exchange -->

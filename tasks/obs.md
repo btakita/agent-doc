@@ -54,4 +54,22 @@ Your current bitrate is 6000 kbps which is fine for 1080p but low for 4K recordi
 - Or switch to CQP/CRF mode for quality-based encoding (under Advanced output mode, set Rate Control to CQP with value 18-23)
 
 **Restart OBS** after making these changes.
+
+### Done - OBS Config Updated
+
+Edited both OBS config files directly:
+
+**`~/.config/obs-studio/basic/profiles/Untitled/basic.ini`:**
+- `BaseCX=3840`, `BaseCY=2160` (canvas captures full 4K screen)
+- `OutputCX=1920`, `OutputCY=1080` (downscales to 1080p for recording)
+
+**`~/.config/obs-studio/basic/scenes/Untitled.json`:**
+- `scale_ref` updated to 3840x2160 (matches actual capture)
+- `scale` reset to 1.0/1.0 (no weird fractional scaling)
+- `pos_rel` zeroed out
+- Scene `resolution` updated to 3840x2160
+
+**Restart OBS** for changes to take effect. The display capture will now grab the full 4K screen and downscale to 1080p output.
+
+Continue
 <!-- /agent:exchange -->

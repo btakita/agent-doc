@@ -735,4 +735,47 @@ Currently `looks_truncated()` considers single words ≥3 chars as NOT truncated
 B
 
 `B` should mean Option B is selected. So propose a system that would work in this case.
+### Re: Alias `write` & `format`?
+
+No — avoid aliasing. `agent_doc_write` and `agent_doc_format` are clear as-is. Aliasing `write` would conflict with the `agent-doc write` subcommand. `format` is ambiguous (markdown formatting? output format?). The `agent_doc_` prefix keeps them scoped. The current `agent_doc_mode` has aliases (`mode`, `response_mode`) and that already caused confusion — fewer aliases is better.
+
+### Re: Why is `recover && claims.log && truncate` blocking?
+
+**Intent:** These must complete before diff computation because they can change the document.
+
+- **`recover`**: May write a pending response to the file. If we diff before recovery, we'd compute against a document that's about to change, causing missed or double responses.
+- **`claims.log` read**: Informational record in the Claude session of IDE-triggered claims. Provides routing context.
+- **`truncate`**: Clears the log after reading.
+
+The blocking nature also fixes the background task leak from earlier — running `recover` in the background caused orphaned bash shells to accumulate across `/agent-doc` cycles.
+
+Seems like this should be synchronous. But I don't like adding ~100ms latency to each run. Is there a better way?
+
+### Re: Single-char input "B" as a valid choice selection
+
+The current `looks_truncated()` would flag "B" as truncated (length 1, no terminal punctuation), triggering the recheck chain. The recheck finds content stable after 200ms and proceeds — so it *works*, but adds a needless delay.
+
+**Proposed system — alphanumeric singles are never truncated:**
+
+```rust
+// Single alphanumeric char — choice selection (A, B, 1, 2, y, n)
+if trimmed.len() == 1 && trimmed.chars().next()
+    .map_or(false, |c| c.is_alphanumeric())
+{
+    return false;
+}
+```
+
+What if there is a race-condition where only the first character were typed?
+Just ignore and get the rest of the diff in the next run? It seems ok to me but I may be missing an issue with this approach. Please analyze.
+
+This handles choice selections (A, B, C), yes/no shortcuts (y, n), and numbered picks (1, 2, 3). Single non-alphanumeric chars (like lone punctuation) still get checked — "(" alone is probably truncated.
+
+The full `looks_truncated()` cascade is now:
+1. Empty → not truncated
+2. Structural (`/`, `#`, `` ``` ``, `<\!--`) → not truncated
+3. **Single alphanumeric char → not truncated** *(new)*
+4. Single word ≥ 2 chars → not truncated
+5. Terminal punctuation → not truncated
+6. Otherwise → truncated (recheck chain fires)
 <!-- /agent:exchange -->

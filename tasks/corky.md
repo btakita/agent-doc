@@ -315,5 +315,7 @@ release
 - Published to crates.io, PyPI, GitHub Releases
 - Binary installed locally (.bin/corky v0.14.0)
 - GitHub release: https://github.com/btakita/corky/releases/tag/v0.14.0
+
+Please add a feature to edit linkedin posts. See tasks/obs.md
 <!-- /agent:exchange -->
 ****

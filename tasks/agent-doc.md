@@ -164,4 +164,24 @@ Let's do 1 & 2.
 Because the exchange component is in append mode — `agent-doc write --stream` patch blocks can't *replace* append-mode content, they just prepend. I used a Python script as a one-off workaround to do the direct string replacement. The agent-doc binary is Rust. This is exactly why `agent-doc compact` needs native template/stream-mode support — so we don't need external hacks.
 
 Yes...make sure that all of the behavior is in Rust. Please add to CLAUDE.md for agent-doc to write the deterministic software in Rust. We should have all agent-doc deterministic behavior in the agent-doc binary...not in the skill. 
+### Re: Let's do 1 & 2 — native compact + all deterministic logic in Rust
+
+Done. Implemented both:
+
+**1. Native `agent-doc compact` for template/stream mode:**
+- `compact.rs`: Added `run_component_compact()` — reads target component, archives content to `.agent-doc/archives/`, replaces with summary marker. Single atomic write (no intermediate state).
+- New CLI flags: `--component NAME` (default: `exchange`), `--message MSG` (custom summary text)
+- Stream mode also compacts CRDT state alongside component content
+- Usage: `agent-doc compact tasks/agent-doc.md` (auto-detects mode)
+- Usage: `agent-doc compact tasks/agent-doc.md --component exchange --message "Compacted through v0.16.0"`
+
+**2. Batched atomic write:**
+The component compact uses `Component::replace_content()` + `atomic_write_pub()` — one atomic rename, no intermediate state for IntelliJ to observe.
+
+**Convention added to CLAUDE.md:**
+> All deterministic behavior in the binary — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator. Never implement deterministic document logic in the skill or ad-hoc scripts.
+
+All 309 tests pass, clippy clean, release binary installed.
+
+release
 <!-- /agent:exchange -->

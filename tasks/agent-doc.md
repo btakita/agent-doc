@@ -1013,5 +1013,7 @@ Please extract lifecycle diagrams into the documentation. Explaining the Reactiv
 compact this file
 *Compacted. v0.15.1 through v0.16.0 folded into history + releases.*
 
-/agent-doc compact 
+/agent-doc compact
+
+Be more aggressive about compacting this file
 <!-- /agent:exchange -->

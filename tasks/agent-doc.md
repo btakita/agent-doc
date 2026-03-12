@@ -335,4 +335,49 @@ Can agent-doc make a CRDT change for the plugin to call the JetBrains document e
 
 Should I fix the tmux-router layout bug now? Yes
 The JetBrains plugin issue is a known IDE behavior and would need plugin-side changes. Fix and reinstall plugin
+### Re: tmux layout disruption fix
+
+**Fixed in tmux-router `src/sync.rs`.** The hardcoded `-dbh` on line 655 is replaced with a new `first_pane_join_flag()` function that computes the correct tmux join flag based on the existing pane's position in the desired column structure:
+
+| Existing pane position | Flag | Effect |
+|------------------------|------|--------|
+| Later column (col > 0) | `-dbh` | Anchor joins left of it (correct column-major) |
+| Same column, later row (row > 0) | `-dbv` | Anchor joins above it (correct stacking) |
+| Not in desired set (unwanted) | `-dh` | Neutral right-side join (REORDER fixes anyway) |
+
+I have primarily been using a `left | right` layout.
+Please heavily test other layouts including 1d, 2d, 3d (2d nested...(row | col) major, (row | col) minor) layouts. Such as:
+- `pane`
+- ```
+  pane top
+  ----
+  pane bottom
+  ```
+- ```
+  pane left top    | pane right top
+  pane left bottom | pane right bottom
+  ```
+
+**3 new tests added** (61 total, all passing):
+1. `test_sync_anchor_joins_left_of_desired_pane` — 2-column layout, anchor joins left without REORDER
+2. `test_sync_anchor_joins_above_in_same_column` — single-column layout, anchor joins above without REORDER  
+3. `test_first_pane_join_flag_logic` — unit test for flag computation logic
+
+The key improvement: when the existing pane IS a desired pane, the anchor now joins in the correct relative position, eliminating the intermediate row-major state that triggered REORDER.
+
+**`route.rs` line 122** (`-dh` for auto-start) is a different scenario — joining a brand new pane to the right of the active pane — and is correct as-is.
+
+### Re: JetBrains Plugin cursor jump + dialog
+
+The cursor jump and dialog are caused by IntelliJ's "external file change" detection — when `agent-doc write` does an atomic write (tempfile → rename), IntelliJ sees the file modification and reloads.
+
+**Proposed fix:** Have the agent-doc binary write a CRDT patch via IPC (e.g., a `.agent-doc/pending-patch.json` file), and have the JetBrains plugin poll for pending patches and apply them through the IntelliJ `Document` API (`WriteCommandAction.runWriteCommandAction`). This way:
+Please explain how the IPC works. Is the recevier the JetBrains process or does the plugin have sidecar process?
+- No external file modification (no dialog, no cursor jump)
+- CRDT merge happens in-process via the plugin
+- The plugin already watches `.agent-doc/` — adding patch polling is incremental
+
+This is a larger change that touches both the binary and the plugin. Should I implement it?
+
+Explain first...flush buffer to this file...and implement
 <!-- /agent:exchange -->

@@ -1,8 +1,10 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '23'
-agent_doc_mode: stream
+tmux_session: '2323'
+agent_doc_mode: sstrreaam
 ---
+
+
 
 
 
@@ -1578,5 +1580,29 @@ convert this doc to stream mode.
 
 Please make `Claim for Tmux Pane` default to `agent_doc_mode: stream`.
 
-Also, when 
+Also, when I called `agent-doc run` on this file...and there was no tmux session. Nothing seemed to happen. This issue h
+### Re: Default claim to stream mode — done
+
+Changed the default `agent_doc_mode` in `claim.rs` from `template` to `stream`. New claims (via `agent-doc claim` or lazy claim in `route`) now set `agent_doc_mode: stream` when no mode is specified.
+
+**Change:** `claim.rs:90-100` — `set_mode(&content, "template")` → `set_mode(&content, "stream")`
+
+All 293 tests pass, clippy clean. Binary reinstalled.
+
+### Re: "convert this doc to stream mode" + "/agent-doc compact"
+
+This doc is already in `stream` mode (set in the previous cycle). No conversion needed. Compact is for append-mode history trimming — stream-mode documents use bounded components, so there's nothing to compact.
+
+### Re: "Also, when I called agent-doc run on this file...and ther"
+
+Your message appears to have been cut off. Could you complete the thought? Were you reporting a bug with `agent-doc run` on this file?
+
+convert this doc to stream mode.
+/agent-doc compact
+
+Please make `Claim for Tmux Pane` default to `agent_doc_mode: stream`.
+
+Also, when I called `agent-doc run` on this file...and there was no tmux session. Nothing seemed to happen. This issue has been occurring despite several releases attempting to fix it.
+
+I want to do a human review of the code. Please let me know where I should look to see why this issue keeps on occurring. And claude code has failed to fix the issue despite almost 10 attempts.
 <!-- /agent:exchange -->

@@ -1650,4 +1650,48 @@ Should this be `if window_files.len() == 1`? What happens if it's 0?
 **What to look for:** Follow the code path from `agent-doc route <file>` when no valid pane exists. Trace: Does it create a pane? Does it wait for Claude to start? Does it send the command? Is there a race between send and readiness?
 
 There are many steps in this process...Which seems like a code smell. This flow should be simpler. And we should log where we stop in the flow of the agent-doc run.
+### Re: Extract methods from `run_with_tmux` — done
+
+Refactored `route.rs` to eliminate duplicated code:
+
+**Extracted methods:**
+- `send_command(tmux, pane, file_path)` — sends `/agent-doc <file>` + focuses pane. Was duplicated 3 times.
+- `find_target_pane(tmux, explicit_pane)` — resolves target pane for lazy claim. Was duplicated twice (dead pane path + no-registration path).
+
+**Simplified flow** (was 5 conditional branches, now 3 linear steps):
+1. Check if registered pane is alive → `send_command()` and return
+2. Try lazy claim via `find_target_pane()` → register + `send_command()` + sync
+3. Auto-start new Claude session
+
+**Added `[route]` prefix to all log lines** for step-by-step tracing:
+```
+[route] Pane %42 is alive
+[route] Sent /agent-doc tasks/foo.md → pane %42
+```
+or:
+```
+[route] Pane %42 is dead
+[route] Lazy-claiming to pane %43 (dead pane)
+[route] Sent /agent-doc tasks/foo.md → pane %43
+```
+or:
+```
+[route] No pane registered for session a1b2c3d4
+[route] No active pane found, auto-starting...
+[route] Started Claude for tasks/foo.md in pane %44 (session a1b2c3d4)
+```
+
+### Re: `window_files.len() < 2` — comment updated
+
+`< 2` is correct — covers both 0 (no files) and 1 (single file). Updated the comment from "Single file" to "0 or 1 files — no layout sync needed" for clarity.
+
+### Re: Too many steps / code smell / logging
+
+Agreed and fixed. The route flow is now 3 linear steps with `[route]` prefixed logging at each decision point. You can trace exactly where the flow stops by reading stderr.
+
+The remaining architectural issue: the **auto-start path doesn't send the `/agent-doc` command** — it starts Claude and tells the user to run route again. This is the root of the "nothing happened" bug. The race is: plugin sends `/agent-doc <file>` → route auto-starts → Claude isn't ready → command gets lost. A proper fix would be to poll until Claude is ready before sending, but that's a separate change.
+
+All 293 tests pass, clippy clean. Binary was already installed.
+
+release
 <!-- /agent:exchange -->

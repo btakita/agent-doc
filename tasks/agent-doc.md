@@ -7,7 +7,7 @@ agent_doc_mode: stream
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.15.0 | **Tests:** 293 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.16.0 | **Tests:** 308 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
@@ -153,6 +153,7 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 | v0.14.9 | Multi-backtick code span support in `find_code_ranges`, 235 tests |
 | v0.15.0 | CRDT stream mode, chain-of-thought streaming, watch daemon stream support, cumulative flush fix. 293 tests. |
 | v0.15.1 | Claim defaults to stream mode, route.rs refactor (extract methods + `[route]` logging) |
+| v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, docs (reactive-stream.md). 308 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -244,6 +245,8 @@ AoE is a **session manager** (TUI dashboard, multi-agent, Docker, worktrees). ag
 **v0.15.0 session:** CRDT stream mode implementation (Phases 1-4). Phase 1: `crdt.rs` with `yrs` library — `CrdtDoc`, `merge()`, `compact()`. Phase 2: CRDT merge path in `merge.rs`, CRDT state persistence in `snapshot.rs`. Phase 3: `StreamingAgent` trait + `stream-json` parser. Phase 4: `agent-doc stream` command — timer-based flush loop, template patch application, CRDT state save. Chain-of-thought streaming (`thinking` + `thinking_target` in StreamConfig). Watch daemon stream support (tmux capture-pane polling). Stream flush uses replace mode for cumulative buffers. 293 tests. Designed Option A (skill-level checkpoints) and Option B (watch daemon capture) for tool-use + streaming. Implemented both. Converted this document to stream mode.
 
 **v0.15.1 session:** Claim defaults to stream mode instead of template. Refactored `route.rs`: extracted `send_command()` and `find_target_pane()` to eliminate duplicated lazy-claim logic, added `[route]` prefix logging. Identified CRDT merge bug (frontmatter character doubling). Code review guide for recurring routing bug (auto-start race condition). Published to all targets.
+
+**v0.15.1-v0.16.0 session:** Fixed CRDT stale base detection — `compute_edit_ops()` was generating duplicate inserts when base state diverged. Added common-prefix comparison (<50% match → use ours as base). Designed and implemented truncation detection in `diff.rs`: `looks_truncated()` cascade (empty → structural → single alphanumeric → single word ≥2 → terminal punctuation → truncated) with delayed recheck chain (200ms × 25 = 5s max). Proposed `agent_doc_write`/`agent_doc_format` config split to decouple write timing from document format. Discussed `auto_start` race condition in `route.rs` (Claude session starts but no command sent). Designed reactive stream mode (zero debounce for stream-mode docs, CRDT handles concurrency). Implemented in `watch.rs`: `HashSet<PathBuf>` reactive path tracking, `Duration::ZERO` debounce bypass, `discover_entries()` marks stream docs reactive. Created `docs/reference/reactive-stream.md` with flush cycle diagram, merge call path diagram, truncation cascade diagram. Diagnosed PATH shadowing bug (`.bin/agent-doc` symlink to stale `target/release/`). Added release checklist to `CLAUDE.local.md`. Published v0.16.0 to crates.io, PyPI, GitHub Releases. 308 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -1008,4 +1011,7 @@ Added release checklist to `CLAUDE.local.md`:
 Please extract lifecycle diagrams into the documentation. Explaining the Reactive stream flush diagram in the docs as well.
 
 compact this file
+*Compacted. v0.15.1 through v0.16.0 folded into history + releases.*
+
+/agent-doc compact 
 <!-- /agent:exchange -->

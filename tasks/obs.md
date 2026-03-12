@@ -72,4 +72,10 @@ Edited both OBS config files directly:
 **Restart OBS** for changes to take effect. The display capture will now grab the full 4K screen and downscale to 1080p output.
 
 Continue
+
+OBS restarted and auto-corrected the scene source — it now shows `scale: 2.07x` which is correct (3840/1854 ≈ 2x, matching the XSHM capture to the 3840x2160 canvas). The config is working.
+
+To verify the recording captures your full screen, do a quick test recording (10 seconds), then check the output in `~/Videos/` — it should show your entire 4K desktop downscaled to 1080p. If text looks too small in the recording, you might want to bump output to `OutputCX=2560` / `OutputCY=1440` (1440p) for a better balance of readability and file size.
+
+compact this file
 <!-- /agent:exchange -->

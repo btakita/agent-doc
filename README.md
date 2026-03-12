@@ -263,7 +263,7 @@ agent-doc commit <file>             # git add + commit with timestamp
 agent-doc skill install             # install Claude Code skill definition
 agent-doc skill check               # check if installed skill is up to date
 agent-doc patch <file> <component> [content]  # update component (stdin if no content)
-agent-doc watch [--stop] [--status]          # watch daemon (debounce + loop prevention)
+agent-doc watch [--stop] [--status]          # watch daemon (debounce + reactive mode for stream docs)
 agent-doc audit-docs                # audit instruction files for staleness
 agent-doc upgrade                   # upgrade to latest version
 agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)

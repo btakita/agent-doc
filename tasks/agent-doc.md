@@ -840,4 +840,61 @@ Token cost: slightly higher (may respond to partial input), but no wasted cancel
 **Recommendation:** Skip speculative execution. Make stream mode reactive (no debounce), keep 500ms debounce for non-stream modes.
 
 Yes...go with recommendation.
+### Re: Reactive stream flush diagram
+
+```
+USER EDITS                    AGENT STREAM                    DOCUMENT
+    │                              │                              │
+    │  ① file save                 │                              │
+    ├─────────────────────────────►│                              │
+    │  (watch: immediate,          │                              │
+    │   no debounce)               │                              │
+    │                              │  ② read + diff + prompt      │
+    │                              ├─────────────────────────────►│
+    │                              │                              │
+    │                              │  ③ send to Claude (stream)   │
+    │                              │  ┌──────────────────────┐    │
+    │                              │  │ Timer: every 200ms   │    │
+    │                              │  │                      │    │
+    │   ④ user keeps editing       │  │  ⑤ flush:            │    │
+    ├──────────────────────────────┼──┤   read file (has     │    │
+    │                              │  │   user edits\!)       │    │
+    │                              │  │                      │    │
+    │                              │  │   CRDT 3-way merge:  │    │
+    │                              │  │   base = baseline    │    │
+    │                              │  │   ours = agent text  │    │
+    │                              │  │   theirs = file now  │    │
+    │                              │  │        ↓             │    │
+    │                              │  │   merged = agent +   ├───►│ ⑥ atomic
+    │                              │  │           user edits │    │   write
+    │                              │  │                      │    │
+    │                              │  │  (repeat every 200ms)│    │
+    │                              │  └──────────────────────┘    │
+    │                              │                              │
+    │                              │  ⑦ stream complete           │
+    │                              │  final flush + snapshot      │
+    │                              ├─────────────────────────────►│
+    │                              │                              │
+    │  ⑧ next edit                 │                              │
+    ├─────────────────────────────►│  ⑨ new cycle (immediate)     │
+    │                              │  diff sees only new user     │
+    │                              │  content (agent output       │
+    │                              │  already in snapshot)        │
+```
+
+**Step ⑤ detail:** Each 200ms flush reads the *current* file (with user edits), CRDT-merges agent output + user edits against the baseline, writes merged result atomically.
+
+**Watch daemon protection:** Stream flushes trigger file changes, but existing loop prevention (convergence detection + cycle counter) prevents re-triggering during active streams.
+
+### Re: Go with recommendation
+
+Confirmed. Implementation in `watch.rs`:
+- Add `reactive` flag when `agent_doc_mode == "stream"`
+- Skip debounce timer for reactive-mode documents
+- Keep debounce for append/template mode
+- Stream loop prevention already exists
+
+I like the diagrams. Pleas add to the documentation. Make this somewhat robust for changes to implementation. method names are ok...as long as we update the methods names when we audit the docs.
+
+Implement
 <!-- /agent:exchange -->

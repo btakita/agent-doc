@@ -105,4 +105,36 @@ What I have so far:
 > I caught the tail end of this call. But Eric Ries is making a bold stance on applying ethics in the agentic age.
 
 I want to emphasize how we can define and apply philosophy to find deep alignment with each other and with our tools.
+
+### Re: Eric Ries / Incorruptible post
+
+Eric Ries's new book *Incorruptible* argues organizational failure is structural, not ethical — systems quietly reshape behavior. Notably uses Anthropic as a case study. The LinkedIn event was likely a live discussion around these themes.
+
+**Post draft** (ready to paste):
+
+---
+
+I caught the tail end of Eric Ries's call on building incorruptible organizations. He's making a bold stance: the failure of companies isn't ethical — it's structural. The systems we build quietly reshape behavior until even principled people produce outcomes they never wanted.
+
+This resonates deeply with what I'm building.
+
+If organizational drift is structural, then alignment — between people, between teams, between humans and AI agents — is a design problem. Not a values problem. Not a policy problem. A systems design problem.
+
+This is why I'm obsessed with defining terms precisely. In Existence Lang, every concept starts from the universal set (Existence) and scopes down through explicit context. When your ontology is sloppy, your systems drift. When your terms are precise and composable, alignment becomes structural too.
+
+The same principle applies to AI agents. An agent without well-defined scope, context, and domain boundaries will drift just like an organization without mission-locked governance. agent-doc is my attempt to make that structure explicit — every interaction captured in a document, every decision traceable, every scope bounded.
+
+Ries uses Anthropic as a case study in Incorruptible. It's no accident that the company building Claude is also experimenting with novel corporate structures to stay aligned with its mission. Alignment isn't a feature you bolt on — it's architecture.
+
+What systems are you building to keep your work aligned with your intent?
+
+https://www.linkedin.com/events/7433272878466359296/
+
+#Incorruptible #EricRies #ExistenceLang #AgentDoc #AI #Alignment #OrganizationalDesign #Philosophy
+
+---
+
+Connects your Existence Lang philosophy (explicit scoping, precise ontology) to Ries's thesis (structural alignment > ethical intentions). The Anthropic case study reference ties it together — same company building Claude. Adjust tone or length as needed.
+
+post to linkedin
 <!-- /agent:exchange -->

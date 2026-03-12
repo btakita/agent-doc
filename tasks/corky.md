@@ -372,5 +372,19 @@ Compiles clean, clippy passes. Some pre-existing test failures from the uncommit
 **Note:** YouTube upload (`corky youtube auth/draft/publish`) is also implemented and uncommitted in the tree. Both features are ready for review/commit together or separately.
 
 release
+**Released v0.15.0** — YouTube upload, LinkedIn edit, profiles consolidation.
+
+- `corky youtube auth/draft/publish` — YouTube Data API v3, resumable upload, SRT captions
+- `corky linkedin edit <file> [--body TEXT]` — PARTIAL_UPDATE API for published posts
+- Profiles now load from `.corky.toml [profiles]` (fallback: `profiles.toml`)
+- SPEC.md § 17 (YouTube), LinkedIn edit command added
+- VERSIONS.md updated (also backfilled 0.14.0, 0.14.1)
+- All tests pass (408+), release binary built
+- GitHub release: https://github.com/btakita/corky/releases/tag/v0.15.0
+- **crates.io and PyPI failed** — auth issues (crates.io: malformed Authorization header from `pass`; PyPI: invalid credentials). Need to fix auth tokens before publishing to registries.
+
+release
+
+Do we have automated tests for the new features.
 <!-- /agent:exchange -->
 ****

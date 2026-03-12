@@ -148,9 +148,20 @@ When I compacted this file...it showed an intermediate state in Idea where some 
 
 Expected behavior. Compaction was two steps: (1) `agent-doc write --stream` patched architecture/releases/history but exchange append-mode kept old content (~900 lines), (2) direct Python replace cleared exchange (145 lines). IntelliJ's VFS polling (~300ms) caught the intermediate state between the two writes. Refresh resolved it. The atomic rename in `agent-doc write` helps but doesn't eliminate the race with IDE VFS polling.
 
-
+Can we prevent the race condition?
 
 > direct Python replace cleared exchange (145 lines)
 
 Why did you say Python here? I thought agent-doc was implemented in rust.
+### Re: Preventing the IntelliJ race condition
+
+Two approaches: (1) Make `agent-doc compact` handle stream/template-mode documents natively — single atomic write replaces exchange content + updates other components in one operation. No intermediate state for IntelliJ to observe. (2) Batch all writes into one — instead of two separate writes (patch + clear), build the entire document in memory and do one atomic rename. Fix (1) is the right path — adds it to the pending list.
+
+Let's do 1 & 2.
+
+### Re: Why "Python"?
+
+Because the exchange component is in append mode — `agent-doc write --stream` patch blocks can't *replace* append-mode content, they just prepend. I used a Python script as a one-off workaround to do the direct string replacement. The agent-doc binary is Rust. This is exactly why `agent-doc compact` needs native template/stream-mode support — so we don't need external hacks.
+
+Yes...make sure that all of the behavior is in Rust. Please add to CLAUDE.md for agent-doc to write the deterministic software in Rust. We should have all agent-doc deterministic behavior in the agent-doc binary...not in the skill. 
 <!-- /agent:exchange -->

@@ -317,5 +317,38 @@ release
 - GitHub release: https://github.com/btakita/corky/releases/tag/v0.14.0
 
 Please add a feature to edit linkedin posts. See tasks/obs.md
+
+**LinkedIn post editing — here's the plan.**
+
+The LinkedIn API supports updating published posts via `POST /rest/posts/{encoded_urn}` with an `X-RestLi-Method: PARTIAL_UPDATE` header. Only **text** (`commentary`) can be updated — images, visibility, and media are immutable after publish.
+
+**Implementation plan for `corky linkedin edit`:**
+
+1. **New CLI command:** `corky linkedin edit <file> [--body "new text"]`
+   - Reads the published draft file (has `post_id` in frontmatter)
+   - If `--body` provided, uses that; otherwise reads updated body from the draft file
+   - Calls LinkedIn PARTIAL_UPDATE API
+   - Updates the draft file's body to match
+
+2. **API addition in `linkedin.rs`:**
+   - `update_post(access_token, post_urn, commentary)` function
+   - `POST https://api.linkedin.com/rest/posts/{url_encoded_urn}`
+   - Extra header: `X-RestLi-Method: PARTIAL_UPDATE`
+   - Body: `{"patch": {"$set": {"commentary": "..."}}}`
+   - Returns 204 No Content on success
+
+3. **Workflow:**
+   - Edit the draft file body in your editor
+   - Run `corky linkedin edit <file>` — reads updated body, pushes to LinkedIn
+   - Or: `corky linkedin edit <file> --body "new text"` for one-liner fixes
+
+4. **Constraints:**
+   - Only text updates (images/visibility immutable post-publish)
+   - Requires `post_id` in the draft frontmatter (must be published)
+   - Same auth/token as publish (no new scopes needed)
+
+Shall I implement?
+
+yes...note that we implemented YouTube uploads...see tasks/obs.md. 
 <!-- /agent:exchange -->
 ****

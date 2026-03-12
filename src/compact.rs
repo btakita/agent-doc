@@ -42,11 +42,11 @@ pub fn run(
 
     let (fm, body) = frontmatter::parse(&content)?;
 
-    let mode = fm.mode.as_deref().unwrap_or("append");
-    match mode {
-        "template" | "stream" => {
-            // Compact CRDT state if stream mode
-            if mode == "stream"
+    let resolved = fm.resolve_mode();
+    if resolved.is_template() {
+        {
+            // Compact CRDT state if CRDT write mode
+            if resolved.is_crdt()
                 && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
             {
                 let compacted_crdt = crate::crdt::compact(&crdt_state)?;
@@ -61,8 +61,7 @@ pub fn run(
             let target = component_name.unwrap_or("exchange");
             return run_component_compact(file, &content, target, message);
         }
-        _ => {} // append mode — continue
-    }
+    } // else: append mode — continue
 
     // Parse exchanges from the body
     let exchanges = parse_exchanges(body);

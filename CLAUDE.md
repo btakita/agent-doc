@@ -86,12 +86,12 @@ Used by `agent-doc stream` for real-time write-back. Currently only `claude` sup
 
 ## Stream Mode
 
-Stream mode (`agent_doc_mode: stream`) enables real-time agent output with CRDT-based conflict-free merge.
+Stream mode (`agent_doc_format: template` + `agent_doc_write: crdt`) enables real-time agent output with CRDT-based conflict-free merge. Legacy: `agent_doc_mode: stream` is still supported as a deprecated alias.
 
 **Usage:** `agent-doc stream <FILE> [--interval 200] [--agent claude] [--model opus] [--no-git]`
 
 **How it works:**
-1. Validates document mode is `stream`, reads `StreamConfig` from frontmatter
+1. Validates document uses CRDT write strategy (`resolved.is_crdt()`), reads `StreamConfig` from frontmatter
 2. Computes diff, builds prompt requesting patch-block format
 3. Spawns streaming agent (`claude -p --output-format stream-json`)
 4. Timer thread (default 200ms) periodically flushes accumulated text to document:
@@ -100,7 +100,8 @@ Stream mode (`agent_doc_mode: stream`) enables real-time agent output with CRDT-
 
 **Frontmatter:**
 ```yaml
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
 agent_doc_stream:
   interval: 200           # write-back interval (ms), default 200
   strip_ansi: true        # strip ANSI codes from output
@@ -127,7 +128,8 @@ flushed on the same timer interval as response text.
 **Example document with thinking:**
 ```markdown
 ---
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
 agent_doc_stream:
   target: exchange
   thinking: true
@@ -153,7 +155,7 @@ Implementation: `flush_to_document()` passes mode overrides to
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
 `agent/streaming.rs` (StreamingAgent trait + chunk parser), `agent/claude.rs` (streaming impl)
 
-**Reactive file-watching:** Stream-mode documents get reactive file-watching (zero debounce) from the watch daemon. The `WatchEntry` has a `reactive: bool` field set by `discover_entries()` for stream-mode docs. Reactive paths are tracked in a `HashSet<PathBuf>` and use `Duration::ZERO` for the debounce check, enabling instant re-submit on file change.
+**Reactive file-watching:** CRDT-mode documents (`resolved.is_crdt()`) get reactive file-watching (zero debounce) from the watch daemon. The `WatchEntry` has a `reactive: bool` field set by `discover_entries()` for CRDT docs. Reactive paths are tracked in a `HashSet<PathBuf>` and use `Duration::ZERO` for the debounce check, enabling instant re-submit on file change.
 
 **One session per document:** Each `agent-doc stream` spawns its own Claude CLI process.
 Multiple documents stream in parallel via separate tmux panes.

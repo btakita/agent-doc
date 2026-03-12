@@ -11,8 +11,14 @@ import com.intellij.openapi.project.ProjectManagerListener
  * This enables `require-restart="false"` (dynamic plugin install/update/unload).
  */
 class PluginLifecycleListener : ProjectManagerListener {
+    override fun projectOpened(project: Project) {
+        // Start watching for IPC patch files from agent-doc write --ipc
+        PatchWatcher.getInstance(project)
+    }
+
     override fun projectClosed(project: Project) {
         PromptPanel.dismiss(project)
         PromptPoller.disposeProject(project)
+        PatchWatcher.disposeProject(project)
     }
 }

@@ -32,13 +32,14 @@ pub fn run(
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    // Validate mode
+    // Validate mode — requires CRDT write strategy
     let raw_content = std::fs::read_to_string(file)?;
     let (fm, _body) = frontmatter::parse(&raw_content)?;
-    if fm.mode.as_deref() != Some("stream") {
+    let resolved = fm.resolve_mode();
+    if !resolved.is_crdt() {
         anyhow::bail!(
-            "document mode is {:?}, expected \"stream\". Use `agent-doc mode {} --set stream` first.",
-            fm.mode.as_deref().unwrap_or("append"),
+            "document write mode is {:?}, expected crdt. Use `agent-doc mode {} --set stream` first.",
+            resolved.write,
             file.display()
         );
     }
@@ -686,13 +687,13 @@ mod tests {
     }
 
     #[test]
-    fn mode_validation_rejects_non_stream() {
+    fn mode_validation_rejects_non_crdt() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "---\nagent_doc_mode: template\n---\n\nBody\n").unwrap();
+        std::fs::write(&doc, "---\nagent_doc_format: template\nagent_doc_write: merge\n---\n\nBody\n").unwrap();
 
         let config = Config::default();
         let err = run(&doc, 2000, None, None, true, &config).unwrap_err();
-        assert!(err.to_string().contains("expected \"stream\""), "error: {}", err);
+        assert!(err.to_string().contains("expected crdt"), "error: {}", err);
     }
 }

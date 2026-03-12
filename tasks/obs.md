@@ -408,4 +408,18 @@ resolving dependencies...
 
 Enter a number (default=1):
 ```
+Pick **2) onnxruntime-cuda**. That's the NVIDIA GPU backend for your RTX 5090.
+
+- `1) onnxruntime-cpu` — CPU only, slower
+- **`2) onnxruntime-cuda`** — NVIDIA GPU, this one
+- `3) onnxruntime-opt-cuda` — optimized CUDA build, may have compat issues with newer cards
+- `4/5) onnxruntime-*-rocm` — AMD GPU, not for you
+
+```
+The following OBS plugins failed to load:
+
+obs-backgroundremoval
+
+Please update or remove these plugins.
+```
 <!-- /agent:exchange -->

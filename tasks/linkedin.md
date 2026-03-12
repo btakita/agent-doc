@@ -66,7 +66,7 @@ Exports the currently visible LinkedIn messaging thread as a timestamped text fi
 **Filename format:** `yyyymmdd-linkedin-contact-name.txt` (e.g., `20260311-linkedin-mia-tomeo.txt`)
 
 ```javascript
-javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';const time=timeEl?timeEl.textContent.trim():'';const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){contactName=[...headerEl.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).filter(Boolean).join(' ')||headerEl.textContent.split(/\s{2,}/)[0].trim()}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
+javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';const time=timeEl?timeEl.textContent.trim():'';const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\n').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
 ```
 
 **To install:** Create a new bookmark, paste the `javascript:void(...)` code as the URL.
@@ -89,4 +89,20 @@ Looked at the exported file — the header element contains nested HTML with "St
 Fixed by extracting only direct text nodes from the header element (skipping all child elements), and cleaning whitespace. Also simplified the transcript output — just `[timestamp] Name: message`, no date headers cluttering the format.
 
 The bookmarklet wanted to save the file as `20260311-linkedin-.txt`...it should be `20260311-linkedin-mia-tomeo.txt`
+
+### Re: Empty name in filename
+
+The `childNodes` text node filter returned nothing because LinkedIn wraps the name in a `<span>`, not as a bare text node. The fallback `split(/\s{2,}/)` also failed on the whitespace-heavy `textContent`.
+
+**Fix:** Split `textContent` on newlines, trim each, take the first non-empty line. The LinkedIn header structure puts the name on the first line, with "Status is reachable" and "Mobile • 28m ago" on subsequent lines. This is the simplest reliable approach.
+
+Try the updated bookmarklet — it should now save as `20260311-linkedin-mia-tomeo.txt`.
+
+Help me write a post sharing
+https://www.linkedin.com/events/7433272878466359296/
+
+What I have so far:
+> I caught the tail end of this call. But Eric Ries is making a bold stance on applying ethics in the agentic age.
+
+I want to emphasize how we can define and apply philosophy to find deep alignment with each other and with our tools.
 <!-- /agent:exchange -->

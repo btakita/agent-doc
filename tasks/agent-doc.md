@@ -1,8 +1,10 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '0'
-agent_doc_mode: template
+tmux_session: '23'
+agent_doc_mode: stream
 ---
+
+
 
 # agent-doc
 
@@ -1562,4 +1564,19 @@ tmux-router: no changes, no release needed.
 
 convert this doc to stream mode.
 /agent-doc compact
+
+### Converted to Stream Mode
+
+Done:
+- **Mode changed:** `agent_doc_mode: stream` — all future writes use CRDT merge with real-time flush
+- **CRDT compact:** State compacted (already clean, no size reduction). Note: `compact` is for append-mode history trimming; stream-mode documents use bounded components, so compaction has minimal effect.
+
+The document is now in stream mode. Future `/agent-doc` cycles will use `agent-doc write --stream` with CRDT merge for conflict-free concurrent editing.
+
+convert this doc to stream mode.
+/agent-doc compact
+
+Please make `Claim for Tmux Pane` default to `agent_doc_mode: stream`.
+
+Also, when 
 <!-- /agent:exchange -->

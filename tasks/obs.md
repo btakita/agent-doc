@@ -347,4 +347,24 @@ Yes...Can you update it to post from Corky?
 Another question...should I post to Twitch as my primary platform...if I do live sessions?
 
 How do I get my camera showing me in the corner full overlayed over the screencast
+(LinkedIn draft and Twitch recommendation already addressed above.)
+
+### Re: Webcam Overlay (Picture-in-Picture)
+
+In OBS:
+
+1. **Add webcam source:** Sources **+** > **Video Capture Device (V4L2)** > select your webcam
+2. **Resize:** Drag corner handles to shrink to ~15-20% of canvas
+3. **Position:** Drag to bottom-right corner (or wherever you prefer)
+4. **Layer order:** In the Sources list, webcam must be **above** screen capture (higher = on top)
+5. **Lock it:** Right-click > Lock (prevents accidental dragging)
+
+**Optional polish:**
+- **Round corners:** Right-click webcam > Filters > + > Image Mask/Blend with a circular PNG mask
+- **Border:** Add a Color Source behind the webcam, slightly larger, for a colored border effect
+- **Chroma key:** If you have a green screen, add Filters > Chroma Key to remove background
+
+How do I have a custom background like with google talk or zoom
+
+That's it — standard PiP setup. Most dev streamers use bottom-right at about 15% size so it doesn't obscure code
 <!-- /agent:exchange -->

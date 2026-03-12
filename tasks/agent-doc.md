@@ -7,7 +7,7 @@ agent_doc_mode: stream
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.16.0 | **Tests:** 308 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
+**Version:** v0.16.1 | **Tests:** 309 passing | **Dependencies:** tmux-router v0.2.4, instruction-files v0.1
 **Published:** crates.io, PyPI, GitHub Releases
 **Plugins:** JetBrains v0.2.0 + VS Code v0.2.0 — autocomplete for 74 commands, auto-sync on lazy claim + autoclaim
 <!-- /agent:status -->
@@ -75,6 +75,7 @@ agent_doc_mode: stream
 | v0.15.0 | CRDT stream mode (`yrs`), chain-of-thought streaming, watch daemon stream support, cumulative flush fix. 293 tests. |
 | v0.15.1 | Claim defaults to stream mode, route.rs refactor (`send_command()`, `find_target_pane()`, `[route]` logging). |
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
+| v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -160,4 +161,16 @@ $ agent-doc compact tasks/agent-doc.md --component exchange --message "*Compacte
 build so we can test
 
 release
+### Re: Release v0.16.1
+
+Published to all targets:
+- **crates.io**: `agent-doc v0.16.1`
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.16.1
+- **PyPI**: publishing (background)
+- **Release binary**: building (background)
+- **Submodule pointer**: updated in agent-loop
+
+Changes: native compact for template/stream mode, deterministic-in-Rust convention in CLAUDE.md. 309 tests.
+
+Is agent_doc_format and agent_doc_write implemented to replace agent_doc_mode?
 <!-- /agent:exchange -->

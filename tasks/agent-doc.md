@@ -810,4 +810,34 @@ Would this strategy cost us much in terms of tokens?
 **Edge case:** User types "B" as choice selection AND more text follows. First run processes "B", second gets the rest. But this requires typing "B", pausing 500ms+, then resuming — unusual mid-word.
 
 **Verdict:** Current design is correct. Debounce = primary defense, truncation detection = secondary safety net, single-char fast-path = avoids false delays.
+### Re: Fast path latency
+
+~0.2ms total. One file read + strip_comments + extract_last_added_line + looks_truncated. Negligible.
+
+### Re: Speculative execution with debounce
+
+The pipeline has two phases: **Phase 1** (local: read, diff, prompt — free, ~5-50ms) and **Phase 2** (agent: API call — costly, 5-60s).
+
+Speculative Phase 1 only wins ~5-50ms — not worth the complexity. Full speculative (Phase 1+2) wastes ~$0.01-0.05 per cancelled API call, 2-3 hits per sentence = ~$0.05-0.15 per input. Adds up.
+
+**Better approach: reactive stream mode (no debounce).**
+
+With CRDT merge, debounce is a pre-CRDT protection. In stream mode, CRDT already handles concurrent edits. So:
+1. First file change → process immediately (zero latency)
+2. User keeps editing → CRDT merge handles it on next flush
+3. No debounce, no cancellation, no wasted tokens
+
+> User keeps editing → CRDT merge handles it on next flush
+
+How does the "next flush" get folded into the agent loop? Please make a diagram.
+
+Watch daemon modes:
+- **Debounced** (append mode): 500ms debounce, wait for stable
+- **Reactive** (stream mode): No debounce, CRDT handles concurrency
+
+Token cost: slightly higher (may respond to partial input), but no wasted cancellation tokens. If agent responds to "B" instead of "But I think...", the next cycle catches the full input.
+
+**Recommendation:** Skip speculative execution. Make stream mode reactive (no debounce), keep 500ms debounce for non-stream modes.
+
+Yes...go with recommendation.
 <!-- /agent:exchange -->

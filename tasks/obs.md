@@ -156,4 +156,34 @@ Yes, go ahead and post the 1/4 screen video. The content is what matters — the
 Post it now, record the full-screen follow-up with PipeWire capture, and you've got a two-video arc: the raw dog-fooding chaos + the polished version.
 
 Please write a post for my video post on LinkedIn
+
+https://www.youtube.com/watch?v=B-9uI53cRVE
+
+### LinkedIn Post Draft
+
+---
+
+**My first dev video: Dog-fooding agent-doc live**
+
+I recorded myself debugging CRDT merge bugs in agent-doc — an interactive document system I'm building that lets you have structured conversations with AI agents directly in markdown files.
+
+What you'll see:
+- Real-time bug hunting across 10+ releases of a Rust CLI tool
+- Template mode, stream mode, and reactive architecture decisions
+- How I use Claude as a co-pilot for complex debugging sessions
+- A tangent about Existence Lang and why God = Existence = the universal set (yes, really)
+
+Fair warning: the screen recording only captured 1/4 of my display (XSHM + HiDPI — lesson learned). The content is all there though, and the audio carries the full story. Already fixed for the next one.
+
+This is what "vibe coding" actually looks like — messy, iterative, real. Not a polished tutorial. Just a developer eating his own dog food and sharing the experience.
+
+If you're interested in AI-powered developer tooling, document-driven workflows, or just want to see someone wrestle with async Rust and TMUX pane management for two hours — this one's for you.
+
+agent-doc: https://crates.io/crates/agent-doc
+
+#AgentDoc #ClaudeCode #RustLang #VibeCoding #DeveloperTools #AI #CRDT #ExistenceLang #LiveCoding
+
+---
+
+Feel free to adjust the tone or add/remove details. You might want to add the YouTube link once it's uploaded.
 <!-- /agent:exchange -->

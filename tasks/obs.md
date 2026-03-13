@@ -198,4 +198,15 @@ corky linkedin publish mail/social/20260313-170000-linkedin.md
 Or edit the draft first, then tell me to publish.
 
 publish
+
+Are YouTube transcripts indexed for SEO and LLMs?
+I would like to have my video CC transcripts somehow reach the SERP or LLM results.
+There are some interesting topics that can be phrased into coherent thoughts for search results & LLMs.
+### Re: Publish LinkedIn
+
+**Published:** https://www.linkedin.com/feed/update/urn:li:share:7438328637952667648
+
+Added `[profiles.btakita.linkedin]` entry to `.corky.toml` (was missing — Part 1 was posted manually). Future LinkedIn publishes will work directly.
+
+Draft updated to `published` status at `mail/social/20260313-170000-linkedin.md`.
 <!-- /agent:exchange -->

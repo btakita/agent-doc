@@ -429,4 +429,24 @@ urn = "urn:li:person:_C2t_TDOVY"
 This should move to `.corky.toml` under `[profiles.btakita.linkedin]`. The code migration (updating `profiles.rs` to read from `.corky.toml` instead of `profiles.toml`) is tracked as a follow-up — want me to do that now or as part of the YouTube feature PR?
 
 Yes...go
+Migrating profiles.toml → .corky.toml now. Working in background on `src/corky/`.
+### Profiles Consolidated — Done
+
+Migrated profile loading from `profiles.toml` → `.corky.toml [profiles]`:
+
+- **`ProfilesFile::load()`** checks `.corky.toml` first, falls back to `profiles.toml`
+- **`update_profile_urn()`** writes to `.corky.toml` using `toml_edit` (format-preserving)
+- **`run_rename_author()`** updates both files for backward compat
+- **CLI help** references `.corky.toml [profiles]` instead of `profiles.toml`
+
+To migrate your config, add to your `.corky.toml`:
+```toml
+[profiles.btakita.linkedin]
+handle = "briantakita"
+urn = "urn:li:person:_C2t_TDOVY"
+```
+
+Both YouTube feature and profiles consolidation are ready for review — all uncommitted in `src/corky/`.
+
+Is the YouTube publish released?
 <!-- /agent:exchange -->

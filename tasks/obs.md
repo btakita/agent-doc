@@ -70,4 +70,26 @@ YouTube as primary (permanence, SEO, SRT support). Twitch optional add-on for li
 
 The video capture was miscropped and has missing areas of the video capture. How can I crop the entire video to fit the video content on the screen?
 [2026-03-12 17-49-43.mp4](../../../../Videos/2026-03-12%2017-49-43.mp4)
+### Re: Crop Miscaptured Video
+
+**Auto-detected crop area:** Content is 1872x928 at offset (4,4). The bottom ~150px and right edge are black (XSHM HiDPI artifact). Consistent across the full 2-hour video.
+
+**Crop with ffmpeg** (re-encodes to remove black borders, scales up to 1920x1080):
+
+```bash
+ffmpeg -i ~/Videos/"2026-03-12 17-49-43.mp4" \
+  -vf "crop=1872:928:4:4,scale=1920:1080:flags=lanczos" \
+  -c:v libx264 -crf 18 -preset medium \
+  -c:a copy \
+  ~/Videos/"2026-03-12 17-49-43-cropped.mp4"
+```
+
+**Options:**
+- **Crop only** (keep native 1872x928): Remove `,scale=1920:1080:flags=lanczos` — smaller file, no upscale artifacts
+- **Crop + scale to 1080p** (shown above): Standard 1920x1080 for YouTube — lanczos gives sharp upscale
+- **CRF 18**: High quality. Lower = bigger file, higher = smaller. 18 is visually lossless.
+
+This is a ~2 hour video so encoding will take a while. Want me to run it?
+
+yes
 <!-- /agent:exchange -->

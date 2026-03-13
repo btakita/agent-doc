@@ -638,4 +638,44 @@ agent-doc should immediately write to the document when the user needs to do som
 4. Rebuild, retry upload
 
 Working on it now.
+### YouTube Upload Bug Fixed + Edit Command Added
+
+**Bug fix:** `youtube.rs` upload loop now handles empty response bodies gracefully. Previously `r.into_json()` crashed on empty 200 responses — now reads as string first, continues uploading if empty, only parses JSON when there's actual content.
+
+**New command:** `corky youtube edit <file>` — updates title, description, tags, and visibility on published YouTube videos via the videos.update API endpoint.
+
+**Tests:** 8 new tests in `test_youtube.rs`:
+- `yt_u1`: visibility mapping
+- `yt_u2`/`yt_u3`: channel ID parsing (success + empty)
+- `yt_u4`: small file upload with mock server
+- `yt_u5`: **empty body on 200** (the exact bug that caused the crash)
+- `yt_u6`/`yt_u7`: video update (success + 403)
+- `yt_u8`: missing file rejection
+
+All tests pass. Binary rebuilt. **Retrying upload now...**
+### Video Uploaded — Captions Need Re-auth
+
+**Video uploaded successfully\!** But caption upload failed with 403 (insufficient scopes). The OAuth token was missing `youtube.force-ssl` scope needed for captions.
+
+**Fixed:** Added scope, rebuilt binary. Now need to re-authorize to get a token with the new scope.
+
+**ACTION REQUIRED:** A browser window will open for YouTube re-authorization. Please click through the consent screen to grant the additional caption permissions.
+### YouTube Upload Complete
+
+**Published:** https://www.youtube.com/watch?v=qQCKVQHRQCI
+
+Video + captions uploaded successfully. Draft updated to `published` status.
+
+**Note:** There's a duplicate private video from the first failed attempt (video uploaded but caption upload errored). You can delete it from [YouTube Studio](https://studio.youtube.com/) — it'll be the one without captions.
+
+**Summary of changes to corky:**
+- **Bug fix:** Empty response body in upload loop no longer crashes
+- **New scope:** `youtube.force-ssl` added for caption uploads
+- **New command:** `corky youtube edit <file>` — update metadata on published videos
+- **8 new tests** covering upload, update, and error handling
+
+All changes are uncommitted in `src/corky/`. Ready for review and commit.
+
+https://github.com/nicholasgasior/rmemo is wrong.
+It's https://github.com/ctx-core/rmemo
 <!-- /agent:exchange -->

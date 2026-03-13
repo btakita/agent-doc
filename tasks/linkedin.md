@@ -137,4 +137,19 @@ https://www.linkedin.com/events/7433272878466359296/
 Connects your Existence Lang philosophy (explicit scoping, precise ontology) to Ries's thesis (structural alignment > ethical intentions). The Anthropic case study reference ties it together — same company building Claude. Adjust tone or length as needed.
 
 post to linkedin
+
+### Posted to LinkedIn
+
+Published via corky: https://www.linkedin.com/feed/update/urn:li:share:7437915217499471872
+
+Draft file: `mail/social/20260312-eric-ries-incorruptible-linkedin.md` (status updated to `published`).
+
+
+From David Alger
+> Really cool stuff. I wonder if organizations and companies should have time limits. After that, they have to start over.Otherwise they keep getting stretched and changed for purposes they weren't designed to accomplish.
+
+Help me draft a reply. What I have so far:
+
+> Thank you David! People and institutions may change. It would be interesting to capture the moment and context of when the company during certain moments...such as when it was on a good path. Perhaps other people or companies can then take on the essence of that company in a good state and carve out a different path onward? Kindof like exploring alternative paths via improv?
+
 <!-- /agent:exchange -->

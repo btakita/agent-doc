@@ -129,4 +129,15 @@ Create a draft to upload to YouTube. Include a title, description, and tags.
 Edit the draft title/description in your editor. Once the transcript is ready, I'll update the draft and it'll be ready to publish.
 
 Add a mea culpa about the cropping in the description. I will have it fixed in the next video.
+Added cropping mea culpa to the YouTube description:
+
+> Heads up: the screen capture is cropped from a quarter-screen XSHM recording (HiDPI + X11 don't play nice). The content is all there but slightly upscaled. Fixed for the next video — PipeWire capture is working now.
+
+It was a slight offset of the video. You just cropped the offset. Basically, the top of the editor was clipped.
+
+Draft updated at `mail/social/20260313-163457-youtube.md`. Whisper transcription still running.
+
+Add a mea culpa about the cropping in the description. I will have it fixed in the next video.
+
+Re: the video
 <!-- /agent:exchange -->

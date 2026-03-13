@@ -106,4 +106,27 @@ The CRF 18 encode is significantly smaller because the black borders were easy t
 
 Create a closed caption transcript of the cropped video.
 Create a draft to upload to YouTube. Include a title, description, and tags.
+**Transcribing now...** Extracting audio and running speech-to-text on the 2-hour video. This will take a few minutes.
+### Re: Transcript + YouTube Draft
+
+**Draft created:** `mail/social/20260313-163457-youtube.md`
+
+**Title:** Dog-fooding agent-doc Part 3: YouTube upload, tmux-router tests, JetBrains plugin IPC
+
+**Description highlights:**
+- YouTube upload feature implementation in corky (Rust, resumable upload)
+- profiles.toml → .corky.toml consolidation
+- agent-doc mode system (append/template/stream)
+- 61 tmux-router tests — layout reconciliation, anchoring, join flags
+- JetBrains plugin cursor jump fix + IPC patch delivery
+- Sift integration research with tag-path/existence-lang
+- Publishing agent-doc v0.17.0 + JetBrains plugin v0.2.1
+
+**Video:** `~/Videos/2026-03-12 17-49-43-cropped.mp4` (cropped, 1920x1080)
+
+**Transcription:** Whisper (medium model) is still running on the 2-hour audio. SRT will be saved to `mail/topics/brian-takita/videos/` when complete, then added to the draft's `captions:` field.
+
+Edit the draft title/description in your editor. Once the transcript is ready, I'll update the draft and it'll be ready to publish.
+
+Add a mea culpa about the cropping in the description. I will have it fixed in the next video.
 <!-- /agent:exchange -->

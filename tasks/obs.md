@@ -516,4 +516,25 @@ This opens a browser consent screen for YouTube-specific permissions. The refres
 **One prerequisite:** Make sure **YouTube Data API v3** is enabled in the same Google Cloud project. Go to [APIs & Services > Library](https://console.cloud.google.com/apis/library) and search for "YouTube Data API v3" — click Enable if it's not already.
 
 done
+YouTube OAuth set up. You're ready to upload videos via corky:
+
+```bash
+corky youtube draft --author btakita --video ~/Videos/2026-03-12\ 03-50-55.mp4
+# edit the draft to add title, description, captions path
+corky youtube publish mail/social/YYYYMMDD-HHMMSS-youtube.md
+```
+
+All threads in this session are resolved (OBS config, PipeWire capture, YouTube upload feature, OAuth setup). Let me know when you want to upload the second video or record a new one with the fixed full-screen capture.
+
+```
+~/work/btakita/agent-loop main ⇡194 !19 ?1                                                                                                                                                                                             13:42:09
+❯ corky youtube draft --author btakita --video ~/Videos/2026-03-12\ 03-50-55.mp4
+error: unexpected argument '--video' found
+
+  tip: to pass '--video' as a value, use '-- --video'
+
+Usage: corky youtube draft --author <AUTHOR> [BODY]
+
+For more information, try '--help'.
+```
 <!-- /agent:exchange -->

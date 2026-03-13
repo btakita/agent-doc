@@ -529,4 +529,28 @@ The `.yalc/` directory doesn't exist in briantakita.me-dev — the yalc packages
 The `ENOENT: failed opening cache/package/version dir` errors are bun trying to resolve yalc-linked packages that aren't in the local yalc store. Once published and added, `bun i` should succeed.
 
 Still seeing `TS2307: Cannot find module` error
+## Assistant
+
+### Re: TS2307 still showing for .md imports
+
+Simplified `md.d.ts` — removed the `rebuildjs/server` import that could fail if yalc packages aren't installed:
+
+```ts
+declare module '*.md' {
+	export const meta_:(ctx:any)=>any
+	const content:(ctx:any)=>any
+	export default content
+}
+```
+
+If the error persists after this change, try:
+
+1. **Restart TypeScript service in IDEA:** `Help → Find Action → "Restart TypeScript Service"`
+2. **Or invalidate caches:** `File → Invalidate Caches → Invalidate and Restart`
+
+Note: your `tsconfig.json` has a mismatch — `"module": "esnext"` with `"moduleResolution": "nodenext"`. tsc requires `"module": "nodenext"` when using `"moduleResolution": "nodenext"`. This may also cause IDEA's TypeScript service to behave unpredictably. If you want to fix it: change `"module"` to `"nodenext"`.
+
+The `bun i` issue (yalc packages) is separate and needs the `yalc-publish-all.sh` + `yalc add` flow described above. The `.md` declaration should work independently once IDEA refreshes its TypeScript cache.
+
+How do I get these new blog posts to show up in the home page and in /posts?
 <!-- /agent:exchange -->

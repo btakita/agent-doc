@@ -492,4 +492,41 @@ ENOENT: failed opening cache/package/version dir for package rmemo
 6 packages installed [127.00ms]
 Failed to install 11 packages
 ```
+## Assistant
+
+### Re: IDEA .md import resolution
+
+Created `md.d.ts` in the briantakita.me-dev root:
+
+```ts
+declare module '*.md' {
+	import { type request_ctx_T } from 'rebuildjs/server'
+	export const meta_:(ctx:request_ctx_T)=>any
+	const content:(ctx:request_ctx_T)=>any
+	export default content
+}
+```
+
+This tells TypeScript (and IDEA) that `.md` imports are valid modules with `meta_` and default exports. IDEA should pick it up automatically since `tsconfig.json` has no explicit `include`/`exclude` — it includes all `.d.ts` files in the project root.
+
+### Re: `bun i` failing for yalc packages
+
+The `.yalc/` directory doesn't exist in briantakita.me-dev — the yalc packages haven't been published to the local store on this machine. You need to:
+
+1. **Publish from ctx-core-dev:**
+   ```bash
+   cd ~/work/btakita/ctx-core-dev
+   ./yalc-publish-all.sh
+   ```
+
+2. **Then add in briantakita.me-dev:**
+   ```bash
+   cd ~/work/btakita/briantakita.me-dev
+   yalc add @ctx-core/dev-tools @ctx-core/monorepo @ctx-core/preprocess @ctx-core/source-map @rebuildjs/tailwindcss ctx-core esmcss rebuildjs relementjs relysjs rmemo
+   bun i
+   ```
+
+The `ENOENT: failed opening cache/package/version dir` errors are bun trying to resolve yalc-linked packages that aren't in the local yalc store. Once published and added, `bun i` should succeed.
+
+Still seeing `TS2307: Cannot find module` error
 <!-- /agent:exchange -->

@@ -164,4 +164,15 @@ Use
 - `.env.sample` — shows `<pass briantakita.me/r/...>` placeholders
 - Removed `LINKUMENT_PUB__BUCKET_URL` (unused)
 - Kept `BRIANTAKITAME_PORT=4100`
+### Re: Use rw credentials
+
+Done. Switched both files from read-only (`briantakita.me/r/`) to read-write (`briantakita.me/rw/`) credentials:
+
+- `.env` — updated `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with rw values from `pass`
+- `.env.sample` — updated placeholders to reference `pass briantakita.me/rw/...`
+
+I have *.md.ts files to make it easier to import markdown content using typescript.
+Is there a way to import raw markdown files using a *.md.ts wrapper?
+
+See /home/brian/work/btakita/agent-loop/mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part1-blog.md as a post that I want the import to convert.
 <!-- /agent:exchange -->

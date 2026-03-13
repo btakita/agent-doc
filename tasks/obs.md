@@ -678,4 +678,11 @@ All changes are uncommitted in `src/corky/`. Ready for review and commit.
 
 https://github.com/nicholasgasior/rmemo is wrong.
 It's https://github.com/ctx-core/rmemo
+### Re: rmemo Link Fixed
+
+Fixed the rmemo URL in the YouTube draft: `nicholasgasior/rmemo` → `ctx-core/rmemo`.
+
+Updated the published video description on YouTube using the new `corky youtube edit` command — first real use of the edit feature we just built. Live at: https://www.youtube.com/watch?v=qQCKVQHRQCI]-
+
+/agent-doc compact
 <!-- /agent:exchange -->

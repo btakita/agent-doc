@@ -582,4 +582,26 @@ corky youtube publish mail/social/20260313-134452-youtube.md
 ```
 
 Publish to youtube
+**Almost there — YouTube Data API v3 is not enabled.** The OAuth flow succeeded (token obtained), but the API call to fetch your channel ID returned 403.
+
+**Fix:**
+
+1. Go to [Google Cloud Console > APIs & Services > Library](https://console.cloud.google.com/apis/library)
+2. Search for **"YouTube Data API v3"**
+3. Click **Enable**
+4. Wait ~30 seconds for propagation
+
+Then retry:
+```bash
+corky youtube auth --profile btakita
+```
+
+This time the channel ID fetch should succeed and save to your profile. Then:
+```bash
+corky youtube publish mail/social/20260313-134452-youtube.md
+```
+
+I also added `[btakita.youtube]` to `profiles.toml` and set the draft status to `ready`.
+
+go
 <!-- /agent:exchange -->

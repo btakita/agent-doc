@@ -179,4 +179,7 @@ All three videos are now live:
 Write a draft LinkedIn post for part 3.
 
 Since it is end of day on Friday...should I delay publishing this till Monday?
+I will probably make more videos over the weekend. These video will have better cropping as well.
+
+So publishing part 3 now could work with more coming over the weekend and/or on Monday.
 <!-- /agent:exchange -->

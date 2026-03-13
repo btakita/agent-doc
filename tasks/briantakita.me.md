@@ -175,4 +175,58 @@ I have *.md.ts files to make it easier to import markdown content using typescri
 Is there a way to import raw markdown files using a *.md.ts wrapper?
 
 See /home/brian/work/btakita/agent-loop/mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part1-blog.md as a post that I want the import to convert.
+## Assistant
+
+### Re: Raw markdown import via .md.ts wrapper
+
+Yes — the cleanest approach is **esbuild text loader + thin `.md.ts` wrapper**.
+
+**Current pattern**: Content is hardcoded as TypeScript calls (`md__raw_({ ctx }, \`...\`)`). The `md__raw_()` function needs `request_ctx_T` for the `marked` instance, so a wrapper is still needed — but the markdown content can be imported from a raw `.md` file.
+
+**Step 1 — Enable text loader for `.md` in `build.ts`:**
+
+Add to your esbuild config:
+```ts
+loader: { '.md': 'text' }
+```
+
+**Step 2 — Place the raw `.md` file alongside the wrapper:**
+
+Copy `2026-03-12-dogfooding-agent-doc-part1-blog.md` into `app/briantakita.me/post/content/`.
+
+**Step 3 — Create the `.md.ts` wrapper:**
+
+```ts
+// 2026-03-12-dogfooding-agent-doc-part1-blog.md.ts
+import { post_meta__validate } from '@rappstack/domain--server--blog/post'
+import { md__raw_ } from '@rappstack/ui--any/md'
+import { type request_ctx_T } from 'rebuildjs/server'
+import content from './2026-03-12-dogfooding-agent-doc-part1-blog.raw.md'
+
+export const meta_ = (ctx:request_ctx_T)=>post_meta__validate(ctx, {
+  pub_date: '2026-03-12T00:00:00Z',
+  title: `Dog-fooding agent-doc: CRDT Debugging, Reactive Architecture, and Why God = Existence`,
+  slug: 'dogfooding-agent-doc-part1',
+  tag_a1: ['agent-doc', 'rust', 'crdt', 'vibe-coding', 'existence-lang', 'ai', 'live-coding'],
+  description: `A 2-hour live session debugging CRDT merge bugs in agent-doc, a Rust CLI tool for structured AI conversations in markdown.`,
+})
+
+// @formatter:off
+// language=md
+export default (ctx:request_ctx_T)=>md__raw_({ ctx }, content)
+```
+
+**Note on naming**: Use `.raw.md` extension for the raw file to avoid collision with the `.md.ts` wrapper (since esbuild sees `foo.md.ts` as handling `foo.md`). Or place the raw files in a separate `raw/` subdirectory.
+
+**Alternative — no `.raw.md` rename needed**: If you put the raw `.md` in a different directory (e.g., `post/raw/`) and import with a relative path, no renaming is needed.
+
+**What about frontmatter?** The YAML frontmatter in the raw `.md` file would get passed through as markdown text. Two options:
+1. Strip frontmatter in the wrapper (parse it out before passing to `md__raw_()`)
+2. Keep metadata only in the `.md.ts` `meta_()` export and strip frontmatter from the raw `.md`
+
+The iframe embed will render as raw HTML through `marked` — it handles inline HTML natively.
+
+This follows the same plugin architecture as `esmcss_esbuild_plugin_` and `json_esbuild_plugin_` but uses esbuild's built-in text loader instead of a custom plugin, which is simpler.
+
+Can we make a custom importer for the *.md files?
 <!-- /agent:exchange -->

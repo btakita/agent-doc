@@ -439,5 +439,57 @@ slug: dogfooding-agent-doc-part1   # optional — derived from filename if omitt
 
 Want me to implement this in briantakita.me-dev?
 
-Yes...Is tags an alias to tag_a1? I renamed tag_a1 to tags.
+Yes...I renamed tag_a1 to tags.
+## Assistant
+
+### Re: Implement md_esbuild_plugin
+
+Done. Implemented in briantakita.me-dev:
+
+**`build.ts`** — added `md_esbuild_plugin_()`:
+- Parses YAML frontmatter via `js-yaml`, strips it from body
+- Generates `meta_()` and `default` exports as JS module (`loader: 'js'`)
+- Derives `slug` from filename (strips date prefix), or uses explicit `slug` frontmatter
+- Handles `js-yaml` parsing `date:` as a JS `Date` object (calls `.toISOString()`)
+- Maps: `date` → `pub_date`, `tags` → `tag_a1`, passes through `hero_image`, `og_image`, `draft`
+- Registered in both browser and server plugin arrays
+
+**`index.generate.ts`** — updated to discover both `.md.ts` and raw `.md` files:
+- `.md.ts` → imports as `.md.js` (compiled TypeScript, existing behavior)
+- `.md` → imports directly (esbuild plugin generates JS module)
+
+**Blog post** — copied `2026-03-12-dogfooding-agent-doc-part1-blog.md` to `post/content/`. Regenerated `index.ts` — confirmed it has `import('./content/2026-03-12-dogfooding-agent-doc-part1-blog.md')`.
+
+**Verified** — plugin logic produces correct output:
+- `slug: dogfooding-agent-doc-part1-blog`
+- `pub_date: 2026-03-12T00:00:00.000Z`
+- Tags array preserved correctly
+- Full build fails on pre-existing missing asset (`favicon.svg` — needs R2 download), not plugin-related
+
+Note: the `tags` field in frontmatter is renamed from `tag_a1` as you mentioned — the plugin maps `tags` → `tag_a1` internally for `post_meta__validate`.
+
+How do I make idea understand the md imports
+
+![img_2.png](img_2.png)
+
+```
+~/work/btakita/agent-loop/src/briantakita.me-dev main !2                                                                                                                                                                              19:43:48
+❯ bun i
+[0.01ms] ".env"
+bun install v1.3.10 (30e609e0)
+ENOENT: failed opening cache/package/version dir for package @ctx-core/dev-tools
+ENOENT: failed opening cache/package/version dir for package @ctx-core/monorepo
+ENOENT: failed opening cache/package/version dir for package @ctx-core/preprocess
+ENOENT: failed opening cache/package/version dir for package @ctx-core/source-map
+ENOENT: failed opening cache/package/version dir for package @rebuildjs/tailwindcss
+ENOENT: failed opening cache/package/version dir for package ctx-core
+ENOENT: failed opening cache/package/version dir for package esmcss
+ENOENT: failed opening cache/package/version dir for package rebuildjs
+ENOENT: failed opening cache/package/version dir for package relementjs
+ENOENT: failed opening cache/package/version dir for package relysjs
+ENOENT: failed opening cache/package/version dir for package rmemo
+
+6 packages installed [127.00ms]
+Failed to install 11 packages
+```
 <!-- /agent:exchange -->

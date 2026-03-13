@@ -466,4 +466,24 @@ Have you set up the Google Cloud OAuth2 credentials yet? That's the prerequisite
 
 I set GOOGLE_API_KEY in agent-doc/.env
 
+**`GOOGLE_API_KEY` won't work for YouTube uploads.** YouTube upload requires **OAuth2** (user consent flow), not a simple API key. API keys only work for read-only public data.
+
+**What you need:**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) > APIs & Services > Credentials
+2. Create an **OAuth 2.0 Client ID** (application type: "Desktop app")
+3. This gives you a `client_id` and `client_secret`
+4. Add to your `.corky.toml`:
+   ```toml
+   [youtube]
+   client_id = "your-client-id.apps.googleusercontent.com"
+   client_secret = "your-client-secret"
+   ```
+5. Make sure **YouTube Data API v3** is enabled in your project (APIs & Services > Library)
+6. Run `corky youtube auth --profile btakita` — this opens a browser for Google consent, then saves the refresh token
+
+The `GOOGLE_API_KEY` in `.env` is separate — that's for Google API key-based services (like Gemini). YouTube upload needs the OAuth2 flow because it acts on behalf of your Google account.
+
+I already have auth for gmail and google search console via the corky auth.
+Can we use the same credentials?
 <!-- /agent:exchange -->

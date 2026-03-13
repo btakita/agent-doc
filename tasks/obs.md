@@ -161,4 +161,20 @@ corky youtube publish mail/social/20260313-163457-youtube.md
 Or edit the draft title/description first in your editor, then tell me to publish.
 
 publish
+**Publishing now...** Uploading 671 MB video + captions to YouTube. This will take a few minutes depending on upload speed.
+**YouTube token expired.** Re-authenticating now.
+
+**ACTION REQUIRED:** A browser window will open — click through the Google consent screen to re-authorize YouTube access.
+### Part 3 Published
+
+**Published:** https://www.youtube.com/watch?v=RrZETW8EZEQ
+
+Video + captions uploaded. Draft updated to `published` status.
+
+All three videos are now live:
+- **Part 1:** https://www.youtube.com/watch?v=B-9uI53cRVE
+- **Part 2:** https://www.youtube.com/watch?v=qQCKVQHRQCI
+- **Part 3:** https://www.youtube.com/watch?v=RrZETW8EZEQ
+
+Write a LinkedIn post for part 3 and publish.
 <!-- /agent:exchange -->

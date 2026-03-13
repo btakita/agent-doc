@@ -616,5 +616,17 @@ A browser tab will open asking you to grant YouTube permissions. Click through t
 If the browser doesn't open automatically, copy the URL from the terminal output and paste it in your browser.
 
 Try again
+agent-doc should write to the document when 
+**Auth succeeded!** Channel ID: `UC3gg23rxm1sM43sQWRGKEqQ` — saved to profile.
 
+**Upload failed** with "Failed to read JSON: EOF while parsing a value" — this is a bug in corky's YouTube upload code. The 1.8GB video (225 chunks at 8MB) uploaded, but the response parsing failed. YouTube likely returned a 200 with either an empty body or a redirect that ureq didn't follow properly.
+
+**Bug:** In `youtube.rs:176`, when ureq returns `Ok(r)` on a chunk upload, it calls `r.into_json()` — but if YouTube returns a 200 with an empty body (possible on intermediate successful chunks), this fails.
+
+**Fixing now** — I'll update the upload code to handle empty responses gracefully and add response body logging. Want me to fix and retry, or would you prefer to upload this video via YouTube Studio manually while I fix the bug?
+
+Fix and retry. Can we edit videos? Might as well add functionality to edit the video. Add tests
+
+Try again
+agent-doc should immediately write to the document when the user needs to do something
 <!-- /agent:exchange -->

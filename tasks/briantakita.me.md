@@ -321,4 +321,123 @@ plugins: [
 The plugin strips frontmatter at build time, the `.md.ts` wrapper handles metadata via `meta_()` and rendering via `md__raw_()`. Both old-style (inline content) and new-style (raw import) `.md.ts` files work side by side.
 
 Want me to implement this in briantakita.me-dev?
+## Assistant
+
+### Re: Zero-wrapper .md imports
+
+Yes — the plugin can generate the full module directly from a raw `.md` file. No wrapper needed.
+
+**Updated `md_esbuild_plugin_`** — parses frontmatter, generates `meta_()` + `default` exports:
+
+```ts
+import { readFile } from 'fs/promises'
+import { basename } from 'path'
+import yaml from 'js-yaml'
+import type { Plugin } from 'esbuild'
+
+export function md_esbuild_plugin_():Plugin {
+    return {
+        name: 'md',
+        setup(build) {
+            build.onLoad(
+                { filter: /\.md$/ },
+                async (config)=>{
+                    const raw = await readFile(config.path, 'utf8')
+                    let body = raw
+                    let meta:Record<string, any> = {}
+                    // Parse YAML frontmatter
+                    if (raw.startsWith('---\n')) {
+                        const end = raw.indexOf('\n---\n', 4)
+                        if (end >= 0) {
+                            meta = yaml.load(raw.substring(4, end)) ?? {}
+                            body = raw.substring(end + 5)
+                        }
+                    }
+                    // Derive slug from filename: 2026-03-12-foo-bar.md → foo-bar
+                    const fname = basename(config.path, '.md')
+                    const slug = meta.slug
+                        ?? fname.replace(/^\d{4}-\d{2}-\d{2}-/, '')
+                    // Normalize pub_date
+                    const pub_date = meta.date
+                        ? (String(meta.date).includes('T')
+                            ? String(meta.date)
+                            : String(meta.date) + 'T00:00:00Z')
+                        : new Date().toISOString()
+                    const contents = `
+import { post_meta__validate } from '@rappstack/domain--server--blog/post'
+import { md__raw_ } from '@rappstack/ui--any/md'
+export const meta_ = (ctx)=>post_meta__validate(ctx, ${JSON.stringify({
+                        pub_date,
+                        title: meta.title ?? slug,
+                        slug,
+                        description: meta.description ?? '',
+                        tag_a1: meta.tags ?? ['other'],
+                        ...(meta.hero_image && { hero_image: meta.hero_image }),
+                        ...(meta.og_image && { og_image: meta.og_image }),
+                        ...(meta.draft !== undefined && { draft: meta.draft }),
+                    })})
+export default (ctx)=>md__raw_({ ctx }, ${JSON.stringify(body)})
+`
+                    return { contents, loader: 'js' }
+                }
+            )
+        },
+    }
+}
+```
+
+**Key features:**
+- Uses `js-yaml` (already in deps) for proper YAML parsing — handles arrays, nested values, etc.
+- Derives `slug` from filename (strips date prefix) or explicit `slug` frontmatter
+- Maps `date` → `pub_date`, `tags` → `tag_a1`
+- `loader: 'js'` — esbuild treats the result as a JavaScript module
+- No wrapper file needed
+
+**`index.generate.ts` update** — needs to handle both `.md.ts` and raw `.md` files:
+
+```ts
+function import_line_a_ts_() {
+    return (
+        readdir(join(dir, 'content'))
+            .then(file_a=>
+                file_a
+                    .filter(file=>isNumber(file[0]))
+                    .map(file=>{
+                        if (file.endsWith('.md.ts'))
+                            return `\timport('./content/${basename(file, '.ts')}.js'),`
+                        if (file.endsWith('.md'))
+                            return `\timport('./content/${file}'),`
+                        return null
+                    })
+                    .filter(Boolean)
+                    .join('\n'))
+    )
+}
+```
+
+**Result** — your content directory becomes:
+
+```
+post/content/
+├── 2026-03-12-dogfooding-agent-doc-part1-blog.md   ← raw markdown (plugin generates module)
+└── 2026-03-05-introducing-agent-doc.md.ts           ← existing (inline content, works as before)
+```
+
+The frontmatter in the `.md` file maps directly:
+
+```yaml
+---
+title: "Dog-fooding agent-doc..."
+date: 2026-03-12
+tags:
+  - agent-doc
+  - rust
+  - crdt
+slug: dogfooding-agent-doc-part1   # optional — derived from filename if omitted
+---
+```
+
+Want me to implement this in briantakita.me-dev?
+
+Yes...Is tags an alias to tag_a1? I renamed tag_a1 to tags.
 <!-- /agent:exchange -->

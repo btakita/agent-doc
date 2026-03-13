@@ -198,4 +198,33 @@ I wonder if character sheets can be made so an actor can "align" with their subj
 ---
 
 
+### Re: Revised reply — improv + character sheets
+
+Knowing David was your improv teacher changes everything. This should feel like a conversation between two people who've done scenes together, not a tech blog comment. The character sheet idea is the best part — it bridges his world (theater) and yours (tooling).
+
+**Refined draft:**
+
+---
+
+Thank you David! This makes me think about what we explored in improv together. People and institutions change — and that drift is often invisible until the story has moved on without you.
+
+What if instead of hard resets, we could snapshot the essence of an organization at its best — capture the principles, the culture, the decision patterns — and let others fork from that state? Like exploring alternative paths in an improv scene. The original company may drift, but the patterns that worked become seeds for a new scene.
+
+I wonder if character sheets could work here — the way an actor builds alignment with a character at different beats in a story. What if we could build something like that for organizations? A sheet that captures who the company *was* at its best, so someone else can step into that role and take it somewhere new.
+
+That's kind of what I'm trying to build with my tools — making the intent explicit so it doesn't quietly erode. If you can see the gap between where you are and where you started, drift becomes a choice instead of an accident.
+
+---
+
+This version:
+- References your shared improv history naturally (not name-dropping, just "what we explored")
+- Uses theater language David will connect with (scenes, beats, character sheets, stepping into a role)
+- The character sheet concept lands as a genuine question, not a pitch
+- Keeps the tech connection light — "my tools" instead of naming agent-doc
+- Ends with an accessible insight rather than a call-to-action
+
+Short enough for a LinkedIn comment reply. Want me to trim further or adjust the improv references?
+
+Edit mail/social/20260313-170000-linkedin.md to link to https://existence-lang.github.io/ instead of rmemo. Use corky to edit the post.
+
 <!-- /agent:exchange -->

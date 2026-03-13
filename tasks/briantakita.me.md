@@ -143,4 +143,25 @@ Please update .env and .env.sample in /home/brian/work/btakita/agent-loop/src/br
 The AWS buckets were moved to R2. Please update accordingly.
 Use `pass` where appropriate.
 
+## Assistant
+
+Updated both files in `src/briantakita.me-dev/`:
+
+| Field | Old (Contabo) | New (R2) |
+|-------|---------------|----------|
+| `AWS_REGION` | `US-central` | `auto` |
+| `AWS_BUCKET` | `assets.briantakita.me` | `briantakita-assets` |
+| `AWS_ENDPOINT_URL` | `https://usc1.contabostorage.com` | R2 S3 endpoint |
+| `AWS_ACCESS_KEY_ID` | (empty) | From `pass briantakita.me/r/AWS_ACCESS_KEY_ID` |
+| `AWS_SECRET_ACCESS_KEY` | (empty) | From `pass briantakita.me/r/AWS_SECRET_ACCESS_KEY` |
+| `ASSETS_BRIANTAKITA_ME__BUCKET_URL` | (empty) | `https://briantakita.me` |
+
+Use
+- pass briantakita.me/rw/AWS_ACCESS_KEY_ID
+- pass briantakita.me/rw/AWS_SECRET_ACCESS_KEY
+
+- `.env` — populated with real R2 credentials from `pass`
+- `.env.sample` — shows `<pass briantakita.me/r/...>` placeholders
+- Removed `LINKUMENT_PUB__BUCKET_URL` (unused)
+- Kept `BRIANTAKITAME_PORT=4100`
 <!-- /agent:exchange -->

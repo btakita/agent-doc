@@ -1,9 +1,8 @@
 ---
 agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
-tmux_session: '23'
+tmux_session: '0'
 agent_doc_mode: template
 ---
-
 
 
 
@@ -139,5 +138,9 @@ Already done — all 11 ctx-core dependencies are already `yalc add`'d in briant
 Converted to template mode. The existing conversation is now wrapped in an `<!-- agent:exchange -->` component. You can add more components (like `<!-- agent:status -->`, `<!-- agent:output -->`) as needed. Write prompts inside the exchange block and submit as usual.
 
 ## User
+
+Please update .env and .env.sample in /home/brian/work/btakita/agent-loop/src/briantakita.me-dev
+The AWS buckets were moved to R2. Please update accordingly.
+Use `pass` where appropriate.
 
 <!-- /agent:exchange -->

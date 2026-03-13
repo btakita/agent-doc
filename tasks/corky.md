@@ -461,5 +461,35 @@ This avoids reinventing code review and focuses on orchestration. Want me to res
 
 Yes...all 3 steps should be part of the general development pipeline for our projects.
 Does `/simplify` and `audit-docs` belong in agent-doc's deployed skill...or should we defer to the user's environment? Can we have `/simplify` and `audit-docs` if the user doesn't have either in their environment?
+**Defer to the user's environment.** Here's the reasoning:
+
+**`/simplify`** is a Claude Code built-in skill — it ships with every Claude Code installation. No deployment needed. It's always available.
+
+**`audit-docs`** is part of `instruction-files` (the Rust crate). It's available when the user has `instruction-files` installed or when a project uses it as a dependency (like corky does). It's NOT universal.
+
+**agent-doc's skill should not bundle either.** agent-doc is a document session tool — its skill handles the edit/diff/respond loop. Bundling code review or doc auditing would violate the single-responsibility principle and create coupling between unrelated tools.
+
+**The right architecture:**
+
+1. **agent-doc skill** — document sessions only (current scope, keep it)
+2. **Project-level CLAUDE.md** — defines the project's review pipeline:
+   ```
+   ## Precommit
+   - /simplify on changed files
+   - make check (clippy + tests)
+   - /agent-doc audit-docs (or instruction-files audit)
+   ```
+3. **`/review` skill** (optional, lives in agent-loop or per-project) — orchestrates whatever the project's CLAUDE.md specifies
+4. **Users without these tools** — `/review` gracefully skips missing steps and reports what's available
+
+This way:
+- agent-doc stays focused
+- Each project defines its own quality gates
+- `/review` is a thin orchestrator that reads project conventions
+- No tool is required — each step is optional
+
+**Practical next step:** Add a `## Review Pipeline` section to corky's AGENTS.md documenting the 3 steps (make check, audit-docs, /simplify). The `/review` skill can come later — for now, the convention itself is the value.
+
+continue
 <!-- /agent:exchange -->
 ****

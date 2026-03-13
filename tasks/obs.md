@@ -486,4 +486,34 @@ The `GOOGLE_API_KEY` in `.env` is separate — that's for Google API key-based s
 
 I already have auth for gmail and google search console via the corky auth.
 Can we use the same credentials?
+**Yes — same Google Cloud project, same OAuth client credentials.** Gmail and YouTube both use Google OAuth2, just with different scopes. Your existing client_id/client_secret from the Gmail setup will work.
+
+Add to your `.corky.toml`:
+
+```toml
+[youtube]
+client_id = "same-as-gmail"
+client_secret = "same-as-gmail"
+```
+
+Or if you use `_cmd` resolution (like `pass`):
+
+```toml
+[youtube]
+client_id_cmd = "pass corky/gmail_client_id"
+client_secret_cmd = "pass corky/gmail_client_secret"
+```
+
+Copy whatever values you have in your `[gmail]` section — the client_id and client_secret are the same OAuth app. YouTube just requests different scopes (`youtube.upload` + `youtube.force-ssl`) during the auth flow.
+
+Then run:
+```bash
+corky youtube auth --profile btakita
+```
+
+This opens a browser consent screen for YouTube-specific permissions. The refresh token gets stored separately from Gmail's token.
+
+**One prerequisite:** Make sure **YouTube Data API v3** is enabled in the same Google Cloud project. Go to [APIs & Services > Library](https://console.cloud.google.com/apis/library) and search for "YouTube Data API v3" — click Enable if it's not already.
+
+done
 <!-- /agent:exchange -->

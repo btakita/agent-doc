@@ -629,4 +629,13 @@ Fix and retry. Can we edit videos? Might as well add functionality to edit the v
 
 Try again
 agent-doc should immediately write to the document when the user needs to do something
+**Good feedback — noted.** I'll flush instructions to the document before running blocking commands from now on.
+
+**Plan:**
+1. Fix upload bug (handle empty JSON response body)
+2. Add `corky youtube edit` (update title/description/tags on published videos)
+3. Add tests for upload + edit
+4. Rebuild, retry upload
+
+Working on it now.
 <!-- /agent:exchange -->

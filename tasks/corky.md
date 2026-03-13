@@ -437,5 +437,29 @@ Want me to create this skill?
 Sure. I know that many people have been working on code review skills.
 So it may make sense to do more research.
 
+Good call on research first. The `/simplify` skill already exists in this environment (reviews changed code for reuse, quality, and efficiency). There's also the broader ecosystem:
+
+**Existing approaches worth studying:**
+- Claude Code's built-in `/simplify` skill — already does code review of changed files
+- GitHub's code review agents (Copilot, CodeRabbit, etc.) — PR-level review
+- `aider`'s lint/test integration — runs linters after every edit
+- Custom Claude Code skills people have shared on GitHub
+
+**What's already covered vs. what's missing:**
+- `/simplify` handles code quality review of diffs
+- `make check` (clippy + tests) is already in the workflow
+- `corky audit-docs` / `instruction-files audit` handles doc consistency
+- **Gap:** No orchestrator that runs all three in sequence and reports a unified result
+
+The simplest approach might be a thin `/review` skill that just chains the existing tools:
+1. Run `/simplify` on changed files
+2. Run `make check` (or equivalent)
+3. Run `audit-docs` if available
+4. Summarize pass/fail
+
+This avoids reinventing code review and focuses on orchestration. Want me to research what others have built before creating anything?
+
+Yes...all 3 steps should be part of the general development pipeline for our projects.
+Does `/simplify` and `audit-docs` belong in agent-doc's deployed skill...or should we defer to the user's environment? Can we have `/simplify` and `audit-docs` if the user doesn't have either in their environment?
 <!-- /agent:exchange -->
 ****

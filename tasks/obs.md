@@ -449,4 +449,21 @@ urn = "urn:li:person:_C2t_TDOVY"
 Both YouTube feature and profiles consolidation are ready for review — all uncommitted in `src/corky/`.
 
 Is the YouTube publish released?
+**Yes — YouTube publish is released.** It shipped in **corky v0.15.0** (commit `6e43a7f`), published to all 3 registries:
+
+- crates.io: `cargo install corky`
+- PyPI: `pip install corky`
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.15.0
+
+Commands available:
+```bash
+corky youtube auth --profile btakita     # Google OAuth2 (one-time)
+corky youtube draft --author btakita --video ~/Videos/file.mp4
+corky youtube publish mail/social/YYYYMMDD-HHMMSS-youtube.md
+```
+
+Have you set up the Google Cloud OAuth2 credentials yet? That's the prerequisite before you can use it.
+
+I set GOOGLE_API_KEY in agent-doc/.env
+
 <!-- /agent:exchange -->

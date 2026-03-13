@@ -648,4 +648,103 @@ Once #16 lands, ALL document modifications will flow through IPC — fully dialo
 
 Implement fix for #16.
 Discuss how we are going to spec editor plugins. Including a reference implementation using a virtual editor.
+### Re: Implement #16 (frontmatter via IPC)
+
+**Implemented.** All builds pass (310 + 21 tests, clippy clean, JetBrains plugin builds).
+
+**Usage:** Agent includes a `patch:frontmatter` block in the response:
+```markdown
+<!-- patch:frontmatter -->
+model: opus
+agent: claude
+agent_doc_format: template
+<!-- /patch:frontmatter -->
+
+<!-- patch:status -->
+Updated status.
+<!-- /patch:status -->
+```
+
+**Binary side** (`frontmatter.rs` + `write.rs`):
+- New `merge_fields(content, yaml)` — parses YAML key/value pairs, merges into existing frontmatter (additive, never removes)
+- Handles all known fields: session, resume, agent, model, branch, tmux_session, mode, format, write
+- Enum fields (`agent_doc_format`, `agent_doc_write`) properly deserialized
+- Unknown fields logged and ignored
+- `run_ipc()` separates frontmatter patches from component patches, adds `"frontmatter": "yaml..."` to IPC JSON
+- Fallback path (IPC timeout) also applies frontmatter merge before CRDT write
+- 7 new tests (44 frontmatter total)
+
+**Plugin side** (`PatchWatcher.kt`):
+- `IpcPatch` data class gains `frontmatter: String?` field
+- `parsePatchJson()` extracts `frontmatter` field from IPC JSON
+- New `applyFrontmatterPatch()` method:
+  - Parses existing YAML frontmatter as ordered key/value pairs
+  - Merges new fields (add or update, preserves order)
+  - Rebuilds `---\n...\n---\n` block
+  - Applied FIRST, before component patches (frontmatter changes don't affect component boundaries)
+- All via `WriteCommandAction` — no external file change dialog
+
+**IPC JSON format (updated):**
+```json
+{
+  "file": "/path/to/doc.md",
+  "patches": [{"component": "status", "content": "..."}],
+  "unmatched": "",
+  "baseline": "...",
+  "frontmatter": "model: opus\nagent: claude"
+}
+```
+
+**Dialog-free status (all operations now covered):**
+
+| Operation | Path | Dialog-free? |
+|-----------|------|-------------|
+| Content patches | `--ipc` → PatchWatcher → Document API | Yes |
+| Frontmatter updates | `--ipc` → PatchWatcher → Document API | **Yes** |
+| Snapshot/CRDT state | `.agent-doc/` files | N/A |
+
+### Re: Plugin spec + reference implementation
+
+**Agreed — the IPC contract needs a formal spec.** Each editor plugin will have its own implementation of the same protocol. Without a spec, implementations will drift.
+
+**Proposed: `SPEC.md §8 — Editor Plugin IPC Protocol`**
+
+The spec should define:
+
+1. **Patch file format** — JSON schema for `.agent-doc/patches/<hash>.json`
+2. **Component patching** — how to find `<!-- agent:name -->` markers and replace content
+3. **Frontmatter patching** — YAML key/value merge into `---` block
+4. **ACK protocol** — delete the JSON file after applying (signals completion to CLI)
+5. **Document API requirement** — all edits MUST go through the editor's document API (not disk writes) to avoid external change dialogs
+6. **Fallback behavior** — CLI falls back to direct write if ACK not received within timeout
+
+**Reference implementation: `agent-doc ipc-test`**
+
+A CLI command that acts as a virtual editor for testing:
+```
+agent-doc ipc-test <FILE> --watch
+```
+- Watches `.agent-doc/patches/` like a real plugin
+- Applies patches to the file using the same algorithm
+- Prints each operation to stdout for verification
+- Deletes patch file (ACK)
+- Can be used in CI to verify the IPC contract without a real IDE
+
+This would be a Rust implementation of the plugin contract, serving as:
+- **Reference**: canonical behavior for all editors to match
+- **Test harness**: CI-runnable verification that the binary produces correct IPC payloads
+- **Documentation**: the code IS the spec (alongside the written SPEC.md)
+
+**Editor plugin compliance matrix:**
+
+| Capability | JetBrains | VS Code | Reference (CLI) |
+|-----------|-----------|---------|-----------------|
+| Watch `.agent-doc/patches/` | NIO WatchService | fs.watch | notify crate |
+| Component patching | `applyComponentPatch()` | string replacement | string replacement |
+| Frontmatter patching | `applyFrontmatterPatch()` | YAML merge | YAML merge |
+| Document API (no dialog) | WriteCommandAction | WorkspaceEdit | direct file write (ok for CLI) |
+| ACK (delete patch file) | File.delete() | fs.unlink() | std::fs::remove_file() |
+| Lifecycle | projectOpened/Closed | activate/deactivate | CLI start/stop |
+
+Should I write the SPEC section and implement `agent-doc ipc-test` now?
 <!-- /agent:exchange -->

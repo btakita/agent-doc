@@ -537,4 +537,31 @@ Usage: corky youtube draft --author <AUTHOR> [BODY]
 
 For more information, try '--help'.
 ```
+**My bad — `--video` isn't a CLI flag.** The video path goes in the draft file's YAML frontmatter, not on the command line.
+
+**Correct workflow:**
+
+```bash
+# 1. Create the draft (body is the YouTube description)
+corky youtube draft --author btakita "Dog-fooding agent-doc Part 2: rmemo, tag-path, and releasing v0.16.1"
+
+# 2. Edit the generated draft file to add video + captions paths:
+```
+
+In the draft file (`mail/social/YYYYMMDD-HHMMSS-youtube.md`), add to the YAML frontmatter:
+
+```yaml
+video: /home/brian/Videos/2026-03-12 03-50-55.mp4
+captions: /home/brian/work/btakita/agent-loop/mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-2.srt
+title: "Dog-fooding agent-doc Part 2: rmemo, tag-path, and releasing v0.16.1"
+```
+
+```bash
+# 3. Publish (uploads video + captions to YouTube)
+corky youtube publish mail/social/YYYYMMDD-HHMMSS-youtube.md
+```
+
+The `video:` and `captions:` fields are frontmatter — not CLI args. Sorry for the confusion in my earlier examples.
+
+No problem...please create the draft. Make a draft title and description for me to review and edit.
 <!-- /agent:exchange -->

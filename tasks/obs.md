@@ -145,4 +145,20 @@ Updated the mea culpa — corrected from "quarter-screen" to the actual issue: s
 > Heads up: the screen capture had a slight offset that clipped the top of the editor window — OBS + XSHM + HiDPI misalignment. The video has been cropped to fit the content, but you'll notice the top edge is cut off in places. Fixed for the next video — PipeWire capture is working now.
 
 Whisper transcription still in progress.
+### Transcription Complete
+
+**SRT saved:** `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-3.srt` (6040 lines, 2h 1m)
+
+**Draft updated** with `captions:` field pointing to the SRT file.
+
+Draft is ready to publish:
+```bash
+# Set status to ready first
+# Then:
+corky youtube publish mail/social/20260313-163457-youtube.md
+```
+
+Or edit the draft title/description first in your editor, then tell me to publish.
+
+publish
 <!-- /agent:exchange -->

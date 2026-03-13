@@ -209,4 +209,35 @@ There are some interesting topics that can be phrased into coherent thoughts for
 Added `[profiles.btakita.linkedin]` entry to `.corky.toml` (was missing — Part 1 was posted manually). Future LinkedIn publishes will work directly.
 
 Draft updated to `published` status at `mail/social/20260313-170000-linkedin.md`.
+### Re: YouTube Transcripts, SEO & LLMs
+
+**Short answer:** YouTube captions are partially indexed, but not the way web content is.
+
+**What YouTube does with captions:**
+- Indexed for YouTube's own search (helps discovery within YouTube)
+- Google can surface "key moments" from caption text in search results
+- But transcript text is NOT full-text indexed by Google like a webpage — it's video metadata
+
+**How to get transcript content into SERP and LLM results:**
+
+1. **Blog posts with embedded video** — Publish companion posts on briantakita.me for each video. Embed YouTube + include polished transcript excerpts. Google indexes blog content fully. Highest ROI.
+
+2. **Structured transcript page** — Add a `/videos/` section to your site with readable timestamped text. Add `VideoObject` schema markup for rich snippets.
+
+3. **GitHub content** — Extract technical insights (CRDT debugging, agent-doc architecture, tmux-router) into README sections or GitHub discussions. Heavily indexed by Google and LLM training pipelines.
+
+4. **YouTube description** — Already indexed by Google. Pack with searchable phrases (you're doing this).
+
+**For LLMs specifically:**
+- Training corpora favor GitHub repos, blog posts, and docs over YouTube transcripts
+- CommonCrawl (major LLM training source) indexes web pages, not YouTube captions
+- Turn video insights into blog posts / documentation for LLM coverage
+
+**Practical next step:** Auto-generate blog post drafts from SRT + video metadata. Extract the coherent thoughts, structure as blog posts, publish to briantakita.me. Gets both SERP and LLM coverage with minimal extra effort.
+
+Want me to build a `corky blog draft` command that converts SRT + video metadata into a blog post template?
+
+Yes...Do this for all of my videos. Create a separate blog post for each video.
+Use the content. Highlight interesting ideas and philosophical points.
+Make this SEO & llms friendly.
 <!-- /agent:exchange -->

@@ -182,4 +182,20 @@ Since it is end of day on Friday...should I delay publishing this till Monday?
 I will probably make more videos over the weekend. These video will have better cropping as well.
 
 So publishing part 3 now could work with more coming over the weekend and/or on Monday.
+### Re: LinkedIn Post + Timing
+
+**Publish Part 3 now.** Friday afternoon LinkedIn is lower engagement, but developer content lives on hashtag feeds and gets picked up over the weekend. If you make more videos this weekend, you'll have fresh content for Monday — that's your highest-engagement slot. Spreading posts across days builds momentum vs. dumping 2-3 at once.
+
+**Strategy:** Part 3 today → weekend recordings → Part 4+ on Monday/Tuesday.
+
+**LinkedIn draft created:** `mail/social/20260313-170000-linkedin.md`
+
+To publish:
+```bash
+corky linkedin publish mail/social/20260313-170000-linkedin.md
+```
+
+Or edit the draft first, then tell me to publish.
+
+publish
 <!-- /agent:exchange -->

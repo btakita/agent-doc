@@ -229,4 +229,96 @@ The iframe embed will render as raw HTML through `marked` — it handles inline 
 This follows the same plugin architecture as `esmcss_esbuild_plugin_` and `json_esbuild_plugin_` but uses esbuild's built-in text loader instead of a custom plugin, which is simpler.
 
 Can we make a custom importer for the *.md files?
+## Assistant
+
+### Re: Custom markdown importer
+
+Yes — a custom `md_esbuild_plugin_` following the `json_esbuild_plugin_` pattern:
+
+```ts
+import { readFile } from 'fs/promises'
+import type { Plugin } from 'esbuild'
+
+export function md_esbuild_plugin_():Plugin {
+    return {
+        name: 'md',
+        setup(build) {
+            build.onLoad(
+                { filter: /\.md$/ },
+                async (config)=>{
+                    let contents = await readFile(config.path, 'utf8')
+                    // Strip YAML frontmatter
+                    if (contents.startsWith('---\n')) {
+                        const end = contents.indexOf('\n---\n', 4)
+                        if (end >= 0) contents = contents.substring(end + 5)
+                    }
+                    return { contents, loader: 'text' }
+                }
+            )
+        },
+    }
+}
+```
+
+**Key features:**
+- Automatically strips YAML frontmatter at build time — no per-wrapper handling
+- Follows the established plugin pattern (`esmcss_esbuild_plugin_`, `json_esbuild_plugin_`)
+- Returns `loader: 'text'` so the import resolves to a plain string
+
+**File layout** — put raw `.md` in `raw/` to avoid collision with `.md.ts` files:
+
+```
+post/content/
+├── raw/
+│   └── 2026-03-12-dogfooding-agent-doc-part1-blog.md   ← raw markdown
+├── 2026-03-12-dogfooding-agent-doc-part1-blog.md.ts     ← thin wrapper
+└── 2026-03-05-introducing-agent-doc.md.ts               ← existing (inline content)
+```
+
+Can we just have 
+
+```
+post/content/
+├── 2026-03-12-dogfooding-agent-doc-part1-blog.md     ← importing this markdown create a module with meta_ and default factory functions?
+└── 2026-03-05-introducing-agent-doc.md.ts               ← existing (inline content)
+```
+
+**Wrapper becomes minimal:**
+
+```ts
+import { post_meta__validate } from '@rappstack/domain--server--blog/post'
+import { md__raw_ } from '@rappstack/ui--any/md'
+import { type request_ctx_T } from 'rebuildjs/server'
+import content from './raw/2026-03-12-dogfooding-agent-doc-part1-blog.md'
+
+export const meta_ = (ctx:request_ctx_T)=>post_meta__validate(ctx, {
+  pub_date: '2026-03-12T00:00:00Z',
+  title: `Dog-fooding agent-doc: CRDT Debugging, Reactive Architecture, and Why God = Existence`,
+  slug: 'dogfooding-agent-doc-part1',
+  tag_a1: ['agent-doc', 'rust', 'crdt', 'vibe-coding', 'existence-lang', 'ai', 'live-coding'],
+  description: `A 2-hour live session debugging CRDT merge bugs in agent-doc...`,
+})
+
+// @formatter:off
+// language=md
+export default (ctx:request_ctx_T)=>md__raw_({ ctx }, content)
+```
+
+**Registration in `build.ts`** — add alongside existing plugins:
+
+```ts
+const md_esbuild_plugin = md_esbuild_plugin_()
+
+plugins: [
+    esmcss_esbuild_plugin,
+    rebuild_tailwind_plugin,
+    preprocess_plugin,
+    json_esbuild_plugin,
+    md_esbuild_plugin,
+]
+```
+
+The plugin strips frontmatter at build time, the `.md.ts` wrapper handles metadata via `meta_()` and rendering via `md__raw_()`. Both old-style (inline content) and new-style (raw import) `.md.ts` files work side by side.
+
+Want me to implement this in briantakita.me-dev?
 <!-- /agent:exchange -->

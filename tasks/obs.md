@@ -140,4 +140,9 @@ Draft updated at `mail/social/20260313-163457-youtube.md`. Whisper transcription
 Add a mea culpa about the cropping in the description. I will have it fixed in the next video.
 
 Re: the video
+Updated the mea culpa — corrected from "quarter-screen" to the actual issue: slight offset clipping the top of the editor window.
+
+> Heads up: the screen capture had a slight offset that clipped the top of the editor window — OBS + XSHM + HiDPI misalignment. The video has been cropped to fit the content, but you'll notice the top edge is cut off in places. Fixed for the next video — PipeWire capture is working now.
+
+Whisper transcription still in progress.
 <!-- /agent:exchange -->

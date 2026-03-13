@@ -564,4 +564,22 @@ corky youtube publish mail/social/YYYYMMDD-HHMMSS-youtube.md
 The `video:` and `captions:` fields are frontmatter — not CLI args. Sorry for the confusion in my earlier examples.
 
 No problem...please create the draft. Make a draft title and description for me to review and edit.
+**Draft created:** `mail/social/20260313-134452-youtube.md`
+
+**Title:** Dog-fooding agent-doc Part 2: rmemo, tag-path, and releasing v0.16.1
+
+**Description:**
+> Follow-up to my first dog-fooding session. In this video I test OBS screen capture (still quarter-screen — fixed for next time!), showcase rmemo — a 358-byte reactive library for JavaScript/TypeScript, demonstrate tag-path semantic code search with TreeSitter integration, walk through agent-doc's compaction workflow, and ship agent-doc v0.16.1 live on camera.
+
+**Frontmatter includes:**
+- `video:` pointing to `~/Videos/2026-03-12 03-50-55.mp4`
+- `captions:` pointing to the SRT file from the transcription
+- `visibility: private` (change to `public` or `unlisted` when ready)
+
+Edit the draft in your editor, then publish:
+```bash
+corky youtube publish mail/social/20260313-134452-youtube.md
+```
+
+Publish to youtube
 <!-- /agent:exchange -->

@@ -622,4 +622,30 @@ Do you have the following?
 I want to avoid the file externally changed dialog. So the plugin does need to handle updating the file so external change dialog does not pop up.
 
 The plugin needs to handle the mechanics of the CRDT changes to gracefully integrate these updates with the editor process...avoiding externally changed file dialogs
+### Re: Plugin patch application + frontmatter management
+
+**Patch application: Yes, implemented.** `PatchWatcher.kt` handles this end-to-end:
+The Patch implementation should be SPEC'd. Since each editor will have it's own implementation
+We need a "Software Factory" to ensure that all of the plugins work according to spec.
+Perhaps a reference implementation with a virtual editor?
+- NIO WatchService on `.agent-doc/patches/`
+- Reads JSON patch files written by `agent-doc write --ipc`
+- `applyComponentPatch()` finds `<!-- agent:name -->` markers, replaces content
+- All edits via `WriteCommandAction.runWriteCommandAction` — holds document write lock, batches undo, preserves cursor, NO external file change dialog
+- Saves document via `FileDocumentManager.saveDocument()`, then deletes patch file (ACK)
+
+**Frontmatter management: Not yet.** This is [#16](https://github.com/btakita/agent-doc/issues/16). Currently frontmatter changes go through the Edit tool (direct file write), which can trigger the external change dialog. Fix: add `patch:frontmatter` target so frontmatter updates flow through the same IPC pipeline as content patches.
+
+**Summary of what avoids the dialog vs what doesn't:**
+
+| Operation | Path | Dialog-free? |
+|-----------|------|-------------|
+| Content patches (exchange, status, etc.) | `--ipc` → PatchWatcher → Document API | Yes |
+| Frontmatter updates | Edit tool → disk write | **No** (triggers dialog) |
+| Snapshot/CRDT state | `.agent-doc/` files (not open in editor) | N/A |
+
+Once #16 lands, ALL document modifications will flow through IPC — fully dialog-free. The plugin stays thin: it only handles the mechanics of applying changes through the IDE's Document API. The merge logic, CRDT state, snapshot management, and patch computation remain in the agent-doc CLI.
+
+Implement fix for #16.
+Discuss how we are going to spec editor plugins. Including a reference implementation using a virtual editor.
 <!-- /agent:exchange -->

@@ -604,4 +604,17 @@ corky youtube publish mail/social/20260313-134452-youtube.md
 I also added `[btakita.youtube]` to `profiles.toml` and set the draft status to `ready`.
 
 go
+**Auth timed out** — the browser consent screen needs your click. The first attempt got a token but failed on channel ID fetch (API wasn't enabled yet). The second attempt timed out waiting for browser consent (120s).
+
+**Try again — click quickly this time:**
+```bash
+corky youtube auth --profile btakita
+```
+
+A browser tab will open asking you to grant YouTube permissions. Click through the consent screen. The 120s timeout starts when the command runs, so be ready to click.
+
+If the browser doesn't open automatically, copy the URL from the terminal output and paste it in your browser.
+
+Try again
+
 <!-- /agent:exchange -->

@@ -176,5 +176,7 @@ All three videos are now live:
 - **Part 2:** https://www.youtube.com/watch?v=qQCKVQHRQCI
 - **Part 3:** https://www.youtube.com/watch?v=RrZETW8EZEQ
 
-Write a LinkedIn post for part 3 and publish.
+Write a draft LinkedIn post for part 3.
+
+Since it is end of day on Friday...should I delay publishing this till Monday?
 <!-- /agent:exchange -->

@@ -42,4 +42,14 @@ Starting this cycle, I'll run the claims log check in the foreground. The 9 stal
 
 Please update agent-doc to not use run_in_background for these tasks.
 The change should occur in the agent-doc binary and/or the agent-doc skill.
+
+Updated the agent-doc skill (`SKILL.md` step 0, "Check claims log") to explicitly require **foreground** execution — added "never use `run_in_background`" with the reason (phantom task accumulation).
+
+**Changes made:**
+- `.claude/skills/agent-doc/SKILL.md` — added foreground-only instruction to claims log check
+- `memory/feedback_no_background_claims_log.md` — saved feedback memory (done in previous cycle)
+
+The binary doesn't need changes — this was purely a Claude Code behavior issue in the skill instructions. The fix ensures future sessions won't repeat the mistake.
+
+But we do need to change and release the SKILL.md that agent-doc installs. 
 <!-- /agent:exchange -->

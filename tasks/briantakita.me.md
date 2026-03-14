@@ -1146,4 +1146,13 @@ I apologize for the earlier incorrect audit. My subagent searched for `CARGO_REG
 
 Why is `$(pass cargo/registry_token)` not picked up in my project wide search using Idea?
 
+The text isn't in any project file — that's why IDEA can't find it.
+
+it was in my .env files though. Which should be included in the search.
+
+The cleartext token appeared in a **Claude Code Bash tool call** during this session. It's stored in the session transcript at `~/.claude/projects/-home-brian-work-btakita-agent-loop/3f2803bc-....jsonl` — which is outside your project directory, so IDEA's project search won't index it.
+
+The token was visible in the Claude Code CLI output (the terminal) during execution, which is what stream viewers would have seen. It was never written to a source file.
+
+To find it: `grep 'CARGO_REGISTRY_TOKEN=cio' ~/.claude/projects/-home-brian-work-btakita-agent-loop/*.jsonl`
 <!-- /agent:exchange -->

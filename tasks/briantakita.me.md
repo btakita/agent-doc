@@ -1463,4 +1463,27 @@ All 9 routes verified (including `/`, `/search`, `/rss`, `/about`, `/tags`, `/po
 Shall I commit from within each submodule and push?
 
 We should be able to import *.md files directly. Work was done to process the *.md files to export `meta_` and the default factory functions.
+### Re: Direct .md imports
+
+Implemented the `md_esbuild_plugin_` that processes raw `.md` files with YAML frontmatter into JS modules at build time.
+
+**What was done:**
+- Added `md_esbuild_plugin_()` to `build.ts` — parses YAML frontmatter, generates `meta_()` + default render function via `md__raw_`
+- Copied the 3 raw `.md` blog posts from `mail/topics/brian-takita/videos/` into `post/content/`
+- Removed the `.md.ts` wrappers (no longer needed)
+- Updated `post/index.ts` imports: `.md.js` → `.md` for the dogfooding posts
+- Added `md.d.ts` for TypeScript module declarations
+- Added `js-yaml` to package.json
+
+**All routes verified:**
+```
+/posts/dogfooding-agent-doc-part1-blog → 200 (22ms)
+/posts/dogfooding-agent-doc-part2-blog → 200 (15ms)
+/posts/dogfooding-agent-doc-part3-blog → 200 (17ms)
+```
+
+Now new blog posts can be authored as plain markdown with YAML frontmatter — no TypeScript wrapper needed.
+
+**Ready to commit and deploy.** Shall I proceed?
+Yes
 <!-- /agent:exchange -->

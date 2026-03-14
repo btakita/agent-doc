@@ -1916,4 +1916,13 @@ The `content/index.ts` barrel used `export * from '...'` for all post files, but
 - `briantakita.me` -> `57959b3`
 - `briantakita.me-dev` -> `ad75caa` (deploy triggered)
 Please regenerate and update dependencies
+### Re: Regenerated and updated
+
+Done:
+
+1. **Regenerated `post/index.ts`** via `bun index.generate.ts` — dogfooding posts import as `.md`
+2. **Updated dependencies** — dev-tools 8.3.72, caniuse-lite, baseline-browser-mapping, monorepo
+3. **Committed and pushed** -> `843d0d6` (deploy triggered)
+
+Please add documentation on how to properly generate content/index.ts
 <!-- /agent:exchange -->

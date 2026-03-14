@@ -4,10 +4,7 @@ tmux_session: '0'
 agent_doc_mode: template
 ---
 
-<!-- agent:exchange -->
-## Status Summary (compacted 2026-03-14)
-
-### Current Architecture
+## Current Architecture
 
 **briantakita.me** is a pre-rendered static site deployed to **Cloudflare Pages**, built with **Hono** (via rhonojs) + **esbuild** (via rebuildjs).
 
@@ -22,7 +19,7 @@ agent_doc_mode: template
 | Email workers | `email-gateway-worker`, `email-to-slack-worker` |
 | Cloudflare plan | $5/month Workers Paid |
 
-### CI/CD Pipeline (`.github/workflows/deploy.yml`)
+## CI/CD Pipeline (`.github/workflows/deploy.yml`)
 
 ```
 push to main → checkout (recursive submodules) → bun install --frozen-lockfile →
@@ -32,7 +29,7 @@ cp assets to dist/static/ → wrangler pages deploy
 
 `build-and-serve.ts` builds then starts server so CSS hashes match between prerendered HTML and static assets.
 
-### GitHub Secrets
+## GitHub Secrets
 
 | Secret | Value |
 |--------|-------|
@@ -43,7 +40,7 @@ cp assets to dist/static/ → wrangler pages deploy
 | `ASSETS_BRIANTAKITA_ME__BUCKET_URL` | `https://briantakita.me` |
 | `CLOUDFLARE_API_TOKEN` | Pages deploy token |
 
-### Local Development
+## Local Development
 
 ```bash
 cd ~/work/btakita/briantakita.me-dev
@@ -52,7 +49,7 @@ source .env
 cd app/briantakita.me && bun run dev          # port 4100
 ```
 
-### Esbuild Plugins
+## Esbuild Plugins
 
 | Plugin | File | Purpose |
 |--------|------|---------|
@@ -62,7 +59,7 @@ cd app/briantakita.me && bun run dev          # port 4100
 | `preprocess_plugin_` | build.ts | Debug preprocessing for ctx-core |
 | `json_esbuild_plugin_` | build.ts | JSON generation from `.json.ts` files |
 
-### Blog Posts
+## Blog Posts
 
 **Published posts:** 51 total, including 4 new posts:
 - `2026-03-05-introducing-agent-doc.md.ts` — "Introducing agent-doc" (TypeScript wrapper with rich content)
@@ -72,7 +69,14 @@ cd app/briantakita.me && bun run dev          # port 4100
 
 Post registration: `post/index.ts` — imports both `.md.js` (compiled from `.md.ts`) and `.md` (processed by `md_esbuild_plugin_`).
 
-### Hono Migration (completed 2026-03-14)
+## Security Notes
+
+- Google OAuth refresh tokens were exposed in March 13 session transcript — **revoke at https://myaccount.google.com/permissions**
+- `CARGO_REGISTRY_TOKEN` was exposed in cleartext in March 14 session — **rotate at https://crates.io/settings/tokens**
+- `/livestream` skill created at `.claude/skills/livestream/SKILL.md` for future sessions
+- All future secret usage must use `$(pass ...)` — never inline cleartext
+
+## Hono Migration (completed 2026-03-14)
 
 Migrated from Elysia/relysjs to Hono/rhonojs:
 - 10 app files: route handlers, build config, prerender
@@ -80,14 +84,7 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 - 5 lib package.json: dep `relysjs` → `rhonojs`
 - rhonojs 0.1.1 published with `app__attach()` fix for Hono sub-app routing
 
-### Security Notes
-
-- Google OAuth refresh tokens were exposed in March 13 session transcript — **revoke at https://myaccount.google.com/permissions**
-- `CARGO_REGISTRY_TOKEN` was exposed in cleartext in March 14 session — **rotate at https://crates.io/settings/tokens**
-- `/livestream` skill created at `.claude/skills/livestream/SKILL.md` for future sessions
-- All future secret usage must use `$(pass ...)` — never inline cleartext
-
-### Historical Fixes
+## Historical Fixes
 
 | Issue | Fix |
 |-------|-----|
@@ -98,25 +95,24 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 | bun.lock frozen lockfile CI failure | Regenerated `bun.lock` after dep changes |
 | postcss circular import | Pinned `"postcss": "~8.4.49"` |
 
+## Exchange
+
+<!-- agent:exchange -->
 ### Pending
 
-- [ ] Revoke exposed Google OAuth tokens
-- [ ] Rotate crates.io API token
-- [ ] Publish @rappstack/* packages at v0.1.0 to npm
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
 - [ ] Create yalc tooling for library version publishing
+How can we do this? Should we create a new package?
 - [ ] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+go
 - [ ] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+go
 - [ ] Update YouTube video descriptions (add blog post links)
+go
 - [ ] Tailwind v4 migration for @rebuildjs/tailwindcss
+go
 
-Organize this file into separate dashboard areas.
-Ongoing context should be outside of exchange, such as:
-- Current Architecture
-- CI/CD Pipeline
-- GitHub Secrets
-- Local Development
-- Esbuild Plugins
-- Blog Posts
-- Security Notes
-- Hono Migration (completed 2026-03-14)
 <!-- /agent:exchange -->

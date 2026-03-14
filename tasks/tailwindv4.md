@@ -104,4 +104,26 @@ Want to proceed with the briantakita.me integration test?
 
 Yes
 And Can we kill the 4 bashes?
+No background bashes remain — they were cleaned up when the previous context ended.
+
+### briantakita.me Integration Test: PASS
+
+yalc published `@rebuildjs/tailwindcss@0.10.60` → briantakita.me-dev. Build completes successfully:
+
+```
+rhonojs_browser__build|done
+rhonojs_server__build|done
+```
+
+Note: `build.ts` still passes `tailwindcss_config` to the plugin, but since we removed it from the config type, it's silently ignored at runtime. The `@tailwindcss/postcss` plugin auto-discovers `tailwind.config.ts` from the project. No build errors.
+
+**Remaining:**
+- [x] Test with briantakita.me build
+- [ ] Clean up `build.ts` — remove `tailwindcss_config` import + param (now dead code)
+- [ ] Address `tailwind.config.ts` v4 deprecations (safelist removed, JS config → CSS @theme)
+- [ ] Publish updated @rebuildjs/tailwindcss to npm
+
+Want to proceed with publish, or clean up the consumer side first?
+
+clean up the publish
 <!-- /agent:exchange -->

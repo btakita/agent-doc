@@ -1084,4 +1084,33 @@ Committed in ctx-core-dev as `24c14f64e`.
 Shall I proceed with wiring up the apps?
 
 Yes
+### Re: All 6 apps wired up
+
+**Plugin added to all 6 apps' `build.ts`:**
+
+| App | Install | Build | Notes |
+|-----|---------|-------|-------|
+| drmanny-dev | ✅ | ✅ | — |
+| brookebrodack-dev | ✅ | ✅ | — |
+| prescience-notes-dev | ✅ | ✅ | — |
+| cogov-dev | ✅ | ✅ | — |
+| herbaliciousbliss-dev | ✅ | ✅ | — |
+| briantakita.me-dev | ✅ | ⚠️ | Pre-existing env var issue (`ASSETS_BRIANTAKITA_ME__BUCKET_URL|missing`) — unrelated to plugin |
+
+Fix the ASSETS_BRIANTAKITA_ME__BUCKET_URL issue
+
+**Fixed packaging bug:** `esbuild-plugin-object-store-asset@0.0.1` was published with `workspace:*` dependency. Republished as **v0.0.2** with `>=0.0.1`. All apps had workaround overrides added by the agents, which can be removed after updating to 0.0.2.
+
+**Plugin is a no-op in dev** (no `ASSET_BASE_URL` set) — all apps behave identically to before.
+
+**Remaining steps:**
+1. Create R2 buckets + custom domains
+2. Upload existing assets to R2
+3. Set `ASSET_BASE_URL` in CI workflows
+4. Remove override workarounds, update to 0.0.2
+5. Commit + deploy
+
+Shall I continue with R2 bucket creation?
+
+Yes...I thought we already had R2 buckets for each of the apps
 <!-- /agent:exchange -->

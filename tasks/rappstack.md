@@ -2014,4 +2014,17 @@ Each `import()` resolves independently — no barrel, no name collisions. The es
 
 commit and push all rappstack packages and sites.
 publish briantakita.me
+
+### Re: Commit, push, and deploy
+
+**In progress:**
+1. Checking git status across all 9 repos (brookebrodack-dev, cogov-dev, censible-core, drmanny-dev, herbaliciousbliss-dev, prescience-notes-dev, rappstack-dev, ctx-core-dev, briantakita.me-dev)
+2. Committing and pushing any uncommitted changes
+3. Deploying briantakita.me via CI
+
+Will update with results shortly.
+
+commit and push all rappstack packages and sites.
+version bump and release any ctx-core or rappstack package that needs it 
+publish briantakita.me
 <!-- /agent:exchange -->

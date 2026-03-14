@@ -327,6 +327,18 @@ Published `@ctx-core/monorepo@21.4.162`:
 - All prepublish checks passed (types, tests, publint, attw)
 - Pushed to origin/main
 
-What plugin do we use to render *.md & *.md.ts files?
+What plugin do we use to import *.md & *.md.ts files?
 
+
+### Re: MD import plugins
+
+**`md_esbuild_plugin_`** in `app/briantakita.me/build.ts` — a local (not published) esbuild plugin.
+
+**`.md` files:** The plugin reads raw markdown with YAML frontmatter, extracts metadata (slug, date, title, tags, hero_image, etc.), and outputs a JS module:
+- `meta_()` → calls `post_meta__validate()` from `@rappstack/domain--server--blog/post`
+- `default()` → calls `md__raw_()` from `@rappstack/ui--any/md` with the markdown body
+
+**`.md.ts` files:** Hand-written TypeScript wrappers. Same `meta_` + default export interface, but use custom component composition (e.g., `tb_a_`, `dl_tree_`). These are compiled by esbuild's native TS support, not the plugin.
+
+Both types are imported in `post/index.ts` as `.md.js` (esbuild compiles `.md` → `.md.js` via the plugin, `.md.ts` → `.md.js` natively).
 <!-- /agent:exchange -->

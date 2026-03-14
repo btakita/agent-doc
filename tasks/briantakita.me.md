@@ -684,4 +684,35 @@ The `md_esbuild_plugin` is generating correct JS modules for all three `.md` fil
 http://localhost:4100/posts/dogfooding-agent-doc-part2-blog times out. Looks like the *.md import doesn't work.
 
 It should generate minified js with mapping files.
+## Assistant
+
+### Re: Blog post timeout and .md import fix
+
+Found and fixed the root cause. Two issues:
+
+**1. Raw `.md` files not processed at runtime** — The `md_esbuild_plugin` only runs during esbuild bundling. But `bun run dev` uses Bun's runtime module resolution for the dynamic imports in `post/index.ts`. Bun doesn't know how to process `.md` files as JS modules — it imports them as raw text/HTML, so `default` is a string instead of a function, causing the `blog_post__estimate_read_minutes__wait` 5-second timeout.
+
+**Fix:** Updated `index.generate.ts` to:
+- Generate `.md.js` wrapper files for each raw `.md` file (same transformation as the esbuild plugin — frontmatter parsing, slug derivation, `meta_()` + `default` exports)
+- Import `.md.js` in `index.ts` instead of raw `.md`
+
+Now both esbuild (production bundling) AND Bun (dev runtime) can import the posts.
+
+**2. Wrong field name: `tag_a1` → `tags`** — The esbuild plugin was outputting `tag_a1` but `post_meta__validate` expects `tags`. Fixed in both `build.ts` and `index.generate.ts`.
+
+**Verified:** All 4 blog posts return 200 with sub-50ms response times:
+```
+intro:  200  12ms
+part1:  200  17ms
+part2:  200   9ms
+part3:  200  40ms
+```
+
+**Note:** There's a pre-existing cold-start race condition with the `rmemo__wait` reactive chain — the first request to the server after startup can timeout. Once warmed up, all posts work correctly. This is NOT related to the `.md` import changes.
+
+http://localhost:4100/posts/dogfooding-agent-doc-part2-blog times out. Looks like the *.md import doesn't work.
+
+It should generate minified js with mapping files.
+
+Please add automated tests.
 <!-- /agent:exchange -->

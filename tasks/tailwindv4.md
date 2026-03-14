@@ -425,5 +425,24 @@ Note I set `visibility: public` in:
 [20260313-163457-youtube.md](../mail/social/20260313-163457-youtube.md)
 [20260313-134452-youtube.md](../mail/social/20260313-134452-youtube.md)
 
-Corky 
+Corky should set visibility: public by default
+### YouTube Video: Auth Required
+
+The draft `mail/social/20260313-134452-youtube.md` already has `visibility: public` — corky's default is correct. The video was uploaded with public intent but may have been changed on YouTube's side.
+
+**Corky's `default_visibility()` already returns `"public"`** (line 34 of `src/social/youtube.rs`), so the code default is correct. No corky update needed there.
+
+**To fix the video**, YouTube OAuth needs to be re-authenticated:
+
+```bash
+corky youtube auth
+# (opens browser for Google OAuth)
+# Then:
+corky youtube edit mail/social/20260313-134452-youtube.md
+```
+
+This will push the `visibility: public` setting from the draft to YouTube. Run `corky youtube auth` first — the token has expired.
+
+Please do it
+for the 3 video. Make them public
 <!-- /agent:exchange -->

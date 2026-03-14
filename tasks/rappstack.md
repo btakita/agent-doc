@@ -2084,4 +2084,17 @@ ok
 
 Want me to fix all of these?
 yes
+
+### Re: Fixing all 4 CI failures
+
+**4 fix agents launched in parallel:**
+
+1. **brookebrodack-dev** — upgrading esbuild-plugin-object-store-asset to v0.0.3 + fixing build timeout
+2. **drmanny-dev** — adding `marked-highlight` dependency
+3. **herbaliciousbliss-dev** — fixing build timeout (waitfor skip when watch: false)
+4. **cogov-dev** — adding asset download step to CI workflow
+
+Will report results as each completes.
+
+/agent-doc compact
 <!-- /agent:exchange -->

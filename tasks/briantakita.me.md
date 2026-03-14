@@ -992,4 +992,43 @@ Commit changes to rappstack libraries.
 Publish blog posts.
 Update video descriptions to point to the related blog post.
 
+### Re: Release, commit, publish, update descriptions
+
+**Corky v0.15.2** — Released to all 4 targets:
+- GitHub: pushed + tagged
+- crates.io: published  
+- PyPI: published
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.15.2
+
+**briantakita.me-dev** — Committed and pushed:
+- 3 raw `.md` blog posts + `.md.js` wrappers
+- Updated `index.generate.ts`, `build.ts`, `index.ts`
+- Test file (6 tests)
+- `md.d.ts`, `.env.sample`, `bun.lock`
+
+**rappstack lib submodules** — Committed locally (tag_a1 → tags rename):
+- `lib/domain--any--blog` — tag rename, file rename
+- `lib/domain--server--blog` — post_meta update
+- `lib/ui--server` — og metadata update
+- `lib/ui--server--blog` — fragment updates
+- `lib/ui--server--briantakita` — sitemap update
+
+**Blocked:** The lib submodules can't push — they're on detached HEAD and the remotes have diverged (Hono migration happened upstream). The commits need to be rebased onto the latest remote `main` for each lib. This won't block the blog deploy if CI uses the submodule pointers as-is.
+
+Rebase onto HEAD, resolve merges, push
+
+**Video descriptions** — Already include blog post URLs from the earlier update. No changes needed.
+
+**Blog deploy** — Pushed to `main`. GitHub Actions should trigger the build + deploy to Cloudflare Pages.
+
+Release Corky.
+Commit changes to rappstack libraries.
+Publish blog posts.
+Update video descriptions to point to the related blog post.
+
+> ● Bash(cargo build --release 2>&1 | tail -3 && CARGO_REGISTRY_TOKEN=... cargo publish
+2>&1 | tail -5)
+
+I livestream my content. Can we have a rule in AGENTS.md to always use pass instead of showing my cleartext keys?
+Actually this should be a skill. A security skill?
 <!-- /agent:exchange -->

@@ -614,4 +614,21 @@ localhost:4020 header is missing padding
 - cogov.me: ![img_7.png](img_7.png)
 
 Are the background tasks still being used?
+### Re: cogov.me header padding + deeper investigation
+
+**cogov.me header fix:** The `@config` I added loaded `tailwind.config.ts` which REPLACES default screens (`sm`, `md`, `lg`, `xl`) with custom ones (`phone`, `port`, `pack`, `land`, `big`). The nav template uses `lg:flex` and `lg:hidden` — which only exist in Tailwind's default screens. Removed `@config`, replaced with `@theme` (fonts) + `@custom-variant` (custom breakpoints) — this preserves all default screens while adding custom ones.
+
+**drmanny-dev CSS completely broken:** PostCSS silently fails because `tailwind.config.ts` imports `{ borderColor, textColor, ... }` from `tailwindcss/defaultTheme.js` — these exports don't exist in Tailwind v4. The `@config` directive triggers loading this config, which throws a SyntaxError that the build swallows. Zero compiled CSS output. Converting to `@utility` + `@theme` approach (like briantakita.me). Fix in progress.
+
+**Re: background tasks:** Yes, the drmanny-dev conversion (most complex app — extensive per-utility-type skin colors + typography prose overrides) is running as a background agent. Will report results when complete.
+
+**CSS output verification (post @source fix):**
+
+| App | Compiled CSS | Key classes present | Issue |
+|-----|-------------|--------------------|----|
+| cogov-dev | 32K ✅ | `lg:flex`, `lg:hidden`, `port:space-x-0`, `space-x-8` | Fixed — `@config` replaced with `@theme` + `@custom-variant` |
+| herbaliciousbliss-dev | 32K ✅ | `text-primary`, `bg-card-indigo`, `grid-cols-2` | — |
+| prescience-notes-dev | 44K ✅ | `max-w-3xl`, `px-4`, `text-4xl`, `backdrop-blur-sm` | — |
+| brookebrodack-dev | 23K ✅ | `noscript:`, `max-w-prose` | — |
+| drmanny-dev | 0K ❌ | None (raw @apply in output) | Fix in progress — converting to @utility approach |
 <!-- /agent:exchange -->

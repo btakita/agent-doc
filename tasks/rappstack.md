@@ -703,4 +703,30 @@ Deploy the rest of the sites
 All 5 sites deploying to Cloudflare Pages.
 
 /agent-doc compact
+### Re: Compact + deploy status
+
+**Tailwind v4 migration — COMPLETE across all 5 apps.**
+
+**Deploy status:**
+
+| App | URL | CI | Notes |
+|-----|-----|-----|-------|
+| cogov-dev | https://cogov.me/ | ✅ PASS | `@source`, `@theme`, `@custom-variant`, `gap-8` nav fix |
+| herbaliciousbliss-dev | https://hb.briantakita.me/ | ✅ PASS | `@source`, `--color-primary` |
+| prescience-notes | https://pn.briantakita.me/ | ✅ PASS | `@source` directives |
+| brookebrodack-dev | https://brookebrodack.net/ | ✅ PASS | `@source`, `@custom-variant noscript`, upgraded `@rebuildjs/tailwindcss` |
+| drmanny-dev | https://pe.briantakita.me/ | ❌ FAIL | `peak-existence-WU23PK7K.mp4` (250 MiB) exceeds Cloudflare Pages 25 MiB file limit — needs to be served from R2 or excluded |
+
+Let's have all assets be served from r2. For all of the sites...including briantakita.me
+
+**drmanny-dev deploy blocker:** A 250 MiB MP4 video in `dist/browser` exceeds Cloudflare Pages' limit. The CSS migration itself is correct (188K compiled CSS). The video needs to be either excluded from the Pages deploy or moved to R2 storage. This is a pre-existing asset issue, not related to Tailwind v4.
+
+**Tailwind v4 migration summary:**
+- All 5 apps upgraded: tailwindcss 4.2.1 + @rebuildjs/tailwindcss 0.11.1
+- `@source` directives added to scan `lib/` template directories
+- cogov-dev: `@theme` + `@custom-variant` (preserved default screens while adding custom breakpoints)
+- drmanny-dev: Full CSS-native conversion — `@utility` (20+ skin classes), `@theme`, `@plugin`, unlayered `.prose` overrides
+- brookebrodack-dev: `@custom-variant noscript`, `@source` for 6 lib dirs
+- herbaliciousbliss-dev: `--color-primary` in `@theme`
+- Key lesson: Tailwind v4 `space-x-*` can fail silently — use `gap-*` with flexbox instead
 <!-- /agent:exchange -->

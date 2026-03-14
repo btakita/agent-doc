@@ -1056,4 +1056,48 @@ Added a `## Security — Secret Handling` section to `CLAUDE.md` with these rule
 Regarding a dedicated security skill — a CLAUDE.md rule is the right first layer since it applies to every session automatically. A skill could add automated detection (scanning tool call args for patterns like tokens, passwords, API keys) but that's a separate effort. The CLAUDE.md rule covers the immediate need.
 
 Please review my part 3 video. Do any of my keys get exposed?
+**Part 3 Video Security Audit:**
+
+I scanned the Claude Code session transcripts from March 12-13 (the Part 3 recording period). The March 12 sessions (4 files) are **clean** — no secrets exposed.
+
+**However, the March 13 session (`de90ccda`) has exposures:**
+
+| Secret | Risk | Status |
+|--------|------|--------|
+| Google/YouTube OAuth **access tokens** (`ya29.a0...`) | Low — short-lived, likely expired | Exposed via `tokens.json` read |
+| Google/YouTube OAuth **refresh tokens** (`1//0...`) | **HIGH — long-lived, can generate new access tokens** | Exposed via `tokens.json` read |
+| Google OAuth **client_id** | Low — semi-public by design | Exposed in auth URLs |
+| YouTube **channel ID** | None — public info | Exposed |
+| `CARGO_REGISTRY_TOKEN` | Safe | Used `$(pass ...)` |
+| `MATURIN_PYPI_TOKEN` | Safe | Used `$(pass ...)` |
+
+**Action required:**
+
+1. **Revoke Google/YouTube OAuth tokens NOW** — Go to https://myaccount.google.com/permissions, find the corky OAuth app, revoke access, then re-auth with `corky youtube auth --profile btakita`
+2. **Prevent future exposure** — Consider adding `tokens.json` to a deny-list so the agent can't read it, or store tokens via `pass` instead of a JSON file
+
+The refresh tokens are the critical concern — they don't expire and could be used to access your YouTube account.
+
+Please review my part 3 video. Do any of my keys get exposed?
+
+Please create a security skill. that can be shared.
+Or better yet, a general purpose livestream skill that include security.
+**Created `/livestream` skill** at `.claude/skills/livestream/SKILL.md`
+
+Three commands:
+
+- `/livestream on` — activates session-wide secret protection (deny-list for token files, mandatory `pass` usage, redaction rules)
+- `/livestream off` — deactivates
+- `/livestream audit [paths]` — scans session transcripts for exposed secrets (OAuth tokens, GitHub tokens, API keys, private keys, etc.)
+
+Key features:
+- **Secret deny-list** — blocks reading `tokens.json`, `.env`, `credentials.json`, `*.pem`, `*.key`, `id_rsa*`, `.netrc` during live sessions
+- **Audit patterns** — detects `ya29.a0...` (Google OAuth), `ghp_...` (GitHub), `pypi-...` (PyPI), Bearer tokens, AWS creds, private keys
+- **Safe pattern exclusion** — ignores `$(pass ...)` references, test tokens, placeholders
+
+The skill is shareable — it's a standalone SKILL.md with no external dependencies. Anyone can copy `.claude/skills/livestream/` into their project.
+
+**Immediate action still needed:** Revoke the Google OAuth refresh tokens exposed in the March 13 session — https://myaccount.google.com/permissions
+
+What do I need to do?
 <!-- /agent:exchange -->

@@ -802,6 +802,12 @@ Cork
 Why were the videos not public to begin with?
 Corky should always publish public videos...unless explicitly to private.
 
+```
+```
+
+Why were the videos not public to begin with?
+Corky should always publish public videos...unless explicitly to private.
+
 Used `corky youtube edit` with draft files specifying `visibility: public`. Had to re-auth first (`corky youtube auth --profile btakita`).
 
 Refresh the blog post page — the YouTube embeds should now show the video player instead of "This video is private".
@@ -848,4 +854,32 @@ Why are you using /home/brian/Documents/mail and not /home/brian/work/btakita/ma
 > Create it or run `corky linkedin check` for guidance.
 
 Why this? Why are we looking in profiles.toml? I thought we moved all of the config into .corky.toml?
+### Re: Why were the videos not public?
+
+**Corky bug found and fixed.** Two competing `default_visibility()` functions:
+
+| File | Default |
+|------|---------|
+| `social/draft.rs:76` | `"public"` |
+| `social/youtube.rs:34` | `"private"` |
+
+The YouTube `UploadMetadata` struct uses its own serde default, overriding the draft's `"public"` default. So videos uploaded without explicit `visibility` in the draft get published as private.
+
+**Fixed:** Changed `youtube.rs:35` from `"private"` to `"public"`. Compiles clean. This needs to be committed in the corky submodule.
+
+Yes...change the visibility to Public using Corky...if any of these are private.
+
+```
+● Bash(corky youtube edit /tmp/yt-drafts/part1.md 2>&1)
+  ⎿  Error: Exit code 1
+     Error: profiles.toml not found at /home/brian/Documents/mail/profiles.toml.
+     Create it or run `corky linkedin check` for guidance.
+```
+
+Why are you using /home/brian/Documents/mail and not /home/brian/work/btakita/mail?
+> Create it or run `corky linkedin check` for guidance.
+
+Why this? Why are we looking in profiles.toml? I thought we moved all of the config into .corky.toml?
+
+Youtube video drafts should have the visibility set to public in the frontmatter.
 <!-- /agent:exchange -->

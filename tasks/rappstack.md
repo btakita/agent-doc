@@ -103,4 +103,28 @@ Internal `workspace:*` dependencies updated to `^0.1.0` before publishing.
 **Ready to start app conversion.** Proceeding with all apps in sequence, starting with cogov-dev (simplest — 1 dep).
 
 Yes. Go
+### Re: App conversion progress
+
+**Published:** All @rappstack/* packages + @btakita/dev-bin + @btakita/ui--browser--semantic to npm at 0.1.0
+
+**App conversion status:**
+
+| App | Submodules removed | package.json updated | bun install | Notes |
+|-----|-------------------|---------------------|-------------|-------|
+| cogov-dev | 5 removed | 3 files | SUCCESS | Working |
+| brookebrodack-dev | 14 removed | 10 files | BLOCKED | CDN cache |
+| drmanny-dev | 19 removed | 2 files | BLOCKED | CDN cache, fixed app-specific refs |
+| herbaliciousbliss-dev | 16 removed | 4 files | BLOCKED | CDN cache |
+| prescience-notes-dev | 11 removed | 4 files | BLOCKED | CDN cache |
+
+**CDN cache issue:** npm's CDN cached 404 responses for `@rappstack/domain--any--blog` and `@rappstack/ui--browser` from when the conversion agents ran `bun install` before the packages had propagated. This is a known npm registry issue — the negative cache TTL is ~10-15 minutes for newly published scoped packages.
+
+**Next steps:**
+1. Wait ~10 minutes for CDN cache to expire
+2. Re-run `bun install` in each app
+3. Verify builds
+4. Commit changes in each submodule
+
+Want me to retry now, or should we wait?
+retry
 <!-- /agent:exchange -->

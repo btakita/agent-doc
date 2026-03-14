@@ -64,4 +64,21 @@ The binary bundles SKILL.md at compile time, so a **rebuild + release** is neede
 Ready to commit in the submodule and release when you say go. Do you want a version bump, or should we move the existing v0.17.0 tag forward?
 
 Release
+
+### Release Status
+
+**Done:**
+- Committed SKILL.md fix in agent-doc submodule (443949c)
+- Pushed to `origin/main`
+- Moved v0.17.0 tag forward (406c13a → 443949c)
+- Built release binary with fix embedded
+- Updated GitHub Release with new binary
+
+**Blocked:**
+- **crates.io**: Token in `~/.cargo/credentials.toml` is invalid (401 Unauthorized). Need to generate a new API token at https://crates.io/settings/tokens and run `cargo login`.
+- **PyPI (maturin)**: Skipped — depends on crates.io auth being fixed first.
+
+The binary is available via GitHub Release and `cargo install --git`. crates.io publish needs a fresh token.
+
+See CARGO_REGISTRY_TOKEN in the root .env
 <!-- /agent:exchange -->

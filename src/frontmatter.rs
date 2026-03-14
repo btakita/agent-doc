@@ -240,6 +240,51 @@ pub fn set_format_and_write(
     write(&fm, body)
 }
 
+/// Merge YAML key/value pairs into a document's frontmatter.
+///
+/// Takes a YAML string of fields to merge (additive — never removes keys).
+/// Only known frontmatter fields are applied; unknown keys are ignored.
+/// Returns the updated document content.
+pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    let patch: serde_yaml::Value = serde_yaml::from_str(yaml_fields)
+        .unwrap_or(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let mapping = patch.as_mapping().unwrap_or(&serde_yaml::Mapping::new()).clone();
+
+    for (key, value) in &mapping {
+        let key_str = key.as_str().unwrap_or("");
+        let val_str = || value.as_str().map(|s| s.to_string());
+        match key_str {
+            "agent_doc_session" | "session" => fm.session = val_str(),
+            "resume" => fm.resume = val_str(),
+            "agent" => fm.agent = val_str(),
+            "model" => fm.model = val_str(),
+            "branch" => fm.branch = val_str(),
+            "tmux_session" => fm.tmux_session = val_str(),
+            "agent_doc_mode" | "mode" | "response_mode" => fm.mode = val_str(),
+            "agent_doc_format" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(f) = serde_yaml::from_str::<AgentDocFormat>(&format!("\"{}\"", s))
+                {
+                    fm.format = Some(f);
+                }
+            }
+            "agent_doc_write" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(w) = serde_yaml::from_str::<AgentDocWrite>(&format!("\"{}\"", s))
+                {
+                    fm.write_mode = Some(w);
+                }
+            }
+            _ => {
+                eprintln!("[frontmatter] ignoring unknown patch field: {}", key_str);
+            }
+        }
+    }
+
+    write(&fm, body)
+}
+
 /// Update the tmux_session name in a document string.
 pub fn set_tmux_session(content: &str, session_name: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
@@ -607,6 +652,69 @@ mod tests {
         assert!(fm.mode.is_none());
         assert_eq!(fm.format, Some(AgentDocFormat::Template));
         assert_eq!(fm.write_mode, Some(AgentDocWrite::Crdt));
+    }
+
+    // --- merge_fields tests ---
+
+    #[test]
+    fn merge_fields_adds_new_field() {
+        let content = "---\nagent_doc_session: abc\n---\nBody\n";
+        let result = merge_fields(content, "model: opus").unwrap();
+        let (fm, body) = parse(&result).unwrap();
+        assert_eq!(fm.session.as_deref(), Some("abc"));
+        assert_eq!(fm.model.as_deref(), Some("opus"));
+        assert!(body.contains("Body"));
+    }
+
+    #[test]
+    fn merge_fields_updates_existing_field() {
+        let content = "---\nagent_doc_session: abc\nmodel: sonnet\n---\nBody\n";
+        let result = merge_fields(content, "model: opus").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("opus"));
+        assert_eq!(fm.session.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn merge_fields_multiple_fields() {
+        let content = "---\nagent_doc_session: abc\n---\nBody\n";
+        let result = merge_fields(content, "model: opus\nagent: claude\nbranch: main").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("opus"));
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+        assert_eq!(fm.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn merge_fields_format_enum() {
+        let content = "---\nagent_doc_session: abc\n---\nBody\n";
+        let result = merge_fields(content, "agent_doc_format: append").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.format, Some(AgentDocFormat::Append));
+    }
+
+    #[test]
+    fn merge_fields_write_enum() {
+        let content = "---\nagent_doc_session: abc\n---\nBody\n";
+        let result = merge_fields(content, "agent_doc_write: merge").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.write_mode, Some(AgentDocWrite::Merge));
+    }
+
+    #[test]
+    fn merge_fields_ignores_unknown() {
+        let content = "---\nagent_doc_session: abc\n---\nBody\n";
+        let result = merge_fields(content, "unknown_field: value\nmodel: opus").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn merge_fields_preserves_body() {
+        let content = "---\nagent_doc_session: abc\n---\n# Title\n\nSome **markdown** content.\n";
+        let result = merge_fields(content, "model: opus").unwrap();
+        assert!(result.contains("# Title"));
+        assert!(result.contains("Some **markdown** content."));
     }
 
     #[test]

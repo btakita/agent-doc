@@ -381,4 +381,90 @@ User line 2.
         assert!(result.contains("User edit"));
         assert!(!result.contains("<<<<<<<"));
     }
+
+    /// Regression test: CRDT state must include user edits from the merge.
+    ///
+    /// Bug: After a merge cycle where the user edited concurrently, the CRDT
+    /// state was rebuilt from `content_ours` (agent-only) instead of the merged
+    /// state. On the next cycle, the merge saw user edits as new insertions
+    /// relative to the stale base, producing duplicate text.
+    ///
+    /// This test simulates two consecutive merge cycles:
+    /// 1. Agent writes response while user edits concurrently → merge
+    /// 2. Agent writes another response using the CRDT state from cycle 1
+    ///
+    /// With the bug, cycle 2 would duplicate the user's edit from cycle 1.
+    #[test]
+    fn crdt_state_includes_user_edits_no_duplicates() {
+        // --- Cycle 1: Initial state, agent responds, user edits concurrently ---
+        let initial = "Why were the videos not public?\n";
+        let initial_doc = crate::crdt::CrdtDoc::from_text(initial);
+        let initial_state = initial_doc.encode_state();
+
+        // Agent appends a response
+        let ours_cycle1 = "Why were the videos not public?\nAlways publish public videos.\n";
+        // User also edits concurrently (adds a line)
+        let theirs_cycle1 = "Why were the videos not public?\nuser-edit-abc\n";
+
+        let (merged1, state1) = merge_contents_crdt(
+            Some(&initial_state), ours_cycle1, theirs_cycle1
+        ).unwrap();
+
+        // Both edits present after cycle 1
+        assert!(merged1.contains("Always publish public videos."), "missing agent response");
+        assert!(merged1.contains("user-edit-abc"), "missing user edit");
+
+        // --- Cycle 2: Agent writes another response, no concurrent user edits ---
+        // The agent's new content_ours includes the full merged result + new text
+        let ours_cycle2 = format!("{}...unless explicitly set to private.\n", merged1);
+        // No user edits this time — theirs is the same as what was written to disk
+        let theirs_cycle2 = merged1.clone();
+
+        let (merged2, _state2) = merge_contents_crdt(
+            Some(&state1), &ours_cycle2, &theirs_cycle2
+        ).unwrap();
+
+        // The user's edit should appear exactly ONCE, not duplicated
+        let edit_count = merged2.matches("user-edit-abc").count();
+        assert_eq!(
+            edit_count, 1,
+            "User edit duplicated! Appeared {} times in:\n{}",
+            edit_count, merged2
+        );
+
+        // Agent's content from both cycles should be present
+        assert!(merged2.contains("Always publish public videos."));
+        assert!(merged2.contains("...unless explicitly set to private."));
+    }
+
+    /// Regression test: Multiple flush cycles with concurrent user edits.
+    ///
+    /// Simulates the streaming checkpoint pattern where the agent flushes
+    /// partial responses multiple times while the user keeps editing.
+    #[test]
+    fn crdt_multi_flush_no_duplicates() {
+        let base = "# Doc\n\nQuestion here.\n";
+        let base_doc = crate::crdt::CrdtDoc::from_text(base);
+        let state0 = base_doc.encode_state();
+
+        // Flush 1: Agent starts responding, user adds a note
+        let ours1 = "# Doc\n\nQuestion here.\n\n### Re: Answer\n\nFirst paragraph.\n";
+        let theirs1 = "# Doc\n\nQuestion here.\n\n> user note\n";
+        let (merged1, state1) = merge_contents_crdt(Some(&state0), ours1, theirs1).unwrap();
+        assert!(merged1.contains("First paragraph."));
+        assert!(merged1.contains("> user note"));
+
+        // Flush 2: Agent continues, user adds another note
+        let ours2 = format!("{}\nSecond paragraph.\n", merged1);
+        let theirs2 = format!("{}\n> another note\n", merged1);
+        let (merged2, _state2) = merge_contents_crdt(Some(&state1), &ours2, &theirs2).unwrap();
+
+        // Each piece of content appears exactly once
+        assert_eq!(merged2.matches("First paragraph.").count(), 1,
+            "First paragraph duplicated in:\n{}", merged2);
+        assert_eq!(merged2.matches("> user note").count(), 1,
+            "User note duplicated in:\n{}", merged2);
+        assert!(merged2.contains("Second paragraph."));
+        assert!(merged2.contains("> another note"));
+    }
 }

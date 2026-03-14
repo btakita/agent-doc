@@ -410,4 +410,23 @@ Compacting the document. Summary of completed work:
 **Open item — drmanny-dev:** `relysjs__ready__wait(Infinity)` in `build.ts` causes the CI build to hang (works locally). Build step has 10-minute timeout. Need to investigate why it doesn't resolve on GitHub Actions runners. Peakexistence repos are now public.
 
 Add tests
+### Re: drmanny-dev build fix & tests
+
+**drmanny-dev build fix applied:** The root cause was `relysjs__ready__wait(Infinity)` in `build.ts` — it waited for a "ready" signal that only fires in watch mode. On local bun, Infinity overflows to 1ms (resolves immediately), but on CI it hangs forever. Fixed by skipping `relysjs__ready__wait` when `watch: false`. New CI run in progress.
+
+**Re: "Add tests"** — What kind of tests? Options:
+1. **CI smoke tests** — after deploy, `curl` each URL and verify 200 + CSS loads
+2. **Build tests** — verify `dist/browser/` contains expected HTML files after prerender
+3. **App unit tests** — test app-specific logic (routes, components, etc.)
+
+The quickest win would be adding a post-deploy smoke test step to each workflow:
+```yaml
+- name: Smoke test
+  run: |
+    sleep 10
+    curl -sf https://cogov.me/ > /dev/null
+    curl -sf https://cogov.me/index.server-*.css > /dev/null
+```
+
+Which approach do you want?
 <!-- /agent:exchange -->

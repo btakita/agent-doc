@@ -1264,10 +1264,13 @@ Elysia route handler → briantakita_request_ctx__ensure() → blog_request_ctx_
 |---------|-------|
 Do not publish @btakita/*. Leave as submodule
 Do not publish @btakita/*. Leave as submodule
+Do not publish @btakita/*. Leave as submodule
 | `@btakita/dev-bin` | Dev tooling |
 | `@btakita/snippet--rappstack` | Snippets |
 | `@btakita/ui--browser--briantakita` | Site-specific UI |
 | `@btakita/ui--browser--semantic` | Semantic UI |
+
+Publish @rappstack/*
 
 Publish @rappstack/*
 
@@ -1294,9 +1297,13 @@ Publish
 
 Publish
 
+Publish
+
 **Already published (current on npm):** ctx-core, rmemo, relementjs, rebuildjs, esmcss, @ctx-core/preprocess, @ctx-core/source-map, @rebuildjs/tailwindcss, relysjs, rhonojs (11 total).
 
 **Never published:** `@relementjs/astro` (0.0.128)
+
+Publish
 
 Publish
 
@@ -1306,7 +1313,9 @@ Should I:
 1. Fix the `blog_request_ctx.ts` Hono→relysjs revert first?
 S
 Stay on hono. We want to make sure it works on Cloudflare.
+Stay on hono. We want to make sure it works on Cloudflare.
 2. Publish the ~140 ctx-core-dev packages via `publish--force`?
+Yes
 Yes
 3. Both?
 
@@ -1338,6 +1347,45 @@ Tier 3 (depend on Tier 1+2):
 
 **Before publishing I need to know:**
 1. What version? `0.1.0` is standard for first public release. Or match a convention you prefer?
+0.1.0
 2. The `workspace:*` refs will be replaced with `^<version>` automatically by bun/npm on publish. Confirm this is OK?
+Yes. Use yalc for development as well. Make some common yalc tools for publishing library versions.
 3. **@relementjs/astro** has `"private": true` — need to remove that flag to publish. Proceed?
+
+### Re: Stay on Hono + publish
+
+**Hono migration scope** — 10 files need changes, roughly 4 phases:
+
+**Phase 1 — Core (must do first):**
+- `app/briantakita.me/app/index.ts` — `new Elysia()` → `new Hono()`, middleware chaining
+- `app/briantakita.me/app/index.server.ts` — route handlers: `context` → `c` (Hono Context)
+- `app/briantakita.me/start.ts` — import from `rhonojs/server`
+- `app/briantakita.me/config/config__init.ts` — import from `rhonojs/server`
+- `app/briantakita.me/build-and-serve.ts` — `relysjs: { app__start: true }` → `rhonojs: { app__start: true }`
+
+**Phase 2 — Sub-routes:**
+- `app/briantakita.me/app/search/index.server.ts` — same pattern
+- `app/briantakita.me/app/posts/index.server.ts` — same pattern
+
+**Phase 3 — Context adapter:**
+- `app/briantakita.me/ctx/briantakita_request_ctx.ts` — accept Hono `Context` instead of Elysia context
+
+**Phase 4 — Export:**
+- `app/briantakita.me/prerender.ts` — `relysjs/server/export` → `rhonojs/server/export`
+
+**Key pattern changes:**
+| Elysia | Hono |
+|--------|------|
+| `new Elysia()` | `new Hono()` |
+| `context.request` | `c.req.raw` |
+| `context.store` | `c.get()` / `c.set()` |
+| `context.params.tag` | `c.req.param('tag')` |
+| `.onError(({ error, request }) => ...)` | `.onError((error, c) => ...)` |
+
+**Dependencies:** Replace `elysia` → `hono` and `relysjs` → `rhonojs` in package.json.
+
+**Regarding @rappstack/* publishing:** You haven't answered the version question yet. Should they be `0.1.0` for first publish? And should I remove `"private": true` from `@relementjs/astro`?
+
+Shall I proceed with the Hono migration now?
+proceed
 <!-- /agent:exchange -->

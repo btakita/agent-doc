@@ -445,4 +445,22 @@ This will push the `visibility: public` setting from the draft to YouTube. Run `
 
 Please do it
 for the 3 video. Make them public
+### Making 3 Videos Public
+
+Running `corky youtube auth` now — **please complete the OAuth flow in your browser** when it opens. After auth completes, I'll edit all 3 videos to set them public.
+
+Videos to update:
+1. `mail/social/20260312-youtube-part1.md` — Part 1
+2. `mail/social/20260313-134452-youtube.md` — Part 2 (qQCKVQHRQCI)
+3. `mail/social/20260313-163457-youtube.md` — Part 3
+All 3 videos set to **public**:
+
+1. Part 1: https://www.youtube.com/watch?v=B-9uI53cRVE ✓
+2. Part 2: https://www.youtube.com/watch?v=qQCKVQHRQCI ✓
+3. Part 3: https://www.youtube.com/watch?v=RrZETW8EZEQ ✓
+
+The embedded video on http://localhost:4100/posts/dogfooding-agent-doc-part2-blog should now be playable. Please refresh to verify.
+
+Will `corky youtube draft` now create with `visibility: public`?
+Will every stage of `corky youtube` keep use `visibility: public` by default?
 <!-- /agent:exchange -->

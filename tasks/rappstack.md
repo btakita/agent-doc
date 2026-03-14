@@ -959,4 +959,73 @@ Actually, I do want an asset plugin. But it should not necessarily be tied to es
 
 A plugin could also work. I mainly want to consolidate the logic into a library.
 `esbuild-plugin-s3-asset` could be a good name. Or `esbuild-plugin-object-store-asset`.
+### Re: Builder-agnostic asset library + esbuild plugin
+
+**Two-layer architecture:**
+
+1. **`object-store-asset`** (core) — builder-agnostic: content hashing, URL resolution, extension matching
+2. **`esbuild-plugin-object-store-asset`** — thin esbuild `onLoad` wrapper around the core
+
+When you move to bun build, write a thin `bun-plugin-object-store-asset` wrapper. Zero logic duplication.
+
+**Core library API:**
+
+```ts
+// object-store-asset
+export const ASSET_EXTENSIONS = /\.(aac|apng|avif|...28 extensions...webp|woff|woff2)$/
+
+export interface object_store_asset_config_T {
+  asset_base_url: string   // 'https://assets.pe.briantakita.me'
+  base_path?: string       // optional prefix within bucket
+  hash_length?: number     // default 8
+}
+
+// Async — reads file, hashes, returns URL
+export async function object_store_asset_url_(path, config): Promise<string>
+
+// Sync — given content buffer, returns URL
+export function object_store_asset_url_sync_(path, content, config): string
+
+// Extension check
+export function is_asset_(path, extensions?): boolean
+```
+
+**esbuild plugin — 15 lines wrapping the core:**
+
+```ts
+// esbuild-plugin-object-store-asset
+export function object_store_asset_esbuild_plugin_(config?): Plugin {
+  return {
+    name: 'object-store-asset',
+    setup(build) {
+      if (!config?.asset_base_url) return  // dev → no-op
+      build.onLoad({ filter: ASSET_EXTENSIONS }, async ({ path }) => {
+        const content = await readFile(path)
+        const url = object_store_asset_url_sync_(path, content, config)
+        return { contents: `export default ${JSON.stringify(url)}`, loader: 'js' }
+      })
+    },
+  }
+}
+```
+
+**Per-app usage:**
+
+```ts
+import { object_store_asset_esbuild_plugin_ } from 'esbuild-plugin-object-store-asset'
+
+const r2_asset = object_store_asset_esbuild_plugin_({
+  asset_base_url: import_meta_env_().ASSET_BASE_URL,
+  base_path: import_meta_env_().ASSET_BASE_PATH,
+})
+plugins: [r2_asset, rebuild_tailwind_plugin, ...]
+```
+
+**Where to create?** Two options:
+- `ctx-core-dev/lib/` → publishes as `@ctx-core/object-store-asset` + `@ctx-core/esbuild-plugin-object-store-asset`
+- Standalone repos → publishes without scope
+
+Which namespace?
+ 
+Standalone names without scope...root namespace
 <!-- /agent:exchange -->

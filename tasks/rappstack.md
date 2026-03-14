@@ -328,4 +328,28 @@ Fix locally
 Make the repos public.
 
 Which approach for drmanny-dev, and should I investigate the brookebrodack/herbaliciousbliss runtime bugs or defer those?
+### Re: Style fixes, runtime bug fixes, drmanny-dev public repos
+
+**Root cause of all runtime failures:** relementjs state duplication across esbuild entry points. Each entry point gets its own copy of mutable module state (tag factories, XML namespace helpers). `config__init()` only initializes the main chunk — the route/page chunk stays uninitialized.
+
+**Fix:** Added `relement__use(server__relement)` at the top of every `index.server.ts` file + switched prerender scripts to use `base_url` (fetch from running server, matching briantakita.me-dev's working pattern).
+
+**All 5 apps now deployed to Cloudflare Pages:**
+
+| App | URL | Status |
+|-----|-----|--------|
+| cogov-dev | https://cogov.me/ | ✅ DEPLOYED — styles fixed |
+Add a link to demo.cogov.me
+Update demo.cogov.me and deploy
+| prescience-notes | https://pn.briantakita.me/ | ✅ DEPLOYED — styles fixed |
+| brookebrodack-dev | https://brookebrodack.net/ | ✅ DEPLOYED |
+| herbaliciousbliss-dev | https://herbaliciousbliss.com/ | ✅ DEPLOYED |
+https://hb.briantakita.me/ is down
+| drmanny-dev | https://pe.briantakita.me/ | 🔄 IN PROGRESS — peakexistence repos made public, R2 secrets configured |
+
+**drmanny-dev changes:**
+- Made 5 peakexistence repos public (peakexistence-site, domain--any--peakexistence, domain--server--peakexistence, ui--browser--peakexistence, ui--server--peakexistence)
+- Switched .gitmodules URLs from SSH to HTTPS for CI compatibility
+- Removed GH_PAT from workflow
+- Added R2 asset download step + NODE_ENV=production
 <!-- /agent:exchange -->

@@ -1063,4 +1063,25 @@ Starting implementation now.
 Ready to publish — shall I proceed?
 
 publish
+### Re: Published
+
+**Both packages live on npm:**
+
+| Package | Version | npm |
+|---------|---------|-----|
+| `object-store-asset` | 0.0.1 | ✅ published |
+| `esbuild-plugin-object-store-asset` | 0.0.1 | ✅ published |
+
+Committed in ctx-core-dev as `24c14f64e`.
+
+**Next steps:**
+1. Add plugin to each app's `build.ts`
+2. Create R2 buckets + custom domains
+3. Upload existing assets to R2
+4. Set `ASSET_BASE_URL` in CI workflows
+5. Deploy
+
+Shall I proceed with wiring up the apps?
+
+Yes
 <!-- /agent:exchange -->

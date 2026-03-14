@@ -592,4 +592,11 @@ Or push to `main` — GitHub Actions runs this automatically.
 
 I still don't see the pages on dev. Run `bun run dev` on briantakita.me-dev
 See http://localhost:4100/
+
+Still see `TS2307: Cannot find module` for:
+```
+	import('./content/2026-03-12-dogfooding-agent-doc-part1-blog.md'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part2-blog.md'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part3-blog.md'),
+```
 <!-- /agent:exchange -->

@@ -1452,4 +1452,23 @@ Asking b/c Idea cannot resolve the import.
 
 *.md.ts files seems to be correctly inferred by idea when imported only using *.md.
 `import('./content/2004-09-19-deploy-any-file-type-using-whidbey-click-once.md'),`
+### Re: generate-index-js `.md` imports without `.js` suffix
+
+Updated `generate-index-js` to emit `export * from './${basename}'` (without `.js` suffix) for plain `.md` files. IDEA can resolve `.md` imports but not `.md.js`.
+
+**Changes:**
+1. **`@ctx-core/dev-tools@8.3.72`** — `.md` handler now emits `export * from './${basename}'` instead of `'./${basename}.js'`
+2. **`post/content/index.ts`** — regenerated barrel with new format
+3. **`post/index.ts`** — updated the 3 dogfooding posts from `.md.js` → `.md`
+
+Note: `.md.ts` files still correctly export as `.md.js` (they go through the `.ts` handler).
+
+**Commits:**
+- `ctx-core/dev-tools` → `12e878d` (published 8.3.72)
+- `briantakita.me` → `466ea48`
+- `briantakita.me-dev` → `76f4702` (deploy triggered)
+
+Please document how to generate the index.ts file.
+
+In the home page Recent Posts, the dogfooding articles are duplicate as links.
 <!-- /agent:exchange -->

@@ -1131,4 +1131,19 @@ But I just saw the claude session cli use cleartext for CARGO_REGISTRY_TOKEN
 > **Security note:** During this session, Google OAuth tokens were briefly visible in the Claude Code output. They've been revoked and rotated. This incident led to building a `/livestream` security skill for Claude Code that prevents secret exposure during live sessions.
 
 Want me to update the Part 3 YouTube description with this via `corky youtube edit`?
+**Correction — you're right.** The `CARGO_REGISTRY_TOKEN` was exposed in cleartext in **today's session** (the current transcript, `3f2803bc`). It was used twice with the actual token value during the corky v0.15.2 publish — this was before context compaction, before I added the security rule.
+
+The March 13 session used `$(pass ...)` correctly. The March 12 sessions (Part 3 video) are clean. But **today's session has the cleartext crates.io token.**
+
+`MATURIN_PYPI_TOKEN` was safe — all references used `$(pass ...)`.
+
+**Updated action list:**
+
+1. **Revoke Google OAuth refresh tokens** — https://myaccount.google.com/permissions → remove corky app → re-auth with `corky youtube auth --profile btakita`
+2. **Rotate crates.io API token** — Go to https://crates.io/settings/tokens → revoke the exposed token → create a new one → update `pass`: `pass insert crates.io/token`
+
+I apologize for the earlier incorrect audit. My subagent searched for `CARGO_REGISTRY_TOKEN=` but didn't distinguish cleartext values from `$(pass ...)` references in the current session transcript.
+
+Why is `$(pass cargo/registry_token)` not picked up in my project wide search using Idea?
+
 <!-- /agent:exchange -->

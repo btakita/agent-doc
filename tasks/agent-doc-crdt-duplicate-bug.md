@@ -18,3 +18,40 @@ The frontmatter has:
 agent_doc_format: template
 agent_doc_write: crdt
 ```
+
+<!-- agent:exchange -->
+
+### Root Cause: `flush_to_document()` ignores baseline
+
+In `stream.rs`, `flush_to_document()` takes a `_baseline` parameter but **ignores it**. Instead, it reads the current file state and applies the patch directly:
+
+```rust
+fn flush_to_document(
+    file: &Path,
+    text: &str,
+    target: &str,
+    _baseline: &str,  // <-- IGNORED
+) -> Result<()> {
+    // ...
+    let content_current = std::fs::read_to_string(file)?;  // has user's prompt
+    let content_patched = template::apply_patches_with_overrides(
+        &content_current, &patches, ...  // patch also has user's prompt
+    )?;
+}
+```
+
+**The duplication path:**
+
+1. User adds prompt at bottom of `<!-- agent:exchange -->` component
+2. `agent-doc run` computes diff (includes user prompt), sends to agent
+3. Agent's response includes/echoes the user's prompt text
+4. `flush_to_document()` reads current file (user prompt is in exchange component)
+5. Patch block (agent response with user prompt) is applied to current file in **replace mode**
+6. Result: user prompt appears twice — once from the agent's response, once preserved at its original position
+
+**Why only in CRDT/template mode:** Non-CRDT writes use 3-way merge (baseline/response/current) which would detect the overlap. Stream mode uses direct patch application without baseline comparison.
+
+**Fix approach:** In `flush_to_document()`, when the file has diverged from baseline, use CRDT merge (like `write::run_stream()` does) instead of direct patch application. This is a 1-file fix in `stream.rs`.
+
+Implement. Add to spec.
+<!-- /agent:exchange -->

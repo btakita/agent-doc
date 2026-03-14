@@ -581,4 +581,37 @@ Verify the upgrades work via tests
 
 Please learn the lessons from the tasks/briantakit.me.md upgrade.
 The styles are not all applied to these sites.
+### Re: Lessons from briantakita.me + style fixes
+
+**Root cause:** Tailwind v4's content scanner only scans within the CSS file's `package.json` scope. All template files in `lib/` directories (outside `app/*/`) were invisible — utility classes from those templates were never generated.
+
+**briantakita.me lessons applied:**
+1. **`@source` directives** — Added to all 5 apps pointing at their `lib/` template directories
+2. **`@config` paths** — Must resolve from `dist/server/` (where esbuild outputs CSS), using `../../../../lib/` to reach monorepo root
+3. **Typography plugin cascade** — Checked all apps; no `@layer` prose override issues found
+4. **`outline-2` breaking change** — Checked; not used in any app
+
+**Fixes applied per app:**
+
+| App | @source dirs | Other fixes |
+|-----|-------------|-------------|
+| cogov-dev | `lib/ui--server--cogov`, `lib/ui--server--cogov-demo` | Added `@config` for custom screens/fonts |
+| drmanny-dev | `lib/ui--server--peakexistence`, `lib/ui--browser--peakexistence`, `lib/domain--any--peakexistence`, `app/**` | — |
+| herbaliciousbliss-dev | `lib/ui--server--herbaliciousbliss`, `lib/ui--any--herbiliciousbliss`, `lib/ui--browser--herbaliciousbliss` | Added `--color-primary: #0597a4` to @theme |
+| prescience-notes-dev | `lib/ui--server--prescience-notes`, `lib/ui--browser--prescience-notes`, `lib/domain--server--prescience-notes` | — |
+| brookebrodack-dev | 6 lib dirs (ui/domain, server/browser/any) | Upgraded @rebuildjs/tailwindcss 0.10.59→0.11.1, added `@custom-variant noscript`, added `@config` |
+
+**All builds pass, all tests pass (14+12+4+6+30 = 66 tests).**
+
+Ready to commit and push.
+
+Please learn the lessons from the tasks/briantakit.me.md upgrade.
+The styles are not all applied to these sites.
+See tasks/tailwindv4.md
+
+localhost:4020 header is missing padding
+- localhost:4020: ![img_6.png](img_6.png)
+- cogov.me: ![img_7.png](img_7.png)
+
+Are the background tasks still being used?
 <!-- /agent:exchange -->

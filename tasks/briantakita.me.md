@@ -1190,4 +1190,29 @@ CI runs `bun install --frozen-lockfile` which can't resolve these. This has been
 Which approach do you prefer? Option 1 (publish to npm) is the most sustainable. Are these packages already published to npm?
 
 Yes. Publish to npm
+**Publishing yalc packages to npm — investigation:**
+
+All 8 packages live in the `ctx-core-dev` monorepo (`src/ctx-core-dev/`). Each is one patch version ahead of npm:
+
+| Package | npm | yalc | Source |
+|---------|-----|------|--------|
+| `ctx-core` | 7.2.33 | 7.2.34 | `lib/ctx-core` |
+| `rmemo` | 0.51.33 | 0.51.34 | `lib/rmemo` |
+| `relementjs` | 0.80.32 | 0.80.33 | `lib/relementjs` |
+| `rebuildjs` | 0.70.44 | 0.70.45 | `lib/rebuildjs` |
+| `esmcss` | 0.2.14 | 0.2.15 | `lib/esmcss` |
+| `@ctx-core/preprocess` | 0.2.3 | 0.2.4 | `lib/preprocess` |
+| `@ctx-core/source-map` | 0.2.116 | 0.2.117 | `lib/source-map` |
+| `@rebuildjs/tailwindcss` | 0.10.59 | 0.10.60 | `lib/rebuildjs-tailwindcss` |
+| `relysjs` | 1.21.75 | 1.21.75 | (in sync) |
+
+This is a significant publish operation — 8 packages from one monorepo. I need to verify the lib submodules have the right code committed and pushed before publishing. Do you have a standard publish workflow for `ctx-core-dev`? (e.g., `changesets`, `npm publish` per-package, a Makefile target?)
+
+Please add to docs:
+```
+recursive-git-commit
+publish--force
+```
+
+Or should I just `npm publish` each one from the yalc directory contents?
 <!-- /agent:exchange -->

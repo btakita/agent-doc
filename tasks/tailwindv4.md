@@ -380,4 +380,34 @@ Verified: `h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}` present in served CSS.
 4. Preflight no longer resets heading/p/pre margins → add explicit `margin: 0` reset
 
 The home page h2 has a margin: 24px 0 12px
+### Styling Fix: First/Last Child Margin Collapse
+
+**Root cause:** In v3, the typography plugin baked our custom margins into its `:where(h2)` selector (zero specificity). The plugin's own `:where(:first-child){margin-top:0}` rule could override it by source order. In v4, our `.prose h2` override has specificity (0,1,1) which beats the typography plugin's `:where(.prose > :first-child)` (0,0,0 due to `:where()`), so first-child h2 elements kept `margin-top: 1.5rem` instead of collapsing to 0.
+
+**Fix:** Added explicit first/last-child rules at the end of our prose overrides in `index.css.ts`:
+
+```css
+.prose > :first-child {
+    margin-top: 0;
+}
+.prose > :last-child {
+    margin-bottom: 0;
+}
+```
+
+These have specificity (0,1,1) — matching `.prose h2` — but come later in source order, so they win. Now blog card h2s (first children of `<a class="prose">`) correctly get `margin-top: 0`.
+
+**Dev server restarted** at http://localhost:4100 — please hard-refresh.
+
+**Updated v4 breaking changes list:**
+1. `outline-2` now sets `outline-style: solid` → use `outline-hidden`
+2. `@source` needed for content scanning outside CSS project root
+3. Typography plugin outputs to `@layer utilities` → prose overrides must be unlayered
+4. Preflight no longer resets heading/p/pre margins → add explicit `margin: 0` reset
+5. Unlayered prose overrides beat `:where()` first/last-child rules → add explicit `.prose > :first-child/:last-child` margin rules
+
+The video in the page http://localhost:4100/posts/dogfooding-agent-doc-part2-blog is set to private.
+I thought we fixed this issue before.
+Make the video public.
+corky's skill should assume videos are public unless explicitly set to private.
 <!-- /agent:exchange -->

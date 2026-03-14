@@ -1,7 +1,8 @@
 ---
 agent_doc_session: fce94c2a-2072-49c6-924b-144e96b540b7
 tmux_session: '0'
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 
@@ -346,6 +347,8 @@ Update demo.cogov.me and deploy
 | herbaliciousbliss-dev | https://herbaliciousbliss.com/ | ✅ DEPLOYED |
 https://hb.briantakita.me/ is down
 | drmanny-dev | https://pe.briantakita.me/ | 🔄 IN PROGRESS — peakexistence repos made public, R2 secrets configured |
+Run failed. https://github.com/btakita/drmanny-dev/actions/runs/23089041151
+We should be using bun...not node.js
 
 **drmanny-dev changes:**
 - Made 5 peakexistence repos public (peakexistence-site, domain--any--peakexistence, domain--server--peakexistence, ui--browser--peakexistence, ui--server--peakexistence)

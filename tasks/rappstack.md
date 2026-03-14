@@ -299,4 +299,33 @@ Test locally and fix this issue.
 - brookebrodack-dev: Re-triggered after fixing bucket name
 - herbaliciousbliss-dev: Re-triggered after fixing S3 download path
 - prescience-notes-dev: Re-triggered after fixing S3 download path
+### Re: Deploy fixes & status update
+
+**Fixed & deployed:**
+
+| App | CI Status | Fix Applied |
+|-----|-----------|-------------|
+| **cogov-dev** | ✅ DEPLOYED | Added `NODE_ENV=production`, changed `index.ts` → `start.ts` for prerender |
+Styles are messed up on https://cogov.me/
+| **prescience-notes** | ✅ DEPLOYED | (deployed in previous cycle) |
+Styles are messed up on https://pn.briantakita.me/
+
+**Fixed CI, but pre-existing runtime bugs block prerender:**
+
+| App | CI Fix | Runtime Issue |
+|-----|--------|---------------|
+| **brookebrodack-dev** | `resolve()` for `dist/server/index.js` path | `tags.img`, `tags.span`, `rss_tags_()` all undefined — server rendering init fails. **Fails locally too.** |
+| **herbaliciousbliss-dev** | Added `NODE_ENV=production`, `start.ts` | `request.headers` undefined in rmemo/ctx-core chain — prerender 500s on `/` and `/lyra`. **Fails locally too.** |
+
+**brookebrodack-dev and herbaliciousbliss-dev runtime failures are pre-existing** — they fail the same way locally, not caused by the @rappstack migration. briantakita.me-dev (same framework) deploys fine, so these are app-specific bugs in the server rendering pipeline.
+
+Fix locally
+
+**drmanny-dev** remains blocked on private submodule access. Re: your question about inlining — the cleanest options:
+1. **Publish peakexistence packages to npm** (like @rappstack) — removes submodules entirely
+2. **GitHub PAT** — quickest fix, just needs a fine-grained token
+3. **Make repos public** — simplest if no reason to keep private
+Make the repos public.
+
+Which approach for drmanny-dev, and should I investigate the brookebrodack/herbaliciousbliss runtime bugs or defer those?
 <!-- /agent:exchange -->

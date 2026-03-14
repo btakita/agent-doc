@@ -251,4 +251,27 @@ The dev server was restarted with a clean rebuild from `/home/brian/work/btakita
 styling still messed up
 
 See ![2026-03-14_11-34-bad-stying-4100.png](../../../../Pictures/agent-loop/2026-03-14_11-34-bad-stying-4100.png)
+### Styling Fix: Outline v4 Breaking Change
+
+**Root cause:** In Tailwind v3, `outline-2` only set `outline-width: 2px` (no style change, so outline stayed invisible). In v4, `outline-2` sets BOTH `outline-style: solid; outline-width: 2px` — making outlines permanently visible on ALL `a` tags.
+
+**Fix:** Replaced `outline-2` with `outline-hidden` (v4's `outline: 2px solid transparent`) as default state. Outline only shows on `focus-visible`:
+
+```css
+/* Before (v3-compatible, broken in v4): */
+a { @apply outline-2 outline-offset-1 outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed; }
+
+/* After (v4-native): */
+a { @apply outline-hidden outline-offset-1 focus-visible:outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed; }
+```
+
+Same fix applied to `.focus-outline` component class.
+
+**Dev server restarted** at http://localhost:4100 — refresh to verify the fix.
+
+The styling is still messed up. Numerous layout issues.
+
+![2026-03-14_11-40-good-styling-briantakita.me.png](../../../../Pictures/agent-loop/2026-03-14_11-40-good-styling-briantakita.me.png)
+![2026-03-14_11-34-bad-stying-4100-2.png](../../../../Pictures/agent-loop/2026-03-14_11-34-bad-stying-4100-2.png)
+
 <!-- /agent:exchange -->

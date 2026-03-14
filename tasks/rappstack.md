@@ -1199,7 +1199,27 @@ Rename the R2 buckets to match the custom domain.
 
 I need Cloudflare API access to create buckets and set up custom domains. The `wrangler` auth failed earlier. Can you run `npx wrangler login` or provide API credentials?
 
+done
+
 R2 custom domain. Switch the environment variable as well.
-Rename the R2 buckets to match the custom domain.
-The custom subdomain should always have `assets.` prepended to the site subdomain/domain
+### Re: Confirmed naming convention
+
+Got it — `assets.{site-domain}` pattern confirmed:
+
+| Site | Asset Custom Domain |
+|------|-------------------|
+| `briantakita.me` | `assets.briantakita.me` |
+| `pe.briantakita.me` | `assets.pe.briantakita.me` |
+| `brookebrodack.net` | `assets.brookebrodack.net` |
+| `cogov.me` | `assets.cogov.me` |
+| `hb.briantakita.me` | `assets.hb.briantakita.me` |
+| `pn.briantakita.me` | `assets.pn.briantakita.me` |
+
+**Blocker:** `wrangler` auth is expired — I can't create buckets or set up custom domains without it. Please run:
+
+```bash
+npx wrangler login
+```
+
+This opens a browser for OAuth. Once authenticated, I can create the new buckets, copy objects, and set up custom domains.
 <!-- /agent:exchange -->

@@ -95,4 +95,16 @@ See CARGO_REGISTRY_TOKEN in the root .env
 See PYPI_PUBLISH_TOKEN in the root .env
 
 The fix is live for `cargo install` and GitHub Release users. `agent-doc skill install` will now install the SKILL.md with the foreground-only claims log instruction.
+
+### All Targets Published
+
+- **crates.io**: v0.17.0 ✓
+- **PyPI**: v0.17.0 ✓
+- **GitHub Release**: binary updated ✓
+- **Git**: tag moved, pushed ✓
+
+Release complete. The foreground-only claims log fix is now live across all distribution channels.
+
+Is the skill updated locally?
+I still see 1 bash running
 <!-- /agent:exchange -->

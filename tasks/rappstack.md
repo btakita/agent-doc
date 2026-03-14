@@ -11,5 +11,31 @@ Now that @rappstack/* packages are published, the apps need to reference the @ra
 
 Convert brookebrodack-dev, cogov-dev, censible-core, drmanny-dev, herbaliciousbliss-dev, prescience-notes-dev
 
-Use yalc if possible. And deploy using npm.
+Use yalc if possible. And deploy via github actions. The deployments must depend on the published npm packages...not yalc. yalc is only for development.
 
+<!-- agent:exchange -->
+## Conversion Plan
+
+**Apps and their @rappstack/* dependencies:**
+
+| App | @rappstack/* packages | Count |
+|-----|----------------------|-------|
+| herbaliciousbliss-dev | domain--any--blog, domain--server, domain--server--blog, ui--any, ui--any--blog, ui--browser--blog, ui--server, ui--server--blog | 8 |
+| drmanny-dev | domain--any--blog, domain--server, domain--server--auth, domain--server--blog, ui--any, ui--server | 6 |
+| brookebrodack-dev | domain--server, domain--server--auth, ui--any, ui--server | 4 |
+| prescience-notes-dev | domain--server, domain--server--blog, ui--any, ui--browser--blog | 4 |
+| cogov-dev | domain--server | 1 |
+| censible-core | (none found — may not need conversion) | 0 |
+
+**Conversion steps per app:**
+1. Change `workspace:*` → published version in all package.json files
+2. Remove rappstack git submodules from `lib/`
+3. Remove submodule entries from `.gitmodules`
+4. Remove workspace entries from `pnpm-workspace.yaml` (if applicable)
+I thought we were using bun to manage the packages and deployments. Should pnpm-workspace.yaml be removed in favor of the bun monorepo configuration?
+5. Run `pnpm install` to pull from npm registry
+6. Verify build
+
+Ready to start. Which app first, or all sequentially?
+All in sequence.
+<!-- /agent:exchange -->

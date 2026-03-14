@@ -38,7 +38,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 **Recover orphaned responses:** Run `agent-doc recover <FILE>` via Bash. If a pending response exists (from a previous cycle interrupted by context compaction), it will be written to the document automatically. Print the output to confirm recovery. This must run before computing the diff.
 
-**Check claims log:** Read `.agent-doc/claims.log` (if it exists). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
+**Check claims log:** Read `.agent-doc/claims.log` (if it exists) as a **foreground** Bash call — never use `run_in_background` (instant commands cause phantom task accumulation). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
 
 ### 0b. Commit previous response
 

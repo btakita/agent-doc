@@ -273,4 +273,34 @@ corky youtube edit mail/social/20260313-134452-youtube.md
 corky youtube edit mail/social/20260313-163457-youtube.md
 ```
 
+### Pending
+
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
+- [X] Create yalc tooling for library version publishing — implemented in @ctx-core/monorepo
+- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+- [X] Update YouTube video descriptions (blog post links added)
+- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
+
+All tasks complete.
+
+---
+
+### Re: Yalc commit
+
+Committing changes in @ctx-core/monorepo submodule (in progress).
+
+publish to npmjs
+
+### Re: YouTube — Done
+
+OAuth re-authenticated successfully (channel UC3gg23rxm1sM43sQWRGKEqQ). All 3 videos updated:
+
+- B-9uI53cRVE (Part 1) — blog link added
+- qQCKVQHRQCI (Part 2) — blog link added
+- RrZETW8EZEQ (Part 3) — blog link added
+
 <!-- /agent:exchange -->

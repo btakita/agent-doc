@@ -796,9 +796,44 @@ Done. All 3 videos are now **Public**:
 | [Part 2](https://www.youtube.com/watch?v=qQCKVQHRQCI) | Public |
 | [Part 3](https://www.youtube.com/watch?v=RrZETW8EZEQ) | Public |
 
+Why were the videos not public to begin with?
+Cork
+
+Why were the videos not public to begin with?
+Corky should always publish public videos...unless explicitly to private.
+
 Used `corky youtube edit` with draft files specifying `visibility: public`. Had to re-auth first (`corky youtube auth --profile btakita`).
 
 Refresh the blog post page — the YouTube embeds should now show the video player instead of "This video is private".
+
+Yes...change the visibility to Public using Corky...if any of these are private.
+
+```
+● Bash(corky youtube edit /tmp/yt-drafts/part1.md 2>&1)
+  ⎿  Error: Exit code 1
+     Error: profiles.toml not found at /home/brian/Documents/mail/profiles.toml.
+     Create it or run `corky linkedin check` for guidance.
+```
+
+Why are you using /home/brian/Documents/mail and not /home/brian/work/btakita/mail?
+> Create it or run `corky linkedin check` for guidance.
+
+Why this? Why are we looking in profiles.toml? I thought we moved all of the config into .corky.toml?
+### Re: Why Documents/mail and profiles.toml?
+
+Both issues stem from **CWD drift** — my shell had `cd`'d into `src/corky/` during earlier exploration. Since there's no `mail/` in `src/corky/`, corky's `data_dir()` resolution fell through:
+
+1. CWD `.corky.toml`? No
+2. CWD `mail/` subdir? No
+3. `CORKY_DATA` env? Not set
+4. App config mailbox? Not configured
+5. **Fallback: `~/Documents/mail`** — found, but no `[profiles]` section → triggered `profiles.toml` fallback error
+
+**The `profiles.toml` message is a corky bug** — it's the error when `.corky.toml [profiles]` isn't found. The consolidation to `.corky.toml` was done, but the error message still references the old file. Should say "No profiles found in .corky.toml" instead.
+
+Once I ran from agent-loop root (where `mail/.corky.toml` has `[profiles.btakita.youtube]`), it worked.
+
+**Re: "Why were the v..."** — Videos were likely uploaded as Private (YouTube's default for API uploads). If no `visibility` was specified in the draft at publish time, YouTube defaults to private.
 
 Yes...change the visibility to Public using Corky...if any of these are private.
 

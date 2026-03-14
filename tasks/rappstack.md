@@ -1925,4 +1925,26 @@ Done:
 3. **Committed and pushed** -> `843d0d6` (deploy triggered)
 
 Please add documentation on how to properly generate content/index.ts
+### Re: Documentation for generating post/index.ts
+
+**How to regenerate `post/index.ts`:**
+
+```bash
+# From briantakita.me-dev project root:
+bun app/briantakita.me/post/index.generate.ts
+```
+
+Uses `import.meta.url` to resolve paths — works regardless of CWD.
+
+**What it does:**
+- Scans `post/content/` for date-prefixed files
+- `.md.ts` / `.md.js` -> `import('./content/${name}.md')` (strips suffix for IDEA resolution)
+- `.md` -> `import('./content/${file}')` (direct import, esbuild plugin handles at build time)
+- Writes `post/index.ts` with `post_mod_a1` array
+
+**When to run:** After adding, removing, or renaming post files in `post/content/`.
+
+**Note:** Do NOT use `generate-index-js` for `post/content/` — barrel `export *` causes `meta_` name collisions since all posts export the same names.
+
+Add to the README of briantakita.me
 <!-- /agent:exchange -->

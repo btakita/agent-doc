@@ -453,4 +453,25 @@ The prerender errors were route paths (e.g. `/Uv`), not error messages containin
 Which type?
 
 All
+### Re: All three test types added
+
+**CI smoke tests, build verification, and app unit tests added to all 5 apps:**
+
+| App | Unit test file | CI build check | CI smoke test |
+|-----|---------------|----------------|---------------|
+| cogov-dev | `app/cogov.me/test/routes.test.ts` | Verify 12 HTML files + robots.txt + sitemap.xml | Curl all routes on cogov.me |
+| brookebrodack-dev | `app/brookebrodack-site/test/routes.test.ts` | Verify 5 HTML files + robots.txt + rss + sitemap.xml | Curl all routes on brookebrodack.net |
+| drmanny-dev | `app/peakexistence-site/test/routes.test.ts` | Verify 7 key route HTML files + robots.txt | Curl key routes on pe.briantakita.me |
+| herbaliciousbliss-dev | `app/herbaliciousbliss-site/test/routes.test.ts` | Verify index.html + lyra/index.html | Curl / and /lyra on hb.briantakita.me |
+| prescience-notes-dev | `app/www/test/routes.test.ts` | Verify 4 HTML files + robots.txt + sitemap.xml | Curl all routes on pn.briantakita.me |
+
+**Unit tests** use `bun:test`, spawn the production server in `beforeAll`, test all routes for 200 + expected HTML content, and kill the server in `afterAll`. Run locally with `bun test` after a production build.
+
+**Build verification** steps run after prerender/export, before deploy — fail the workflow if expected files are missing from `dist/browser/`.
+
+**CI smoke tests** run after deploy with a propagation delay, curl each route and verify HTTP 200.
+
+Changes are uncommitted — ready to commit and push when you approve.
+
+commit and push
 <!-- /agent:exchange -->

@@ -147,4 +147,59 @@ CssSyntaxError: The `outline-skin-fill` class does not exist.
 - [ ] Bump `@rebuildjs/tailwindcss` dep from `^0.10.60` to `^0.11.0`
 
 Continue
+### briantakita.me v4 Migration: DONE
+
+**Root cause of build failure:** `@tailwindcss/postcss` v4's Oxide engine reads CSS from disk, ignoring the string passed to `postcss.process()`. The in-memory `@tailwind` → `@import "tailwindcss"` transform was invisible to v4, so it ran in v3 compat mode (which doesn't support `@utility`).
+
+**Fix:** Write the transformed CSS back to the esbuild output file before PostCSS processes it. Published as `@rebuildjs/tailwindcss@0.11.1`.
+
+**briantakita.me changes:**
+1. **`tailwind.config.ts`** → deleted (was triggering v3 compat mode)
+2. **`index.css.ts`** — all config moved to CSS:
+   - `@theme` for fonts, highlight color, box-shadow
+   - `@utility` for all 15 skin classes (text/bg/outline/border/fill)
+   - `@plugin "@tailwindcss/typography"` replaces JS plugin import
+   - Prose overrides moved from JS config to `@layer base` CSS rules
+3. **`build.ts`** — removed `tailwindcss_config` import + param
+
+Clean `rm -rf dist && bun run build` passes.
+
+**Published versions:**
+- `@rebuildjs/tailwindcss@0.11.0` — initial v4 migration
+- `@rebuildjs/tailwindcss@0.11.1` — write transformed CSS to file (v4 Oxide engine fix)
+
+Error running dev
+```
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+rhonojs_browser__build|done
+rhonojs_server__build|done
+browser__build|watch
+server__build|watch
+1 | 'use strict'
+2 |
+    ^
+CssSyntaxError: /home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/app/index.css.ts:2:0: The `outline-skin-fill` class does not exist. If `outline-skin-fill` is a custom class, make sure it is defined within a `@layer` directive.
+    reason: "The `outline-skin-fill` class does not exist. If `outline-skin-fill` is a custom class, make sure it is defined within a `@layer` directive.",
+      file: "/home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/app/index.css.ts",
+    source: "\n@tailwind base;\n@tailwind components;\n@tailwind utilities;\n@layer base {\n\tsection,\n\tfooter {\n\t\t@apply mx-auto max-w-3xl px-4;\n\t}\n\ta {\n\t\t@apply outline-2 outline-offset-1 outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed;\n\t}\n\thtml {\n\t\ttab-size: 2;\n\t\t/* ===== scrollbar ===== */\n\t\toverflow-y: scroll;\n\t}\n\t/* width */\n\t::-webkit-scrollbar {\n\t\t@apply w-3;\n\t}\n\t/* Track */\n\t::-webkit-scrollbar-track {\n\t\t@apply bg-skin-fill;\n\t}\n\t/* Handle */\n\t::-webkit-scrollbar-thumb {\n\t\t@apply bg-skin-card;\n\t}\n\t/* Handle on hover */\n\t::-webkit-scrollbar-thumb:hover {\n\t\t@apply bg-skin-card-muted;\n\t}\n\tcode,\n\tblockquote {\n\t\tword-wrap: break-word;\n\t}\n\tpre > code {\n\t\twhite-space: pre;\n\t}\n\t.prose :where(dd):not(:where([class~=\"not-prose\"], [class~=\"not-prose\"] *)) {\n\t\tpadding-inline-start: 0;\n\t}\n\t@media (min-width: 640px) {\n\t\t.prose :where(dd):not(:where([class~=\"not-prose\"], [class~=\"not-prose\"] *)) {\n\t\t\tpadding-inline-start: 1.625em;\n\t\t}\n\t}\n}\n@layer components {\n\t.focus-outline {\n\t\t@apply outline-2 outline-offset-1 outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed;\n\t}\n}\n",
+   endLine: 2,
+ endColumn: 10,
+     input: {
+  column: 1,
+  endColumn: 16,
+  endLine: 2,
+  line: 2,
+  source: "/* app/index.css.ts */\n@tailwind base;\n@tailwind components;\n@tailwind utilities;\n@layer base {\n  section,\n  footer {\n    @apply mx-auto max-w-3xl px-4;\n  }\n  a {\n    @apply outline-2 outline-offset-1 outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed;\n  }\n  html {\n    tab-size: 2;\n    overflow-y: scroll;\n  }\n  ::-webkit-scrollbar {\n    @apply w-3;\n  }\n  ::-webkit-scrollbar-track {\n    @apply bg-skin-fill;\n  }\n  ::-webkit-scrollbar-thumb {\n    @apply bg-skin-card;\n  }\n  ::-webkit-scrollbar-thumb:hover {\n    @apply bg-skin-card-muted;\n  }\n  code,\n  blockquote {\n    word-wrap: break-word;\n  }\n  pre > code {\n    white-space: pre;\n  }\n  .prose :where(dd):not(:where([class~=not-prose], [class~=not-prose] *)) {\n    padding-inline-start: 0;\n  }\n  @media (min-width: 640px) {\n    .prose :where(dd):not(:where([class~=not-prose], [class~=not-prose] *)) {\n      padding-inline-start: 1.625em;\n    }\n  }\n}\n@layer components {\n  .focus-outline {\n    @apply outline-2 outline-offset-1 outline-skin-fill focus-visible:no-underline focus-visible:outline-dashed;\n  }\n}\n\n/* config/hljs.css */\npre code.hljs {\n  display: block;\n  overflow-x: auto;\n  padding: 1em;\n}\ncode.hljs {\n  padding: 3px 5px;\n}\n.hljs {\n  color: #e6e6e6;\n}\n.hljs-emphasis {\n  font-style: italic;\n}\n.hljs-strong {\n  font-weight: bold;\n}\n.hljs-link {\n  text-decoration: underline;\n}\n.hljs-comment,\n.hljs-quote {\n  color: #bbbbbb;\n  font-style: italic;\n}\n.hljs-params {\n  color: #bbbbbb;\n}\n.hljs-punctuation,\n.hljs-attr {\n  color: #e6e6e6;\n}\n.hljs-selector-tag,\n.hljs-name,\n.hljs-meta {\n  color: #ff4b82;\n}\n.hljs-operator,\n.hljs-char.escape_ {\n  color: #b084eb;\n}\n.hljs-keyword,\n.hljs-deletion {\n  color: #ff75b5;\n}\n.hljs-regexp,\n.hljs-selector-pseudo,\n.hljs-selector-attr,\n.hljs-variable.language_ {\n  color: #ff9ac1;\n}\n.hljs-subst,\n.hljs-property,\n.hljs-code,\n.hljs-formula,\n.hljs-section,\n.hljs-title.function_ {\n  color: #45a9f9;\n}\n.hljs-string,\n.hljs-symbol,\n.hljs-bullet,\n.hljs-addition,\n.hljs-selector-class,\n.hljs-title.class_,\n.hljs-title.class_.inherited__,\n.hljs-meta .hljs-string {\n  color: #19f9d8;\n}\n.hljs-variable,\n.hljs-template-variable,\n.hljs-number,\n.hljs-literal,\n.hljs-type,\n.hljs-link,\n.hljs-built_in,\n.hljs-title,\n.hljs-selector-id,\n.hljs-tag,\n.hljs-doctag,\n.hljs-attribute,\n.hljs-template-tag,\n.hljs-meta .hljs-keyword,\n.hljs-punctuation {\n  color: #ffb86c;\n}\n",
+  url: "file:///home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-I2PUZEQI_esbuild.css",
+  file: "/home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-I2PUZEQI_esbuild.css",
+},
+    plugin: undefined,
+
+      at /home/brian/work/btakita/briantakita.me-dev/node_modules/postcss/lib/input.js:2:1
+```
+
+Add tests to verify the site works.
 <!-- /agent:exchange -->

@@ -524,4 +524,39 @@ f4aa473 chore: update submodule pointers (tests + CI fixes)
 **Session complete.** @rappstack migration, CI/CD deployment, and test coverage all done.
 
 Upgrade to tailwind v4. Upgrade @rebuildjs/tailwindcss to 0.11.1 or higher version.
+### Re: Tailwind v4 upgrade
+
+**Current state:**
+
+| App | tailwindcss | @rebuildjs/tailwindcss | Complexity |
+|-----|------------|----------------------|------------|
+| cogov-dev | 3.4.4 | 0.10.49 | Low (minimal config) |
+| brookebrodack-dev | **4.2.1** | 0.10.59 | Already on v4\! |
+| drmanny-dev | 3.4.4 | 0.10.49 | High (extensive theme + plugins) |
+| herbaliciousbliss-dev | 3.4.4 | 0.10.49 | High (extensive theme + plugins) |
+| prescience-notes-dev | 3.4.4 | 0.10.49 | Low (minimal config) |
+
+**Target:** tailwindcss 4.2.1, @rebuildjs/tailwindcss 0.11.1
+
+**brookebrodack-dev already on v4** — using it as reference. 4 apps need upgrading.
+
+Starting with cogov-dev and prescience-notes-dev (minimal configs), then drmanny-dev and herbaliciousbliss-dev (complex themes with CSS variables and plugins).
+
+### Re: Tailwind v4 upgrade complete
+
+All 4 apps upgraded to Tailwind v4.2.1 + @rebuildjs/tailwindcss 0.11.1. Builds verified.
+
+| App | Status | Key Changes |
+|-----|--------|-------------|
+| cogov-dev | ✅ DONE | Updated deps, removed plugin from JS config (now via CSS `@plugin`) |
+| brookebrodack-dev | ✅ Already on v4 | No changes needed |
+| drmanny-dev | ✅ DONE | Updated deps, added `@config` directive in CSS, replaced `@screen md` with `@media`, removed `tailwindcss-noscript` |
+| herbaliciousbliss-dev | ✅ DONE | Updated deps, migrated to `@import "tailwindcss"` + `@theme` block in CSS, deleted `tailwind.config.ts` |
+| prescience-notes-dev | ✅ DONE | Updated deps, added `@config` directive in CSS |
+
+**Common pattern:** `@rebuildjs/tailwindcss` 0.11.1 no longer accepts `tailwindcss_config` parameter — Tailwind v4 reads config from CSS directives (`@config`, `@plugin`, `@theme`). All `build.ts` files updated to remove the config import.
+
+All builds pass locally. Ready to commit submodule pointers and push to trigger CI.
+
+Verify the upgrades work via tests.
 <!-- /agent:exchange -->

@@ -748,6 +748,17 @@ Seeing "This video is private"
 ![img_3.png](img_3.png)
 
 ```
+~/work/btakita/briantakita.me-dev main ?1                                                                                                                                                                                             20:36:10
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+relysjs_browser__build|done
+relysjs_server__build|done
+browser__build|watch
+server__build|watch
+server started on port 4100
+^C
 ```
 
 ```
@@ -758,4 +769,19 @@ brave     2381 brian  86u  IPv6 62845254      0t0  TCP localhost:50700->localhos
 brave     2381 brian 189u  IPv6 62830967      0t0  TCP localhost:50702->localhost:igo-incognito (CLOSE_WAIT)
 bun     765802 brian  15u  IPv6 61991734      0t0  TCP *:igo-incognito (LISTEN)
 ```
+### Re: "This video is private"
+
+This is a YouTube visibility setting, not a code issue. The video `qQCKVQHRQCI` embedded in Part 2 is set to **Private** on YouTube.
+
+To fix, go to [YouTube Studio](https://studio.youtube.com) and change the visibility:
+
+| Video | ID | Action needed |
+|-------|----|---------------|
+| Part 1 | `B-9uI53cRVE` | Check visibility |
+| Part 2 | `qQCKVQHRQCI` | Change from Private to **Unlisted** or **Public** |
+| Part 3 | `RrZETW8EZEQ` | Check visibility |
+
+Set each to **Unlisted** (shareable by link, not searchable) or **Public** (fully discoverable). The embed code in the blog posts is correct — once the YouTube visibility changes, the videos will render immediately without any code changes.
+
+You can also use `corky` if you have a YouTube publish command set up, or change it directly in YouTube Studio.
 <!-- /agent:exchange -->

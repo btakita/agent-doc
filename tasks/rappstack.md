@@ -2097,4 +2097,44 @@ yes
 Will report results as each completes.
 
 /agent-doc compact
+
+### Re: Compact
+
+**Session summary — rappstack migration & site deployment:**
+
+**Phase 1: @rappstack migration (COMPLETE)**
+- 14 @rappstack/* packages published to npm (v0.1.0, then v0.1.1 for 4 updated packages)
+- 5 apps converted from submodules to npm packages
+- `workspace:*` → `^0.1.0` in all package.json files
+
+**Phase 2: CI/CD deployment (COMPLETE for 2, fixing 4)**
+- CI workflows created for all apps
+- Unit tests, build verification, and smoke tests added (66 tests total)
+
+**Phase 3: Tailwind v4 (COMPLETE)**
+- All 5 apps upgraded to tailwindcss 4.2.1 + @rebuildjs/tailwindcss 0.11.1
+- Key fixes: `@source` directives, `@theme`/`@custom-variant`, `gap-*` instead of `space-x-*`
+
+**Phase 4: R2 asset pipeline (COMPLETE)**
+- `object-store-asset` + `esbuild-plugin-object-store-asset` published to npm
+- 6 new R2 buckets with custom domains (`assets.{site}`)
+- Plugin wired into all 6 apps' build.ts
+
+**Phase 5: generate-index-js fixes (COMPLETE)**
+- `@ctx-core/dev-tools@8.3.72` — fixed readdirSync bug, added .md support
+- Removed duplicate .md.js wrapper files
+- Documented post index regeneration in README
+
+**Current deploy status:**
+
+| App | URL | CI Status |
+|-----|-----|-----------|
+| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
+| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
+| brookebrodack-dev | brookebrodack.net | 🔧 FIXING (plugin v0.0.3 + build timeout) |
+| drmanny-dev | pe.briantakita.me | 🔧 FIXING (missing marked-highlight) |
+| herbaliciousbliss-dev | hb.briantakita.me | 🔧 FIXING (build timeout) |
+| cogov-dev | cogov.me | 🔧 FIXING (asset download in CI) |
+
+**4 fix agents running in parallel.** Will update when complete.
 <!-- /agent:exchange -->

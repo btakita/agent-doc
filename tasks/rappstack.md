@@ -733,4 +733,52 @@ The generated files (.css, .js) should be on the filesystem. But the mp3, png, j
 - brookebrodack-dev: `@custom-variant noscript`, `@source` for 6 lib dirs
 - herbaliciousbliss-dev: `--color-primary` in `@theme`
 - Key lesson: Tailwind v4 `space-x-*` can fail silently — use `gap-*` with flexbox instead
+### Re: Asset pipeline & R2 serving plan
+
+**How assets currently work:**
+
+All apps use `esbuild-plugin-esmfile`. When TypeScript imports an asset:
+```ts
+import hero_webp from '../public/image/hero.webp'
+// hero_webp = "/hero-QQWMKLCH.webp" (content-hashed path string)
+```
+esbuild copies the file to `dist/browser/` with a hashed filename. Templates reference these strings in `<img src>`, `<video src>`, etc. This means ALL assets (images, videos, fonts) get bundled into `dist/browser/` alongside JS/CSS, and Cloudflare Pages deploys everything.
+
+**Current CI pipeline (all 6 apps):**
+1. Download assets from S3/R2 bucket → `public/` or `public/assets/`
+2. `bun build` — esbuild imports assets, copies to `dist/browser/` with hashed names
+3. Prerender HTML (references hashed asset paths)
+4. `wrangler pages deploy dist/browser/` — uploads everything including assets
+
+**Asset sizes per app:**
+| App | Size | Dominant asset |
+|-----|------|---------------|
+| drmanny-dev | ~336 MB | 3 large MP4 videos |
+| brookebrodack-dev | ~119 MB | Images + GIF |
+| herbaliciousbliss-dev | ~65 MB | Images |
+| cogov-dev | ~32 MB | Images + 1 MP4 |
+| briantakita.me-dev | ~31 MB | Images + fonts |
+| prescience-notes-dev | ~16 KB | SVGs only |
+
+**Proposed architecture (dev = filesystem, prod = R2 CDN):**
+
+The key change is in `esbuild-plugin-esmfile`. It needs two modes:
+
+- **Dev mode (default):** Current behavior — copy file to `dist/browser/`, return relative hashed path
+- **Prod mode (`ASSET_BASE_URL` env var set):** Don't copy file, return `${ASSET_BASE_URL}/${hashed-filename}` — file is already on R2
+
+**Implementation steps:**
+1. **Upload assets to R2** with their content-hashed filenames (one-time sync, then CI uploads new ones)
+2. **Modify `esmfile` plugin** (or wrap it) to check `ASSET_BASE_URL` env var:
+   - If set: resolve imports to `${ASSET_BASE_URL}/filename-HASH.ext`, skip file copy
+   - If unset: current behavior (local copy)
+3. **Update CI workflows**: set `ASSET_BASE_URL=https://<r2-custom-domain>/` and skip the asset copy step
+4. **R2 custom domain**: each bucket gets a public custom domain via Cloudflare (e.g., `assets.cogov.me`)
+
+**Dev experience unchanged** — assets are on the filesystem, esbuild copies them locally. Only production builds resolve to R2 URLs.
+
+**Question:** Does `esmfile` have a config option for base URL already, or do we need to fork/wrap it? Also — do you want one R2 bucket per app, or a shared bucket with per-app prefixes?
+
+You can see the implementation at src/ctx-core-dev/lib/esbuild-plugin-esmfile
+I believe that it generates the js file with the same relative path in the dist/browser directory as the import.
 <!-- /agent:exchange -->

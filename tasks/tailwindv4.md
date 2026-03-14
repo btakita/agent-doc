@@ -126,4 +126,25 @@ Note: `build.ts` still passes `tailwindcss_config` to the plugin, but since we r
 Want to proceed with publish, or clean up the consumer side first?
 
 clean up the publish
+### Published: @rebuildjs/tailwindcss@0.11.0
+
+**Done:**
+- [x] Cleaned `build.ts` — removed dead `tailwindcss_config` import + param
+- [x] Version bumped 0.10.60 → 0.11.0 (breaking: v3→v4)
+- [x] Published to npm: `@rebuildjs/tailwindcss@0.11.0`
+- [x] All 4 tests pass, publint + attw clean
+
+**Blocker for briantakita.me:** The first "passing" build used cached dist artifacts. Clean build fails:
+```
+CssSyntaxError: The `outline-skin-fill` class does not exist.
+```
+`tailwind.config.ts` uses v3-style `outlineColor.skin.fill` theme config that v4 doesn't support via `@apply`. The consumer needs its own v4 config migration (separate task).
+
+**Summary of remaining briantakita.me work:**
+- [ ] Migrate `tailwind.config.ts` to v4 format (CSS @theme directives or v4-compatible JS config)
+- [ ] Remove `safelist` (not supported in v4)
+- [ ] Update `@apply` usage for custom theme utilities
+- [ ] Bump `@rebuildjs/tailwindcss` dep from `^0.10.60` to `^0.11.0`
+
+Continue
 <!-- /agent:exchange -->

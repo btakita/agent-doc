@@ -1215,4 +1215,27 @@ publish--force
 ```
 
 Or should I just `npm publish` each one from the yalc directory contents?
+**npm publish + deploy progress:**
+
+Published 8 ctx-core packages to npm (ctx-core, rmemo, relementjs, rebuildjs, esmcss, @ctx-core/preprocess, @ctx-core/source-map, @rebuildjs/tailwindcss). Updated `package.json` in both root and `app/briantakita.me` to use npm versions instead of `file:.yalc/*`.
+
+**Deploy is closer but still failing.** The module resolution error (`relysjs/server/export`) is fixed. The build now gets all the way to static export, but 3 routes return 500:
+- `/search` → 500
+- `/rss` → 500
+- `/rss.xml` → 500
+
+This is likely a runtime error in those route handlers — possibly related to the `tag_a1` → `tags` rename in the rappstack libs, or a missing dependency at runtime. I can't see the server error details from CI logs alone.
+
+**To debug:** Can you run the build locally?
+```bash
+cd src/briantakita.me-dev/app/briantakita.me
+bun ./build-and-serve.ts &
+sleep 5
+curl http://localhost:4100/search
+curl http://localhost:4100/rss
+```
+
+The 500 error response body should show what's failing.
+
+Please run this and debug.
 <!-- /agent:exchange -->

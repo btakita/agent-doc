@@ -786,4 +786,31 @@ Set each to **Unlisted** (shareable by link, not searchable) or **Public** (full
 You can also use `corky` if you have a YouTube publish command set up, or change it directly in YouTube Studio.
 
 Yes...change the visibility to Public using Corky...if any of these are private.
+### Re: Change YouTube visibility to Public via Corky
+
+Done. All 3 videos are now **Public**:
+
+| Video | Status |
+|-------|--------|
+| [Part 1](https://www.youtube.com/watch?v=B-9uI53cRVE) | Public |
+| [Part 2](https://www.youtube.com/watch?v=qQCKVQHRQCI) | Public |
+| [Part 3](https://www.youtube.com/watch?v=RrZETW8EZEQ) | Public |
+
+Used `corky youtube edit` with draft files specifying `visibility: public`. Had to re-auth first (`corky youtube auth --profile btakita`).
+
+Refresh the blog post page — the YouTube embeds should now show the video player instead of "This video is private".
+
+Yes...change the visibility to Public using Corky...if any of these are private.
+
+```
+● Bash(corky youtube edit /tmp/yt-drafts/part1.md 2>&1)
+  ⎿  Error: Exit code 1
+     Error: profiles.toml not found at /home/brian/Documents/mail/profiles.toml.
+     Create it or run `corky linkedin check` for guidance.
+```
+
+Why are you using /home/brian/Documents/mail and not /home/brian/work/btakita/mail?
+> Create it or run `corky linkedin check` for guidance.
+
+Why this? Why are we looking in profiles.toml? I thought we moved all of the config into .corky.toml?
 <!-- /agent:exchange -->

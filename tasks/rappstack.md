@@ -16,14 +16,24 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Fixing remaining 2
+### Re: drmanny-dev fixed
 
-**2 fix agents launched:**
+**Root causes (3 issues):**
+1. **tailwindcss not resolved** — esbuild needs `conditions: ['style']` for TW v4 (same fix as herbaliciousbliss-dev)
+2. **Build timeout** — `relysjs__ready__wait(300_000)` hangs when `watch: false`. Wrapped in watch check.
+3. **unique_tags_ not found** — Published v0.1.1 had stale code. Republished `@rappstack/domain--any--blog@0.1.2`
 
-1. **drmanny-dev** — adding `./jsonld` exports map entry to `@btakita/domain--server--peakexistence`
-2. **herbaliciousbliss-dev** — adding `./layout` exports map entry to `@btakita/ui--browser--herbaliciousbliss` + fixing `tailwindcss` resolution
+**Build passes locally.** Committed and pushed — CI running.
 
-Will update with results.
+**Deploy status:**
 
-drmanny-dev is taking too long. Does it work locally?
+| App | URL | CI |
+|-----|-----|-----|
+| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
+| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
+| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
+| cogov-dev | cogov.me | ✅ DEPLOYED |
+| drmanny-dev | pe.briantakita.me | 🔄 CI running |
+| herbaliciousbliss-dev | hb.briantakita.me | ❌ relysjs/server resolution (pre-existing) |
+I thought herbaliciousbliss-dev migrated to rhonojs.
 <!-- /agent:exchange -->

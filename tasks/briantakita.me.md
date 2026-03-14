@@ -1435,7 +1435,7 @@ http://localhost:4100/posts/dogfooding-agent-doc-part2-blog has a timeout
 **To fix the timeout:** The dogfooding blog posts need to be re-created. Do you have the original `.md` files, or should I recreate them from the content in the YouTube video descriptions?
 
 I have the originals in:
-- mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part1-blog.md
+- mail/topics/brian-takita/videos1p/2026-03-12-dogfooding-agent-doc-part1-blog.md
 - mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part2-blog.md
 - mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part3-blog.md
 
@@ -1443,4 +1443,24 @@ I have the originals in:
 1. Commit the Hono migration changes (from within each submodule)
 2. Re-create the dogfooding blog posts
 3. Push and deploy
+### Re: Blog posts restored
+
+Created all 3 dogfooding blog posts as `.md.ts` files and registered them in `post/index.ts`:
+
+| Post | Route | Status |
+|------|-------|--------|
+| Part 1: CRDT Debugging | `/posts/dogfooding-agent-doc-part1-blog` | 200 |
+| Part 2: rmemo, tag-path | `/posts/dogfooding-agent-doc-part2-blog` | 200 |
+| Part 3: YouTube Upload | `/posts/dogfooding-agent-doc-part3-blog` | 200 |
+
+All 9 routes verified (including `/`, `/search`, `/rss`, `/about`, `/tags`, `/posts/introducing-agent-doc`).
+
+**Ready to commit and deploy.** Changes span:
+- `app/briantakita.me/` — Hono migration (10 files) + 3 new blog posts + index.ts + package.json
+- 5 lib submodules — relysjs→rhonojs imports and package.json deps
+- Root `package.json` — rhonojs npm reference
+
+Shall I commit from within each submodule and push?
+
+We should be able to import *.md files directly. Work was done to process the *.md files to export `meta_` and the default factory functions.
 <!-- /agent:exchange -->

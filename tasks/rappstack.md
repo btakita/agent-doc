@@ -1947,4 +1947,17 @@ Uses `import.meta.url` to resolve paths — works regardless of CWD.
 **Note:** Do NOT use `generate-index-js` for `post/content/` — barrel `export *` causes `meta_` name collisions since all posts export the same names.
 
 Add to the README of briantakita.me
+
+Done — added post index regeneration documentation to `briantakita.me/README.md` (commit `76dfa4f`, pushed to remote).
+
+The README now documents:
+- **Asset download/upload** commands (`bun -b assets--download` / `bun -b assets--upload`)
+- **Post index regeneration**: `bun post/index.generate.ts`
+- **Warning**: Do not use `generate-index-js` for `post/content/` — barrel `export *` causes `meta_` name collisions
+
+How do I fix the `meta_` name collisions?
+
+```
+TS2308: Module './2004-09-18-subversion-source-control.md' has already exported a member named meta_. Consider explicitly re-exporting to resolve the ambiguity.
+```
 <!-- /agent:exchange -->

@@ -1028,4 +1028,16 @@ plugins: [r2_asset, rebuild_tailwind_plugin, ...]
 Which namespace?
  
 Standalone names without scope...root namespace
+### Re: Standalone root namespace — names available
+
+Both `object-store-asset` and `esbuild-plugin-object-store-asset` are available on npm.
+
+**Plan:**
+1. Create `object-store-asset` in `ctx-core-dev/lib/object-store-asset/` — publishes to npm as `object-store-asset` (root namespace)
+2. Create `esbuild-plugin-object-store-asset` in `ctx-core-dev/lib/esbuild-plugin-object-store-asset/` — publishes as `esbuild-plugin-object-store-asset`
+3. Both live in ctx-core-dev monorepo (workspace packages) but publish without `@ctx-core/` scope
+4. Wire up in all 6 apps' `build.ts`
+5. Create R2 buckets, upload assets, set CI env vars
+
+Starting implementation now.
 <!-- /agent:exchange -->

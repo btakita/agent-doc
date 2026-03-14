@@ -1294,4 +1294,8 @@ CI deploys should be running now. Once all deploys succeed and assets load corre
 Want me to check the deploy status?
 
 Yes
+
+In https://briantakita.me/posts/squarespace-site-lighthouse-scores/
+Are all of my assets using the CDN?
+Including the recently moved r2 assets?
 <!-- /agent:exchange -->

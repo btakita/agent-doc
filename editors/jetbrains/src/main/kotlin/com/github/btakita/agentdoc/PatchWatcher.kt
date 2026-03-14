@@ -123,6 +123,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             val content = document.text
             var result = content
 
+            // Apply frontmatter patch first (before component patches)
+            if (!patch.frontmatter.isNullOrBlank()) {
+                result = applyFrontmatterPatch(result, patch.frontmatter)
+            }
+
             for (p in patch.patches) {
                 result = applyComponentPatch(result, p.component, p.content)
             }
@@ -141,6 +146,47 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
+    }
+
+    /**
+     * Merge YAML key/value pairs into the document's frontmatter.
+     * Parses the existing frontmatter, updates matching keys, preserves others.
+     */
+    private fun applyFrontmatterPatch(doc: String, yamlFields: String): String {
+        if (!doc.startsWith("---\n")) return doc
+
+        val endIdx = doc.indexOf("\n---\n", 4)
+        if (endIdx < 0) return doc
+
+        val existingYaml = doc.substring(4, endIdx)
+        val body = doc.substring(endIdx + 5) // skip \n---\n
+
+        // Parse existing frontmatter as key/value pairs (preserve order)
+        val existing = LinkedHashMap<String, String>()
+        for (line in existingYaml.lines()) {
+            val colonIdx = line.indexOf(':')
+            if (colonIdx > 0) {
+                val key = line.substring(0, colonIdx).trim()
+                val value = line.substring(colonIdx + 1).trim()
+                existing[key] = value
+            }
+        }
+
+        // Merge new fields
+        for (line in yamlFields.lines()) {
+            val colonIdx = line.indexOf(':')
+            if (colonIdx > 0) {
+                val key = line.substring(0, colonIdx).trim()
+                val value = line.substring(colonIdx + 1).trim()
+                if (key.isNotEmpty()) {
+                    existing[key] = value
+                }
+            }
+        }
+
+        // Rebuild frontmatter
+        val newYaml = existing.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+        return "---\n$newYaml\n---\n$body"
     }
 
     /**
@@ -190,6 +236,7 @@ data class IpcPatch(
     val file: String,
     val patches: List<ComponentPatch>,
     val unmatched: String,
+    val frontmatter: String?,
 )
 
 data class ComponentPatch(
@@ -205,6 +252,7 @@ fun parsePatchJson(json: String): IpcPatch? {
     try {
         val file = extractStringField(json, "file") ?: return null
         val unmatched = extractStringField(json, "unmatched") ?: ""
+        val frontmatter = extractStringField(json, "frontmatter")
 
         // Parse patches array
         val patchesStart = json.indexOf("\"patches\"")
@@ -230,7 +278,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             pos = objEnd + 1
         }
 
-        return IpcPatch(file, patches, unmatched)
+        return IpcPatch(file, patches, unmatched, frontmatter)
     } catch (e: Exception) {
         return null
     }

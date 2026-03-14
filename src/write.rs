@@ -196,9 +196,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     let base = baseline.unwrap_or(&content_at_start);
 
-    // Apply patches to baseline
-    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    // Apply patches to baseline with replace mode for exchange component.
+    // The --stream path receives the complete intended exchange content
+    // (not a delta), so append mode would duplicate the user's prompt
+    // that already exists in the baseline's exchange component.
+    let mut mode_overrides = std::collections::HashMap::new();
+    mode_overrides.insert("exchange".to_string(), "replace".to_string());
+    let content_ours = template::apply_patches_with_overrides(
+        base, &patches, &unmatched, file, &mode_overrides,
+    ).context("failed to apply template patches")?;
 
     // Acquire advisory lock
     let doc_lock = acquire_doc_lock(file)?;
@@ -207,7 +213,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, _crdt_state) = if content_current == base {
+    let (final_content, crdt_state) = if content_current == base {
         // No edits — build CRDT state from result
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
@@ -224,8 +230,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
     // If the user edited concurrently, final_content includes their edits via CRDT merge.
     // Saving content_ours ensures the next diff detects those concurrent edits.
     snapshot::save(file, &content_ours)?;
-    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
-    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
+    // Save the merged CRDT state — NOT a fresh state from content_ours.
+    // Using content_ours would lose user edits from the merge, causing
+    // the next merge cycle to re-insert them as duplicates.
+    snapshot::save_crdt(file, &crdt_state)?;
 
     drop(doc_lock);
 
@@ -281,22 +289,33 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
+    // Separate frontmatter patch from component patches
+    let mut frontmatter_yaml: Option<String> = None;
     let ipc_patches: Vec<serde_json::Value> = patches
         .iter()
-        .map(|p| {
-            serde_json::json!({
-                "component": p.name,
-                "content": p.content,
-            })
+        .filter_map(|p| {
+            if p.name == "frontmatter" {
+                frontmatter_yaml = Some(p.content.trim().to_string());
+                None
+            } else {
+                Some(serde_json::json!({
+                    "component": p.name,
+                    "content": p.content,
+                }))
+            }
         })
         .collect();
 
-    let ipc_payload = serde_json::json!({
+    let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
         "unmatched": unmatched.trim(),
         "baseline": baseline.unwrap_or(""),
     });
+
+    if let Some(ref yaml) = frontmatter_yaml {
+        ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
+    }
 
     // Atomic write of patch file
     atomic_write(
@@ -339,12 +358,18 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let base = baseline.unwrap_or(&content_at_start);
-    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
+    let mut content_ours = template::apply_patches(base, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
+
+    // Apply frontmatter patch if present
+    if let Some(ref yaml) = frontmatter_yaml {
+        content_ours = crate::frontmatter::merge_fields(&content_ours, yaml)
+            .context("failed to apply frontmatter patch")?;
+    }
     let doc_lock = acquire_doc_lock(file)?;
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
-    let (final_content, _crdt_state) = if content_current == base {
+    let (final_content, crdt_state) = if content_current == base {
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
     } else {
@@ -354,8 +379,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     };
     atomic_write(file, &final_content)?;
     snapshot::save(file, &content_ours)?;
-    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
-    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
+    snapshot::save_crdt(file, &crdt_state)?;
     drop(doc_lock);
     recover::clear_pending(file)?;
     eprintln!(
@@ -384,7 +408,7 @@ pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, _crdt_state) = if content_current == content {
+    let (final_content, crdt_state) = if content_current == content {
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
     } else {
@@ -395,8 +419,7 @@ pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
     atomic_write(file, &final_content)?;
     // Save snapshot as content_ours, not final_content
     snapshot::save(file, &content_ours)?;
-    let crdt_ours = crate::crdt::CrdtDoc::from_text(&content_ours);
-    snapshot::save_crdt(file, &crdt_ours.encode_state())?;
+    snapshot::save_crdt(file, &crdt_state)?;
     drop(doc_lock);
     eprintln!("[write] Stream patches applied to {}", file.display());
     Ok(())

@@ -289,7 +289,24 @@ pre_patch = "cmd"      # Shell command: stdin→stdout transform
 post_patch = "cmd"     # Shell command: fire-and-forget
 ```
 
-### 7.21 watch
+### 7.21 write
+
+`agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc]` — apply patch blocks from stdin to a template document.
+
+1. Read response (patch blocks) from stdin
+2. Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks
+3. Read document and baseline (from `--baseline-file` or current file)
+4. Apply patches to baseline:
+   - **Exchange component uses replace mode** (overrides the default append), since the `--stream` path receives the complete intended exchange content. Without this override, the user's prompt (already in the baseline exchange) would be duplicated by the append.
+   - All other components use their configured mode (from `.agent-doc/components.toml`) or default (`replace`)
+5. CRDT merge: if the file was modified during response generation, merge `content_ours` (baseline + patches) with `content_current` (file on disk) using Yrs CRDT
+6. Atomic write + snapshot save + CRDT state save
+
+**`--stream` flag:** Enables CRDT write strategy. Required for template/CRDT documents.
+
+**`--ipc` flag:** Writes a JSON patch file to `.agent-doc/patches/` for IDE plugin consumption instead of modifying the document directly.
+
+### 7.22 watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.
 

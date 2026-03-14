@@ -300,11 +300,14 @@ fn stream_loop(
 
         // Compute content_ours: baseline + final response patches (without user edits).
         // Save this as snapshot so the next diff detects any concurrent user edits.
+        // Must use replace mode for the target — stream buffer is cumulative, not incremental.
         let content_ours = {
             let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
             let (patches, unmatched) = crate::template::parse_patches(&patch)
                 .unwrap_or_default();
-            crate::template::apply_patches(baseline, &patches, &unmatched, file)
+            let mut mode_overrides = std::collections::HashMap::new();
+            mode_overrides.insert(target.to_string(), "replace".to_string());
+            crate::template::apply_patches_with_overrides(baseline, &patches, &unmatched, file, &mode_overrides)
                 .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
         };
         snapshot::save(file, &content_ours)?;
@@ -695,5 +698,93 @@ mod tests {
         let config = Config::default();
         let err = run(&doc, 2000, None, None, true, &config).unwrap_err();
         assert!(err.to_string().contains("expected crdt"), "error: {}", err);
+    }
+
+    /// Regression test: content_ours computation for exchange component must use
+    /// replace mode, not the default append mode. Without replace mode, the
+    /// patch content gets appended to the baseline's exchange content, duplicating
+    /// the user's prompt text.
+    #[test]
+    fn content_ours_exchange_no_duplicate() {
+        let baseline = "\
+---
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+<!-- agent:exchange -->
+commit and push all rappstack packages and sites.
+publish briantakita.me
+<!-- /agent:exchange -->
+";
+        let target = "exchange";
+        let final_text = "\
+commit and push all rappstack packages and sites.
+publish briantakita.me
+
+### Re: commit and push
+
+Done — all packages pushed.";
+
+        // Build patch and apply WITH replace mode (the fix)
+        let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
+        let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
+        let mut mode_overrides = std::collections::HashMap::new();
+        mode_overrides.insert(target.to_string(), "replace".to_string());
+        let file = std::path::Path::new("test.md");
+        let content_ours = crate::template::apply_patches_with_overrides(
+            baseline, &patches, &unmatched, file, &mode_overrides,
+        ).unwrap();
+
+        // User prompt should appear exactly once
+        assert_eq!(
+            content_ours.matches("commit and push all rappstack packages and sites.").count(),
+            1,
+            "User prompt duplicated in content_ours:\n{}",
+            content_ours
+        );
+        assert_eq!(
+            content_ours.matches("publish briantakita.me").count(),
+            1,
+            "User prompt duplicated in content_ours:\n{}",
+            content_ours
+        );
+        // Agent response should be present
+        assert!(content_ours.contains("Done — all packages pushed."));
+    }
+
+    /// Verify that WITHOUT replace mode, exchange component WOULD duplicate
+    /// content (demonstrating the bug this fix prevents).
+    #[test]
+    fn content_ours_exchange_duplicates_without_replace() {
+        let baseline = "\
+---
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+<!-- agent:exchange -->
+user prompt here
+<!-- /agent:exchange -->
+";
+        let target = "exchange";
+        let final_text = "user prompt here\n\nAgent response.";
+
+        let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
+        let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
+        let file = std::path::Path::new("test.md");
+
+        // Without mode override, exchange defaults to append → duplicates
+        let content_no_override = crate::template::apply_patches(
+            baseline, &patches, &unmatched, file,
+        ).unwrap();
+
+        // With append mode, "user prompt here" appears twice (baseline + patch)
+        assert_eq!(
+            content_no_override.matches("user prompt here").count(),
+            2,
+            "Expected duplication without replace override:\n{}",
+            content_no_override
+        );
     }
 }

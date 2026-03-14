@@ -1532,4 +1532,38 @@ Why are the *.md files missing when I run:
 ❯ (cd app/briantakita.me/post/content && generate-index-js -d .) | grep 'dogfood'
 ~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                16:52:52
 ```
+### Re: `.md` files missing from generate-index-js output
+
+**Root cause:** Your standalone `~/work/btakita/briantakita.me-dev` has `@ctx-core/dev-tools` managed by **yalc**, pinning it to `8.3.70`. `bun update` cannot override yalc links.
+
+**Fix options:**
+
+1. **Update via yalc** (from ctx-core-dev):
+   ```bash
+   cd ~/work/btakita/ctx-core-dev/lib/dev-tools && yalc push
+   ```
+
+2. **Remove yalc link** (use npm registry):
+   ```bash
+   cd ~/work/btakita/briantakita.me-dev && yalc remove @ctx-core/dev-tools && bun install
+   ```
+
+3. **Republish all yalc packages** (keeps the yalc setup current):
+   ```bash
+   cd ~/work/btakita/ctx-core-dev && yalc-publish-all.sh
+   ```
+
+The `.md` export fix is in `8.3.72`. Once yalc is updated, `generate-index-js` will include `.md` files.
+
+How did the *.md.js files get generated?
+```
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                16:52:52
+❯ (cd app/briantakita.me/post/content && ls -1) | grep 'dogfood'
+2026-03-12-dogfooding-agent-doc-part1-blog.md
+2026-03-12-dogfooding-agent-doc-part1-blog.md.js
+2026-03-12-dogfooding-agent-doc-part2-blog.md
+2026-03-12-dogfooding-agent-doc-part2-blog.md.js
+2026-03-12-dogfooding-agent-doc-part3-blog.md
+2026-03-12-dogfooding-agent-doc-part3-blog.md.js
+```
 <!-- /agent:exchange -->

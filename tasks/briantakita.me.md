@@ -958,4 +958,27 @@ Video unavailable
 Playback on other websites has been disabled by the video owner
 Watch on YouTube
 ```
+
+Would it be best to show the vidb
+### Re: "Playback on other websites has been disabled"
+
+Fixed. The YouTube embed was disabled because the `embeddable` flag wasn't set in the API call.
+
+1. Added `"embeddable": true` to corky's `update_video` and `upload_video` API calls
+2. Built release binary
+3. Re-ran `corky youtube edit` on all 3 videos — embedding now enabled
+
+Refresh your blog posts — the iframes should play inline now.
+
+**Corky fix:** Both upload and edit now set `embeddable: true` by default. This is a v0.15.2 candidate when ready to release.
+
+My video iframes have an error:
+
+```
+Video unavailable
+Playback on other websites has been disabled by the video owner
+Watch on YouTube
+```
+
+Would it be best to show the video in an iframe or just have a direct link?
 <!-- /agent:exchange -->

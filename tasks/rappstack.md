@@ -1661,4 +1661,114 @@ Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/conte
 ~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                17:09:13
 ❯
 ```
+### Re: Still not working — yalc override + stale submodule
+
+Both commands fail because your standalone `~/work/btakita/briantakita.me-dev` hasn't pulled our changes:
+
+**Problem 1: `npx generate-index-js`** — yalc pins `@ctx-core/dev-tools@8.3.70` (has the `readdirSync(dir_path)` bug). Fix:
+```bash
+cd ~/work/btakita/briantakita.me-dev && yalc remove @ctx-core/dev-tools && bun install
+```
+
+**Problem 2: `bun index.generate.ts`** — the submodule `app/briantakita.me` is at an older commit (still has `md_js__generate()`). Fix:
+```bash
+cd ~/work/btakita/briantakita.me-dev/app/briantakita.me && git pull
+```
+
+Both fixes needed. Our changes (dev-tools v8.3.72, refactored index.generate.ts) are in git/npm but your local yalc store and submodule pointer are stale.
+
+And now the *.md.js files are back...I thought you fixed removing the wrapper .md.js file when there is a *.md file.
+
+```
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                17:10:04
+❯ find app/briantakita.me/post/content | grep 'dogfood'
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part2-blog.md
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part1-blog.md
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part3-blog.md.js
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part2-blog.md.js
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part3-blog.md
+app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part1-blog.md.js
+```
+
+I did a git pull and yalc remove and bun install but still having the issues:
+
+```
+~/work/btakita/briantakita.me-dev/app/briantakita.me main ⇣5 !1                                                                                                                                                                       17:11:43
+❯ gs
+On branch main
+Your branch is behind 'origin/main' by 5 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   post/index.ts
+
+no changes added to commit (use "git add" and/or "git commit -a")
+~/work/btakita/briantakita.me-dev/app/briantakita.me main ⇣5 !1                                                                                                                                                                       17:11:45
+❯ gdiff
+~/work/btakita/briantakita.me-dev/app/briantakita.me main ⇣5 !1                                                                                                                                                                       17:11:48
+❯ git reset --hard
+HEAD is now at 6414e90 Migrate to Tailwind CSS v4
+~/work/btakita/briantakita.me-dev/app/briantakita.me main ⇣5                                                                                                                                                                          17:11:51
+❯ gfr
+Successfully rebased and updated refs/heads/main.
+~/work/btakita/briantakita.me-dev/app/briantakita.me main                                                                                                                                                                             17:11:52
+❯ tig
+~/work/btakita/briantakita.me-dev/app/briantakita.me main                                                                                                                                                                          4s 17:11:57
+❯ ppd
+~/work/btakita/briantakita.me-dev main !1                                                                                                                                                                                             17:11:58
+❯ gs
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   app/briantakita.me (new commits)
+
+no changes added to commit (use "git add" and/or "git commit -a")
+~/work/btakita/briantakita.me-dev main !1                                                                                                                                                                                             17:11:59
+❯ npx generate-index-js -d app/briantakita.me/post/content
+Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/content'
+    at readdirSync (node:fs:1554:26)
+    at main (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:32:21)
+    at chdir (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dir/chdir/index.js:5:9)
+    at file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:24:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: 'app/briantakita.me/post/content'
+}
+~/work/btakita/briantakita.me-dev main !1                                                                                                                                                                                             17:12:04
+❯ bun app/briantakita.me/post/index.generate.ts
+~/work/btakita/briantakita.me-dev main !1                                                                                                                                                                                             17:12:08
+❯ yalc remove @ctx-core/dev-tools && bun install
+Package @ctx-core/dev-tools not found in yalc.lock, still will try to remove.
+Removing installation of @ctx-core/dev-tools in /home/brian/work/btakita/briantakita.me-dev
+[0.01ms] ".env"
+bun install v1.3.10 (30e609e0)
+
+2 packages installed [319.00ms]
+~/work/btakita/briantakita.me-dev main !2                                                                                                                                                                                             17:12:25
+❯ bun app/briantakita.me/post/index.generate.ts
+~/work/btakita/briantakita.me-dev main !2                                                                                                                                                                                             17:12:28
+❯ npx generate-index-js -d app/briantakita.me/post/content
+Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/content'
+    at readdirSync (node:fs:1554:26)
+    at main (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:32:21)
+    at chdir (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dir/chdir/index.js:5:9)
+    at file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:24:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: 'app/briantakita.me/post/content'
+}
+```
 <!-- /agent:exchange -->

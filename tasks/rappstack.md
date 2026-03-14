@@ -1377,4 +1377,28 @@ I'm missing the the straight *.md files. THe *.md.ts files seem to be included:
 [2026-03-12-dogfooding-agent-doc-part3-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part3-blog.md)
 [2026-03-12-dogfooding-agent-doc-part2-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part2-blog.md)
 [2026-03-12-dogfooding-agent-doc-part1-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part1-blog.md)
+### Re: generate-index-js fixed + .md support added
+
+**Fixed two bugs in `@ctx-core/dev-tools` `generate-index-js`:**
+
+1. **`statSync().then()` → `existsSync()`** — `statSync` returns a `Stats` object, not a Promise. Replaced with `existsSync()`.
+2. **`readdirSync(dir_path)` → `readdirSync('.')`** — after `chdir()` changes CWD, the original relative path is invalid. Use `.` instead.
+
+**Added `.md` extension support** — generates `export * from './${basename}.js'` for `.md` files, matching the pattern used by `md_esbuild_plugin_` in `build.ts`.
+
+**Result:**
+
+The 3 dogfooding blog posts are now exported in `post/content/index.ts`:
+```
+export * from './2026-03-12-dogfooding-agent-doc-part1-blog.md.js'
+export * from './2026-03-12-dogfooding-agent-doc-part2-blog.md.js'
+export * from './2026-03-12-dogfooding-agent-doc-part3-blog.md.js'
+```
+
+**Commits:**
+- `ctx-core-dev/lib/dev-tools` → `38ae669` (fix pushed)
+- `briantakita.me` → `3013492` (index.ts regenerated)
+- `briantakita.me-dev` → `12fab11` (submodule pointer + deploy triggered)
+
+`(cd app/briantakita.me/post/content && generate-index-js -d .)` still does no include the *.md files.
 <!-- /agent:exchange -->

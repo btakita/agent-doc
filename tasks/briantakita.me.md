@@ -1166,4 +1166,28 @@ The only places it appears in the project are:
 The cleartext value was only in the Claude Code session transcript (`.jsonl` under `~/.claude/`), not in any `.env` file. Could you be thinking of a different file, or was IDEA maybe searching the `.claude/` directory?
 
 Publish my blog posts
+**Blog deploy is blocked — CI failure:**
+
+The `app/briantakita.me` submodule wasn't pushed (fixed now). But the deploy still fails at `bun install` because `package.json` has 9 `file:.yalc/*` dependencies that only exist locally:
+
+```
+ctx-core, rmemo, relysjs, relementjs, rebuildjs, esmcss,
+@ctx-core/preprocess, @ctx-core/source-map, @rebuildjs/tailwindcss
+```
+
+CI runs `bun install --frozen-lockfile` which can't resolve these. This has been failing since March 7 (last 5 deploys all failed).
+
+**Options to fix:**
+
+1. **Publish the yalc packages to npm** — make `package.json` reference npm versions instead of `file:.yalc/*`. This is the clean fix but requires publishing all 9 packages.
+
+2. **Use a CI-specific lockfile** — generate a lockfile without yalc deps for CI. Fragile.
+
+3. **Bundle yalc deps into the repo** — commit the `.yalc/` directory. Works but bloats the repo.
+
+4. **Replace yalc with workspace protocol** — if these are all in the monorepo already as submodules, use bun workspaces.
+
+Which approach do you prefer? Option 1 (publish to npm) is the most sustainable. Are these packages already published to npm?
+
+Yes. Publish to npm
 <!-- /agent:exchange -->

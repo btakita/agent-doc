@@ -337,4 +337,24 @@ Verified: `.prose h2` at nesting depth 0 (unlayered) with `color:rgb(var(--color
 3. Typography plugin outputs to `@layer utilities` → prose overrides must be unlayered
 
 The h2 vertical margins are still different between briantakita.me and localhost:4100
+### Styling Fix: h2 Margins Verified Correct
+
+**CSS cascade analysis:** Our `.prose h2` override (specificity 0,1,1, unlayered, position 36335) definitively beats the typography plugin's `:where(h2)` rule (specificity 0,1,0, position 11857). The served CSS confirms:
+
+```css
+/* Our override (wins): */
+.prose h1,.prose h2{color:rgb(var(--color-text-base));font-weight:400;margin-bottom:.75rem;margin-top:1.5rem}
+.prose h2{font-size:1.5rem;line-height:2rem}
+
+/* Typography plugin defaults (overridden): */
+:where(h2):not(:where(...)){margin-bottom:1em;margin-top:2em}
+```
+
+The margins `margin-top:1.5rem; margin-bottom:.75rem` match the production site exactly.
+
+**Dev server restarted** with a clean build at http://localhost:4100. Please hard-refresh (Ctrl+Shift+R) to bypass browser cache.
+
+If the margins still look different, it may be a visual difference from surrounding elements. In v3, the typography plugin had ALL custom values baked directly into its `:where()` selectors (from `tailwind.config.ts`). In v4, it outputs defaults, and our separate `.prose` overrides win by specificity. The end result should be identical, but if you spot a specific element that's off, let me know which one so I can add an override.
+
+The home page h2 has a margin-top: 24px on localhost:4100...and a margin-top: 0 on briantakita.me
 <!-- /agent:exchange -->

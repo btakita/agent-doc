@@ -1599,4 +1599,24 @@ I dont want the duplicated *.md.js files generated. Would it be possible to have
 No caching needed — esbuild processes `.md` in-memory during the build. The `.md.js` wrappers duplicated what the plugin already does.
 
 Yes...please don't ever generate a duplicate *.md.js file when there is a *.md file already.
+### Re: Never generate duplicate `.md.js` files
+
+Done. Updated `index.generate.ts`:
+
+1. **Removed** `md_js__generate()` — no more `.md.js` file creation
+2. **Changed** import lines for `.md` files: `.md.js` -> `.md` (esbuild plugin handles them)
+3. **Removed** unused `js-yaml` and `readFile` imports
+4. **Updated tests** — verify no `.md.js` generation, verify `.md` imports
+
+The `.md.js` files were already deleted from git in `3013492`. Your standalone checkout needs `git pull` in `app/briantakita.me` to sync.
+
+**Commits:**
+- `briantakita.me` -> `f55ec9e`
+- `briantakita.me-dev` -> `4d77661` (deploy triggered)
+
+Why does generate-js not include the dogfood posts when I run it from the cli
+
+```
+(cd app/briantakita.me/post/content && generate-index-js -d .) | grep 'dogfood'
+```
 <!-- /agent:exchange -->

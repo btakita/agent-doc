@@ -719,6 +719,10 @@ All 5 sites deploying to Cloudflare Pages.
 
 Let's have all assets be served from r2. For all of the sites...including briantakita.me
 
+Please explain how the asset files are added to `dist/browser`. On development, I want to use the file system. But on deployments, use R2/S3
+
+The generated files (.css, .js) should be on the filesystem. But the mp3, png, jpg, etc. assets should be from R2/S3.
+
 **drmanny-dev deploy blocker:** A 250 MiB MP4 video in `dist/browser` exceeds Cloudflare Pages' limit. The CSS migration itself is correct (188K compiled CSS). The video needs to be either excluded from the Pages deploy or moved to R2 storage. This is a pre-existing asset issue, not related to Tailwind v4.
 
 **Tailwind v4 migration summary:**

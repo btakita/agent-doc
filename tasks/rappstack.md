@@ -1325,4 +1325,56 @@ These use esbuild's built-in `[name]-[hash]` format (base64-like), not our plugi
 **3 pre-existing failures** (drmanny, cogov, herbaliciousbliss) are unrelated to the asset plugin — they have missing dependencies or broken module resolution that predates our changes. Want me to investigate and fix those?
 
 For briantakita.me, please run generate-index-js
+### Re: generate-index-js
+
+`generate-index-js` from `@ctx-core/dev-tools@8.3.70` has a bug — line 37 uses `statSync().then()` which is invalid (statSync returns a Stats object, not a Promise). The tool crashes with `TypeError: statSync(...).then is not a function`.
+
+I ran a fixed version locally against the briantakita-specific lib dirs. Output:
+
+**`lib/domain--server--briantakita/`:**
+```js
+export * from './env/index.js'
+export * from './jsonld/index.js'
+```
+
+**`lib/ui--server--briantakita/`:**
+```js
+export * from './about/index.js'
+export * from './anchor/index.js'
+export * from './attribution/index.js'
+export * from './footer/index.js'
+export * from './header/index.js'
+export * from './home/index.js'
+export * from './icon/index.js'
+export * from './layout/index.js'
+export * from './links/index.js'
+export * from './md/index.js'
+export * from './open_source/index.js'
+export * from './portfolio/index.js'
+export * from './post/index.js'
+export * from './search/index.js'
+export * from './sitemap/index.js'
+export * from './social/index.js'
+export * from './stack/index.js'
+export * from './sticky/index.js'
+export * from './tag/index.js'
+export * from './utf8/index.js'
+```
+
+**`lib/ui--browser--briantakita/`:**
+```js
+export * from './layout/index.js'
+```
+
+Should I write these to the `index.ts` files, or did you want this run differently? The `@ctx-core/dev-tools` bug (line 37: `statSync(path).then()`) should be fixed in ctx-core-dev.
+
+
+When I run:
+```
+(cd app/briantakita.me/post/content && generate-index-js -d .)
+```
+I'm missing the the straight *.md files. THe *.md.ts files seem to be included:
+[2026-03-12-dogfooding-agent-doc-part3-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part3-blog.md)
+[2026-03-12-dogfooding-agent-doc-part2-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part2-blog.md)
+[2026-03-12-dogfooding-agent-doc-part1-blog.md](../src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-12-dogfooding-agent-doc-part1-blog.md)
 <!-- /agent:exchange -->

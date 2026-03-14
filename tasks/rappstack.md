@@ -1471,4 +1471,45 @@ Note: `.md.ts` files still correctly export as `.md.js` (they go through the `.t
 Please document how to generate the index.ts file.
 
 In the home page Recent Posts, the dogfooding articles are duplicate as links.
+### Re: Documenting how to generate index.ts
+
+**To regenerate `post/content/index.ts`:**
+
+```bash
+# From the briantakita.me-dev project root:
+npx generate-index-js -d app/briantakita.me/post/content > app/briantakita.me/post/content/index.ts
+```
+
+**Important:** Always run from the project root (where `node_modules` lives). Running from a subdirectory with `npx` causes CWD resolution issues.
+
+**What it does:**
+- `.md.ts` files → `export * from './${name}.md.js'` (TypeScript handler)
+- `.md` files → `export * from './${name}.md'` (plain markdown, IDEA-resolvable)
+- `.ts` files → `export * from './${name}.js'`
+- Subdirectories with `index.ts` → `export * from './${name}/index.js'`
+
+**When to run:** After adding, removing, or renaming post files in `post/content/`.
+
+
+```
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                16:50:28
+❯ bunx generate-index-js -d app/briantakita.me/post/content
+Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/content'
+    at readdirSync (node:fs:1554:26)
+    at main (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:32:21)
+    at chdir (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dir/chdir/index.js:5:9)
+    at file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:24:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: 'app/briantakita.me/post/content'
+}
+```
+
+### Re: Duplicate links on homepage
+
+Checked the live site — **no duplicates found.** The fix from commit `0c16d41` (removing duplicate `.md` imports) resolved this. The latest deploy (`76f4702`) is live and working correctly.
 <!-- /agent:exchange -->

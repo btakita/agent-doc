@@ -1250,4 +1250,32 @@ This opens a browser for OAuth. Once authenticated, I can create the new buckets
 Shall I update the `.env` files and CI workflows now?
 
 Yes
+### Re: .env files and CI workflows updated
+
+**All 6 apps updated:**
+
+| App | AWS_BUCKET | ASSET_BASE_URL | CI Secret | Overrides |
+|-----|-----------|----------------|-----------|-----------|
+| briantakita.me-dev | `assets-briantakita-me` | `https://assets.briantakita.me` | ✅ set | ✅ removed |
+| drmanny-dev | `assets-pe-briantakita-me` | `https://assets.pe.briantakita.me` | ✅ set | ✅ removed |
+| brookebrodack-dev | `assets-brookebrodack-net` | `https://assets.brookebrodack.net` | ✅ set | ✅ removed |
+| cogov-dev | `assets-cogov-me` | `https://assets.cogov.me` | ✅ set | ✅ removed |
+| herbaliciousbliss-dev | `assets-hb-briantakita-me` | `https://assets.hb.briantakita.me` | ✅ set | ✅ removed |
+| prescience-notes-dev | `assets-pn-briantakita-me` | `https://assets.pn.briantakita.me` | ✅ set | ✅ removed |
+
+**Changes per app:**
+1. `.env` — updated `AWS_BUCKET`, added `ASSET_BASE_URL`
+2. `.env.sample` — updated `AWS_BUCKET`, added `ASSET_BASE_URL=` template
+3. `deploy.yml` — added `ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}` to build step
+4. `package.json` — removed `object-store-asset` overrides (v0.0.2 fix)
+5. GitHub secrets — set `ASSET_BASE_URL` and updated `AWS_BUCKET`
+
+**Remaining:**
+1. Commit changes in each app repo
+2. Deploy all apps (CI will now use new buckets + asset URLs)
+3. Delete old R2 buckets after confirming everything works
+
+Shall I commit and deploy?
+
+Yes
 <!-- /agent:exchange -->

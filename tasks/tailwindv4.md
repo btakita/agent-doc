@@ -1,7 +1,58 @@
 ---
 agent_doc_session: a90ef1a3-df78-4fda-bb96-679789416f14
 tmux_session: '0'
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+
+
+## Overview
+@rebuildjs/tailwindcss needs to migrate from Tailwind v3 API to v4. The plugin at src/ctx-core-dev/lib/rebuildjs-tailwindcss/ calls tailwind({...config}) which no longer exists in v4.
+
+## Scope
+- Source: src/ctx-core-dev/lib/rebuildjs-tailwindcss/
+- Current version: 0.10.60 (locked to Tailwind v3)
+- Target: Tailwind v4 (@tailwindcss/postcss)
+
+## Migration Steps
+- [ ] Replace `tailwind()` PostCSS plugin call with `@tailwindcss/postcss`
+- [ ] Update config handling — v4 uses CSS-based `@theme` directives
+- [ ] Update package.json dep from `tailwindcss: ^3.4.18` to `^4.x`
+- [ ] Fix type imports (`Config` type changed in v4)
+- [ ] Update test fixtures for v4 CSS output format
+- [ ] Test with briantakita.me build
+- [ ] Publish updated @rebuildjs/tailwindcss to npm
+
+## Key Changes in Tailwind v4
+- No JavaScript-based API for main tailwind processor
+- Must use @tailwindcss/postcss as PostCSS plugin
+- Configuration via CSS @theme directives or @config directive
+- safelist, corePlugins, separator options removed
+
+## Exchange
+<!-- agent:exchange -->
+Go
+Go
+
+### Status: In Progress
+
+Migration started. Changes made:
+1. `index.js`: Swapped `import tailwind from 'tailwindcss'` → `import tailwindcss from '@tailwindcss/postcss'`
+2. `index.js`: Replaced `tailwind({...config, content})` with `tailwindcss()` — v4 auto-detects content
+3. `index.js`: Added `@tailwind` → `@import "tailwindcss"` CSS transform (v4 doesn't support @tailwind directives)
+4. `index.d.ts`: Removed `tailwindcss_config` from config type, removed `Config` import
+5. `package.json`: Added `@tailwindcss/postcss: ^4.2.1`, bumped `tailwindcss: ^4.2.1`
+6. `index.test.ts`: Removed `tailwindcss_config` test parameter
+
+**Blocker:** Tests timeout — PostCSS v4 processing works but the reactive build loop keeps re-triggering. Investigating the memo/cancel cycle. PostCSS output is 48K chars (full Tailwind CSS) which is correct, but the build never signals completion.
+
+<!-- /agent:exchange -->
+---
+agent_doc_session: a90ef1a3-df78-4fda-bb96-679789416f14
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 

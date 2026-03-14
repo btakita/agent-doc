@@ -389,4 +389,25 @@ The `relysjs__ready__wait(Infinity)` in `build.ts` causes the build to hang inde
 New run in progress. If the build times out, we may need to investigate why `relysjs__ready__wait` doesn't resolve on CI runners.
 
 /agent-doc compact
+### Re: Compact
+
+Compacting the document. Summary of completed work:
+
+**@rappstack Migration — COMPLETE:**
+- 14 @rappstack/* packages published to npm at v0.1.0
+- All 5 apps converted from submodules to npm packages
+- CI/CD workflows created for all apps
+
+**Deployment Status:**
+| App | URL | Status |
+|-----|-----|--------|
+| cogov-dev | https://cogov.me/ | ✅ DEPLOYED (Demo link added) |
+| prescience-notes | https://pn.briantakita.me/ | ✅ DEPLOYED |
+| brookebrodack-dev | https://brookebrodack.net/ | ✅ DEPLOYED |
+| herbaliciousbliss-dev | https://hb.briantakita.me/ | ✅ DEPLOYED |
+| drmanny-dev | https://pe.briantakita.me/ | ❌ BUILD HANGS IN CI |
+
+**Open item — drmanny-dev:** `relysjs__ready__wait(Infinity)` in `build.ts` causes the CI build to hang (works locally). Build step has 10-minute timeout. Need to investigate why it doesn't resolve on GitHub Actions runners. Peakexistence repos are now public.
+
+Add tests
 <!-- /agent:exchange -->

@@ -316,4 +316,25 @@ Verified: `.prose h2{color:rgb(var(--color-text-base));font-weight:400;...}` now
 
 h2 color is still incorrect
 ![img_5.png](img_5.png)
+### Styling Fix: Typography Plugin in @layer utilities
+
+**Root cause:** The typography plugin's `.prose :where(h2){color:var(--tw-prose-headings)}` is nested inside **`@layer utilities`** (not `@layer components` as assumed). CSS cascade: `utilities > components > base`. Our overrides in `@layer components` still lost.
+
+**Fix:** Moved ALL `.prose` overrides **outside any `@layer`** (unlayered). In CSS cascade layers, unlayered styles always beat layered styles regardless of specificity or order. This guarantees our prose customizations win.
+
+Structure now:
+- `@layer base` — layout defaults (section/footer, a, html, scrollbar)
+- `@layer components` — `.focus-outline` only
+- Unlayered — all `.prose` overrides (guaranteed highest cascade priority)
+
+Verified: `.prose h2` at nesting depth 0 (unlayered) with `color:rgb(var(--color-text-base))`.
+
+**Dev server restarted** at http://localhost:4100 — please refresh.
+
+**Updated v4 breaking changes list:**
+1. `outline-2` now sets `outline-style: solid` → use `outline-hidden`
+2. `@source` needed for content scanning outside CSS project root
+3. Typography plugin outputs to `@layer utilities` → prose overrides must be unlayered
+
+The h2 vertical margins are still different between briantakita.me and localhost:4100
 <!-- /agent:exchange -->

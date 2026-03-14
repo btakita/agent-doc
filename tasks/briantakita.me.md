@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 ## Current Architecture
@@ -302,5 +303,30 @@ OAuth re-authenticated successfully (channel UC3gg23rxm1sM43sQWRGKEqQ). All 3 vi
 - B-9uI53cRVE (Part 1) — blog link added
 - qQCKVQHRQCI (Part 2) — blog link added
 - RrZETW8EZEQ (Part 3) — blog link added
+
+### Pending
+
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
+- [X] Create yalc tooling for library version publishing — @ctx-core/monorepo@21.4.162
+- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+- [X] Update YouTube video descriptions (blog post links added)
+- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
+
+All tasks complete.
+
+---
+
+### Re: npm publish — Done
+
+Published `@ctx-core/monorepo@21.4.162`:
+- Version bump 21.4.161 → 21.4.162
+- All prepublish checks passed (types, tests, publint, attw)
+- Pushed to origin/main
+
+What plugin do we use to render *.md & *.md.ts files?
 
 <!-- /agent:exchange -->

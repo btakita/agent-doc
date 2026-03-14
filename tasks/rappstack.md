@@ -1141,4 +1141,29 @@ Also — what are the public-facing URLs for each bucket? briantakita.me-dev use
 Yes...I thought we already had R2 buckets for each of the apps
 
 I migrated all of the apps S3 from contabo to R2...right?
+### Re: All apps already on R2
+
+You're right — all 6 apps are already migrated to Cloudflare R2. The `.env.sample` files were stale (still showing Contabo), which misled me. The live `.env` files all point to R2:
+
+update the .env.sample files please
+
+| App | R2 Bucket | Endpoint |
+|-----|-----------|----------|
+| briantakita.me-dev | `briantakita-assets` | `1e7e...r2.cloudflarestorage.com` |
+| drmanny-dev | `peakexistence-public` | `1e7e...r2.cloudflarestorage.com` |
+| brookebrodack-dev | `assets-brookebrodack` | via `pass` (same R2) |
+| cogov-dev | `assets-cogov` | `1e7e...r2.cloudflarestorage.com` |
+| herbaliciousbliss-dev | `herbaliciousbliss-asset` | `1e7e...r2.cloudflarestorage.com` |
+| prescience-notes-dev | `prescience-notes-public` | `1e7e...r2.cloudflarestorage.com` |
+
+**What's needed to enable the plugin:**
+Each bucket needs a **public-facing URL** for `ASSET_BASE_URL`. Options:
+1. **R2 custom domain** (e.g., `assets.pe.briantakita.me`) — needs Cloudflare DNS setup
+2. **R2 public bucket URL** — Cloudflare provides `pub-<id>.r2.dev` URLs for public buckets
+
+briantakita.me-dev already has `ASSETS_BRIANTAKITA_ME__BUCKET_URL=https://briantakita.me` — is that the pattern for all apps (assets served from the same domain)? Or do the other apps have dedicated asset URLs?
+
+What are the public-facing asset URLs for each app?
+
+R2 custom domain. Switch the environment variable as well.
 <!-- /agent:exchange -->

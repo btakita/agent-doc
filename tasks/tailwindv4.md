@@ -463,4 +463,18 @@ The embedded video on http://localhost:4100/posts/dogfooding-agent-doc-part2-blo
 
 Will `corky youtube draft` now create with `visibility: public`?
 Will every stage of `corky youtube` keep use `visibility: public` by default?
+### Corky YouTube Visibility Defaults: Already Public
+
+**Yes to both.** Every stage defaults to `public`:
+
+1. **`corky youtube draft`** — CLI flag `--visibility` defaults to `"public"` (`cli.rs:551`)
+2. **Serde deserialization** — Both `SocialDraftMeta.visibility` (`draft.rs:52`) and `VideoMetadata.visibility` (`youtube.rs:27`) use `#[serde(default = "default_visibility")]` which returns `"public"`
+3. **`corky youtube publish`** — reads `draft.meta.visibility` from the draft file, passes it to `map_visibility()` → YouTube API `privacyStatus`
+4. **`corky youtube edit`** — reads `draft.meta.visibility` from the draft file, sends it as the updated privacy status
+
+The entire pipeline is consistent: if a draft file has no `visibility` field, it defaults to `public`. If it has `visibility: public` (which all 3 of your drafts do), every command respects it.
+
+The previous videos were likely uploaded before the `default_visibility` was set, or YouTube's API had an issue. Either way, the code is correct now and defaults to public at every stage.
+
+Does corky need a release due to any changes?
 <!-- /agent:exchange -->

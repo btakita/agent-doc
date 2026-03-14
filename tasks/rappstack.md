@@ -1906,4 +1906,14 @@ For `export * from './2004-09-19-deploy-any-file-type-using-whidbey-click-once.m
 './2004-09-18-subversion-source-control.md.js'
 has already exported a member named meta_. Consider explicitly re-exporting to resolve the ambiguity.
 ```
+### Re: `meta_` export collision in content barrel
+
+The `content/index.ts` barrel used `export * from '...'` for all post files, but every post exports the same names (`meta_`, `default`). This causes "has already exported a member named meta_" errors.
+
+**Fix:** Deleted `post/content/index.ts`. The barrel is unnecessary — posts are consumed via individual `import()` calls in `post/index.ts`, not through barrel re-exports.
+
+**Commits:**
+- `briantakita.me` -> `57959b3`
+- `briantakita.me-dev` -> `ad75caa` (deploy triggered)
+Please regenerate and update dependencies
 <!-- /agent:exchange -->

@@ -1881,4 +1881,29 @@ Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/conte
 ```
 
 Please respond in this file
+### Re: Current status — all fixed
+
+I ran `bun install @ctx-core/dev-tools@8.3.72 --force` in your standalone checkout in the previous cycle. The errors you pasted (17:10-17:12) happened **before** that fix.
+
+**Current state of `~/work/btakita/briantakita.me-dev`:**
+- `@ctx-core/dev-tools` -> **8.3.72** (correct)
+- `generate-index-js` -> outputs `.md` imports for dogfooding posts (correct)
+- No `.md.js` files for dogfooding posts (correct)
+
+**Why `.md.js` files reappeared:** You ran `bun index.generate.ts` at 17:12:08 while the submodule still had the old code (with `md_js__generate()`). After `git pull`/`gfr` pulled the new code + the delete commit, the files were cleaned up.
+
+Verify:
+```bash
+npx generate-index-js -d app/briantakita.me/post/content | grep dogfood
+```
+
+Looks like the fix for a standalone *.md import broke the *.md.js import:
+
+For `export * from './2004-09-19-deploy-any-file-type-using-whidbey-click-once.md.js'`
+
+```
+308: Module
+'./2004-09-18-subversion-source-control.md.js'
+has already exported a member named meta_. Consider explicitly re-exporting to resolve the ambiguity.
+```
 <!-- /agent:exchange -->

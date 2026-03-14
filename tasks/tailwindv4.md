@@ -357,4 +357,27 @@ The margins `margin-top:1.5rem; margin-bottom:.75rem` match the production site 
 If the margins still look different, it may be a visual difference from surrounding elements. In v3, the typography plugin had ALL custom values baked directly into its `:where()` selectors (from `tailwind.config.ts`). In v4, it outputs defaults, and our separate `.prose` overrides win by specificity. The end result should be identical, but if you spot a specific element that's off, let me know which one so I can add an override.
 
 The home page h2 has a margin-top: 24px on localhost:4100...and a margin-top: 0 on briantakita.me
+### Styling Fix: Missing Preflight Margin Reset
+
+**Root cause:** Tailwind v3's preflight included `h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}` which zeroed out browser default margins on all headings. Tailwind v4's preflight **removed this reset**. So headings outside `.prose` (like the "Featured" h2 with classes `text-2xl font-semibold tracking-wide`) now get browser default margins (~0.83em for h2).
+
+**Fix:** Added the v3 preflight margin reset to `@layer base` in `index.css.ts`:
+
+```css
+h1, h2, h3, h4, h5, h6, hr, p, pre {
+    margin: 0;
+}
+```
+
+Verified: `h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}` present in served CSS.
+
+**Dev server restarted** at http://localhost:4100 — please hard-refresh.
+
+**Updated v4 breaking changes list:**
+1. `outline-2` now sets `outline-style: solid` → use `outline-hidden`
+2. `@source` needed for content scanning outside CSS project root
+3. Typography plugin outputs to `@layer utilities` → prose overrides must be unlayered
+4. Preflight no longer resets heading/p/pre margins → add explicit `margin: 0` reset
+
+The home page h2 has a margin: 24px 0 12px
 <!-- /agent:exchange -->

@@ -902,4 +902,61 @@ Shall I start?
 I don't want to add a new plugin. I actually want to move over to bun build instead. But for now, let's fix the issue with the existing esbuild plugin only.
 
 Is there an existing esbuild plugin that works for S3/R2?
+### Re: No new plugin — using publicPath + post-build cleanup
+
+**No existing esbuild plugin for S3/R2.** The CDN plugins ([esbuild-cdn-imports](https://github.com/luxass/esbuild-cdn-imports)) are for JS module imports, not binary asset serving.
+
+**But we don't need one.** esbuild's built-in `publicPath` already rewrites asset URLs. `rebuildjs` sets `publicPath: '/'` by default (line 278), and apps override it via `...esbuild__config` spread.
+
+**Minimal fix — no plugin changes, no new packages:**
+
+1. **CI sets `PUBLIC_PATH` env var** → app's `build.ts` passes it to esbuild
+2. **Post-build cleanup** → delete binary assets from `dist/browser/` before deploy
+3. **Upload assets to R2** → one-time sync + CI maintains
+
+**Per-app `build.ts` change (one line):**
+
+```ts
+publicPath: import_meta_env_().PUBLIC_PATH || '/',
+```
+
+**CI workflow additions:**
+
+```yaml
+env:
+  PUBLIC_PATH: https://assets.pe.briantakita.me/
+
+steps:
+  - name: Build
+    run: bun run build
+
+  - name: Remove binary assets from dist
+    run: |
+      find dist/browser -type f \( -name '*.webp' -o -name '*.png' -o -name '*.jpg' \
+        -o -name '*.mp4' -o -name '*.gif' -o -name '*.svg' -o -name '*.woff' \
+        -o -name '*.woff2' -o -name '*.ico' -o -name '*.otf' -o -name '*.ttf' \) -delete
+
+  - name: Deploy
+    run: wrangler pages deploy dist/browser/
+```
+
+**R2 setup per app:**
+
+| App | R2 Bucket | PUBLIC_PATH |
+|-----|-----------|------------|
+| drmanny-dev | `peakexistence-assets` | `https://assets.pe.briantakita.me/` |
+| cogov-dev | `cogov-assets` | `https://assets.cogov.me/` |
+| brookebrodack-dev | `brookebrodack-assets` | `https://assets.brookebrodack.net/` |
+| herbaliciousbliss-dev | `herbaliciousbliss-assets` | `https://assets.hb.briantakita.me/` |
+| prescience-notes-dev | `prescience-notes-assets` | `https://assets.pn.briantakita.me/` |
+| briantakita.me-dev | `briantakita-assets` | `https://assets.briantakita.me/` |
+
+**Trade-off:** esbuild still copies files during build (wasted I/O), but it's fast and gets deleted before deploy. When you move to bun build, this whole approach gets replaced.
+
+Shall I implement?
+
+Actually, I do want an asset plugin. But it should not necessarily be tied to esbuild. It should work generically for any asset builder.
+
+A plugin could also work. I mainly want to consolidate the logic into a library.
+`esbuild-plugin-s3-asset` could be a good name. Or `esbuild-plugin-object-store-asset`.
 <!-- /agent:exchange -->

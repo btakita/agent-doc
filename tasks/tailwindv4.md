@@ -444,7 +444,7 @@ corky youtube edit mail/social/20260313-134452-youtube.md
 This will push the `visibility: public` setting from the draft to YouTube. Run `corky youtube auth` first — the token has expired.
 
 Please do it
-for the 3 video. Make them public
+for the 3 video. Make them publica
 ### Making 3 Videos Public
 
 Running `corky youtube auth` now — **please complete the OAuth flow in your browser** when it opens. After auth completes, I'll edit all 3 videos to set them public.
@@ -477,4 +477,17 @@ The entire pipeline is consistent: if a draft file has no `visibility` field, it
 The previous videos were likely uploaded before the `default_visibility` was set, or YouTube's API had an issue. Either way, the code is correct now and defaults to public at every stage.
 
 Does corky need a release due to any changes?
+### Corky Release Status: No Release Needed
+
+Corky is at `v0.15.2` — the latest commit matches the tag. No code changes since the last release.
+
+The YouTube visibility default (`public`) was already shipped in `v0.15.1`:
+```
+v0.15.2: set embeddable=true for YouTube uploads and edits
+v0.15.1: YouTube visibility default to public, video edit command
+```
+
+No new release is needed.
+
+Please deploy briantakita.me
 <!-- /agent:exchange -->

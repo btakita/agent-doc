@@ -299,4 +299,21 @@ The styling is still messed up. Numerous layout issues.
 The h2 color is incorrect on the home page.
 
 ![img_4.png](img_4.png)
+### Styling Fix: Prose Layer Cascade
+
+**Root cause:** In Tailwind v4, `@layer` cascade order is `theme < base < components < utilities`. The typography plugin outputs `.prose` styles in `@layer components`, so our custom `.prose h2 { color: ... }` rules in `@layer base` were being overridden — components always wins over base regardless of specificity.
+
+**Fix:** Moved all `.prose` overrides from `@layer base` to `@layer components` (same layer as the typography plugin, but later in source order, so our rules win).
+
+Verified: `.prose h2{color:rgb(var(--color-text-base));font-weight:400;...}` now present in output CSS.
+
+**Dev server restarted** at http://localhost:4100 — please refresh.
+
+**Summary of all v4 breaking changes fixed:**
+1. `outline-2` now sets `outline-style: solid` → use `outline-hidden` as default
+2. `@source` needed for content scanning outside CSS file's project root
+3. `@layer base` prose overrides lose to typography plugin in `@layer components`
+
+h2 color is still incorrect
+![img_5.png](img_5.png)
 <!-- /agent:exchange -->

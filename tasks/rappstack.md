@@ -1,7 +1,7 @@
 ---
 agent_doc_session: fce94c2a-2072-49c6-924b-144e96b540b7
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_mode: stream
 ---
 
 
@@ -244,4 +244,38 @@ drmanny-dev needs:
 Would you like me to configure these secrets via `gh secret set`, or will you set them manually?
 
 Yes...configure via `gh secret set`
+### Re: Secrets configured
+
+**Secrets set via `gh secret set`:**
+
+| Secret | cogov-dev | brookebrodack-dev | drmanny-dev | herbaliciousbliss-dev | prescience-notes |
+|--------|:---------:|:-----------------:|:-----------:|:--------------------:|:----------------:|
+| CLOUDFLARE_API_TOKEN | ✓ | ✓ | ✓ | ✓ | ✓ |
+| CLOUDFLARE_ACCOUNT_ID | ✓ | ✓ | ✓ | ✓ | ✓ |
+| AWS_ACCESS_KEY_ID | ✓ | ✓ | — | ✓ | ✓ |
+| AWS_SECRET_ACCESS_KEY | ✓ | ✓ | — | ✓ | ✓ |
+| AWS_ENDPOINT_URL | ✓ | ✓ | — | ✓ | ✓ |
+| AWS_BUCKET | ✓ | ✓ | — | ✓ | ✓ |
+| GOOGLE_API_KEY | — | ✓ | — | ✓ | — |
+| YOUTUBE_CHANNELID | — | ✓ | — | — | — |
+| YOUTUBE_RSS_URL | — | ✓ | — | — | — |
+| ADMIN_EMAILS | — | — | — | ✓ | — |
+| AUTH_SECRET | — | — | — | ✓ | — |
+| AUTH_GOOGLE_* | — | — | — | ✓ | — |
+| AUTH_GITHUB_* | — | — | — | ✓ | — |
+
+**Deploys re-triggered** for cogov-dev, brookebrodack-dev, herbaliciousbliss-dev, prescience-notes.
+
+**drmanny-dev blocker:** The private peakexistence-* repos need a GitHub PAT with repo read access. You need to:
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Create a token with **Contents: Read** access to the 5 peakexistence repos
+3. Set it: `pass insert btak/GH_PAT` then `pass btak/GH_PAT | gh secret set GH_PAT -R btakita/drmanny-dev`
+
+Why do I need a PAT for drmanny-dev? How did the last deployment work?
+
+Monitoring deploy runs now...
+
+Yes...configure via `gh secret set`
+
+
 <!-- /agent:exchange -->

@@ -1298,4 +1298,31 @@ Yes
 In https://briantakita.me/posts/squarespace-site-lighthouse-scores/
 Are all of my assets using the CDN?
 Including the recently moved r2 assets?
+### Re: Deploy status + asset CDN check
+
+**Deploy status:**
+
+| App | Status | Issue |
+|-----|--------|-------|
+| briantakita.me-dev | ✅ deployed | Assets still on `briantakita.me` (see below) |
+| brookebrodack-dev | ✅ deployed | — |
+| drmanny-dev | ❌ failed | Missing `marked-highlight` package (pre-existing) |
+| cogov-dev | ❌ failed | "Cannot use ... as a URL" for image paths (pre-existing) |
+| herbaliciousbliss-dev | ❌ failed | Cannot resolve `@btakita/ui--browser--herbaliciousbliss/layout` (pre-existing) |
+| prescience-notes-dev | ❌ → retrying | Plugin crashed on missing `.svg` file — fixed in v0.0.3, pushed |
+
+**Plugin v0.0.3 published** — handles `ENOENT` gracefully (falls through to default loader when files don't exist on disk).
+
+**Asset CDN check for `briantakita.me/posts/squarespace-site-lighthouse-scores/`:**
+
+All images are still served from `briantakita.me` directly:
+- `briantakita.me/briantakita-profile-photo-W2BQAFPP.webp`
+- `briantakita.me/chrome-dev-toolbar-menu-lighthouse-NFQRUCL4.webp`
+- `briantakita.me/logo-SXBCHDMR.svg`
+
+These use esbuild's built-in `[name]-[hash]` format (base64-like), not our plugin's SHA256 hex format. This means the plugin didn't intercept them during the build that deployed — the first deploy ran before `ASSET_BASE_URL` was set as a GitHub secret. I've pushed a lockfile fix + re-triggered the deploy for briantakita.me-dev.
+
+**3 pre-existing failures** (drmanny, cogov, herbaliciousbliss) are unrelated to the asset plugin — they have missing dependencies or broken module resolution that predates our changes. Want me to investigate and fix those?
+
+For briantakita.me, please run generate-index-js
 <!-- /agent:exchange -->

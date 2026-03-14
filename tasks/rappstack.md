@@ -1566,4 +1566,17 @@ How did the *.md.js files get generated?
 2026-03-12-dogfooding-agent-doc-part3-blog.md
 2026-03-12-dogfooding-agent-doc-part3-blog.md.js
 ```
+### Re: How `.md.js` files were generated
+
+The `.md.js` files are **committed generated wrappers**, created by `index.generate.ts`. Commit `c74b70f` ("Add 3 dogfooding blog posts, .md.js generation, and tests") explicitly generated them:
+
+- **Source:** `.md` files — raw markdown blog posts
+- **Generated:** `.md.js` files — JavaScript wrapper modules that parse frontmatter and export `meta_()` + `default()` for Bun runtime
+- **Generator:** `index.generate.ts` handles frontmatter parsing and `.md.js` creation
+
+This differs from `.md.ts` files (hand-written TypeScript). The `.md` -> `.md.js` pipeline is a code generation step, not an esbuild build artifact.
+
+For `generate-index-js`, the `.md.js` files have extname `.js` (no handler), so they're silently skipped. Only the `.md` source files are exported in the barrel (on `@8.3.72`).
+
+I dont want the duplicated *.md.js files generated. Would it be possible to have the plugin only keep the *.md files in the source tree but generate a cached *.md.js file?
 <!-- /agent:exchange -->

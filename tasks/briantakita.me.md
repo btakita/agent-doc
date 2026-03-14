@@ -1486,4 +1486,24 @@ Now new blog posts can be authored as plain markdown with YAML frontmatter — n
 
 **Ready to commit and deploy.** Shall I proceed?
 Yes
+### Re: Commit and deploy
+
+**Committed and pushed:**
+- 7 lib submodules: relysjs→rhonojs imports (domain--server, domain--server--blog, domain--any--blog, ui--server, ui--server--blog, ui--server--briantakita, snippet--rappstack)
+- `app/briantakita.me`: Hono migration + blog posts + md esbuild plugin
+- Parent repo: updated submodule pointers + regenerated `bun.lock`
+
+**CI/CD:** First deploy attempt failed with `lockfile had changes, but lockfile is frozen`. Fixed — pushed updated `bun.lock` (982189f). New deploy is running.
+
+**Local build verified** — all routes return 200 including the 3 dogfooding blog posts.
+
+Monitoring deploy...
+
+**Deploy SUCCEEDED.** briantakita.me is live with Hono + all 3 blog posts.
+
+Fixed one missed import: `prerender.ts` still had `relysjs/server/export` → changed to `rhonojs/server/export`.
+
+Site is live at https://briantakita.me
+
+/agent-doc compact
 <!-- /agent:exchange -->

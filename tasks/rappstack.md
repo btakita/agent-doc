@@ -687,4 +687,20 @@ Changes deployed:
 Monitoring CI...
 
 Deploy the rest of the sites
+### Re: Deploy the rest of the sites
+
+**All 4 remaining apps committed and pushed:**
+
+| App | Commit | CI Run | Status |
+|-----|--------|--------|--------|
+| drmanny-dev | `0163e6b` (submodule) + `6144148` (parent) | 23092727387 | queued |
+| herbaliciousbliss-dev | `d9820ef` (submodule) + `6c6d418` (parent) | 23092715045 | ✅ success |
+| prescience-notes | `c5acf7e` | 23092719123 | in_progress |
+| brookebrodack-dev | `4a66817` (submodule) + `d930547` (parent) | 23092722729 | in_progress |
+
+**cogov.me CI also passed** (run 23092667604, 51s).
+
+All 5 sites deploying to Cloudflare Pages.
+
+/agent-doc compact
 <!-- /agent:exchange -->

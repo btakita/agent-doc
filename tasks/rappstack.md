@@ -182,4 +182,66 @@ fix
 The deployments go to CloudFlare. We recently migrated from Contabo to CloudFlare for all of these websites.
 
 Once you provide deployment details, I'll create `.github/workflows/deploy.yml` for each app.
+### Re: Build fixes & CloudFlare deployment
+
+**drmanny-dev: BUILD SUCCEEDS** — The earlier timeout was misleading. The build completes with cosmetic warnings (browserslist outdated, TimeoutOverflowWarning for Infinity). dist/browser/ is populated correctly.
+
+**brookebrodack-dev fix (in progress):**
+- Root cause: esbuild can't resolve cross-workspace imports that bun handles via hoisting
+- `ui--browser--brookebrodack` imports from `ui--server--brookebrodack/css` without declaring it as a dep
+- `ui--server--brookebrodack` imports from `brookebrodack-site/jsonld` (circular) without dep or exports map
+- Fix: Adding missing dependency declarations and exports map entries
+
+**prescience-notes-dev fix (in progress):**
+- Same pattern: missing cross-workspace deps for esbuild
+- `ui--server--prescience-notes` needs deps on `domain--server--prescience-notes` and `prescience-notes-www`
+- Missing exports map entries in those packages
+
+**herbaliciousbliss-dev fix (in progress):**
+- `.env` file has `ADMIN_EMAILS` — investigating how build loads it
+
+**CloudFlare deployment:**
+- brookebrodack-dev already has `.github/workflows/deploy.yml` (Cloudflare Pages)
+- cogov-dev, drmanny-dev, herbaliciousbliss-dev, prescience-notes-dev need workflows created
+- All use `pages_build_output_dir = "dist/browser"` in wrangler.toml
+- Pattern: bun build → prerender → deploy static HTML via `wrangler pages deploy`
+- Creating workflows based on the brookebrodack-dev/briantakita.me-dev templates
+### Re: Build fixes & deployment status
+
+**Build fixes completed:**
+
+| App | Build | Deploy CI | Notes |
+|-----|-------|-----------|-------|
+| cogov-dev | SUCCESS | NEEDS SECRETS | yalc→npm fixed, asset download step added |
+| brookebrodack-dev | SUCCESS | NEEDS SECRETS | Missing deps/exports fixed for esbuild |
+| drmanny-dev | SUCCESS | NEEDS SECRETS + DEPLOY_SSH_KEY | Private peakexistence submodules need SSH deploy key |
+| herbaliciousbliss-dev | SUCCESS (env loaded from .env) | NEEDS SECRETS | Asset download step added, env vars in workflow |
+| prescience-notes-dev | SUCCESS | NEEDS SECRETS | Missing deps/exports fixed, asset download step added |
+
+**All builds pass locally.** CI workflows are created and pushed but need GitHub Secrets configured.
+
+**Required GitHub Secrets per repo:**
+
+All repos need:
+- `CLOUDFLARE_API_TOKEN` — Cloudflare API token
+- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID
+
+cogov-dev, herbaliciousbliss-dev, prescience-notes-dev, brookebrodack-dev need:
+- `AWS_ACCESS_KEY_ID` — R2 access key
+- `AWS_SECRET_ACCESS_KEY` — R2 secret key
+- `AWS_ENDPOINT_URL` — R2 endpoint (same across all: `https://1e7e194ff8da4ad9e40ce041aea84f76.r2.cloudflarestorage.com`)
+- `AWS_BUCKET` — R2 bucket name (differs per app)
+
+herbaliciousbliss-dev also needs:
+- `ADMIN_EMAILS`, `AUTH_SECRET`, `GOOGLE_API_KEY`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`
+
+brookebrodack-dev also needs:
+- `GOOGLE_API_KEY`, `YOUTUBE_CHANNELID`, `YOUTUBE_RSS_URL`
+
+drmanny-dev needs:
+- `DEPLOY_SSH_KEY` — SSH key with read access to the private peakexistence-* repos
+
+Would you like me to configure these secrets via `gh secret set`, or will you set them manually?
+
+Yes...configure via `gh secret set`
 <!-- /agent:exchange -->

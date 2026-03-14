@@ -355,4 +355,18 @@ We should be using bun...not node.js
 - Switched .gitmodules URLs from SSH to HTTPS for CI compatibility
 - Removed GH_PAT from workflow
 - Added R2 asset download step + NODE_ENV=production
+### Re: drmanny-dev, demo.cogov.me, hb.briantakita.me, Node.js
+
+**drmanny-dev:** The failed run (23089041151) was the old one before R2 secrets were configured. A new run is in progress now with the asset download fix — checkout + submodule clone + install + assets all succeeded, build is running.
+
+**Re: "We should be using bun...not node.js"** — The Node.js 20 deprecation warning comes from GitHub Actions infrastructure (`actions/checkout@v4` and `cloudflare/wrangler-action@v3` run on Node.js internally). Our actual build commands all use bun. These actions will update to Node.js 24 automatically. Not something we control — it's GitHub's runner infrastructure.
+
+**hb.briantakita.me:** The custom domain IS configured in Cloudflare Pages (confirmed via `wrangler pages project list`), and DNS points to Cloudflare. The 404 is because **the prerender exported 0 files** — the auth middleware in herbaliciousbliss has a deeper issue where `request.method` and `request.headers` are accessed eagerly during route setup before a request context exists. The `relement__use` fix helped with tag factories, but the auth middleware issue is separate. The `herbaliciousbliss.pages.dev` preview URL also returns 404 — the deployment succeeded but deployed an empty `dist/browser/`. This needs the auth middleware to be refactored to defer request context access. I can investigate the source code further if you'd like.
+
+Yes...do it. This should be for browser side js.
+
+**demo.cogov.me:** It's a separate Cloudflare Worker (not Pages) — already live and working at https://demo.cogov.me/. It uses Hono + D1 database for a governance demo app. To add a link: the nav is in `lib/ui--server--cogov/nav/nav__div.ts`. To deploy: `cd app/demo.cogov.me && wrangler deploy`. What kind of updates do you want on demo.cogov.me?
+
+Make https://demo.cogov.me/ use our existing @rappstack packages instead of submodules...if applicable
+Add a link to https://demo.cogov.me/ in nav__div
 <!-- /agent:exchange -->

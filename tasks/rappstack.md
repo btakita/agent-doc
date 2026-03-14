@@ -662,4 +662,17 @@ All 5 apps' Tailwind v4 CSS is now working correctly. Ready to commit and push w
 Negative...header links are still squished
 
 ![img_8.png](img_8.png)
+### Re: Header links still squished
+
+**Root cause:** Tailwind v4's `space-x-8` uses nested CSS selectors (`:where(& > :not(:last-child))`) that are more fragile than v3's simple sibling selector. The CSS rule was present but not producing visible spacing.
+
+**Fix:** Replaced `space-x-8` → `gap-8` and `port:space-x-0` → `port:gap-0` on the nav items container. `gap` works natively with flexbox and doesn't rely on complex selector nesting. Also reverted the `py-2 px-3` → back to `pt-1` (matching production).
+
+**Changes in `lib/ui--server--cogov/nav/nav__div.ts`:**
+- Container: `space-x-8 port:space-x-0` → `gap-8 port:gap-0`
+- Items: `py-2 px-3` → `pt-1` (reverted to match production)
+
+Verified: fresh build + server shows `gap-8` in HTML output. Please check localhost:4020.
+
+Deploy cogov.me
 <!-- /agent:exchange -->

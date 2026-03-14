@@ -1242,4 +1242,61 @@ Please run this and debug.
 Please release unreleased packages.
 Include rappstack packages that are currently submodules.
 Show me a list first.
+
+### Re: Debug 500 errors + unreleased packages
+
+**Root cause of 500 errors:** `lib/domain--server--blog/ctx/blog_request_ctx.ts` was migrated to Hono/rhonojs during the upstream rebase, but the app still uses Elysia (relysjs). The call chain:
+
+```
+Elysia route handler → briantakita_request_ctx__ensure() → blog_request_ctx__ensure()
+  → request_ctx__ensure() from rhonojs/server  ← MISMATCH: receives Elysia context, expects Hono Context
+```
+
+**Fix:** Revert `blog_request_ctx.ts` to import from `relysjs/server` instead of `rhonojs/server`. Single file change + remove hono/rhonojs from `lib/domain--server--blog/package.json`. This aligns with the rest of the codebase.
+
+---
+
+**Unreleased packages inventory:**
+
+**briantakita.me-dev lib/* (15 packages)** — all at `0.0.0`, workspace-only, never published to npm:
+
+| Package | Notes |
+|---------|-------|
+Do not publish @btakita/*. Leave as submodule
+| `@btakita/dev-bin` | Dev tooling |
+| `@btakita/snippet--rappstack` | Snippets |
+| `@btakita/ui--browser--briantakita` | Site-specific UI |
+| `@btakita/ui--browser--semantic` | Semantic UI |
+
+Publish @rappstack/*
+| `@rappstack/domain--any--blog` | Blog domain (any) |
+| `@rappstack/domain--browser` | Browser domain |
+| `@rappstack/domain--browser--blog` | Blog browser domain |
+| `@rappstack/domain--server` | Server domain |
+| `@rappstack/domain--server--blog` | Server blog domain |
+| `@rappstack/ui--any` | Universal UI |
+| `@rappstack/ui--any--blog` | Blog universal UI |
+| `@rappstack/ui--browser` | Browser UI |
+| `@rappstack/ui--browser--blog` | Blog browser UI |
+| `@rappstack/ui--server` | Server UI |
+| `@rappstack/ui--server--blog` | Server blog UI |
+
+**ctx-core-dev (~140 packages)** — each has 1 patch version bump (changeset applied but unpublished). Examples:
+- `@ctx-core/array` 27.1.167 → 27.1.168
+- `@ctx-core/function` 21.32.73 → 21.32.74
+- `hyop` 0.3.16 → 0.3.17
+- Plus ~137 more `@ctx-core/*` packages
+
+Publish
+
+**Already published (current on npm):** ctx-core, rmemo, relementjs, rebuildjs, esmcss, @ctx-core/preprocess, @ctx-core/source-map, @rebuildjs/tailwindcss, relysjs, rhonojs (11 total).
+
+**Never published:** `@relementjs/astro` (0.0.128)
+
+Publish
+
+Should I:
+1. Fix the `blog_request_ctx.ts` Hono→relysjs revert first?
+2. Publish the ~140 ctx-core-dev packages via `publish--force`?
+3. Both?
 <!-- /agent:exchange -->

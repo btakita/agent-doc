@@ -631,4 +631,26 @@ Are the background tasks still being used?
 | prescience-notes-dev | 44K ✅ | `max-w-3xl`, `px-4`, `text-4xl`, `backdrop-blur-sm` | — |
 | brookebrodack-dev | 23K ✅ | `noscript:`, `max-w-prose` | — |
 | drmanny-dev | 0K ❌ | None (raw @apply in output) | Fix in progress — converting to @utility approach |
+### Re: drmanny-dev CSS fix complete
+
+**drmanny-dev: ✅ FIXED** — Converted from broken `@config` (importing removed `tailwindcss/defaultTheme.js` exports) to CSS-native Tailwind v4:
+
+- `@import 'tailwindcss'` + `@plugin '@tailwindcss/forms'` + `@plugin '@tailwindcss/typography'`
+- `@theme` block with all custom colors, shadows, fonts, spacing, animations, keyframes
+- 20+ `@utility` definitions for per-utility-type skin classes (`text-skin-base`, `bg-skin-fill`, `border-skin-line`, `fill-skin-accent`, etc.)
+- Unlayered `.prose` overrides (typography plugin outputs to `@layer utilities` in v4, so prose overrides must be unlayered to win cascade)
+
+**Final CSS verification — all 5 apps working:**
+
+| App | Compiled CSS | Key classes | Status |
+|-----|-------------|-------------|--------|
+| cogov-dev | 32K | `lg:flex`, `lg:hidden`, `port:space-x-0` | ✅ |
+| herbaliciousbliss-dev | 32K | `text-primary`, `bg-card-indigo` | ✅ |
+| prescience-notes-dev | 44K | `max-w-3xl`, `px-4`, `backdrop-blur-sm` | ✅ |
+| brookebrodack-dev | 23K | `noscript:`, `max-w-prose` | ✅ |
+| drmanny-dev | 188K | `bg-skin-fill`, `text-skin-base`, `border-skin-line` | ✅ |
+
+**All tests pass (66 total across 5 apps).** All changes uncommitted — ready to commit and push when you approve.
+
+cogov-dev: localhost:4020 header links need padding.
 <!-- /agent:exchange -->

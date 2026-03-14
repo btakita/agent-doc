@@ -52,4 +52,16 @@ Updated the agent-doc skill (`SKILL.md` step 0, "Check claims log") to explicitl
 The binary doesn't need changes — this was purely a Claude Code behavior issue in the skill instructions. The fix ensures future sessions won't repeat the mistake.
 
 But we do need to change and release the SKILL.md that agent-doc installs. 
+
+Updated all three SKILL.md copies with the foreground-only claims log instruction:
+
+1. `.claude/skills/agent-doc/SKILL.md` — local project copy (done last cycle)
+2. `src/agent-doc/SKILL.md` — root template embedded via `include_str!("../SKILL.md")` in `skill.rs`
+3. `src/agent-doc/.claude/skills/agent-doc/SKILL.md` — agent-doc's own dev copy
+
+The binary bundles SKILL.md at compile time, so a **rebuild + release** is needed for the fix to propagate to new `agent-doc skill install` runs. Current version: **0.17.0**.
+
+Ready to commit in the submodule and release when you say go. Do you want a version bump, or should we move the existing v0.17.0 tag forward?
+
+Release
 <!-- /agent:exchange -->

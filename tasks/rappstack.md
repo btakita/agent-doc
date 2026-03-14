@@ -10,3 +10,6 @@ The apps used submodules from rappstack.
 Now that @rappstack/* packages are published, the apps need to reference the @rappstack/* packages instead of using submodules.
 
 Convert brookebrodack-dev, cogov-dev, censible-core, drmanny-dev, herbaliciousbliss-dev, prescience-notes-dev
+
+Use yalc if possible. And deploy using npm.
+

@@ -87,4 +87,17 @@ the agent response should be after the user prompt.
 The user prompt should not be duplicated after the agent response right before `<!-- /agent:exchange -->` in this case.
 
 tasks/rappstack.md was an example of this case.
+
+The fix I applied addresses exactly this scenario. Here's the flow:
+
+1. **User adds prompt** before `<!-- /agent:exchange -->` → baseline has user prompt in exchange
+2. **Agent streams response** → cumulative buffer = user prompt + agent response (correct order)
+3. **`flush_to_document()`** writes buffer with **replace mode** → exchange = buffer (no duplication) ✓
+4. **`content_ours` snapshot** — previously used **append mode** (bug), duplicating the prompt. Now uses **replace mode** (fix), so exchange = buffer (no duplication) ✓
+
+The ordering is correct because the stream buffer is cumulative — it naturally preserves user prompt → agent response order. Replace mode ensures the full buffer replaces the component content rather than being appended to it.
+
+The fix + tests are in `src/agent-doc/src/stream.rs`. Ready to publish when you want.
+
+publish
 <!-- /agent:exchange -->

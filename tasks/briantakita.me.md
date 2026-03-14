@@ -553,4 +553,43 @@ Note: your `tsconfig.json` has a mismatch — `"module": "esnext"` with `"module
 The `bun i` issue (yalc packages) is separate and needs the `yalc-publish-all.sh` + `yalc add` flow described above. The `.md` declaration should work independently once IDEA refreshes its TypeScript cache.
 
 How do I get these new blog posts to show up in the home page and in /posts?
+## Assistant
+
+### Re: Getting new blog posts to show up
+
+The posts auto-appear once they're in the build pipeline. Here's the flow:
+
+**Step 1 — Regenerate `index.ts`** (you already did this):
+```bash
+cd app/briantakita.me
+bun run post/index.generate.ts
+```
+This scans `post/content/` and generates the import array in `post/index.ts`. Already done — confirmed `2026-03-12-dogfooding-agent-doc-part1-blog.md` is in the generated file.
+
+**Step 2 — Build + deploy:**
+```bash
+bun ./build-and-serve.ts &   # builds + starts server
+sleep 5
+bun ./prerender.ts           # static export all routes
+kill %1
+wrangler pages deploy dist/static/
+```
+
+Or push to `main` — GitHub Actions runs this automatically.
+
+**How it works internally:**
+1. `post_mod_a1` (from `post/index.ts`) feeds into the site config via `blog_site`
+2. Posts are sorted by `pub_date` (newest first), `draft: true` posts are filtered out
+3. **Home page** (`/`): shows featured posts + 4 most recent non-featured posts
+4. **Posts page** (`/posts`): paginated list of all non-draft posts (10 per page)
+5. **Individual post** (`/posts/{slug}`): renders the post's `default(ctx)` export
+
+**To make a post featured** on the home page, add `featured: true` to the frontmatter. Otherwise it appears in the "Recent Posts" section (if recent enough) and always on `/posts`.
+
+**For the Part 1 blog post** — it will appear automatically at `/posts/dogfooding-agent-doc-part1-blog` (slug derived from filename). Since its `pub_date` is `2026-03-12`, it'll be near the top of the chronological list.
+
+**No code changes needed** — the `md_esbuild_plugin_` handles everything. Just run `index.generate.ts` when adding new `.md` files, then build and deploy.
+
+I still don't see the pages on dev. Run `bun run dev` on briantakita.me-dev
+See http://localhost:4100/
 <!-- /agent:exchange -->

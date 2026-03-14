@@ -115,4 +115,71 @@ go
 - [ ] Tailwind v4 migration for @rebuildjs/tailwindcss
 go
 
+### Pending
+
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
+- [X] Create yalc tooling for library version publishing
+- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+- [ ] Update YouTube video descriptions (add blog post links)
+- [ ] Tailwind v4 migration for @rebuildjs/tailwindcss
+
+---
+
+### Re: Yalc tooling
+
+**No new package needed.** ctx-core-dev already has a `bin/yalc-publish-all.sh` script that iterates workspace packages and runs `yalc publish --push`. The recommended approach:
+
+1. **Copy/adapt** `ctx-core-dev/bin/yalc-publish-all.sh` into `agent-loop/bin/` as a shared utility
+Put this into @ctx-core/monorepo
+2. **In consumer projects** (briantakita.me-dev): `yalc add <pkg>` pulls from local yalc store, `bun install` resolves
+3. **Add to .gitignore**: `.yalc/` and `yalc.lock` are local dev artifacts, never committed
+4. **For CI**: npm-published versions remain the source of truth (as they are now)
+
+The yalc workflow is for **local development only** — iterating on unreleased library changes before publishing to npm.
+
+### Re: Email-to-Slack
+
+Test email sent from `brian.takita@gmail.com` to `dev-slack@briantakita.me` with subject "Test: email-to-Slack verification". **Check Slack to confirm delivery.** The worker parses multipart MIME, converts HTML to text, and posts via `SLACK_WEBHOOK_URL`.
+
+Note: Proton Bridge wasn't running, so used the Gmail account instead.
+
+### Re: Stale GitHub secrets
+
+Done. Deleted from `btakita/briantakita.me-dev`:
+- `VPS_HOST` ✓
+- `VPS_USER` ✓
+- `VPS_SSH_KEY` ✓
+
+### Re: YouTube descriptions
+
+3 videos identified for blog post links:
+
+| Video ID | Title | Blog URL |
+|----------|-------|----------|
+| B-9uI53cRVE | Dog-fooding agent-doc Part 1 | `https://briantakita.me/posts/dogfooding-agent-doc-part1-blog` |
+| qQCKVQHRQCI | Dog-fooding agent-doc Part 2 | `https://briantakita.me/posts/dogfooding-agent-doc-part2-blog` |
+| RrZETW8EZEQ | Dog-fooding agent-doc Part 3 | `https://briantakita.me/posts/dogfooding-agent-doc-part3-blog` |
+
+Tooling: `corky youtube edit <file>` can push description updates. The video files at `mail/topics/brian-takita/videos/` already have `video_url` in frontmatter. Need to add blog links to each description and run `corky youtube edit`. Want me to proceed?
+
+yes
+
+### Re: Tailwind v4
+
+This is a **moderate-complexity refactor** of `@rebuildjs/tailwindcss`. Key issue: the plugin calls `tailwind({...config})` (v3 API) which no longer exists in v4. Changes needed:
+
+1. **Replace** `tailwind()` PostCSS plugin call with `@tailwindcss/postcss`
+2. **Update** config handling — v4 uses CSS-based `@theme` directives instead of JS config objects
+3. **Update** package.json dep from `tailwindcss: ^3.4.18` to `^4.x`
+4. **Fix** type imports (`Config` type changed in v4)
+5. **Update** test fixtures for v4 CSS output format
+
+Source: `src/ctx-core-dev/lib/rebuildjs-tailwindcss/`. The app already has `tailwindcss: ^4.2.1` installed but `@rebuildjs/tailwindcss@0.10.60` still depends on v3 internally. This should be its own focused session — want me to create a task file?
+
+yes
+
 <!-- /agent:exchange -->

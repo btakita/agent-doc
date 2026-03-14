@@ -81,4 +81,18 @@ Release
 The binary is available via GitHub Release and `cargo install --git`. crates.io publish needs a fresh token.
 
 See CARGO_REGISTRY_TOKEN in the root .env
+
+### Release Complete
+
+**Published:**
+- **GitHub Release**: v0.17.0 binary updated (443949c)
+- **crates.io**: v0.17.0 published (`cargo install agent-doc`)
+- **Git**: tag moved forward, pushed to origin/main
+
+**Still blocked:**
+- **PyPI**: 403 auth error — PyPI token needs renewal. Run `maturin publish` after fixing PyPI credentials.
+
+See PYPI_PUBLISH_TOKEN in the root .env
+
+The fix is live for `cargo install` and GitHub Release users. `agent-doc skill install` will now install the SKILL.md with the foreground-only claims log instruction.
 <!-- /agent:exchange -->

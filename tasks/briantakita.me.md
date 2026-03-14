@@ -599,4 +599,40 @@ Still see `TS2307: Cannot find module` for:
 	import('./content/2026-03-12-dogfooding-agent-doc-part2-blog.md'),
 	import('./content/2026-03-12-dogfooding-agent-doc-part3-blog.md'),
 ```
+## Assistant
+
+### Re: Dev server and TS2307
+
+**Dev server — two blockers found, one fixed:**
+
+1. **Fixed: Missing `public/` symlink** — `blog_site.ts` imports `from '../public/assets/favicon.svg'`, which resolves to `app/briantakita.me/public/`. This directory didn't exist. Created symlink: `app/briantakita.me/public → ../../public`. The `public` entry in `.gitignore` means this symlink is expected to be created locally.
+
+2. **Blocked: Missing yalc packages** — after fixing the symlink, the dev server fails with:
+   ```
+   Cannot find package 'rmemo' from 'lib/ui--server--blog/post/blog_post__html.ts'
+   ```
+   This is the same yalc dependency issue. The dev server can't start until the 11 yalc packages are published and installed.
+
+**To unblock everything (dev server + TS2307):**
+
+```bash
+# 1. Publish yalc packages from ctx-core-dev
+cd ~/work/btakita/ctx-core-dev
+./yalc-publish-all.sh
+
+# 2. Install in briantakita.me-dev
+cd ~/work/btakita/agent-loop/src/briantakita.me-dev
+bun i
+
+# 3. Start dev server
+cd app/briantakita.me
+bun run dev
+```
+Please run this and make it work
+**TS2307 for `.md` imports** — the `md.d.ts` declaration file is already in place with the correct `declare module '*.md'`. The TS2307 errors are most likely caused by the broken yalc dependency chain — IDEA's TypeScript service can't resolve the full module graph when 11 packages are missing. Once `bun i` succeeds after yalc publishing, restart the TypeScript service in IDEA (`Help → Find Action → "Restart TypeScript Service"`) and the errors should clear.
+
+**Do you have ctx-core-dev set up?** If not, we need to either:
+- Clone and set up ctx-core-dev with `yalc-publish-all.sh`
+- Or install the 11 packages from npm instead of yalc (if published versions are compatible)
+See /home/brian/work/btakita/agent-loop/src/ctx-core-dev
 <!-- /agent:exchange -->

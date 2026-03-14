@@ -1978,4 +1978,10 @@ bun post/index.generate.ts
 This creates `post/index.ts` with individual `import('./content/<file>')` entries — no barrel, no collisions.
 
 If the modules did not all export `meta_` and only the default, would there be a collision?
+
+Yes — there would still be a collision on `default`. Every post module has a default export (the rendered content), and `export *` re-exports `default` as a named binding. Two modules both exporting `default` through a barrel causes the same TS2308 error.
+
+The fundamental issue: barrel `export *` requires **unique** export names across all re-exported modules. Post modules all share the same shape (`meta_`, `default`, etc.), so they inherently can't be barreled. Individual `import()` calls (as `post/index.ts` uses) is the correct pattern for same-shape modules.
+
+How is `post_mod_a1` generated in post/index.ts?
 <!-- /agent:exchange -->

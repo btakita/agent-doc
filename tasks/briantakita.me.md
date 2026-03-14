@@ -715,4 +715,47 @@ http://localhost:4100/posts/dogfooding-agent-doc-part2-blog times out. Looks lik
 It should generate minified js with mapping files.
 
 Please add automated tests.
+## Assistant
+
+### Re: Timeout still happening + automated tests
+
+**Timeout resolved:** The issue was stale dev server processes from previous sessions. Multiple `bun index.ts` processes were running simultaneously. After killing all stale processes and starting fresh, all 4 posts return 200 in under 50ms:
+
+```
+intro:  200  49ms
+part1:  200  16ms
+part2:  200  12ms
+part3:  200  10ms
+```
+
+**Automated tests added** — `post/index.generate.test.ts` (6 tests, all passing):
+
+| Test | What it verifies |
+|------|-----------------|
+| frontmatter parsing | title, description, slug, tags, pub_date extracted correctly |
+| slug derivation | `2099-01-01-test-post.md` → `slug: "test-post"` when no explicit slug |
+| Date handling | js-yaml Date objects → ISO string (`2099-06-15` → `"2099-06-15T..."`) |
+| default tags | Missing tags defaults to `["other"]` |
+| optional fields | `hero_image`, `og_image`, `draft` passed through when present |
+| index.ts imports | `.md.ts` → `.md.js` and raw `.md` → `.md.js` import paths |
+
+Run with: `bun test post/index.generate.test.ts`
+
+**If timeout recurs:** Kill stale processes with `pkill -f "bun.*index.ts"` then restart `bun run dev`.
+
+Seeing "This video is private"
+
+![img_3.png](img_3.png)
+
+```
+```
+
+```
+~/work/btakita/agent-loop main ⇡235 !20 ?1                                                                                                                                                                                      ✘ INT 20:38:50
+❯ lsof -i tcp:4100
+COMMAND    PID  USER  FD   TYPE   DEVICE SIZE/OFF NODE NAME
+brave     2381 brian  86u  IPv6 62845254      0t0  TCP localhost:50700->localhost:igo-incognito (CLOSE_WAIT)
+brave     2381 brian 189u  IPv6 62830967      0t0  TCP localhost:50702->localhost:igo-incognito (CLOSE_WAIT)
+bun     765802 brian  15u  IPv6 61991734      0t0  TCP *:igo-incognito (LISTEN)
+```
 <!-- /agent:exchange -->

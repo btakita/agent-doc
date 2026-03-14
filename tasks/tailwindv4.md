@@ -410,4 +410,20 @@ The video in the page http://localhost:4100/posts/dogfooding-agent-doc-part2-blo
 I thought we fixed this issue before.
 Make the video public.
 corky's skill should assume videos are public unless explicitly set to private.
+### YouTube Video Privacy
+
+The embedded video `qQCKVQHRQCI` on the dogfooding-agent-doc-part2-blog post is set to private. I don't have YouTube API credentials or a CLI tool to change it programmatically.
+
+**Manual fix:** Go to [YouTube Studio](https://studio.youtube.com) → Content → find "Dog-fooding agent-doc Part 2" → Visibility → change from Private/Unlisted to **Public**.
+
+**Re: corky default video privacy** — noted. This feedback belongs in the corky/YouTube task. I'll save it as a feedback memory for future sessions.
+
+Please update corky. GOOGLE_API_KEY is in .env
+
+Note I set `visibility: public` in:
+[20260312-youtube-part1.md](../mail/social/20260312-youtube-part1.md)
+[20260313-163457-youtube.md](../mail/social/20260313-163457-youtube.md)
+[20260313-134452-youtube.md](../mail/social/20260313-134452-youtube.md)
+
+Corky 
 <!-- /agent:exchange -->

@@ -1031,4 +1031,29 @@ Update video descriptions to point to the related blog post.
 
 I livestream my content. Can we have a rule in AGENTS.md to always use pass instead of showing my cleartext keys?
 Actually this should be a skill. A security skill?
+**Rappstack lib submodules — rebased and pushed:**
+
+All 5 lib submodules rebased onto `origin/main` and pushed successfully:
+
+| Submodule | Status | Conflict |
+|-----------|--------|----------|
+| `lib/domain--any--blog` | pushed (503987f) | package.json — upstream replaced `relysjs` with `rebuildjs` + `relementjs` (Hono migration); kept upstream deps, applied tag rename only |
+| `lib/domain--server--blog` | pushed (f581f0c) | clean rebase |
+| `lib/ui--server` | pushed (38361d1) | clean rebase |
+| `lib/ui--server--blog` | pushed (cc2d5ed) | clean rebase |
+| `lib/ui--server--briantakita` | pushed (6cf4e3d) | already up to date |
+
+---
+
+**Security rule — cleartext secrets in livestreams:**
+
+Added a `## Security — Secret Handling` section to `CLAUDE.md` with these rules:
+
+- **Never inline cleartext secrets** — always use `pass` via subshell: `"$(pass crates.io/token)"`
+- Never echo, print, or log secrets
+- If unsure whether a value is secret, treat it as secret
+
+Regarding a dedicated security skill — a CLAUDE.md rule is the right first layer since it applies to every session automatically. A skill could add automated detection (scanning tool call args for patterns like tokens, passwords, API keys) but that's a separate effort. The CLAUDE.md rule covers the immediate need.
+
+Please review my part 3 video. Do any of my keys get exposed?
 <!-- /agent:exchange -->

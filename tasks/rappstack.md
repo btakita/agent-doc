@@ -16,14 +16,11 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: drmanny-dev fixed
+### Re: herbaliciousbliss-dev relysjs fix
 
-**Root causes (3 issues):**
-1. **tailwindcss not resolved** — esbuild needs `conditions: ['style']` for TW v4 (same fix as herbaliciousbliss-dev)
-2. **Build timeout** — `relysjs__ready__wait(300_000)` hangs when `watch: false`. Wrapped in watch check.
-3. **unique_tags_ not found** — Published v0.1.1 had stale code. Republished `@rappstack/domain--any--blog@0.1.2`
+You're right — the `relysjs/server` import was a leftover compatibility shim. `ctx/index.ts` imported `elysia_context__set` to set an elysia context for `@rappstack/domain--server--auth`, but that package doesn't use `elysia_context` at all.
 
-**Build passes locally.** Committed and pushed — CI running.
+**Fix:** Removed the `elysia_context__set` import and call. Now uses only `rhonojs/server`. Committed and pushed — CI triggered.
 
 **Deploy status:**
 
@@ -34,6 +31,9 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 | brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
 | cogov-dev | cogov.me | ✅ DEPLOYED |
 | drmanny-dev | pe.briantakita.me | 🔄 CI running |
-| herbaliciousbliss-dev | hb.briantakita.me | ❌ relysjs/server resolution (pre-existing) |
-I thought herbaliciousbliss-dev migrated to rhonojs.
+| herbaliciousbliss-dev | hb.briantakita.me | 🔄 CI running (relysjs shim removed) |
+
+I see many errors for the drmanny-dev build. See https://github.com/btakita/drmanny-dev/actions/runs/23099026077/job/67096311943
+
+herbaliciousbliss-dev has errors https://github.com/btakita/herbaliciousbliss-dev/actions/runs/23099060500/job/67096404135
 <!-- /agent:exchange -->

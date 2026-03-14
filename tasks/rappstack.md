@@ -61,4 +61,32 @@ All `npm view @rappstack/*` commands return 404. The packages need to be publish
 Should I publish the rappstack packages first? Or are they published somewhere else (private registry, GitHub Packages)?
 
 Publish rappstack packages first.
+### Re: Publishing rappstack packages
+
+**Two blockers before we can publish:**
+
+**1. @rappstack npm org doesn't exist yet**
+The `@rappstack` scope needs to be created on npm. You need to:
+- Go to https://www.npmjs.com/org/create
+- Create the `rappstack` org (your `btakita` account is authenticated)
+- This is required before any `@rappstack/*` package can be published
+
+**2. Package format mismatch**
+The packages export `.ts` files directly (`"./index.ts"`) but the `files` field filters for `*.d.ts, *.js` — so TypeScript source would be excluded from the published tarball. Two options:
+
+- **Option A (Simple, bun-only):** Update `files` to include `*.ts` and publish TypeScript source. Works with bun consumers but not standard Node.js/tsc.
+- **Option B (Standard):** Add a build step (tsc or bun build) to compile `.ts` → `.js` + `.d.ts`, update exports to point to compiled output. Works universally.
+
+Since all your apps use bun, **Option A** is the fastest path. We can always add a build step later.
+
+**Once the org is created, the publish sequence is:**
+
+Level 0 (no internal deps): domain--any--blog, domain--browser, domain--server, domain--server--auth, ui--any, ui--browser, ui--server
+Level 1: domain--server--blog, domain--server--youtube, ui--any--blog
+Level 2: ui--browser--blog, domain--browser--blog
+Level 3: ui--server--blog, snippet--rappstack
+
+Please create the @rappstack org on npm, then let me know which option (A or B) and I'll proceed with publishing.
+
+I think @rappstack is created. Please check
 <!-- /agent:exchange -->

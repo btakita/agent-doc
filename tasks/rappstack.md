@@ -89,4 +89,18 @@ Level 3: ui--server--blog, snippet--rappstack
 Please create the @rappstack org on npm, then let me know which option (A or B) and I'll proceed with publishing.
 
 I think @rappstack is created. Please check
+### Re: @rappstack org check & publishing
+
+The @rappstack org is confirmed working. All 14 packages published to npm at `0.1.0`:
+
+**Level 0:** @rappstack/domain--any--blog, domain--browser, domain--server, domain--server--auth, ui--any, ui--browser, ui--server
+**Level 1:** @rappstack/domain--server--blog, domain--server--youtube, ui--any--blog
+**Level 2:** @rappstack/ui--browser--blog, domain--browser--blog
+**Level 3:** @rappstack/ui--server--blog, @btakita/snippet--rappstack
+
+Internal `workspace:*` dependencies updated to `^0.1.0` before publishing.
+
+**Ready to start app conversion.** Proceeding with all apps in sequence, starting with cogov-dev (simplest — 1 dep).
+
+Yes. Go
 <!-- /agent:exchange -->

@@ -894,4 +894,19 @@ Done. Fixed both places where the default was `"private"`:
 Now `corky youtube draft` generates drafts with `visibility: public` in frontmatter by default, and `corky youtube publish` uses `"public"` when no visibility is specified in the draft file. Both changes compile clean — needs commit in the corky submodule.
 
 release corky changes
+### Re: Release corky changes
+
+Committed and tagged **v0.15.1** in the corky submodule:
+
+- YouTube default visibility: `"private"` → `"public"` (serde default + CLI default)
+- `youtube edit` command for updating published video metadata
+- Improved upload error handling
+- 8 YouTube tests, all passing
+- Release binary built (`cargo build --release`)
+
+**Ready to publish** — awaiting confirmation to push to GitHub, crates.io, PyPI, and GitHub Releases.
+
+Please add description to the Youtube videos.
+
+For part 2...make a joke that I am the craze quarter screen dude after all. See CC transcript where I talk about the quarter screen.
 <!-- /agent:exchange -->

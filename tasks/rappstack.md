@@ -1436,4 +1436,20 @@ My real issue is I have duplicate imports
 	import('./content/2026-03-12-dogfooding-agent-doc-part2-blog.md.js'),
 	import('./content/2026-03-12-dogfooding-agent-doc-part3-blog.md.js'),
 ```
+### Re: Duplicate imports fixed
+
+The issue was in `post/index.ts` — the 3 dogfooding blog posts were imported twice:
+1. Lines 8-10: `import('./content/...dogfooding....md')` (direct `.md` import, added manually)
+2. Lines 51-53: `import('./content/...dogfooding....md.js')` (via barrel export from `generate-index-js`)
+
+Both resolve to the same module through `md_esbuild_plugin_`. Removed the direct `.md` imports (lines 8-10) since the `.md.js` exports via `index.ts` barrel are the canonical path.
+
+Committed `0c16d41` and pushed — deploy triggered.
+
+Can we have the generator import *.md instead of *.md.js when the source post is a *.md file?
+Asking b/c Idea cannot resolve the import.
+![img_9.png](img_9.png)
+
+*.md.ts files seems to be correctly inferred by idea when imported only using *.md.
+`import('./content/2004-09-19-deploy-any-file-type-using-whidbey-click-once.md'),`
 <!-- /agent:exchange -->

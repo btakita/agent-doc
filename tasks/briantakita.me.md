@@ -1122,4 +1122,13 @@ That's it. 3 steps, ~2 minutes. The refresh tokens are the only critical concern
 Was my crates.io or pypi key exposed? I probably should refresh those keys as a precaution.
 
 Should we also explain in the description that the keys have been recycled? I'm concerned about appearing sloppy. I messed up, but at least I caught it.
+**crates.io and PyPI keys:** Not exposed. The audit confirmed all `CARGO_REGISTRY_TOKEN` and `MATURIN_PYPI_TOKEN` uses were wrapped in `$(pass ...)` — only the pass command was visible, never the actual token. No rotation needed for those.
+
+But I just saw the claude session cli use cleartext for CARGO_REGISTRY_TOKEN
+
+**Video description note:** Good call — transparency shows professionalism, not sloppiness. Catching it, fixing it, and building tooling to prevent it is actually a strong story. Suggested addition to the Part 3 video description:
+
+> **Security note:** During this session, Google OAuth tokens were briefly visible in the Claude Code output. They've been revoked and rotated. This incident led to building a `/livestream` security skill for Claude Code that prevents secret exposure during live sessions.
+
+Want me to update the Part 3 YouTube description with this via `corky youtube edit`?
 <!-- /agent:exchange -->

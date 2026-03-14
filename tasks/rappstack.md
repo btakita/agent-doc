@@ -127,4 +127,24 @@ Yes. Go
 
 Want me to retry now, or should we wait?
 retry
+### Re: Retry results
+
+CDN cache cleared. All apps now install successfully:
+
+| App | bun install | Notes |
+|-----|-------------|-------|
+| cogov-dev | SUCCESS | |
+| brookebrodack-dev | SUCCESS | 1373 packages |
+| drmanny-dev | SUCCESS | Fixed: restored 4 app-specific peakexistence submodules that were incorrectly removed, updated their @rappstack refs from workspace:* to ^0.1.0 |
+| herbaliciousbliss-dev | SUCCESS | |
+| prescience-notes-dev | SUCCESS | |
+
+**Remaining steps:**
+1. Verify builds in each app
+2. Commit changes in each submodule
+3. Update parent agent-loop submodule pointers
+
+Should I proceed with build verification and commits?
+
+Yes...and deploy updates.
 <!-- /agent:exchange -->

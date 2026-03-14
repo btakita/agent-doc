@@ -938,4 +938,24 @@ PyPI needs a valid API token. Check if you have one in `pass` or generate a new 
 maturin publish --username __token__ --password <token>
 ```
 Does this work MATURIN_PYPI_TOKEN="$(pass pypi/publish_token)"
+### Re: PyPI publish with MATURIN_PYPI_TOKEN
+
+Yes — worked. `MATURIN_PYPI_TOKEN="$(pass pypi/publish_token)" maturin publish` succeeded.
+
+Corky v0.15.1 is now published to all 4 targets:
+
+| Target | Status |
+|--------|--------|
+| GitHub | main + tag v0.15.1 pushed |
+| crates.io | Published |
+| PyPI | Published |
+| GitHub Release | https://github.com/btakita/corky/releases/tag/v0.15.1 |
+
+My video iframes have an error:
+
+```
+Video unavailable
+Playback on other websites has been disabled by the video owner
+Watch on YouTube
+```
 <!-- /agent:exchange -->

@@ -1222,4 +1222,32 @@ npx wrangler login
 ```
 
 This opens a browser for OAuth. Once authenticated, I can create the new buckets, copy objects, and set up custom domains.
+### Re: R2 buckets created, custom domains live, objects copied
+
+**All done:**
+
+| App | New Bucket | Custom Domain | Objects | Status |
+|-----|-----------|---------------|---------|--------|
+| briantakita.me-dev | `assets-briantakita-me` | `assets.briantakita.me` | 95 | ✅ serving (200) |
+| drmanny-dev | `assets-pe-briantakita-me` | `assets.pe.briantakita.me` | 120 | ✅ serving |
+| brookebrodack-dev | `assets-brookebrodack-net` | `assets.brookebrodack.net` | 116 | ✅ serving (200) |
+| cogov-dev | `assets-cogov-me` | `assets.cogov.me` | 143 | ✅ serving (200) |
+| herbaliciousbliss-dev | `assets-hb-briantakita-me` | `assets.hb.briantakita.me` | 16 | ✅ DNS propagating |
+| prescience-notes-dev | `assets-pn-briantakita-me` | `assets.pn.briantakita.me` | 3 | ✅ DNS propagating |
+
+**What was done:**
+1. ✅ Created 6 new R2 buckets with hyphenated names
+2. ✅ Connected custom domains via `wrangler r2 bucket domain add`
+3. ✅ Copied all objects from old buckets to new buckets via `aws s3 sync`
+4. ✅ Verified assets serving via HTTPS (200 responses)
+
+**Remaining steps:**
+1. Update `.env` files with new bucket names (`AWS_BUCKET`)
+2. Add `ASSET_BASE_URL` to `.env` files and CI secrets
+3. Commit changes in each app repo
+4. Delete old buckets (after confirming everything works)
+
+Shall I update the `.env` files and CI workflows now?
+
+Yes
 <!-- /agent:exchange -->

@@ -271,7 +271,32 @@ Same fix applied to `.focus-outline` component class.
 
 The styling is still messed up. Numerous layout issues.
 
-![2026-03-14_11-40-good-styling-briantakita.me.png](../../../../Pictures/agent-loop/2026-03-14_11-40-good-styling-briantakita.me.png)
+- Good: ![2026-03-14_11-40-good-styling-briantakita.me.png](../../../../Pictures/agent-loop/2026-03-14_11-40-good-styling-briantakita.me.png)
 ![2026-03-14_11-34-bad-stying-4100-2.png](../../../../Pictures/agent-loop/2026-03-14_11-34-bad-stying-4100-2.png)
 
+### Styling Fix: Content Scanner Scope (the real fix)
+
+**Root cause:** Tailwind v4's content scanner determines the project root by walking up from the CSS file's location to the nearest `package.json`. The esbuild CSS output is in `app/briantakita.me/dist/`, so v4 finds `app/briantakita.me/package.json` as the root — missing ALL template files in `lib/ui--server--briantakita/`, `lib/ui--server--blog/`, etc.
+
+This means utilities like `sm:flex-row`, `-top-full`, `hidden`, `absolute`, `sticky`, `z-50` were never generated — only the 15 custom `@utility` classes and base Tailwind utilities referenced directly in `index.css.ts` made it through.
+
+**Fix:** Added `@source` directives to `index.css.ts`:
+
+```css
+@source "../../lib/**/*.ts";
+@source "../app/**/*.ts";
+```
+
+These tell v4 to scan the monorepo's `lib/` and `app/` directories for utility classes. Now all utilities from the template files are generated (verified: `sm:flex-row`, `-top-full`, `hidden`, `absolute`, `sticky` all present).
+
+**Dev server restarted** at http://localhost:4100 — please refresh.
+
+The styling is still messed up. Numerous layout issues.
+
+- Good: ![2026-03-14_11-40-good-styling-briantakita.me.png](../../../../Pictures/agent-loop/2026-03-14_11-40-good-styling-briantakita.me.png)
+- Bad: ![2026-03-14_11-34-bad-stying-4100-2.png](../../../../Pictures/agent-loop/2026-03-14_11-34-bad-stying-4100-2.png)
+
+The h2 color is incorrect on the home page.
+
+![img_4.png](img_4.png)
 <!-- /agent:exchange -->

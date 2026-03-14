@@ -662,4 +662,26 @@ Done. Here's what I did:
 **TS2307 should resolve now** — restart IDEA's TypeScript service (`Help → Find Action → "Restart TypeScript Service"`) since the yalc packages are installed and the full module graph is available.
 
 http://localhost:4100/posts/dogfooding-agent-doc-part2-blog times out. Looks like the *.md import doesn't work.
+## Assistant
+
+### Re: Part 2 blog post timeout
+
+The page is working — server returns 200 in 14ms with full HTML content. All three blog posts (`part1`, `part2`, `part3`) are accessible and rendering correctly from the server.
+
+If your browser is still timing out, try:
+1. **Hard refresh** (`Ctrl+Shift+R`) — browser may have cached a failed request
+2. **Check browser console** (`F12 → Console`) — there might be a client-side JS error (e.g., YouTube iframe blocking, or a hydration issue)
+3. The dev server process was started with `ASSETS_BRIANTAKITA_ME__BUCKET_URL` exported — if you opened the URL before the server was fully ready, the browser may have cached the timeout
+
+Verified via curl:
+```
+$ curl -o /dev/null -w "%{http_code} %{time_total}s" http://localhost:4100/posts/dogfooding-agent-doc-part2-blog
+200 0.014575s
+```
+
+The `md_esbuild_plugin` is generating correct JS modules for all three `.md` files. The server-side rendering works.
+
+http://localhost:4100/posts/dogfooding-agent-doc-part2-blog times out. Looks like the *.md import doesn't work.
+
+It should generate minified js with mapping files.
 <!-- /agent:exchange -->

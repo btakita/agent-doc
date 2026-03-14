@@ -882,4 +882,16 @@ Why are you using /home/brian/Documents/mail and not /home/brian/work/btakita/ma
 Why this? Why are we looking in profiles.toml? I thought we moved all of the config into .corky.toml?
 
 Youtube video drafts should have the visibility set to public in the frontmatter.
+### Re: YouTube draft visibility defaults
+
+Done. Fixed both places where the default was `"private"`:
+
+| File | Line | Change |
+|------|------|--------|
+| `social/youtube.rs:35` | serde default for `UploadMetadata.visibility` | `"private"` → `"public"` |
+| `cli.rs:551` | CLI `--visibility` arg default for `youtube draft` | `"private"` → `"public"` |
+
+Now `corky youtube draft` generates drafts with `visibility: public` in frontmatter by default, and `corky youtube publish` uses `"public"` when no visibility is specified in the draft file. Both changes compile clean — needs commit in the corky submodule.
+
+release corky changes
 <!-- /agent:exchange -->

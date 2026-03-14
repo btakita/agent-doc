@@ -1512,4 +1512,24 @@ Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/conte
 ### Re: Duplicate links on homepage
 
 Checked the live site — **no duplicates found.** The fix from commit `0c16d41` (removing duplicate `.md` imports) resolved this. The latest deploy (`76f4702`) is live and working correctly.
+### Re: generate-index-js ENOENT error
+
+This is the `readdirSync(dir_path)` bug fixed in `@ctx-core/dev-tools@8.3.71`. Your standalone `~/work/btakita/briantakita.me-dev` has `@8.3.70` (pre-fix).
+
+After `chdir('app/briantakita.me/post/content')` succeeds, the old code calls `readdirSync('app/briantakita.me/post/content')` — but that path is relative to the *new* CWD, so it doesn't exist.
+
+**Fix:**
+```bash
+cd ~/work/btakita/briantakita.me-dev && bun update @ctx-core/dev-tools
+```
+
+This pulls `@8.3.72` with both the `readdirSync('.')` fix and the `.md` import fix.
+
+Why are the *.md files missing when I run:
+
+```
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                          ✘ INT 16:52:51
+❯ (cd app/briantakita.me/post/content && generate-index-js -d .) | grep 'dogfood'
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                16:52:52
+```
 <!-- /agent:exchange -->

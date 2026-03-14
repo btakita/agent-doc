@@ -1579,4 +1579,24 @@ This differs from `.md.ts` files (hand-written TypeScript). The `.md` -> `.md.js
 For `generate-index-js`, the `.md.js` files have extname `.js` (no handler), so they're silently skipped. Only the `.md` source files are exported in the barrel (on `@8.3.72`).
 
 I dont want the duplicated *.md.js files generated. Would it be possible to have the plugin only keep the *.md files in the source tree but generate a cached *.md.js file?
+### Re: Eliminating duplicate `.md.js` files
+
+**Already solved by `md_esbuild_plugin_` in `build.ts`.** The esbuild plugin (lines 129-176) handles `.md` files on-the-fly during builds. The generated `.md.js` files from `index.generate.ts` are redundant.
+
+**Steps:**
+
+1. **Delete `.md.js` files** from source:
+   ```bash
+   cd app/briantakita.me && git rm post/content/2026-03-12-dogfooding-agent-doc-part{1,2,3}-blog.md.js
+   ```
+
+2. **Import `.md` directly** — already done in `post/index.ts` (lines 48-50)
+
+3. **Regenerate barrel** with `generate-index-js@8.3.72` which emits `.md` imports
+
+4. **Simplify `index.generate.ts`** — reduce to barrel generation only, or replace with `generate-index-js`
+
+No caching needed — esbuild processes `.md` in-memory during the build. The `.md.js` wrappers duplicated what the plugin already does.
+
+Yes...please don't ever generate a duplicate *.md.js file when there is a *.md file already.
 <!-- /agent:exchange -->

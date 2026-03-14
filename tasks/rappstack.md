@@ -1619,4 +1619,46 @@ Why does generate-js not include the dogfood posts when I run it from the cli
 ```
 (cd app/briantakita.me/post/content && generate-index-js -d .) | grep 'dogfood'
 ```
+### Re: generate-index-js does not work from subdirectories
+
+This is a `npx`/`bunx` CWD resolution issue — not a version problem. When you run:
+
+```bash
+(cd app/briantakita.me/post/content && npx generate-index-js -d .)
+```
+
+`npx` resolves the binary from the nearest `node_modules/.bin/` and **changes CWD to the project root** before executing. So `-d .` resolves to the project root, not the content directory.
+
+**This pattern will never work with npx/bunx.** Use one of these instead:
+
+```bash
+# From project root (recommended):
+npx generate-index-js -d app/briantakita.me/post/content
+
+# Or use index.generate.ts (CWD-independent, uses import.meta.url):
+bun app/briantakita.me/post/index.generate.ts
+```
+
+Not working for me...why?
+```
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                17:09:02
+❯ npx generate-index-js -d app/briantakita.me/post/content
+Error: ENOENT: no such file or directory, scandir 'app/briantakita.me/post/content'
+    at readdirSync (node:fs:1554:26)
+    at main (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:32:21)
+    at chdir (file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dir/chdir/index.js:5:9)
+    at file:///home/brian/work/btakita/briantakita.me-dev/node_modules/@ctx-core/dev-tools/bin/generate-index-js.js:24:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: 'app/briantakita.me/post/content'
+}
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                17:09:06
+❯ bun app/briantakita.me/post/index.generate.ts
+~/work/btakita/briantakita.me-dev main                                                                                                                                                                                                17:09:13
+❯
+```
 <!-- /agent:exchange -->

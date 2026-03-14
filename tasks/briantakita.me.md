@@ -784,4 +784,6 @@ To fix, go to [YouTube Studio](https://studio.youtube.com) and change the visibi
 Set each to **Unlisted** (shareable by link, not searchable) or **Public** (fully discoverable). The embed code in the blog posts is correct — once the YouTube visibility changes, the videos will render immediately without any code changes.
 
 You can also use `corky` if you have a YouTube publish command set up, or change it directly in YouTube Studio.
+
+Yes...change the visibility to Public using Corky...if any of these are private.
 <!-- /agent:exchange -->

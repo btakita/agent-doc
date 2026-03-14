@@ -1960,4 +1960,22 @@ How do I fix the `meta_` name collisions?
 ```
 TS2308: Module './2004-09-18-subversion-source-control.md' has already exported a member named meta_. Consider explicitly re-exporting to resolve the ambiguity.
 ```
+
+The `meta_` collision happens when a barrel `index.ts` exists in `post/content/` using `export *` — every post module exports `meta_` and `default`, so re-exporting all of them from one file causes name collisions.
+
+**Fix:** Delete `post/content/index.ts` if it exists:
+
+```bash
+rm app/briantakita.me/post/content/index.ts
+```
+
+**Prevention:** Never run `generate-index-js` on `post/content/`. Posts are consumed via individual `import()` calls in `post/index.ts`, not via a barrel. To regenerate the post index:
+
+```bash
+bun post/index.generate.ts
+```
+
+This creates `post/index.ts` with individual `import('./content/<file>')` entries — no barrel, no collisions.
+
+If the modules did not all export `meta_` and only the default, would there be a collision?
 <!-- /agent:exchange -->

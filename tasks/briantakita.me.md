@@ -1238,4 +1238,8 @@ curl http://localhost:4100/rss
 The 500 error response body should show what's failing.
 
 Please run this and debug.
+
+Please release unreleased packages.
+Include rappstack packages that are currently submodules.
+Show me a list first.
 <!-- /agent:exchange -->

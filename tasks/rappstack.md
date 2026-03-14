@@ -369,4 +369,24 @@ Yes...do it. This should be for browser side js.
 
 Make https://demo.cogov.me/ use our existing @rappstack packages instead of submodules...if applicable
 Add a link to https://demo.cogov.me/ in nav__div
+### Re: herbaliciousbliss auth fix, demo.cogov.me link, drmanny-dev build
+
+**hb.briantakita.me: ✅ NOW WORKING**
+
+Fixed the auth middleware crash — `site_request_ctx__ensure` was using `relysjs/server`'s Elysia-based context, but herbaliciousbliss uses Hono. Created a local `site_request_ctx__ensure` using `rhonojs/server` and removed server-side auth from static routes (auth runs client-side). Prerender now exports `/` and `/lyra` successfully. https://hb.briantakita.me/ serves 200.
+
+**cogov.me Demo link: ✅ ADDED**
+
+Added "Demo" link to `https://demo.cogov.me/` in `outbound_links_()` in `nav__div.ts`. CI auto-deploying. demo.cogov.me uses internal `@cogov/*` workspace packages only — no @rappstack deps to convert.
+
+**drmanny-dev: 🔄 BUILD HANGING IN CI**
+
+The `relysjs__ready__wait(Infinity)` in `build.ts` causes the build to hang indefinitely on GitHub Actions runners (slower than local). Build completes locally but CI build step never finishes. Applied:
+1. 10-minute timeout on build step
+2. Added `relement__use(server__relement)` to `index.server.ts`
+3. Added prerender step to workflow
+
+New run in progress. If the build times out, we may need to investigate why `relysjs__ready__wait` doesn't resolve on CI runners.
+
+/agent-doc compact
 <!-- /agent:exchange -->

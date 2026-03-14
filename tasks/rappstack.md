@@ -781,4 +781,40 @@ The key change is in `esbuild-plugin-esmfile`. It needs two modes:
 
 You can see the implementation at src/ctx-core-dev/lib/esbuild-plugin-esmfile
 I believe that it generates the js file with the same relative path in the dist/browser directory as the import.
+### Re: esmfile implementation & R2 strategy
+
+**How `esmfile` works:** The plugin returns `{ contents, loader: 'file' }` to esbuild. esbuild's built-in `file` loader does ALL the heavy lifting — it copies the file to `outdir` with a content hash, and generates a JS module that exports the URL path string. The hash is esbuild's own content hash.
+
+**Key finding:** `esbuild-plugin-esmfile` has ZERO config options. The URL prefix comes entirely from **esbuild's `publicPath` build option**, which the `file` loader respects automatically. All apps already set `publicPath: '/'` in their `build.ts`.
+
+**Also:** Most asset imports aren't `.file.ts` at all — they're direct imports of `.webp`, `.png`, `.mp4` files. esbuild handles these with the same `file` loader. So ALL asset URL generation goes through `publicPath`.
+
+**Simplified R2 strategy using `publicPath`:**
+
+1. **Dev:** `publicPath: '/'` (unchanged) — assets copied locally, served from filesystem
+2. **Prod:** `publicPath: 'https://assets.cogov.me/'` — esbuild generates URLs pointing to R2 CDN
+
+**Problem:** esbuild's `file` loader ALWAYS copies files to `outdir`, even when `publicPath` points elsewhere. We can't skip the copy. Two options:
+
+**Option A — Post-build cleanup:** Build normally, then delete asset files from `dist/browser/` before `wrangler pages deploy`. Simple, no plugin changes.
+
+**Option B — Custom loader wrapper:** Replace esbuild's `file` loader with a custom `onLoad` that returns `{ contents: 'export default "${R2_URL}"', loader: 'js' }` in prod mode. No file copy happens. Cleaner but requires plugin changes.
+
+**R2 setup needed (either option):**
+1. Create R2 buckets (one per app or shared)
+2. Set up custom domains (e.g., `assets.cogov.me`, `assets.pe.briantakita.me`)
+3. Upload existing assets with their content-hashed names
+4. CI: set `ASSET_BASE_URL` env var for production builds
+
+**Recommendation:** Option A is simplest. After `bun build`, add a step:
+```bash
+find dist/browser -type f \( -name '*.webp' -o -name '*.png' -o -name '*.jpg' -o -name '*.mp4' -o -name '*.gif' -o -name '*.woff' -o -name '*.svg' \) -delete
+```
+Then deploy only JS/CSS/HTML to Cloudflare Pages.
+
+Option B.
+
+Which option do you prefer? And: one R2 bucket per app, or one shared bucket?
+
+One configurable R2 bucket per app. The base path should also be configurable.
 <!-- /agent:exchange -->

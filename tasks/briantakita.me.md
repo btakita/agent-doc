@@ -1100,4 +1100,26 @@ The skill is shareable — it's a standalone SKILL.md with no external dependenc
 **Immediate action still needed:** Revoke the Google OAuth refresh tokens exposed in the March 13 session — https://myaccount.google.com/permissions
 
 What do I need to do?
+**What you need to do:**
+
+**Step 1 — Revoke exposed tokens:**
+1. Go to https://myaccount.google.com/permissions
+2. Find the corky OAuth app (or whatever you named it in Google Cloud Console)
+3. Click it → "Remove Access" — this invalidates the exposed refresh tokens
+
+**Step 2 — Re-authenticate:**
+```bash
+corky youtube auth --profile btakita
+```
+
+**Step 3 — Verify:**
+```bash
+corky youtube list --profile btakita
+```
+
+That's it. 3 steps, ~2 minutes. The refresh tokens are the only critical concern — access tokens are already expired, client ID and channel ID are not secret.
+
+Was my crates.io or pypi key exposed? I probably should refresh those keys as a precaution.
+
+Should we also explain in the description that the keys have been recycled? I'm concerned about appearing sloppy. I messed up, but at least I caught it.
 <!-- /agent:exchange -->

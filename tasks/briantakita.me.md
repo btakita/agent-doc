@@ -182,4 +182,50 @@ Source: `src/ctx-core-dev/lib/rebuildjs-tailwindcss/`. The app already has `tail
 
 yes
 
+### Pending
+
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
+- [X] Create yalc tooling for library version publishing
+- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+- [ ] Update YouTube video descriptions (add blog post links) — **blocked: OAuth expired**
+- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file created at `tasks/tailwindv4.md`
+
+---
+
+### Re: Yalc → @ctx-core/monorepo
+
+Agreed. @ctx-core/monorepo already has 24 submodules and 32+ bin scripts. The yalc tooling fits naturally as:
+
+- `monorepo_yalc__publish__all/index.js` — main function
+- `bin/monorepo_yalc__publish__all.mjs` — CLI wrapper
+- Pattern matches existing `monorepo_npm__dependencies__update`, `monorepo_pnpm__dependencies__update`
+
+Currently `yalc-publish-all.sh` lives in ctx-core-dev root bin/ — needs to be refactored into @ctx-core/monorepo as a proper submodule. This is a separate task for a ctx-core-dev session.
+
+Do it please.
+
+### Re: YouTube descriptions — OAuth expired
+
+Draft files created with blog post links:
+- `mail/social/20260312-youtube-part1.md` → Part 1 (B-9uI53cRVE)
+- `mail/social/20260313-134452-youtube.md` → Part 2 (qQCKVQHRQCI)
+- `mail/social/20260313-163457-youtube.md` → Part 3 (RrZETW8EZEQ)
+
+**Blocker:** YouTube OAuth token for `btakita` has expired. To complete:
+```bash
+corky youtube auth
+corky youtube edit mail/social/20260312-youtube-part1.md
+corky youtube edit mail/social/20260313-134452-youtube.md
+corky youtube edit mail/social/20260313-163457-youtube.md
+```
+Try again
+
+### Re: Tailwind v4
+
+Task file created at `tasks/tailwindv4.md` with migration checklist. Ready for a focused session on the @rebuildjs/tailwindcss plugin refactor.
+
 <!-- /agent:exchange -->

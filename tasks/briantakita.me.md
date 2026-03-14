@@ -981,4 +981,15 @@ Watch on YouTube
 ```
 
 Would it be best to show the video in an iframe or just have a direct link?
+### Re: Iframe vs direct link
+
+**The embed fix is applied** — YouTube's oEmbed API confirms all 3 videos are embeddable now. If still seeing the error, hard refresh (`Ctrl+Shift+R`) — YouTube can take a few minutes to propagate the setting.
+
+**Recommendation: Keep the iframe.** Embedded video is better UX — readers watch without leaving the page, and the thumbnail breaks up the text visually. A "Watch on YouTube" link below each iframe is a nice fallback for mobile or ad-blocker users, but the primary embed should stay.
+
+Release Corky.
+Commit changes to rappstack libraries.
+Publish blog posts.
+Update video descriptions to point to the related blog post.
+
 <!-- /agent:exchange -->

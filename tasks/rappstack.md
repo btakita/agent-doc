@@ -1147,6 +1147,8 @@ You're right — all 6 apps are already migrated to Cloudflare R2. The `.env.sam
 
 update the .env.sample files please
 
+update the .env.sample files please
+
 | App | R2 Bucket | Endpoint |
 |-----|-----------|----------|
 | briantakita.me-dev | `briantakita-assets` | `1e7e...r2.cloudflarestorage.com` |
@@ -1166,4 +1168,38 @@ briantakita.me-dev already has `ASSETS_BRIANTAKITA_ME__BUCKET_URL=https://briant
 What are the public-facing asset URLs for each app?
 
 R2 custom domain. Switch the environment variable as well.
+Rename the R2 buckets to match the custom domain.
+### Re: .env.sample updated + R2 custom domains plan
+
+**`.env.sample` files updated** in all 5 repos (briantakita.me-dev was already correct):
+- `AWS_REGION`: `US-central` → `auto`
+- `AWS_ENDPOINT_URL`: Contabo → R2
+- `AWS_BUCKET`: dot-separated → hyphen-separated (matching live `.env`)
+
+**R2 custom domain + bucket rename plan:**
+
+| App | Current Bucket | New Bucket | Custom Domain | ASSET_BASE_URL |
+|-----|---------------|------------|---------------|---------------|
+| briantakita.me-dev | `briantakita-assets` | `assets.briantakita.me` | `assets.briantakita.me` | `https://assets.briantakita.me` |
+| drmanny-dev | `peakexistence-public` | `assets.pe.briantakita.me` | `assets.pe.briantakita.me` | `https://assets.pe.briantakita.me` |
+| brookebrodack-dev | `assets-brookebrodack` | `assets.brookebrodack.net` | `assets.brookebrodack.net` | `https://assets.brookebrodack.net` |
+| cogov-dev | `assets-cogov` | `assets.cogov.me` | `assets.cogov.me` | `https://assets.cogov.me` |
+| herbaliciousbliss-dev | `herbaliciousbliss-asset` | `assets.hb.briantakita.me` | `assets.hb.briantakita.me` | `https://assets.hb.briantakita.me` |
+| prescience-notes-dev | `prescience-notes-public` | `assets.pn.briantakita.me` | `assets.pn.briantakita.me` | `https://assets.pn.briantakita.me` |
+
+**Steps to execute:**
+1. Create new R2 buckets with custom domain names
+2. Copy objects from old buckets to new buckets
+3. Set up custom domains in Cloudflare DNS (CNAME → R2 public URL)
+4. Update `.env` and `.env.sample` with new bucket names
+5. Update CI secrets (AWS_BUCKET, ASSET_BASE_URL)
+6. Delete old buckets
+
+**Note:** R2 doesn't support renaming buckets — we have to create new ones and copy objects. Also, R2 custom domains require the domain to be on Cloudflare DNS (which all these domains likely are since they deploy to Cloudflare Pages).
+
+I need Cloudflare API access to create buckets and set up custom domains. The `wrangler` auth failed earlier. Can you run `npx wrangler login` or provide API credentials?
+
+R2 custom domain. Switch the environment variable as well.
+Rename the R2 buckets to match the custom domain.
+The custom subdomain should always have `assets.` prepended to the site subdomain/domain
 <!-- /agent:exchange -->

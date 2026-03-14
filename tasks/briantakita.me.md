@@ -909,4 +909,17 @@ Committed and tagged **v0.15.1** in the corky submodule:
 Please add description to the Youtube videos.
 
 For part 2...make a joke that I am the craze quarter screen dude after all. See CC transcript where I talk about the quarter screen.
+### Re: YouTube descriptions added
+
+Updated all 3 videos with descriptions, tags, and links via `corky youtube edit`:
+
+**Part 1** — CRDT debugging, reactive architecture, Existence Lang. Includes the honest "1/4 of my display" warning.
+
+**Part 2** — Added the quarter-screen joke: *"Yes, I'm the crazy quarter-screen dude from Part 1. Good news: I figured out OBS this time and you get a full screen."*
+
+**Part 3** — YouTube upload in Rust, 61 tmux-router tests, JetBrains plugin IPC. OBS misalignment note included.
+
+Each description has topic bullets, blog post links, and project links (agent-doc, corky, Existence Lang).
+
+Release Corky 0.15.1
 <!-- /agent:exchange -->

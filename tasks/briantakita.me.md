@@ -922,4 +922,20 @@ Updated all 3 videos with descriptions, tags, and links via `corky youtube edit`
 Each description has topic bullets, blog post links, and project links (agent-doc, corky, Existence Lang).
 
 Release Corky 0.15.1
+### Re: Release Corky 0.15.1
+
+Published:
+
+| Target | Status |
+|--------|--------|
+| GitHub | Pushed main + tag v0.15.1 |
+| crates.io | Published (`cargo publish`) |
+| GitHub Release | Created with prebuilt binary: https://github.com/btakita/corky/releases/tag/v0.15.1 |
+| PyPI | **Failed** — 403 auth error. PyPI token may need refresh. |
+
+PyPI needs a valid API token. Check if you have one in `pass` or generate a new one at https://pypi.org/manage/account/token/. Once you have it, run:
+```bash
+maturin publish --username __token__ --password <token>
+```
+Does this work MATURIN_PYPI_TOKEN="$(pass pypi/publish_token)"
 <!-- /agent:exchange -->

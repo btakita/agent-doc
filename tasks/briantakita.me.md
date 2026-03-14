@@ -1263,10 +1263,13 @@ Elysia route handler → briantakita_request_ctx__ensure() → blog_request_ctx_
 | Package | Notes |
 |---------|-------|
 Do not publish @btakita/*. Leave as submodule
+Do not publish @btakita/*. Leave as submodule
 | `@btakita/dev-bin` | Dev tooling |
 | `@btakita/snippet--rappstack` | Snippets |
 | `@btakita/ui--browser--briantakita` | Site-specific UI |
 | `@btakita/ui--browser--semantic` | Semantic UI |
+
+Publish @rappstack/*
 
 Publish @rappstack/*
 | `@rappstack/domain--any--blog` | Blog domain (any) |
@@ -1289,14 +1292,52 @@ Publish @rappstack/*
 
 Publish
 
+Publish
+
 **Already published (current on npm):** ctx-core, rmemo, relementjs, rebuildjs, esmcss, @ctx-core/preprocess, @ctx-core/source-map, @rebuildjs/tailwindcss, relysjs, rhonojs (11 total).
 
 **Never published:** `@relementjs/astro` (0.0.128)
 
 Publish
 
+Publish
+
 Should I:
 1. Fix the `blog_request_ctx.ts` Hono→relysjs revert first?
+S
+Stay on hono. We want to make sure it works on Cloudflare.
 2. Publish the ~140 ctx-core-dev packages via `publish--force`?
+Yes
 3. Both?
+
+### Re: Publishing
+
+**ctx-core-dev publish results:**
+- 8 packages published successfully (ctx-core, @ctx-core/cognito, @ctx-core/preprocess, @ctx-core/source-map, esmcss, rebuildjs, @rebuildjs/tailwindcss, rmemo)
+- 161 packages already at latest version on npm
+- 23 packages failed — all due to `publint` errors in their `prepublishOnly` scripts (exports ordering, missing .d.ts files, etc.). These are mostly older/dormant packages: @ctx-core/atob, @ctx-core/fetch, @ctx-core/svelte, hyop, van-type-delegate, etc.
+
+**@rappstack/* publishing plan:**
+
+All 11 packages are at `0.0.0` — need a version before publishing. They have no build scripts (publish TypeScript source directly). 6 packages have internal `workspace:*` deps that need resolution.
+
+**Publish order (dependency graph):**
+```
+Tier 1 (no internal deps):
+  domain--any--blog, domain--browser, domain--server, ui--any, ui--browser, ui--server
+
+Tier 2 (depend on Tier 1):
+  domain--browser--blog → domain--any--blog
+  domain--server--blog → domain--server
+  ui--any--blog → domain--any--blog
+
+Tier 3 (depend on Tier 1+2):
+  ui--browser--blog → domain--any--blog, domain--browser, ui--any--blog
+  ui--server--blog → domain--any--blog, domain--server, domain--server--blog, ui--any, ui--any--blog, ui--server
+```
+
+**Before publishing I need to know:**
+1. What version? `0.1.0` is standard for first public release. Or match a convention you prefer?
+2. The `workspace:*` refs will be replaced with `^<version>` automatically by bun/npm on publish. Confirm this is OK?
+3. **@relementjs/astro** has `"private": true` — need to remove that flag to publish. Proceed?
 <!-- /agent:exchange -->

@@ -202,4 +202,19 @@ CssSyntaxError: /home/brian/work/btakita/briantakita.me-dev/app/briantakita.me/a
 ```
 
 Add tests to verify the site works.
+The error is from `/home/brian/work/btakita/briantakita.me-dev/` (the main checkout), which didn't have the migration changes. I've propagated the changes:
+
+1. Copied `index.css.ts`, `build.ts` from agent-loop's copy
+2. Backed up `tailwind.config.ts` → `.v3bak`
+3. Updated yalc with `@rebuildjs/tailwindcss@0.11.0` (includes writeFile fix)
+
+Clean `rm -rf dist && bun run build` passes in the main checkout.
+
+Re: "Add tests to verify the site works" — what kind of tests are you looking for? Options:
+- **Smoke test** — `bun run build` exits 0 (already proven)
+- **CSS assertion** — verify the output CSS contains expected utility classes
+- **Visual/E2E** — Playwright or similar browser test hitting the dev server
+- **Something else?**
+
+All of the above
 <!-- /agent:exchange -->

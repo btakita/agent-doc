@@ -1278,4 +1278,20 @@ Yes
 Shall I commit and deploy?
 
 Yes
+### Re: Committed and pushed all 6 apps
+
+| App | Commit | Files | Push |
+|-----|--------|-------|------|
+| briantakita.me-dev | `ed3b406` | `.env.sample`, `deploy.yml` | ✅ |
+| drmanny-dev | `1a2aef7` | `.env.sample`, `deploy.yml` | ✅ |
+| brookebrodack-dev | `6544f67` | `.env.sample`, `deploy.yml`, `bun.lock` | ✅ |
+| cogov-dev | `82bd0c2` | `.env.sample`, `deploy.yml`, `build.ts`, `package.json`, `bun.lock` | ✅ |
+| herbaliciousbliss-dev | `4674fe4` | `.env.sample`, `deploy.yml`, `bun.lockb`, submodule (`build.ts`, `package.json`) | ✅ |
+| prescience-notes-dev | `1bdfaf2` | `.env.sample`, `deploy.yml`, `build.ts`, `package.json`, `bun.lock` | ✅ |
+
+CI deploys should be running now. Once all deploys succeed and assets load correctly from the custom domains, we can delete the old R2 buckets.
+
+Want me to check the deploy status?
+
+Yes
 <!-- /agent:exchange -->

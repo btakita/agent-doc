@@ -48,4 +48,43 @@ Please write a fix for the agent-doc binary with tests.
 commit and push all rappstack packages and sites.
 publish briantakita.me
 ```
+
+### Re: CRDT duplicate user prompt in rappstack.md
+
+**Root cause:** In `stream.rs` line 307, the final snapshot computation used `apply_patches()` (default modes) instead of `apply_patches_with_overrides()` with replace mode. The `exchange` component defaults to **append** mode, so the patch content (which includes the user's prompt + agent response) was *appended* to the baseline's exchange content — duplicating the prompt.
+
+The `flush_to_document()` function already used replace mode correctly (lines 342-343), but the snapshot computation at line 307 was inconsistent.
+
+**Fix:** `stream.rs` line 307 now uses `apply_patches_with_overrides` with replace mode for the target component:
+
+```rust
+// Before (bug — append mode for exchange duplicates content):
+crate::template::apply_patches(baseline, &patches, &unmatched, file)
+
+// After (fix — replace mode, matching flush_to_document behavior):
+let mut mode_overrides = std::collections::HashMap::new();
+mode_overrides.insert(target.to_string(), "replace".to_string());
+crate::template::apply_patches_with_overrides(baseline, &patches, &unmatched, file, &mode_overrides)
+```
+
+**Tests added** in `stream.rs`:
+- `content_ours_exchange_no_duplicate` — verifies replace mode produces exactly 1 copy of user prompt
+- `content_ours_exchange_duplicates_without_replace` — proves the bug: without replace override, append mode produces 2 copies
+
+All tests pass: `make check` clean (clippy + 314 tests + 21 CLI tests).
+I came across another CRDT issue with duplicate user prompt being written to tasks/rappstack.md.
+Why did this happen?
+Please write a fix for the agent-doc binary with tests.
+
+```
+commit and push all rappstack packages and sites.
+publish briantakita.me
+```
+
+If the user adds a prompt right before `<!-- /agent:exchange -->` and the agent response is for the prompt...
+the agent response should be after the user prompt.
+
+The user prompt should not be duplicated after the agent response right before `<!-- /agent:exchange -->` in this case.
+
+tasks/rappstack.md was an example of this case.
 <!-- /agent:exchange -->

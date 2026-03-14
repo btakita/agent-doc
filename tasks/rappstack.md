@@ -16,24 +16,24 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: herbaliciousbliss-dev relysjs fix
+### Re: CI errors investigation
 
-You're right — the `relysjs/server` import was a leftover compatibility shim. `ctx/index.ts` imported `elysia_context__set` to set an elysia context for `@rappstack/domain--server--auth`, but that package doesn't use `elysia_context` at all.
+**drmanny-dev (run 23099026077):** Still in progress (9+ min). The previous run (23098920375) failed with:
+- `tailwindcss` not resolved — **fixed** in current run (`conditions: ['style']`)
+- `peak-existence.mp4` not found — video file not in git, needs R2 or exclude
+- `fa_waves_sine.svg` not found — icon file missing
 
-**Fix:** Removed the `elysia_context__set` import and call. Now uses only `rhonojs/server`. Committed and pushed — CI triggered.
+**herbaliciousbliss-dev (run 23099060500):** Build succeeds but **prerender fails**:
+```
+p is not a function (500 on / and /lyra)
+```
+This is the **relementjs state duplication** issue — tag factories not initialized in minified server bundle. Fix: add `relement__use(server__relement)` to server entry point.
 
-**Deploy status:**
+**Next steps:**
+1. drmanny-dev: handle missing `fa_waves_sine.svg` + `peak-existence.mp4`
+2. herbaliciousbliss-dev: add `relement__use(server__relement)` to server entry
 
-| App | URL | CI |
-|-----|-----|-----|
-| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
-| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
-| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
-| cogov-dev | cogov.me | ✅ DEPLOYED |
-| drmanny-dev | pe.briantakita.me | 🔄 CI running |
-| herbaliciousbliss-dev | hb.briantakita.me | 🔄 CI running (relysjs shim removed) |
+Want me to fix both?
 
-I see many errors for the drmanny-dev build. See https://github.com/btakita/drmanny-dev/actions/runs/23099026077/job/67096311943
-
-herbaliciousbliss-dev has errors https://github.com/btakita/herbaliciousbliss-dev/actions/runs/23099060500/job/67096404135
+Yes
 <!-- /agent:exchange -->

@@ -2054,4 +2054,34 @@ publish briantakita.me
 briantakita.me is deployed. The other site failures need investigation — want me to look into them?
 
 Yes...look into the failures.
+
+### Re: CI failure investigation
+
+**prescience-notes-dev** ✅ — already passing (repo is `btakita/prescience-notes`)
+
+**briantakita.me-dev** ✅ — already deployed
+
+**Failures:**
+
+| App | Error | Root Cause |
+|-----|-------|------------|
+| **brookebrodack-dev** | `esbuild-plugin-object-store-asset` invalid `filter` + `Timeout 10000ms` | 1. Plugin v0.0.2 has bug in `onLoad({ filter })`. 2. `relysjs__ready__wait` hangs in CI |
+| **drmanny-dev** | `Cannot find package 'marked-highlight'` | Missing dependency in `app/peakexistence-site/` |
+| **herbaliciousbliss-dev** | `Timeout 5000ms` in rebuildjs browser build | `waitfor` timeout in `rebuildjs_browser` — same CI build hang pattern |
+| **cogov-dev** | `Cannot use "../../public/assets/images/..." as a URL` (25 errors) | Asset files not present in CI — CSS templates reference local images via relative paths |
+
+**cogov-dev** is at `cogov/cogov-dev` (not `btakita/cogov-dev`).
+
+**Fixes needed:**
+1. **esbuild-plugin-object-store-asset** — bump to v0.0.3 in brookebrodack-dev (already published)
+ok
+2. **brookebrodack-dev & herbaliciousbliss-dev** — skip `relysjs__ready__wait`/`waitfor` when `watch: false` (same fix as drmanny/prescience)
+ok
+3. **drmanny-dev** — add `marked-highlight` to dependencies
+ok
+4. **cogov-dev** — ensure asset download step runs before build in CI
+ok
+
+Want me to fix all of these?
+yes
 <!-- /agent:exchange -->

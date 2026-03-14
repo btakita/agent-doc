@@ -228,4 +228,49 @@ Try again
 
 Task file created at `tasks/tailwindv4.md` with migration checklist. Ready for a focused session on the @rebuildjs/tailwindcss plugin refactor.
 
+### Pending
+
+Some tasks were completed in tasks/rappstack.md
+- [X] Revoke exposed Google OAuth tokens
+- [X] Rotate crates.io API token
+- [X] Publish @rappstack/* packages at v0.1.0 to npm
+- [X] Create yalc tooling for library version publishing — implemented in @ctx-core/monorepo
+- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
+- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
+- [ ] Update YouTube video descriptions — **blocked: OAuth requires manual browser auth**
+- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
+
+---
+
+### Re: Yalc → @ctx-core/monorepo — Done
+
+Created in `src/ctx-core-dev/lib/monorepo/`:
+- `monorepo_yalc__publish__all/index.js` — iterates workspace projects, skips private, runs `yalc publish --no-scripts [--push]`
+- `monorepo_yalc__publish__all/index.d.ts` — types
+- `monorepo_yalc__publish__all__cli/index.js` — CLI with `--no-push`, `-t/--threads`, `-h/--help`
+- `monorepo_yalc__publish__all__cli/index.d.ts` — types
+- `bin/monorepo_yalc__publish__all.mjs` — executable entry point
+- Updated `package.json` (files, bin), `index.js`, `index.d.ts`
+
+Follows existing pattern (`monorepo_npm__dependencies__update`). Not committed yet — needs review and publish.
+
+ok...go
+
+### Re: YouTube — Still blocked
+
+OAuth callback timed out (120s). This requires you to complete the Google sign-in in a browser:
+
+Try again
+
+```bash
+corky youtube auth
+```
+
+Then complete the browser OAuth flow. After that:
+```bash
+corky youtube edit mail/social/20260312-youtube-part1.md
+corky youtube edit mail/social/20260313-134452-youtube.md
+corky youtube edit mail/social/20260313-163457-youtube.md
+```
+
 <!-- /agent:exchange -->

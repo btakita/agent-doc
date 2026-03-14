@@ -16,22 +16,14 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: CI fix results
+### Re: Fixing remaining 2
 
-**All 4 fixes applied. 4/6 apps now deploying successfully:**
+**2 fix agents launched:**
 
-| App | URL | CI | Fix Applied | Remaining Issue |
-|-----|-----|-----|------------|-----------------|
-| briantakita.me-dev | briantakita.me | ✅ DEPLOYED | — | — |
-| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED | — | — |
-| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED | Plugin v0.0.3 + skip ready wait | — |
-| cogov-dev | cogov.me | ✅ DEPLOYED | Removed plugin (R2 files unhashed), published plugin v0.0.4 with CSS url-token fix | — |
-| drmanny-dev | pe.briantakita.me | ❌ FAIL | Added `marked-highlight` dep | `@btakita/domain--server--peakexistence/jsonld` — missing exports map entry |
-| herbaliciousbliss-dev | hb.briantakita.me | ❌ FAIL | Skipped ready wait in CI | `@btakita/ui--browser--herbaliciousbliss/layout` — missing exports map entry + `tailwindcss` not resolved |
+1. **drmanny-dev** — adding `./jsonld` exports map entry to `@btakita/domain--server--peakexistence`
+2. **herbaliciousbliss-dev** — adding `./layout` exports map entry to `@btakita/ui--browser--herbaliciousbliss` + fixing `tailwindcss` resolution
 
-**drmanny-dev and herbaliciousbliss-dev** have pre-existing module resolution issues — packages missing `exports` map entries for subpath imports. These aren't related to the rappstack migration or Tailwind v4 upgrade.
+Will update with results.
 
-Want me to fix the remaining 2?
-
-Yes
+drmanny-dev is taking too long. Does it work locally?
 <!-- /agent:exchange -->

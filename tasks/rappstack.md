@@ -1040,4 +1040,27 @@ Both `object-store-asset` and `esbuild-plugin-object-store-asset` are available 
 5. Create R2 buckets, upload assets, set CI env vars
 
 Starting implementation now.
+### Re: Implementation progress
+
+**Both packages created in `ctx-core-dev/lib/`:**
+
+| Package | Location | Tests | Types |
+|---------|----------|-------|-------|
+| `object-store-asset` | `lib/object-store-asset/` | ✅ 7/7 pass | ✅ |
+| `esbuild-plugin-object-store-asset` | `lib/esbuild-plugin-object-store-asset/` | ✅ types pass | ✅ |
+
+**Core library exports:** `object_store_asset_url_()`, `object_store_asset_url_sync_()`, `is_asset_()`, `ASSET_EXTENSIONS`
+
+**esbuild plugin:** `object_store_asset_esbuild_plugin_(config)` — returns no-op when `asset_base_url` is unset (dev mode), intercepts asset loads when set (prod mode).
+
+**Next steps:**
+1. Publish both packages to npm
+2. Add to each app's `build.ts`
+3. Create R2 buckets + custom domains
+4. Upload existing assets
+5. Set `ASSET_BASE_URL` in CI workflows
+
+Ready to publish — shall I proceed?
+
+publish
 <!-- /agent:exchange -->

@@ -1401,4 +1401,39 @@ export * from './2026-03-12-dogfooding-agent-doc-part3-blog.md.js'
 - `briantakita.me-dev` → `12fab11` (submodule pointer + deploy triggered)
 
 `(cd app/briantakita.me/post/content && generate-index-js -d .)` still does no include the *.md files.
+### Re: generate-index-js local fix
+
+Published `@ctx-core/dev-tools@8.3.71` with the fix. Updated in briantakita.me-dev's `node_modules`.
+
+The `.md` files ARE included — but there's a CWD issue with how `npx` resolves the binary from a subdirectory:
+
+```bash
+# This WORKS (run from project root):
+npx generate-index-js -d app/briantakita.me/post/content
+
+# This DOES NOT WORK (npx resolves binary from parent node_modules, CWD shifts):
+(cd app/briantakita.me/post/content && npx generate-index-js -d .)
+```
+
+The workaround is to always run from the project root with the full path to `-d`. Or use the explicit bin path:
+
+```bash
+(cd app/briantakita.me/post/content && ../../../../node_modules/.bin/generate-index-js -d .)
+```
+
+The `index.ts` file was already updated and pushed in the previous cycle (`3013492`), so the 3 dogfooding posts are included in the build.
+
+`(cd app/briantakita.me/post/content && generate-index-js -d .)` still does no include the *.md files.
+
+My real issue is I have duplicate imports
+
+```
+	import('./content/2026-03-12-dogfooding-agent-doc-part1-blog.md'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part2-blog.md'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part3-blog.md'),
+  ...
+	import('./content/2026-03-12-dogfooding-agent-doc-part1-blog.md.js'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part2-blog.md.js'),
+	import('./content/2026-03-12-dogfooding-agent-doc-part3-blog.md.js'),
+```
 <!-- /agent:exchange -->

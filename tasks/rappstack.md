@@ -817,4 +817,89 @@ Option B.
 Which option do you prefer? And: one R2 bucket per app, or one shared bucket?
 
 One configurable R2 bucket per app. The base path should also be configurable.
+### Re: Option B — R2 asset plugin plan
+
+**New plugin: `esbuild-plugin-r2-asset`** in `ctx-core-dev/lib/`.
+
+When `asset_base_url` is configured, intercepts asset file loads and returns a JS module exporting the R2 URL — no file copy to `dist/browser/`. When unset (dev mode), falls through to esbuild's `file` loader.
+
+**Key discovery:** `rebuildjs` (line 206-239) already maps 28+ extensions to `'file'` loader via `default_loader`, and both browser/server builds use `assetNames: '[name]-[hash]'`, `publicPath: '/'`. The `...esbuild__config` spread lets apps override these.
+
+**Plugin implementation:**
+
+```ts
+// esbuild-plugin-r2-asset — intercepts before esbuild's file loader
+const ASSET_EXTENSIONS = /\.(aac|apng|avif|eot|flac|gif|ico|jfif|jpeg|jpg|mov|mp3|mp4|ogg|opus|otf|pdf|pjp|pjpeg|png|svg|ttf|wav|webm|webp|woff|woff2)$/
+
+export function r2_asset_plugin_({
+  asset_base_url,   // e.g. 'https://assets.pe.briantakita.me'
+  base_path = '',   // optional prefix within bucket
+  extensions = ASSET_EXTENSIONS,
+} = {}): Plugin {
+  return {
+    name: 'r2-asset',
+    setup(build) {
+      if (!asset_base_url) return  // dev → no-op, esbuild's file loader handles it
+      build.onLoad({ filter: extensions }, async ({ path }) => {
+        const content = await readFile(path)
+        const hash = createHash('sha256').update(content).digest('hex').slice(0, 8).toUpperCase()
+        const ext = extname(path)
+        const name = basename(path, ext)
+        const prefix = base_path ? `${base_path}/` : ''
+        const url = `${asset_base_url.replace(/\/$/, '')}/${prefix}${name}-${hash}${ext}`
+        return { contents: `export default ${JSON.stringify(url)}`, loader: 'js' }
+      })
+    },
+  }
+}
+```
+
+**Per-app `build.ts` — just add the plugin:**
+
+```ts
+const r2_asset = r2_asset_plugin_({
+  asset_base_url: import_meta_env_().ASSET_BASE_URL,  // undefined in dev → no-op
+  base_path: import_meta_env_().ASSET_BASE_PATH,      // optional prefix
+})
+plugins: [r2_asset, rebuild_tailwind_plugin, preprocess_plugin, esmfile]
+```
+
+**esmfile compatibility:** r2-asset uses `onLoad` for asset extensions; esmfile uses `onResolve` for `.file.ts` then strips the suffix. esmfile re-resolves to the raw asset path → r2-asset intercepts that load. Both compose cleanly.
+
+**Per-app R2 buckets (configurable):**
+
+| App | R2 Bucket | ASSET_BASE_URL |
+|-----|-----------|---------------|
+| drmanny-dev | `peakexistence-assets` | `https://assets.pe.briantakita.me` |
+| cogov-dev | `cogov-assets` | `https://assets.cogov.me` |
+| brookebrodack-dev | `brookebrodack-assets` | `https://assets.brookebrodack.net` |
+| herbaliciousbliss-dev | `herbaliciousbliss-assets` | `https://assets.hb.briantakita.me` |
+| prescience-notes-dev | `prescience-notes-assets` | `https://assets.pn.briantakita.me` |
+| briantakita.me-dev | `briantakita-assets` | `https://assets.briantakita.me` |
+
+**R2 upload script** (same SHA256-8 hash as plugin):
+
+```bash
+for file in public/**/*.{webp,png,jpg,mp4,gif,svg,woff,woff2}; do
+  hash=$(sha256sum "$file" | cut -c1-8 | tr a-f A-F)
+  name="$(basename "$file" ".${file##*.}")"
+  wrangler r2 object put "bucket/${name}-${hash}.${file##*.}" --file "$file"
+done
+```
+
+**CI workflow:** Set `ASSET_BASE_URL` env var. No other changes needed — plugin is a no-op when unset.
+
+**Implementation order:**
+1. Create `esbuild-plugin-r2-asset` in ctx-core-dev, publish
+2. Create R2 buckets + custom domains (wrangler or dashboard)
+3. Upload existing assets to R2 (one-time)
+4. Add plugin to each app's `build.ts`
+5. Set `ASSET_BASE_URL` in CI workflows
+6. Test + deploy
+
+Shall I start?
+
+I don't want to add a new plugin. I actually want to move over to bun build instead. But for now, let's fix the issue with the existing esbuild plugin only.
+
+Is there an existing esbuild plugin that works for S3/R2?
 <!-- /agent:exchange -->

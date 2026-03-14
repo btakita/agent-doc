@@ -275,7 +275,28 @@ Why do I need a PAT for drmanny-dev? How did the last deployment work?
 
 Monitoring deploy runs now...
 
-Yes...configure via `gh secret set`
+Use agent_doc_mode: stream for this doc
+### Re: Why PAT for drmanny-dev
 
+Previously drmanny-dev was deployed from **Contabo via Docker** (docker-compose with Traefik on port 4103, host `pe.briantakita.me`). There was no GitHub Actions CI — builds ran locally where your SSH key has access to all repos.
 
+With GitHub Actions, the CI runner needs to clone each submodule during `actions/checkout`. The default `GITHUB_TOKEN` only has access to the repository running the workflow (drmanny-dev), not to other private repos like `peakexistence-site`, `domain--any--peakexistence`, etc.
+
+Should we inline these repos into drmanny-dev?
+
+**Options:**
+1. **GitHub PAT** (fine-grained token with Contents:Read on the 5 repos) — simplest
+2. **Make the peakexistence repos public** — if there's no reason to keep them private
+3. **Publish peakexistence packages to npm** (like we did with @rappstack) — then remove submodules entirely, no private access needed
+
+Option 3 would be the cleanest long-term solution — it mirrors what we just did for @rappstack. The peakexistence packages would become `@btakita/domain--any--peakexistence`, etc. on npm.
+
+Which approach do you prefer?
+
+**Deploy status update:**
+- cogov-dev: Build + asset download ✓, but Prerender fails (can't find `dist/server/index.js` — the server build may not be producing output in CI)
+Test locally and fix this issue.
+- brookebrodack-dev: Re-triggered after fixing bucket name
+- herbaliciousbliss-dev: Re-triggered after fixing S3 download path
+- prescience-notes-dev: Re-triggered after fixing S3 download path
 <!-- /agent:exchange -->

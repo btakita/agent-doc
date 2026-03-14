@@ -2027,4 +2027,31 @@ Will update with results shortly.
 commit and push all rappstack packages and sites.
 version bump and release any ctx-core or rappstack package that needs it 
 publish briantakita.me
+
+### Re: Version bumps, commits, and deploys
+
+**Published to npm (v0.1.1):**
+- @rappstack/domain--any--blog (was already at 0.1.1)
+- @rappstack/ui--server — bumped & published
+- @rappstack/domain--server--blog — bumped & published
+- @rappstack/ui--server--blog — bumped & published
+
+**@ctx-core/dev-tools** — no uncommitted changes, already at 8.3.72. Skipped.
+
+**Submodule pointers updated:** rappstack-dev pushed (`67320c3`)
+
+**Deploy status:**
+
+| App | CI | Notes |
+|-----|-----|-------|
+| briantakita.me-dev | ✅ SUCCESS | Run 23098249065, deployed |
+| cogov-dev | ⚠️ No recent runs | May need push |
+| brookebrodack-dev | ❌ FAILURE | Run 23098284792 |
+| drmanny-dev | ❌ FAILURE | Run 23098284226 |
+| herbaliciousbliss-dev | ❌ FAILURE | Run 23095075759 |
+| prescience-notes-dev | ⚠️ No recent runs | May need push |
+
+briantakita.me is deployed. The other site failures need investigation — want me to look into them?
+
+Yes...look into the failures.
 <!-- /agent:exchange -->

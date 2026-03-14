@@ -217,4 +217,18 @@ Re: "Add tests to verify the site works" — what kind of tests are you looking 
 - **Something else?**
 
 All of the above
+Implementing all three test types. Starting with smoke + CSS assertions (no extra deps), then Playwright E2E.
+
+**Test plan:**
+1. **Smoke test** — build exits 0
+2. **CSS assertion** — verify output CSS contains skin utilities, prose styles, no @tailwind directives
+3. **E2E** — Playwright: start dev server, check pages render, verify CSS applied
+
+Working...
+
+All of the above
+Use lightpanda for the headless browser
+See https://github.com/lightpanda-io/browser
+http://localhost:4100 styling is broken
+
 <!-- /agent:exchange -->

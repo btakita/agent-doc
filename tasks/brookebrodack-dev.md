@@ -160,4 +160,13 @@ Three bugs found:
 Committed and pushed (`28c0c14`) — CI deploying.
 
 .YT_player__div is 0x0. The video is not visible
+### Re: YT_player__div 0x0
+
+The `hidden` class was on the **parent div** (`.YT_player__div`), but the animation memo at line 300 was toggling `hidden` on `YT_iframe__wanimato.el` — which is the **iframe** child (from `YT_player.getIframe()`). The parent div kept `display:none` forever, causing 0x0 dimensions even though audio played (YouTube iframes can play audio while hidden).
+
+**Fix:** Changed the `hidden` class toggle to target `YT_iframe__div_(ctx)` (the parent div reference) instead of `YT_iframe__wanimato.el` (the iframe). Also fixed the reduced-motion fallback to target the parent div.
+
+Committed and pushed (`6bfaae1`) — CI deploying.
+
+.YT_player__div still hidden
 <!-- /agent:exchange -->

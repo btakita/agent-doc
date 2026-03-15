@@ -129,11 +129,16 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     //           just the agent response, theirs' diff is just the small edit.
     let mutual_prefix = common_prefix_len(ours_text, theirs_text);
     if mutual_prefix > base_text.len() {
-        // Snap to a line boundary to avoid splitting mid-line
+        // Snap to a line boundary to avoid splitting mid-line/mid-word.
+        // Without this, the shared prefix can include partial formatting
+        // sequences (e.g., a leading `*` from `**bold**`), causing the
+        // CRDT merge to separate that character from the rest of the
+        // formatting, producing garbled text like `*Soft-bristle brush only**`
+        // instead of `**Soft-bristle brush only**`.
         let snap = &ours_text[..mutual_prefix];
         let snapped = match snap.rfind('\n') {
             Some(pos) if pos >= base_text.len() => pos + 1,
-            _ => mutual_prefix,
+            _ => base_text.len(), // no suitable line boundary — don't advance
         };
         if snapped > base_text.len() {
             eprintln!(
@@ -529,5 +534,125 @@ Committed and pushed.
             count, merged
         );
         assert!(merged.contains("Agent response."), "Agent text missing:\n{}", merged);
+    }
+
+    /// Regression test: Character-level interleaving bug.
+    ///
+    /// When the user types in their editor while the agent is streaming,
+    /// both sides insert text at the same position relative to the base.
+    /// The CRDT base advancement logic used to snap to the shared prefix
+    /// of ours/theirs, which could land mid-line on a shared formatting
+    /// character (e.g., `*` from `*bold*` and `**bold**`). This caused
+    /// the formatting character to be absorbed into the base, splitting
+    /// it from the rest of the formatting sequence and producing garbled
+    /// text like `*Soft-bristle brush only**` instead of
+    /// `**Soft-bristle brush only**`.
+    ///
+    /// The fix: always snap the advanced base to a line boundary. If no
+    /// suitable line boundary exists after the current base length, don't
+    /// advance at all.
+    #[test]
+    fn merge_no_character_interleaving() {
+        // Base: a document with some existing content
+        let base = "# Doc\n\nPrevious content.\n\n";
+        let base_doc = CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        // Agent adds a response
+        let ours = "# Doc\n\nPrevious content.\n\n*Compacted. Content archived to*\n";
+        // User types something in their editor at the same position
+        let theirs = "# Doc\n\nPrevious content.\n\n**Soft-bristle brush only**\n";
+
+        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+
+        // Both texts should be present as contiguous blocks, not interleaved
+        assert!(
+            merged.contains("*Compacted. Content archived to*"),
+            "Agent text should be contiguous (not interleaved). Got:\n{}",
+            merged
+        );
+        assert!(
+            merged.contains("**Soft-bristle brush only**"),
+            "User text should be contiguous (not interleaved). Got:\n{}",
+            merged
+        );
+    }
+
+    /// Regression test: Concurrent edits within the same line should not
+    /// produce character-level interleaving.
+    #[test]
+    fn merge_concurrent_same_line_no_garbling() {
+        let base = "Some base text\n";
+        let base_doc = CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        // Both sides replace the line with different content
+        let ours = "Agent wrote this line\n";
+        let theirs = "User wrote different text\n";
+
+        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+
+        // At least one side's text should appear contiguously
+        let has_agent_contiguous = merged.contains("Agent wrote this line");
+        let has_user_contiguous = merged.contains("User wrote different text");
+
+        assert!(
+            has_agent_contiguous || has_user_contiguous,
+            "At least one side should have contiguous text (no char interleaving). Got:\n{}",
+            merged
+        );
+    }
+
+    /// Regression test: Simulates the exact scenario from the bug report.
+    ///
+    /// The agent streams a response into the exchange component while
+    /// the user types in their editor. Both sides share a common prefix
+    /// that includes markdown formatting characters. The CRDT merge must
+    /// preserve formatting integrity for both sides.
+    #[test]
+    fn merge_streaming_concurrent_edit_preserves_formatting() {
+        // Exchange component content after user's initial prompt
+        let base = "commit and push all rappstack packages.\n\n";
+        let base_doc = CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        // Agent's response (content_ours = user prompt + agent response)
+        let ours = "\
+commit and push all rappstack packages.
+
+### Re: commit and push
+
+*Compacted. Content archived to `docs/`*
+
+Done — all packages pushed.
+";
+
+        // User's concurrent edit (added a note at the bottom)
+        let theirs = "\
+commit and push all rappstack packages.
+
+**Soft-bristle brush only**
+";
+
+        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+
+        // Agent formatting must be intact
+        assert!(
+            merged.contains("*Compacted. Content archived to `docs/`*"),
+            "Agent formatting broken. Got:\n{}",
+            merged
+        );
+        // User formatting must be intact
+        assert!(
+            merged.contains("**Soft-bristle brush only**"),
+            "User formatting broken. Got:\n{}",
+            merged
+        );
+        // No character-level interleaving
+        assert!(
+            !merged.contains("*C*C") && !merged.contains("**Sot"),
+            "Character interleaving detected. Got:\n{}",
+            merged
+        );
     }
 }

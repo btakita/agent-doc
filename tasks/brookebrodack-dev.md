@@ -147,4 +147,17 @@ The hash-copy script failed in CI — Ubuntu's `/bin/sh` is `dash`, which doesn'
 
 Clicking on a video in https://brookebrodack.net/content/ causes the video to be invisible.
 The video does play and the audio is head...but the video is not seen.
+### Re: Invisible video player
+
+Three bugs found:
+
+1. **Aspect ratio inverted** (`YT_player.ts:90`): `clientWidth * 16 / 9` → `clientWidth * 9 / 16`. The old formula made the iframe absurdly tall (711px for 400px wide), getting clipped by `max-h` to a region above the visible area.
+
+2. **Animation race condition** (`content__hyop.ts`): `video__div__open()` plays all animations including `YT_iframe__wanimato_`, but the YT player loads async. By the time `YT_iframe__wanimato_` is created (after player ready), `video__div__open` already ran — so the iframe animation never played forward, `finish_currentTime` stayed falsy, and the `hidden` class was never removed. Fix: play the iframe animation explicitly after creation if the video div is already open.
+
+3. **Reduced-motion users** (`content__doc_html.ts`): The YT_player__div had `hidden` + `scale-0` + `motion-reduce:scale-100` but no `motion-reduce:block`. The `hidden` class (`display:none`) overrode the scale fix. Added `motion-reduce:block` to the div, plus a fallback in the click handler to directly remove `hidden` when animations are disabled.
+
+Committed and pushed (`28c0c14`) — CI deploying.
+
+.YT_player__div is 0x0. The video is not visible
 <!-- /agent:exchange -->

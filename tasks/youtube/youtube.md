@@ -37,23 +37,11 @@ And give suggestions on how I should present it.
 ## Published
 
 **YouTube (rappstack):** https://www.youtube.com/watch?v=oFFHVjQaYdA
+**YouTube (lazily):** https://www.youtube.com/watch?v=hVNmbmY4vgo
 **Blog post (rappstack):** deployed to CloudFlare Pages
+**Blog post (lazily):** `2026-03-15-lazily-reactive-signals.md` — iframe + video_url added
 
 ---
-
-All outbound links should use tb_a_ functions...target blank.
-
-See /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/lib/ui--server--briantakita/anchor/atb.ts
-
-### Re: tb_a_ links
-
-The lazily blog post is currently a plain `.md` file — `tb_a_` functions aren't available in raw markdown. Two options:
-
-1. **Convert to `.md.ts`** — use the factory function pattern like the older posts. This gives access to `tb_a_` imports from `atb.ts` (e.g., `rmemo__tb_a_`, `relementjs__tb_a_`, `rappstack__tb_a_`).
-
-2. **Use HTML in markdown** — `<a href="..." target="_blank" rel="noopener">text</a>` inline. Works but verbose and not DRY.
-
-The `.md.ts` route is more consistent with the existing architecture. Should I convert the lazily blog post to `.md.ts` format and wire up the `tb_a_` imports? Some links (lazily-rs, lazily-zig, lazily-py, agent-doc) aren't in `atb.ts` yet — I'd add them.
 
 Yes. Format markdown 
 It would be good to have markdown with custom components. Could we use web components?
@@ -61,17 +49,46 @@ It would be good to have markdown with custom components. Could we use web compo
 Or is there a way to escape within a markdown document for server side rendering?
 Or what if we postprocess the markdown output to automatically make outbound links open to target blank?
 
-### Re: Links updated to target blank
+### Re: Markdown + target blank architecture
 
-Kept the `.md` format (consistent with the recent dogfooding posts). Converted all outbound links to `<a href="..." target="_blank" rel="noopener">` HTML tags:
+**Option 4 is the winner: postprocess markdown output.** Here's why:
 
-- Intro paragraph links (lazily, Rust, Zig, Python)
-- Hyop link
-- Scientific citation DOI links (4 references)
-- Multi-language comparison table links
-- Links section (6 links)
+| Approach | Pros | Cons |
+|---|---|---|
+| `.md.ts` factory functions | DRY, reusable `tb_a_` components | Loses markdown authoring ergonomics, can't use standard markdown editors |
+| Web components in markdown | Standards-based, works in any renderer | SSR complexity, hydration overhead, overkill for `target="_blank"` |
+| Escape hatches in markdown | Flexible | Non-standard, fragile, renderer-specific |
+| **Postprocess HTML output** | Zero authoring friction, automatic, write standard markdown | Need a transform step |
 
-Total: 16 outbound links now open in new tabs. Ready to commit and redeploy.
+**Implementation:** Add a `marked` extension or rehype plugin that:
+1. Finds all `<a>` tags in rendered markdown output
+2. If `href` starts with `http://` or `https://` and doesn't match the site domain → add `target="_blank" rel="noopener"`
+3. Internal links (relative or same domain) left unchanged
 
-**YouTube upload:** still in progress (4.8 GB).
+This is a ~10-line plugin. You already use `marked` for markdown rendering. The transform runs at build time (SSR), zero runtime cost.
+
+```typescript
+// rehype or marked extension
+function externalLinksPlugin() {
+  return (tree) => {
+    visit(tree, 'element', (node) => {
+      if (node.tagName === 'a' && node.properties?.href) {
+        const href = node.properties.href as string
+        if (href.startsWith('http') && !href.includes('briantakita.me')) {
+          node.properties.target = '_blank'
+          node.properties.rel = 'noopener'
+        }
+      }
+    })
+  }
+}
+```
+
+This means you can go back to writing standard markdown links `[text](url)` and they'll automatically get `target="_blank"` for external URLs. No HTML tags needed.
+
+Yes
+
+**Lazily YouTube uploaded:** https://www.youtube.com/watch?v=hVNmbmY4vgo — added iframe + video_url to blog post. Ready to commit and redeploy.
+
+continue
 <!-- /agent:exchange -->

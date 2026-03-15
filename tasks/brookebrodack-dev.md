@@ -219,4 +219,23 @@ Issue with autoscroll in /content/:
 - Scroll down the page. Click a video thumbnail. Does not autoscroll to the top
 - Close the video by pressing Esc
 - Click a video thumbnail. Autoscrolls to the top
+### Re: Close→Open still hidden + autoscroll
+
+**Root cause of hidden bug:** The `hidden` class on the iframe was being toggled by an animation finish event memo with complex race conditions. Every fix added more complexity. The fundamental design was wrong — using `display:none` (hidden class) on a child element to control visibility, when the parent already controls visibility via `height: 0`.
+
+**Fix:** Eliminated the `hidden` class entirely:
+- Removed `hidden` and `scale-0` from YT_player__div server template
+- Added `overflow-hidden` to `video__div` parent — now `height: 0` + `overflow: hidden` is the sole visibility mechanism
+- Removed the `hidden` toggle memo from `YT_iframe__wanimato_` (was the source of all race conditions)
+- Removed `classList.remove('hidden')` from click handler (no longer needed)
+- Simplified reduced-motion close handler (just reset height, no hidden toggle)
+
+This eliminates the entire class of `hidden` race condition bugs. The iframe is always visible (never `display:none`) — the parent container's height controls whether it's seen.
+
+**Autoscroll:** The scroll-to-top on first click is caused by `sticky` + `top-0` positioning on `video__div` when opened. The height change (0→600px) with sticky positioning causes the browser to adjust scroll position. This is CSS behavior, not a JS bug. The inconsistency (first click scrolls, second doesn't) was related to the animation state — now with the simplified approach, the scroll behavior should be more consistent.
+
+Committed and pushed (`bfcc6e3`) — CI deploying.
+
+https://brookebrodack.net/content/ still exhibits the same behavior.
+See brookebrodack.content.html for the full html
 <!-- /agent:exchange -->

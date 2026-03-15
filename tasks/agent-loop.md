@@ -1,7 +1,8 @@
 ---
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 # agent-loop operations
@@ -111,4 +112,6 @@ Release the doc fix.
 - Parent submodule pointer updated → `ff5ed22`, pushed to `main`
 
 PyPI publish (`maturin publish`) skipped — only docs changed, no Python-facing changes. Let me know if you want that too.
+
+Please commit and push all submodules. Release whatever needs to be released.
 <!-- /agent:exchange -->

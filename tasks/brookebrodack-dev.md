@@ -178,4 +178,19 @@ The animation-based `hidden` toggle was unreliable — race conditions between a
 Committed and pushed (`ef3e99c`) — CI deploying.
 
 Still hidden. see brookebrodack.video__div.html
+### Re: Still hidden (DOM snapshot analysis)
+
+From the DOM snapshot, two root causes:
+
+1. **`video__div` has `style="height: 0px"`** — JS sets `style.height = '0'` on init, and the height animation was skipped (reduced-motion or timing). Inline styles override CSS classes like `motion-reduce:lg:h-[600px]`. **Fix:** In `video__div__open`, when no animation is available, set `style.height` directly to the target height.
+
+2. **`YT_iframe__div_` is a detached DOM reference** — YouTube's `new YT.Player(div)` replaces the div with an iframe. The div ref becomes detached. All `classList` operations on it have no effect on the live DOM. **Fix:** Use `YT_player.getIframe()` for all class manipulation (remove `hidden`, `scale-0`). The animation memo's `wanimato.el` already points to the iframe (correct), but the hidden toggle was using the detached div ref.
+
+Also added proper close handling for reduced-motion: resets `video__div.style.height` to `'0'` and re-adds `hidden` on the iframe.
+
+Committed and pushed (`de27c15`) — CI deploying.
+
+Opening a video a shows video a.
+Closing video a then opening video b start video b but video b is hidden.
+Closing video b then reopening video b starts and shows video b. video b is visible.
 <!-- /agent:exchange -->

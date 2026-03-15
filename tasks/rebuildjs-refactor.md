@@ -97,20 +97,20 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**Packages released to npm:**
-- rebuildjs 0.71.0 (minor)
-- relysjs 1.21.76 (patch)
-- rhonojs 0.1.2 (patch)
+**All rappstack apps updated:**
 
-**briantakita.me publish in progress** — removing yalc, pulling from npm, building, deploying.
+| App | Change | Build |
+|-----|--------|-------|
+| cogov-dev | relysjs ^1.21.76 | OK |
+| drmanny-dev | rebuildjs ^0.71.0 | OK |
+| herbaliciousbliss-dev | rebuildjs ^0.71.0 | OK |
+| brookebrodack-dev | **Converted Elysia→Hono** (22 files, relysjs→rhonojs) | OK |
 
-Update the dependencies in the rest of the rappstack apps.
-Such as:
-- cogov-dev
-- brookebrodack-dev
-  - Convert brookebrodack-dev to use rhonojs
-- drmanny-dev
-- censible-core
-- prescience-notes-dev
-- herbaliciousbliss-dev
+brookebrodack-dev conversion details: Elysia→Hono patterns (chained `.use()`→method calls, `context`→`c`, `app.route()` for sub-apps), request_ctx bypasses rappstack's Elysia-based helper, rebuildjs 0.71.0 resolution added.
+
+Skipped: censible-core, prescience-notes-dev (no rebuildjs/relysjs/rhonojs deps)
+
+All changes uncommitted. Ready to commit and deploy when you want.
+
+go
 <!-- /agent:exchange -->

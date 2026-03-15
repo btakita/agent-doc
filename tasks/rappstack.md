@@ -133,4 +133,51 @@ This would let sites switch frameworks without changing build config or plugin s
 
 Could we move the relysjs and rhonojs logic into rebuildjs as extensions and optional dependencies.
 Keeping relysjs and rhonojs as thin packages that makes dependencies required and imports the rebuildjs/relysjs or rebuildjs/rhonojs?
+### Re: rebuildjs as the core, relysjs/rhonojs as thin wrappers
+
+Yes, this is a clean architecture. The dependency graph would be:
+
+```
+rebuildjs (core)
+├── rebuildjs/elysia   — optional: elysia adapter (app__new, app__attach, etc.)
+├── rebuildjs/hono     — optional: hono adapter (same interface)
+├── rebuildjs/server   — shared server logic (static files, prerender, ready__wait)
+└── rebuildjs/build    — esbuild orchestration (browser + server builds)
+
+relysjs (thin wrapper)
+├── peerDep: rebuildjs
+├── dep: elysia
+└── re-exports rebuildjs/elysia + rebuildjs/server + rebuildjs/build
+
+rhonojs (thin wrapper)
+├── peerDep: rebuildjs
+├── dep: hono
+└── re-exports rebuildjs/hono + rebuildjs/server + rebuildjs/build
+```
+
+**What moves into rebuildjs:**
+- `relysjs_browser__build` / `relysjs_server__build` → `rebuildjs_browser__build` / `rebuildjs_server__build` (framework-agnostic)
+- `relysjs__ready__wait` → `rebuildjs__ready__wait` (already framework-agnostic)
+- `app__new()`, `app__attach()`, route registration → `rebuildjs/elysia` and `rebuildjs/hono` subpaths
+- Static file serving, prerender logic → `rebuildjs/server`
+
+**What stays in relysjs/rhonojs:**
+- Just `package.json` with the right deps and `exports` map that re-exports from rebuildjs
+- Maybe a `server/index.ts` that does `export * from 'rebuildjs/elysia'` (or hono)
+- The existing import paths (`relysjs/server`, `rhonojs/server`) keep working via re-exports
+
+**Benefits:**
+- Single place to fix build bugs (rebuildjs)
+- Apps import from `relysjs/server` or `rhonojs/server` — no change needed
+- Adding a new framework = new `rebuildjs/<framework>` subpath + thin wrapper package
+- Future `bun build` support goes in `rebuildjs/build` with an adapter, all frameworks get it
+
+**Migration path:**
+1. Move shared logic from rhonojs → rebuildjs (since rhonojs is newer and cleaner)
+2. Update rhonojs to re-export from rebuildjs
+3. Update relysjs to re-export from rebuildjs (using the elysia adapter)
+4. Apps don't change — same import paths work
+
+Add SPEC.md. Add tests. Implement.
+
 <!-- /agent:exchange -->

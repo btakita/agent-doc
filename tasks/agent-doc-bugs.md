@@ -16,9 +16,15 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: tmux orientation — additional clue
+### Re: tmux pane orientation fixed
 
-Thanks for the extra detail. The behavior "switching editor focus to the right side reverts to horizontal" suggests the tmux layout is being disrupted by `agent-doc run`'s pane creation/resizing, not permanently changed. The `split-window` or `select-layout` command may be triggering a layout recalculation.
+**Root cause:** `sync_after_claim()` and `sync_after_autoclaim()` joined all files into a single column (`vec![window_files.join(",")]`). In tmux-router, files within one column stack vertically. This flipped layout from left|right to top/bottom on every claim/autoclaim sync.
 
-Fix agent is still investigating the source code. Will update with findings.
+**Fix:** Each file is now a separate column element → arranged side-by-side (left|right).
+
+**Files:** `route.rs` + `autoclaim.rs`. All 340 tests pass.
+
+Ready to publish.
+
+release
 <!-- /agent:exchange -->

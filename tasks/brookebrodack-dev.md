@@ -75,3 +75,35 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 
 The deployed website styling is broken.
 https://brookebrodack.net/
+
+<!-- agent:exchange -->
+## Assistant
+
+**Root cause:** `build.ts` conditionally skipped `relysjs__ready__wait()` when `watch: false` (production builds):
+
+```ts
+// Bug — ready wait skipped for non-watch builds:
+if (config?.rebuildjs?.watch !== false) {
+    build_promises.push(relysjs__ready__wait(300_000))
+}
+```
+
+This caused `process.exit(0)` to fire before the `@rebuildjs/tailwindcss` plugin finished processing CSS through PostCSS. Result: raw `@tailwind` directives in the output CSS, no `<link>` tags in rendered HTML, completely unstyled pages.
+
+**Fix:** Always await `relysjs__ready__wait()` regardless of watch mode:
+
+```ts
+build_promises.push(relysjs__ready__wait(300_000))
+```
+
+**Verified:**
+- CSS now starts with `/*! tailwindcss v4.2.1 */` with full utility classes
+- `dist/browser/` contains CSS files
+- Server injects `<link rel="stylesheet">` tags
+- Committed and pushed — CI deployment running
+
+## User
+Switch to `agent_doc_format: template`
+
+https://brookebrodack.net/ 
+<!-- /agent:exchange -->

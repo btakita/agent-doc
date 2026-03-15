@@ -1,6 +1,8 @@
 ---
 agent_doc_session: d2691213-7160-4943-9751-c954341df959
 tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 # brookebrodack-dev — Session Summary

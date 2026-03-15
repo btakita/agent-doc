@@ -603,6 +603,157 @@ Committed and pushed.
         );
     }
 
+    /// Regression test: Replace-vs-append corruption (lazily-rs.md bug).
+    ///
+    /// Pattern:
+    /// - CRDT base is from a previous cycle (old exchange content)
+    /// - Agent replaces exchange content entirely (template replace mode)
+    /// - User appends new prompt text to exchange during response generation
+    /// - CRDT interleaves agent's new content with user's old + new text,
+    ///   causing mid-word splits like "key de" + [user text] + "cisions"
+    ///
+    /// Root cause: stale CRDT base doesn't match either side well enough
+    /// for prefix advancement, so the CRDT does a raw character-level merge
+    /// of the exchange section, interleaving replace and append operations.
+    ///
+    /// Fix: use baseline (not stored CRDT state) as merge base, so both
+    /// sides' diffs are computed from the exact content they diverged from.
+    #[test]
+    fn merge_replace_vs_append_no_interleaving() {
+        // Full document structure (template mode)
+        let header = "---\nagent_doc_format: template\n---\n\n# Title\n\n<!-- agent:exchange -->\n";
+        let footer = "\n<!-- /agent:exchange -->\n";
+
+        // Previous cycle's exchange content (what the CRDT state contains)
+        let old_exchange = "\
+### Committed, Pushed & Released
+
+**project (v0.1.0):**
+- Committed initial implementation
+- Tagged v0.1.0 and pushed
+
+Add a README.md to the project.
+Also add AGENTS.md with a symlink CLAUDE.md
+
+**sub-project:**
+- Committed fix + SPEC.md
+- Pushed to remote
+";
+        let stale_base = format!("{header}{old_exchange}{footer}");
+        let stale_state = CrdtDoc::from_text(&stale_base).encode_state();
+
+        // Baseline (what the file looked like when response generation started)
+        // Same as stale_base in this case — no user edits between cycles
+        let _baseline = stale_base.clone();
+
+        // Ours: agent replaces exchange content (template replace mode applied)
+        let agent_exchange = "\
+### Done
+
+Added to project and pushed:
+
+- **README.md** — overview, usage, design notes
+- **AGENTS.md** — architecture, key decisions, commands, related projects
+- **CLAUDE.md** → symlink to AGENTS.md
+
+All committed and pushed.
+";
+        let ours = format!("{header}{agent_exchange}{footer}");
+
+        // Theirs: user inserted new prompt IN THE MIDDLE of the exchange section
+        // (after the existing user prompt, before the sub-project sections)
+        // This is the critical difference — insertion within the range that ours deletes
+        let theirs_exchange = "\
+### Committed, Pushed & Released
+
+**project (v0.1.0):**
+- Committed initial implementation
+- Tagged v0.1.0 and pushed
+
+Add a README.md to the project.
+Also add AGENTS.md with a symlink CLAUDE.md
+
+Please add tests.
+Please comprehensively test adherence to the spec.
+
+**sub-project:**
+- Committed fix + SPEC.md
+- Pushed to remote
+";
+        let theirs = format!("{header}{theirs_exchange}{footer}");
+
+        // Using stale CRDT state (previous cycle) — this is what triggers the bug
+        let merged = merge(Some(&stale_state), &ours, &theirs).unwrap();
+
+        // Agent's replacement text should be contiguous (no interleaving)
+        assert!(
+            merged.contains("- **AGENTS.md** — architecture, key decisions, commands, related projects"),
+            "Agent text garbled (mid-word split). Got:\n{}", merged
+        );
+
+        // User's addition should be preserved
+        assert!(
+            merged.contains("Please add tests."),
+            "User addition missing. Got:\n{}", merged
+        );
+
+        // No fragments of old content mixed into agent's new content
+        assert!(
+            !merged.contains("key deAdd") && !merged.contains("key de\n"),
+            "Old content interleaved into agent text. Got:\n{}", merged
+        );
+    }
+
+    /// Same as merge_replace_vs_append_no_interleaving but using baseline
+    /// as CRDT base instead of stale state. This is the fix verification.
+    #[test]
+    fn merge_replace_vs_append_with_baseline_base() {
+        let header = "---\nagent_doc_format: template\n---\n\n# Title\n\n<!-- agent:exchange -->\n";
+        let footer = "\n<!-- /agent:exchange -->\n";
+
+        let old_exchange = "\
+### Previous Response
+
+Old content here.
+
+Add a README.md to the project.
+Also add AGENTS.md with a symlink CLAUDE.md
+";
+        let baseline = format!("{header}{old_exchange}{footer}");
+
+        // Ours: agent replaces exchange
+        let agent_exchange = "\
+### Done
+
+- **README.md** — overview, usage, design notes
+- **AGENTS.md** — architecture, key decisions, commands, related projects
+- **CLAUDE.md** → symlink to AGENTS.md
+
+All committed and pushed.
+";
+        let ours = format!("{header}{agent_exchange}{footer}");
+
+        // Theirs: user appended new prompt
+        let user_addition = "\nPlease add tests.\n";
+        let theirs = format!("{header}{old_exchange}{user_addition}{footer}");
+
+        // Use baseline as CRDT base (the fix)
+        let baseline_state = CrdtDoc::from_text(&baseline).encode_state();
+        let merged = merge(Some(&baseline_state), &ours, &theirs).unwrap();
+
+        // Agent text should be contiguous
+        assert!(
+            merged.contains("key decisions, commands, related projects"),
+            "Agent text garbled. Got:\n{}", merged
+        );
+
+        // User addition preserved
+        assert!(
+            merged.contains("Please add tests."),
+            "User addition missing. Got:\n{}", merged
+        );
+    }
+
     /// Regression test: Simulates the exact scenario from the bug report.
     ///
     /// The agent streams a response into the exchange component while

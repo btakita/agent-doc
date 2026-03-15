@@ -219,9 +219,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
         (content_ours.clone(), doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
+        // Use baseline as CRDT base instead of stored state from previous cycle.
+        // The baseline is the exact content both sides (ours and theirs) diverged
+        // from, giving clean diffs. Using a stale stored state causes character-level
+        // interleaving when the agent replaces component content while the user
+        // appends within the same region (lazily-rs.md corruption bug).
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let result = merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
         eprintln!("[write] CRDT merge successful — no conflicts possible.");
-        let crdt_state = snapshot::load_crdt(file)?;
-        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
+        result
     };
 
     atomic_write(file, &final_content)?;

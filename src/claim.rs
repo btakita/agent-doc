@@ -31,9 +31,10 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // Check for stale claims on this specific file and log if found
     validate_file_claim(file);
 
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
+    // Canonicalize to handle CWD drift (e.g., when CWD is in a submodule)
+    let file = &file.canonicalize().map_err(|_| {
+        anyhow::anyhow!("file not found: {}", file.display())
+    })?;
 
     // Validate --window if provided: if dead, fall back to a live project window
     let effective_window: Option<String> = if let Some(win) = window {
@@ -134,16 +135,26 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
 
     // Append to claims log so the skill can display it on next invocation
     let log_line = format!("Claimed {} for pane {}\n", file_str, pane_id);
-    let log_path = std::path::Path::new(".agent-doc/claims.log");
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let log_path = project_root.join(".agent-doc/claims.log");
+    if let Some(parent) = log_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("warning: failed to create claims log dir: {}", e);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
+    match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_path)
+        .open(&log_path)
     {
-        let _ = write!(f, "{}", log_line);
+        Ok(mut f) => {
+            if let Err(e) = write!(f, "{}", log_line) {
+                eprintln!("warning: failed to write claims log: {}", e);
+            }
+        }
+        Err(e) => eprintln!("warning: failed to open claims log: {}", e),
     }
 
     eprintln!(

@@ -48,30 +48,29 @@ rhonojs (thin wrapper)
 
 ## Phases
 
-### Phase 1: SPEC.md
-- [ ] Write `rebuildjs/SPEC.md` — adapter interface contract, subpath exports, framework adapter requirements
-- [ ] Define TypeScript interfaces for framework adapters
+### Phase 1: SPEC.md ✓
+- [x] Write `rebuildjs/SPEC.md` — adapter interface contract, subpath exports, framework adapter requirements
+- [x] Define TypeScript interfaces for framework adapters
 
-### Phase 2: Extract shared logic into rebuildjs
-- [ ] Move route logic (html_route_, request_ctx__ensure, html_response__new) — parameterize by framework context type
-- [ ] Move compression middleware — parameterize by middleware return type
-- [ ] Move static file serving
-- [ ] Move SSG export + Cloudflare export
-- [ ] Create `rebuildjs/server/elysia` adapter subpath
-- [ ] Create `rebuildjs/server/hono` adapter subpath
-- [ ] Remove `elysia` from rebuildjs direct deps
-- [ ] Add new subpath exports to rebuildjs package.json
+### Phase 2: Extract shared logic into rebuildjs ✓
+- [x] Move route logic (html_route_, request_ctx__ensure, html_response__new) — parameterize by framework context type
+- [x] Move static file serving
+- [x] Move SSG export + Cloudflare export
+- [x] Remove `elysia` from rebuildjs direct deps
+- [x] Add new subpath exports to rebuildjs package.json
+- N/A: Compression middleware stays in adapters (fundamentally different implementations)
+- N/A: Elysia/Hono adapter subpaths stay in relysjs/rhonojs (framework-specific)
 
-### Phase 3: Thin wrappers
-- [ ] Update relysjs to re-export from rebuildjs
-- [ ] Update rhonojs to re-export from rebuildjs
-- [ ] Verify existing import paths still work (relysjs/server, rhonojs/server)
-- [ ] Move elysia dep to relysjs only, hono dep to rhonojs only
+### Phase 3: Thin wrappers ✓
+- [x] Update relysjs to re-export from rebuildjs
+- [x] Update rhonojs to re-export from rebuildjs
+- [x] Verify existing import paths still work (relysjs/server, rhonojs/server)
+- [x] Move elysia dep to relysjs only, hono dep to rhonojs only
 
-### Phase 4: Tests
-- [ ] Port relysjs tests to rhonojs
-- [ ] Add adapter interface conformance tests
-- [ ] Run all existing tests to verify no regressions
+### Phase 4: Tests ✓
+- [x] Port relysjs tests to rhonojs (83 tests)
+- [x] Add adapter interface conformance tests (44 relysjs + 42 rhonojs)
+- [x] Run all existing tests to verify no regressions (rebuildjs 56, relysjs 76, rhonojs 83)
 
 ## Key API Surface (shared → rebuildjs)
 
@@ -98,14 +97,20 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-Phase 3+4 launched (thin wrappers + tests). Agent will:
-1. Verify relysjs/rhonojs re-export from rebuildjs correctly
-2. Confirm elysia dep only in relysjs, hono dep only in rhonojs
-3. Port relysjs tests to rhonojs
-4. Add adapter conformance tests
-5. Run all tests
+**Packages released to npm:**
+- rebuildjs 0.71.0 (minor)
+- relysjs 1.21.76 (patch)
+- rhonojs 0.1.2 (patch)
 
-Session is free.
+**briantakita.me publish in progress** — removing yalc, pulling from npm, building, deploying.
 
-Please update Phase progress
+Update the dependencies in the rest of the rappstack apps.
+Such as:
+- cogov-dev
+- brookebrodack-dev
+  - Convert brookebrodack-dev to use rhonojs
+- drmanny-dev
+- censible-core
+- prescience-notes-dev
+- herbaliciousbliss-dev
 <!-- /agent:exchange -->

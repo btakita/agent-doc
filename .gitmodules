@@ -79,3 +79,12 @@
 [submodule "src/agent-kit"]
 	path = src/agent-kit
 	url = git@github.com:btakita/agent-kit.git
+[submodule "src/lazily-zig"]
+	path = src/lazily-zig
+	url = git@github.com:btakita/lazily-zig.git
+[submodule "src/lazily-py"]
+	path = src/lazily-py
+	url = git@github.com:btakita/lazily-py.git
+[submodule "src/lazily-rs"]
+	path = src/lazily-rs
+	url = git@github.com:btakita/lazily-rs.git

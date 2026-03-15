@@ -42,76 +42,12 @@ And give suggestions on how I should present it.
 - Title: "Building a Sub-1KB Web Framework — Live Debugging with AI"
 - Visibility: public
 - Captions: uploaded (SRT)
-- Chapter markers in description
+- Chapter markers + blog post link in description
 
-**Blog post:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-14-rappstack-live-session.md`
-- YouTube embed updated with real URL
-- Ready to deploy with the next briantakita.me build
-Add agent-doc as a tag
+**Blog post (rappstack):** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-14-rappstack-live-session.md`
+- Deployed to CloudFlare Pages via GitHub Actions
 
-### Re: Tag + trimmed content analysis
-
-**agent-doc tag added** to the blog post.
-
-**What's in the trimmed 50 minutes:**
-
-The condensed cut kept 34:45 of 84:28. Here's what was trimmed and whether it has value:
-
-| Trimmed segment | Time range | Content | Worth including? |
-|---|---|---|---|
-| Lighthouse/CDN investigation | 15:00–22:00 | Checking cache headers, response times, CDN configuration, minification issues | Low — mostly staring at devtools |
-| Blog post index debugging | 30:00–38:00 | Navigating file trees, trying to find where `generate-index.js` runs, duplicate imports | Low — wandering, mostly silence |
-| Code generator deep dive | 39:00–46:30 | Reading through esbuild-plugin-esm-file source, trying to understand the plugin chain | Medium — shows the architecture but lots of "I don't remember" |
-| Waiting for Claude | 46:30–51:00 + scattered | Idle time while Claude Code processes | None — dead air |
-| Camper bumper tangent | 46:00–47:30 | SVG/CAD story about ripping off bumper at gas station | Fun but off-topic |
-| Part 2: File navigation | 62:38–68:28 | Searching for where blog_site_config is defined, node_modules navigation | Low — repetitive debugging |
-| Part 2: "Can't find my log" | 69:08–75:38 | Trying to locate where logging happens, IDEA not helping | Medium — relatable frustration, but slow |
-
-**Bottom line:** The trimmed content is mostly debugging dead-ends, silence, and file navigation. The only potentially interesting bits are:
-- The camper bumper story (46:00–47:30) — personality, but tangential
-- The "can't find my log" segment — shows real dev frustration but 6 minutes of it is slow
-
-The condensed cut captured the essential narrative. The full 84-minute version is only useful as a "raw uncut" archive for completeness.
-
-I will probably delete the source videos. Is there a good place to put the archive videos?
-How much will R2 cost per TB?
-
-### Re: Video archival + R2 pricing
-
-**Current video inventory:**
-- Source parts: 3.6 GB (3 files in `~/Videos/`)
-- Merged full: 3.7 GB (`tasks/youtube/`)
-- Condensed (uploaded): 1.6 GB (`tasks/youtube/`)
-- **Total: ~8.9 GB**
-
-Since the condensed version is on YouTube, and the merged full is a lossless concat of the 3 source parts, you can safely delete both the source parts and the merged full. That leaves only the condensed + SRT locally (~1.6 GB).
-
-**CloudFlare R2 pricing:**
-- **Storage:** $0.015/GB/month = **$15/TB/month**
-- **Class A ops** (writes): $4.50 per million
-- **Class B ops** (reads): $0.36 per million
-- **Egress: Free** (zero egress fees — this is R2's killer feature vs S3)
-- **Free tier:** 10 GB storage + 1M Class A + 10M Class B per month
-
-For 8.9 GB of video archives, you'd be under the free tier. Even at 1 TB, it's $15/month with no egress charges.
-
-**Recommendation:** Upload the merged full-length video to R2 as a cold archive (you'll rarely access it). Delete the 3 source parts and the local merged copy. Keep the condensed version locally if you want quick access, or archive it to R2 too.
-
-You already have R2 set up via `esbuild-plugin-object-store-assets`. You could create a dedicated `video-archive` bucket or use your existing assets bucket with a `/video/` prefix.
-
-Want me to upload the merged full video to R2 before you delete the sources?
-Will do this later.
-
-Please deploy briantakita.me
-
-### Re: Deployed
-
-Committed and pushed to `briantakita.me-dev` (main):
-- Blog post: `2026-03-14-rappstack-live-session.md` with YouTube embed
-- Regenerated `post/index.ts` with new post
-- Dependency bumps: rebuildjs ^0.71.0, rhonojs ^0.1.2
-
-GitHub Actions "Deploy to Cloudflare Pages" workflow triggered on push to main. The deploy should complete in a few minutes.
+---
 
 Add a link to the blog post in the YouTube video description.
 
@@ -124,7 +60,7 @@ Blog post: https://briantakita.me/posts/2026-03-14-rappstack-live-session
 
 Added before the Links section. Video updated: https://www.youtube.com/watch?v=oFFHVjQaYdA
 Closed Captioning transcription. Description.
-Make a blog post with the highlighs.
+Make a blog post with the highlights.
 
 Break out specifics on the abstractions:
 - Context
@@ -132,10 +68,35 @@ Break out specifics on the abstractions:
 - Cell
 - Signal
 
-Explain the lazy and eager reactivty.
+Explain the lazy and eager reactivity.
 
 Water Hydration's role in not being tired...via waste elimination as well.
 Any links to scientific backing would be great as well.
 
 Make this a featured blog post on briantakita.me
+
+### Re: lazily blog post created
+
+**Blog post:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md`
+
+Set as `featured: true` in frontmatter.
+
+**Content:**
+- **Context, Slot, Cell, Signal** — each abstraction explained with code examples and semantics
+- **Lazy vs Eager reactivity** — comparison table, why lazy wins for backends, how eager can be added on top
+- **The hydration connection** — lazy evaluation as a form of hydration, connecting to rappstack's hyop system
+- **Water hydration parallel** — metabolic waste elimination as the physical analog of lazy computation, with 4 scientific references:
+  - Ganio et al. (2012) — mild dehydration impairs cognition and increases fatigue
+  - Cheuvront & Kenefick (2014) — 2% dehydration impairs performance
+  - Clark et al. (2016) — hydration and kidney waste clearance
+  - Kenefick & Cheuvront (2012) — blood viscosity and oxygen transport
+- **Multi-language comparison** — Rust/Zig/Python implementation differences table
+- **Getting started** code example
+
+Ready to commit and deploy. Want me to push?
+
+Yes push...Where is the lazily YouTube video?
+[2026-03-15 01-14-16.mp4](../../../../../Videos/2026-03-15%2001-14-16.mp4)
+
+Include a 
 <!-- /agent:exchange -->

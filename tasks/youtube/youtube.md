@@ -13,39 +13,20 @@ Add a teaser about agent-doc and Proof that God Exists.
 
 
 <!-- agent:exchange -->
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6c30f981c4362ce462dd5779d2ddb4059b9d7bda17c090dd39ac21fccd9a5e19-20260312-171814.md`*
 
-Note the frontmatter change.
+### Re: _redirects setup
 
-## Published
+Done. Created `_redirects` at the briantakita.me-dev root with:
 
-**YouTube (rappstack):** https://www.youtube.com/watch?v=oFFHVjQaYdA
-**YouTube (lazily):** https://www.youtube.com/watch?v=hVNmbmY4vgo
-**Blog post (rappstack):** deployed
-**Blog post (lazily):** deployed with iframe + video_url
+```
+/2026-03-15-lazily /posts/2026-03-15-lazily-reactive-signals 301
+```
 
----
+Updated `.github/workflows/deploy.yml` to copy it to `dist/static/` during build. Pushed to main — the deploy workflow should trigger automatically.
 
-The url is truncated in full view.![img.png](img.png)
+The short URL will be: `https://briantakita.me/2026-03-15-lazily`
 
-url shortener seems to be the way to go. Or we can have a short url on briantakita.me
+You can add more redirects to the same file later (one per line, CloudFlare Pages format).
 
-### Re: Short URL on briantakita.me
-
-A redirect on briantakita.me is the cleanest approach — you control it, it's branded, and it won't break. Options:
-
-1. **CloudFlare redirect rule** — add a rule in your CloudFlare dashboard: `briantakita.me/lazily` → `briantakita.me/posts/2026-03-15-lazily-reactive-signals` (301 redirect). Zero code, instant.
-
-2. **Route in the Hono app** — add a redirect route in the app code. More work but version-controlled.
-
-3. **`_redirects` file** — if CloudFlare Pages supports it (it does): add `briantakita.me/_redirects` with `/lazily /posts/2026-03-15-lazily-reactive-signals 301`.
-
-Option 1 is fastest. Option 3 is version-controlled and deploys with the site.
-
-For the YouTube description, the URL would become: `https://briantakita.me/lazily` (25 chars — no truncation).
-
-Want me to set up option 3 (the `_redirects` file) and update the YouTube description? Or do you prefer a different short path?
-
-Yes...`_redirects`.
-/2026-03-15-lazily -> /posts/2026-03-15-lazily-reactive-signals
+Update the link in the YouTube video description.
 <!-- /agent:exchange -->

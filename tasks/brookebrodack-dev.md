@@ -126,4 +126,15 @@ There is no background image nor is brooke's profile image being served
 **Committed and pushed** (`71d2334`) — CI deployment running.
 
 The footer has 2 duplicate instagram links. Please reduce to 1 
+### Re: Duplicate Instagram links
+
+Removed the second instagram entry (`@makingandmeaning_brooke`) from `app/brookebrodack-site/config.ts` — both pointed to the same `instagram_url`. Kept `@brookebrodack`.
+
+Committed in brookebrodack-site (`c64adca`) and updated submodule pointer (`f7eeb61`). CI deploying.
+
+The footer has 2 duplicate instagram links. Please reduce to 1
+
+Images still broken:
+https://brookebrodack.net/nature-origami-bg-906C5EF4.webp
+https://brookebrodack.net/brooke-brodack-profile-C6E74A0F.webp
 <!-- /agent:exchange -->

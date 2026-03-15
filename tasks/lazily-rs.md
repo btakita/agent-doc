@@ -21,18 +21,19 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Thread Safety
+### Released v0.1.1
 
-No — lazily-rs is currently **single-threaded only**. It uses `RefCell` for interior mutability, so `Context` is neither `Send` nor `Sync`.
+Bumped to v0.1.1 to include README, AGENTS.md, and spec compliance tests (v0.1.0 was published without them).
 
-The thread-local `TRACKING_STACK` is inherently per-thread (which is correct), but the `Context` itself cannot be shared across threads.
+- Published to crates.io: https://crates.io/crates/lazily/0.1.1
+- GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.1.1
+- No API changes from v0.1.0
 
-**To add thread safety** (future work):
-- Replace `RefCell<Inner>` with `RwLock<Inner>` or `Mutex<Inner>` behind a `thread-safe` cargo feature flag
-- `Context` would implement `Send + Sync` when enabled
-- lazily-zig uses mutex by default with a build flag to disable; lazily-rs could do the inverse (single-threaded default, opt-in thread safety via `features = ["thread-safe"]`)
+Note the recent updates to the lazily-rs api.
+Also see /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md
 
-This is a natural Phase 3/4 enhancement. Want me to implement it now, or continue with derived/computed signals first?
-
-Please release lazily-rs with the README
+Update the README.
+audit docs
+Please release if we need to release the changes.
 <!-- /agent:exchange -->
+ 

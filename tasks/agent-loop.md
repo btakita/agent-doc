@@ -19,101 +19,31 @@ Operational task document for agent-loop workspace management.
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
 <!-- agent:exchange -->
-Converted component from `output` to `exchange`. Write prompts here — both user and agent share this surface.
 
-commit submodule. release any pending features + bug fixes. commit & push agent-loop
+**Completed** — all submodules committed, pushed, and parent pointers updated.
 
-**Completed** — submodules committed, pointers updated, agent-loop pushed.
+| Submodule | Action |
+|-----------|--------|
+| mail | Committed 94 files (conversations, contacts, drafts, social) + pushed. Note: `contacts/kevin-volk/recordings/20260309-kevin-volk.mp4` (1.5GB) excluded — added to .gitignore. |
+| philosophy | Committed .iml update + pushed |
+| resume | Committed .iml update + pushed (pointer advanced to `0638e8e`) |
+| censible-core | Committed .iml update + pushed |
+| cloudflare | Committed .iml update + pushed |
+| cogov-dev | Committed .iml update + pushed |
+| herbaliciousbliss-dev | Committed .iml update + pushed |
+| agent-doc | Pointer updated (v0.17.9) |
+| corky | Pointer updated (v0.15.2) |
+| ctx-core-dev | Pointer updated |
+| lazily-py | Pointer updated |
+| lazily-zig | Pointer updated |
+| prescience-notes-dev | Pointer updated |
+| rappstack-dev | Pointer updated |
 
-| Submodule | Version | Action |
-|-----------|---------|--------|
-| mail | main@a153669 | Committed 39 files (conversations, contacts, drafts) + pushed |
-| agent-doc | v0.14.5+2 | Pointer updated (JetBrains plugin fixes, no crate release needed) |
-| corky | v0.14.0 | Pointer updated |
-| tmux-router | v0.2.4 | Pointer updated |
+**Releases:** All publishable projects (agent-doc, corky, lazily-py, lazily-zig) are at their latest tags — no pending releases needed.
 
-Parent commit: `cca8d88` — includes all submodule pointers + 22 task doc updates. Pushed to `main`.
+Parent commit: `862dc11` — includes all 14 submodule pointers, task docs, skills, settings. Pushed to `main`.
 
-Only untracked item remaining: `src/agent-kit` (new, not yet added to parent).
+Also added `*.mp4` to `tasks/youtube/.gitignore` (1.6GB + 3.7GB video files were too large for git).
 
-audit docs
-
-**Audit docs completed.**
-
-| Project | Issues | Action |
-|---------|--------|--------|
-| agent-doc | 5 → 1 (warning only) | Updated README.md + SPEC.md for route cascade & sync_after_claim. Touched SKILL.md + CLAUDE.md (reviewed, not stale). Domain Ontology table stays in CLAUDE.md per convention. |
-| corky | 3 → 0 | Updated README.md + SPEC.md — transcribe now enabled by default (CPU). Touched AGENTS.md (reviewed, not stale). |
-
-Submodule commits pushed, parent pointers updated → `234d137`. Pushed to `main`.
-
-commit and push corky changes. Would it be possible to update the README on the crates.io docs for the current corky release?
-
-Corky is already committed and pushed (done in previous cycle — `7c3f4ea`).
-
-**crates.io README update:** crates.io serves the README embedded in the published crate tarball. There's no API to update docs for an existing version. Options:
-
-1. **Publish v0.14.1** — bump version, `cargo publish`. The only change is docs (README + SPEC reflecting transcribe-by-default). Clean and correct.
-2. **Do nothing** — the crates.io README is slightly stale but functionally harmless (just says "install with `--features transcribe`" instead of "enabled by default").
-
-Want me to publish v0.14.1 for the docs fix?
-
-Is there any pending features or bug fixes for corky?
-
-**Corky pending work:**
-
-- **No open issues or PRs.** No TODO/FIXME/HACK in source.
-- **One pending task** from `tasks/email.md`: btak-dev Gmail account setup (`btak.dev@gmail.com` in `mail/.corky.toml`) — discussed but never applied.
-- **23 unmerged branches** — most are stale feature experiments. Notable ones:
-  - `telegram-html-import` / `telegram-slack-import` — Telegram import: status?
-  - `contact-sync-v2` — contact sync v2: status?
-  - `upgrade-self-update` — self-update mechanism: status?
-  - `draft-attachments` — draft attachments: status?
-  - `contact-enrichment` — contact enrichment: status?
-  - `rust-2024-edition` — edition upgrade: already done. delete
-
-No code-level bugs or pending features blocking a release. If you want to publish v0.14.1 (docs-only), it's clean to do so. The stale branches could be pruned if those features are abandoned.
-
-**Branch status — all merged via PRs, all deleted:**
-
-| Branch | PR | Status |
-|--------|-----|--------|
-| `telegram-html-import` | #5 | Merged, deleted |
-| `telegram-slack-import` | #4 | Merged, deleted |
-| `contact-sync-v2` | #6 | Merged, deleted |
-| `upgrade-self-update` | #8 | Merged, deleted |
-| `upgrade-check` | #7 | Merged, deleted |
-| `draft-attachments` | #17 | Merged, deleted |
-| `contact-enrichment` | #3 | Merged, deleted |
-| `rust-2024-edition` | #19 | Merged, deleted (edition=2024 on main) |
-| `linkedin-images` | — | Merged, deleted |
-| `social-credential-cmd` | #11 | Merged, deleted |
-| `topic-sync` | #9 | Merged, deleted |
-| `spec-rename` | #14 | Merged, deleted |
-| `v0.11.3` | #13 | Merged, deleted |
-| `transcribe-filter` | #16 | Merged, deleted |
-| `label-clear` | #15 | Merged, deleted |
-| `oauth-fixes` | #12 | Merged, deleted |
-| `social-to-linkedin` | #18 | Merged, deleted |
-| `rename-unanswered` | #2 | Merged, deleted |
-| `rust-port` | #1 | Merged, deleted |
-
-**Result:** Corky now has only `main`. 19 stale branches removed (local + remote).
-
-Release the doc fix.
-
-**Released corky v0.14.1:**
-
-- Version bumped in Cargo.toml + pyproject.toml
-- 373 tests pass (195 unit + 178 integration)
-- Published to **crates.io**: `cargo install corky` now gets v0.14.1 with updated README
-- Tagged `v0.14.1` and pushed
-- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.14.1 (with prebuilt binary)
-- Parent submodule pointer updated → `ff5ed22`, pushed to `main`
-
-PyPI publish (`maturin publish`) skipped — only docs changed, no Python-facing changes. Let me know if you want that too.
-
-Please commit and push all submodules. Release whatever needs to be released.
-
-Was the .iml file added in the commit? If yes...let's re
+Was the .iml file added in the commit? If yes...let's reset and ignore iml files.
 <!-- /agent:exchange -->

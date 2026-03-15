@@ -144,4 +144,7 @@ The hash-copy script failed in CI — Ubuntu's `/bin/sh` is `dash`, which doesn'
 **Fix:** Changed shebang to `#!/bin/bash` and CI workflow to `bash` instead of `sh`. Pushed (`4b342aa`) — CI redeploying now.
 
 (The duplicate instagram note was already addressed in the previous cycle.)
+
+Clicking on a video in https://brookebrodack.net/content/ causes the video to be invisible.
+The video does play and the audio is head...but the video is not seen.
 <!-- /agent:exchange -->

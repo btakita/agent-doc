@@ -16,19 +16,15 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Published v0.17.3
+### Re: tmux pane orientation bug
 
-- **crates.io**: `agent-doc v0.17.3` ✓
-- **PyPI**: `agent-doc 0.17.3` ✓
-- **GitHub Release**: [v0.17.3](https://github.com/btakita/agent-doc/releases/tag/v0.17.3) with prebuilt binary ✓
-- **Release binary built**: `cargo build --release` ✓
-
-Fix: CRDT base advancement no longer splits formatting sequences mid-line — prevents character-level interleaving during concurrent edits.
+Investigating the `agent-doc run` command's tmux split logic. The issue is likely using `-v` (top/bottom) instead of `-h` (left/right) in the `split-window` command. Fix agent running.
 
 When I did `agent-doc run tasks/rappstack.md`, the orientation of the tmux panes switched from horizontal (left | right) to vertical (top/bottom).
 Please diagnose from logs.
 Please add test(s) replicating the issue.
 Please fix.
 
-And it just happened.
+And it just happened. Still in the top/bottom orientation after running this file.
+If I switch to the editor focus to the right side, it will revert back to horizontal left|right orientation.
 <!-- /agent:exchange -->

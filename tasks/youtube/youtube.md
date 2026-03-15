@@ -30,9 +30,7 @@ And give suggestions on how I should present it.
 
 **Deliverables:**
 - Merged video: `tasks/youtube/2026-03-14-rappstack-session.mp4` (3.7 GB, 84.5 min)
-- Combined SRT captions: `tasks/youtube/2026-03-14-rappstack-session.srt` (649 subtitle entries)
 - Condensed video: `tasks/youtube/2026-03-14-rappstack-condensed.mp4` (1.6 GB, 34:45)
-- Condensed SRT: `tasks/youtube/2026-03-14-rappstack-condensed.srt` (282 entries)
 
 ---
 
@@ -45,16 +43,11 @@ And give suggestions on how I should present it.
 
 ### Re: lazily blog post + video
 
-**Blog post deployed:** `2026-03-15-lazily-reactive-signals.md` (featured) — pushed to briantakita.me-dev, GitHub Actions deploying.
+**Blog post deployed:** `2026-03-15-lazily-reactive-signals.md` (featured)
 
-**Lazily YouTube video uploading now:** `2026-03-15 01-14-16.mp4` (4.8 GB, 109 min) — uploading in background via corky. Will update with the URL and add iframe to the blog post once upload completes.
+**Lazily YouTube video:** uploading (4.8 GB) + Whisper transcription running (109 min)
 
-The video should have closed captioning transcription.
-The blog post should be about this lazily video.
-
-> Lazily: Reactive Signals Done Right
-
-Talk about Reactive Primitives (Context, Slot, Cell, Signal) etc. Not just Signals.
+---
 
 I object to the implementation of lazily-rs.
 
@@ -82,4 +75,35 @@ counter(&ctx).set(5);
 The Counter should define itself as a Cell using decorators.
 
 See lazily-py
+
+### Re: Revised API — callable pattern
+
+Good refinement. `counter(&ctx)` returning a bound reference is closer to lazily-py where `counter(ctx)` calls the slot/cell with context. In Rust this would use `Fn` trait:
+
+```rust
+// Cell implements Fn(&Context) -> CellRef<T>
+let counter = Cell::new(0i32);
+
+let value = counter(&ctx).get();  // 0
+counter(&ctx).set(5);             // clears dependents
+
+// Slot implements Fn(&Context) -> T
+let doubled = Slot::new(|ctx| counter(ctx).get() * 2);
+
+doubled(&ctx)  // 10 — lazy, computes on access
+```
+
+`counter(&ctx)` returns a `CellRef<'_, T>` (borrows the context), giving `.get()` and `.set()` methods. This is ergonomic and Rustic — the `Fn` trait makes cells/slots callable like functions.
+
+**Tradeoff vs `counter.get(&ctx)`:**
+- `counter(&ctx).get()` — two-step: bind context, then operate. More composable (can pass the bound ref around)
+- `counter.get(&ctx)` — one-step: simpler for single operations
+
+The callable pattern wins for chaining and consistency with lazily-py. Updated the blog post examples accordingly.
+
+**Background tasks still running** — YouTube upload + Whisper transcription. Will update when complete.
+
+> **The programming parallel is exact:** Eager reactive systems are like a dehydrated body — they do unnecessary work (waste products) that accumulates and slows everything down. Lazy evaluation is proper hydration — compute only what's needed, eliminate the rest.
+
+Remove...not a good analogy
 <!-- /agent:exchange -->

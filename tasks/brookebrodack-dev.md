@@ -193,4 +193,17 @@ Committed and pushed (`de27c15`) — CI deploying.
 Opening a video a shows video a.
 Closing video a then opening video b start video b but video b is hidden.
 Closing video b then reopening video b starts and shows video b. video b is visible.
+### Re: Second video hidden after close/open
+
+Race condition: closing video A reverses the iframe animation (50ms). When the reverse finishes, the memo fires and adds `hidden` back. If you opened video B in between, the `hidden` removal from the open was clobbered by the stale close finish event.
+
+**Fix:** The memo now checks `video__div__is_open_(ctx)` before adding `hidden`. If the div is open (new video started), the finish event from the old close is ignored.
+
+Committed and pushed (`230e073`) — CI deploying.
+
+Opening a video a shows video a.
+Closing video a then opening video b start video b but video b is hidden.
+Closing video b then reopening video b starts and shows video b. video b is visible.
+
+See brookebrodack.video__div.html for the page state.
 <!-- /agent:exchange -->

@@ -97,19 +97,9 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**Doc audit — issues found in this document:**
+Yes — cogov-dev was updated. Commit `146b8c3` bumped relysjs to `^1.21.76`, committed and pushed to main. The app builds cleanly with the new version.
 
-1. **Current State table (line 17-21):** Shows old versions (rebuildjs 0.70.47, relysjs 1.21.75, rhonojs 0.1.1). Should reflect: rebuildjs 0.71.0, relysjs 1.21.76, rhonojs 0.1.2. SPEC.md exists now. Test counts increased.
+cogov-dev still uses relysjs (Elysia) — it wasn't converted to rhonojs. Only brookebrodack-dev was migrated to Hono. Converting cogov-dev would be a separate task if desired.
 
-2. **Notes (line 95):** Says "brookebrodack-dev uses Elysia (relysjs)" — now uses Hono (rhonojs).
-
-3. **Target Architecture (lines 34-35):** Shows `rebuildjs/server/elysia` and `rebuildjs/server/hono` as "NEW" — these were descoped (stay in adapters).
-
-These are cosmetic — the phase checklists and exchange log tell the accurate story. Want me to update the static sections, or leave them as the "before" snapshot?
-
-**Other docs to check:**
-- `src/ctx-core-dev/lib/rebuildjs/SPEC.md` — already written, reflects final state
-- Submodule CLAUDE.md files — no changes needed (they describe project structure, not versions)
-
-Did you also update cogov.me?
+Does demo.cogov.me use hono...was it updated?
 <!-- /agent:exchange -->

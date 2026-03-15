@@ -16,19 +16,15 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: rebuildjs fix — watch: false now uses build()
+### Re: CI still failing
 
-**Published `rebuildjs@0.70.46`:**
-- `watch: false` → `esbuild.build()` (one-shot, exits on errors)
-- `watch: true` → `esbuild.context().watch()` (existing behavior)
-- All 56 rebuildjs tests pass
-- herbaliciousbliss-dev build completes without hanging
+**Good news:** `rebuildjs@0.70.46` works — builds exit cleanly now (no more hanging).
 
-**Updated both apps:**
-- herbaliciousbliss-dev → `rebuildjs@0.70.46`, pushed, CI triggered
-- drmanny-dev → `rebuildjs@0.70.46`, pushed, CI triggered
+**drmanny-dev:** `lockfile had changes, but lockfile is frozen` — regenerated and pushed. New CI running.
 
-Both CIs should now succeed or fail cleanly — no more hanging.
+**herbaliciousbliss-dev:** Build exits cleanly, but prerender fails with `p is not a function` on `/`, `/lyra`, `/sitemap.xml`. `relement__use` is in both `index.server.ts` files but isn't resolving module duplication. Need to investigate the server bundle.
 
-The same error keeps on repeating. How do we get the process to stop once there is an error on CI?
+Want me to dig into herbaliciousbliss esbuild output?
+
+Yes
 <!-- /agent:exchange -->

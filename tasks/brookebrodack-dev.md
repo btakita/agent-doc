@@ -105,5 +105,25 @@ build_promises.push(relysjs__ready__wait(300_000))
 ## User
 Switch to `agent_doc_format: template`
 
-https://brookebrodack.net/ 
+https://brookebrodack.net/ does not have images being served
+There is no background image nor is brooke's profile image being served
+### Re: Images not loading
+
+**Root cause:** The `object-store-asset` esbuild plugin generates content-hashed URLs (e.g., `brooke-brodack-profile-C6E74A0F.webp`) but the R2 bucket at `assets.brookebrodack.net` only contained the original unhashed files (`images/brooke-brodack-profile.webp`). The upload scripts never created hashed copies.
+
+**Fix:** Serve hashed assets from Cloudflare Pages instead of R2:
+
+1. **Created `assets--hash-copy.sh`** — copies each file from `public/assets/` into `dist/browser/` with `{name}-{SHA256_8_UPPER}{ext}` naming (matching the esbuild plugin's scheme)
+2. **Updated `deploy.yml`** — added hash-copy step after build, changed `ASSET_BASE_URL` from `https://assets.brookebrodack.net` to `https://brookebrodack.net` (serve from Pages)
+3. **Updated `.env`** — local dev matches CI
+
+**Verified locally:** All 4 critical assets hash correctly:
+- `brooke-brodack-profile-C6E74A0F.webp` ✓
+- `nature-origami-bg-906C5EF4.webp` ✓
+- `brooke-brodack-logo-C9FC9BBB.jpg` ✓
+- `brooke-brodack-profile-6CCF7860.jpg` ✓
+
+**Committed and pushed** (`71d2334`) — CI deployment running.
+
+The footer has 2 duplicate instagram links. Please reduce to 1 
 <!-- /agent:exchange -->

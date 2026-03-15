@@ -7,15 +7,20 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### v0.17.9 Released
+### Re: Slow pickup of agent-doc commands
 
-CRDT character-interleaving fix shipped:
-- crates.io: https://crates.io/crates/agent-doc/0.17.9
-- PyPI: https://pypi.org/project/agent-doc/0.17.9/
-- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.9
+The delay is between when `agent-doc route` sends keys to the tmux pane and when Claude Code processes the input. This is mostly Claude Code's internal latency — we can't control how fast it picks up typed input.
 
-Key change: `compute_edit_ops()` now uses `TextDiff::from_lines()` instead of `from_chars()`. Line-level diffs produce clean merge operations that don't interleave at character boundaries during concurrent edits. All 352 tests pass.
+**Options to reduce perceived latency:**
 
-In tasks/youtube/youtube.md, it took a while for the claude session to pick up the agent-doc run command.
-Is there a way to get quicker feedback in the claude session terminal?
+1. **Watch daemon (already exists):** `agent-doc watch` auto-submits on file save with zero debounce for CRDT docs. Bypasses `/agent-doc` typing entirely — just save the file and the daemon routes the command. Is this what you're already using, or are you triggering manually from the IDE?
+
+2. **Immediate feedback in tmux:** Could add a `tmux display-message` from `agent-doc route` so you see "Sent /agent-doc <file> to pane %X" immediately, even before Claude picks it up. At least you'd know the command was dispatched.
+
+3. **Pre-warm:** If the Claude session is idle for a while, the first input after idle can be slower. No fix for this — it's Claude Code behavior.
+
+Which path are you hitting — IDE plugin → route, or manual `/agent-doc` in the terminal?
+
+IDE plugin → route...
+Let's try a flash notification in the tmux pane that receives the run.
 <!-- /agent:exchange -->

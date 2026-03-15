@@ -13,11 +13,12 @@ use crate::{snapshot, write};
 ///
 /// Returns `true` if a pending response was recovered, `false` otherwise.
 pub fn run(file: &Path) -> Result<bool> {
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
+    // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule)
+    let canonical = file.canonicalize().map_err(|_| {
+        anyhow::anyhow!("file not found: {}", file.display())
+    })?;
 
-    let pending_path = snapshot::pending_path_for(file)?;
+    let pending_path = snapshot::pending_path_for(&canonical)?;
     if !pending_path.exists() {
         return Ok(false);
     }

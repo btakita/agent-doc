@@ -16,13 +16,21 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: SKILL.md updated + lazily-rs task created
+### Published v0.17.6
 
-**SKILL.md** — Added status tracking instructions under template mode (step 4b): update `<!-- agent:status -->` components at natural milestones using `<!-- patch:status -->` blocks with checkbox progress.
+- **crates.io**: `agent-doc v0.17.6` ✓
+- **PyPI**: `agent-doc 0.17.6` ✓
+- **GitHub Release**: [v0.17.6](https://github.com/btakita/agent-doc/releases/tag/v0.17.6) with prebuilt binary ✓
+- **Release binary built**: `cargo build --release` ✓
+- **Skill installed**: SKILL.md v0.17.6 ✓
 
-**`tasks/lazily-rs.md`** — Created with template mode, `<!-- agent:status -->` component (6 phases: research → publish), and input/output components. Ready for a planning session.
-
-To start planning lazily-rs: `/agent-doc tasks/lazily-rs.md`
+Includes: status tracking instructions for `<!-- agent:status -->` components + IPC-first writes docs.
 
 Release agent-doc SKILL.md update
+
+When you created lazily-rs.md, the default values were incorrect. It should've been:
+```
+agent_doc_format: template
+agent_doc_write: crdt
+```
 <!-- /agent:exchange -->

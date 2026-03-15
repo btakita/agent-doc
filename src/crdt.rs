@@ -240,7 +240,7 @@ enum EditOp {
 fn compute_edit_ops(from: &str, to: &str) -> Vec<EditOp> {
     use similar::{ChangeTag, TextDiff};
 
-    let diff = TextDiff::from_chars(from, to);
+    let diff = TextDiff::from_lines(from, to);
     let mut ops = Vec::new();
 
     for change in diff.iter_all_changes() {
@@ -804,6 +804,54 @@ commit and push all rappstack packages.
             !merged.contains("*C*C") && !merged.contains("**Sot"),
             "Character interleaving detected. Got:\n{}",
             merged
+        );
+    }
+
+    /// Regression test: Agent replaces multi-line block while user inserts within it.
+    /// With from_chars, this produces ~20 scattered character-level ops that interleave
+    /// with user edits. With from_lines, ops are contiguous line-level blocks.
+    ///
+    /// Uses a template document structure to match the real workflow where the baseline
+    /// (common ancestor) contains the exchange component with original content.
+    #[test]
+    fn merge_replace_vs_insert_no_interleaving() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# Document Title\n\nSome preamble text that both sides share.\nThis provides enough common prefix to avoid stale detection.\n\n<!-- agent:exchange -->\n";
+        let footer = "<!-- /agent:exchange -->\n";
+
+        let old_exchange = "Line one of old content\nLine two of old content\nLine three of old content\n";
+        let baseline = format!("{header}{old_exchange}{footer}");
+        let baseline_doc = CrdtDoc::from_text(&baseline);
+        let baseline_state = baseline_doc.encode_state();
+
+        // Agent replaces exchange with completely new content
+        let agent_exchange = "Completely new line one\nCompletely new line two\nCompletely new line three\nCompletely new line four\n";
+        let ours = format!("{header}{agent_exchange}{footer}");
+
+        // User inserts a line in the middle of the original exchange
+        let theirs = format!("{header}Line one of old content\nUser inserted this line\nLine two of old content\nLine three of old content\n{footer}");
+
+        let merged = merge(Some(&baseline_state), &ours, &theirs).unwrap();
+
+        // Agent text should be contiguous — no mid-word splits
+        assert!(
+            merged.contains("Completely new line one"),
+            "Agent line 1 missing or garbled. Got:\n{}", merged
+        );
+        assert!(
+            merged.contains("Completely new line two"),
+            "Agent line 2 missing or garbled. Got:\n{}", merged
+        );
+
+        // User text should be preserved
+        assert!(
+            merged.contains("User inserted this line"),
+            "User insertion missing. Got:\n{}", merged
+        );
+
+        // No character interleaving (e.g., "Complete" + user text + "ly")
+        assert!(
+            !merged.contains("CompleteUser") && !merged.contains("Complete\nUser"),
+            "Character interleaving detected. Got:\n{}", merged
         );
     }
 }

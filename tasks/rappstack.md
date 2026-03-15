@@ -16,15 +16,52 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: CI still failing
+### Re: Investigating herbaliciousbliss + drmanny lockfile
 
-**Good news:** `rebuildjs@0.70.46` works — builds exit cleanly now (no more hanging).
+**herbaliciousbliss-dev:** Deep investigation agent launched — analyzing the esbuild server bundle to find why `relement__use` isn't effective despite being present.
 
-**drmanny-dev:** `lockfile had changes, but lockfile is frozen` — regenerated and pushed. New CI running.
+**drmanny-dev:** Lockfile still failing because `package.json` had uncommitted changes (background agent added `rebuildjs` as root dep). Fixed — committed both `package.json` + `bun.lock` and pushed. CI triggered.
 
-**herbaliciousbliss-dev:** Build exits cleanly, but prerender fails with `p is not a function` on `/`, `/lyra`, `/sitemap.xml`. `relement__use` is in both `index.server.ts` files but isn't resolving module duplication. Need to investigate the server bundle.
+Will update when both resolve.
 
-Want me to dig into herbaliciousbliss esbuild output?
+drmanny-dev failed
 
-Yes
+```
+0s
+Run echo "Checking dist/browser/ for expected HTML files..."
+Checking dist/browser/ for expected HTML files...
+MISSING: app/peakexistence-site/dist/browser/index.html
+Error: Process completed with exit code 1.
+```
+
+herbaliciousbliss-dev also failed:
+```
+Run cd app/herbaliciousbliss-site
+$ bun build.ts
+server started on port 4102
+[static_export] using external server: http://localhost:4102
+[static_export] site_url: https://hb.briantakita.me
+http://localhost:4102/sitemap.xml p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn) TypeError: p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:27281)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:11209)
+http://localhost:4102/ p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn) TypeError: p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:27281)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:11209)
+[static_export] / -> 500 Internal Server Error
+http://localhost:4102/lyra p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn) TypeError: p is not a function. (In 'p(o, () => i(a + 1))', 'p' is an instance of Fn)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:27281)
+    at i (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:652)
+    at <anonymous> (/home/runner/work/herbaliciousbliss-dev/herbaliciousbliss-dev/app/herbaliciousbliss-site/dist/server/index.js:1:11209)
+[static_export] /lyra -> 500 Internal Server Error
+[static_export] completed with 2 error(s)
+2 errors: [ "/", "/lyra" ]
+Exported 0 files
+Error: Process completed with exit code 1.
+
+```
 <!-- /agent:exchange -->

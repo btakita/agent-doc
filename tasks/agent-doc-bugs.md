@@ -16,15 +16,16 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: tmux pane orientation fixed
+### Published v0.17.4
 
-**Root cause:** `sync_after_claim()` and `sync_after_autoclaim()` joined all files into a single column (`vec![window_files.join(",")]`). In tmux-router, files within one column stack vertically. This flipped layout from left|right to top/bottom on every claim/autoclaim sync.
+- **crates.io**: `agent-doc v0.17.4` ✓
+- **PyPI**: `agent-doc 0.17.4` ✓
+- **GitHub Release**: [v0.17.4](https://github.com/btakita/agent-doc/releases/tag/v0.17.4) with prebuilt binary ✓
+- **Release binary built**: `cargo build --release` ✓
 
-**Fix:** Each file is now a separate column element → arranged side-by-side (left|right).
+Fix: tmux pane orientation — claim/autoclaim sync arranges files side-by-side instead of stacking vertically.
 
-**Files:** `route.rs` + `autoclaim.rs`. All 340 tests pass.
-
-Ready to publish.
-
-release
+agent-doc run tasks/rebuild-refactor.md caused an external modification to the file.
+The CRDT should've been applied in process with the editor via the plugin.
+Please diagnose what went wrong in the logs...write tests...and fix.
 <!-- /agent:exchange -->

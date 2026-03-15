@@ -16,21 +16,15 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Published v0.17.6
+### Re: lazily-rs.md frontmatter fixed
 
-- **crates.io**: `agent-doc v0.17.6` ✓
-- **PyPI**: `agent-doc 0.17.6` ✓
-- **GitHub Release**: [v0.17.6](https://github.com/btakita/agent-doc/releases/tag/v0.17.6) with prebuilt binary ✓
-- **Release binary built**: `cargo build --release` ✓
-- **Skill installed**: SKILL.md v0.17.6 ✓
-
-Includes: status tracking instructions for `<!-- agent:status -->` components + IPC-first writes docs.
-
-Release agent-doc SKILL.md update
-
-When you created lazily-rs.md, the default values were incorrect. It should've been:
-```
+Updated `tasks/lazily-rs.md` frontmatter from `agent_doc_mode: template` to:
+```yaml
 agent_doc_format: template
 agent_doc_write: crdt
 ```
+
+Why did you originally write lazily-rs.md with the incorrect values?
+What can we do to ensure this won't happen in the future?
+Does the agent-doc skill or binary need to be updated?
 <!-- /agent:exchange -->

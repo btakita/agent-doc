@@ -122,12 +122,19 @@ pub fn run(
         merge::merge_contents(&content_original, &content_ours, &content_current)?
     };
 
-    atomic_write(file, &final_content)?;
+    // Try IPC first — if an IDE plugin is active, it applies the change via
+    // Document API (no "externally modified" dialog, cursor preserved).
+    let ipc_ok = crate::write::try_ipc_full_content(file, &final_content)?;
 
-    // Save snapshot as content_ours (baseline + response), not final_content.
-    // If the user edited concurrently, final_content includes their edits.
-    // Saving content_ours ensures the next diff detects those concurrent edits.
-    snapshot::save(file, &content_ours)?;
+    if !ipc_ok {
+        // IPC not available or timed out — fall back to direct disk write
+        atomic_write(file, &final_content)?;
+
+        // Save snapshot as content_ours (baseline + response), not final_content.
+        // If the user edited concurrently, final_content includes their edits.
+        // Saving content_ours ensures the next diff detects those concurrent edits.
+        snapshot::save(file, &content_ours)?;
+    }
 
     drop(doc_lock); // explicit release after both doc and snapshot are written
 

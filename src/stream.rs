@@ -329,6 +329,10 @@ fn stream_loop(
 /// the component's configured mode (e.g., exchange defaults to append). This is
 /// because the stream buffer is cumulative — each flush contains the full text
 /// so far, not just the delta.
+///
+/// When a JetBrains/VS Code plugin is active (`.agent-doc/patches/` directory
+/// exists), attempts IPC first to avoid "externally modified" dialogs. Falls
+/// back to direct write on IPC timeout.
 pub(crate) fn flush_to_document(
     file: &Path,
     text: &str,
@@ -340,6 +344,14 @@ pub(crate) fn flush_to_document(
 
     let (patches, unmatched) = template::parse_patches(&patch_response)
         .context("failed to parse patch blocks")?;
+
+    // Try IPC first — if plugin is active, it applies patches via Document API
+    // (no "externally modified" dialog, cursor preserved, undo preserved)
+    if crate::write::try_ipc(file, &patches, &unmatched, None, None)? {
+        return Ok(());
+    }
+
+    // IPC not available or timed out — fall back to direct write
 
     // Force replace mode for stream target — buffer is cumulative, not incremental
     let mut mode_overrides = std::collections::HashMap::new();

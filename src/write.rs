@@ -493,6 +493,142 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     Ok(())
 }
 
+/// Attempt to write via IPC (file-based patch for IDE plugin consumption).
+///
+/// Writes a JSON patch file to `.agent-doc/patches/` and polls for the plugin
+/// to consume it (delete the file as ACK). Returns `Ok(true)` if the plugin
+/// consumed the patch, `Ok(false)` if it timed out (caller should fall back
+/// to direct write).
+///
+/// This is safe to call unconditionally — if no plugin is active, it simply
+/// returns `false` after a short timeout.
+pub fn try_ipc(
+    file: &Path,
+    patches: &[crate::template::PatchBlock],
+    unmatched: &str,
+    frontmatter_yaml: Option<&str>,
+    baseline: Option<&str>,
+) -> Result<bool> {
+    let canonical = file.canonicalize()?;
+    let hash = snapshot::doc_hash(file)?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let patches_dir = project_root.join(".agent-doc/patches");
+
+    // Only attempt IPC if the patches directory exists (plugin has started)
+    if !patches_dir.exists() {
+        return Ok(false);
+    }
+
+    let patch_file = patches_dir.join(format!("{}.json", hash));
+
+    // Separate frontmatter patch from component patches
+    let ipc_patches: Vec<serde_json::Value> = patches
+        .iter()
+        .filter(|p| p.name != "frontmatter")
+        .map(|p| {
+            serde_json::json!({
+                "component": p.name,
+                "content": p.content,
+            })
+        })
+        .collect();
+
+    let mut ipc_payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": ipc_patches,
+        "unmatched": unmatched.trim(),
+        "baseline": baseline.unwrap_or(""),
+    });
+
+    if let Some(yaml) = frontmatter_yaml {
+        ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
+    }
+
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len())
+}
+
+/// Attempt to write full document content via IPC.
+///
+/// Like `try_ipc()` but replaces the entire document content instead of
+/// applying component patches. Used by append-mode documents that don't
+/// have `<!-- agent:name -->` component markers.
+///
+/// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
+pub fn try_ipc_full_content(
+    file: &Path,
+    content: &str,
+) -> Result<bool> {
+    let canonical = file.canonicalize()?;
+    let hash = snapshot::doc_hash(file)?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let patches_dir = project_root.join(".agent-doc/patches");
+
+    // Only attempt IPC if the patches directory exists (plugin has started)
+    if !patches_dir.exists() {
+        return Ok(false);
+    }
+
+    let patch_file = patches_dir.join(format!("{}.json", hash));
+
+    let ipc_payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": [],
+        "unmatched": "",
+        "baseline": "",
+        "fullContent": content,
+    });
+
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0)
+}
+
+/// Write an IPC patch file and poll for plugin ACK (file deletion).
+///
+/// Returns `Ok(true)` if consumed, `Ok(false)` on timeout.
+fn write_ipc_and_poll(
+    patch_file: &Path,
+    payload: &serde_json::Value,
+    doc_file: &Path,
+    patch_count: usize,
+) -> Result<bool> {
+    // Atomic write of patch file
+    atomic_write(
+        patch_file,
+        &serde_json::to_string_pretty(payload)?,
+    )?;
+
+    eprintln!(
+        "[write] IPC patch written to {} ({} components)",
+        patch_file.display(),
+        patch_count
+    );
+
+    // Poll for ACK (plugin deletes file after applying)
+    let timeout = std::time::Duration::from_secs(2);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if !patch_file.exists() {
+            // Plugin consumed the patch — update snapshot from current file
+            let content = std::fs::read_to_string(doc_file)
+                .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?;
+            snapshot::save(doc_file, &content)?;
+            let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
+            snapshot::save_crdt(doc_file, &crdt_doc.encode_state())?;
+            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
+            return Ok(true);
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    // Timeout — clean up unconsumed patch file
+    eprintln!("[write] IPC timeout ({}s) — falling back to direct write", timeout.as_secs());
+    let _ = std::fs::remove_file(patch_file);
+    Ok(false)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
@@ -759,5 +895,95 @@ mod tests {
             current.contains("Follow-up question"),
             "current file should contain user's edit"
         );
+    }
+
+    #[test]
+    fn try_ipc_returns_false_when_no_patches_dir() {
+        // Without .agent-doc/patches/, IPC should return false immediately
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "content").unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let result = try_ipc(&doc, &patches, "", None, None).unwrap();
+        assert!(!result, "should return false when patches dir doesn't exist");
+    }
+
+    #[test]
+    fn try_ipc_times_out_when_no_plugin() {
+        // With .agent-doc/patches/ existing but no plugin consuming, should timeout
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+
+        let patch = crate::template::PatchBlock {
+            name: "exchange".to_string(),
+            content: "new content".to_string(),
+        };
+
+        // This will timeout after 2s — patch file is written but never consumed
+        let result = try_ipc(&doc, &[patch], "", None, None).unwrap();
+        assert!(!result, "should return false on timeout (no plugin)");
+
+        // Patch file should be cleaned up after timeout
+        let patches_dir = agent_doc_dir.join("patches");
+        let entries: Vec<_> = fs::read_dir(&patches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(entries.is_empty(), "patch file should be cleaned up after timeout");
+    }
+
+    #[test]
+    fn try_ipc_succeeds_when_plugin_consumes() {
+        // Simulate plugin by spawning a thread that deletes the patch file
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+
+        let patch = crate::template::PatchBlock {
+            name: "exchange".to_string(),
+            content: "new content".to_string(),
+        };
+
+        // Spawn "plugin" thread that watches for and deletes patch files
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(&doc, &[patch], "", None, None).unwrap();
+        assert!(result, "should return true when plugin consumes patch");
+    }
+
+    #[test]
+    fn try_ipc_full_content_returns_false_when_no_patches_dir() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "content").unwrap();
+
+        let result = try_ipc_full_content(&doc, "new content").unwrap();
+        assert!(!result, "should return false when patches dir doesn't exist");
     }
 }

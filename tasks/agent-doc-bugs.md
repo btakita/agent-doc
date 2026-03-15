@@ -16,20 +16,36 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: Docs updated
+### Re: Tracking state via CRDT
 
-All 4 stale docs updated. `audit-docs` now reports **0 issues** (377/1000 lines).
+Good idea — auto-updating progress checkboxes as work completes. A few approaches:
 
-**Changes:**
-- **SKILL.md** — Bumped version to 0.17.5, added IPC-first write bullets
-- **CLAUDE.md** — Added IPC-first writes subsection, fixed code block warning (added imperative context), moved 14-row table to README
-- **README.md** — Added IPC-first writes section + domain ontology table (from CLAUDE.md)
-- **SPEC.md** — Added IPC-first behavior paragraph to section 7.21
+**Option A: `<!-- agent:status -->` component with patch blocks**
+The agent writes `<!-- patch:status -->` blocks during streaming to update a status component. The CRDT handles concurrent edits. This already works with the template mode — just needs the SKILL.md to instruct Claude to update status components as work progresses.
 
-Committed in agent-doc submodule (`a9d1a69`).
+**Option B: Dedicated `agent-doc progress` command**
+A CLI command that updates specific checkbox lines in a document:
+```bash
+agent-doc progress tasks/rebuild-refactor.md "Phase 1" --done
+```
+Would find `- [ ] Phase 1` and replace with `- [X] Phase 1`, writing via IPC.
+
+**Option C: Frontmatter-based tracking**
+Add a `progress` field to frontmatter that the agent updates:
+```yaml
+progress:
+  phase_1: done
+  phase_2: in_progress
+  phase_3: pending
+```
+
+It looks like you were about to suggest something — what were you thinking with "Perhaps we want to use"?
 
 In rebuildjs-refactor.md, I requested that the Phases checkboxes are updated.
 This sort of tracking state should always be updated via CRDT...To track ongoing progress.
 
 Please add the relevant skills and implementation to agent-doc to ensure that fields are updated as state changes.
+
+Would reactive signals or lazily style slots + cells help?
+Should we implement lazily-rs as a counterpart to btakita/lazily-py and btakita/lazily-zig?
 <!-- /agent:exchange -->

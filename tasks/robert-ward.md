@@ -251,11 +251,14 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
-Noted. Frontmatter updated:
-- `agent_doc_mode` → `agent_doc_format` (field rename)
-- Added `agent_doc_write: crdt` (enables CRDT merge for concurrent edits)
-
-Document is now configured for template format with CRDT write mode.
-
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6d80de6e787d2dd84a42304a61aaca110edc241ddceea15a1444d598b26910f6-20260315-023752.md`*
 /agent-doc compact
+Compacted. Archived exchange content to `.agent-doc/archives/`.
+
+Robert had his middle bottom tooth broke off 4 weeks ago. The root is still attached.
+Robert had his middle top tooth broke off 2 weeks ago. The root is still attached.
+
+Is citrus ok to eat until he has a procedure to replace the teeth?
+What is the ideal home care protocol that is natural...for Robert to do?
+What preventative and stabilizing care can robert do?
 <!-- /agent:exchange -->

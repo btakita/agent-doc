@@ -45,5 +45,6 @@ Should we add a placeholder component for the agent session response to populate
 There would be a single instance of the component that would be placed under the last prompt that was sent to the agent session.
 This placeholder would move as more is sent to the agent session.
 
-If lazily-rs would be usefu
+If lazily-rs would be useful for reactive tracking, please update the lazily-rs.md tasks.
+lazily-rs.md should've been setup with agent:exchange...not agent:input and  agent:output
 <!-- /agent:exchange -->

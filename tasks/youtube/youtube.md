@@ -114,4 +114,28 @@ Committed and pushed to `briantakita.me-dev` (main):
 GitHub Actions "Deploy to Cloudflare Pages" workflow triggered on push to main. The deploy should complete in a few minutes.
 
 Add a link to the blog post in the YouTube video description.
+
+### Re: Blog post link added to YouTube
+
+Updated the YouTube video description with:
+```
+Blog post: https://briantakita.me/posts/2026-03-14-rappstack-live-session
+```
+
+Added before the Links section. Video updated: https://www.youtube.com/watch?v=oFFHVjQaYdA
+Closed Captioning transcription. Description.
+Make a blog post with the highlighs.
+
+Break out specifics on the abstractions:
+- Context
+- Slot
+- Cell
+- Signal
+
+Explain the lazy and eager reactivty.
+
+Water Hydration's role in not being tired...via waste elimination as well.
+Any links to scientific backing would be great as well.
+
+Make this a featured blog post on briantakita.me
 <!-- /agent:exchange -->

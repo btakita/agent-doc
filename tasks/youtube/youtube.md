@@ -49,9 +49,6 @@ And give suggestions on how I should present it.
 - Ready to deploy with the next briantakita.me build
 Add agent-doc as a tag
 
-deploy
-
-Does the full merged video have any content that is of value and not in the condensed video?
 ### Re: Tag + trimmed content analysis
 
 **agent-doc tag added** to the blog post.
@@ -78,4 +75,32 @@ The condensed cut captured the essential narrative. The full 84-minute version i
 
 I will probably delete the source videos. Is there a good place to put the archive videos?
 How much will R2 cost per TB?
+
+### Re: Video archival + R2 pricing
+
+**Current video inventory:**
+- Source parts: 3.6 GB (3 files in `~/Videos/`)
+- Merged full: 3.7 GB (`tasks/youtube/`)
+- Condensed (uploaded): 1.6 GB (`tasks/youtube/`)
+- **Total: ~8.9 GB**
+
+Since the condensed version is on YouTube, and the merged full is a lossless concat of the 3 source parts, you can safely delete both the source parts and the merged full. That leaves only the condensed + SRT locally (~1.6 GB).
+
+**CloudFlare R2 pricing:**
+- **Storage:** $0.015/GB/month = **$15/TB/month**
+- **Class A ops** (writes): $4.50 per million
+- **Class B ops** (reads): $0.36 per million
+- **Egress: Free** (zero egress fees — this is R2's killer feature vs S3)
+- **Free tier:** 10 GB storage + 1M Class A + 10M Class B per month
+
+For 8.9 GB of video archives, you'd be under the free tier. Even at 1 TB, it's $15/month with no egress charges.
+
+**Recommendation:** Upload the merged full-length video to R2 as a cold archive (you'll rarely access it). Delete the 3 source parts and the local merged copy. Keep the condensed version locally if you want quick access, or archive it to R2 too.
+
+You already have R2 set up via `esbuild-plugin-object-store-assets`. You could create a dedicated `video-archive` bucket or use your existing assets bucket with a `/video/` prefix.
+
+Want me to upload the merged full video to R2 before you delete the sources?
+Will do this later.
+
+
 <!-- /agent:exchange -->

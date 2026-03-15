@@ -34,4 +34,7 @@ Auth succeeded, description updated on https://www.youtube.com/watch?v=hVNmbmY4v
 - Removed markdown list prefixes
 
 The description should now show clickable links on YouTube.
+
+The blog post link is still truncated
+`https://briantakita.me/posts/2026-03-15-la...`
 <!-- /agent:exchange -->

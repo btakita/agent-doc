@@ -1,9 +1,9 @@
 ---
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
-
 
 Robert Ward is a long time friend who lives in LA.
 He has a Chinese Medicine, acupressure, therapeutic massage practice.
@@ -247,3 +247,5 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 - Brian drafted and emailed the legal letter to Robert
 
 ## User
+
+Note the changes to the frontmatter.

@@ -169,4 +169,13 @@ The `hidden` class was on the **parent div** (`.YT_player__div`), but the animat
 Committed and pushed (`6bfaae1`) — CI deploying.
 
 .YT_player__div still hidden
+### Re: YT_player__div still hidden
+
+The animation-based `hidden` toggle was unreliable — race conditions between animation creation, play, and the finish event meant the memo didn't always remove `hidden` in time.
+
+**Simplified fix:** Directly call `YT_iframe__div_(ctx)?.classList.remove('hidden')` when a video is clicked, before playing. No more relying on animation state for initial visibility. The animation memo still handles re-adding `hidden` on close (reverse animation finish).
+
+Committed and pushed (`ef3e99c`) — CI deploying.
+
+Still hidden. see brookebrodack.video__div.html
 <!-- /agent:exchange -->

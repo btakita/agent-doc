@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.14.10"
+agent-doc-version: "0.17.5"
 ---
 
 # agent-doc submit
@@ -110,8 +110,9 @@ Use `agent-doc write --stream` to atomically append the response:
    ```
 3. `agent-doc write --stream` handles:
    - Appending `## Assistant\n\n<response>\n\n## User\n\n`
+   - **IPC-first write:** tries IPC to JetBrains/VS Code plugin (via `.agent-doc/patches/`) before falling back to direct disk write — avoids "externally modified" dialogs and preserves cursor/undo state
    - CRDT merge if the user edited during your response (conflict-free)
-   - Atomic file write (flock + tempfile + rename)
+   - Atomic file write (flock + tempfile + rename) on IPC fallback
    - Snapshot update
 
 #### 4b. Template mode (`agent_doc_mode: template`)
@@ -140,8 +141,9 @@ The agent responds with **patch blocks** that target specific components.
 4. `agent-doc write --stream` handles:
    - Parsing patch blocks from the response
    - Applying each patch to the matching component
+   - **IPC-first write:** tries IPC to IDE plugin before falling back to direct disk write
    - CRDT merge if the user edited during your response (conflict-free)
-   - Atomic file write + snapshot update
+   - Atomic file write + snapshot update (on IPC fallback)
 
 **Template document conventions:**
 - `<!-- agent:input -->` — user writes prompts here

@@ -125,7 +125,7 @@ Stream mode can capture the agent's chain-of-thought (thinking blocks) from Clau
 `"type": "thinking"` content blocks. Thinking is buffered separately (`thinking_buffer`) and
 flushed on the same timer interval as response text.
 
-**Example document with thinking:**
+Use this frontmatter structure to enable thinking with a separate log component:
 ```markdown
 ---
 agent_doc_format: template
@@ -152,6 +152,14 @@ full text so far, not just the delta. Without replace mode, append-mode componen
 Implementation: `flush_to_document()` passes mode overrides to
 `template::apply_patches_with_overrides()`.
 
+### IPC-First Writes (v0.17.5)
+
+All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin before falling back to direct disk writes. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. If no plugin is active or ACK times out (2s), the write falls back to atomic disk write.
+
+- `try_ipc()` — component-level patches for template/stream documents
+- `try_ipc_full_content()` — full document replacement for append-mode documents
+- Both are safe to call unconditionally; they return `false` immediately if `.agent-doc/patches/` does not exist
+
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
 `agent/streaming.rs` (StreamingAgent trait + chunk parser), `agent/claude.rs` (streaming impl)
 
@@ -165,20 +173,4 @@ subsequent merges. Compacted via `agent-doc compact` to GC tombstones.
 
 ## Domain Ontology
 
-agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions. These terms map agent-doc concepts to the universal ontology they derive from.
-
-| Term | Derives From | Description |
-|------|-------------|-------------|
-| **Session** | project + story | A bounded interaction with temporal arc; the unit of agent-doc work |
-| **Document** | entity + context | A markdown file that holds conversational state between user and agent |
-| **Pane** | focus + scope | A tmux viewport — finite attention applied to a single document |
-| **Claim** | scope + entity | Binding a document to a pane; scoping focus to a specific file |
-| **Route** | context + resolution | Resolving which pane handles a document; context-aware dispatch |
-| **Sync** | pattern + system | Aligning tmux pane layout to editor split state; maintaining coherence |
-| **Watch** | consciousness + evolution | Detecting file changes and triggering agent responses; event-driven |
-| **Dashboard** | system + focus | A document used as a live system view with agent-maintained sections |
-| **Component** | scope + abstraction | Bounded, named, re-renderable region in a document (`<!-- agent:name -->...<!-- /agent:name -->`). Configurable mode (replace/append/prepend) and shell hooks. |
-| **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
-| **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
-| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
-| **Overlay** | context + resolution | Domain-specific terms extending the base kernel vocabulary |
+agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).

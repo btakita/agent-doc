@@ -306,6 +306,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **`--ipc` flag:** Writes a JSON patch file to `.agent-doc/patches/` for IDE plugin consumption instead of modifying the document directly.
 
+**IPC-first behavior (v0.17.5):** The `run` and `stream` commands (and their `flush_to_document` path) automatically try IPC before falling back to direct disk writes. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (append mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC success, snapshot and CRDT state are updated from the file as written by the plugin.
+
 ### 7.22 watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.

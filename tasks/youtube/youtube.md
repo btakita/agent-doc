@@ -14,19 +14,17 @@ Add a teaser about agent-doc and Proof that God Exists.
 
 <!-- agent:exchange -->
 
-### Re: _redirects setup
+### Re: Canonical URL fix
 
-Done. Created `_redirects` at the briantakita.me-dev root with:
+Fixed. The canonical URL is `/posts/lazily-reactive-signals` (no date prefix).
 
-```
-/2026-03-15-lazily /posts/2026-03-15-lazily-reactive-signals 301
-```
+**Updated:**
+1. `_redirects` in briantakita.me-dev → now redirects `/2026-03-15-lazily` to `/posts/lazily-reactive-signals` (pushed, deploy triggered)
+2. lazily-rs README blog post link → canonical URL (pushed)
 
-Updated `.github/workflows/deploy.yml` to copy it to `dist/static/` during build. Pushed to main — the deploy workflow should trigger automatically.
+The YouTube description uses the short URL (`briantakita.me/2026-03-15-lazily`) which will redirect correctly after the deploy completes.
 
-The short URL will be: `https://briantakita.me/2026-03-15-lazily`
+Let's change the redirect to /lazily-reactive-signals -> /posts/lazily-reactive-signals
 
-You can add more redirects to the same file later (one per line, CloudFlare Pages format).
-
-Update the link in the YouTube video description.
+Please update the link in the YouTube description
 <!-- /agent:exchange -->

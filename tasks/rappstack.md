@@ -16,14 +16,12 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Fixing both
+### Re: Latest CI failures
 
-**2 fix agents launched:**
+**drmanny-dev** — `fa_waves_sine.svg` and `peak-existence.mp4` missing. Fix agent working on it.
 
-1. **drmanny-dev** — resolving missing `peak-existence.mp4` and `fa_waves_sine.svg`
-2. **herbaliciousbliss-dev** — adding `relement__use(server__relement)` to server entry points
+**herbaliciousbliss-dev** — `relement__use` IS in both `index.server.ts` files (confirmed commit `8dc5072` checked out). The `p is not a function` error persists — deeper esbuild module graph issue. The minified bundle creates separate module instances despite `relement__use`.
 
-Will update with results.
-
-The workflows have failed. See the errors.
+Both need deeper investigation. Want me to dig into herbaliciousbliss-dev's esbuild config?
+Yes. Does the build work locally?
 <!-- /agent:exchange -->

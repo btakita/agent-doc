@@ -78,4 +78,59 @@ What would the difference be?
 If the goal is simplifying the build, a more practical path might be reducing the plugin count or consolidating the `relysjs`/`rhonojs` build wrappers, rather than switching bundlers.
 
 Could we have 1 package that supports elysia and hono...with optional dependencies depending on which is supported?
+### Re: Tailwind plugin for bun build
+
+No dedicated `bun build` plugin for Tailwind CSS exists. The Tailwind v4 ecosystem provides:
+- `@tailwindcss/postcss` — PostCSS plugin (bundler-agnostic)
+- `@tailwindcss/cli` — standalone CLI
+- `@tailwindcss/vite` — Vite plugin
+
+Since Bun's bundler supports `onLoad` hooks, you could write a plugin that runs PostCSS with `@tailwindcss/postcss` in the loader — similar to what `rebuild_tailwind_plugin_` does for esbuild. The PostCSS pipeline itself is bundler-independent.
+
+### Re: Supporting both esbuild and bun build
+
+Yes, with an **adapter pattern**. The build orchestration layer (`rebuildjs`) could define a bundler-agnostic interface:
+
+```ts
+interface Bundler {
+  build(browser_config): Promise<BuildResult>
+  build(server_config): Promise<BuildResult>
+  watch?(onChange): void
+}
+```
+
+Then have `rebuildjs-esbuild` and `rebuildjs-bun` adapters. The `relysjs`/`rhonojs` layer would call the interface, not esbuild directly. This is the cleanest path if you want both — but it's non-trivial (the esbuild API surface used by rebuildjs is large).
+
+A simpler intermediate step: keep esbuild for production builds, use `bun build` only for development (faster startup). But the watch mode differences make even this tricky.
+
+### Re: Watch mode differences
+
+**esbuild watch:** Incremental rebuilds via `ctx.rebuild()`. The `rebuildjs` layer hooks into esbuild's `onEnd` callback to know when a rebuild completes, then triggers CSS reprocessing, ready signals, etc. Rebuilds are fast because esbuild caches the AST.
+
+**bun --watch:** File-system watcher that restarts the entire process. No incremental rebuild — full rebuild each time. No `onEnd` hook equivalent. Bun's `Bun.build()` API doesn't have a watch mode at all — `--watch` is a CLI feature that watches and re-executes the script.
+
+The practical difference: esbuild's watch gives you sub-50ms rebuilds after first build. Bun's watch gives you full rebuilds (still fast, but no caching). The `rebuildjs` lifecycle hooks (`ready__wait`, rebuild callbacks) have no direct equivalent.
+
+### Re: Unified elysia + hono package
+
+Yes — this is essentially what the `relysjs` → `rhonojs` migration already proved. The server abstraction layer (`relysjs`/`rhonojs`) wraps framework-specific APIs. A unified package could:
+
+```
+@rappstack/server (or rebuildjs-server)
+├── adapter-elysia.ts  — Elysia-specific: app__new(), app__attach(), route handling
+├── adapter-hono.ts    — Hono-specific: same interface
+├── index.ts           — re-exports based on which adapter is installed
+```
+
+**How it would work:**
+- `peerDependencies: { "elysia": ">=1.0", "hono": ">=4.0" }` — both optional
+- Runtime detection: check which framework is installed (`import.meta.resolve`)
+- Or explicit config: `{ framework: 'hono' }` in build config
+
+The migration from `relysjs` to `rhonojs` showed the API surface is nearly identical — `app__new()`, `app__attach()`, route registration, static file serving. The main differences are middleware signature and response handling.
+
+This would let sites switch frameworks without changing build config or plugin setup. brookebrodack-dev could stay on Elysia while briantakita.me uses Hono, sharing the same build layer.
+
+Could we move the relysjs and rhonojs logic into rebuildjs as extensions and optional dependencies.
+Keeping relysjs and rhonojs as thin packages that makes dependencies required and imports the rebuildjs/relysjs or rebuildjs/rhonojs?
 <!-- /agent:exchange -->

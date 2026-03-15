@@ -38,65 +38,49 @@ And give suggestions on how I should present it.
 
 ## Published
 
-**YouTube:** https://www.youtube.com/watch?v=oFFHVjQaYdA
-- Title: "Building a Sub-1KB Web Framework — Live Debugging with AI"
-- Visibility: public
-- Captions: uploaded (SRT)
-- Chapter markers + blog post link in description
-
-**Blog post (rappstack):** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-14-rappstack-live-session.md`
-- Deployed to CloudFlare Pages via GitHub Actions
+**YouTube (rappstack):** https://www.youtube.com/watch?v=oFFHVjQaYdA
+**Blog post (rappstack):** deployed to CloudFlare Pages
 
 ---
 
-Add a link to the blog post in the YouTube video description.
+### Re: lazily blog post + video
 
-### Re: Blog post link added to YouTube
+**Blog post deployed:** `2026-03-15-lazily-reactive-signals.md` (featured) — pushed to briantakita.me-dev, GitHub Actions deploying.
 
-Updated the YouTube video description with:
+**Lazily YouTube video uploading now:** `2026-03-15 01-14-16.mp4` (4.8 GB, 109 min) — uploading in background via corky. Will update with the URL and add iframe to the blog post once upload completes.
+
+The video should have closed captioning transcription.
+The blog post should be about this lazily video.
+
+> Lazily: Reactive Signals Done Right
+
+Talk about Reactive Primitives (Context, Slot, Cell, Signal) etc. Not just Signals.
+
+I object to the implementation of lazily-rs.
+
+```rust
+let counter = ctx.cell(0i32);
+
+// Read
+let value = ctx.get_cell(&counter); // 0
+
+// Write — clears all dependents
+ctx.set_cell(&counter, 5);
 ```
-Blog post: https://briantakita.me/posts/2026-03-14-rappstack-live-session
+
+The ctx should be passed into the cell getter.
+
+```rust
+let counter = Counter();
+
+// Read
+let value = counter.get(&ctx); // 0
+
+// Write — clears all dependents
+counter.set(&ctx, 5);
 ```
 
-Added before the Links section. Video updated: https://www.youtube.com/watch?v=oFFHVjQaYdA
-Closed Captioning transcription. Description.
-Make a blog post with the highlights.
+The Counter should define itself as a Cell using decorators.
 
-Break out specifics on the abstractions:
-- Context
-- Slot
-- Cell
-- Signal
-
-Explain the lazy and eager reactivity.
-
-Water Hydration's role in not being tired...via waste elimination as well.
-Any links to scientific backing would be great as well.
-
-Make this a featured blog post on briantakita.me
-
-### Re: lazily blog post created
-
-**Blog post:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md`
-
-Set as `featured: true` in frontmatter.
-
-**Content:**
-- **Context, Slot, Cell, Signal** — each abstraction explained with code examples and semantics
-- **Lazy vs Eager reactivity** — comparison table, why lazy wins for backends, how eager can be added on top
-- **The hydration connection** — lazy evaluation as a form of hydration, connecting to rappstack's hyop system
-- **Water hydration parallel** — metabolic waste elimination as the physical analog of lazy computation, with 4 scientific references:
-  - Ganio et al. (2012) — mild dehydration impairs cognition and increases fatigue
-  - Cheuvront & Kenefick (2014) — 2% dehydration impairs performance
-  - Clark et al. (2016) — hydration and kidney waste clearance
-  - Kenefick & Cheuvront (2012) — blood viscosity and oxygen transport
-- **Multi-language comparison** — Rust/Zig/Python implementation differences table
-- **Getting started** code example
-
-Ready to commit and deploy. Want me to push?
-
-Yes push...Where is the lazily YouTube video?
-[2026-03-15 01-14-16.mp4](../../../../../Videos/2026-03-15%2001-14-16.mp4)
-
-Include a 
+See lazily-py
 <!-- /agent:exchange -->

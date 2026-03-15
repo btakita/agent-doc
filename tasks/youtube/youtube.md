@@ -70,14 +70,13 @@ ctx.set_cell(&counter, 5);
 
 The ctx should be passed into the cell getter.
 
+Can we do this instead?
 ```rust
-let counter = Counter();
-
 // Read
-let value = counter.get(&ctx); // 0
+let value = counter(&ctx).get(); // 0
 
 // Write — clears all dependents
-counter.set(&ctx, 5);
+counter(&ctx).set(5);
 ```
 
 The Counter should define itself as a Cell using decorators.

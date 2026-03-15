@@ -183,4 +183,35 @@ client_secret_cmd = "pass google/youtube/client_secret"
 Could you add this section to `/home/brian/Documents/mail/.corky.toml`? Once it's there I'll run auth and upload immediately.
 
 Done
+
+### Re: YouTube auth attempt
+
+Still failing — `.corky.toml` currently only contains:
+
+```toml
+[profiles.btakita.youtube]
+channel_id = "UC3gg23rxm1sM43sQWRGKEqQ"
+```
+
+The `[youtube]` section with `client_id_cmd`/`client_secret_cmd` isn't there yet. This is a separate top-level section from `[profiles.btakita.youtube]`. The file needs both:
+
+```toml
+[youtube]
+client_id_cmd = "pass google/youtube/client_id"
+client_secret_cmd = "pass google/youtube/client_secret"
+
+[profiles.btakita.youtube]
+channel_id = "UC3gg23rxm1sM43sQWRGKEqQ"
+```
+
+Want me to add the `[youtube]` section to the file for you? I just need to know the correct `pass` paths for your Google OAuth credentials.
+
+Look in /home/brian/work/btakita/agent-loop/mail/.corky.toml
+
+```
+[youtube]
+client_id_cmd = "pass corky/gmail/client_id"
+client_secret_cmd = "pass corky/gmail/client_secret"
+sync_days = 3650
+```
 <!-- /agent:exchange -->

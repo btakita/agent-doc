@@ -47,4 +47,7 @@ This placeholder would move as more is sent to the agent session.
 
 If lazily-rs would be useful for reactive tracking, please update the lazily-rs.md tasks.
 lazily-rs.md should've been setup with agent:exchange...not agent:input and  agent:output
+
+This file was externally edited. It should have been edited in process via the CRDT. Why did the external edit occur?
+Write tests. Fix in agent-doc.
 <!-- /agent:exchange -->

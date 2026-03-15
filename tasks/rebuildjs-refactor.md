@@ -97,11 +97,19 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**Bugfixes committed and pushed:**
-- drmanny-dev — esbuild plugin order fix
-- brookebrodack-dev — hono externals + remaining Elysia→Hono migration in nested submodules (domain--server, ui--server, app/brookebrodack-site)
+**npm packages** (published to npm): Yes, all released.
+- rebuildjs 0.71.0
+- relysjs 1.21.76
+- rhonojs 0.1.2
 
-Parent submodule pointers staged. All rappstack apps are now committed, pushed, and working.
+**rappstack apps** (committed + pushed to git): Yes, all done.
+- cogov-dev — pushed
+- drmanny-dev — pushed (+ plugin order bugfix)
+- herbaliciousbliss-dev — pushed
+- brookebrodack-dev — pushed (+ Elysia→Hono migration + hono externals fix)
+- briantakita.me-dev — pushed
 
-Are all of the rappstack apps released?
+**Deployments:** Only briantakita.me was discussed for deploy (Cloudflare Pages). The other apps would need their own deploy processes if they have production environments. Do you want to deploy any of them?
+
+audit docs. including this doc
 <!-- /agent:exchange -->

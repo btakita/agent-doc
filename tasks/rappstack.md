@@ -16,17 +16,13 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Local build test
+### Re: Streaming errors
 
-**herbaliciousbliss-dev build hangs locally.** `bun build.ts` runs indefinitely (tested with 120s timeout) — no output, no error, just hangs. briantakita.me-dev builds fine in ~30s with the same `rhonojs` v0.1.1.
+I can't access CI logs via `gh run view --log` while the run is in progress — GitHub's API only serves completed run logs. The run (23099251298) is still in_progress (9+ min). The background fix agent pushed "create public symlinks in CI and fix esbuild plugin order."
 
-The hang is NOT the `rhonojs__ready__wait` (that's already skipped). Something in the esbuild build itself hangs — likely the `esmcss_esbuild_plugin` or `rebuild_tailwind_plugin` during CSS processing.
+For the herbaliciousbliss-dev build hang — I was running `bun run build` which only shows output on completion/error. The build is hanging silently, not streaming errors.
 
-**drmanny-dev** fix agent is still working on the missing files.
+Let me wait for the drmanny-dev run to complete and check. For herbaliciousbliss, I'll try capturing output differently.
 
-Investigating the herbaliciousbliss build hang now.
-
-Errors are streaming. Why are you not detecting the streaming errors?
-The process has not ended by there are many errors.
-https://github.com/btakita/drmanny-dev/actions/runs/23099251298/job/67096897494
+The error should immediately end the build process.
 <!-- /agent:exchange -->

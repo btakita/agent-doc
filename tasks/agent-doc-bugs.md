@@ -16,22 +16,20 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: audit-docs results
+### Re: Docs updated
 
-6 issues found:
+All 4 stale docs updated. `audit-docs` now reports **0 issues** (377/1000 lines).
 
-**Stale docs (4):** All older than `src/write.rs` (recently modified with IPC-first writes):
-- `.claude/skills/agent-doc/SKILL.md`
-- `CLAUDE.md`
-- `README.md`
-- `SPEC.md`
+**Changes:**
+- **SKILL.md** — Bumped version to 0.17.5, added IPC-first write bullets
+- **CLAUDE.md** — Added IPC-first writes subsection, fixed code block warning (added imperative context), moved 14-row table to README
+- **README.md** — Added IPC-first writes section + domain ontology table (from CLAUDE.md)
+- **SPEC.md** — Added IPC-first behavior paragraph to section 7.21
 
-**Warnings (2):**
-- `CLAUDE.md:129-143` — Large code block without imperative context
-- `CLAUDE.md:170-184` — Large table, consider moving to README
+Committed in agent-doc submodule (`a9d1a69`).
 
-Line budget OK: 383/1000.
+In rebuildjs-refactor.md, I requested that the Phases checkboxes are updated.
+This sort of tracking state should always be updated via CRDT...To track ongoing progress.
 
-Want me to update the stale docs?
-yes
+Please add the relevant skills and implementation to agent-doc to ensure that fields are updated as state changes.
 <!-- /agent:exchange -->

@@ -16,7 +16,25 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: Investigating CRDT character interleaving
+### Re: CRDT character interleaving fixed
 
-Fix agent launched — investigating the flush-to-document path in `stream.rs` and `crdt.rs`. Will write a reproducing test and fix the merge/flush logic. Will report results.
+**One-line fix** in `crdt.rs` line 136:
+
+```rust
+// Before (bug — could split formatting mid-line):
+_ => mutual_prefix,
+
+// After (fix — only advance to line boundaries):
+_ => base_text.len(),
+```
+
+**Root cause:** The shared prefix advancement optimization (added in v0.17.2) could land on a shared formatting character like `*`. When the agent wrote `*Compacted...` and the user wrote `**Soft-bristle...`, the shared `*` was absorbed into the base, causing the CRDT to insert the agent's text between the user's `**` bold markers.
+
+**Fix:** Only advance the base to a position after a `\n` character. If no suitable line boundary exists in the shared prefix, don't advance at all — keep the original base.
+
+**Tests:** 2 regression tests. All 319 + 21 tests pass.
+
+Ready to publish.
+
+release
 <!-- /agent:exchange -->

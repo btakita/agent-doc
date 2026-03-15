@@ -43,9 +43,11 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
 /// Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks from an agent response.
 ///
 /// Content outside patch blocks is collected as "unmatched" and returned separately.
+/// Markers inside fenced code blocks (``` or ~~~) and inline code spans are ignored.
 pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
     let bytes = response.as_bytes();
     let len = bytes.len();
+    let code_ranges = component::find_code_ranges(response);
     let mut patches = Vec::new();
     let mut unmatched = String::new();
     let mut pos = 0;
@@ -54,6 +56,12 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
     while pos + 4 <= len {
         if &bytes[pos..pos + 4] != b"<!--" {
             pos += 1;
+            continue;
+        }
+
+        // Skip markers inside code regions
+        if code_ranges.iter().any(|&(start, end)| pos >= start && pos < end) {
+            pos += 4;
             continue;
         }
 
@@ -94,16 +102,16 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 unmatched.push_str(trimmed_before);
             }
 
-            // Find the matching close: <!-- /patch:name -->
+            // Find the matching close: <!-- /patch:name --> (skipping code blocks)
             let close_marker = format!("<!-- /patch:{} -->", name);
-            if let Some(close_pos) = response[content_start..].find(&close_marker) {
-                let content = &response[content_start..content_start + close_pos];
+            if let Some(close_pos) = find_outside_code(&close_marker, response, content_start, &code_ranges) {
+                let content = &response[content_start..close_pos];
                 patches.push(PatchBlock {
                     name: name.to_string(),
                     content: content.to_string(),
                 });
 
-                let mut end = content_start + close_pos + close_marker.len();
+                let mut end = close_pos + close_marker.len();
                 if end < len && bytes[end] == b'\n' {
                     end += 1;
                 }
@@ -322,6 +330,22 @@ fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+/// Find `needle` in `haystack` starting at `from`, skipping occurrences inside code ranges.
+/// Returns the byte offset of the match within `haystack` (absolute, not relative to `from`).
+fn find_outside_code(needle: &str, haystack: &str, from: usize, code_ranges: &[(usize, usize)]) -> Option<usize> {
+    let mut search_start = from;
+    loop {
+        let rel = haystack[search_start..].find(needle)?;
+        let abs = search_start + rel;
+        if code_ranges.iter().any(|&(start, end)| abs >= start && abs < end) {
+            // Inside a code block — skip past this occurrence
+            search_start = abs + needle.len();
+            continue;
+        }
+        return Some(abs);
+    }
+}
+
 fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     let len = bytes.len();
     let mut i = start;
@@ -520,5 +544,109 @@ All green.
         let info = template_info(&doc_path).unwrap();
         assert!(!info.template_mode);
         assert!(info.components.is_empty());
+    }
+
+    #[test]
+    fn parse_patches_ignores_markers_in_fenced_code_block() {
+        let response = "\
+<!-- patch:exchange -->
+Here is how you use component markers:
+
+```markdown
+<!-- agent:exchange -->
+example content
+<!-- /agent:exchange -->
+```
+
+<!-- /patch:exchange -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "exchange");
+        assert!(patches[0].content.contains("```markdown"));
+        assert!(patches[0].content.contains("<!-- agent:exchange -->"));
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn parse_patches_ignores_patch_markers_in_fenced_code_block() {
+        // Patch markers inside a code block should not be treated as real patches
+        let response = "\
+<!-- patch:exchange -->
+Real content here.
+
+```markdown
+<!-- patch:fake -->
+This is just an example.
+<!-- /patch:fake -->
+```
+
+<!-- /patch:exchange -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1, "should only find the outer real patch");
+        assert_eq!(patches[0].name, "exchange");
+        assert!(patches[0].content.contains("<!-- patch:fake -->"), "code block content should be preserved");
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn parse_patches_ignores_markers_in_tilde_fence() {
+        let response = "\
+<!-- patch:status -->
+OK
+<!-- /patch:status -->
+
+~~~
+<!-- patch:fake -->
+example
+<!-- /patch:fake -->
+~~~
+";
+        let (patches, _unmatched) = parse_patches(response).unwrap();
+        // Only the real patch should be found; the fake one inside ~~~ is ignored
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "status");
+    }
+
+    #[test]
+    fn parse_patches_ignores_closing_marker_in_code_block() {
+        // The closing marker for a real patch is inside a code block,
+        // so the parser should skip it and find the real closing marker outside
+        let response = "\
+<!-- patch:exchange -->
+Example:
+
+```
+<!-- /patch:exchange -->
+```
+
+Real content continues.
+<!-- /patch:exchange -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "exchange");
+        assert!(patches[0].content.contains("Real content continues."));
+    }
+
+    #[test]
+    fn parse_patches_normal_markers_still_work() {
+        // Sanity check: normal patch parsing without code blocks still works
+        let response = "\
+<!-- patch:status -->
+All systems go.
+<!-- /patch:status -->
+<!-- patch:log -->
+- Entry 1
+<!-- /patch:log -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 2);
+        assert_eq!(patches[0].name, "status");
+        assert_eq!(patches[0].content, "All systems go.\n");
+        assert_eq!(patches[1].name, "log");
+        assert_eq!(patches[1].content, "- Entry 1\n");
+        assert!(unmatched.is_empty());
     }
 }

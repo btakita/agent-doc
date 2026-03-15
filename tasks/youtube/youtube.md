@@ -41,22 +41,21 @@ And give suggestions on how I should present it.
 
 ---
 
-### Re: lazily video + blog post
-
-**Blog post deployed:** `2026-03-15-lazily-reactive-signals.md` (featured)
-**Whisper SRT:** `tasks/youtube/2026-03-15-lazily-session.srt` (87K, ready)
-**YouTube upload:** still in progress (4.8 GB)
-
----
-
-> **The programming parallel is exact:** Eager reactive systems are like a dehydrated body...
-
-Remove...not a good analogy
-
-### Re: Analogy removed
-
-Removed the "dehydrated body = eager reactive" analogy from the blog post. The water hydration section still stands on its own (scientific backing for hydration → waste elimination → energy) without the forced programming parallel.
-
-YouTube upload still in progress — will add captions + iframe once it completes.
 All outbound links should use tb_a_ functions...target blank.
+
+See /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/lib/ui--server--briantakita/anchor/atb.ts
+
+### Re: tb_a_ links
+
+The lazily blog post is currently a plain `.md` file — `tb_a_` functions aren't available in raw markdown. Two options:
+
+1. **Convert to `.md.ts`** — use the factory function pattern like the older posts. This gives access to `tb_a_` imports from `atb.ts` (e.g., `rmemo__tb_a_`, `relementjs__tb_a_`, `rappstack__tb_a_`).
+
+2. **Use HTML in markdown** — `<a href="..." target="_blank" rel="noopener">text</a>` inline. Works but verbose and not DRY.
+
+The `.md.ts` route is more consistent with the existing architecture. Should I convert the lazily blog post to `.md.ts` format and wire up the `tb_a_` imports? Some links (lazily-rs, lazily-zig, lazily-py, agent-doc) aren't in `atb.ts` yet — I'd add them.
+
+Yes.
+
+**YouTube upload status:** still uploading (4.8 GB file).
 <!-- /agent:exchange -->

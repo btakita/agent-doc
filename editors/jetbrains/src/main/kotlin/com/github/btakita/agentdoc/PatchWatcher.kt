@@ -121,6 +121,16 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
             val content = document.text
+
+            // Full content replacement (append-mode documents without component markers)
+            if (!patch.fullContent.isNullOrEmpty()) {
+                if (patch.fullContent != content) {
+                    document.setText(patch.fullContent)
+                }
+                return@runWriteCommandAction
+            }
+
+            // Component-based patching (template/stream-mode documents)
             var result = content
 
             // Apply frontmatter patch first (before component patches)
@@ -237,6 +247,7 @@ data class IpcPatch(
     val patches: List<ComponentPatch>,
     val unmatched: String,
     val frontmatter: String?,
+    val fullContent: String?,
 )
 
 data class ComponentPatch(
@@ -253,6 +264,7 @@ fun parsePatchJson(json: String): IpcPatch? {
         val file = extractStringField(json, "file") ?: return null
         val unmatched = extractStringField(json, "unmatched") ?: ""
         val frontmatter = extractStringField(json, "frontmatter")
+        val fullContent = extractStringField(json, "fullContent")
 
         // Parse patches array
         val patchesStart = json.indexOf("\"patches\"")
@@ -278,7 +290,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             pos = objEnd + 1
         }
 
-        return IpcPatch(file, patches, unmatched, frontmatter)
+        return IpcPatch(file, patches, unmatched, frontmatter, fullContent)
     } catch (e: Exception) {
         return null
     }

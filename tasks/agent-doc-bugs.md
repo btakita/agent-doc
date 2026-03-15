@@ -7,23 +7,20 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Duplicate component tags bug
+### CRDT corruption detected (again)
 
-**Root cause:** `template.rs::parse_patches()` had no code-block awareness. When a response contained component/patch markers inside a fenced code block (e.g., showing examples), it treated them as real patch directives — creating duplicate component tags after CRDT merge.
+The previous write cycle produced garbled text (lines 23-28) — same character-level interleaving bug. The CRDT merge log showed `File was modified during response generation. CRDT merging...` which indicates concurrent user edits triggered the merge path, and the merge produced corrupted output.
 
-The component parser (`component.rs::parse()`) already correctly skips markers inside code blocks via `find_code_ranges()`. The template patch parser did not.
+This is another instance of the baseline/CRDT state mismatch issue. The fix from v0.17.6 (using fresh CRDT state from baseline) didn't fully resolve it — the character-level diff still produces overlapping ops in some cases.
 
-**Fix (template.rs):**
-1. Opening markers: Added `find_code_ranges()` call + check to skip markers inside code ranges
-2. Closing markers: New `find_outside_code()` helper prevents closing markers in code blocks from prematurely terminating real patch blocks
+**Clean document restored.** The template patch parser code-block fix is still in the codebase (5 new tests, all 351 pass).
 
-**5 new tests:**
-- Markers inside ``` blocks are preserved as content (not parsed as patches)
-- Same for ~~~ blocks
-- Closing marker insid cdblckdoen'teminrelp
-Nralmarkerssill(ersngur)
+Shall I:
+1. Release v0.17.8 with the template parser fix (code-block awareness)
+2. Deep-dive the remaining CRDT merge corruption
 
-All 351 passclippy cle.
+Or both?
 
-Shall I releasev0.17.8 with this ?<!-- /agent:exchange -->
+Both
+<!-- /agent:exchange -->
 ,.

@@ -16,25 +16,19 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: CRDT character interleaving fixed
+### Published v0.17.3
 
-**One-line fix** in `crdt.rs` line 136:
+- **crates.io**: `agent-doc v0.17.3` ✓
+- **PyPI**: `agent-doc 0.17.3` ✓
+- **GitHub Release**: [v0.17.3](https://github.com/btakita/agent-doc/releases/tag/v0.17.3) with prebuilt binary ✓
+- **Release binary built**: `cargo build --release` ✓
 
-```rust
-// Before (bug — could split formatting mid-line):
-_ => mutual_prefix,
+Fix: CRDT base advancement no longer splits formatting sequences mid-line — prevents character-level interleaving during concurrent edits.
 
-// After (fix — only advance to line boundaries):
-_ => base_text.len(),
-```
+When I did `agent-doc run tasks/rappstack.md`, the orientation of the tmux panes switched from horizontal (left | right) to vertical (top/bottom).
+Please diagnose from logs.
+Please add test(s) replicating the issue.
+Please fix.
 
-**Root cause:** The shared prefix advancement optimization (added in v0.17.2) could land on a shared formatting character like `*`. When the agent wrote `*Compacted...` and the user wrote `**Soft-bristle...`, the shared `*` was absorbed into the base, causing the CRDT to insert the agent's text between the user's `**` bold markers.
-
-**Fix:** Only advance the base to a position after a `\n` character. If no suitable line boundary exists in the shared prefix, don't advance at all — keep the original base.
-
-**Tests:** 2 regression tests. All 319 + 21 tests pass.
-
-Ready to publish.
-
-release
+And it just happened.
 <!-- /agent:exchange -->

@@ -16,12 +16,17 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Latest CI failures
+### Re: Local build test
 
-**drmanny-dev** — `fa_waves_sine.svg` and `peak-existence.mp4` missing. Fix agent working on it.
+**herbaliciousbliss-dev build hangs locally.** `bun build.ts` runs indefinitely (tested with 120s timeout) — no output, no error, just hangs. briantakita.me-dev builds fine in ~30s with the same `rhonojs` v0.1.1.
 
-**herbaliciousbliss-dev** — `relement__use` IS in both `index.server.ts` files (confirmed commit `8dc5072` checked out). The `p is not a function` error persists — deeper esbuild module graph issue. The minified bundle creates separate module instances despite `relement__use`.
+The hang is NOT the `rhonojs__ready__wait` (that's already skipped). Something in the esbuild build itself hangs — likely the `esmcss_esbuild_plugin` or `rebuild_tailwind_plugin` during CSS processing.
 
-Both need deeper investigation. Want me to dig into herbaliciousbliss-dev's esbuild config?
-Yes. Does the build work locally?
+**drmanny-dev** fix agent is still working on the missing files.
+
+Investigating the herbaliciousbliss build hang now.
+
+Errors are streaming. Why are you not detecting the streaming errors?
+The process has not ended by there are many errors.
+https://github.com/btakita/drmanny-dev/actions/runs/23099251298/job/67096897494
 <!-- /agent:exchange -->

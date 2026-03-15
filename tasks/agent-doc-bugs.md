@@ -15,23 +15,22 @@ Corky should always publish public videos...unless explicitly to private.
 ```
 
 <!-- agent:exchange -->
+**CRDT corruption in lazily-rs.md:** This is a concurrent editing race. You were adding a prompt while the agent was writing a response to the same `agent:exchange` section. The CRDT merge produced a fragment `"> cisions, commands, related projects"` — likely a truncated word from "decisions" or similar.
 
-### Re: External edit still happening
+**Analysis:** The `--stream` CRDT merge uses a 3-way diff (baseline vs yours vs agent's). When both sides edit the same region (inside `agent:exchange`), the character-level diff can produce interleaved fragments. This was the same class of bug fixed in v0.17.3 (character interleaving in concurrent edits).
 
-**Why:** The `.agent-doc/patches/` directory exists but is empty — the JetBrains plugin isn't consuming IPC patches. `try_ipc()` writes a patch JSON file, waits for the plugin to consume it (poll loop), times out after ~500ms, then falls back to disk write. The disk write triggers the "externally modified" dialog.
+**Questions to investigate:**
+1. Was this using agent-doc v0.17.3+ (which has the line-level diffing fix)?
+```
+❯ agent-doc --version
+agent-doc 0.17.6`
+```
+2. Was the corruption at a section boundary or mid-paragraph?
+Section boundary
+3. Can we reproduce by having both sides edit the same `agent:exchange` block simultaneously?
+I don't know. Probably not reliably.
 
-**Root cause:** The JetBrains `PatchWatcher` file watcher may not be running, or may not be watching this project's `.agent-doc/patches/` directory. The plugin needs to be active and watching for the IPC path to work.
+Want me to look at the lazily-rs.md git history to see the exact merge that corrupted?
 
-**To verify:** Check if the JetBrains plugin is installed and enabled. The `PatchWatcher` should start automatically when IDEA opens a project with `.agent-doc/patches/`.
-
-**lazily-rs.md:** Updated to use `agent:exchange` + added reactive tracking context.
-
-Want me to investigate the JetBrains plugin's PatchWatcher to see why it's not consuming patches?
-
-In tasks/lazily-rs.md, I was adding prompt after the lazily-rs section.
-Claude agent was adding response in the same area.
-
-> cisions, commands, related projects
-
-Looks like the response got a bit corrupted.
+Yes
 <!-- /agent:exchange -->

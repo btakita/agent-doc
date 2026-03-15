@@ -111,6 +111,40 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         base_text = ours_text.to_string();
     }
 
+    // Advance base to the common prefix of ours and theirs when it extends
+    // beyond the current base.
+    //
+    // When both ours and theirs independently added the same text beyond the
+    // stale base (e.g., both contain a user prompt that the base doesn't have),
+    // the CRDT treats each insertion as independent and includes both, causing
+    // duplication. Fix: use the common prefix of ours and theirs as the effective
+    // base, so shared additions are not treated as independent insertions.
+    //
+    // This handles the common pattern where:
+    //   base   = "old content"
+    //   ours   = "old content + user prompt + agent response"
+    //   theirs = "old content + user prompt + small edit"
+    // Without fix: user prompt appears twice (from both sides).
+    // With fix: base advances to "old content + user prompt", ours' diff is
+    //           just the agent response, theirs' diff is just the small edit.
+    let mutual_prefix = common_prefix_len(ours_text, theirs_text);
+    if mutual_prefix > base_text.len() {
+        // Snap to a line boundary to avoid splitting mid-line
+        let snap = &ours_text[..mutual_prefix];
+        let snapped = match snap.rfind('\n') {
+            Some(pos) if pos >= base_text.len() => pos + 1,
+            _ => mutual_prefix,
+        };
+        if snapped > base_text.len() {
+            eprintln!(
+                "[crdt] Advancing base to shared prefix (base_len={} → {})",
+                base_text.len(),
+                snapped
+            );
+            base_text = ours_text[..snapped].to_string();
+        }
+    }
+
     // Compute diffs from base to each side
     let ours_ops = compute_edit_ops(&base_text, ours_text);
     let theirs_ops = compute_edit_ops(&base_text, theirs_text);
@@ -408,5 +442,92 @@ mod tests {
         let ours = "Original.\nAgent added.\n";
         let merged = merge(Some(&state), ours, base).unwrap();
         assert_eq!(merged, ours);
+    }
+
+    /// Regression test: CRDT merge should not duplicate user prompt when both
+    /// ours and theirs contain the same text added since the base state.
+    ///
+    /// Scenario (brookebrodack-dev.md duplication bug):
+    /// 1. CRDT base = exchange content from a previous cycle (no user prompt)
+    /// 2. User adds prompt to exchange → saved as baseline
+    /// 3. Agent generates response, content_ours = baseline + response (has user prompt)
+    /// 4. User makes a small edit during response generation → content_current (has user prompt too)
+    /// 5. CRDT merge: both ours and theirs have the user prompt relative to stale base
+    /// 6. BUG: user prompt appears twice in merged output
+    #[test]
+    fn merge_stale_base_no_duplicate_user_prompt() {
+        // CRDT base from a previous cycle — does NOT have the user's current prompt
+        let base_content = "\
+## Assistant
+
+Previous response content.
+
+Committed and pushed.
+
+";
+        let base_doc = CrdtDoc::from_text(base_content);
+        let base_state = base_doc.encode_state();
+
+        // User adds prompt after base was saved
+        let user_prompt = "\
+Opening a video a shows video a.
+Closing video a then opening video b start video b but video b is hidden.
+Closing video b then reopening video b starts and shows video b. video b is visible.
+";
+
+        // content_ours: base + user prompt + agent response (from run_stream with full exchange)
+        let ours = format!("\
+{}{}### Re: Close A → Open B still hidden
+
+Added explicit height and visibility reset.
+
+Committed and pushed.
+
+", base_content, user_prompt);
+
+        // content_current: base + user prompt + minor user edit (e.g., added a blank line)
+        let theirs = format!("\
+{}{}
+", base_content, user_prompt);
+
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        // User prompt should appear exactly ONCE
+        let prompt_count = merged.matches("Opening a video a shows video a.").count();
+        assert_eq!(
+            prompt_count, 1,
+            "User prompt duplicated! Appeared {} times in:\n{}",
+            prompt_count, merged
+        );
+
+        // Agent response should be present
+        assert!(
+            merged.contains("### Re: Close A → Open B still hidden"),
+            "Agent response missing from merge:\n{}", merged
+        );
+    }
+
+    /// Regression test: When CRDT base is stale and both sides added the same text
+    /// at the same position, the merge should not duplicate it.
+    #[test]
+    fn merge_stale_base_same_insertion_both_sides() {
+        let base_content = "Line 1\nLine 2\n";
+        let base_doc = CrdtDoc::from_text(base_content);
+        let base_state = base_doc.encode_state();
+
+        // Both sides added the same text (user prompt) + ours adds more
+        let shared_addition = "User typed this.\n";
+        let ours = format!("{}{}Agent response.\n", base_content, shared_addition);
+        let theirs = format!("{}{}", base_content, shared_addition);
+
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        let count = merged.matches("User typed this.").count();
+        assert_eq!(
+            count, 1,
+            "Shared text duplicated! Appeared {} times in:\n{}",
+            count, merged
+        );
+        assert!(merged.contains("Agent response."), "Agent text missing:\n{}", merged);
     }
 }

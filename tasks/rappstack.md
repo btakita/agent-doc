@@ -16,24 +16,11 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Both fixed
+### Re: pe.briantakita.me styling
 
-**Root cause (same for both):** The `ready__wait` call is NOT just for watch mode — the `rebuild_tailwind_plugin` reactive system needs it to finish PostCSS/Tailwind CSS processing before exit. Skipping it caused `process.exit(0)` to fire before CSS was written and before esbuild output was flushed.
+**herbaliciousbliss-dev: ✅ DEPLOYED** — CSS fix worked, CI passed.
 
-**herbaliciousbliss-dev:** Made `rhonojs__ready__wait(MAX_INT32)` unconditional. CSS now 32KB (was 623 bytes). Added `run()` wrappers matching briantakita.me-dev pattern.
+**drmanny-dev: ❌ prerender fails** with `c.get is not a function` — same module duplication issue as herbaliciousbliss-dev had. Fix agent launched — applying `server_external_()` merge (root + local node_modules) to prevent duplicate bundling.
 
-**drmanny-dev:** Made `relysjs__ready__wait(300_000)` unconditional. `dist/server/index.js` (4.5MB) now produced.
-
-Both CI runs in progress. This should be the final fix.
-
-| App | URL | CI |
-|-----|-----|-----|
-| briantakita.me-dev | briantakita.me | ✅ |
-| prescience-notes-dev | pn.briantakita.me | ✅ |
-| brookebrodack-dev | brookebrodack.net | ✅ |
-| cogov-dev | cogov.me | ✅ |
-| herbaliciousbliss-dev | hb.briantakita.me | 🔄 CI running |
-| drmanny-dev | pe.briantakita.me | 🔄 CI running |
-
-Styling broken on https://pe.briantakita.me/
+Fixing now.
 <!-- /agent:exchange -->

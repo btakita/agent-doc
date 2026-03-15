@@ -16,25 +16,13 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: drmanny-dev fix pushed
+### Re: drmanny-dev DEPLOYED + image issue
 
-**Two fixes applied (same pattern as herbaliciousbliss):**
-1. `server_external_()` — merges root + local `node_modules/` to prevent module duplication
-2. `peakexistence_request_ctx__ensure` — uses `relysjs/server` directly (not `blog_request_ctx__ensure` which uses rhonojs internally). Eagerly inits `request_()` + `request_url_()`.
+**ALL 6 APPS CI GREEN!** drmanny-dev passed (run 23100495333).
 
-Build passes locally (200 on `curl localhost:4103/`). CI running (run 23100495333).
+**Image 404s:** The `esbuild-plugin-object-store-asset` generates hashed filenames (`peak-existence-thumbnail-E573CA32.webp`) but R2 has unhashed names (`image/peak-existence-thumbnail.webp`). Same issue cogov-dev had. Removing the plugin from drmanny-dev (like we did for cogov-dev).
 
-| App | URL | CI |
-|-----|-----|-----|
-| briantakita.me-dev | briantakita.me | ✅ |
-| prescience-notes-dev | pn.briantakita.me | ✅ |
-| brookebrodack-dev | brookebrodack.net | ✅ |
-| cogov-dev | cogov.me | ✅ |
-| herbaliciousbliss-dev | hb.briantakita.me | ✅ |
-| drmanny-dev | pe.briantakita.me | 🔄 CI running |
+**Image smoke tests:** Adding asset URL checks to all 6 sites' CI workflows.
 
-Images are not being served.
-https://assets.pe.briantakita.me/peak-existence-thumbnail-E573CA32.webp
-
-Please add tests for images in the gh actions smoke tests for all sites.
+Fix agent running in background.
 <!-- /agent:exchange -->

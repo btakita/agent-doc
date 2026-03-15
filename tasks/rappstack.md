@@ -16,13 +16,13 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Streaming errors
+### Re: Video uploaded + CI retriggered
 
-I can't access CI logs via `gh run view --log` while the run is in progress — GitHub's API only serves completed run logs. The run (23099251298) is still in_progress (9+ min). The background fix agent pushed "create public symlinks in CI and fix esbuild plugin order."
+**drmanny-dev:** Uploaded `peak-existence.mp4` (251 MB) to R2. Retriggered CI (run 23099460179). Asset download will now include the video.
 
-For the herbaliciousbliss-dev build hang — I was running `bun run build` which only shows output on completion/error. The build is hanging silently, not streaming errors.
+**herbaliciousbliss-dev:** Build hangs locally. The `p is not a function` prerender error in CI happens because the build produces broken output. Investigating.
 
-Let me wait for the drmanny-dev run to complete and check. For herbaliciousbliss, I'll try capturing output differently.
+**Re: "error should immediately end the build"** — The esbuild errors stream but don't terminate because `rebuildjs` uses `context().rebuild()` internally (even with `watch: false`), which doesn't auto-exit on errors like `build()` would.
 
-The error should immediately end the build process.
+Let's make `watch: false` use build instead of rebuild.
 <!-- /agent:exchange -->

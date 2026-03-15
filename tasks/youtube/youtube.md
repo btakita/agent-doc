@@ -75,4 +75,7 @@ The condensed cut kept 34:45 of 84:28. Here's what was trimmed and whether it ha
 - The "can't find my log" segment — shows real dev frustration but 6 minutes of it is slow
 
 The condensed cut captured the essential narrative. The full 84-minute version is only useful as a "raw uncut" archive for completeness.
+
+I will probably delete the source videos. Is there a good place to put the archive videos?
+How much will R2 cost per TB?
 <!-- /agent:exchange -->

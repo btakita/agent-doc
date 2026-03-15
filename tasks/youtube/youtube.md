@@ -163,4 +163,24 @@ Then `corky youtube publish` with the condensed video.
 Want me to go ahead and create the blog post draft now (leaving the YouTube embed as a placeholder)?
 
 Yes
+
+### Re: Blog post + YouTube status
+
+**Blog post created:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-14-rappstack-live-session.md`
+
+Covers: performance story (sub-1KB relementjs, 1.2KB–4.2KB real apps), architecture (domain/server/browser layers, hyop hydration), infrastructure migration (Contabo→CloudFlare, Elysia→Hono), ESBuild plugin system (.md.ts, .css.ts, .svg.ts), debugging with Claude Code, and reflections. Links to all relevant packages.
+
+YouTube embed is a placeholder — will be filled once uploaded.
+
+**YouTube still blocked:** `.corky.toml` only has `[profiles.btakita.youtube]` with `channel_id`. The `client_id_cmd`/`client_secret_cmd` need to go in a `[youtube]` section (not the profile). Corky looks for:
+
+```toml
+[youtube]
+client_id_cmd = "pass google/youtube/client_id"
+client_secret_cmd = "pass google/youtube/client_secret"
+```
+
+Could you add this section to `/home/brian/Documents/mail/.corky.toml`? Once it's there I'll run auth and upload immediately.
+
+Done
 <!-- /agent:exchange -->

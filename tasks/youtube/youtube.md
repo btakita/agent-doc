@@ -26,21 +26,26 @@ Note the frontmatter change.
 
 ---
 
-The blog post link is still truncated
-`https://briantakita.me/posts/2026-03-15-la...`
-
-### Re: YouTube truncation
-
-That's YouTube's default description display — it collapses long URLs to `...` in the unexpanded view. When a viewer clicks "...more" or "Show more" on the description, the full URL is visible and clickable.
-
-The full URL `https://briantakita.me/posts/2026-03-15-lazily-reactive-signals` is actually there in the description data — YouTube just truncates the *display* in the collapsed view. This is standard YouTube behavior for all URLs longer than ~40 characters.
-
 The url is truncated in full view.![img.png](img.png)
 
-Two options if you want it fully visible without expanding:
-1. **Use a URL shortener** — but that hides the destination
 url shortener seems to be the way to go. Or we can have a short url on briantakita.me
-2. **Move the blog post URL to the first line** — YouTube shows the first ~100 chars without truncation
 
-Want me to move the blog post URL to the top of the description?
+### Re: Short URL on briantakita.me
+
+A redirect on briantakita.me is the cleanest approach — you control it, it's branded, and it won't break. Options:
+
+1. **CloudFlare redirect rule** — add a rule in your CloudFlare dashboard: `briantakita.me/lazily` → `briantakita.me/posts/2026-03-15-lazily-reactive-signals` (301 redirect). Zero code, instant.
+
+2. **Route in the Hono app** — add a redirect route in the app code. More work but version-controlled.
+
+3. **`_redirects` file** — if CloudFlare Pages supports it (it does): add `briantakita.me/_redirects` with `/lazily /posts/2026-03-15-lazily-reactive-signals 301`.
+
+Option 1 is fastest. Option 3 is version-controlled and deploys with the site.
+
+For the YouTube description, the URL would become: `https://briantakita.me/lazily` (25 chars — no truncation).
+
+Want me to set up option 3 (the `_redirects` file) and update the YouTube description? Or do you prefer a different short path?
+
+Yes...`_redirects`.
+/2026-03-15-lazily -> /posts/2026-03-15-lazily-reactive-signals
 <!-- /agent:exchange -->

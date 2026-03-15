@@ -41,69 +41,22 @@ And give suggestions on how I should present it.
 
 ---
 
-### Re: lazily blog post + video
+### Re: lazily video + blog post
 
 **Blog post deployed:** `2026-03-15-lazily-reactive-signals.md` (featured)
-
-**Lazily YouTube video:** uploading (4.8 GB) + Whisper transcription running (109 min)
+**Whisper SRT:** `tasks/youtube/2026-03-15-lazily-session.srt` (87K, ready)
+**YouTube upload:** still in progress (4.8 GB)
 
 ---
 
-I object to the implementation of lazily-rs.
-
-```rust
-let counter = ctx.cell(0i32);
-
-// Read
-let value = ctx.get_cell(&counter); // 0
-
-// Write — clears all dependents
-ctx.set_cell(&counter, 5);
-```
-
-The ctx should be passed into the cell getter.
-
-Can we do this instead?
-```rust
-// Read
-let value = counter(&ctx).get(); // 0
-
-// Write — clears all dependents
-counter(&ctx).set(5);
-```
-
-The Counter should define itself as a Cell using decorators.
-
-See lazily-py
-
-### Re: Revised API — callable pattern
-
-Good refinement. `counter(&ctx)` returning a bound reference is closer to lazily-py where `counter(ctx)` calls the slot/cell with context. In Rust this would use `Fn` trait:
-
-```rust
-// Cell implements Fn(&Context) -> CellRef<T>
-let counter = Cell::new(0i32);
-
-let value = counter(&ctx).get();  // 0
-counter(&ctx).set(5);             // clears dependents
-
-// Slot implements Fn(&Context) -> T
-let doubled = Slot::new(|ctx| counter(ctx).get() * 2);
-
-doubled(&ctx)  // 10 — lazy, computes on access
-```
-
-`counter(&ctx)` returns a `CellRef<'_, T>` (borrows the context), giving `.get()` and `.set()` methods. This is ergonomic and Rustic — the `Fn` trait makes cells/slots callable like functions.
-
-**Tradeoff vs `counter.get(&ctx)`:**
-- `counter(&ctx).get()` — two-step: bind context, then operate. More composable (can pass the bound ref around)
-- `counter.get(&ctx)` — one-step: simpler for single operations
-
-The callable pattern wins for chaining and consistency with lazily-py. Updated the blog post examples accordingly.
-
-**Background tasks still running** — YouTube upload + Whisper transcription. Will update when complete.
-
-> **The programming parallel is exact:** Eager reactive systems are like a dehydrated body — they do unnecessary work (waste products) that accumulates and slows everything down. Lazy evaluation is proper hydration — compute only what's needed, eliminate the rest.
+> **The programming parallel is exact:** Eager reactive systems are like a dehydrated body...
 
 Remove...not a good analogy
+
+### Re: Analogy removed
+
+Removed the "dehydrated body = eager reactive" analogy from the blog post. The water hydration section still stands on its own (scientific backing for hydration → waste elimination → energy) without the forced programming parallel.
+
+YouTube upload still in progress — will add captions + iframe once it completes.
+All outbound links should use tb_a_ functions...target blank.
 <!-- /agent:exchange -->

@@ -97,11 +97,11 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**brookebrodack-dev fixed.** Root cause: Hono was bundled into esbuild output (not treated as external), creating two Hono class copies. The `instanceof Hono` check in rhonojs `app__attach()` failed, so sub-apps went through `app.use()` instead of `app.route()`.
+**Bugfixes committed and pushed:**
+- drmanny-dev — esbuild plugin order fix
+- brookebrodack-dev — hono externals + remaining Elysia→Hono migration in nested submodules (domain--server, ui--server, app/brookebrodack-site)
 
-Fix: Added `'hono'` and `'hono/*'` to server externals in `build.ts`. Server starts cleanly now.
+Parent submodule pointers staged. All rappstack apps are now committed, pushed, and working.
 
-This was a deployment-specific issue — briantakita.me-dev has hono hoisted to workspace root `node_modules/`, so `server_external_()` picks it up automatically. brookebrodack-dev doesn't hoist it.
-
-Release
+Are all of the rappstack apps released?
 <!-- /agent:exchange -->

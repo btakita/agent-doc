@@ -7,32 +7,23 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Release context, old response loss, default components
+### Re: Duplicate component tags bug
 
-**Release context:** Agreed — the v0.17.7 response was too terse. Future release responses will include a brief summary of what the release fixed/changed, not just URLs.
+**Root cause:** `template.rs::parse_patches()` had no code-block awareness. When a response contained component/patch markers inside a fenced code block (e.g., showing examples), it treated them as real patch directives — creating duplicate component tags after CRDT merge.
 
-**Old response loss:** When the exchange component replaces content, the old text is only in git history. Options:
-1. **Console summary** (recommended) — print a brief "Replacing N sections from previous exchange" to the console before writing. No document bloat, searchable in Claude transcript.
-2. **`agent:log` component** — append-only log accumulating summaries. Already exists for stream thinking output.
-3. **Snapshot diff** — print what was in the snapshot before replacing.
+The component parser (`component.rs::parse()`) already correctly skips markers inside code blocks via `find_code_ranges()`. The template patch parser did not.
 
-Option 1 is simplest. Should I implement it?
+**Fix (template.rs):**
+1. Opening markers: Added `find_code_ranges()` call + check to skip markers inside code ranges
+2. Closing markers: New `find_outside_code()` helper prevents closing markers in code blocks from prematurely terminating real patch blocks
 
-**Default components → binary:**
-The binary (`agent-doc claim` / `agent-doc init`) already handles frontmatter defaults. Adding component scaffolding there is natural and follows the CLAUDE.md convention ("all deterministic behavior in the binary"):
+**5 new tests:**
+- Markers inside ``` blocks are preserved as content (not parsed as patches)
+- Same for ~~~ blocks
+- Closing marker insid cdblckdoen'teminrelp
+Nralmarkerssill(ersngur)
 
-```markdown
-<!-- agent:status -->
-<!-- /agent:status -->
+All 351 passclippy cle.
 
-<!-- agent:exchange -->
-<!-- /agent:exchange -->
-```
-
-The skill expects components to exist — the binary ensures they do. Should I implement this in `claim.rs`?
-
-Yes...however, you just created 2 `<!-- agent:exchange -->` tags and 3 `<!-- /agent:exchange -->` tags.
-Something did not work right.
-Please dignose, add tests, and fix.
-<!-- /agent:exchange -->
+Shall I releasev0.17.8 with this ?<!-- /agent:exchange -->
 ,.

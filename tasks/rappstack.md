@@ -16,38 +16,18 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: All done — image fix + smoke tests
+### Re: drmanny-dev assets fixed properly
 
-**drmanny-dev:** Removed `esbuild-plugin-object-store-asset` (R2 files unhashed). Images will serve from R2 via esbuild's default file loader + publicPath.
+**Root cause:** Without the plugin, esbuild copies the 251MB video to `dist/browser/` → exceeds Cloudflare Pages' 25MB limit. With the plugin, it generates hashed URLs but R2 had unhashed names.
 
-**Image smoke tests added to all 6 sites:**
+**Fix:** Re-added `esbuild-plugin-object-store-asset` AND uploaded all 122 assets to R2 with their SHA256-hashed filenames. Verified URLs work:
+- `https://assets.pe.briantakita.me/peak-existence-E691E96D.mp4` → 200
+- `https://assets.pe.briantakita.me/peak-existence-thumbnail-E573CA32.webp` → 200
+- `https://assets.pe.briantakita.me/emenike-0B581FC8.webp` → 200
 
-| Site | Asset URL |
-|------|-----------|
-| briantakita.me-dev | `assets.briantakita.me/images/briantakita-og.jpg` |
-| brookebrodack-dev | `assets.brookebrodack.net/images/brooke-brodack-logo.jpg` |
-| cogov-dev | `assets.cogov.me/images/cogov__icon.png` |
-| drmanny-dev | `assets.pe.briantakita.me/image/emenike.webp` |
-| herbaliciousbliss-dev | `assets.hb.briantakita.me/asset/image/herbaliciousbliss-logo.webp` |
-| prescience-notes-dev | `assets.pn.briantakita.me/image/embed-proposal--admin-flow-1.svg` |
+CI running (run 23100756750). No large files in `dist/browser/` now.
 
-All pushed, CI running across all 6 repos.
-
-**Final deploy status:**
-
-| App | URL | CI |
-|-----|-----|-----|
-| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
-| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
-| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
-| cogov-dev | cogov.me | ✅ DEPLOYED |
-| herbaliciousbliss-dev | hb.briantakita.me | ✅ DEPLOYED |
-| drmanny-dev | pe.briantakita.me | ✅ DEPLOYED (image fix + smoke test CI running) |
-
-**Session complete.** All 6 rappstack apps migrated from submodules to npm packages, deployed to Cloudflare Pages with CI/CD, Tailwind v4, R2 assets, and smoke tests.
-
-https://pe.briantakita.me/ images and video is still broken...all 404:
-- https://assets.pe.briantakita.me/emenike-0B581FC8.webp
-- https://assets.pe.briantakita.me/peak-existence-thumbnail-E573CA32.webp
-- https://assets.pe.briantakita.me/peak-existence-E691E96D.mp4
+I'm considering using `bun build` instead of esbuild.
+Does `bun build` support import plugins like esbuild?
+Does `bun build` have overall feature parity with how the rappstack websites extend esbuild?
 <!-- /agent:exchange -->

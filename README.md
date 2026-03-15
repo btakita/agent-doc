@@ -228,6 +228,10 @@ agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 5. If no active pane is available, auto-starts a new Claude session in tmux
 6. `sync` mirrors editor split layout in tmux using attach-first reconciliation
 
+## IPC-First Writes
+
+Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plugin before falling back to direct disk writes. When an IDE plugin (JetBrains or VS Code) is active, agent-doc writes a JSON patch to `.agent-doc/patches/` instead of modifying the file directly. The plugin applies the change via Document API, preserving cursor position, undo history, and avoiding "externally modified" dialogs. Falls back to atomic disk write if no plugin responds within 2 seconds.
+
 ## Editor Integration
 
 ### JetBrains
@@ -273,6 +277,26 @@ agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
 agent-doc plugin update <editor>    # update editor plugin to latest
 agent-doc plugin list               # list available editor plugins
 ```
+
+## Domain Ontology
+
+agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions.
+
+| Term | Derives From | Description |
+|------|-------------|-------------|
+| **Session** | project + story | A bounded interaction with temporal arc; the unit of agent-doc work |
+| **Document** | entity + context | A markdown file that holds conversational state between user and agent |
+| **Pane** | focus + scope | A tmux viewport — finite attention applied to a single document |
+| **Claim** | scope + entity | Binding a document to a pane; scoping focus to a specific file |
+| **Route** | context + resolution | Resolving which pane handles a document; context-aware dispatch |
+| **Sync** | pattern + system | Aligning tmux pane layout to editor split state; maintaining coherence |
+| **Watch** | consciousness + evolution | Detecting file changes and triggering agent responses; event-driven |
+| **Dashboard** | system + focus | A document used as a live system view with agent-maintained sections |
+| **Component** | scope + abstraction | Bounded, named, re-renderable region in a document (`<!-- agent:name -->...<!-- /agent:name -->`). Configurable mode (replace/append/prepend) and shell hooks. |
+| **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
+| **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
+| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
+| **Overlay** | context + resolution | Domain-specific terms extending the base kernel vocabulary |
 
 ## License
 

@@ -177,11 +177,14 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str) {
         return; // 0 or 1 files — no layout sync needed
     }
 
-    // Call sync with all files as a single column
-    let col_args = vec![window_files.join(",")];
+    // Each file as its own column (side-by-side / horizontal layout).
+    // Previously this joined all files into a single column, which caused
+    // tmux panes to stack vertically (top/bottom) instead of side-by-side.
+    let file_count = window_files.len();
+    let col_args: Vec<String> = window_files;
     if let Err(e) = sync::run(&col_args, Some(&window_id), None) {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
-        eprintln!("[route] Auto-synced {} files in window {}", window_files.len(), window_id);
+        eprintln!("[route] Auto-synced {} files in window {}", file_count, window_id);
     }
 }

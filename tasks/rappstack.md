@@ -16,15 +16,25 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Both CI failures analyzed
+### Re: herbaliciousbliss-dev DEPLOYED + rebuildjs fixed
 
-**drmanny-dev:** Build "succeeds" (both browser/server say "done") but `dist/server/index.js` is missing. The `rebuildjs@0.70.46` change to use `esbuild.build()` produces no output — the outdir/outfile config isn't being passed correctly to `build()` vs the `context()` setup. This is a bug in the rebuildjs change. Need to fix the `build()` call to pass the same config as `context()`.
+**herbaliciousbliss-dev: ✅ DEPLOYED** — CI passed! Both fixes worked:
+1. `server_external_()` now merges root + workspace `node_modules/` (no more relementjs duplication)
+2. `site_request_ctx__ensure` eagerly inits Hono-based request bes (no more relysjs/rhonojs race)
 
-**herbaliciousbliss-dev:** Same prerender error. Background investigation agent still running.
+**rebuildjs@0.70.47** published — added `write: true` + metafile guards. Both apps produce output correctly.
 
-**Root issue:** The `rebuildjs@0.70.46` `build()` path needs to replicate the same esbuild config that `context()` uses (especially `outdir`, `write`, `metafile`). The `context()` path builds this config internally in `rebuildjs` before passing to esbuild. The `build()` path needs the same config object.
+**drmanny-dev:** CI running with rebuildjs@0.70.47 (run 23099992485).
 
-Investigating the rebuildjs internals to fix the `build()` config.
+**Deploy status:**
 
-The css and js need to be minimized when deployed to cloudflare.
+| App | URL | CI |
+|-----|-----|-----|
+| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
+| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
+| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
+| cogov-dev | cogov.me | ✅ DEPLOYED |
+| herbaliciousbliss-dev | hb.briantakita.me | ✅ DEPLOYED |
+The css is messed up
+| drmanny-dev | pe.briantakita.me | 🔄 CI running |
 <!-- /agent:exchange -->

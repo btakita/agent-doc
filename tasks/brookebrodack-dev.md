@@ -73,3 +73,5 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 
 ## User
 
+The deployed website styling is broken.
+https://brookebrodack.net/

@@ -249,3 +249,13 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 ## User
 
 Note the changes to the frontmatter.
+
+<!-- agent:exchange -->
+Noted. Frontmatter updated:
+- `agent_doc_mode` → `agent_doc_format` (field rename)
+- Added `agent_doc_write: crdt` (enables CRDT merge for concurrent edits)
+
+Document is now configured for template format with CRDT write mode.
+
+/agent-doc compact
+<!-- /agent:exchange -->

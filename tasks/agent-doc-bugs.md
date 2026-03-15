@@ -16,36 +16,22 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: CRDT corruption in lazily-rs.md
+### Re: CWD drift + claims log bugs
 
-**Root cause:** `run_stream()` in `write.rs` used the stored CRDT state from the *previous* cycle as the merge base. When the user edits the exchange section between cycles, this stored state is stale — it doesn't match the actual content either side diverged from.
+**Root cause (both):** Relative path resolution without project root detection. When CWD drifts to a submodule directory, `file.exists()` and `.agent-doc/claims.log` resolve against the wrong directory.
 
-When the agent replaces the exchange content (replace mode patch) and the user inserts text in the middle of the old content, the stale base causes `compute_edit_ops` (character-level diffs) to produce overlapping delete+insert operations. The Yrs CRDT interleaves these character-level insertions, splitting words like `decisions` → `de` + [user text] + `cisions`.
+**Bug 1 — `agent-doc recover` file-not-found:**
+- `recover.rs:16` checked `file.exists()` on a relative path before canonicalization
+- **Fix:** Replace `file.exists()` with `file.canonicalize()` — if canonicalize fails, the file doesn't exist. Then use the canonical path for all subsequent operations.
 
-**Fix applied** (`write.rs:220-227`): Now uses a fresh CRDT state built from the baseline instead of loading stored state. The baseline is the exact content both sides diverged from, giving clean diffs:
-- ours diff: agent's replace patch
-- theirs diff: user's additions
+**Bug 2 — Claims log not appearing in tmux pane:**
+- `claim.rs:137` used hardcoded relative `.agent-doc/claims.log` — when CWD drifts, it writes to the wrong directory
+- Errors were silently swallowed with `let _` (violates CLAUDE.md: "NEVER swallow errors")
+- **Fix:** Compute project root via `snapshot::find_project_root()` (same pattern as `snapshot.rs`). All errors now logged to stderr.
 
-**Tests added** (`crdt.rs`):
-- `merge_replace_vs_append_no_interleaving` — reproduces the lazily-rs pattern (user inserts in middle of content that agent replaces)
-- `merge_replace_vs_append_with_baseline_base` — verifies baseline-based merge gives clean results
+Also fixed `claim.rs:34` — same `file.exists()` → `file.canonicalize()` pattern as recover.
 
-All 346 tests pass.
+All 346 tests pass, clippy clean.
 
-**lazily-rs.md:** The existing corruption needs manual cleanup — the CRDT fix prevents future occurrences but doesn't retroactively repair the document.
-
-I had as issue with agent-doc run and cwd:
-```
-❯ /agent-doc tasks/youtube/youtube.md
-
-● Bash(agent-doc recover tasks/youtube/youtube.md 2>&1)
-  ⎿  Error: Exit code 1
-     Error: file not found: tasks/youtube/youtube.md
-
-● Read 1 file (ctrl+o to expand)
-
-● The file tasks/youtube/youtube.md doesn't exist. Would you like me to create it, or did you mean a different path?
-```
-
-I tried to run this file but the autoclaim did not show up in the tmux pane
+release
 <!-- /agent:exchange -->

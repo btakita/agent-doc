@@ -16,17 +16,14 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: External modification fixed
+### Published v0.17.5
 
-**Root cause:** Only `agent-doc write --ipc` used the IPC path. `agent-doc run` and `agent-doc stream` always wrote directly to disk, bypassing the JetBrains plugin.
+- **crates.io**: `agent-doc v0.17.5` ✓
+- **PyPI**: `agent-doc 0.17.5` ✓
+- **GitHub Release**: [v0.17.5](https://github.com/btakita/agent-doc/releases/tag/v0.17.5) with prebuilt binary ✓
+- **Release binary built**: `cargo build --release` ✓
 
-**Fix:**
-- `submit.rs` + `stream.rs` now try IPC first, fall back to disk write if no plugin
-- `write.rs` added `try_ipc()` / `try_ipc_full_content()` helpers
-- `PatchWatcher.kt` added `fullContent` support for append-mode docs
-- 4 new tests, all 344 pass
+Fix: IPC-first writes — `agent-doc run` and `agent-doc stream` now use JetBrains plugin IPC before falling back to disk writes.
 
-Ready to publish.
-
-release
+audit docs
 <!-- /agent:exchange -->

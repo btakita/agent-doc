@@ -102,5 +102,5 @@ You already have R2 set up via `esbuild-plugin-object-store-assets`. You could c
 Want me to upload the merged full video to R2 before you delete the sources?
 Will do this later.
 
-
+Please deploy briantakita.me
 <!-- /agent:exchange -->

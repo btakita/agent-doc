@@ -214,4 +214,15 @@ client_id_cmd = "pass corky/gmail/client_id"
 client_secret_cmd = "pass corky/gmail/client_secret"
 sync_days = 3650
 ```
+
+### Re: Found config — auth needs browser consent
+
+Found the YouTube config in `mail/.corky.toml` (the local symlink, not `~/Documents/mail`). `corky youtube auth` now resolves credentials correctly but needs you to complete the Google OAuth consent in the browser. It opened a browser window and timed out after 120s waiting for the callback.
+
+**Next step:** Run `/agent-doc tasks/youtube/youtube.md` again after you've completed the OAuth consent flow. I'll then proceed with creating the draft and uploading.
+
+Try again
+
+Alternatively, if you've already authed previously, the token may be in `~/.config/corky/tokens.json` — I can check if YouTube upload scopes are already granted.
+
 <!-- /agent:exchange -->

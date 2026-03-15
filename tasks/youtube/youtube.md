@@ -26,36 +26,12 @@ Note the frontmatter change.
 
 ---
 
-The YouTube description does not have hyperlinks. Also the link to the blog post is truncated.
+### Re: YouTube description updated
 
-lazily (Rust): https://crates.io/crates/lazily
+Auth succeeded, description updated on https://www.youtube.com/watch?v=hVNmbmY4vgo:
+- `lazily (Rust)` → `lazily-rs`
+- Blog post URL on its own line for auto-linkification
+- Removed markdown list prefixes
 
-### Re: YouTube description fix
-
-Updated the draft to fix link formatting:
-- Blog post URL on its own line (not after `Blog post:` on same line — YouTube truncates long lines)
-- Removed markdown `- ` prefixes (YouTube doesn't render markdown)
-- Used `name — url` format so URLs are on the line and auto-linkify
-
-**Auth timed out** — the YouTube OAuth token expired and I need you to complete the consent flow in the browser. Please click through the Google consent screen, then submit again and I'll update the description.
-
-try again. Can we make the oauth 
-
-Alternatively, you can update the description manually at https://studio.youtube.com/video/hVNmbmY4vgo/edit — paste this:
-
-```
-Lazily: Building a Multi-Language Reactive Signals Library — Live Session
-
-Live coding session building lazily — a reactive signals library implemented in Rust, Zig, and Python. Features lazy invalidation, automatic dependency tracking, and Context/Slot/Cell primitives.
-
-Blog post:
-https://briantakita.me/posts/2026-03-15-lazily-reactive-signals
-
-lazily (Rust) — https://crates.io/crates/lazily
-lazily-zig — https://github.com/btakita/lazily-zig
-lazily-py — https://github.com/btakita/lazily-py
-Claude Code — https://claude.com/claude-code
-agent-doc — https://crates.io/crates/agent-doc
-```
-lazily (Rust) should be lazily-rs
+The description should now show clickable links on YouTube.
 <!-- /agent:exchange -->

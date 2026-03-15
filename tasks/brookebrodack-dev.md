@@ -193,17 +193,30 @@ Committed and pushed (`de27c15`) — CI deploying.
 Opening a video a shows video a.
 Closing video a then opening video b start video b but video b is hidden.
 Closing video b then reopening video b starts and shows video b. video b is visible.
-### Re: Second video hidden after close/open
+### Re: Close A → Open B still hidden
 
-Race condition: closing video A reverses the iframe animation (50ms). When the reverse finishes, the memo fires and adds `hidden` back. If you opened video B in between, the `hidden` removal from the open was clobbered by the stale close finish event.
+Added explicit height and visibility reset in the click handler itself — not relying on animation state at all. Now on every video click:
 
-**Fix:** The memo now checks `video__div__is_open_(ctx)` before adding `hidden`. If the div is open (new video started), the finish event from the old close is ignored.
+1. `iframe.classList.remove('hidden')` — always
+2. `iframe.classList.remove('scale-0')` — always
+3. `video__div.style.height = target` — if stuck at 0px
 
-Committed and pushed (`230e073`) — CI deploying.
+This handles all edge cases (first open, reopen, switch) without depending on animation finish events or wanimato state machine timing.
+
+Committed and pushed (`da17790`) — CI deploying.
+
+Note: The previous fix for `video__div__is_open_` check in the memo was correct but insufficient — the animation state machine has too many timing edge cases. The direct approach in the click handler is more reliable.
 
 Opening a video a shows video a.
 Closing video a then opening video b start video b but video b is hidden.
 Closing video b then reopening video b starts and shows video b. video b is visible.
 
 See brookebrodack.video__div.html for the page state.
+
+Issue with autoscroll in /content/:
+- Scroll down the page. Click a video thumbnail. Autoscrolls to the top
+- Close the video
+- Scroll down the page. Click a video thumbnail. Does not autoscroll to the top
+- Close the video by pressing Esc
+- Click a video thumbnail. Autoscrolls to the top
 <!-- /agent:exchange -->

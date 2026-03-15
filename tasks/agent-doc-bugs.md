@@ -16,16 +16,7 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Published v0.17.4
+### Re: External modification on rebuild-refactor.md
 
-- **crates.io**: `agent-doc v0.17.4` ✓
-- **PyPI**: `agent-doc 0.17.4` ✓
-- **GitHub Release**: [v0.17.4](https://github.com/btakita/agent-doc/releases/tag/v0.17.4) with prebuilt binary ✓
-- **Release binary built**: `cargo build --release` ✓
-
-Fix: tmux pane orientation — claim/autoclaim sync arranges files side-by-side instead of stacking vertically.
-
-agent-doc run tasks/rebuild-refactor.md caused an external modification to the file.
-The CRDT should've been applied in process with the editor via the plugin.
-Please diagnose what went wrong in the logs...write tests...and fix.
+Investigating why `agent-doc run` wrote directly to disk instead of using the IPC path to the JetBrains plugin. Checking the IPC/socket connection logic, file claim state, and fallback conditions. Fix agent running.
 <!-- /agent:exchange -->

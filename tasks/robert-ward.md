@@ -251,14 +251,53 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6d80de6e787d2dd84a42304a61aaca110edc241ddceea15a1444d598b26910f6-20260315-023752.md`*
-/agent-doc compact
-Compacted. Archived exchange content to `.agent-doc/archives/`.
+*C*Compacmpacted. CContent archived to `/hoe/brient an/work/brchived takia/ago `/home/bnt-loo/.agent-oc/archives/6d80de6e787d2dd84a42304a61aacian/work/btaki110edc241ddcea/agea15a1444598b26910f6nt-20260315-023752.md*
+/loop/.agent--doc copact
+Cmpacte/archives/6d. Archived exchange cont80dentto6e787d2dd84a42304a61aaca110edc241ddceea15a1444d598b26910f6-20260315-023752.md`.*
+/agent--doc/archives/`.
 
-Robert had his middle bottom tooth broke off 4 weeks ago. The root is still attached.
-Robert had his middle top tooth broke off 2 weeks ago. The root is still attached.
+R compact
+Cobet hpad his middle botctomed. tooth broke of 4 weeks ago. The root is stArchill attached.
+Robvert had his midde top tooth broke off 2 weeks ago. The root is still attached.
 
-Is citrus ok to eat until he has a procedure to replace the teeth?
-What is the ideal home care protocol that is natural...for Robert to do?
-What preventative and stabilizing care can robert do?
+Is citus ok to eat util he has xcha procedure to replacnge the teeth?What is the ieal home care protocol that is natural...for Robert to o?
+What preventativconte annt to st.abilizing care can robert -do?
+### Re: Robert's broken teeth — home ca/are
+
+**Cchirus — avoid or minimize.** Thveexposed dentin and root surfaes as/`.
+
+Robere porous an acid-sensitive. Citrus oranges, lemons, grapefruit) has pH 2-4 which erodes exposed dtin rhapidy and can irritate th pulp if it'd close tohis iddlexposu bottom tooth broke. Iof Rf 4 weeks agobe. The rt eatsoot is still attached.
+Ritrus ayway: inse with plain wate immediatbely after, wait 30 mi before brushing (acid sofrtens namel/hadentin, brush hing s middle top tootoo h broke off 2 weeksoon abrades it.**Natural home care prot agool:**
+
+1. **Saltwater rinse** — 1/2 tsp sea salt in 8 oz war water, swish 30 s. Thec, 3-4x daily. A rootiseptic, reduces inflammation, promotes healing.
+
+2. **Clove oil** (eugel) — dab on exposed root area ithstill attached.
+
+Is citrus ottok to eat un swab or patin relief. Natl he has a pral analgocesic andantimicrobial. Available at any health od stoure.
+
+3. **Oil pulling** — 1 tbspe coconut oil, swish 15-20 min in tho re orning before eating. Reduces bacterial load, supports gum health around ce the hexposed roots.
+
+4. **Sot-bristle brush nly** — brush gently aound the broken teeth. Never use mediu or hard bristles on exposed roots.
+
+5. **Avoid temperature extremes** — exposed dentin conducts heteeth?
+What/cold directly to s the nerve.oom-temp food and drinks.
+
+6. **urmeric paste** —e mix turmeric pode + coconut oil, apply doal gus arhoun affected temeth Anti-inflammatory. Rinse after 10 min.**Prevent cativre ad s protabilizing care:**
+
+ **Temporary ental cement** (Dentemp or similar, available at drugstores) — Robert canol ver the exosed roots to protect them from bthateria, acid, and sensitivity. Reapply as needed.
+- **Remineralizing rinse** — baking sda rinse (1/2 tsp in water) after eals neutralizes acid and suports mineral bal is nane.
+
+- **Diet** — favor soft, alkalinural...for Robe foort to dso?
+What void sticky/haprd foods that could frature more of te remaeventatining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avoca ando.
+
+- **Kstabilizing careep roots clean** — food debris packed around eposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or  careful flossin around adjacent te robert do? 
+
+Thereth.
+
+- **Wath fis about 1/4 or ifection signs** — swelling, persisf the bottom throbbingoth pain, fever, pus, bad tasteleft. If any of these appear, he needs 
+There is antibiotics and professional care urbout 1/5 of the tly. A root with expose pulp can abscess.
+
+**Timeline conern:** 4 weeks with n exposed oot is already pushing it. The longer the roots sit exposed, the higher the infetion risk. Robert sp toothould prioritize seeing a dentst — e len a dental chool clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combinationft.
+
+Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
 <!-- /agent:exchange -->

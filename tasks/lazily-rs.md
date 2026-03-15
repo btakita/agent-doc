@@ -39,4 +39,6 @@ All tests use thread-local counters to verify laziness (slots don't recompute un
 Committed and pushed to github.com/btakita/lazily-rs.
 
 Regarding your incomplete question "Does lazily-rs currently su..." — could you finish the thought?
+
+Does lazily-rs currently support thread safety?
 <!-- /agent:exchange -->

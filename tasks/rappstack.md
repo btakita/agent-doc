@@ -16,25 +16,20 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: herbaliciousbliss-dev DEPLOYED + rebuildjs fixed
+### Re: herbaliciousbliss CSS + drmanny lockfile
 
-**herbaliciousbliss-dev: ✅ DEPLOYED** — CI passed! Both fixes worked:
-1. `server_external_()` now merges root + workspace `node_modules/` (no more relementjs duplication)
-2. `site_request_ctx__ensure` eagerly inits Hono-based request bes (no more relysjs/rhonojs race)
+**herbaliciousbliss CSS:** Only 623 bytes — Tailwind v4 classes aren't generated. `@import "tailwindcss"` + `@source` directives produce nearly empty output with `esbuild.build()`. The `rebuild_tailwind_plugin` PostCSS processing may behave differently in one-shot mode. Investigating.
 
-**rebuildjs@0.70.47** published — added `write: true` + metafile guards. Both apps produce output correctly.
-
-**drmanny-dev:** CI running with rebuildjs@0.70.47 (run 23099992485).
-
-**Deploy status:**
+**drmanny-dev:** Workspace packages resolved to stale `rebuildjs@0.70.46`. Regenerated lockfile, all on 0.70.47 now. CI running.
 
 | App | URL | CI |
 |-----|-----|-----|
-| briantakita.me-dev | briantakita.me | ✅ DEPLOYED |
-| prescience-notes-dev | pn.briantakita.me | ✅ DEPLOYED |
-| brookebrodack-dev | brookebrodack.net | ✅ DEPLOYED |
-| cogov-dev | cogov.me | ✅ DEPLOYED |
-| herbaliciousbliss-dev | hb.briantakita.me | ✅ DEPLOYED |
-The css is messed up
+| briantakita.me-dev | briantakita.me | ✅ |
+| prescience-notes-dev | pn.briantakita.me | ✅ |
+| brookebrodack-dev | brookebrodack.net | ✅ |
+| cogov-dev | cogov.me | ✅ |
+| herbaliciousbliss-dev | hb.briantakita.me | ⚠️ CSS broken |
 | drmanny-dev | pe.briantakita.me | 🔄 CI running |
+
+Ok...fix hb.briantakita.me. What are you waiting for?
 <!-- /agent:exchange -->

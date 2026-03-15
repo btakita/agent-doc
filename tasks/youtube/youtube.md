@@ -138,4 +138,29 @@ Created an automated condensed edit from the best segments:
 
 Looks good. Release it to YouTube. Make sure the video is public.
 Also, create a post on briantakita.me with the summary and interesting links and topics.
+
+### Re: YouTube upload + blog post
+
+**YouTube upload blocked:** `corky youtube auth` fails — no `client_id` configured in `.corky.toml`. You'll need to add YouTube OAuth credentials:
+
+```toml
+[youtube]
+client_id = "YOUR_CLIENT_ID"
+client_secret = "YOUR_CLIENT_SECRET"
+```
+
+I set client_id_cmd and client_secret_cmd
+
+Once that's set, I can run:
+```bash
+corky youtube draft --visibility public --tags "rappstack,web-framework,claude-code,typescript,bun,hono,cloudflare" \
+  "Building a Sub-1KB Web Framework — Live Debugging with AI"
+```
+Then `corky youtube publish` with the condensed video.
+
+**Blog post:** Ready to create. I'll write it to `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-14-rappstack-live-session.md` following the same format as the dogfooding series. Will include the YouTube embed (once we have the URL), session summary, architecture overview, and links to rappstack packages.
+
+Want me to go ahead and create the blog post draft now (leaving the YouTube embed as a placeholder)?
+
+Yes
 <!-- /agent:exchange -->

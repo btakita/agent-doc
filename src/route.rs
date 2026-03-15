@@ -79,7 +79,22 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
 }
 
 /// Send `/agent-doc <file>` to a pane and focus it.
+/// Shows a brief tmux display-message on the target pane for immediate feedback.
 fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
+    // Flash notification on target pane — immediate feedback before Claude picks up input
+    let short_name = std::path::Path::new(file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+    let flash_msg = format!("⏳ /agent-doc {}", short_name);
+    if let Err(e) = tmux
+        .cmd()
+        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
+        .status()
+    {
+        eprintln!("[route] warning: display-message failed: {}", e);
+    }
+
     let command = format!("/agent-doc {}", file_path);
     tmux.send_keys(pane, &command)?;
     if let Err(e) = tmux.select_pane(pane) {

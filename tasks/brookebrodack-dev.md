@@ -238,4 +238,17 @@ Committed and pushed (`bfcc6e3`) — CI deploying.
 
 https://brookebrodack.net/content/ still exhibits the same behavior.
 See brookebrodack.content.html for the full html
+### Re: Same behavior persists
+
+The deployed HTML confirms our changes ARE live (no `hidden` class, `overflow-hidden` on parent). The DOM snapshot shows `height: 600px` — so the first open works.
+
+The close→open issue is likely caused by `fill: both` on the height animation. After close reverses the animation, `fill: both` keeps the visual height at 0 even though `style.height` might read "600px". On second open, the check `style.height === "0px"` was false, so height wasn't re-set. The animation's `play()` should restart but may not override the fill state properly.
+
+**Fix:** Always set `style.height` on every open — both in `video__div__open()` and in the click handler. No conditional check. This ensures the inline style is always fresh, regardless of animation fill state.
+
+Committed and pushed (`d2d0c34`) — CI deploying.
+
+Same behavior. See:
+- brookebrodack.success.html
+- brookebrodack.failure.html
 <!-- /agent:exchange -->

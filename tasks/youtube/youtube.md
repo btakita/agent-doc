@@ -55,7 +55,23 @@ The lazily blog post is currently a plain `.md` file — `tb_a_` functions aren'
 
 The `.md.ts` route is more consistent with the existing architecture. Should I convert the lazily blog post to `.md.ts` format and wire up the `tb_a_` imports? Some links (lazily-rs, lazily-zig, lazily-py, agent-doc) aren't in `atb.ts` yet — I'd add them.
 
-Yes.
+Yes. Format markdown 
+It would be good to have markdown with custom components. Could we use web components?
 
-**YouTube upload status:** still uploading (4.8 GB file).
+Or is there a way to escape within a markdown document for server side rendering?
+Or what if we postprocess the markdown output to automatically make outbound links open to target blank?
+
+### Re: Links updated to target blank
+
+Kept the `.md` format (consistent with the recent dogfooding posts). Converted all outbound links to `<a href="..." target="_blank" rel="noopener">` HTML tags:
+
+- Intro paragraph links (lazily, Rust, Zig, Python)
+- Hyop link
+- Scientific citation DOI links (4 references)
+- Multi-language comparison table links
+- Links section (6 links)
+
+Total: 16 outbound links now open in new tabs. Ready to commit and redeploy.
+
+**YouTube upload:** still in progress (4.8 GB).
 <!-- /agent:exchange -->

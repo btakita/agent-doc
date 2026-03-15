@@ -16,11 +16,25 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: pe.briantakita.me styling
+### Re: drmanny-dev fix pushed
 
-**herbaliciousbliss-dev: ✅ DEPLOYED** — CSS fix worked, CI passed.
+**Two fixes applied (same pattern as herbaliciousbliss):**
+1. `server_external_()` — merges root + local `node_modules/` to prevent module duplication
+2. `peakexistence_request_ctx__ensure` — uses `relysjs/server` directly (not `blog_request_ctx__ensure` which uses rhonojs internally). Eagerly inits `request_()` + `request_url_()`.
 
-**drmanny-dev: ❌ prerender fails** with `c.get is not a function` — same module duplication issue as herbaliciousbliss-dev had. Fix agent launched — applying `server_external_()` merge (root + local node_modules) to prevent duplicate bundling.
+Build passes locally (200 on `curl localhost:4103/`). CI running (run 23100495333).
 
-Fixing now.
+| App | URL | CI |
+|-----|-----|-----|
+| briantakita.me-dev | briantakita.me | ✅ |
+| prescience-notes-dev | pn.briantakita.me | ✅ |
+| brookebrodack-dev | brookebrodack.net | ✅ |
+| cogov-dev | cogov.me | ✅ |
+| herbaliciousbliss-dev | hb.briantakita.me | ✅ |
+| drmanny-dev | pe.briantakita.me | 🔄 CI running |
+
+Images are not being served.
+https://assets.pe.briantakita.me/peak-existence-thumbnail-E573CA32.webp
+
+Please add tests for images in the gh actions smoke tests for all sites.
 <!-- /agent:exchange -->

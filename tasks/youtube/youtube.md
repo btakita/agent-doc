@@ -43,33 +43,43 @@ And give suggestions on how I should present it.
 
 ---
 
-Yes
-
-continue
-
 ### Re: Implemented + deployed
 
-**External link postprocessor added** to `config/config__init.ts`:
+**External link postprocessor added** to `config/config__init.ts` — all external markdown links now get `target="_blank"`.
 
-```typescript
-marked.use({
-  renderer: {
-    link({ href, title, tokens }) {
-      const text = this.parser.parseInline(tokens)
-      if (href && /^https?:\/\//.test(href) && !href.includes('briantakita.me')) {
-        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
-      }
-      return `<a href="${href}">${text}</a>`
-    }
-  }
-})
-```
-
-All external links in markdown blog posts now automatically open in new tabs. Zero authoring friction — just write standard `[text](url)` markdown.
-
-**Reverted** the lazily blog post links from HTML `<a>` tags back to standard markdown syntax (the postprocessor handles them now).
-
-**Pushed and deploying** — GitHub Actions triggered for CloudFlare Pages.
+---
 
 The article is not showing up in the featured articles on the home pages
+See
+
+### Re: Featured flag bug — fixed
+
+**Root cause:** The `md_esbuild_plugin_` in `build.ts` parses markdown frontmatter and generates the `post_meta__validate` call, but it was only forwarding `hero_image`, `og_image`, and `draft` from frontmatter. The `featured` field was silently dropped.
+
+**Fix** (`build.ts:168`): Added `featured` to the forwarded fields:
+```typescript
+...(meta.featured !== undefined && { featured: meta.featured }),
+```
+
+This only affected `.md` blog posts. The `.md.ts` posts (like `introducing-agent-doc.md.ts`) set `featured` directly in their `meta_()` function, so they worked fine.
+
+Pushed and deploying. The lazily post should appear in featured articles after this deploy.
+See https://briantakita.me/#featured
+
+The YouTube description does not have hyperlinks. Also the link to the blog post is truncated.
+
+```
+Live coding session building lazily — a reactive signals library implemented in Rust, Zig, and Python. Features lazy invalidation, automatic dependency tracking, and Context/Slot/Cell primitives.
+
+Blog post: https://briantakita.me/posts/2026-03-15-la...
+
+Links:
+lazily (Rust): https://crates.io/crates/lazily
+lazily-zig: https://github.com/btakita/lazily-zig
+lazily-py: https://github.com/btakita/lazily-py
+Claude Code: https://claude.com/claude-code
+agent-doc: https://crates.io/crates/agent-doc
+```
+
+lazily (Rust): https://crates.io/crates/lazily
 <!-- /agent:exchange -->

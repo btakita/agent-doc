@@ -16,14 +16,22 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Published v0.17.5
+### Re: audit-docs results
 
-- **crates.io**: `agent-doc v0.17.5` ✓
-- **PyPI**: `agent-doc 0.17.5` ✓
-- **GitHub Release**: [v0.17.5](https://github.com/btakita/agent-doc/releases/tag/v0.17.5) with prebuilt binary ✓
-- **Release binary built**: `cargo build --release` ✓
+6 issues found:
 
-Fix: IPC-first writes — `agent-doc run` and `agent-doc stream` now use JetBrains plugin IPC before falling back to disk writes.
+**Stale docs (4):** All older than `src/write.rs` (recently modified with IPC-first writes):
+- `.claude/skills/agent-doc/SKILL.md`
+- `CLAUDE.md`
+- `README.md`
+- `SPEC.md`
 
-audit docs
+**Warnings (2):**
+- `CLAUDE.md:129-143` — Large code block without imperative context
+- `CLAUDE.md:170-184` — Large table, consider moving to README
+
+Line budget OK: 383/1000.
+
+Want me to update the stale docs?
+yes
 <!-- /agent:exchange -->

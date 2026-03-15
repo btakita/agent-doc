@@ -32,4 +32,35 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 | drmanny-dev | pe.briantakita.me | 🔄 CI running |
 
 Ok...fix hb.briantakita.me. What are you waiting for?
+
+https://github.com/btakita/drmanny-dev/actions/runs/23100033701/job/67099081314 failed
+Same issue as last time
+
+```
+0s
+Run echo "Checking dist/browser/ for expected HTML files..."
+  echo "Checking dist/browser/ for expected HTML files..."
+  for route in index about partners tags; do
+    file="app/peakexistence-site/dist/browser/${route}/index.html"
+    if [ "$route" = "index" ]; then
+      file="app/peakexistence-site/dist/browser/index.html"
+    fi
+    if [ ! -f "$file" ]; then
+      echo "MISSING: $file"
+      exit 1
+    fi
+    echo "OK: $file"
+  done
+  # Verify robots.txt
+  if [ ! -f "app/peakexistence-site/dist/browser/robots.txt" ]; then
+    echo "MISSING: robots.txt"
+    exit 1
+  fi
+  echo "OK: robots.txt"
+  echo "Build verification passed."
+  shell: /usr/bin/bash -e {0}
+Checking dist/browser/ for expected HTML files...
+MISSING: app/peakexistence-site/dist/browser/index.html
+Error: Process completed with exit code 1._
+```
 <!-- /agent:exchange -->

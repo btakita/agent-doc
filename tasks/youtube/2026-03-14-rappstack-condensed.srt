@@ -1,0 +1,1127 @@
+1
+00:00:00,000 --> 00:00:10,859
+Hey everybody, so yeah okay um what I'm gonna do is I want to kind of get my
+
+2
+00:00:10,859 --> 00:00:17,800
+web stack on um you know capture my web stack and what I'm doing with it
+
+3
+00:00:17,800 --> 00:00:24,440
+sorry I think that sounds better so basically um now I'm just migrating a
+
+4
+00:00:24,440 --> 00:00:29,640
+bunch of websites over fixing some of the assets I want to serve them from
+
+5
+00:00:29,640 --> 00:00:37,399
+R2 on CloudFlare and I moved them over from Contobo which was sort of like a
+
+6
+00:00:37,399 --> 00:00:43,719
+VPS an expensive VPS but CloudFlare is better because it you know performs
+
+7
+00:00:43,719 --> 00:00:49,960
+better and you know kind of difficulty I was having pre-cloud was just the
+
+8
+00:00:49,960 --> 00:00:53,399
+amount of work it took to just manage all the different domains it was just
+
+9
+00:00:53,399 --> 00:00:59,039
+easier just to run you know a web server in a Docker container and just audit to
+
+10
+00:00:59,039 --> 00:01:05,599
+be easier to automate all that but now with you know cloud it's pretty easy to
+
+11
+00:01:05,599 --> 00:01:11,760
+automate all the um CloudFlare stuff so um you know I have a CloudFlare worker
+
+12
+00:01:11,760 --> 00:01:19,438
+I was using the bun with Elysia and unfortunately Elysia doesn't work quite
+
+13
+00:01:19,438 --> 00:01:25,319
+as well on CloudFlare it does work but it's a little bit bigger than Hono
+
+14
+00:01:26,078 --> 00:01:33,718
+Hono it doesn't benchmark quite as fast as Elysia on CloudFlare but um I guess
+
+15
+00:01:33,718 --> 00:01:44,319
+I'll check it out so we got Hono versus Elysia you know Y-S-I-A okay so so yeah
+
+16
+00:01:44,319 --> 00:01:49,040
+it's just a couple different web servers they both are pretty good Hono
+
+17
+00:01:49,040 --> 00:01:54,799
+basically is more portable across different runtimes so I think it'll
+
+18
+00:01:54,799 --> 00:02:00,599
+work just as well on well maybe not quite as fast but it'll work on Node.js
+
+19
+00:02:00,599 --> 00:02:06,438
+as well as Dino but you know I'm gonna write on bun but then and it'll also
+
+20
+00:02:06,438 --> 00:02:14,639
+work on native to CloudFlare's runtime or their V8 runtime whatever that's
+
+21
+00:02:14,639 --> 00:02:20,560
+called but don't know at the moment but yeah CloudFlare worker's runtime so yeah
+
+22
+00:02:20,560 --> 00:02:28,758
+and then I think you can run bun but it's a little bit like you gotta kind
+
+23
+00:02:28,758 --> 00:02:33,919
+of bring the stack over onto the CloudFlare workers which is you know
+
+24
+00:02:33,919 --> 00:02:41,840
+gonna be a bigger you know payload to run there so yeah basically Hono is more
+
+25
+00:02:42,360 --> 00:02:52,318
+closer to the metal on CloudFlare so yeah switching over yeah now I'm just
+
+26
+00:02:52,318 --> 00:02:59,878
+kind of in the middle of moving my assets over to their new buckets you know
+
+27
+00:02:59,878 --> 00:03:07,000
+just doing all that looks like we're ready to go yes yes so yeah it's been
+
+28
+00:03:07,758 --> 00:03:13,800
+pretty easy I've had it just I was working on some also migrating over ES
+
+29
+00:03:13,800 --> 00:03:20,479
+build I'm using ES build right now for all my websites because I do a lot of
+
+30
+00:03:20,479 --> 00:03:26,060
+really custom stuff I have this framework called wrap stack which I kind
+
+31
+00:03:26,060 --> 00:03:36,758
+of built on our memo and relevant JS and wrap stack is kind of like my see if I
+
+32
+00:03:36,800 --> 00:03:49,000
+here it is it's kind of like my sort of composable application framework so I
+
+33
+00:03:49,000 --> 00:03:55,800
+was using initially I was using get sub modules because I wanted to iterate
+
+34
+00:03:55,800 --> 00:04:00,479
+quickly but now I've switched over and these are now NPM modules but they only
+
+35
+00:04:00,479 --> 00:04:06,680
+really work on bun.js at the moment but I could probably switch it over to you
+
+36
+00:04:06,680 --> 00:04:15,120
+know since I'm now supporting Hono instead of Elysia I can probably switch
+
+37
+00:04:15,120 --> 00:04:23,240
+it over to the JS DTS files and all that just to be compatible but basically I I
+
+38
+00:04:23,240 --> 00:04:29,399
+just kind of have different like levels I have domain layer server and browser so
+
+39
+00:04:29,399 --> 00:04:37,800
+the idea is to be really efficient with client server you know with on the
+
+40
+00:04:37,800 --> 00:04:43,199
+payload as well as client server communication so I I haven't really
+
+41
+00:04:43,199 --> 00:04:48,600
+ever gotten into any of this but maybe I will at some point but I have high up
+
+42
+00:04:48,600 --> 00:04:57,838
+and high up is basically just as really simple hydration operation layer so like
+
+43
+00:04:57,879 --> 00:05:03,720
+this is like this is the library it's a very tiny just kind of goes through all
+
+44
+00:05:03,720 --> 00:05:10,838
+the fights high up in it and then we just sort of map it not the high up over
+
+45
+00:05:10,838 --> 00:05:15,879
+you know the high up command and it over to a function that gets registered and
+
+46
+00:05:15,879 --> 00:05:23,360
+then we call it with the element and that's it and then I guess we can do
+
+47
+00:05:23,360 --> 00:05:28,759
+multiple okay yeah yeah we had different like variations on that but
+
+48
+00:05:28,759 --> 00:05:34,639
+this is the basic high up over here so I have to remember what multi high up was
+
+49
+00:05:34,639 --> 00:05:40,920
+for I actually really did implement this without Claude but it was a while ago so
+
+50
+00:05:40,920 --> 00:05:50,120
+you know this is kind of like one of those things to where you realize you
+
+51
+00:05:50,160 --> 00:05:56,278
+know if enough time passes it's effectively like the same as not really
+
+52
+00:05:56,278 --> 00:06:01,680
+knowing what exactly you did because it was a while ago so but I think it has to
+
+53
+00:06:01,680 --> 00:06:10,040
+do with multiple routes and with regular high up I think I have like one like
+
+54
+00:06:10,040 --> 00:06:18,480
+component route I think but don't quote me on that let's see but I think yeah
+
+55
+00:06:18,920 --> 00:06:27,120
+yeah okay oh no okay got it okay so multi high up is you can run multiple
+
+56
+00:06:27,120 --> 00:06:37,519
+high ops on a single element so like you can compose together multiple
+
+57
+00:06:37,519 --> 00:06:46,439
+hydration operations using the high up keyword over here or the high up
+
+58
+00:06:46,480 --> 00:06:54,838
+attribute and so it's kind of like I pretty much use a single high up I don't
+
+59
+00:06:54,838 --> 00:07:00,000
+really use multi high up but the single okay so I guess I'll show you some
+
+60
+00:07:01,040 --> 00:07:08,120
+examples I can just do like a search for high up okay so here is an example of a
+
+61
+00:07:08,120 --> 00:07:12,360
+high up and I just have a function called input high up which gets
+
+62
+00:07:12,360 --> 00:07:22,560
+registered somewhere and I think it oh this is just the example so yeah
+
+63
+00:07:22,560 --> 00:07:32,720
+basically it's just you register input high up on load and of course you know
+
+64
+00:07:32,720 --> 00:07:38,519
+this is just a really simple case but for the most part you would just use
+
+65
+00:07:38,519 --> 00:07:43,838
+imports and imports would just you know it would just give you a really
+
+66
+00:07:43,838 --> 00:07:47,879
+efficient like you know you can import whatever you want but the imports are
+
+67
+00:07:47,879 --> 00:07:54,720
+only for the front end so because rap stack splits out you know the client in
+
+68
+00:07:54,720 --> 00:08:01,560
+the server to different bundles you know it'll be really efficient really small
+
+69
+00:08:01,560 --> 00:08:07,560
+so for example I guess let's look at how big this thing is
+
+70
+00:08:07,560 --> 00:08:14,199
+hopefully it's why is it slow okay should be fast I don't know why I was so
+
+71
+00:08:14,199 --> 00:08:19,639
+slow maybe I don't know if I had a network hiccup but let's see let's look at the
+
+72
+00:08:19,639 --> 00:08:22,360
+JavaScript
+
+73
+00:08:24,680 --> 00:08:30,600
+in Nick's browser I don't know if this is like the best example but this is 1.2
+
+74
+00:08:30,600 --> 00:08:37,960
+kilobytes I mean it does some sort of minimal stuff like I think we do like a
+
+75
+00:08:37,960 --> 00:08:45,840
+search oh that's broken I gotta fix that I migrated from also from tailwind 3 to
+
+76
+00:08:45,840 --> 00:08:56,720
+tailwind 4 so things are not necessarily working the best right now I gotta fix
+
+77
+00:08:56,720 --> 00:09:03,200
+some stuff but yeah especially styling but okay so back to the home page we
+
+78
+00:09:03,200 --> 00:09:11,240
+had 1.2 gigs night hadn't ish okay so I gotta look exactly what the JavaScript
+
+79
+00:09:11,240 --> 00:09:16,879
+functionality is but I definitely do have some stuff going on that is
+
+80
+00:09:16,879 --> 00:09:23,278
+JavaScript II but but yeah 1.2 kilobytes is very small I guess all let me do
+
+81
+00:09:23,278 --> 00:09:28,000
+this thing a little bit more obvious so here's my lovely partner Brooke and she
+
+82
+00:09:28,240 --> 00:09:36,639
+had she used to be a big youtuber well she still is but um she's she's have a
+
+83
+00:09:36,639 --> 00:09:41,639
+channel called Brookers and she deleted it but because she went on a spiritual
+
+84
+00:09:41,639 --> 00:09:50,678
+journey but um but yeah you know and but nonetheless I want to kind of revive a
+
+85
+00:09:50,798 --> 00:09:56,080
+little bit of that and I just made something really basic here I you know I
+
+86
+00:09:56,080 --> 00:10:00,000
+should make something a little bit more appropriate to what she accomplished
+
+87
+00:10:00,000 --> 00:10:05,678
+because there's a lot of stuff that she did which was pretty amazing actually as
+
+88
+00:10:05,678 --> 00:10:09,918
+far as um you know being like a very early on you know viral sensation she
+
+89
+00:10:09,918 --> 00:10:17,500
+actually had the most YouTube subscribers early on and yeah she got
+
+90
+00:10:17,500 --> 00:10:25,658
+picked up by NBC but anyways um I guess I'll talk more about her soon but yeah
+
+91
+00:10:25,658 --> 00:10:34,580
+right now and her thing this is about three looks like four kilobytes for just
+
+92
+00:10:34,580 --> 00:10:39,658
+for all all the animation and stuff and and we do you know we do like stuff like
+
+93
+00:10:40,658 --> 00:10:51,860
+I found this leg if anybody wants to claim it like that would be awesome
+
+94
+00:10:51,860 --> 00:11:11,058
+sitting in my basement that's her sister so anyways we would show this
+
+95
+00:11:11,058 --> 00:11:15,740
+show videos of some of the stuff she was in and this is picking it up but this is
+
+96
+00:11:15,740 --> 00:11:19,340
+all like 4.2 kilobytes driving all this you know it's pretty small it's like you
+
+97
+00:11:19,340 --> 00:11:23,740
+know if you go to react I don't know it was like 50 kilobytes just to load hello
+
+98
+00:11:23,740 --> 00:11:30,700
+world you know so we got all the logic as well as the hydration as well you
+
+99
+00:11:30,700 --> 00:11:33,620
+know because the hydration tends to be pretty big too with some of these
+
+100
+00:11:33,620 --> 00:11:42,019
+frameworks but yeah this is her big viral sensation but yeah so
+
+101
+00:11:49,340 --> 00:12:18,000
+yeah so but yeah anyways um I could be in there for a while I'll definitely
+
+102
+00:12:18,058 --> 00:12:26,740
+since I did any of this so yeah take it a little slow now so anyways let's see
+
+103
+00:12:26,740 --> 00:12:34,500
+yes check the deploy status so it's probably already deployed but I think
+
+104
+00:12:34,500 --> 00:12:41,940
+yeah so anyways I it's just like a totally custom stack I just migrated over
+
+105
+00:12:41,940 --> 00:12:52,379
+from Contobo to CloudFlare and migrated the you know now I'm serving rather than
+
+106
+00:12:52,379 --> 00:13:01,019
+serving assets from the build I'm serving it from R2 and I created just
+
+107
+00:13:01,019 --> 00:13:13,418
+launched a object store assets and ES build plug-in object store assets
+
+108
+00:13:15,860 --> 00:13:22,980
+plugins to you know serve these generated files to upload them and to
+
+109
+00:13:22,980 --> 00:13:29,058
+serve them online so another thing I'm doing as well is I have this these
+
+110
+00:13:29,058 --> 00:13:45,298
+custom imports for MD files so like on my blog over here basically oh this is
+
+111
+00:13:45,298 --> 00:13:51,538
+just like my browser logic for this particular blog post so I had some
+
+112
+00:13:51,538 --> 00:13:59,820
+square house so I basically profiled Squarespace in one of my blog posts so
+
+113
+00:14:01,298 --> 00:14:12,298
+don't mind my ugly search but I think I don't know exactly what I did with it
+
+114
+00:14:12,298 --> 00:14:21,860
+but entry intersecting lazy oh yeah lazily loading things because I wanted
+
+115
+00:14:21,860 --> 00:14:29,940
+to keep the performance score the lighthouse score pretty good on this one so
+
+116
+00:14:29,940 --> 00:14:43,019
+there's you know quite a bit of content especially with iframes and I was a
+
+117
+00:14:43,019 --> 00:14:47,380
+hundred I was hundred across the board but looks like I have some regressions
+
+118
+00:14:47,380 --> 00:14:54,660
+so maybe I'll just go and fix the regressions but yeah I probably just
+
+119
+00:14:54,660 --> 00:15:03,058
+messed something up during the oh I see a blocking here so I'm not exactly sure
+
+120
+00:15:03,058 --> 00:15:08,180
+like if this if this is cached this should be edge cached I don't know maybe
+
+121
+00:15:08,180 --> 00:15:18,380
+it my headers aren't correct that's probably what happened so I think I can
+
+122
+00:15:18,380 --> 00:15:27,940
+get back to all hundreds but I have to make sure I'm using the CDN probably okay
+
+123
+00:15:27,940 --> 00:15:42,338
+so let's come back here so I guess this is like a good thing to look into in are
+
+124
+00:15:42,380 --> 00:15:59,660
+all of my assets using the CDN including the recently moved R2 assets so let's see
+
+125
+00:15:59,660 --> 00:16:17,700
+if that I guess I should not be lazy and check myself so I guess where's the CSS
+
+126
+00:16:17,700 --> 00:16:18,000
+file that's what I was looking at specifically where is why do we just have
+
+127
+00:16:28,180 --> 00:16:34,778
+this over to bun build rather than using ES build because bun builds a lot faster but I
+
+128
+00:16:35,338 --> 00:16:44,180
+may be stuck on ES build because I do some import plugins so one of my import plugins
+
+129
+00:16:44,180 --> 00:16:56,098
+is markdown files and I sort of have okay these posts so here's just like a normal well okay
+
+130
+00:16:56,098 --> 00:17:04,460
+this is not a normal markdown file this is MDJS file so I made these special MDJS and MDTS files
+
+131
+00:17:04,460 --> 00:17:11,098
+which basically is like a component that has the front matter up here and then these are
+
+132
+00:17:11,098 --> 00:17:19,778
+all like functions basically and like factory functions which return the front matter object
+
+133
+00:17:19,778 --> 00:17:28,578
+as well as the the actual markdown rendered markdown but I think I did this way because
+
+134
+00:17:28,578 --> 00:17:37,180
+I didn't really figure out how to just use regular markdown to automatically generate
+
+135
+00:17:37,180 --> 00:17:46,538
+this where I was just like iterating and I just didn't really want to kind of go the last mile
+
+136
+00:17:46,538 --> 00:17:53,858
+and just support markdown itself I was also a little bit weird about like wanting you know
+
+137
+00:17:53,858 --> 00:17:59,019
+I was experimenting a lot oh I got a lot of these I saw these tagging a ones which I got
+
+138
+00:17:59,019 --> 00:18:08,900
+delete they're all now called tags yeah I was doing a lot of experimentation back in the day
+
+139
+00:18:08,900 --> 00:18:15,660
+so yeah now I'm just gonna be a little bit more conventional just use markdown files and
+
+140
+00:18:15,740 --> 00:18:24,420
+this what basically what this will do is under the hood this will generate this over here so
+
+141
+00:18:24,420 --> 00:18:37,180
+I could just do a straight-up import and I don't know why I'm still like why is my yeah
+
+142
+00:18:37,180 --> 00:18:53,538
+so why is my search and replace not working there we go yeah so let me make sure I got
+
+143
+00:18:53,538 --> 00:19:07,220
+everything no I didn't okay yeah so I guess this is kind of like the problem of using
+
+144
+00:19:07,220 --> 00:19:16,740
+agent take the agent loop to do your edits especially on large projects is stuff sometimes
+
+145
+00:19:16,740 --> 00:19:25,940
+gets lost some changes sometimes get lost so that's kind of maybe I thought I fixed that but
+
+146
+00:19:25,940 --> 00:19:33,058
+I might have to fix it again so this is kind of like I guess part of the issue with them yeah
+
+147
+00:19:33,058 --> 00:19:41,538
+using agents is that the alignment isn't always there so I should I'm trying to fix that right
+
+148
+00:19:41,538 --> 00:19:52,180
+now obviously with agent doc that's helpful but yeah it's not 100% especially with some of
+
+149
+00:19:52,180 --> 00:19:58,058
+these changes that are a little bit more recent so you know like kind of big changes and I'm
+
+150
+00:19:58,058 --> 00:20:04,180
+still like migrating stuff over so it's still gonna be a lot of work still just to kind of
+
+151
+00:20:04,180 --> 00:20:15,220
+get things lined up but yeah anyways yeah so this is kind of the old way I just had
+
+152
+00:20:15,220 --> 00:20:21,940
+Claude code make it so I could just use straight-up markdown files and basically what I do is I import
+
+153
+00:20:21,940 --> 00:20:32,259
+this so here I just have a way I have a code generator which then generates this index file
+
+154
+00:20:32,338 --> 00:20:39,058
+which then imports all of my blog posts and this is how I get my
+
+155
+00:20:42,578 --> 00:20:50,259
+sort of site built and it should this is on the server side so it's just going to
+
+156
+00:20:50,259 --> 00:20:56,098
+load the entire world and it doesn't scale you know infinitely you know because it's like
+
+157
+00:20:57,058 --> 00:21:06,098
+you know I'm loading every single page as a component as a function but it should scale
+
+158
+00:21:06,098 --> 00:21:12,420
+big enough probably for my blog for a while and at some point I might have to switch over to like
+
+159
+00:21:12,420 --> 00:21:19,298
+a database or something and scrap this idea but you know this works for small blogs pretty well
+
+160
+00:21:19,298 --> 00:21:25,858
+it's a static loader with some automation and yeah as you can see the imports here are marked
+
+161
+00:21:25,858 --> 00:21:34,420
+down files for these three and then mdjs so I have a custom import
+
+162
+00:21:37,298 --> 00:21:42,338
+and where is that located I gotta figure that out I think it's
+
+163
+00:21:42,660 --> 00:21:47,140
+uh plug in markdown
+
+164
+00:21:50,980 --> 00:21:51,380
+um
+
+165
+00:21:54,578 --> 00:21:59,460
+I think it's in wrap is it wrap stack or is it must be wrap stack
+
+166
+00:22:02,818 --> 00:22:10,660
+yeah oh no it's not it's uh it's in context core and it's like uh
+
+167
+00:22:13,058 --> 00:22:17,618
+I got a lot of libraries that I kind of go through so it's like esbuild
+
+168
+00:22:21,220 --> 00:22:23,220
+esm file that's what it is
+
+169
+00:22:26,660 --> 00:22:32,818
+and I think this guy um
+
+170
+00:22:32,818 --> 00:22:45,220
+um so okay so what it is is um you can do any type of file like so you can even do images
+
+171
+00:22:46,098 --> 00:22:53,618
+um and if they get but they need to get rendered with as like a um typescript or javascript so you
+
+172
+00:22:53,618 --> 00:23:00,259
+need to use typescript javascript to basically generate to to you know return of you know like
+
+173
+00:23:00,578 --> 00:23:06,740
+the default export will be a function like a factory function to generate that particular
+
+174
+00:23:08,660 --> 00:23:18,000
+mime type so I could do like a css.ts or md markdown.ts or like a png.ts and or mp4.ts if I
+
+175
+00:23:21,380 --> 00:23:22,340
+page a1
+
+176
+00:23:25,940 --> 00:23:30,980
+that's it post mod sorry it wasn't page it's post okay here we go so
+
+177
+00:23:34,500 --> 00:23:39,460
+oh okay I see what's going on my code generator is wrong
+
+178
+00:23:43,219 --> 00:23:44,500
+it's generating a duplicate
+
+179
+00:23:44,500 --> 00:23:53,619
+it so this doesn't exist because I only have a markdown file I deleted the other files but
+
+180
+00:23:53,619 --> 00:24:01,300
+for some reason it seems to so let me just try running it um
+
+181
+00:24:01,300 --> 00:24:04,099
+um
+
+182
+00:24:06,980 --> 00:24:18,000
+where am I at I'm at dev so let me cd there and uh
+
+183
+00:24:22,739 --> 00:24:30,340
+pillars that are on the side of the of the gas pumps which you know for good reason um but yeah
+
+184
+00:24:30,340 --> 00:24:36,500
+and I ended up ripping off my bumper with that so anyways I was just trying to like go to like a
+
+185
+00:24:36,500 --> 00:24:46,260
+fabricator and um I uh create like a svg um maybe I'll get when I track it down maybe I'll shut
+
+186
+00:24:46,260 --> 00:24:52,500
+off later but I basically create a CAD drawing using using svg but anyways um I think Claude
+
+187
+00:24:52,500 --> 00:24:59,860
+is done and they beat me to finding the solution here or at least something okay so fix two bugs
+
+188
+00:24:59,860 --> 00:25:05,619
+oh good okay so we got this stat thing is this syncs the stats not a promise replace
+
+189
+00:25:05,619 --> 00:25:12,739
+with exist syncs okay and change okay use dot instead added md extension
+
+190
+00:25:14,980 --> 00:25:22,500
+generates export from md files matching pattern how does it do that okay let okay let's see if
+
+191
+00:25:22,500 --> 00:25:30,018
+it worked I don't see the dog food though
+
+192
+00:25:30,018 --> 00:25:39,539
+so
+
+193
+00:25:42,420 --> 00:25:48,000
+so still does not include the md files
+
+194
+00:25:52,353 --> 00:25:55,273
+Just cuz like I don't know what the hell is being called
+
+195
+00:25:56,033 --> 00:25:59,153
+And logging is like the surefire way of like finding out
+
+196
+00:25:59,872 --> 00:26:03,313
+You know, how does this library do something, you know
+
+197
+00:26:03,912 --> 00:26:09,472
+How does you know as things get complicated? How does my own code do things, you know?
+
+198
+00:26:11,912 --> 00:26:13,912
+Not trivial
+
+199
+00:26:14,353 --> 00:26:20,993
+So I definitely did a lot of logging and of course idea is not really being helpful with
+
+200
+00:26:22,033 --> 00:26:24,033
+Navigating to the implementation
+
+201
+00:26:25,393 --> 00:26:27,393
+No, I don't want to promise
+
+202
+00:26:37,313 --> 00:26:39,313
+Yeah, nothing
+
+203
+00:26:56,712 --> 00:27:03,953
+So this is probably where Claude is gonna show me something that I'm doing that's just really dumb and
+
+204
+00:27:06,273 --> 00:27:13,953
+Before Claude I probably spent like a couple hours trying to figure this out like what the hell am I doing wrong here and
+
+205
+00:27:15,752 --> 00:27:18,313
+Claude really saves me a lot of time
+
+206
+00:27:20,472 --> 00:27:22,472
+With these sort of things
+
+207
+00:27:26,313 --> 00:27:28,000
+Yeah, so
+
+208
+00:27:47,233 --> 00:27:50,872
+You know what it probably what it probably had to do with
+
+209
+00:27:50,872 --> 00:27:56,872
+The plug-in maybe the plug-in generated it
+
+210
+00:28:01,792 --> 00:28:05,712
+All right, well, you know I might cut this short because
+
+211
+00:28:07,353 --> 00:28:09,712
+This is not the most interesting thing
+
+212
+00:28:09,712 --> 00:28:14,872
+I have a lot more just things I'm working on but this is just kind of like grunge work and
+
+213
+00:28:15,432 --> 00:28:20,353
+Sadly, it's not really a good look for a wrap stack over here all this
+
+214
+00:28:21,193 --> 00:28:24,972
+Nasty debug stuff, but the nice thing about wrap stack is it's small
+
+215
+00:28:25,632 --> 00:28:32,353
+I gotta figure out, you know, I gotta clean this some stuff up and like get it
+
+216
+00:28:33,273 --> 00:28:39,752
+Polished and working very quickly with Claude as well. It's you know, kind of like a library which has a lot of
+
+217
+00:28:40,993 --> 00:28:43,552
+weird custom stuff in it and
+
+218
+00:28:44,393 --> 00:28:49,073
+You know, I think that once I hammer it in the shape it'll get a little bit better
+
+219
+00:28:49,832 --> 00:28:54,712
+It's from a developer experience standpoint, but right now it's pretty atrocious
+
+220
+00:28:54,712 --> 00:28:58,313
+So I'm not gonna bore everybody with this. So I guess
+
+221
+00:29:00,832 --> 00:29:02,832
+Here we go is generated
+
+222
+00:29:07,113 --> 00:29:09,113
+Okay, so
+
+223
+00:29:10,313 --> 00:29:12,313
+I'm not really sure what's going on. So
+
+224
+00:29:12,953 --> 00:29:18,993
+I'm going to yeah, let's just call it and I'll upload this and I hope
+
+225
+00:29:19,872 --> 00:29:24,792
+You all have a good one. Peace out stick around. I'll get back to
+
+226
+00:29:25,672 --> 00:29:27,193
+agent doc soon
+
+227
+00:29:27,193 --> 00:29:28,000
+Thanks
+
+228
+00:29:29,238 --> 00:29:35,960
+All right, I'm back in let me turn the music off, uh, yeah, so finally fix the issue I had a like I
+
+229
+00:29:38,719 --> 00:29:43,118
+Had Claude fix it, but I ran to do some sinking issues, I guess
+
+230
+00:29:43,878 --> 00:29:45,878
+What ended up happening was?
+
+231
+00:29:46,960 --> 00:29:50,559
+As you can see from my history, it's kind of long ish
+
+232
+00:29:51,439 --> 00:29:53,439
+but
+
+233
+00:29:53,519 --> 00:29:58,319
+It didn't sync up properly with like my yelk
+
+234
+00:29:59,838 --> 00:30:01,399
+repository
+
+235
+00:30:01,399 --> 00:30:06,479
+Didn't really have like it. I I didn't have the latest version basically
+
+236
+00:30:07,639 --> 00:30:11,118
+This is unpublished still but it's in yelk
+
+237
+00:30:11,878 --> 00:30:14,319
+so now if I were to
+
+238
+00:30:15,399 --> 00:30:20,519
+Run this it'll it doesn't do all of it anymore. And if I
+
+239
+00:30:21,038 --> 00:30:28,838
+Do that it'll I don't know why bun doesn't oh
+
+240
+00:30:32,158 --> 00:30:37,000
+You know what it is is I have to do like NPX maybe like if I do bun X
+
+241
+00:30:38,279 --> 00:30:40,399
+Bun X there you go
+
+242
+00:30:43,158 --> 00:30:45,158
+Okay
+
+243
+00:30:46,559 --> 00:30:48,960
+There we go, so yeah
+
+244
+00:30:51,519 --> 00:30:56,319
+Yeah, not now it seems to work and then if I do the inc dex
+
+245
+00:31:01,279 --> 00:31:04,359
+So many indexes here
+
+246
+00:31:07,719 --> 00:31:09,719
+Okay, look at that now
+
+247
+00:31:20,519 --> 00:31:22,519
+I
+
+248
+00:31:24,719 --> 00:31:29,719
+Already has a supported already X has exported a member named meta. Oh
+
+249
+00:31:31,439 --> 00:31:33,439
+Shoot so I think
+
+250
+00:31:34,238 --> 00:31:37,519
+Part of the fix for the MD file
+
+251
+00:31:38,798 --> 00:31:43,679
+broke the MD JTS MD JS
+
+252
+00:31:46,238 --> 00:31:48,238
+So
+
+253
+00:31:50,519 --> 00:31:52,519
+I
+
+254
+00:31:56,198 --> 00:32:01,038
+Fix for a stand alone
+
+255
+00:32:03,319 --> 00:32:11,198
+MD import broke the MD dot md.js imports
+
+256
+00:32:14,920 --> 00:32:17,158
+This is for so
+
+257
+00:32:18,158 --> 00:32:21,158
+So for for
+
+258
+00:32:26,519 --> 00:32:33,479
+I got to compact this file. It's getting pretty big, but we're just doing diffs. So it should be okay
+
+259
+00:32:36,519 --> 00:32:40,920
+I'm not sure if it scans or puts the whole thing into its context. I don't think it does
+
+260
+00:32:40,920 --> 00:32:45,359
+I think it just does the diff and that's what gets added to context
+
+261
+00:32:47,639 --> 00:32:49,639
+I
+
+262
+00:33:04,359 --> 00:33:06,359
+Yeah, so we
+
+263
+00:33:07,319 --> 00:33:09,319
+Looks like we're exporting meta twice
+
+264
+00:33:11,238 --> 00:33:13,238
+In the plug-in
+
+265
+00:33:14,198 --> 00:33:17,078
+And I probably need to have like a skill
+
+266
+00:33:18,038 --> 00:33:19,238
+for
+
+267
+00:33:19,238 --> 00:33:22,439
+All these sub modules just to make sure that and yoke
+
+268
+00:33:23,078 --> 00:33:27,559
+Just to make sure that we are going to always update properly
+
+269
+00:33:29,838 --> 00:33:35,559
+But let me do that but I'm actually fading out so
+
+270
+00:33:37,078 --> 00:33:41,798
+I'll probably just maybe do one more cut to when I have things basically working
+
+271
+00:33:43,238 --> 00:33:46,878
+And then leave it at that but it might take me a little bit of time
+
+272
+00:33:48,359 --> 00:33:54,899
+And I'm a little tired right now, so all right meta export collision
+
+273
+00:33:56,198 --> 00:33:58,198
+the barrel used
+
+274
+00:34:01,000 --> 00:34:07,798
+All port post files, but every post exports the same names met and default oh, it's cause it okay
+
+275
+00:34:08,920 --> 00:34:10,838
+deleted that
+
+276
+00:34:10,838 --> 00:34:12,838
+The barrel is unnecessary
+
+277
+00:34:14,198 --> 00:34:18,679
+Posts are consumed via individual import calls. So
+
+278
+00:34:22,118 --> 00:34:24,118
+Okay
+
+279
+00:34:31,599 --> 00:34:33,599
+Please regenerate
+
+280
+00:34:34,838 --> 00:34:38,798
+And please regenerate and update
+
+281
+00:34:40,920 --> 00:34:42,920
+Dependencies
+
+282
+00:34:43,238 --> 00:34:45,000
+Okay, all right peace out

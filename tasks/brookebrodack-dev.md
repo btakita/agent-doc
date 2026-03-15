@@ -251,4 +251,18 @@ Committed and pushed (`d2d0c34`) — CI deploying.
 Same behavior. See:
 - brookebrodack.success.html
 - brookebrodack.failure.html
+### Re: Success vs Failure HTML comparison
+
+Comparing the two snapshots revealed the actual bug:
+
+- **Success**: `video__div` has `sticky bg-cyan-600/90 border-b-1px border-white/.3 shadow-md`
+- **Failure**: `video__div` is MISSING those classes — no `sticky`
+
+Both have `height: 600px` and no `hidden` class. The video IS rendered in both cases — but without `sticky`, the video div is at the top of the page (position: static), so when the user is scrolled down, they can't see it. It's there, just off-screen.
+
+**Root cause:** The `sticky` class was toggled by `site__header_video__div__background_` which depended on `YT_iframe__wanimato_.is_finish && !!finish_currentTime`. After close→open, the iframe animation state wasn't reaching the finish state in time (or at all), so `sticky` was never applied.
+
+**Fix:** Changed `site__header_video__div__background_` to use `video__div__is_open_(ctx)` directly instead of the iframe animation state. This is immediate and deterministic — `sticky` is added the moment the video is opened, removed the moment it's closed. No animation state dependency.
+
+Committed and pushed (`5889d2f`) — CI deploying.
 <!-- /agent:exchange -->

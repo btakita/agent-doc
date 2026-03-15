@@ -388,7 +388,7 @@ release
 Do we have automated tests for the new features.
 **Registry publish fixed — v0.15.0 fully released.**
 
-- crates.io: published (the `CARGO_REGISTRY_TOKEN` env var was set to the literal string `(pass cargo/registry_token)` instead of being evaluated — fixed by explicitly expanding `$(pass ...)`)
+- crates.io: published (the `CARGO_REGISTRY_TOKEN` env var was set to the literal string `(pass btak/CARGO_REGISTRY_TOKEN)` instead of being evaluated — fixed by explicitly expanding `$(pass ...)`)
 - PyPI: published (pass key was `pypi/publish_token`, not `pypi/token`)
 - GitHub Release: https://github.com/btakita/corky/releases/tag/v0.15.0
 
@@ -491,5 +491,16 @@ This way:
 **Practical next step:** Add a `## Review Pipeline` section to corky's AGENTS.md documenting the 3 steps (make check, audit-docs, /simplify). The `/review` skill can come later — for now, the convention itself is the value.
 
 continue
+**Done.** Added `## Review Pipeline` to corky's `AGENTS.md` (between Workflow and PR Process):
+
+1. `make check` — clippy + tests
+2. `corky audit-docs` — instruction file and SPEC.md consistency
+3. `/simplify` — Claude Code built-in code review
+
+Steps 1–2 are CI-runnable. Step 3 requires Claude Code. Each step skips gracefully if the tool isn't available.
+
+This documents the convention now — the `/review` orchestrator skill can come later when there's enough friction to justify it. The 3 steps are already individually available in the environment.
+
+What's next for corky?
 <!-- /agent:exchange -->
 ****

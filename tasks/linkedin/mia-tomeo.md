@@ -54,6 +54,17 @@ Be direct about the miscommunication. Acknowledge the awkward replies without ov
 4. **LinkedIn best practices** — Tue-Thu 8-10 AM ET is peak engagement (today is Thursday, perfect timing)
 
 The message itself is good. Just queue it for the morning.
+## Assistant
+
+Great — she's engaged. Here's a draft reply:
+
+> That sounds great. Monday or Tuesday next week works well for me — what time works best on your end?
+
+Short, confirms interest, gives her your availability without over-explaining. Let her propose a time/format (call, Zoom, etc.).
+
+**For the call itself:** Good instinct to bring up The Freedom People — but lead with listening first. Let her pitch her services, ask questions, then naturally mention your background: "I've actually studied some of this through The Freedom People — are you familiar with their approach?" This positions you as a peer, not a prospect being sold to. If their methods align, you could even offer value back ("I may be able to help your team too") — but save that for after you understand what they do.
+
+## User
 <!-- /agent:exchange -->
 
 Hey Mia — apologies for the confusion in my earlier replies, I completely misread your message. I'm actually very interested in what you're describing.

@@ -7,20 +7,15 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Slow pickup of agent-doc commands
+### Flash notification added
 
-The delay is between when `agent-doc route` sends keys to the tmux pane and when Claude Code processes the input. This is mostly Claude Code's internal latency — we can't control how fast it picks up typed input.
+Added `tmux display-message` to `route.rs::send_command()` — shows a brief flash on the target pane immediately when the route dispatches the command:
 
-**Options to reduce perceived latency:**
+```
+⏳ /agent-doc youtube.md
+```
 
-1. **Watch daemon (already exists):** `agent-doc watch` auto-submits on file save with zero debounce for CRDT docs. Bypasses `/agent-doc` typing entirely — just save the file and the daemon routes the command. Is this what you're already using, or are you triggering manually from the IDE?
+This appears for 2 seconds, giving instant visual feedback that the command was sent, even before Claude Code picks up the input. Uses just the filename (not full path) to keep it short.
 
-2. **Immediate feedback in tmux:** Could add a `tmux display-message` from `agent-doc route` so you see "Sent /agent-doc <file> to pane %X" immediately, even before Claude picks it up. At least you'd know the command was dispatched.
-
-3. **Pre-warm:** If the Claude session is idle for a while, the first input after idle can be slower. No fix for this — it's Claude Code behavior.
-
-Which path are you hitting — IDE plugin → route, or manual `/agent-doc` in the terminal?
-
-IDE plugin → route...
-Let's try a flash notification in the tmux pane that receives the run.
+All 352 tests pass, clippy clean. Want me to include this in the next release?
 <!-- /agent:exchange -->

@@ -216,4 +216,5 @@ Move framework-agnostic code from relysjs/rhonojs into rebuildjs subpaths:
 **This should be done in a dedicated ctx-core-dev session** — it touches deep internals and needs careful testing. Want me to create a task file at `tasks/rebuildjs-refactor.md`?
 
 Yes
+Created `tasks/rebuildjs-refactor.md` with the full plan — 4 phases, checklist items, target architecture diagram, and API surface documentation. Ready for a dedicated ctx-core-dev session.
 <!-- /agent:exchange -->

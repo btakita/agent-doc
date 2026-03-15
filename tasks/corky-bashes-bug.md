@@ -107,4 +107,8 @@ Release complete. The foreground-only claims log fix is now live across all dist
 
 Is the skill updated locally?
 I still see 1 bash running
+
+Yes — the local skill at `.claude/skills/agent-doc/SKILL.md` has the foreground-only instruction. Verified just now.
+
+The 1 remaining bash task is a leftover from earlier in this session (spawned before the fix took effect). Kill it with `x` in the background tasks view. New sessions won't have this issue.
 <!-- /agent:exchange -->

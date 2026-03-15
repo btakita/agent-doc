@@ -1,0 +1,3868 @@
+1
+00:00:00,000 --> 00:00:08,640
+Hey everyone it's me again Brian and I got some exciting developments so I'm
+
+2
+00:00:08,640 --> 00:00:16,440
+gonna start creating lazily rs so I have a couple libraries one is lazily zig
+
+3
+00:00:16,440 --> 00:00:26,400
+and lazily python and it's basically they're lazy you know like like
+
+4
+00:00:26,400 --> 00:00:34,640
+the name you can lazily create values on the context that you pass in like
+
+5
+00:00:34,640 --> 00:00:42,240
+through dependency injection so the idea is that we have you know a slot and the
+
+6
+00:00:42,240 --> 00:00:52,680
+slot is like a value that on the context that is like a single value so it can
+
+7
+00:00:52,680 --> 00:00:56,680
+it gets lazily instantiated and basically it doesn't change the so it
+
+8
+00:00:56,680 --> 00:01:00,440
+can be mutable like it can be like a hash or you know like a sorry not a hash
+
+9
+00:01:00,440 --> 00:01:07,600
+but like a dictionary or something like that where you or a list like that is
+
+10
+00:01:07,600 --> 00:01:14,800
+mutable that you can change the values of it but the idea also is that it's
+
+11
+00:01:14,800 --> 00:01:20,920
+not like you can't like change the actual pointer the original pointer
+
+12
+00:01:20,960 --> 00:01:27,200
+because it's it's a slot so you but you can clear it though and then you can
+
+13
+00:01:27,200 --> 00:01:35,040
+then redo it basically and then we also have a cell which allows you to actually
+
+14
+00:01:35,040 --> 00:01:42,640
+change the value so I'm kind of going through that on the right side and then
+
+15
+00:01:42,640 --> 00:01:54,760
+on the left side here I am working on consolidating RhonoJS and ReliasisJS
+
+16
+00:01:54,760 --> 00:02:01,960
+which is this is Elysia's JS and this is Hono's integration with RebuildJS so I'm
+
+17
+00:02:01,960 --> 00:02:07,360
+basically consolidating all the functionality into RebuildJS and then
+
+18
+00:02:07,360 --> 00:02:14,600
+making ReliasisJS and RhonoJS thin wrappers and you know the kind of the
+
+19
+00:02:14,600 --> 00:02:18,920
+advantage of that is that we can you know consolidate the logic extract out
+
+20
+00:02:18,920 --> 00:02:26,840
+shared logic all within the same package and then then kind of use it from there
+
+21
+00:02:26,840 --> 00:02:38,160
+so I'm just I went ahead and did that let's see I think I released it and I'm
+
+22
+00:02:38,160 --> 00:02:46,440
+also now kind of propagating it across the different apps that I have so we
+
+23
+00:02:46,440 --> 00:02:54,240
+built yeah so looks like we're converting Brooke Brodack site to Hono
+
+24
+00:02:54,240 --> 00:02:59,100
+because it was in Elysia and now we're gonna move over to Hono because Hono is
+
+25
+00:02:59,100 --> 00:03:07,240
+better with Cloudflare workers so anyways with the LazeLease side I wanted
+
+26
+00:03:07,240 --> 00:03:14,840
+to start doing kind of reactive algorithms reason why is I have agent
+
+27
+00:03:14,840 --> 00:03:19,760
+doc and I'm starting to make it more reactive so for example this checkbox
+
+28
+00:03:19,760 --> 00:03:26,000
+here happened automatically so as I was you know as I kind of did this exchange
+
+29
+00:03:26,000 --> 00:03:32,960
+area and we updated the status area updated as well so right now it's very
+
+30
+00:03:32,960 --> 00:03:36,880
+rudimentary it all happens just within the skill but I want to get more
+
+31
+00:03:36,880 --> 00:03:42,800
+sophisticated and that's what LazeLease is gonna help us with so we might have
+
+32
+00:03:42,800 --> 00:03:49,400
+even full-blown signals so we have legal slot a cell and we may have a signal as
+
+33
+00:03:49,400 --> 00:03:57,440
+well context core kind of has this like delineation as well oops I gotta be
+
+34
+00:03:57,440 --> 00:04:05,720
+quiet a context core has a delineation as well but lazily I feel like is a
+
+35
+00:04:05,720 --> 00:04:17,600
+little bit of a cleaner breakout so hopefully that goes well so anyways
+
+36
+00:04:17,640 --> 00:04:22,880
+let's just continue let me move my mic closer so I don't have to talk as loud
+
+37
+00:04:22,880 --> 00:04:34,680
+I get excited so I talk loud and then keeps everybody awake alright so so what
+
+38
+00:04:34,680 --> 00:04:42,000
+do we have here so we actually I kind of made like a little description and I
+
+39
+00:04:42,000 --> 00:04:55,040
+moved I had some modules to lazily pie and lazily zig into my agent loop private
+
+40
+00:04:55,040 --> 00:05:04,920
+repo but now we're just kind of evaluating it so let's see so my
+
+41
+00:05:04,920 --> 00:05:09,280
+description is accurate with some nuances slots can be unset or set with
+
+42
+00:05:09,280 --> 00:05:13,880
+a value returned by its activating function correct in both implementations
+
+43
+00:05:13,880 --> 00:05:21,680
+so meaning lazily pie and lazily zig in lazily zig an unset slot has storage
+
+44
+00:05:21,680 --> 00:05:28,800
+null in lazily pie an unset slot simply has no entry in the context dictionary
+
+45
+00:05:28,800 --> 00:05:35,160
+okay so these are just kind of like implementation specific things because
+
+46
+00:05:35,160 --> 00:05:41,440
+like zig you know has a struct and you got to like have the fields in there you
+
+47
+00:05:41,440 --> 00:05:46,560
+can't like lazily add or remove fields in the struct it's just always got to be
+
+48
+00:05:46,560 --> 00:05:53,680
+there so and in Python of course is dynamic so you can be a little bit more
+
+49
+00:05:53,680 --> 00:06:01,160
+specific like especially for dictionary you can dynamically add or remove fields
+
+50
+00:06:01,160 --> 00:06:07,120
+all right so a slot and I guess also in zig like a struct is just gonna be more
+
+51
+00:06:07,120 --> 00:06:17,000
+performant than like dictionary type in zig and I should I don't remember what
+
+52
+00:06:17,000 --> 00:06:23,440
+it's called but I guess I should look I know zig is going through some a major
+
+53
+00:06:23,440 --> 00:06:27,120
+version of the actually zigs got some exciting developments as well
+
+54
+00:06:27,120 --> 00:06:34,120
+specifically with their upcoming release with async programming like they don't
+
+55
+00:06:34,120 --> 00:06:38,120
+have an async await keyword they have like in their data structures like an
+
+56
+00:06:38,120 --> 00:06:45,600
+ability to basically use the same like logic but you can use both async or
+
+57
+00:06:45,600 --> 00:06:53,240
+synchronous programming with the I think it's their IO modules so it's some
+
+58
+00:06:53,240 --> 00:07:02,680
+pretty cool looking stuff but yeah anyways with zig what do we have here so
+
+59
+00:07:02,680 --> 00:07:16,640
+our zig implementation our slot here see I did I did all this by hand so but
+
+60
+00:07:16,640 --> 00:07:20,520
+it's probably been about a month or so a little more than a month since I last
+
+61
+00:07:20,560 --> 00:07:29,280
+touched this I need to familiarize myself with it again yeah I like the testing in
+
+62
+00:07:29,280 --> 00:07:35,200
+zig and how the compiler works it seemed to work pretty good actually when I did
+
+63
+00:07:35,200 --> 00:07:44,160
+it by hand and I kind of preferred zig over rust because it just seemed like
+
+64
+00:07:44,160 --> 00:07:52,240
+more productive language to hand code and it also was better with interoperability
+
+65
+00:07:52,240 --> 00:08:00,760
+between different systems so it seemed like my idea with lazily zig was I wanted
+
+66
+00:08:00,760 --> 00:08:08,760
+to have this interoperable lazy you know context this context where I can lazily
+
+67
+00:08:08,760 --> 00:08:16,360
+add state or you know manage state with it and including you know state with
+
+68
+00:08:16,360 --> 00:08:21,960
+relationships we're having a slot in cells and you can have like slots with
+
+69
+00:08:21,960 --> 00:08:27,560
+dependencies and then if you deactivate like a parent slot like you clear it out
+
+70
+00:08:27,560 --> 00:08:37,520
+it'll automatically clear out the child slots in its graph and cells if you
+
+71
+00:08:37,520 --> 00:08:42,520
+dynamically set a value I mean if you set a value it won't clear it out but if
+
+72
+00:08:42,520 --> 00:08:46,880
+you if it's just using its default value it would clear it out so next time you
+
+73
+00:08:46,880 --> 00:08:53,080
+access the cell it would lazily reinstantiate the default value again
+
+74
+00:08:53,080 --> 00:08:59,320
+based on like you know parent data so like you know you can have like the
+
+75
+00:08:59,320 --> 00:09:06,440
+default data of a cell or a slide you know as well like depend on what the
+
+76
+00:09:06,440 --> 00:09:18,200
+parent slots values or cell values are so yeah so anyways you know I was kind
+
+77
+00:09:18,200 --> 00:09:25,240
+of looking at this slot here in the context right so the context is not like
+
+78
+00:09:25,240 --> 00:09:31,440
+a normal context where you just like have an app context where you define your
+
+79
+00:09:31,440 --> 00:09:38,120
+own fields this is a dynamic context so it has okay the cases they would I mean
+
+80
+00:09:38,120 --> 00:09:42,720
+boys had an allocator but it has a cache here so it's auto hash map that's what I
+
+81
+00:09:42,720 --> 00:09:49,240
+was looking for so this is kind of equivalent to a Python dictionary so but
+
+82
+00:09:49,240 --> 00:09:59,320
+in this case the hash maps key value in our case is a u-size which is unsigned
+
+83
+00:09:59,320 --> 00:10:05,880
+size int it's like an integer but it's like it's for the pointers so it's like
+
+84
+00:10:05,880 --> 00:10:15,400
+it's usually I think it's like four bytes or I think it's like four bytes in the
+
+85
+00:10:15,400 --> 00:10:24,880
+case of most like 64-bit systems so it's like 64 bits I think and it's like the
+
+86
+00:10:24,880 --> 00:10:31,000
+address space essentially so we can like assign pointers and that's kind of the
+
+87
+00:10:31,000 --> 00:10:37,080
+purpose of u-size is just to kind of point it to like the activating function
+
+88
+00:10:37,080 --> 00:10:43,560
+so that function pointer would basically be the key and then the value would be
+
+89
+00:10:43,560 --> 00:10:50,040
+the whatever the value of that activity function is so you know there are kind
+
+90
+00:10:50,040 --> 00:10:55,960
+inherent limitations with this like you but you have you need like basically one
+
+91
+00:10:55,960 --> 00:11:02,120
+activating function would have one value on on one context so if you want to have
+
+92
+00:11:02,120 --> 00:11:06,760
+like a single activity function have multiple values we either need different
+
+93
+00:11:06,760 --> 00:11:11,880
+contexts or that activating function we need to like return like a like a like a
+
+94
+00:11:11,880 --> 00:11:16,480
+data structure like a hash map that's you know like a mutable data structure
+
+95
+00:11:16,480 --> 00:11:22,240
+that we can sort of manage the values with but it's but yeah basically just a
+
+96
+00:11:22,240 --> 00:11:30,720
+one-to-one relationship we have mutex here because I'm starting to do you
+
+97
+00:11:30,720 --> 00:11:40,160
+know asynchronous or parallel stuff but it's a very simple mutex it's gonna be
+
+98
+00:11:40,160 --> 00:11:45,440
+more sophisticated later but I have to like get back to this project and do
+
+99
+00:11:45,440 --> 00:11:52,040
+that but for the most part yeah it's just a simple mutex and I actually did
+
+100
+00:11:52,040 --> 00:11:57,800
+get a multi-threading working so it is there is a thread safe built with
+
+101
+00:11:57,800 --> 00:12:03,600
+lazily zig lazily pie does not have a thread safe built I just it's it's just
+
+102
+00:12:03,600 --> 00:12:07,520
+yeah you basically we just need to have another context in a different thread if
+
+103
+00:12:07,520 --> 00:12:12,880
+you wanted or you'd have to manage the thread safety yourself but it doesn't
+
+104
+00:12:12,880 --> 00:12:17,400
+guarantee thread safety but lazy zig does have thread safety but you can also
+
+105
+00:12:17,400 --> 00:12:23,920
+disable thread safety because there's some overhead so you can either have like
+
+106
+00:12:23,920 --> 00:12:30,680
+a thread safe or not thread safe build with it so yeah I have like an FFI in
+
+107
+00:12:30,680 --> 00:12:38,320
+here where this idea was that I wanted to like have like flutter apps or web
+
+108
+00:12:38,320 --> 00:12:46,560
+servers or even wasm web assembly don't use these libraries that use lazily zig
+
+109
+00:12:46,560 --> 00:12:50,760
+and this would kind of like be like the back-end state that you can share
+
+110
+00:12:50,760 --> 00:12:57,880
+across different platforms and of course yeah we have the slots and the slot is
+
+111
+00:12:57,880 --> 00:13:05,160
+very simple structure it's just I guess I'll show a test I actually have some
+
+112
+00:13:05,160 --> 00:13:10,880
+examples that's probably a better so in this case like I have like an off here
+
+113
+00:13:10,880 --> 00:13:13,880
+where
+
+114
+00:13:18,160 --> 00:13:28,600
+trying to think what is a good place to do this okay it's like get off token for example you
+
+115
+00:13:28,600 --> 00:13:33,720
+pass in the context and then you can do your authentication like this is like
+
+116
+00:13:33,720 --> 00:13:38,520
+pretending to be like a real library so pretend that this is like a for real
+
+117
+00:13:38,520 --> 00:13:44,720
+authentication obviously this is not for real but you know this would in and with
+
+118
+00:13:44,720 --> 00:13:50,200
+late with zig 016 you know you can make this asynchronous as well I mean these
+
+119
+00:13:50,200 --> 00:13:54,560
+could also be threaded too but we actually have asynchronous support
+
+120
+00:13:55,400 --> 00:14:04,720
+IO support too so pretty cool and then this off token managed what is this off
+
+121
+00:14:04,720 --> 00:14:12,480
+token here oh you know I don't think I have oh yeah so I had this notion of
+
+122
+00:14:12,480 --> 00:14:23,360
+this own string so with um shoot I got to install the zig plugin to let me do
+
+123
+00:14:23,360 --> 00:14:35,120
+that real quick but just to have it I do have it okay so I'm not sure why I
+
+124
+00:14:35,120 --> 00:14:42,640
+didn't take me there oh you know I know why shoot I gotta add because I just
+
+125
+00:14:42,640 --> 00:14:51,920
+added this so I gotta like add it here yeah this is kind of like not like a
+
+126
+00:14:51,920 --> 00:15:12,800
+great DX for Jeff rings products but you know so lazily zig okay sources so I
+
+127
+00:15:13,280 --> 00:15:22,520
+guess I might as well do pie as well and rusts why not rusts too
+
+128
+00:15:22,520 --> 00:15:46,960
+all right so let's see if we have navigation no we don't yeah that oh
+
+129
+00:15:47,120 --> 00:16:09,240
+shoot okay let me um do the installs too just to kind of okay so here I'm gonna
+
+130
+00:16:09,240 --> 00:16:17,600
+source and this would be lazily zig and we'll do these install we do these
+
+131
+00:16:17,600 --> 00:16:35,480
+trusts install and then source lazily pie install okay good we have AVM okay
+
+132
+00:16:35,480 --> 00:16:56,960
+cool and then oh do that this would be zig version shoot cool we got oh 16 okay
+
+133
+00:16:56,960 --> 00:17:09,280
+awesome so we're using dev version zig and then python version 3.4 okay cool so yeah the zig
+
+134
+00:17:09,280 --> 00:17:15,240
+brains plugins not so good so it is I don't think it's even official but anyways I have this
+
+135
+00:17:15,240 --> 00:17:26,840
+own string over here and the idea with the own string is that strings in zig when you use like
+
+136
+00:17:26,840 --> 00:17:33,680
+define them in the source code like this very secret token it's going to have a pointer but
+
+137
+00:17:33,680 --> 00:17:44,160
+it's gonna be like in this place that's like lives as long as a program lives basically so
+
+138
+00:17:44,160 --> 00:17:49,800
+it's not like a dynamically allocated string it's just like this string that kind of like
+
+139
+00:17:49,800 --> 00:18:01,360
+it's already there so if you reference it it's gonna reference this string that's just gonna
+
+140
+00:18:01,360 --> 00:18:09,720
+live for the entire life cycle of the program so the own string kind of makes sure that we
+
+141
+00:18:09,720 --> 00:18:18,360
+use a pointer and I hope I'm accurate with this by the way I'm like I think I'm fairly confident
+
+142
+00:18:18,360 --> 00:18:29,960
+but I'm also confidently wrong here but anyways owned I think is yeah it's our type okay so yeah
+
+143
+00:18:29,960 --> 00:18:42,520
+so we kind of have to like break down the type a bit so we have like a managed type versus like
+
+144
+00:18:42,520 --> 00:18:48,880
+unmanaged type okay like a literal so literal would be like a number and then there's like a
+
+145
+00:18:48,880 --> 00:18:56,080
+managed type which is like a pointer to an object and then also I have this of course this DNIT so
+
+146
+00:18:56,080 --> 00:19:06,200
+this is how we deal with the Indian ultimately deallocate the thing so if it's like a pointer
+
+147
+00:19:06,200 --> 00:19:18,040
+we free it or if it's a struct and if we know the type we'll DNIT it and yeah if it's not managed
+
+148
+00:19:18,040 --> 00:19:25,800
+and we just exit because you know it's not meant to be collected it's not meant sorry
+
+149
+00:19:25,800 --> 00:19:32,960
+not collected it's not meant to be deallocated so that's kind of the idea with the own string
+
+150
+00:19:32,960 --> 00:19:48,800
+is that the type is a string and in this case it's a slice so yeah it's so yeah it's so a
+
+151
+00:19:48,800 --> 00:19:55,000
+string can also is a slice as well but the string is more like the underlying string with the
+
+152
+00:19:55,000 --> 00:20:07,320
+pointer and the slice is the pointer but it and it's also kind of like I think that it depends
+
+153
+00:20:07,320 --> 00:20:17,080
+on the allocation of the underlying string so I don't think they're mutable the strings but I
+
+154
+00:20:17,560 --> 00:20:25,120
+could be wrong but I don't think they're mutable so because yeah they have to be known during
+
+155
+00:20:25,120 --> 00:20:37,240
+compile time but you can have like like a C string here which you know is kind of like this
+
+156
+00:20:37,240 --> 00:20:47,000
+you start with the pointer at address zero and then it terminates with the zero byte sorry the
+
+157
+00:20:47,000 --> 00:21:01,520
+zero bit or zero value byte but and then you can also have in zig the slices which know the length
+
+158
+00:21:01,520 --> 00:21:12,520
+of the string that or the sorry the length of the u8s that were there basically so so it's like
+
+159
+00:21:12,520 --> 00:21:24,360
+the length of the array basically and it wants to know that compile time otherwise I think there's
+
+160
+00:21:24,360 --> 00:21:34,120
+rules about that if it's not known to but it's like some special rules that you're kind of
+
+161
+00:21:34,120 --> 00:21:40,440
+restricted on what you can do with it anyways here's a slot I don't know if I should go too
+
+162
+00:21:40,440 --> 00:21:49,080
+deep into this but is pointing to a context object in this context object I think we do we look at
+
+163
+00:21:49,080 --> 00:22:00,880
+that yeah yeah we did so the allocator cache in mutex with init d init get slot so we can
+
+164
+00:22:00,880 --> 00:22:08,120
+get a slot based off the function and this is what this function is the actual key of this cache
+
+165
+00:22:08,120 --> 00:22:20,360
+is it no yeah it is pretty sure it is yeah yeah so because yeah that's the actual value and then
+
+166
+00:22:20,360 --> 00:22:28,480
+yeah because this is very dynamic so you can pass in a function pointer at any time in the
+
+167
+00:22:28,480 --> 00:22:39,640
+program's life cycle and it'll then like execute it that function with a context this part interface
+
+168
+00:22:39,640 --> 00:22:46,440
+you know it's an argument and then you can execute it and the return value is the value that gets
+
+169
+00:22:46,440 --> 00:22:52,480
+stored in the cache okay so the slots we have a context we have the value function pointer so
+
+170
+00:22:52,480 --> 00:22:59,840
+basically this is the function oh that we store the key of the cat in the cache the cache key
+
+171
+00:22:59,840 --> 00:23:15,600
+hmm I'm not sure why we oh I think we do this for slots because sorry cells because cells are slots
+
+172
+00:23:15,600 --> 00:23:25,280
+that contain a cell object so that we have a cell object and then we have this notion of a cell
+
+173
+00:23:25,280 --> 00:23:36,240
+slot and I think we actually have a cell slot type as well we should at least maybe it's in
+
+174
+00:23:36,240 --> 00:24:00,640
+the Python version but cell slots yeah I guess oh yeah I only got it in Python so
+
+175
+00:24:00,640 --> 00:24:11,440
+yeah it would be good if we have a cell slot in Leslie's egg but
+
+176
+00:24:11,440 --> 00:24:29,240
+for now I think we just have a slot that has a cell as well we'll see maybe I'm not remembering
+
+177
+00:24:29,240 --> 00:24:37,240
+correctly here because I think I introduced the cell slot type into lazily pie after I worked
+
+178
+00:24:37,240 --> 00:24:48,640
+on this library because I was using lazily pie and in presence when I worked there so for a lot
+
+179
+00:24:48,640 --> 00:24:57,600
+of service side logic now starting to propagate it hmm I also used a message spec a lot with
+
+180
+00:24:58,080 --> 00:25:04,720
+Python which is pretty it's like a structs basically so it's a pretty fast and nice
+
+181
+00:25:04,720 --> 00:25:18,360
+library much better than Pydantic but anyways I don't have code folding oh man shoot I'm not
+
+182
+00:25:18,360 --> 00:25:26,680
+sure why it's kind of lame like I seem to recall that it was a better development experience
+
+183
+00:25:26,760 --> 00:25:35,720
+standalone than the project so maybe I just need to configure things properly but anyways
+
+184
+00:25:35,720 --> 00:25:48,600
+we have in it in it keyed which I think you can pass in your own key but for the most part it's
+
+185
+00:25:48,600 --> 00:25:59,120
+just the value function but in the case of cells it's different and yeah here's some
+
+186
+00:25:59,120 --> 00:26:08,720
+implementation logic you know storage and this is where we store the oh yes we have a one in a
+
+187
+00:26:08,720 --> 00:26:15,040
+slice over here direct and indirect and then direct has you know it kind of deals with these
+
+188
+00:26:15,040 --> 00:26:22,440
+different types over here so the idea of direct is like the pointer indirect is the
+
+189
+00:26:22,440 --> 00:26:42,760
+exactly what is what should I have your comments but storage is right here all right no allocation
+
+190
+00:26:42,800 --> 00:26:55,800
+okay so direct is like like a literal basically and indirect is allocated as a pointer and it
+
+191
+00:26:55,800 --> 00:27:11,280
+needs to be freed basically whenever we de-init the storage over here so like if you take the
+
+192
+00:27:11,320 --> 00:27:19,360
+cell and you de-init it or you clear it then it's gonna de-init kind of cascade down and
+
+193
+00:27:19,360 --> 00:27:35,720
+to the storage and all this over here so yeah so yeah so I don't know how much more I should
+
+194
+00:27:35,760 --> 00:27:49,440
+into this but yeah we got the storage here and it keyed so we're just going in our storage
+
+195
+00:27:49,440 --> 00:27:56,360
+saying this is the slot we're saying the slot storage and this is where we actually store the
+
+196
+00:27:56,360 --> 00:28:05,360
+value and then we have our mutex over here so the mutex is a pretty cool was there again
+
+197
+00:28:05,360 --> 00:28:11,000
+I actually had a lot of fun with the compiler it was it took me a while to actually get the
+
+198
+00:28:11,000 --> 00:28:19,440
+compiler to pass and the tests to pass took me a few days but eventually I got it destroying
+
+199
+00:28:19,440 --> 00:28:29,960
+and put it into the cache over here here's our getter so as you can see it it's actually
+
+200
+00:28:29,960 --> 00:28:38,760
+kind of sophisticated with it's a lot easier in Python than it is in Zig because yeah you don't
+
+201
+00:28:38,760 --> 00:28:43,520
+really have to worry about whether it's a pointer or not in Python you can just it's just the value
+
+202
+00:28:43,520 --> 00:28:52,040
+basically that means a reference but you can just access the value directly via Python handles
+
+203
+00:28:52,040 --> 00:28:58,400
+the reference versus the literal like all this stuff over here is just handled seamlessly in
+
+204
+00:28:58,400 --> 00:29:07,040
+Python but in Zig you got to be concerned about it oh yeah so there's also the pointer size so
+
+205
+00:29:07,040 --> 00:29:18,080
+this is like a built-in the zig I mean well this is our method but but the pointer size itself is
+
+206
+00:29:18,080 --> 00:29:29,240
+like a built-in type so and this has like you know slice one many or see so the slices like
+
+207
+00:29:29,240 --> 00:29:39,000
+here's a slice of a byte array of an array we have one which is just a single singular
+
+208
+00:29:39,000 --> 00:29:47,520
+pointer a many which is like the actual array itself or the string the actual raw string
+
+209
+00:29:47,520 --> 00:29:53,480
+dot slice of it and then we have the C pointer which is a C style pointer which has the beginning
+
+210
+00:29:53,480 --> 00:30:01,160
+address and then null turning byte so we have directed we have indirect for the slot
+
+211
+00:30:01,160 --> 00:30:08,840
+pointer for the mode sorry the storage mode we get this pointer error over here this is just
+
+212
+00:30:08,840 --> 00:30:20,400
+error handling which we can have an error here which in this case yeah so if there is no slot
+
+213
+00:30:20,400 --> 00:30:30,920
+storage then we're missing a missing pointer basically we do the mode here cannot get
+
+214
+00:30:30,920 --> 00:30:39,080
+player so this is another error when you call get pointer and it's literal then we error out
+
+215
+00:30:39,080 --> 00:30:44,200
+can I get the pointer of direct mode so I guess I should I should probably just call this a literal
+
+216
+00:30:44,200 --> 00:30:55,040
+mode rather than direct mode because yeah I'm really like big on making terminology
+
+217
+00:30:55,040 --> 00:31:01,440
+beautiful because when you start having like synonyms like this then it's like it creates
+
+218
+00:31:01,440 --> 00:31:09,560
+forces mapping in the head you know and it's like it's easy to forget you know it's just easier if
+
+219
+00:31:09,560 --> 00:31:15,040
+it were just like like if we just called this literal mode or literal run direct that would
+
+220
+00:31:15,040 --> 00:31:20,120
+just gotten it right away I would be like wonder you know I wouldn't be wasting time wondering
+
+221
+00:31:20,120 --> 00:31:26,280
+what this is and having to look it up and talking about it even it's just like it's just a lot more
+
+222
+00:31:26,280 --> 00:31:50,000
+efficient so but let me name direct shoot up they're all
+
+223
+00:31:56,280 --> 00:32:23,960
+literal mode see can I get can I get pointer of literal I mean or literal has no pointer
+
+224
+00:32:23,960 --> 00:32:44,840
+like you know it's kind of like it just kind of makes sense the rule has no pointer I think
+
+225
+00:32:44,840 --> 00:32:52,120
+that makes sense in context of I get pointer error yeah literal is no pointer let's see it's
+
+226
+00:32:52,760 --> 00:33:00,960
+that's a nice thing about having proper like really explicit about domain language is you
+
+227
+00:33:00,960 --> 00:33:08,560
+can come up with better terms or more memorable and they're often shorter I mean I make a lot
+
+228
+00:33:08,560 --> 00:33:15,040
+of long names too so I'm not like sometimes you get it longer too but it's just more appropriate
+
+229
+00:33:15,040 --> 00:33:21,040
+the terminology tends to be more appropriate and less ambiguous as well because the ambiguity can
+
+230
+00:33:21,040 --> 00:33:28,240
+be costly it's a lot of times people will have brevity but with the brevity comes ambiguity so
+
+231
+00:33:28,240 --> 00:33:34,120
+you got to be careful about that because then when you start having ambiguity then you start
+
+232
+00:33:34,120 --> 00:33:39,600
+making mistakes about switching things out you know having the wrong like actual meaning of an
+
+233
+00:33:39,600 --> 00:33:45,400
+ambiguous term in a context where you got like contextualize you got to add context to the
+
+234
+00:33:45,400 --> 00:33:53,000
+meaning to the term ambiguous term in order to give it meaning which also creates mental
+
+235
+00:33:53,000 --> 00:34:01,840
+processing so you know if you just have it like ideally like within like a domain you just have
+
+236
+00:34:01,840 --> 00:34:12,000
+all your terms like in a cup like have meaning in a context-free manner like just the full name
+
+237
+00:34:12,000 --> 00:34:20,600
+without meaning to contextualize the ambiguity away then you know it tends to be a lot more
+
+238
+00:34:20,600 --> 00:34:28,680
+efficient to talk about and to think about and also even the scan to use that quickly scan things
+
+239
+00:34:28,680 --> 00:34:36,160
+and like you know as you scan code quickly you don't have to really like think about it you know
+
+240
+00:34:36,160 --> 00:34:41,800
+it's just like they're just one-to-one symbols you know we basically have our little attention
+
+241
+00:34:41,800 --> 00:34:48,400
+schema in our head and we see it we see the symbol it goes directly to the mapping in one
+
+242
+00:34:48,400 --> 00:34:58,840
+shot rather than like having to process context which is a slower process and and also it's also
+
+243
+00:34:58,840 --> 00:35:08,240
+more like memory intensive so we have like less ability to see a bigger picture of symbols you
+
+244
+00:35:08,240 --> 00:35:12,480
+know we see a bigger picture we can see a big picture of symbols but then when we have to start
+
+245
+00:35:12,480 --> 00:35:21,280
+like thinking through things then the attention scope becomes narrower and then then it's harder
+
+246
+00:35:21,280 --> 00:35:29,320
+to think big picture because you know it's just where our mind is our attention is occupied with
+
+247
+00:35:29,320 --> 00:35:43,440
+contextualizing anyways yes so this is I believe this is the slot still I think unfortunately I
+
+248
+00:35:43,440 --> 00:35:56,240
+don't have collapsing so yeah so basically we just have a bunch of methods on it I'm not
+
+249
+00:35:56,240 --> 00:36:04,320
+gonna go too much into MRE like oh that's just free over here I think this is just this is just
+
+250
+00:36:04,320 --> 00:36:13,120
+a comp time function so yeah this is just like how zig works with the casing is that if it's
+
+251
+00:36:13,120 --> 00:36:26,800
+like a comp time thing you you time case it yeah oh wait it's it's it's sorry no that's not true
+
+252
+00:36:26,800 --> 00:36:35,360
+this is just it it returns a struct I don't know returns a function that's what it is it's
+
+253
+00:36:35,360 --> 00:36:42,280
+an anonymous function that gets returned here so this is like the type and then you can pass
+
+254
+00:36:42,280 --> 00:36:50,880
+in the comp time value of the type so this is how they kind of does generics more or less is that
+
+255
+00:36:50,880 --> 00:36:58,480
+the compiler you know during compile time it knows the type at that moment and you can pass
+
+256
+00:36:58,480 --> 00:37:06,240
+it into the free function which takes comp time and there's special rules with this like this can
+
+257
+00:37:07,120 --> 00:37:14,800
+bypass like scoping you like can get scoped all the way into here even though it's like a boundary
+
+258
+00:37:14,800 --> 00:37:22,880
+of the struct plus the function because it's comp time it has scoping here but if it were
+
+259
+00:37:22,880 --> 00:37:29,160
+not comp time this would be a compile error because you cannot like you know basically
+
+260
+00:37:29,160 --> 00:37:35,280
+you already compiled this function and you can't like switch it up you know you can't
+
+261
+00:37:35,280 --> 00:37:46,240
+like access it intimately once you're in runtime so anyways yeah we got free we got the unit value
+
+262
+00:37:46,240 --> 00:37:53,760
+function we got the payload function value functions these are just comp time things
+
+263
+00:37:53,760 --> 00:38:05,040
+oh yeah we have subscribers oh yeah this tracking frame I think this was this is how we track
+
+264
+00:38:05,040 --> 00:38:22,080
+when we so you basically define a slot or cell and then when it references another slot apparent
+
+265
+00:38:22,160 --> 00:38:31,200
+slot this is how we track it is through this tracking frame so we push and pop as we go into
+
+266
+00:38:31,200 --> 00:38:43,480
+or out of the slot basically the slot definition so we in it heat the slot and this is where we
+
+267
+00:38:43,480 --> 00:38:50,080
+push the tracking frame and then we eventually pop it on the differ so when we leave the function
+
+268
+00:38:50,080 --> 00:39:04,120
+then we pop it all right so we got the cell here and the cell is its own structure context
+
+269
+00:39:04,120 --> 00:39:11,280
+it takes a slot a point to a slot it has a value type so this is where we you know this is the
+
+270
+00:39:11,280 --> 00:39:23,320
+mutable value that can be set and then every time you set it it would propagate to its children so
+
+271
+00:39:23,320 --> 00:39:36,640
+any child slot of this cell would get deactivated and if it were a child cell of the cell then it
+
+272
+00:39:36,880 --> 00:39:43,600
+if we get deactivated if it's a default value otherwise it would keep its value if it was
+
+273
+00:39:43,600 --> 00:39:57,200
+slightly set by something else all right so we got in it context we got our value function we
+
+274
+00:39:57,200 --> 00:40:02,600
+got the unit cell value yes this is like a function that you can pass into D you know
+
+275
+00:40:02,600 --> 00:40:11,200
+properly the unit the cell function yes so it's allows you to define where you know instantiate
+
+276
+00:40:11,200 --> 00:40:16,680
+whatever you want and then but you got to be responsible for the unit unit I guess I
+
+277
+00:40:16,680 --> 00:40:33,520
+probably can just delete that all right so this is like a default I believe because I think
+
+278
+00:40:33,520 --> 00:40:48,720
+yeah so this is how we get this cell from the slot so this this is basically kind of like
+
+279
+00:40:48,720 --> 00:41:01,680
+equivalent to the cell slot in in lazily pie but over here it's called a cell unfortunately so I
+
+280
+00:41:01,720 --> 00:41:07,680
+got to like disambiguate what a cell is and this might actually screw me a little bit as I make
+
+281
+00:41:07,680 --> 00:41:20,160
+lazily RS because I don't necessarily have this architecture fully fleshed out and if I have to
+
+282
+00:41:20,160 --> 00:41:25,520
+start editing it's going to take up you know I might have to like actually just edit this
+
+283
+00:41:25,600 --> 00:41:36,160
+I guess with Claude I guess I haven't really written ZIG with Claude too much so but I do
+
+284
+00:41:36,160 --> 00:41:45,200
+see a lot of projects now that are starting to use ZIG so I think it'll probably go well yeah so
+
+285
+00:41:45,200 --> 00:41:56,880
+oh probably not like as good as rust but like it's probably good enough so we got our cell
+
+286
+00:41:56,880 --> 00:42:04,040
+so this is get cell so I think this is kind of like meant to be run as part of a slot yeah we
+
+287
+00:42:04,040 --> 00:42:18,480
+have a slot keyed and this comes from all right we got basically our slot I'm gonna move it to
+
+288
+00:42:18,480 --> 00:42:28,560
+this side so we got our slot keyed yeah so this is like a module level thing so we got a slot
+
+289
+00:42:28,600 --> 00:42:33,320
+and we got a slot keyed so these are like functions that are on the module level so
+
+290
+00:42:33,320 --> 00:42:44,280
+slot keyed is like the more like like overwriteable or you know configurable version of slot so slot
+
+291
+00:42:44,280 --> 00:42:51,000
+this just kind of assumes you just pass in like a normal function slot keyed is yeah really just
+
+292
+00:42:51,000 --> 00:42:58,840
+meant really for cells so yeah so this is kind of what we do to get cell and then we okay so the
+
+293
+00:42:58,840 --> 00:43:09,720
+cell is right it's not the cell slot that I was thinking of but well you call cell.init and this
+
+294
+00:43:09,720 --> 00:43:25,440
+is what this is the cell slot right here so self is the slot and so it is it's like it's like
+
+295
+00:43:25,440 --> 00:43:33,960
+what is this thing oh yeah it is a cell because it contains a slot okay so it's not a cell slot
+
+296
+00:43:34,440 --> 00:43:40,600
+it's I think that maybe cell slot is just a pythonism in this case we do we gotta like
+
+297
+00:43:41,640 --> 00:43:50,120
+have a reference to slot here so so it's kind of like the cell is contains the slot I see so
+
+298
+00:43:51,240 --> 00:43:57,400
+um all right so you're the getter and our setter you got subscribe and unsubscribe um
+
+299
+00:43:57,400 --> 00:44:00,120
+I'm not sure
+
+300
+00:44:04,280 --> 00:44:16,200
+yeah if you have a parent slot or cell that changes or it basically gets
+
+301
+00:44:18,520 --> 00:44:25,720
+removed well in the case of you know unset for the slot and the cell can either be unset or
+
+302
+00:44:25,720 --> 00:44:36,440
+updated um it should then act you know be there should be a subscriber from here and that's kind
+
+303
+00:44:36,440 --> 00:44:44,840
+of what we'll um yes we can call set here it'll iterate over all the subscribers and I think that
+
+304
+00:44:44,840 --> 00:44:51,960
+comes from the um the frame that we had over here um
+
+305
+00:44:58,760 --> 00:45:04,440
+I can remember what it was it was called top or you know I think it was in context it was the
+
+306
+00:45:05,320 --> 00:45:13,320
+should I wish I had my hotkeys or I wish we had a proper z environment frame tracking frame
+
+307
+00:45:13,320 --> 00:45:21,160
+that's what it is so the tracking frame is how we know how to add or remove subscribers um
+
+308
+00:45:23,160 --> 00:45:23,800
+yeah so
+
+309
+00:45:26,920 --> 00:45:33,640
+we set it um
+
+310
+00:45:33,640 --> 00:45:35,960
+so
+
+311
+00:45:42,680 --> 00:45:54,040
+okay so in this case um we have our list of change subscribers is it list or is it what is it
+
+312
+00:45:54,040 --> 00:46:01,960
+specifically it's like a what is auto hash map okay with the subscriber key void okay I think
+
+313
+00:46:01,960 --> 00:46:12,440
+we did it this way because it was like a convenient way of dynamically adjusting the size of
+
+314
+00:46:13,400 --> 00:46:18,760
+this whatever this is I think that if we had done like a linked list or something
+
+315
+00:46:19,560 --> 00:46:27,400
+kind of a pain in the butt a little bit so um just did just to make my life a little bit easier
+
+316
+00:46:27,400 --> 00:46:33,400
+but there might be a more optimal way of doing it with a vector or something like that
+
+317
+00:46:34,680 --> 00:46:41,720
+um yes we just do a get or put um the subscriber key
+
+318
+00:46:44,200 --> 00:46:50,520
+okay otherwise we return true so I think that something must happen here and you cannot find
+
+319
+00:46:50,600 --> 00:46:59,400
+the usages unfortunately so I think that it kind of like slots somehow
+
+320
+00:47:01,880 --> 00:47:05,880
+maybe it's context that has subscribed I don't even know
+
+321
+00:47:06,920 --> 00:47:15,320
+shoot I wish I had yeah well I'll dive too deep into this but I'm getting a little tired anyway so
+
+322
+00:47:16,200 --> 00:47:20,520
+um yeah anyways um
+
+323
+00:47:24,280 --> 00:47:30,200
+got our examples here's a cell example oh yes this is a little bit more interesting example
+
+324
+00:47:30,200 --> 00:47:35,800
+so we got like hello get name um
+
+325
+00:47:35,800 --> 00:47:51,720
+um and we did it cell function um okay right so you know it so these are cells so this is like
+
+326
+00:47:51,720 --> 00:47:59,560
+your our default value of a cell and then we can admit it over here and then this becomes our
+
+327
+00:47:59,560 --> 00:48:07,800
+cell and then you could reference it right here so like in the greeting we can do hello name and
+
+328
+00:48:07,800 --> 00:48:20,280
+then other string and then um then we can call and then greeting itself can be a slot and when
+
+329
+00:48:20,280 --> 00:48:27,320
+you call greeting then it'll execute get greeting for the first time but which then gets cached
+
+330
+00:48:28,200 --> 00:48:34,600
+and then into the into the context and then if it's cached in the context it'll then just
+
+331
+00:48:35,400 --> 00:48:44,360
+call the cached value um yeah we get a response which is a slide oh yeah we also for testing
+
+332
+00:48:44,360 --> 00:48:56,440
+purposes or demo purposes we have a event log slot which um is a special is this exactly
+
+333
+00:48:58,200 --> 00:49:00,840
+okay I think it's like a
+
+334
+00:49:05,000 --> 00:49:12,680
+linked list or something well I think it's like a list of some type or might even be a
+
+335
+00:49:12,680 --> 00:49:31,400
+what is this thing it's a list okay which is an array list that's managed as a string got it
+
+336
+00:49:31,400 --> 00:49:38,360
+so this is just really for testing purposes just to test like things that happen um yeah so anyways
+
+337
+00:49:38,360 --> 00:49:43,800
+we call this here you know just to make sure that we only call we call this the correct number of
+
+338
+00:49:43,800 --> 00:49:51,480
+times in our test and then we call how are you return how are you and this is the response
+
+339
+00:49:52,360 --> 00:49:58,280
+on the response and we have get green response which will do both a greeting and a response
+
+340
+00:49:59,080 --> 00:50:15,560
+um log it uh they're green we have a response here's our slot and then we test it so um
+
+341
+00:50:15,560 --> 00:50:25,800
+um yeah I yeah we can test the event log so here we
+
+342
+00:50:27,720 --> 00:50:32,840
+oh man I'm getting so tired um I need some water
+
+343
+00:50:46,520 --> 00:50:57,480
+so here's a weird biological thing I noticed and this is maybe just just me or not but
+
+344
+00:50:58,680 --> 00:51:07,320
+it's like I gotta like my brain you know has waste and I gotta pee it out
+
+345
+00:51:07,960 --> 00:51:17,720
+um and my body tells me I'm tired when I get like brain waste or some sort of other bodily waste
+
+346
+00:51:18,280 --> 00:51:26,680
+so that's why if I like lay down take a nap um it'll then like my kidneys can just you know I'm
+
+347
+00:51:26,680 --> 00:51:34,520
+like on my back and like my my blood flow and my I don't know what that fluid is called but the
+
+348
+00:51:34,520 --> 00:51:43,800
+fluid that um you know that that kind of circulates all of our you know waste all that stuff can flow
+
+349
+00:51:43,800 --> 00:51:53,480
+to you know if from like horizontal and like it all flushes out and then I pee and like that's
+
+350
+00:51:53,480 --> 00:51:59,560
+why I take a nap and I gotta pee and but I think that like I heard that like yeah some guys in
+
+351
+00:51:59,560 --> 00:52:05,000
+India where they don't drink caffeine they just drink a lot of water and I think that's kind of
+
+352
+00:52:05,000 --> 00:52:11,160
+essentially a similar mechanism of just you know I think we get our body get tired a lot of times
+
+353
+00:52:11,160 --> 00:52:16,440
+because we have too much waste piled up and we gotta like release we gotta like flush it out
+
+354
+00:52:17,080 --> 00:52:23,720
+and being tired means laying down which then helps flush it out um you know I mean there's other
+
+355
+00:52:23,720 --> 00:52:30,520
+reasons too but I think that's like a lot of it you know especially the initial tiredness
+
+356
+00:52:36,040 --> 00:52:43,720
+so I think that's why hydration works a lot of the time to not be tired um
+
+357
+00:52:45,880 --> 00:52:47,800
+yeah so excuse me
+
+358
+00:52:47,800 --> 00:52:49,880
+um
+
+359
+00:52:53,320 --> 00:52:54,920
+got our expect event log
+
+360
+00:52:56,840 --> 00:53:03,240
+um all right let me close this uh let me make this bigger uh excuse me
+
+361
+00:53:05,640 --> 00:53:15,720
+so yeah basically oops we call this over here this green this this thing basically
+
+362
+00:53:15,720 --> 00:53:23,000
+lazily instantiates the greeting which calls get calls get greeting call hello name and that's
+
+363
+00:53:24,280 --> 00:53:33,560
+oops I wish I had proper symbols here um hello world right because I think that the name is
+
+364
+00:53:33,560 --> 00:53:41,080
+called world is the default value and then we do uh the greeting and response hello world so this
+
+365
+00:53:41,080 --> 00:53:49,640
+will only call so we call the greeting greeting hello name then we call this over here and it's
+
+366
+00:53:49,640 --> 00:53:55,240
+not going to call greeting again so you can see it called greeting and response but greeting
+
+367
+00:53:55,240 --> 00:54:02,360
+itself was cached and then of course called response hello world how are you and then we
+
+368
+00:54:03,080 --> 00:54:16,600
+set in name the name um um cell we set it from world to you and then we then okay so this is
+
+369
+00:54:16,600 --> 00:54:23,240
+basically the same as over here and then we say name get is you and then it's still the same
+
+370
+00:54:23,240 --> 00:54:32,040
+because we were not really we already lazily instantiated the cell with the value and then we
+
+371
+00:54:33,720 --> 00:54:36,760
+here's a greeting that's hello you now rather than hello world
+
+372
+00:54:37,800 --> 00:54:48,760
+and we call greeting and response so when we call name it um it deallocated or I guess it
+
+373
+00:54:49,560 --> 00:55:03,160
+de-initialized um the the child slots which um we had name so and the name was also the child
+
+374
+00:55:03,160 --> 00:55:10,280
+slots were greeting and greeting and response would have been wiped you know the values would
+
+375
+00:55:10,280 --> 00:55:16,040
+have been wiped out so we call greeting again and we call greeting and response after that then
+
+376
+00:55:16,120 --> 00:55:21,880
+we're going to have extra events here to call the um the greeting again right here and then
+
+377
+00:55:21,880 --> 00:55:29,080
+the greeting response so we already called it but it got wiped out when we did this over here
+
+378
+00:55:29,800 --> 00:55:36,920
+when we called set on the name because these were children so basically that's how it works
+
+379
+00:55:36,920 --> 00:55:43,880
+in a nutshell um yeah you can kind of see that it it's not like really reactive but it's like
+
+380
+00:55:43,880 --> 00:55:51,640
+almost like semi-reactive because I mean it effectively is reactive but it's lazily
+
+381
+00:55:51,640 --> 00:56:00,040
+reactive in the sense that like like let's say we had this attached to like an element like a
+
+382
+00:56:00,040 --> 00:56:10,280
+dom element right with a signal a signal be responsible for actually recomputing the value
+
+383
+00:56:10,280 --> 00:56:18,360
+when its parent changes but in this case it's everything's lazy so we don't recompute
+
+384
+00:56:19,080 --> 00:56:27,320
+we only just unset and then the next time you call it we lazily recompute but in the so I
+
+385
+00:56:27,320 --> 00:56:37,960
+guess like a signal is like an eager um an eager cell I guess or an eager slot um you know so
+
+386
+00:56:37,960 --> 00:56:45,160
+basically yeah signals are eager and this is lazy so maybe I shouldn't do um
+
+387
+00:56:46,840 --> 00:56:53,880
+an eager signal but maybe I should I don't know but I guess I call this library lazily so
+
+388
+00:56:54,520 --> 00:57:00,600
+you know I could call have another library called eagerly I don't know maybe but
+
+389
+00:57:00,600 --> 00:57:08,600
+but maybe just all this it should all just go together because um you know I don't really
+
+390
+00:57:08,600 --> 00:57:13,880
+want to have a proliferation of libraries I already have a lot of libraries that I've written that
+
+391
+00:57:14,520 --> 00:57:21,640
+that very many people use like thank god probably because um it would be hard to maintain I would
+
+392
+00:57:21,640 --> 00:57:26,600
+have to be making some serious money to want to maintain it otherwise like I'd be like
+
+393
+00:57:26,600 --> 00:57:38,680
+like working hard and driving myself into the poor house um but anyways uh yeah um
+
+394
+00:57:40,760 --> 00:57:46,520
+this is it so I guess we can you know it's kind of like the the quick tour the whirlwind tour
+
+395
+00:57:47,880 --> 00:57:54,200
+um there's the python side too but I'm not really going to get into it um all right so we have our
+
+396
+00:57:54,200 --> 00:58:01,080
+storage and all and then we have to unset the slot value will not be updated except to clear
+
+397
+00:58:01,080 --> 00:58:07,240
+or unset the slot okay that was what I said my assertion correct neither implementation allows
+
+398
+00:58:07,240 --> 00:58:13,240
+the implementation of a slot's cache value the only way to change it is we destroy reset
+
+399
+00:58:13,240 --> 00:58:21,160
+and then we lazily recompute so but this doesn't happen eagerly this happens lazily um
+
+400
+00:58:24,200 --> 00:58:30,120
+okay so I'll put this in here signal
+
+401
+00:58:42,440 --> 00:58:49,960
+the cell and let's say the slot and cell lazily recompute
+
+402
+00:58:49,960 --> 00:58:52,040
+compute meaning
+
+403
+00:58:54,520 --> 00:59:05,000
+recomputation only occurs when called again when called I guess when called again
+
+404
+00:59:07,320 --> 00:59:12,040
+um a signal would eagerly repute we would eagerly recompute
+
+405
+00:59:13,000 --> 00:59:13,800
+I mean
+
+406
+00:59:16,040 --> 00:59:17,240
+recomputation
+
+407
+00:59:19,160 --> 00:59:21,560
+computation occurs
+
+408
+00:59:23,960 --> 00:59:30,520
+so I would say recomputation and notification subscriber
+
+409
+00:59:30,520 --> 00:59:31,000
+and
+
+410
+00:59:39,320 --> 00:59:45,000
+computation and subscriber notification occurs
+
+411
+00:59:48,520 --> 00:59:50,760
+um when
+
+412
+00:59:53,240 --> 00:59:55,800
+um on on invalidation
+
+413
+00:59:55,800 --> 00:59:58,600
+and well
+
+414
+01:00:03,720 --> 01:00:06,120
+not necessarily because invalidation could also mean
+
+415
+01:00:07,560 --> 01:00:10,440
+d and knitting so this would be like um
+
+416
+01:00:12,440 --> 01:00:15,320
+reset I don't know let's call it reset on reset
+
+417
+01:00:17,320 --> 01:00:22,280
+I don't know if we have a notion of reset in here let me find out
+
+418
+01:00:25,960 --> 01:00:28,840
+no we don't um
+
+419
+01:00:33,720 --> 01:00:37,400
+invalidate compute
+
+420
+01:00:40,120 --> 01:00:42,440
+um unset
+
+421
+01:00:45,240 --> 01:00:50,600
+reset all right so we only really have invalidate
+
+422
+01:00:51,000 --> 01:01:02,760
+um we don't really codify the term I don't think we have subscribers but we call d and nits I believe
+
+423
+01:01:06,600 --> 01:01:11,960
+um let me verify that real quick
+
+424
+01:01:20,600 --> 01:01:23,960
+um
+
+425
+01:01:26,600 --> 01:01:31,480
+so what happens when we use a subscriber I think we do an iter
+
+426
+01:01:34,200 --> 01:01:43,960
+and here we do the callback the change callback and what does the change callback do um
+
+427
+01:01:43,960 --> 01:01:48,440
+um I believe it d and nits but
+
+428
+01:01:52,600 --> 01:01:54,680
+we'll say subscribers.add
+
+429
+01:02:02,040 --> 01:02:07,320
+I guess get or put I guess
+
+430
+01:02:14,040 --> 01:02:23,320
+that way um
+
+431
+01:02:23,320 --> 01:02:26,680
+okay
+
+432
+01:02:40,440 --> 01:02:42,280
+here we go so we
+
+433
+01:02:43,160 --> 01:02:51,960
+um emit change so I have this unlocked here this means basically not thread safe this is like the
+
+434
+01:02:51,960 --> 01:03:00,760
+core so emit change we put a new text around it and the unlocked functions are like the
+
+435
+01:03:01,640 --> 01:03:10,600
+implementation the not thread safe implementation so we um iterate
+
+436
+01:03:11,000 --> 01:03:17,720
+iterate get our dependent slot yeah we're just destroying it the value in it
+
+437
+01:03:19,160 --> 01:03:21,960
+and so um
+
+438
+01:03:24,200 --> 01:03:32,040
+god I don't know what to call it reset I guess I mean it's just change I mean it this is kind of
+
+439
+01:03:32,040 --> 01:03:41,720
+like a imperative it's like coming from the perspective of the event but the actual like
+
+440
+01:03:41,720 --> 01:03:52,200
+action that is being done is not really defined so it's all the same validate on innovation
+
+441
+01:03:52,200 --> 01:03:55,640
+and but the problem is
+
+442
+01:03:58,360 --> 01:04:08,440
+I mean I do I guess if we de-init a signal we're going to remove the children first I think we
+
+443
+01:04:08,440 --> 01:04:18,760
+do that anyway so I think yeah so we did destroy self so this was like part of it too was that
+
+444
+01:04:19,720 --> 01:04:27,640
+we had to make sure that we I guess we don't really I don't think we really notify anyway
+
+445
+01:04:28,760 --> 01:04:35,320
+I think we turned that off the notification as we're destroying ourself anyway so we don't
+
+446
+01:04:35,320 --> 01:04:42,040
+really want to notify like have all these subscriptions firing as something's being
+
+447
+01:04:42,120 --> 01:04:51,000
+destroyed more or less so forget it you know okay so I'll leave that in there um so this should be
+
+448
+01:04:51,000 --> 01:04:59,880
+okay invalidation should be okay um all right the slot may be a mutable struct object of an
+
+449
+01:04:59,880 --> 01:05:08,360
+or another immutable value correct lazy sig handles this via storage nodes with directing
+
+450
+01:05:08,360 --> 01:05:14,520
+direct for structs direct for pointers direct for structs lazily pi stores any python object
+
+451
+01:05:15,480 --> 01:05:22,760
+slots can have a dependency on other slots if dependency slot clears the dependent slots will
+
+452
+01:05:22,760 --> 01:05:29,240
+also clear mostly correct okay so but the direction terminology is inverted from the
+
+453
+01:05:29,240 --> 01:05:38,200
+implementation in both code bases slot b depends on slot a b reads a during computation
+
+454
+01:05:39,880 --> 01:05:47,160
+then when a changes or clears b is invalidated in lazily zig this uses emit change which destroys
+
+455
+01:05:47,160 --> 01:05:58,600
+dependence in lazily pi this uses reset which cascades via subscribers so slots could have
+
+456
+01:05:58,600 --> 01:06:07,000
+dependencies on other slots if a dependency slot I think I just the language is the wrong language
+
+457
+01:06:07,800 --> 01:06:17,320
+so if a dependency slot clears the dependent slot well I mean yeah
+
+458
+01:06:19,240 --> 01:06:22,600
+but the direction terminology is inverted from the implementation
+
+459
+01:06:22,600 --> 01:06:35,720
+I don't understand actually so in both code bases if if slot b depends on slot a b reads a during
+
+460
+01:06:35,720 --> 01:06:46,840
+commutation so the dependency is a and the dependent is b right then a changes or clears
+
+461
+01:06:46,840 --> 01:06:57,800
+b is invalidated afterwards which is what I'm saying here if dependency a clears then the dependent
+
+462
+01:06:57,800 --> 01:07:09,000
+b will also clear so or be invalidated I should say in lazily zig this uses image yeah so I don't
+
+463
+01:07:09,000 --> 01:07:17,240
+know I guess we just have a misunderstanding there all right so cells have a mutable value
+
+464
+01:07:17,240 --> 01:07:23,960
+which can be updated via set in excess to be a get corrected both limitations additionally
+
+465
+01:07:24,520 --> 01:07:32,440
+when both limitations only trigger invalidation when the value change actually changes so
+
+466
+01:07:33,400 --> 01:07:40,040
+right so lazily checks pi checks if it's not equal lazily zig always emits okay
+
+467
+01:07:42,600 --> 01:07:51,720
+yeah so if we use the default like we only trigger when that value actually changes
+
+468
+01:07:51,720 --> 01:07:58,440
+is all right so
+
+469
+01:08:08,200 --> 01:08:09,400
+I'm a little unsure
+
+470
+01:08:09,960 --> 01:08:16,760
+why they made this distinction here so
+
+471
+01:08:19,560 --> 01:08:26,760
+please clarify why you make this distinction
+
+472
+01:08:27,320 --> 01:08:34,120
+so
+
+473
+01:08:40,840 --> 01:08:42,680
+seems to mean that
+
+474
+01:08:45,400 --> 01:08:50,520
+we only propagate propagate
+
+475
+01:08:50,520 --> 01:08:55,080
+to subscribers
+
+476
+01:08:57,560 --> 01:09:06,280
+when the value changes
+
+477
+01:09:06,760 --> 01:09:10,040
+so
+
+478
+01:09:13,320 --> 01:09:17,800
+seems to mean that we always
+
+479
+01:09:19,960 --> 01:09:25,240
+propagate to subscribers even
+
+480
+01:09:27,720 --> 01:09:29,480
+when the value
+
+481
+01:09:31,560 --> 01:09:32,040
+oh no
+
+482
+01:09:32,040 --> 01:09:35,960
+so does not change
+
+483
+01:09:38,120 --> 01:09:47,720
+okay lazily zig cell always admits change on set regardless of value equality it doesn't compare
+
+484
+01:09:47,720 --> 01:09:57,400
+old versus new oh um maybe uh I think we should always okay so that kind of clarifies that
+
+485
+01:09:58,360 --> 01:10:02,280
+actually so lazily
+
+486
+01:10:06,680 --> 01:10:10,920
+zig should follow the same behavior
+
+487
+01:10:14,600 --> 01:10:15,960
+as lazily pi
+
+488
+01:10:18,680 --> 01:10:25,560
+if uh you're a zig expert and if I'm making a mistake here let me know please
+
+489
+01:10:26,520 --> 01:10:33,880
+but this is like intuitively I feel like that's what it should be um all right architectural differences
+
+490
+01:10:36,120 --> 01:10:39,400
+context type struct without here this is a plain deck
+
+491
+01:10:41,000 --> 01:10:49,400
+oh tracking local frame stack versus a global slot stack yeah so lazily pi can
+
+492
+01:10:49,400 --> 01:10:54,120
+it's possible to make it thread safe but it just doesn't right now um
+
+493
+01:10:55,560 --> 01:11:04,520
+slot keys we have a u size versus the object identity which is basically a u size
+
+494
+01:11:05,560 --> 01:11:11,480
+um clean up explicitly destroy and recurse otherwise you garbage collect and reset
+
+495
+01:11:11,480 --> 01:11:19,400
+yeah much easier to do that ffi built-in string view export not available there's no f5 or python
+
+496
+01:11:19,480 --> 01:11:24,200
+thread safety mutex versus not thread safe okay uh yes
+
+497
+01:11:29,400 --> 01:11:33,000
+note my edit above
+
+498
+01:11:36,040 --> 01:11:43,400
+all right oh okay so good um all right so come back here
+
+499
+01:11:43,400 --> 01:11:50,840
+here all changes are committed ready to commit and deploy as you want
+
+500
+01:11:53,400 --> 01:11:57,720
+so I think this is kind of safe I don't think I'm going to really break anything
+
+501
+01:11:59,000 --> 01:12:06,360
+I might break a website but I'll check it I mean it's not like it's that big of a deal
+
+502
+01:12:07,320 --> 01:12:13,480
+if I break my website I mean it would kind of suck for brooks website it would suck but
+
+503
+01:12:14,680 --> 01:12:16,280
+I don't think I'm really going to
+
+504
+01:12:19,720 --> 01:12:30,120
+and I'm tired so hopefully um I can just get this taken care of real quick and then I'll end this
+
+505
+01:12:30,120 --> 01:12:41,560
+video all right what's going on here
+
+506
+01:12:44,600 --> 01:12:51,480
+oh yeah we got two local agents over here so come down here uh oh what
+
+507
+01:12:51,720 --> 01:12:58,760
+oh right these are just what's right so we fixed yep fix it so this should be quick
+
+508
+01:12:59,560 --> 01:13:03,720
+this late today and then this will probably take a little bit longer
+
+509
+01:13:11,640 --> 01:13:19,240
+all right I see so you notice that we are kind of like editing this area and it's a little bit
+
+510
+01:13:19,480 --> 01:13:27,400
+it's a little bit more aggressive than it used to be like I just since I started adding yeah I
+
+511
+01:13:27,400 --> 01:13:36,760
+want you to like update like it was doing these check boxes as we were progressing I mean this
+
+512
+01:13:36,760 --> 01:13:45,080
+was earlier um before I started this recording but it was actually going down the list and checking
+
+513
+01:13:45,080 --> 01:13:52,120
+things um and it would be doing that here too I suppose
+
+514
+01:13:54,600 --> 01:14:01,960
+if it will if it's acting correctly um but I think that's also where these lazily libraries
+
+515
+01:14:01,960 --> 01:14:09,880
+will help is to track these sort of things as well as other behavior so
+
+516
+01:14:09,880 --> 01:14:18,280
+so these are just kind of like the primitives um and I'm not really sure
+
+517
+01:14:20,200 --> 01:14:30,280
+how much additional work needs to be done to make agent doc track everything reactively
+
+518
+01:14:31,240 --> 01:14:40,600
+um right now it's just kind of looping and I think that the um llm more or less
+
+519
+01:14:41,320 --> 01:14:53,240
+every time it gets invoked invoked it'll then sort of prompt um the agent doc tool to edit
+
+520
+01:14:53,240 --> 01:15:06,280
+it to have a CRDT to edit one of these fields or whatever needs to be edited so um
+
+521
+01:15:09,240 --> 01:15:11,000
+yeah so we got this stuff
+
+522
+01:15:11,960 --> 01:15:14,840
+uh why is my oh
+
+523
+01:15:17,000 --> 01:15:20,040
+right what oh my god
+
+524
+01:15:22,360 --> 01:15:25,800
+why do we need to go no we don't need a docker push
+
+525
+01:15:28,280 --> 01:15:29,160
+this should be gone
+
+526
+01:15:32,520 --> 01:15:34,280
+this this was from my old environment
+
+527
+01:15:41,000 --> 01:15:54,520
+um
+
+528
+01:16:06,920 --> 01:16:09,720
+okay um
+
+529
+01:16:11,000 --> 01:16:19,000
+Hmm, I guess I'll check my local stuff. Might as well check it.
+
+530
+01:16:29,000 --> 01:16:33,000
+Uh-oh, something happened, right?
+
+531
+01:16:41,000 --> 01:16:52,000
+Alright, and then we got...
+
+532
+01:16:52,000 --> 01:17:00,000
+Alright, we'll wish this bliss.
+
+533
+01:17:00,000 --> 01:17:22,000
+This site is like, super not done at all.
+
+534
+01:17:22,000 --> 01:17:42,000
+Unfortunately, I ran out of time and money to do stuff for, you know, so it's like, if I had more time, more money, I would totally do more projects for people.
+
+535
+01:17:42,000 --> 01:18:02,000
+But, unfortunately, I don't... I'm then struck it rich with any... I could have probably struck it rich with some companies, but I was very dumb and young and dumb with... really... maybe I shouldn't get into it.
+
+536
+01:18:02,000 --> 01:18:12,000
+But, um, yeah. Let's just say I made a lot of mistakes in life.
+
+537
+01:18:12,000 --> 01:18:24,000
+Alright, so we got the precedence...
+
+538
+01:18:24,000 --> 01:18:31,000
+Alright, 4104. Alright, this seems to work.
+
+539
+01:18:31,000 --> 01:18:41,000
+Oh yeah, I had this, like, interesting way of, like, using the...
+
+540
+01:18:41,000 --> 01:18:48,000
+CSS... whatever it's called.
+
+541
+01:18:48,000 --> 01:18:57,000
+Let's just look it up.
+
+542
+01:18:57,000 --> 01:19:02,000
+Sticky, yeah, position sticky, yeah.
+
+543
+01:19:02,000 --> 01:19:16,000
+You can kind of do some weird stuff like this, and I kind of liked it, but now it's like, you just... it needs to be, like, up here, rather than, like, just hanging out down here, and this cannot happen, this is dumb.
+
+544
+01:19:16,000 --> 01:19:19,000
+Um, yeah.
+
+545
+01:19:19,000 --> 01:19:35,000
+Okay, so that worked.
+
+546
+01:19:35,000 --> 01:19:55,000
+Uh oh.
+
+547
+01:19:55,000 --> 01:20:06,000
+Oh yeah, I was trying to convert Brooke Brodeck to Hono as well, so yeah, probably got some issues.
+
+548
+01:20:06,000 --> 01:20:09,000
+Oh boy.
+
+549
+01:20:09,000 --> 01:20:28,000
+This could take a while, actually. I don't really have my web stuff in order, like, I feel like I work a lot faster with Claude plus Rust versus, like, Claude plus TypeScript right now.
+
+550
+01:20:28,000 --> 01:20:44,000
+As you, I'm going to post up my last video, but I ran into some weird, like, I ran, I got, you know, I don't want to, like, fully stuck, but it was, like, it was definitely a lot slower going.
+
+551
+01:20:44,000 --> 01:20:48,000
+Alright, so let's go out lazily.
+
+552
+01:20:48,000 --> 01:20:57,000
+Uh oh, well, derived or computed signals on next submit. Whoa, seriously?
+
+553
+01:20:57,000 --> 01:21:10,000
+See, it's like, this library kind of took me, I mean, it wasn't like, it's not the biggest library, like, so here you can see phase two got checked.
+
+554
+01:21:10,000 --> 01:21:12,000
+Whoa.
+
+555
+01:21:12,000 --> 01:21:14,000
+Okay.
+
+556
+01:21:14,000 --> 01:21:21,000
+Hey, why not derive or compute signals.
+
+557
+01:21:21,000 --> 01:21:27,000
+So, I think it knows. Okay, so yeah, so lazy eager.
+
+558
+01:21:27,000 --> 01:21:31,000
+Thank you. Thank you very much.
+
+559
+01:21:32,000 --> 01:21:38,000
+Recomputed signals here would recompute immediately on validation. Yes.
+
+560
+01:21:38,000 --> 01:21:40,000
+Yes, yes, yes.
+
+561
+01:21:40,000 --> 01:21:59,000
+This is reflecting who RS is lazy brought recombination, which verifies that after each cell set the slot is cleared, but not recomputed until context get is called.
+
+562
+01:21:59,000 --> 01:22:02,000
+All right.
+
+563
+01:22:02,000 --> 01:22:06,000
+Cell equality check fixed.
+
+564
+01:22:06,000 --> 01:22:11,000
+Alright, so I should probably
+
+565
+01:22:11,000 --> 01:22:19,000
+have parity between lazy lazy lazy RS.
+
+566
+01:22:19,000 --> 01:22:24,000
+That would probably make this whole exercise.
+
+567
+01:22:24,000 --> 01:22:27,000
+Take a lot longer.
+
+568
+01:22:27,000 --> 01:22:33,000
+But it might be worth doing.
+
+569
+01:22:33,000 --> 01:22:42,000
+Okay, so ref cell is interior usability single thread default.
+
+570
+01:22:42,000 --> 01:22:47,000
+Tracking stack.
+
+571
+01:22:47,000 --> 01:22:55,000
+Partial equal guard on cell sets no validation.
+
+572
+01:22:55,000 --> 01:23:05,000
+Dependency rediscovered on each re computation dynamic dependency graphs.
+
+573
+01:23:05,000 --> 01:23:12,000
+I mean, I guess this could be more efficient, but
+
+574
+01:23:12,000 --> 01:23:15,000
+seems fine.
+
+575
+01:23:15,000 --> 01:23:26,000
+I do. This is just like totally fine as far as like how I normally would use this but I can see in very
+
+576
+01:23:26,000 --> 01:23:45,000
+data, real time data intensive cases, you might want to like start caching things, but in that case, I would say you just have a data structure and do all that you have your own data structure to do all that so it would live within a slot that's
+
+577
+01:23:45,000 --> 01:24:02,000
+big as data structure, which does all the caching and your whatever, but it would live there and not really go through this system.
+
+578
+01:24:02,000 --> 01:24:12,000
+And then we have a slide. Okay, so I would say let's move.
+
+579
+01:24:12,000 --> 01:24:22,000
+Okay, so let's, let's commit and push release as well.
+
+580
+01:24:22,000 --> 01:24:31,000
+Let's do that.
+
+581
+01:24:31,000 --> 01:24:39,000
+I don't think we have a notion of release for.
+
+582
+01:24:39,000 --> 01:24:51,000
+I think you just use the repo to get repo as a sort of,
+
+583
+01:24:51,000 --> 01:25:01,000
+you know, whatever, or cargo is really get in zig plan so
+
+584
+01:25:01,000 --> 01:25:05,000
+we'll see what happens.
+
+585
+01:25:06,000 --> 01:25:08,000
+Back here.
+
+586
+01:25:08,000 --> 01:25:10,000
+Pre existing bug.
+
+587
+01:25:10,000 --> 01:25:18,000
+Exposed by fresh install so are we fixed. So.
+
+588
+01:25:18,000 --> 01:25:24,000
+Alright, so let's try the doctor man.
+
+589
+01:25:24,000 --> 01:25:28,000
+Alright, so this is 4103.
+
+590
+01:25:28,000 --> 01:25:31,000
+Alright, cool.
+
+591
+01:25:31,000 --> 01:25:34,000
+Cool.
+
+592
+01:25:35,000 --> 01:25:53,000
+Yeah, no, good, but I do the thing over here too I mean, it didn't really go anywhere we didn't really engage, but this is basically a simple layout.
+
+593
+01:25:53,000 --> 01:26:03,000
+Alright, let me try for product or you know it's like a prototype, but it's useful for some things.
+
+594
+01:26:03,000 --> 01:26:09,000
+3101, okay.
+
+595
+01:26:09,000 --> 01:26:30,000
+Still getting the internal server.
+
+596
+01:26:30,000 --> 01:26:36,000
+Alright, so I think we. Okay, cool. We got a crate. Whoa, seriously.
+
+597
+01:26:36,000 --> 01:26:38,000
+Sweet.
+
+598
+01:26:38,000 --> 01:26:42,000
+Like,
+
+599
+01:26:42,000 --> 01:26:49,000
+I'll read me. So let's
+
+600
+01:26:49,000 --> 01:26:56,000
+add a read me
+
+601
+01:26:56,000 --> 01:27:04,000
+to lazily lazily RS, I think lazy RS has
+
+602
+01:27:04,000 --> 01:27:07,000
+a spec file. Yes.
+
+603
+01:27:07,000 --> 01:27:10,000
+Do we have a spec file in here.
+
+604
+01:27:10,000 --> 01:27:12,000
+Yes.
+
+605
+01:27:12,000 --> 01:27:18,000
+Spec file. Yes. Okay, good.
+
+606
+01:27:18,000 --> 01:27:21,000
+Yeah.
+
+607
+01:27:21,000 --> 01:27:27,000
+I guess we should also add
+
+608
+01:27:27,000 --> 01:27:35,000
+so add agents.md and a symlink
+
+609
+01:27:35,000 --> 01:27:39,000
+with a symlink
+
+610
+01:27:39,000 --> 01:27:56,000
+Claude
+
+611
+01:27:56,000 --> 01:28:00,000
+Oh yeah.
+
+612
+01:28:00,000 --> 01:28:23,000
+Please add tests.
+
+613
+01:28:23,000 --> 01:28:48,000
+Comprehensive
+
+614
+01:28:48,000 --> 01:28:55,000
+So basically this is like feature parody with lazily zig and lazily pie essentially.
+
+615
+01:28:55,000 --> 01:28:59,000
+I don't know if we're doing multi threading.
+
+616
+01:28:59,000 --> 01:29:17,000
+Next I can ask.
+
+617
+01:29:17,000 --> 01:29:29,000
+Oh, looks like my CRDT bit the dust here a bit so
+
+618
+01:29:29,000 --> 01:29:36,000
+I've been having some issues with CRDT
+
+619
+01:29:36,000 --> 01:29:40,000
+since I started doing the dynamic stuff a bit.
+
+620
+01:29:40,000 --> 01:29:44,000
+I seem to get some problems here.
+
+621
+01:29:44,000 --> 01:29:51,000
+So like, let me, I guess what I'll do is I'll mention that.
+
+622
+01:29:51,000 --> 01:30:00,000
+So in tasks lazily.d
+
+623
+01:30:00,000 --> 01:30:13,000
+I was adding prompt to after the lazily section
+
+624
+01:30:13,000 --> 01:30:41,000
+Claude agent was adding response in the same area.
+
+625
+01:30:41,000 --> 01:31:01,000
+Looks like the response got a bit corrupted.
+
+626
+01:31:01,000 --> 01:31:17,000
+Where is this happening? Shoot.
+
+627
+01:31:17,000 --> 01:31:22,000
+Yeah, so I also have some issues with the auto claims still.
+
+628
+01:31:22,000 --> 01:31:31,000
+Still some edge cases with auto claim that I haven't fully nailed down yet in the specs or whatever.
+
+629
+01:31:31,000 --> 01:31:42,000
+So I think I need to like have like a theoretical or I really need to like
+
+630
+01:31:42,000 --> 01:31:51,000
+chart out all the different edge cases that can happen or the, you know, the essential set of cases
+
+631
+01:31:51,000 --> 01:32:02,000
+and that may help with the edge case surprises that I keep on running into.
+
+632
+01:32:02,000 --> 01:32:10,000
+But yeah, I haven't done that yet. I just kind of been trying to do one offs and hopefully fix it all.
+
+633
+01:32:10,000 --> 01:32:16,000
+But it doesn't seem like it's going well.
+
+634
+01:32:16,000 --> 01:32:24,000
+But now I'll get around to it. It mostly works, but still got a little issues.
+
+635
+01:32:24,000 --> 01:32:28,000
+All right. CRDT corruption and lazily.
+
+636
+01:32:28,000 --> 01:32:36,000
+Okay, this is a concurrent editing race. You were adding a prompt
+
+637
+01:32:36,000 --> 01:32:42,000
+while the agent was writing their response to the same agent exchange section.
+
+638
+01:32:42,000 --> 01:32:53,000
+The CRDT merge produced the fragments, decisions, commands, related projects, likely truncated word from decisions or similar analysis.
+
+639
+01:32:53,000 --> 01:32:58,000
+The stream CRDT merges uses three-way diff baseline versus yours versus the agent.
+
+640
+01:32:58,000 --> 01:33:08,000
+When both sides edit the same region inside agent exchange, the character level diff can produce interleaved fragments.
+
+641
+01:33:08,000 --> 01:33:13,000
+That this was the same class of bug fix in those three characters.
+
+642
+01:33:13,000 --> 01:33:23,000
+Okay. So what's this using agent? Yes, it was. I believe it was.
+
+643
+01:33:38,000 --> 01:33:59,000
+Was the corruption at a section boundary or mid paragraph? I would say section boundary.
+
+644
+01:33:59,000 --> 01:34:04,000
+Can we reproduce by having both sides edit the same thing?
+
+645
+01:34:04,000 --> 01:34:14,000
+I don't know.
+
+646
+01:34:14,000 --> 01:34:19,000
+Probably not reliably.
+
+647
+01:34:19,000 --> 01:34:25,000
+Okay. Want me to? Yes. Yes.
+
+648
+01:34:25,000 --> 01:34:31,000
+Okay. Let's take a look over here. Back to rebuild.
+
+649
+01:34:31,000 --> 01:34:39,000
+JS refactor added. Oh, no. So let me.
+
+650
+01:34:39,000 --> 01:34:43,000
+Okay.
+
+651
+01:34:43,000 --> 01:34:48,000
+So let's do the workspace root. So picks automatically.
+
+652
+01:34:48,000 --> 01:34:50,000
+Okay.
+
+653
+01:34:50,000 --> 01:34:53,000
+Okay.
+
+654
+01:34:53,000 --> 01:34:56,000
+That's right here.
+
+655
+01:34:56,000 --> 01:34:59,000
+4101.
+
+656
+01:34:59,000 --> 01:35:02,000
+All right.
+
+657
+01:35:02,000 --> 01:35:05,000
+We have also like a content fee too. So I can like.
+
+658
+01:35:05,000 --> 01:35:10,000
+This is where the term.
+
+659
+01:35:10,000 --> 01:35:13,000
+Escape doesn't work, but my buttons work.
+
+660
+01:35:13,000 --> 01:35:17,000
+This is kind of cool.
+
+661
+01:35:17,000 --> 01:35:24,000
+Presence meditation.
+
+662
+01:35:24,000 --> 01:35:27,000
+Yeah, so.
+
+663
+01:35:27,000 --> 01:35:30,000
+Cool.
+
+664
+01:35:30,000 --> 01:35:36,000
+All right. I think we can release it.
+
+665
+01:35:36,000 --> 01:35:45,000
+I'm going to add like whisper analysis. I'm going to use whisper to transcribe all of her episodes.
+
+666
+01:35:45,000 --> 01:35:49,000
+I'm doing it with mine, but she's got a lot more than me.
+
+667
+01:35:49,000 --> 01:35:56,000
+So I'm going to do that and kind of also section out the interesting things she talks about.
+
+668
+01:35:56,000 --> 01:36:03,000
+And kind of get like a little bit more, you know, focus on that.
+
+669
+01:36:03,000 --> 01:36:07,000
+All right. So release.
+
+670
+01:36:07,000 --> 01:36:12,000
+Oh.
+
+671
+01:36:12,000 --> 01:36:21,000
+Yes. Auto claims a little annoying. When I'm moving stuff around, it seems to like get tripped up.
+
+672
+01:36:21,000 --> 01:36:23,000
+But I didn't move this.
+
+673
+01:36:23,000 --> 01:36:26,000
+It was here as far as I know.
+
+674
+01:36:26,000 --> 01:36:29,000
+All right.
+
+675
+01:36:29,000 --> 01:36:34,000
+Oh, currently.
+
+676
+01:36:34,000 --> 01:36:42,000
+Support.
+
+677
+01:36:42,000 --> 01:36:45,000
+That sucks.
+
+678
+01:36:45,000 --> 01:36:58,000
+Support multi or thread safety.
+
+679
+01:36:58,000 --> 01:37:00,000
+All right. What's this?
+
+680
+01:37:00,000 --> 01:37:03,000
+We got some tests.
+
+681
+01:37:04,000 --> 01:37:08,000
+Number of tests.
+
+682
+01:37:08,000 --> 01:37:16,000
+All this.
+
+683
+01:37:16,000 --> 01:37:20,000
+I don't know if this works or not, but I guess it does.
+
+684
+01:37:20,000 --> 01:37:26,000
+Hopefully it does.
+
+685
+01:37:26,000 --> 01:37:36,000
+But I don't think I'm up to integrating this at all into agent doc at all tonight.
+
+686
+01:37:36,000 --> 01:37:39,000
+I'm about ready to crash.
+
+687
+01:37:39,000 --> 01:37:45,000
+So signals.
+
+688
+01:37:45,000 --> 01:37:49,000
+I guess agent doc can benefit from signals.
+
+689
+01:37:50,000 --> 01:37:52,000
+Rights, I guess.
+
+690
+01:37:52,000 --> 01:37:54,000
+The effect system.
+
+691
+01:37:54,000 --> 01:37:57,000
+Look into what exactly that means.
+
+692
+01:37:57,000 --> 01:38:00,000
+Documentation and publish.
+
+693
+01:38:00,000 --> 01:38:03,000
+This is a natural three.
+
+694
+01:38:03,000 --> 01:38:05,000
+Okay, so we're not quite there yet.
+
+695
+01:38:05,000 --> 01:38:06,000
+Replace ref.
+
+696
+01:38:06,000 --> 01:38:12,000
+Okay, I got it.
+
+697
+01:38:12,000 --> 01:38:15,000
+Please leave the mutex by default.
+
+698
+01:38:15,000 --> 01:38:17,000
+They don't like to disable.
+
+699
+01:38:17,000 --> 01:38:23,000
+They would do the verse single thread default opt in threads, safety features.
+
+700
+01:38:23,000 --> 01:38:24,000
+It's interesting.
+
+701
+01:38:24,000 --> 01:38:28,000
+Okay.
+
+702
+01:38:28,000 --> 01:38:33,000
+Right, because it's got like Tokyo type stuff.
+
+703
+01:38:33,000 --> 01:38:35,000
+So, okay.
+
+704
+01:38:35,000 --> 01:38:36,000
+All right.
+
+705
+01:38:36,000 --> 01:38:39,000
+I think that's a good spot to leave this.
+
+706
+01:38:39,000 --> 01:38:42,000
+And all right.
+
+707
+01:38:42,000 --> 01:38:43,000
+So we pushed.
+
+708
+01:38:43,000 --> 01:38:48,000
+So.
+
+709
+01:38:48,000 --> 01:38:53,000
+Are all of the wraps stack apps.
+
+710
+01:38:53,000 --> 01:39:22,000
+Least.
+
+711
+01:39:22,000 --> 01:39:25,000
+I guess this is out of date now.
+
+712
+01:39:25,000 --> 01:39:31,000
+Because we're using the Hono Prono JS.
+
+713
+01:39:31,000 --> 01:39:46,000
+What do we got here?
+
+714
+01:39:46,000 --> 01:39:49,000
+Okay, so.
+
+715
+01:39:49,000 --> 01:39:52,000
+That's.
+
+716
+01:39:52,000 --> 01:39:54,000
+Okay, I think we worked.
+
+717
+01:39:54,000 --> 01:39:55,000
+Yep.
+
+718
+01:39:55,000 --> 01:39:57,000
+All right.
+
+719
+01:39:57,000 --> 01:39:58,000
+All right.
+
+720
+01:39:58,000 --> 01:40:01,000
+So Brian's key to me.
+
+721
+01:40:01,000 --> 01:40:03,000
+Okay.
+
+722
+01:40:03,000 --> 01:40:06,000
+I gotta update things on my website.
+
+723
+01:40:06,000 --> 01:40:20,000
+To.
+
+724
+01:40:20,000 --> 01:40:36,000
+P.
+
+725
+01:40:36,000 --> 01:40:44,000
+Shoot, I don't remember what that other site is.
+
+726
+01:40:44,000 --> 01:40:52,000
+Oh, yeah.
+
+727
+01:40:52,000 --> 01:40:54,000
+Okay.
+
+728
+01:40:54,000 --> 01:40:56,000
+Cool.
+
+729
+01:40:56,000 --> 01:40:57,000
+All right.
+
+730
+01:40:57,000 --> 01:40:58,000
+Oh, yeah.
+
+731
+01:40:58,000 --> 01:41:04,000
+Should they do.
+
+732
+01:41:04,000 --> 01:41:06,000
+I do that.
+
+733
+01:41:06,000 --> 01:41:11,000
+I don't know if I did that.
+
+734
+01:41:11,000 --> 01:41:12,000
+Did.
+
+735
+01:41:12,000 --> 01:41:16,000
+Oh.
+
+736
+01:41:16,000 --> 01:41:19,000
+Did you also update.
+
+737
+01:41:19,000 --> 01:41:24,000
+Code of.
+
+738
+01:41:24,000 --> 01:41:25,000
+Oh, yeah.
+
+739
+01:41:25,000 --> 01:41:33,000
+Yes.
+
+740
+01:41:33,000 --> 01:41:38,000
+Okay.
+
+741
+01:41:38,000 --> 01:41:39,000
+I'm using the.
+
+742
+01:41:39,000 --> 01:41:42,000
+There's some sort of.
+
+743
+01:41:42,000 --> 01:41:44,000
+Creative Commons data.
+
+744
+01:41:44,000 --> 01:41:48,000
+That I'm using for that site.
+
+745
+01:41:48,000 --> 01:41:54,000
+All right.
+
+746
+01:41:54,000 --> 01:41:56,000
+I guess.
+
+747
+01:41:56,000 --> 01:41:58,000
+Yeah.
+
+748
+01:41:58,000 --> 01:42:02,000
+Okay, cool.
+
+749
+01:42:02,000 --> 01:42:06,000
+Oh, I guess we could still use realizes.
+
+750
+01:42:06,000 --> 01:42:08,000
+Because there's nothing really.
+
+751
+01:42:08,000 --> 01:42:10,000
+Dynamic.
+
+752
+01:42:10,000 --> 01:42:11,000
+Does.
+
+753
+01:42:11,000 --> 01:42:13,000
+Demo.
+
+754
+01:42:13,000 --> 01:42:16,000
+Me use.
+
+755
+01:42:16,000 --> 01:42:19,000
+Oh, no.
+
+756
+01:42:19,000 --> 01:42:21,000
+Was.
+
+757
+01:42:21,000 --> 01:42:30,000
+Updated.
+
+758
+01:42:30,000 --> 01:42:32,000
+Demo.
+
+759
+01:42:32,000 --> 01:42:34,000
+So this is like for a demo for like.
+
+760
+01:42:34,000 --> 01:42:36,000
+This wasn't a Holochain app.
+
+761
+01:42:36,000 --> 01:42:38,000
+I was actually supposed to work on a Holochain app.
+
+762
+01:42:38,000 --> 01:42:40,000
+And I did some work on it.
+
+763
+01:42:40,000 --> 01:42:42,000
+But.
+
+764
+01:42:42,000 --> 01:42:44,000
+This is my friend Raymond Powell.
+
+765
+01:42:44,000 --> 01:42:47,000
+And he actually passed away unfortunately.
+
+766
+01:42:47,000 --> 01:42:49,000
+So.
+
+767
+01:42:49,000 --> 01:42:50,000
+Things kind of.
+
+768
+01:42:50,000 --> 01:42:52,000
+Didn't go according to plan with the project.
+
+769
+01:42:52,000 --> 01:42:55,000
+But I'm kind of keeping it up as like a little bit of a.
+
+770
+01:42:55,000 --> 01:43:00,000
+Memorial.
+
+771
+01:43:00,000 --> 01:43:01,000
+Yeah.
+
+772
+01:43:01,000 --> 01:43:04,000
+At some point I'll get enough time to really complete it.
+
+773
+01:43:04,000 --> 01:43:06,000
+But right now.
+
+774
+01:43:06,000 --> 01:43:08,000
+I got to.
+
+775
+01:43:08,000 --> 01:43:10,000
+I got to support the family.
+
+776
+01:43:10,000 --> 01:43:12,000
+So one of these days.
+
+777
+01:43:12,000 --> 01:43:14,000
+I'll do well.
+
+778
+01:43:14,000 --> 01:43:15,000
+And.
+
+779
+01:43:15,000 --> 01:43:17,000
+Complete it.
+
+780
+01:43:17,000 --> 01:43:19,000
+But it's.
+
+781
+01:43:19,000 --> 01:43:20,000
+For.
+
+782
+01:43:20,000 --> 01:43:22,000
+He makes it called protocol love.
+
+783
+01:43:22,000 --> 01:43:23,000
+Which.
+
+784
+01:43:23,000 --> 01:43:25,000
+Is like this way of like.
+
+785
+01:43:25,000 --> 01:43:27,000
+Storing assets.
+
+786
+01:43:27,000 --> 01:43:28,000
+With.
+
+787
+01:43:28,000 --> 01:43:30,000
+This perspective of love and all that.
+
+788
+01:43:30,000 --> 01:43:31,000
+So.
+
+789
+01:43:31,000 --> 01:43:33,000
+He's got like a whole like.
+
+790
+01:43:33,000 --> 01:43:34,000
+He wrote.
+
+791
+01:43:34,000 --> 01:43:35,000
+A lot of good stuff.
+
+792
+01:43:35,000 --> 01:43:36,000
+And.
+
+793
+01:43:36,000 --> 01:43:38,000
+You know it's kind of like.
+
+794
+01:43:38,000 --> 01:43:39,000
+You know.
+
+795
+01:43:39,000 --> 01:43:41,000
+Storing assets of loving kindness.
+
+796
+01:43:41,000 --> 01:43:42,000
+So.
+
+797
+01:43:42,000 --> 01:43:44,000
+There's like a council.
+
+798
+01:43:44,000 --> 01:43:46,000
+You've got like.
+
+799
+01:43:46,000 --> 01:43:47,000
+You know.
+
+800
+01:43:47,000 --> 01:43:49,000
+People get like.
+
+801
+01:43:49,000 --> 01:43:51,000
+Influenced in these different areas.
+
+802
+01:43:51,000 --> 01:43:54,000
+And they kind of make decisions based off of that.
+
+803
+01:43:54,000 --> 01:43:56,000
+And then.
+
+804
+01:43:56,000 --> 01:43:58,000
+Including stored assets and all that.
+
+805
+01:43:58,000 --> 01:44:00,000
+So.
+
+806
+01:44:00,000 --> 01:44:03,000
+Yeah.
+
+807
+01:44:03,000 --> 01:44:05,000
+It's kind of a cool project.
+
+808
+01:44:05,000 --> 01:44:07,000
+It's like a governance project.
+
+809
+01:44:07,000 --> 01:44:10,000
+But he had like a lot of like.
+
+810
+01:44:10,000 --> 01:44:13,000
+Time he spent in different communities.
+
+811
+01:44:13,000 --> 01:44:15,000
+That.
+
+812
+01:44:15,000 --> 01:44:17,000
+And organizations.
+
+813
+01:44:17,000 --> 01:44:19,000
+And they.
+
+814
+01:44:19,000 --> 01:44:20,000
+And they.
+
+815
+01:44:20,000 --> 01:44:24,000
+There's a lot of time spent on actually making these documents.
+
+816
+01:44:24,000 --> 01:44:27,000
+Which were like.
+
+817
+01:44:27,000 --> 01:44:30,000
+I don't know what they call them.
+
+818
+01:44:30,000 --> 01:44:32,000
+But they're like.
+
+819
+01:44:32,000 --> 01:44:34,000
+Basically where you kind of.
+
+820
+01:44:34,000 --> 01:44:36,000
+Set all your.
+
+821
+01:44:36,000 --> 01:44:38,000
+Terms and agreements.
+
+822
+01:44:38,000 --> 01:44:40,000
+And.
+
+823
+01:44:40,000 --> 01:44:42,000
+I think that.
+
+824
+01:44:42,000 --> 01:44:44,000
+With agent doc.
+
+825
+01:44:44,000 --> 01:44:46,000
+You can probably do something like that.
+
+826
+01:44:46,000 --> 01:44:48,000
+Dynamically.
+
+827
+01:44:48,000 --> 01:44:49,000
+Which.
+
+828
+01:44:49,000 --> 01:44:51,000
+I'm hoping to do.
+
+829
+01:44:51,000 --> 01:44:52,000
+Soon.
+
+830
+01:44:52,000 --> 01:44:53,000
+You know with.
+
+831
+01:44:53,000 --> 01:44:55,000
+AI and all that.
+
+832
+01:44:55,000 --> 01:44:57,000
+I think that would be really cool to kind of.
+
+833
+01:44:57,000 --> 01:45:00,000
+Help people get alignment with each other.
+
+834
+01:45:00,000 --> 01:45:02,000
+With their documents.
+
+835
+01:45:02,000 --> 01:45:05,000
+So like being able to share and all that.
+
+836
+01:45:05,000 --> 01:45:06,000
+And I'm working on it.
+
+837
+01:45:06,000 --> 01:45:07,000
+I think that.
+
+838
+01:45:07,000 --> 01:45:09,000
+Lazily will help out a lot with that.
+
+839
+01:45:09,000 --> 01:45:11,000
+Because you can make things reactive.
+
+840
+01:45:11,000 --> 01:45:14,000
+And then we can publish it somewhere.
+
+841
+01:45:14,000 --> 01:45:15,000
+You know the data.
+
+842
+01:45:15,000 --> 01:45:16,000
+And.
+
+843
+01:45:16,000 --> 01:45:19,000
+There's some other cool projects that.
+
+844
+01:45:19,000 --> 01:45:21,000
+I haven't yet.
+
+845
+01:45:21,000 --> 01:45:23,000
+I need a contact.
+
+846
+01:45:23,000 --> 01:45:25,000
+But.
+
+847
+01:45:25,000 --> 01:45:27,000
+Steve Melville.
+
+848
+01:45:27,000 --> 01:45:29,000
+Has a cool project.
+
+849
+01:45:29,000 --> 01:45:31,000
+GitHub.
+
+850
+01:45:31,000 --> 01:45:34,000
+Steve.
+
+851
+01:45:34,000 --> 01:45:37,000
+Melville.
+
+852
+01:45:37,000 --> 01:45:38,000
+Shoot.
+
+853
+01:45:38,000 --> 01:45:43,000
+I think you can just look them up.
+
+854
+01:45:43,000 --> 01:45:46,000
+Discord.
+
+855
+01:45:46,000 --> 01:45:47,000
+Evil mimic.
+
+856
+01:45:47,000 --> 01:45:50,000
+I think it's an evil mimic.
+
+857
+01:45:50,000 --> 01:45:52,000
+Yes.
+
+858
+01:45:52,000 --> 01:45:53,000
+Okay.
+
+859
+01:45:53,000 --> 01:45:54,000
+Hey.
+
+860
+01:45:54,000 --> 01:45:56,000
+Good looking guy.
+
+861
+01:45:56,000 --> 01:45:58,000
+Let's see.
+
+862
+01:45:58,000 --> 01:45:59,000
+Mapholons.
+
+863
+01:45:59,000 --> 01:46:02,000
+So he's got this project called Mapholons.
+
+864
+01:46:02,000 --> 01:46:05,000
+Which is a way where you own your data.
+
+865
+01:46:05,000 --> 01:46:07,000
+And.
+
+866
+01:46:07,000 --> 01:46:09,000
+It's like perfect for AI.
+
+867
+01:46:09,000 --> 01:46:10,000
+What's going on now.
+
+868
+01:46:10,000 --> 01:46:11,000
+I really need to.
+
+869
+01:46:11,000 --> 01:46:12,000
+Get in touch with them.
+
+870
+01:46:12,000 --> 01:46:13,000
+Because.
+
+871
+01:46:13,000 --> 01:46:15,000
+They need to get their velocity up.
+
+872
+01:46:15,000 --> 01:46:18,000
+Because like yeah you know.
+
+873
+01:46:18,000 --> 01:46:19,000
+Yeah I really need to get.
+
+874
+01:46:19,000 --> 01:46:20,000
+Yeah.
+
+875
+01:46:20,000 --> 01:46:23,000
+But he wanted me to kind of work on their UI thing.
+
+876
+01:46:23,000 --> 01:46:24,000
+But.
+
+877
+01:46:24,000 --> 01:46:26,000
+With cloud code.
+
+878
+01:46:26,000 --> 01:46:27,000
+This is like the UI.
+
+879
+01:46:27,000 --> 01:46:30,000
+Basically it's like text.
+
+880
+01:46:30,000 --> 01:46:32,000
+And it's so good.
+
+881
+01:46:32,000 --> 01:46:34,000
+So he wanted more of a visual thing.
+
+882
+01:46:34,000 --> 01:46:35,000
+That's what he was envisioning.
+
+883
+01:46:35,000 --> 01:46:36,000
+But.
+
+884
+01:46:36,000 --> 01:46:40,000
+I think we just do like documents and.
+
+885
+01:46:40,000 --> 01:46:41,000
+Command line.
+
+886
+01:46:41,000 --> 01:46:43,000
+And we're golden.
+
+887
+01:46:43,000 --> 01:46:44,000
+But yeah.
+
+888
+01:46:44,000 --> 01:46:45,000
+So.
+
+889
+01:46:45,000 --> 01:46:47,000
+This is very Holochain centric as well.
+
+890
+01:46:47,000 --> 01:46:50,000
+So it's like a distributed hash table.
+
+891
+01:46:50,000 --> 01:46:52,000
+You can do some cool stuff with that.
+
+892
+01:46:52,000 --> 01:46:53,000
+And.
+
+893
+01:46:53,000 --> 01:46:55,000
+Like it's like shared hosting and all that.
+
+894
+01:46:55,000 --> 01:46:56,000
+But.
+
+895
+01:46:56,000 --> 01:46:58,000
+He comes from like.
+
+896
+01:46:58,000 --> 01:47:01,000
+I think he did like work on like databases.
+
+897
+01:47:01,000 --> 01:47:03,000
+So I think he came from Sun Microsystems.
+
+898
+01:47:03,000 --> 01:47:05,000
+And.
+
+899
+01:47:05,000 --> 01:47:07,000
+Some other companies like that.
+
+900
+01:47:07,000 --> 01:47:09,000
+So he's pretty old school.
+
+901
+01:47:09,000 --> 01:47:10,000
+And.
+
+902
+01:47:10,000 --> 01:47:12,000
+Definitely had that whole vibe going.
+
+903
+01:47:12,000 --> 01:47:13,000
+So.
+
+904
+01:47:13,000 --> 01:47:14,000
+Yeah.
+
+905
+01:47:14,000 --> 01:47:15,000
+I'll fill you in.
+
+906
+01:47:15,000 --> 01:47:17,000
+I need to like talk to him.
+
+907
+01:47:17,000 --> 01:47:18,000
+Because.
+
+908
+01:47:18,000 --> 01:47:19,000
+Obviously.
+
+909
+01:47:19,000 --> 01:47:20,000
+My.
+
+910
+01:47:20,000 --> 01:47:22,000
+Understanding of things has changed a lot.
+
+911
+01:47:22,000 --> 01:47:23,000
+And.
+
+912
+01:47:23,000 --> 01:47:25,000
+My recent experiences.
+
+913
+01:47:25,000 --> 01:47:27,000
+Really propelled me.
+
+914
+01:47:27,000 --> 01:47:28,000
+To in certain directions.
+
+915
+01:47:28,000 --> 01:47:29,000
+So.
+
+916
+01:47:29,000 --> 01:47:30,000
+I'm very excited.
+
+917
+01:47:30,000 --> 01:47:32,000
+I just haven't talked to him in a while.
+
+918
+01:47:32,000 --> 01:47:33,000
+Because.
+
+919
+01:47:33,000 --> 01:47:34,000
+You know things change a lot.
+
+920
+01:47:34,000 --> 01:47:35,000
+And.
+
+921
+01:47:35,000 --> 01:47:37,000
+I don't necessarily want to lock myself in.
+
+922
+01:47:37,000 --> 01:47:41,000
+While I'm in the midst of changing.
+
+923
+01:47:41,000 --> 01:47:44,000
+I feel like it's better to just like let things shake out a bit.
+
+924
+01:47:44,000 --> 01:47:46,000
+Before I start to like.
+
+925
+01:47:46,000 --> 01:47:50,000
+Commit to things or talk about things.
+
+926
+01:47:50,000 --> 01:47:51,000
+Yeah.
+
+927
+01:47:51,000 --> 01:47:52,000
+Anyways.
+
+928
+01:47:52,000 --> 01:47:55,000
+I think we got a release out.
+
+929
+01:47:55,000 --> 01:47:56,000
+We got.
+
+930
+01:47:56,000 --> 01:48:00,000
+Our first release of Lazily Rust.
+
+931
+01:48:00,000 --> 01:48:03,000
+Which is very exciting.
+
+932
+01:48:03,000 --> 01:48:04,000
+Where's my README?
+
+933
+01:48:04,000 --> 01:48:07,000
+I don't know.
+
+934
+01:48:07,000 --> 01:48:10,000
+Let's get our README out.
+
+935
+01:48:10,000 --> 01:48:12,000
+At least because.
+
+936
+01:48:12,000 --> 01:48:15,000
+This project deserves a README.
+
+937
+01:48:15,000 --> 01:48:16,000
+Alright.
+
+938
+01:48:16,000 --> 01:48:18,000
+So.
+
+939
+01:48:18,000 --> 01:48:20,000
+Please.
+
+940
+01:48:20,000 --> 01:48:24,000
+Release.
+
+941
+01:48:24,000 --> 01:48:36,000
+Lazily Rust with the README.
+
+942
+01:48:36,000 --> 01:48:37,000
+Yeah.
+
+943
+01:48:37,000 --> 01:48:39,000
+So.
+
+944
+01:48:39,000 --> 01:48:42,000
+I'm.
+
+945
+01:48:42,000 --> 01:48:45,000
+Just get this initial.
+
+946
+01:48:45,000 --> 01:48:46,000
+Flag.
+
+947
+01:48:46,000 --> 01:48:49,000
+Planted in the ground.
+
+948
+01:48:49,000 --> 01:48:52,000
+We got basic functionality.
+
+949
+01:48:52,000 --> 01:48:57,000
+Almost paired you with Lazily Zeg.
+
+950
+01:48:57,000 --> 01:48:59,000
+A lot quicker than I made Lazily Zeg.
+
+951
+01:48:59,000 --> 01:49:02,000
+That's for sure.
+
+952
+01:49:02,000 --> 01:49:03,000
+Alright.
+
+953
+01:49:03,000 --> 01:49:04,000
+So.
+
+954
+01:49:04,000 --> 01:49:05,000
+Cool.
+
+955
+01:49:05,000 --> 01:49:06,000
+Looks like we're.
+
+956
+01:49:06,000 --> 01:49:08,000
+Doing our thing.
+
+957
+01:49:08,000 --> 01:49:10,000
+So hey check out.
+
+958
+01:49:10,000 --> 01:49:14,000
+Lazily R.S. people.
+
+959
+01:49:14,000 --> 01:49:16,000
+New library.
+
+960
+01:49:16,000 --> 01:49:18,000
+The debut.
+
+961
+01:49:18,000 --> 01:49:21,000
+Saw it here first.
+
+962
+01:49:21,000 --> 01:49:22,000
+Alright.
+
+963
+01:49:22,000 --> 01:49:23,000
+Peace out.
+
+964
+01:49:23,000 --> 01:49:25,000
+Have a good one everyone.
+
+965
+01:49:25,000 --> 01:49:27,000
+Hope you enjoy.
+
+966
+01:49:27,000 --> 01:49:31,000
+Enjoy life.
+
+967
+01:49:31,000 --> 01:49:32,000
+Peace.
+

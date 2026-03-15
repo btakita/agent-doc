@@ -97,9 +97,9 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-Yes — cogov-dev was updated. Commit `146b8c3` bumped relysjs to `^1.21.76`, committed and pushed to main. The app builds cleanly with the new version.
+Yes — **demo.cogov.me uses rhonojs + Hono** (Cloudflare Workers app). It was on rhonojs 0.1.1.
 
-cogov-dev still uses relysjs (Elysia) — it wasn't converted to rhonojs. Only brookebrodack-dev was migrated to Hono. Converting cogov-dev would be a separate task if desired.
-
-Does demo.cogov.me use hono...was it updated?
+Updated to rhonojs 0.1.2, committed (`605076a`) and pushed. The cogov-dev workspace now has:
+- `cogov.me` app → relysjs (Elysia)
+- `demo.cogov.me` app → rhonojs 0.1.2 (Hono) ← updated
 <!-- /agent:exchange -->

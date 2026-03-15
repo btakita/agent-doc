@@ -490,4 +490,27 @@ v0.15.1: YouTube visibility default to public, video edit command
 No new release is needed.
 
 Please deploy briantakita.me
+### Deploying briantakita.me
+
+Working on it — committing Tailwind v4 migration changes and pushing to trigger Cloudflare Pages deploy via GitHub Actions.
+
+Changes to commit:
+- `app/index.css.ts` — v4 CSS migration (utilities, theme, prose overrides, margin resets)
+- `build.ts` — removed tailwindcss_config
+- `package.json` — updated @rebuildjs/tailwindcss dep
+- Removed `tailwind.config.ts` (v3 config no longer needed)
+
+Need to clean up yalc artifacts first, then commit in the submodule and push.
+### Deployed
+
+Committed and pushed Tailwind v4 migration:
+
+1. **Submodule** (`app/briantakita.me`): commit `6414e90` — CSS migration, build.ts cleanup, package.json update to `@rebuildjs/tailwindcss@^0.11.1`
+2. **Parent** (`briantakita.me-dev`): commit `7e9cee5` — submodule pointer + bun.lock update
+3. **Build verified** locally before push
+
+GitHub Actions deploy is **queued** (run `23092709527`). Cloudflare Pages will be updated once the workflow completes (~1 min).
+
+Fixed: `package.json` had yalc path (`file:.yalc/@rebuildjs/tailwindcss`) — changed to `^0.11.1` (npm) before committing.
+
 <!-- /agent:exchange -->

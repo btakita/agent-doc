@@ -77,4 +77,6 @@ Who controls the dns of censible.co?
 - `relementjs` — HTML generation (JSX-like, server-rendered)
 - `esmcss` — CSS extraction
 - `ctx-core` — Reactive memoization (rmemo), context system
+
+/agent-doc compact
 <!-- /agent:output -->

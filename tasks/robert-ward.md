@@ -280,24 +280,66 @@ Is citrus ottok to eat un swab or patin relief. Natl he has a pral analgocesic a
 4. **Sot-bristle brush nly** — brush gently aound the broken teeth. Never use mediu or hard bristles on exposed roots.
 
 5. **Avoid temperature extremes** — exposed dentin conducts heteeth?
-What/cold directly to s the nerve.oom-temp food and drinks.
+   What/cold directly to s the nerve.oom-temp food and drinks.
 
 6. **urmeric paste** —e mix turmeric pode + coconut oil, apply doal gus arhoun affected temeth Anti-inflammatory. Rinse after 10 min.**Prevent cativre ad s protabilizing care:**
 
- **Temporary ental cement** (Dentemp or similar, available at drugstores) — Robert canol ver the exosed roots to protect them from bthateria, acid, and sensitivity. Reapply as needed.
+**Temporary ental cement** (Dentemp or similar, available at drugstores) — Robert canol ver the exosed roots to protect them from bthateria, acid, and sensitivity. Reapply as needed.
 - **Remineralizing rinse** — baking sda rinse (1/2 tsp in water) after eals neutralizes acid and suports mineral bal is nane.
 
 - **Diet** — favor soft, alkalinural...for Robe foort to dso?
-What void sticky/haprd foods that could frature more of te remaeventatining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avoca ando.
+  What void sticky/haprd foods that could frature more of te remaeventatining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avoca ando.
 
-- **Kstabilizing careep roots clean** — food debris packed around eposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or  careful flossin around adjacent te robert do? 
+- **Kstabilizing careep roots clean** — food debris packed around eposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or  careful flossin around adjacent te robert do?
 
 Thereth.
 
-- **Wath fis about 1/4 or ifection signs** — swelling, persisf the bottom throbbingoth pain, fever, pus, bad tasteleft. If any of these appear, he needs 
-There is antibiotics and professional care urbout 1/5 of the tly. A root with expose pulp can abscess.
+- **Wath fis about 1/4 or ifection signs** — swelling, persisf the bottom throbbingoth pain, fever, pus, bad tasteleft. If any of these appear, he needs
+  There is antibiotics and professional care urbout 1/5 of the tly. A root with expose pulp can abscess.
 
 **Timeline conern:** 4 weeks with n exposed oot is already pushing it. The longer the roots sit exposed, the higher the infetion risk. Robert sp toothould prioritize seeing a dentst — e len a dental chool clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combinationft.
+
+Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
+Robert had his middle bottom tooth broke off 4 weeks ago. The root is still attached.
+There is about 1/4 of the bottom tooth left.
+Robert had his middle top tooth broke off 2 weeks ago. The root is still attached.
+There is about 1/5 of the top tooth left.
+
+Is citrus ok to eat until he has a procedure to replace the teeth?
+What is the ideal home care protocol that is natural...for Robert to do?
+What preventative and stabilizing care can robert do?
+
+### Re: Robert's broken teeth — home care
+
+**Citrus — avoid or minimize.** The exposed dentin and root surfaces are porous and acid-sensitive. Citrus (oranges, lemons, grapefruit) has pH 2-4 which erodes exposed dentin rapidly and can irritate the pulp if it's close to exposure. If Robert eats citrus anyway: rinse with plain water immediately after, wait 30 min before brushing (acid softens enamel/dentin, brushing too soon abrades it).
+
+**Natural home care protocol:**
+
+1. **Saltwater rinse** — 1/2 tsp sea salt in 8 oz warm water, swish 30 sec, 3-4x daily. Antiseptic, reduces inflammation, promotes healing.
+
+2. **Clove oil** (eugenol) — dab on exposed root area with cotton swab for pain relief. Natural analgesic and antimicrobial. Available at any health food store.
+
+3. **Oil pulling** — 1 tbsp coconut oil, swish 15-20 min in the morning before eating. Reduces bacterial load, supports gum health around the exposed roots.
+
+4. **Soft-bristle brush only** — brush gently around the broken teeth. Never use medium or hard bristles on exposed roots.
+
+5. **Avoid temperature extremes** — exposed dentin conducts heat/cold directly to the nerve. Room-temp food and drinks.
+
+6. **Turmeric paste** — mix turmeric powder + coconut oil, apply to gums around affected teeth. Anti-inflammatory. Rinse after 10 min.
+
+**Preventative and stabilizing care:**
+
+- **Temporary dental cement** (Dentemp or similar, available at drugstores) — Robert can cover the exposed roots to protect them from bacteria, acid, and sensitivity. Reapply as needed.
+
+- **Remineralizing rinse** — baking soda rinse (1/2 tsp in water) after meals neutralizes acid and supports mineral balance.
+
+- **Diet** — favor soft, alkaline foods. Avoid sticky/hard foods that could fracture more of the remaining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avocado.
+
+- **Keep roots clean** — food debris packed around exposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or careful flossing around adjacent teeth.
+
+- **Watch for infection signs** — swelling, persistent throbbing pain, fever, pus, bad taste. If any of these appear, he needs antibiotics and professional care urgently. A root with exposed pulp can abscess.
+
+**Timeline concern:** 4 weeks with an exposed root is already pushing it. The longer the roots sit exposed, the higher the infection risk. Robert should prioritize seeing a dentist — even a dental school clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combination.
 
 Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
 <!-- /agent:exchange -->

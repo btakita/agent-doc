@@ -227,4 +227,13 @@ Short enough for a LinkedIn comment reply. Want me to trim further or adjust the
 
 Edit mail/social/20260313-170000-linkedin.md to link to https://existence-lang.github.io/ instead of rmemo. Use corky to edit the post.
 
+### Re: Edit LinkedIn post — rmemo → Existence Lang
+
+**Done.** Updated the live LinkedIn post:
+
+1. Replaced `rmemo: https://github.com/ctx-core/rmemo` with `Existence Lang: https://existence-lang.github.io/` in the draft
+2. Fixed LinkedIn API version bug in `update_post_at` (`"202401"` → `"202601"` — was expired)
+3. Rebuilt corky and pushed the edit: https://www.linkedin.com/feed/update/urn:li:share:7438328637952667648
+
+Draft file updated: `mail/social/20260313-170000-linkedin.md`
 <!-- /agent:exchange -->

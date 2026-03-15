@@ -114,4 +114,6 @@ Release the doc fix.
 PyPI publish (`maturin publish`) skipped — only docs changed, no Python-facing changes. Let me know if you want that too.
 
 Please commit and push all submodules. Release whatever needs to be released.
+
+Was the .iml file added in the commit? If yes...let's re
 <!-- /agent:exchange -->

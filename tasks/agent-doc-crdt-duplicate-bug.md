@@ -54,4 +54,18 @@ fn flush_to_document(
 **Fix approach:** In `flush_to_document()`, when the file has diverged from baseline, use CRDT merge (like `write::run_stream()` does) instead of direct patch application. This is a 1-file fix in `stream.rs`.
 
 Implement. Add to spec.
+
+### Fix Implemented
+
+**Root cause (refined):** Not in `flush_to_document()` (stream path) — the bug is in `write::run_stream()` (the `agent-doc write --stream` path used by the skill). The `exchange` component defaults to **append** mode, so when the agent's patch content is appended to the baseline's exchange content, the user's prompt appears twice: once from the baseline and once from the agent's response.
+
+**Fix:** In `write::run_stream()`, force **replace** mode for the `exchange` component via `apply_patches_with_overrides()`. The `--stream` path receives the complete intended exchange content (not a delta), so append would duplicate content already in the baseline.
+
+**Changes:**
+- `src/write.rs` — `run_stream()`: switched from `apply_patches()` to `apply_patches_with_overrides()` with replace mode for exchange
+- `SPEC.md` — added §7.21 documenting `agent-doc write` command behavior including the exchange replace-mode override
+
+**Tests:** 333 pass (312 unit + 21 CLI), 0 failures. The existing `flush_cumulative_does_not_duplicate` test confirms no regression.
+Implement. Add to spec.
+Add automated tests
 <!-- /agent:exchange -->

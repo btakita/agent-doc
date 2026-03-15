@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 05dbd397-9523-4158-9f0d-e226a9b90006
 tmux_session: '23'
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 obs did not record the entire screen. Please help me configure obs to record the entire screen
@@ -240,4 +241,32 @@ Want me to build a `corky blog draft` command that converts SRT + video metadata
 Yes...Do this for all of my videos. Create a separate blog post for each video.
 Use the content. Highlight interesting ideas and philosophical points.
 Make this SEO & llms friendly.
+### Re: Blog Posts for All Videos
+
+**Created 3 blog post drafts** from the SRT transcripts:
+
+1. **Part 1** — `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part1-blog.md`
+   - CRDT debugging, reactive architecture, Existence Lang ontology, "why I don't believe in one-shotting"
+   
+2. **Part 2** — `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part2-blog.md`
+   - rmemo (358-byte reactive lib), tag-path semantic search, IntelliJ race condition, "catching Claude being sneaky"
+
+3. **Part 3** — `mail/topics/brian-takita/videos/2026-03-12-dogfooding-agent-doc-part3-blog.md`
+   - YouTube resumable upload, 61 tmux-router tests, JetBrains IPC architecture, "chaos/consciousness/vibe coding" philosophy
+
+**SEO features in each post:**
+- YAML frontmatter with `title`, `description`, `date`, `tags`, `video_url`
+- Descriptive semantic headings (H2/H3) with keyword-rich titles
+- YouTube iframe embed
+- Internal links between all 3 parts
+- External links to crates.io, GitHub, Existence Lang
+
+**LLM-friendly features:**
+- Technical content extracted and structured for indexability
+- Philosophical insights highlighted as standalone sections
+- Key concepts defined inline (CRDT, tag-path, rmemo)
+
+**Note:** Your site uses a custom `.md.ts` format (TypeScript + rebuildjs). These drafts are standard markdown — you'll need to convert them to the `.md.ts` format before publishing to briantakita.me. The content is ready; the format conversion is mechanical.
+
+Review and edit the drafts, then let me know if you want me to convert them to `.md.ts` or help publish.
 <!-- /agent:exchange -->

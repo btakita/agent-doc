@@ -14,17 +14,12 @@ Add a teaser about agent-doc and Proof that God Exists.
 
 <!-- agent:exchange -->
 
-### Re: Canonical URL fix
+### Re: Change redirect path and update YouTube
 
-Fixed. The canonical URL is `/posts/lazily-reactive-signals` (no date prefix).
+Done.
 
-**Updated:**
-1. `_redirects` in briantakita.me-dev → now redirects `/2026-03-15-lazily` to `/posts/lazily-reactive-signals` (pushed, deploy triggered)
-2. lazily-rs README blog post link → canonical URL (pushed)
+1. **_redirects** updated: `/lazily-reactive-signals` → `/posts/lazily-reactive-signals` (pushed, deploy triggered)
+2. **YouTube description** updated: blog post link is now `https://briantakita.me/lazily-reactive-signals`
 
-The YouTube description uses the short URL (`briantakita.me/2026-03-15-lazily`) which will redirect correctly after the deploy completes.
-
-Let's change the redirect to /lazily-reactive-signals -> /posts/lazily-reactive-signals
-
-Please update the link in the YouTube description
+Short URL: `briantakita.me/lazily-reactive-signals` (42 chars — fits comfortably in YouTube descriptions)
 <!-- /agent:exchange -->

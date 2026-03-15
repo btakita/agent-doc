@@ -800,4 +800,39 @@ I worked with Nathan Sobo who is the CEO of Zed Industries. This tooling is writ
 - If you never raise, you still have a business. Consulting + agent-doc as a product is a viable solo/small-team business.
 
 **The one scenario where you raise first:** If you're confident the market window is closing fast (e.g., Cursor or another well-funded player is about to ship CRDT-based document collaboration), then speed matters more than validation. Raise fast, hire fast, ship fast. But I don't see that happening imminently — the "document as nexus" framing is yours to define.
+### Approaching Nathan Sobo / Zed
+
+**This is a strong angle.** Here's why and how to think about it:
+
+**Why it's a natural fit:**
+
+- **Rust codebase** — agent-doc is Rust, Zed is Rust. You speak the same language, literally. No rewrite needed for integration.
+- **CRDT expertise** — Zed uses CRDTs (CRDT-based buffer) for their collaborative editing. You've built a CRDT merge system for document-level collaboration. The technical overlap is deep.
+- **Editor-agnostic → editor-native** — agent-doc currently works with any editor via file-level CRDT merge. A Zed-native integration could skip file polling entirely and merge directly into Zed's buffer CRDT. That's a significant UX upgrade.
+- **AI agent integration** — Zed is investing heavily in AI features. agent-doc's "document as nexus" vision (multi-agent, multi-source, CRDT-mediated) aligns with where Zed is heading.
+
+**Three approaches — pick based on your goal:**
+
+**1. Join Zed as an employee (hired)**
+- Pitch: "I built a CRDT-based document collaboration tool in Rust. I understand your stack, your merge model, and the AI integration space. Here's the demo."
+- Pros: Stable income, work on agent-doc concepts inside a well-funded product, learn from Nathan's team
+- Cons: You lose ownership of agent-doc as an independent product. Zed owns what you build there. Your "document as nexus" vision becomes Zed's feature, not your company.
+
+**2. Partnership / integration deal**
+- Pitch: "agent-doc is a standalone tool that streams AI responses into markdown files via CRDT merge. I want to build a native Zed extension that connects agent-doc's merge engine directly to Zed's buffer. This benefits Zed users without Zed needing to build it."
+- Pros: You keep agent-doc independent. Zed gets a powerful AI document feature without building it. Win-win.
+- Cons: Harder to monetize. Extension partnerships don't always come with revenue.
+
+**3. Investment / acqui-hire conversation**
+- Pitch: "I've built something Zed needs — a CRDT-based agent collaboration layer. Instead of hiring me as an employee, invest in agent-doc. I build the Zed integration first, then expand to other editors. Zed gets first-mover advantage."
+- Pros: You keep ownership, get funding, and have a committed distribution partner.
+- Cons: Nathan may not want to invest in external tools when he can build in-house. High bar.
+
+**My honest take:**
+
+If your primary goal is **building a startup around agent-doc**, approach Nathan with option 2 or 3. The demo video (once recorded) is your strongest asset — show him two documents streaming simultaneously with CRDT merge in Zed. That's a conversation starter.
+
+If your primary goal is **financial stability + working on interesting problems**, option 1 is lower risk and you'd be working on adjacent technology. But you'd be giving up the entrepreneur path.
+
+**The relationship matters more than the pitch.** Since you already know Nathan, lead with the demo, not the ask. Show him what agent-doc does, get his reaction, then discuss which structure makes sense. His response will tell you which option is realistic.
 <!-- /agent:exchange -->

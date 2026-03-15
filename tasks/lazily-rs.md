@@ -21,19 +21,49 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Released v0.1.1
+### Re: Update README, audit docs, release
 
-Bumped to v0.1.1 to include README, AGENTS.md, and spec compliance tests (v0.1.0 was published without them).
+**README updated** with:
+- "Why Lazy?" comparison table (lazy vs eager)
+- API reference table (all 7 public methods)
+- Multi-language implementation table (Rust/Zig/Python)
+- Dynamic dependency explanation
+- Context description expanded (maps to request context, app scope)
+- Blog post link was already added
 
-- Published to crates.io: https://crates.io/crates/lazily/0.1.1
-- GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.1.1
-- No API changes from v0.1.0
+**SPEC.md fixed** — was significantly out of date:
+- Changed `HashMap<TypeId, ...>` → `HashMap<SlotId, Node>` (actual impl)
+- Changed `Slot<T>`, `Cell<T>` structs → `SlotNode`, `CellNode` (actual impl)
+- Changed `&mut Context` → `&Context` (uses interior mutability)
+- Changed API methods to match actual surface (`ctx.slot()`, `ctx.get()`, etc.)
+- Fixed lazily-py comparison: `SlotId (u64)` not `TypeId`, `Direct context passing` not `Trait-based`
+- Fixed lazily-rs thread safety: `Single-threaded (RefCell)` not `Feature flag`
 
-Note the recent updates to the lazily-rs api.
-Also see /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md
+**AGENTS.md updated:**
+- Added `tests/spec_compliance.rs` (36 tests)
+- Updated test count to 49 total
+- Restored Architecture section
 
-Update the README.
-audit docs
-Please release if we need to release the changes.
+**Release decision:** Changes are docs-only. v0.1.1 is already published. crates.io serves the README from the last published version, so users see the v0.1.1 README until a new publish. If you want the updated README on crates.io, we'd need v0.1.2. Otherwise these changes are available on GitHub immediately.
+
+**Blog post API discrepancy:** The blog post shows a different API pattern (`Cell::new()`, `Slot::new()`, callable `counter(&ctx)` syntax) that doesn't exist in the current implementation. The current API uses `ctx.cell()`, `ctx.slot()`, `ctx.get_cell()`, `ctx.set_cell()`. Want me to either update the blog post to match the actual API, or implement the blog post's API in the library?
+
+### Re: Docs updated, pushed
+
+**README updated:**
+- Description: "signals" → "primitives" (Context, Slots, Cells)
+- Added Architecture section (moved from AGENTS.md per audit-docs)
+- Added blog post link: https://briantakita.me/posts/2026-03-15-lazily-reactive-signals
+- API examples stay as-is (match current implementation)
+
+**AGENTS.md cleaned:** Removed Architecture section (now in README). Kept design decisions and commands.
+
+**Audit-docs:** Down to 0 issues (was 3).
+
+**Tests:** All 49 pass (13 integration + 36 spec compliance).
+
+**No release needed** — only documentation changes, no API or behavior changes. The v0.1.1 on crates.io is current.
+
+**Note:** The blog post shows an aspirational callable API (`counter(&ctx).get()`) that differs from the current implementation (`ctx.get_cell(&counter)`). The README documents the current API. Refactoring the Rust API to match the blog post would be a separate task.
 <!-- /agent:exchange -->
  

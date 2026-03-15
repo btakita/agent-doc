@@ -1,10 +1,8 @@
 ---
-session: 7edcc64c-420a-493a-86e6-0a6a119dff0a
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 7edcc64c-420a-493a-86e6-0a6a119dff0a
+tmux_session: '23'
 ---
+
 Add a contact for toby-hill
 
 https://www.linkedin.com/in/tobyhill/

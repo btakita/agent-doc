@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.14.4"
+agent-doc-version: "0.14.10"
 ---
 
 # agent-doc submit
@@ -38,7 +38,17 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 **Recover orphaned responses:** Run `agent-doc recover <FILE>` via Bash. If a pending response exists (from a previous cycle interrupted by context compaction), it will be written to the document automatically. Print the output to confirm recovery. This must run before computing the diff.
 
-**Check claims log:** Read `.agent-doc/claims.log` (if it exists). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
+**Check claims log:** Read `.agent-doc/claims.log` (if it exists) as a **foreground** Bash call — never use `run_in_background` (instant commands cause phantom task accumulation). Print each line to the console as a record of IDE-triggered claims. Then truncate the file (write empty string). This gives a permanent record in the Claude session of claims made from the editor plugin.
+
+### 0b. Commit previous response
+
+Before reading the document, commit any uncommitted changes from the previous cycle. This keeps the git gutter clean for the new response while preserving green gutter visibility for the *last* response between cycles:
+
+```bash
+agent-doc commit <FILE>
+```
+
+If there are no uncommitted changes, this is a no-op.
 
 ### 1. Read the document and snapshot
 
@@ -58,7 +68,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 - The diff represents what the user changed since the last submit
 - If no diff (content unchanged after comment stripping), tell the user nothing changed and stop
 
-### 3. Respond
+### 3. Respond (with streaming checkpoints for template mode)
 
 - Address the user's changes naturally in the console (this gives real-time streaming feedback)
 - Respond to:
@@ -67,22 +77,40 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
   - Structural changes (deletions, reorganization)
 - Your console response IS the document response — they should be the same content
 
+**Streaming checkpoints (template/stream mode):**
+When responding to a document with multiple user questions/topics, flush partial responses at natural breakpoints so the user sees progress in their editor:
+
+1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
+   ```bash
+   echo '<partial response as patch blocks>' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   ```
+2. **Re-save the baseline** after each checkpoint flush (the document has changed):
+   ```bash
+   cp <FILE> /tmp/agent-doc-baseline-$$.md
+   ```
+3. Continue responding to the next section, then flush again
+4. The final write-back (step 4) writes the complete response
+
+**When to checkpoint:** After each `### Re:` section, after completing a code implementation summary, or after any response block that takes >15s to generate. Skip checkpoints for short single-topic responses.
+
+**All writes use `--stream` (CRDT merge)** — this eliminates merge conflicts when the user edits the document during response generation.
+
 ### 4. Write back to the document
 
 Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
 
 #### 4a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
 
-Use `agent-doc write` to atomically append the response:
+Use `agent-doc write --stream` to atomically append the response:
 
 1. **Save a baseline copy** of the document content (before step 3) to a temp file
 2. **Pipe your response** through `agent-doc write`:
    ```bash
-   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp>
+   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
    ```
-3. `agent-doc write` handles:
+3. `agent-doc write --stream` handles:
    - Appending `## Assistant\n\n<response>\n\n## User\n\n`
-   - 3-way merging if the user edited during your response
+   - CRDT merge if the user edited during your response (conflict-free)
    - Atomic file write (flock + tempfile + rename)
    - Snapshot update
 
@@ -105,15 +133,18 @@ The agent responds with **patch blocks** that target specific components.
    - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
    - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
    - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
-3. **Pipe through `agent-doc write` with `--template` flag:**
+3. **Pipe through `agent-doc write` with `--stream` flag:**
    ```bash
-   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --template
+   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
    ```
-4. `agent-doc write --template` handles:
+4. `agent-doc write --stream` handles:
    - Parsing patch blocks from the response
    - Applying each patch to the matching component
-   - 3-way merging if the user edited during your response
+   - CRDT merge if the user edited during your response (conflict-free)
    - Atomic file write + snapshot update
+
+**Progress tracking via `<!-- agent:status -->`:**
+When a template document has a `<!-- agent:status -->` component, update it at natural milestones (phase completion, deploy success, etc.) using `<!-- patch:status -->` blocks with checkbox progress. The status should reflect the *current state of work* — not echo what was just done. Example: `- [X] Phase 1: Done\n- [ ] Phase 2: In progress`. Include status patches in the same `agent-doc write` call alongside other patch blocks.
 
 **Template document conventions:**
 - `<!-- agent:input -->` — user writes prompts here
@@ -130,13 +161,13 @@ cp <FILE> /tmp/agent-doc-baseline-$$.md
 ```
 Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
 
-### 5. Git integration (optional)
+### 5. Git integration
 
-If the document is in a git repo:
-- **After writing response:** `agent-doc commit <FILE>` (git add + commit with auto-generated timestamp)
+**Do NOT commit after writing the response.** The response stays uncommitted so the green git gutter bar delineates exactly what the agent wrote. The commit happens at the *start* of the next cycle (step 0b).
+
 - **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- Do NOT commit before responding — this triggers "file changed externally" notices in IDEs
-- The git-based snapshot fallback (`snapshot::resolve()`) ensures diff computation works without a pre-response commit
+- The previous response is committed in step 0b, before the next diff computation
+- This gives the user green gutter visibility between cycles, with automatic cleanup on the next submit
 
 ## Document Format
 
@@ -148,13 +179,14 @@ agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>
-agent_doc_mode: <append | template>  # optional, default: append
+agent_doc_format: <append | template>  # optional, default: append
+agent_doc_write: <crdt | stream>      # optional, default: stream
 ---
 ```
 
 **Append mode** (default): The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
 
-**Template mode** (`agent_doc_mode: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 4b.
+**Template mode** (`agent_doc_format: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 4b.
 
 ## Snapshot Storage
 

@@ -83,6 +83,16 @@ agent-loop/
 - **No Laziness:** Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact:** Changes should only touch what's necessary. Avoid introducing bugs.
 
+## Security — Secret Handling
+
+**NEVER inline cleartext secrets in commands.** This user livestreams — tool call output is visible to viewers.
+
+- Use `pass <path>` via subshell: `CARGO_REGISTRY_TOKEN="$(pass crates.io/token)" cargo publish`
+- Use `--token "$(pass ...)"` when CLIs accept token flags
+- If a command requires a secret, always wrap it with `pass` or reference an env var that's set in the shell profile
+- Never echo, print, or log secrets — not even in error messages
+- If you're unsure whether a value is secret, treat it as secret
+
 ## Conventions
 
 - Each submodule has its own CLAUDE.md with project-specific instructions.

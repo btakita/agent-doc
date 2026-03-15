@@ -103,4 +103,15 @@ Want me to upload the merged full video to R2 before you delete the sources?
 Will do this later.
 
 Please deploy briantakita.me
+
+### Re: Deployed
+
+Committed and pushed to `briantakita.me-dev` (main):
+- Blog post: `2026-03-14-rappstack-live-session.md` with YouTube embed
+- Regenerated `post/index.ts` with new post
+- Dependency bumps: rebuildjs ^0.71.0, rhonojs ^0.1.2
+
+GitHub Actions "Deploy to Cloudflare Pages" workflow triggered on push to main. The deploy should complete in a few minutes.
+
+Add a link to the blog post in the YouTube video description.
 <!-- /agent:exchange -->

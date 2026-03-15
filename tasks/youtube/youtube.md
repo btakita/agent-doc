@@ -17,23 +17,6 @@ Add a teaser about agent-doc and Proof that God Exists.
 
 Note the frontmatter change.
 
-I want to make a video of yesterday's session focused on rappstack.
-It was somewhat frustrating.
-Could you merge the videos together and create a Closed Caption transcript.
-Analyze the content of the video.
-And give suggestions on how I should present it.
-[2026-03-14 17-18-56.mp4](../../../../../Videos/2026-03-14%2017-18-56.mp4)
-[2026-03-14 16-39-43.mp4](../../../../../Videos/2026-03-14%2016-39-43.mp4)
-[2026-03-14 15-26-59.mp4](../../../../../Videos/2026-03-14%2015-26-59.mp4)
-
-### Re: Rappstack session video — complete
-
-**Deliverables:**
-- Merged video: `tasks/youtube/2026-03-14-rappstack-session.mp4` (3.7 GB, 84.5 min)
-- Condensed video: `tasks/youtube/2026-03-14-rappstack-condensed.mp4` (1.6 GB, 34:45)
-
----
-
 ## Published
 
 **YouTube (rappstack):** https://www.youtube.com/watch?v=oFFHVjQaYdA
@@ -43,43 +26,36 @@ And give suggestions on how I should present it.
 
 ---
 
-### Re: Implemented + deployed
-
-**External link postprocessor added** to `config/config__init.ts` — all external markdown links now get `target="_blank"`.
-
----
-
-The article is not showing up in the featured articles on the home pages
-See
-
-### Re: Featured flag bug — fixed
-
-**Root cause:** The `md_esbuild_plugin_` in `build.ts` parses markdown frontmatter and generates the `post_meta__validate` call, but it was only forwarding `hero_image`, `og_image`, and `draft` from frontmatter. The `featured` field was silently dropped.
-
-**Fix** (`build.ts:168`): Added `featured` to the forwarded fields:
-```typescript
-...(meta.featured !== undefined && { featured: meta.featured }),
-```
-
-This only affected `.md` blog posts. The `.md.ts` posts (like `introducing-agent-doc.md.ts`) set `featured` directly in their `meta_()` function, so they worked fine.
-
-Pushed and deploying. The lazily post should appear in featured articles after this deploy.
-See https://briantakita.me/#featured
-
 The YouTube description does not have hyperlinks. Also the link to the blog post is truncated.
 
+lazily (Rust): https://crates.io/crates/lazily
+
+### Re: YouTube description fix
+
+Updated the draft to fix link formatting:
+- Blog post URL on its own line (not after `Blog post:` on same line — YouTube truncates long lines)
+- Removed markdown `- ` prefixes (YouTube doesn't render markdown)
+- Used `name — url` format so URLs are on the line and auto-linkify
+
+**Auth timed out** — the YouTube OAuth token expired and I need you to complete the consent flow in the browser. Please click through the Google consent screen, then submit again and I'll update the description.
+
+try again. Can we make the oauth 
+
+Alternatively, you can update the description manually at https://studio.youtube.com/video/hVNmbmY4vgo/edit — paste this:
+
 ```
+Lazily: Building a Multi-Language Reactive Signals Library — Live Session
+
 Live coding session building lazily — a reactive signals library implemented in Rust, Zig, and Python. Features lazy invalidation, automatic dependency tracking, and Context/Slot/Cell primitives.
 
-Blog post: https://briantakita.me/posts/2026-03-15-la...
+Blog post:
+https://briantakita.me/posts/2026-03-15-lazily-reactive-signals
 
-Links:
-lazily (Rust): https://crates.io/crates/lazily
-lazily-zig: https://github.com/btakita/lazily-zig
-lazily-py: https://github.com/btakita/lazily-py
-Claude Code: https://claude.com/claude-code
-agent-doc: https://crates.io/crates/agent-doc
+lazily (Rust) — https://crates.io/crates/lazily
+lazily-zig — https://github.com/btakita/lazily-zig
+lazily-py — https://github.com/btakita/lazily-py
+Claude Code — https://claude.com/claude-code
+agent-doc — https://crates.io/crates/agent-doc
 ```
-
-lazily (Rust): https://crates.io/crates/lazily
+lazily (Rust) should be lazily-rs
 <!-- /agent:exchange -->

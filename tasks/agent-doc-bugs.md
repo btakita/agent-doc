@@ -7,20 +7,22 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### CRDT corruption detected (again)
+### v0.17.8 Released + CRDT Fix
 
-The previous write cycle produced garbled text (lines 23-28) — same character-level interleaving bug. The CRDT merge log showed `File was modified during response generation. CRDT merging...` which indicates concurrent user edits triggered the merge path, and the merge produced corrupted output.
+**v0.17.8 released** (template parser code-block awareness):
+- crates.io, PyPI, GitHub Release with binary
+- https://github.com/btakita/agent-doc/releases/tag/v0.17.8
 
-This is another instance of the baseline/CRDT state mismatch issue. The fix from v0.17.6 (using fresh CRDT state from baseline) didn't fully resolve it — the character-level diff still produces overlapping ops in some cases.
+**CRDT corruption root cause found and fixed:**
 
-**Clean document restored.** The template patch parser code-block fix is still in the codebase (5 new tests, all 351 pass).
+`compute_edit_ops()` in `crdt.rs` used `TextDiff::from_chars()` — producing ~20 scattered character-level ops when the agent replaces a multi-line block. When merged with user's concurrent edit, these scattered ops interleave at character boundaries, splitting words mid-way.
 
-Shall I:
-1. Release v0.17.8 with the template parser fix (code-block awareness)
-2. Deep-dive the remaining CRDT merge corruption
+**One-line fix:** `TextDiff::from_chars()` → `TextDiff::from_lines()`. Line-level ops produce 2 clean operations (delete old lines, insert new lines) instead of 20 scattered character ops. CRDT concurrent inserts now interleave at line boundaries (acceptable) instead of character boundaries (corruption).
 
-Or both?
+New test `merge_replace_vs_insert_no_interleaving` verifies: agent replacement + user insertion both preserved contiguously with no character interleaving. All 352 tests pass.
 
-Both
+Ready to release v0.17.9 with the CRDT fix?
+
+go
 <!-- /agent:exchange -->
 ,.

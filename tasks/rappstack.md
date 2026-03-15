@@ -16,24 +16,14 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: CI errors investigation
+### Re: Fixing both
 
-**drmanny-dev (run 23099026077):** Still in progress (9+ min). The previous run (23098920375) failed with:
-- `tailwindcss` not resolved — **fixed** in current run (`conditions: ['style']`)
-- `peak-existence.mp4` not found — video file not in git, needs R2 or exclude
-- `fa_waves_sine.svg` not found — icon file missing
+**2 fix agents launched:**
 
-**herbaliciousbliss-dev (run 23099060500):** Build succeeds but **prerender fails**:
-```
-p is not a function (500 on / and /lyra)
-```
-This is the **relementjs state duplication** issue — tag factories not initialized in minified server bundle. Fix: add `relement__use(server__relement)` to server entry point.
+1. **drmanny-dev** — resolving missing `peak-existence.mp4` and `fa_waves_sine.svg`
+2. **herbaliciousbliss-dev** — adding `relement__use(server__relement)` to server entry points
 
-**Next steps:**
-1. drmanny-dev: handle missing `fa_waves_sine.svg` + `peak-existence.mp4`
-2. herbaliciousbliss-dev: add `relement__use(server__relement)` to server entry
+Will update with results.
 
-Want me to fix both?
-
-Yes
+The workflows have failed. See the errors.
 <!-- /agent:exchange -->

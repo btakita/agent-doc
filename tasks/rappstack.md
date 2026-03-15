@@ -16,13 +16,19 @@ Use yalc if possible. And deploy via github actions. The deployments must depend
 
 <!-- agent:exchange -->
 
-### Re: Video uploaded + CI retriggered
+### Re: rebuildjs fix — watch: false now uses build()
 
-**drmanny-dev:** Uploaded `peak-existence.mp4` (251 MB) to R2. Retriggered CI (run 23099460179). Asset download will now include the video.
+**Published `rebuildjs@0.70.46`:**
+- `watch: false` → `esbuild.build()` (one-shot, exits on errors)
+- `watch: true` → `esbuild.context().watch()` (existing behavior)
+- All 56 rebuildjs tests pass
+- herbaliciousbliss-dev build completes without hanging
 
-**herbaliciousbliss-dev:** Build hangs locally. The `p is not a function` prerender error in CI happens because the build produces broken output. Investigating.
+**Updated both apps:**
+- herbaliciousbliss-dev → `rebuildjs@0.70.46`, pushed, CI triggered
+- drmanny-dev → `rebuildjs@0.70.46`, pushed, CI triggered
 
-**Re: "error should immediately end the build"** — The esbuild errors stream but don't terminate because `rebuildjs` uses `context().rebuild()` internally (even with `watch: false`), which doesn't auto-exit on errors like `build()` would.
+Both CIs should now succeed or fail cleanly — no more hanging.
 
-Let's make `watch: false` use build instead of rebuild.
+The same error keeps on repeating. How do we get the process to stop once there is an error on CI?
 <!-- /agent:exchange -->

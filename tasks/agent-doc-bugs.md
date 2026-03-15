@@ -100,4 +100,22 @@ The ordering is correct because the stream buffer is cumulative — it naturally
 The fix + tests are in `src/agent-doc/src/stream.rs`. Ready to publish when you want.
 
 publish
+
+### Published v0.17.1
+
+- **crates.io**: `agent-doc v0.17.1` ✓
+- **PyPI**: `agent-doc 0.17.1` ✓
+- **GitHub Release**: [v0.17.1](https://github.com/btakita/agent-doc/releases/tag/v0.17.1) with prebuilt binary ✓
+- **Release binary built**: `cargo build --release` ✓ (symlink at `.bin/agent-doc` is updated)
+
+Install: `cargo install agent-doc` or `pip install agent-doc`
+
+tasks/brookebrodack-dev.md had the crdt duplicate issue. Please look at the logs to figure out why this happened.
+Add tests and fix.
+
+```
+Opening a video a shows video a.
+Closing video a then opening video b start video b but video b is hidden.
+Closing video b then reopening video b starts and shows video b. video b is visible.
+```
 <!-- /agent:exchange -->

@@ -7,22 +7,32 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Released v0.17.7
+### Re: Release context, old response loss, default components
 
-- crates.io: https://crates.io/crates/agent-doc/0.17.7
-- PyPI: https://pypi.org/project/agent-doc/0.17.7/
-- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.7 (with prebuilt binary)
-- Release binary built and symlink updated
+**Release context:** Agreed — the v0.17.7 response was too terse. Future release responses will include a brief summary of what the release fixed/changed, not just URLs.
 
-The agent response to agent:exchange should provide more context into what this release was about.
-I do like the clean-slate approach. But I also wonder what happens to the response.
-Do I completely lose it?
-I could always ask you to show the old response. But I wonder if a short reminder or log should be printed.
-Perhaps in a log area.
+**Old response loss:** When the exchange component replaces content, the old text is only in git history. Options:
+1. **Console summary** (recommended) — print a brief "Replacing N sections from previous exchange" to the console before writing. No document bloat, searchable in Claude transcript.
+2. **`agent:log` component** — append-only log accumulating summaries. Already exists for stream thinking output.
+3. **Snapshot diff** — print what was in the snapshot before replacing.
 
-Also there's content above the `agent:exchange` component that has stuck around from the beginning of this document.
-I just deleted it.
-Perhaps we should have a status component on the document by default.
-So each document will have `agent:status` and `agent:exchange` by default.
-Should this be in the agent-doc binary or skill?s
+Option 1 is simplest. Should I implement it?
+
+**Default components → binary:**
+The binary (`agent-doc claim` / `agent-doc init`) already handles frontmatter defaults. Adding component scaffolding there is natural and follows the CLAUDE.md convention ("all deterministic behavior in the binary"):
+
+```markdown
+<!-- agent:status -->
+<!-- /agent:status -->
+
+<!-- agent:exchange -->
 <!-- /agent:exchange -->
+```
+
+The skill expects components to exist — the binary ensures they do. Should I implement this in `claim.rs`?
+
+Yes...however, you just created 2 `<!-- agent:exchange -->` tags and 3 `<!-- /agent:exchange -->` tags.
+Something did not work right.
+Please dignose, add tests, and fix.
+<!-- /agent:exchange -->
+,.

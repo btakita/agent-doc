@@ -97,20 +97,16 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**All rappstack apps updated:**
+**All committed and pushed:**
+1. cogov-dev `146b8c3` — relysjs ^1.21.76
+2. drmanny-dev `763072a` — rebuildjs ^0.71.0
+3. herbaliciousbliss-dev `11a38d1` — rebuildjs ^0.71.0
+4. brookebrodack-dev `c32276e` — Elysia→Hono migration
+5. briantakita.me-dev `41fbe49` — rebuildjs/rhonojs versions
 
-| App | Change | Build |
-|-----|--------|-------|
-| cogov-dev | relysjs ^1.21.76 | OK |
-| drmanny-dev | rebuildjs ^0.71.0 | OK |
-| herbaliciousbliss-dev | rebuildjs ^0.71.0 | OK |
-| brookebrodack-dev | **Converted Elysia→Hono** (22 files, relysjs→rhonojs) | OK |
+Parent repo submodule pointers staged (not committed yet).
 
-brookebrodack-dev conversion details: Elysia→Hono patterns (chained `.use()`→method calls, `context`→`c`, `app.route()` for sub-apps), request_ctx bypasses rappstack's Elysia-based helper, rebuildjs 0.71.0 resolution added.
+briantakita.me deploy still pending (needs `gh auth` for ghcr.io docker push, or manual deploy via `make docker-push && make deploy`).
 
-Skipped: censible-core, prescience-notes-dev (no rebuildjs/relysjs/rhonojs deps)
-
-All changes uncommitted. Ready to commit and deploy when you want.
-
-go
+briantakita.me does not need docker anymore...since we are exclusively running on Cloudflare...not on Contabo.
 <!-- /agent:exchange -->

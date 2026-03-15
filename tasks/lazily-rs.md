@@ -21,24 +21,18 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Comprehensive Spec Tests Added
+### Re: Thread Safety
 
-Created `tests/spec_compliance.rs` with 36 tests across 6 modules (49 total with existing integration tests):
+No — lazily-rs is currently **single-threaded only**. It uses `RefCell` for interior mutability, so `Context` is neither `Send` nor `Sync`.
 
-| Module | Tests | Covers |
-|--------|-------|--------|
-| `context` | 5 | Creation, Default, unique handles, mixed slot+cell |
-| `slot_semantics` | 5 | Compute-on-first-access, caching, clear, cascade, immutability |
-| `cell_semantics` | 6 | Get/set, PartialEq guard, invalidation, recursive cascade, String types |
-| `dependency_tracking` | 3 | Auto-discovery, nested deps, dynamic dependency graphs |
-| `invalidation_semantics` | 4 | Cell→dependents, slot cascade, lazy recompute, multi-invalidation |
-| `edge_cases` | 13 | Diamond deps, deep chains (6 levels), multi-cell, Vec types, Copy handles |
+The thread-local `TRACKING_STACK` is inherently per-thread (which is correct), but the `Context` itself cannot be shared across threads.
 
-All tests use thread-local counters to verify laziness (slots don't recompute until accessed).
+**To add thread safety** (future work):
+- Replace `RefCell<Inner>` with `RwLock<Inner>` or `Mutex<Inner>` behind a `thread-safe` cargo feature flag
+- `Context` would implement `Send + Sync` when enabled
+- lazily-zig uses mutex by default with a build flag to disable; lazily-rs could do the inverse (single-threaded default, opt-in thread safety via `features = ["thread-safe"]`)
 
-Committed and pushed to github.com/btakita/lazily-rs.
+This is a natural Phase 3/4 enhancement. Want me to implement it now, or continue with derived/computed signals first?
 
-Regarding your incomplete question "Does lazily-rs currently su..." — could you finish the thought?
-
-Does lazily-rs currently support thread safety?
+Please release lazily-rs with the README
 <!-- /agent:exchange -->

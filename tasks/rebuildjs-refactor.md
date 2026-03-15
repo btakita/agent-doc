@@ -97,63 +97,7 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-Got it — briantakita.me runs on Cloudflare Pages, not Docker/Contabo. The code is already committed and pushed to main (`41fbe49`). If Cloudflare Pages is connected to the repo, it should auto-deploy.
+**drmanny-dev fixed.** Root cause: esbuild plugin order in `build.ts`. `object-store-asset` fired before `esmfile`, tried to read non-existent SVG. Fix: swapped plugin order so `esmfile` handles `.file.js` imports first. Server starts cleanly on port 4103.
 
-If you need a manual deploy: run `bun prerender.ts` with the server running, then push the static output to Cloudflare Pages via `wrangler pages deploy dist/static` (or however your CF Pages project is configured).
-
-The Makefile with Docker targets is stale — can be cleaned up separately.
-
-**Refactor complete.** Everything is committed, pushed, and published.
-
-briantakita.me does not need docker anymore...since we are exclusively running on Cloudflare...not on Contabo.
-
-Got an error with drmanny-dev
-
-```
-$ cd ./app/peakexistence-site && bun dev
-$ bun run dev:sourcemap__resolve__bun
-$ sourcemap__resolve__bun -f index.ts
-relysjs_browser__build|done
-relysjs_server__build|done
-browser__build|watch
-server__build|watch
-✘ [ERROR] ENOENT: no such file or directory, open '/home/brian/work/btakita/agent-loop/src/drmanny-dev/app/peakexistence-site/icon/fa_waves_sine.svg' [plugin object-store-asset]
-
-    config.ts:19:30:
-      19 │ import fa_waves_sine_svg from './icon/fa_waves_sine.svg.file.js'
-         ╵                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  This error came from the "onLoad" callback registered here:
-
-    ../../node_modules/.bun/esbuild-plugin-object-store-asset@0.0.2+0ae84e4a3e13ab91/node_modules/esbuild-plugin-object-store-asset/index.js:14:9:
-      14 │       build.onLoad({ filter }, async ({ path })=>{
-         ╵             ~~~~~~
-
-    at setup (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild-plugin-object-store-asset@0.0.2+0ae84e4a3e13ab91/node_modules/esbuild-plugin-object-store-asset/index.js:14:10)
-    at <anonymous> (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1422:21)
-    at buildOrContextImpl (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1135:5)
-    at buildOrContext (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:961:5)
-    at Promise (unknown:1:11)
-    at context (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:2325:31)
-    at rebuildjs_server__build (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/rebuildjs@0.70.45+921ee3b03b0a9bbc/node_modules/rebuildjs/server/build/index.js:345:28)
-    at processTicksAndRejections (unknown:7:39)
-
-✘ [ERROR] JSON Parse error: Unexpected EOF [plugin onEnd]
-
-    /home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:47:
-      1202 │ ...sponse.metafile) result.metafile = parseJSON(response.metafile);
-           ╵                                       ^
-
-    at <parse> (:0)
-    at parse (unknown)
-    at buildResponseToResult (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:48)
-    at <anonymous> (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1217:9)
-    at new Promise (native:1:11)
-    at <anonymous> (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1216:58)
-    at <anonymous> (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:909:17)
-    at handleIncomingPacket (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:934:7)
-    at readFromStdout (/home/brian/work/btakita/agent-loop/src/drmanny-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:862:7)
-    at emit (node:events:95:22)
-    at addChunk (internal:streams/readable:265:47)
-```
+This was a pre-existing bug unrelated to the rebuildjs refactor — exposed by the fresh `bun install`.
 <!-- /agent:exchange -->

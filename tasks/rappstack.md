@@ -180,4 +180,40 @@ rhonojs (thin wrapper)
 
 Add SPEC.md. Add tests. Implement.
 
+### Re: Add SPEC.md, tests, implement
+
+This is a significant refactoring task across 3 packages in ctx-core-dev. Here's the current state and proposed plan:
+
+**Current state:**
+- `rebuildjs` (v0.70.47) — core build orchestration, 8 test files, no SPEC.md. Already has `elysia` as a direct dep (should be removed in refactor).
+- `relysjs` (v1.21.75) — mature Elysia adapter, 7 test files, no SPEC.md
+- `rhonojs` (v0.1.1) — new Hono adapter, **no tests**, no SPEC.md
+
+**The refactoring has 4 phases:**
+
+#### Phase 1: SPEC.md for rebuildjs
+Define the bundler-agnostic interface and adapter contract. This is the design document that drives everything else.
+
+#### Phase 2: Extract shared logic into rebuildjs
+Move framework-agnostic code from relysjs/rhonojs into rebuildjs subpaths:
+- `rebuildjs/server/route` — `html_route_()`, `request_ctx__ensure()`, `html_response__new()` (parameterized by framework context type)
+- `rebuildjs/server/compression` — compression logic (parameterized by middleware return type)
+- `rebuildjs/server/static` — static file serving
+- `rebuildjs/server/export` — SSG export + Cloudflare export
+- `rebuildjs/server/elysia` — Elysia-specific adapter
+- `rebuildjs/server/hono` — Hono-specific adapter
+- Remove `elysia` from rebuildjs deps (move to optional/peer)
+
+#### Phase 3: Make relysjs/rhonojs thin wrappers
+- `relysjs/server` → `export * from 'rebuildjs/server/elysia'` + `export * from 'rebuildjs/server'`
+- `rhonojs/server` → `export * from 'rebuildjs/server/hono'` + `export * from 'rebuildjs/server'`
+- Move elysia dep to relysjs, hono dep to rhonojs
+
+#### Phase 4: Tests for rhonojs + integration tests
+- Port relysjs tests to rhonojs
+- Add integration tests that verify both adapters against the same interface
+
+**This should be done in a dedicated ctx-core-dev session** — it touches deep internals and needs careful testing. Want me to create a task file at `tasks/rebuildjs-refactor.md`?
+
+Yes
 <!-- /agent:exchange -->

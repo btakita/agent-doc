@@ -38,57 +38,38 @@ And give suggestions on how I should present it.
 
 **YouTube (rappstack):** https://www.youtube.com/watch?v=oFFHVjQaYdA
 **YouTube (lazily):** https://www.youtube.com/watch?v=hVNmbmY4vgo
-**Blog post (rappstack):** deployed to CloudFlare Pages
-**Blog post (lazily):** `2026-03-15-lazily-reactive-signals.md` — iframe + video_url added
+**Blog post (rappstack):** deployed
+**Blog post (lazily):** deployed with iframe + video_url
 
 ---
 
-Yes. Format markdown 
-It would be good to have markdown with custom components. Could we use web components?
-
-Or is there a way to escape within a markdown document for server side rendering?
-Or what if we postprocess the markdown output to automatically make outbound links open to target blank?
-
-### Re: Markdown + target blank architecture
-
-**Option 4 is the winner: postprocess markdown output.** Here's why:
-
-| Approach | Pros | Cons |
-|---|---|---|
-| `.md.ts` factory functions | DRY, reusable `tb_a_` components | Loses markdown authoring ergonomics, can't use standard markdown editors |
-| Web components in markdown | Standards-based, works in any renderer | SSR complexity, hydration overhead, overkill for `target="_blank"` |
-| Escape hatches in markdown | Flexible | Non-standard, fragile, renderer-specific |
-| **Postprocess HTML output** | Zero authoring friction, automatic, write standard markdown | Need a transform step |
-
-**Implementation:** Add a `marked` extension or rehype plugin that:
-1. Finds all `<a>` tags in rendered markdown output
-2. If `href` starts with `http://` or `https://` and doesn't match the site domain → add `target="_blank" rel="noopener"`
-3. Internal links (relative or same domain) left unchanged
-
-This is a ~10-line plugin. You already use `marked` for markdown rendering. The transform runs at build time (SSR), zero runtime cost.
-
-```typescript
-// rehype or marked extension
-function externalLinksPlugin() {
-  return (tree) => {
-    visit(tree, 'element', (node) => {
-      if (node.tagName === 'a' && node.properties?.href) {
-        const href = node.properties.href as string
-        if (href.startsWith('http') && !href.includes('briantakita.me')) {
-          node.properties.target = '_blank'
-          node.properties.rel = 'noopener'
-        }
-      }
-    })
-  }
-}
-```
-
-This means you can go back to writing standard markdown links `[text](url)` and they'll automatically get `target="_blank"` for external URLs. No HTML tags needed.
-
 Yes
 
-**Lazily YouTube uploaded:** https://www.youtube.com/watch?v=hVNmbmY4vgo — added iframe + video_url to blog post. Ready to commit and redeploy.
-
 continue
+
+### Re: Implemented + deployed
+
+**External link postprocessor added** to `config/config__init.ts`:
+
+```typescript
+marked.use({
+  renderer: {
+    link({ href, title, tokens }) {
+      const text = this.parser.parseInline(tokens)
+      if (href && /^https?:\/\//.test(href) && !href.includes('briantakita.me')) {
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
+      }
+      return `<a href="${href}">${text}</a>`
+    }
+  }
+})
+```
+
+All external links in markdown blog posts now automatically open in new tabs. Zero authoring friction — just write standard `[text](url)` markdown.
+
+**Reverted** the lazily blog post links from HTML `<a>` tags back to standard markdown syntax (the postprocessor handles them now).
+
+**Pushed and deploying** — GitHub Actions triggered for CloudFlare Pages.
+
+The article is not showing up in the featured articles on the home pages
 <!-- /agent:exchange -->

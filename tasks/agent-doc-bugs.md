@@ -16,15 +16,9 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: tmux pane orientation bug
+### Re: tmux orientation — additional clue
 
-Investigating the `agent-doc run` command's tmux split logic. The issue is likely using `-v` (top/bottom) instead of `-h` (left/right) in the `split-window` command. Fix agent running.
+Thanks for the extra detail. The behavior "switching editor focus to the right side reverts to horizontal" suggests the tmux layout is being disrupted by `agent-doc run`'s pane creation/resizing, not permanently changed. The `split-window` or `select-layout` command may be triggering a layout recalculation.
 
-When I did `agent-doc run tasks/rappstack.md`, the orientation of the tmux panes switched from horizontal (left | right) to vertical (top/bottom).
-Please diagnose from logs.
-Please add test(s) replicating the issue.
-Please fix.
-
-And it just happened. Still in the top/bottom orientation after running this file.
-If I switch to the editor focus to the right side, it will revert back to horizontal left|right orientation.
+Fix agent is still investigating the source code. Will update with findings.
 <!-- /agent:exchange -->

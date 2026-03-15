@@ -21,24 +21,21 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Committed, Pushed & Released
+### Done
 
-**lazily-rs (v0.1.0):**
-- Committed initial implementation (9 files, 748 insertions)
-- Tagged `v0.1.0` and pushed to github.com/btakita/lazily-rs
-- Published to crates.io: https://crates.io/crates/lazily
-- GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.1.0
+Added to lazily-rs and pushed:
 
-Add a README.md to lazily-rs.
+- **README.md** — crate overview, usage example, core concepts, design notes, related projects badge
+- **AGENTS.md** — architecture, key deAdd a README.md to lazily-rs.
 Also add AGENTS.md with a symlink CLAUDE.md
 
-**lazily-zig:**
-- Committed Cell.set equality fix + SPEC.md
-- Pushed to github.com/btakita/lazily-zig
+Please add tests.
+Please comprehensively test adherence to the spec.
 
-**lazily-py:**
-- SPEC.md committed within submodule (already pushed previously)
+Do
 
-**Parent repo (agent-loop):**
-- Updated all three submodule pointers in a single commit
+cisions, commands, related projects
+- **CLAUDE.md** → symlink to AGENTS.md
+
+All committed and pushed to github.com/btakita/lazily-rs.
 <!-- /agent:exchange -->

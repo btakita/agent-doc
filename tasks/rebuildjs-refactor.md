@@ -97,78 +97,11 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**drmanny-dev fixed.** Root cause: esbuild plugin order in `build.ts`. `object-store-asset` fired before `esmfile`, tried to read non-existent SVG. Fix: swapped plugin order so `esmfile` handles `.file.js` imports first. Server starts cleanly on port 4103.
+**brookebrodack-dev fixed.** Root cause: Hono was bundled into esbuild output (not treated as external), creating two Hono class copies. The `instanceof Hono` check in rhonojs `app__attach()` failed, so sub-apps went through `app.use()` instead of `app.route()`.
 
-This was a pre-existing bug unrelated to the rebuildjs refactor — exposed by the fresh `bun install`.
+Fix: Added `'hono'` and `'hono/*'` to server externals in `build.ts`. Server starts cleanly now.
 
-brookebrodack-dev has internal server error:
-```
-~/work/btakita/agent-loop/src/brookebrodack-dev main                                                                                                                                                                     ✘ INT 6m 27s 02:40:13
-❯ bun run dev
-$ cd ./app/brookebrodack-site && bun dev
-$ bun run dev:sourcemap__resolve__bun
-$ sourcemap__resolve__bun -f index.ts
-browser__build|watch
-server__build|watch
-server started on port 4101
-17 |       } else {
-18 |         handler = i === middleware.length && next || void 0;
-19 |       }
-20 |       if (handler) {
-21 |         try {
-22 |           res = await handler(context, () => dispatch(i + 1));
-                           ^
-TypeError: handler is not a function. (In 'handler(context, () => dispatch(i + 1))', 'handler' is an instance of Hono2)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-    at compress2 (../../../../node_modules/.bun/hono@4.12.8/node_modules/hono/dist/middleware/compress/index.js:8:10)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:118:73)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
+This was a deployment-specific issue — briantakita.me-dev has hono hoisted to workspace root `node_modules/`, so `server_external_()` picks it up automatically. brookebrodack-dev doesn't hoist it.
 
-17 |       } else {
-18 |         handler = i === middleware.length && next || void 0;
-19 |       }
-20 |       if (handler) {
-21 |         try {
-22 |           res = await handler(context, () => dispatch(i + 1));
-                           ^
-TypeError: handler is not a function. (In 'handler(context, () => dispatch(i + 1))', 'handler' is an instance of Hono2)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-    at compress2 (../../../../node_modules/.bun/hono@4.12.8/node_modules/hono/dist/middleware/compress/index.js:8:10)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:118:73)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
-
-17 |       } else {
-18 |         handler = i === middleware.length && next || void 0;
-19 |       }
-20 |       if (handler) {
-21 |         try {
-22 |           res = await handler(context, () => dispatch(i + 1));
-                           ^
-TypeError: handler is not a function. (In 'handler(context, () => dispatch(i + 1))', 'handler' is an instance of Hono2)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-    at compress2 (../../../../node_modules/.bun/hono@4.12.8/node_modules/hono/dist/middleware/compress/index.js:8:10)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:118:73)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
-
-17 |       } else {
-18 |         handler = i === middleware.length && next || void 0;
-19 |       }
-20 |       if (handler) {
-21 |         try {
-22 |           res = await handler(context, () => dispatch(i + 1));
-                           ^
-TypeError: handler is not a function. (In 'handler(context, () => dispatch(i + 1))', 'handler' is an instance of Hono2)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-    at compress2 (../../../../node_modules/.bun/hono@4.12.8/node_modules/hono/dist/middleware/compress/index.js:8:10)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:118:73)
-      at dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
-      at <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
-```
+Release
 <!-- /agent:exchange -->

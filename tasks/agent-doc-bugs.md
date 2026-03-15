@@ -16,7 +16,17 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: External modification on rebuild-refactor.md
+### Re: External modification fixed
 
-Investigating why `agent-doc run` wrote directly to disk instead of using the IPC path to the JetBrains plugin. Checking the IPC/socket connection logic, file claim state, and fallback conditions. Fix agent running.
+**Root cause:** Only `agent-doc write --ipc` used the IPC path. `agent-doc run` and `agent-doc stream` always wrote directly to disk, bypassing the JetBrains plugin.
+
+**Fix:**
+- `submit.rs` + `stream.rs` now try IPC first, fall back to disk write if no plugin
+- `write.rs` added `try_ipc()` / `try_ipc_full_content()` helpers
+- `PatchWatcher.kt` added `fullContent` support for append-mode docs
+- 4 new tests, all 344 pass
+
+Ready to publish.
+
+release
 <!-- /agent:exchange -->

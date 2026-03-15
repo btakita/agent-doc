@@ -98,19 +98,14 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-**Phase 2 complete.** All changes persisted. Tests pass (rebuildjs 56/56, relysjs 11/11).
+Phase 3+4 launched (thin wrappers + tests). Agent will:
+1. Verify relysjs/rhonojs re-export from rebuildjs correctly
+2. Confirm elysia dep only in relysjs, hono dep only in rhonojs
+3. Port relysjs tests to rhonojs
+4. Add adapter conformance tests
+5. Run all tests
 
-**New files in rebuildjs core:**
-- `server/route/index.js` + `.d.ts` — `html_response__new()`, `html_route_()`
-- `server/static/index.js` + `.d.ts` — `static_middleware__routes_()`
-- `server/export/index.js` + `.d.ts` — `static_export_()`, `static_export__file_path_()`
-- `server/export/cloudflare/index.js` + `.d.ts` — `cloudflare_export_()`, `worker_entry__generate_()`, `wrangler_toml__generate_()`
+Session is free.
 
-**Modified:** rebuildjs `package.json` (removed elysia dep, added subpath exports), relysjs + rhonojs server modules now delegate to rebuildjs.
-
-**Correctly left in adapters:** `app__attach`/`app__start`, `request_ctx__ensure`, compression, build plugins, framework context signals.
-
-Ready for Phase 3 (thin wrappers) and Phase 4 (tests) when you want to proceed.
-
-go
+Please update Phase progress
 <!-- /agent:exchange -->

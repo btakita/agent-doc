@@ -98,23 +98,19 @@ rhonojs (thin wrapper)
 - `bun build` adapter is a future extension (separate task)
 
 <!-- agent:exchange -->
-Implement in worker claude instances.
-So I can keep the session free for other work.
-Launched Phase 1 (SPEC.md) in a background worktree agent. It's reading the current API surface across rebuildjs, relysjs, and rhonojs to write `lib/rebuildjs/SPEC.md`. You're free to work on other tasks — I'll update when it completes.
+**Phase 2 complete.** All changes persisted. Tests pass (rebuildjs 56/56, relysjs 11/11).
 
-Please expose the parallel worker claude session in this claude session.
+**New files in rebuildjs core:**
+- `server/route/index.js` + `.d.ts` — `html_response__new()`, `html_route_()`
+- `server/static/index.js` + `.d.ts` — `static_middleware__routes_()`
+- `server/export/index.js` + `.d.ts` — `static_export_()`, `static_export__file_path_()`
+- `server/export/cloudflare/index.js` + `.d.ts` — `cloudflare_export_()`, `worker_entry__generate_()`, `wrangler_toml__generate_()`
 
-**Status:** The previous background agent didn't complete (session ended before it finished). SPEC.md was never written. Fixed document duplication artifact (CRDT merge issue). Re-launching Phase 1 now as a background worktree agent.
-**Phase 1 complete.** `lib/rebuildjs/SPEC.md` written (14.9KB) covering all 8 sections:
-1. Overview — package roles and status
-2. Architecture — adapter pattern, dependency direction
-3. Subpath Exports — current + planned
-4. Adapter Interface — all 8 functions with signatures and framework-specific differences
-5. Build Pipeline — entry points, configs, onEnd flow, readiness chain
-6. Context Hierarchy — app_ctx → middleware_ctx → request_ctx with signal tables
-7. Reactive State — rmemo primitives, naming conventions, build state flow
-8. SSG Export — static_export_ and cloudflare_export_ with config types
+**Modified:** rebuildjs `package.json` (removed elysia dep, added subpath exports), relysjs + rhonojs server modules now delegate to rebuildjs.
 
-File is in the worktree at `src/ctx-core-dev/lib/rebuildjs/SPEC.md`. Ready for Phase 2 (extract shared logic) when you want to proceed.
-Go
+**Correctly left in adapters:** `app__attach`/`app__start`, `request_ctx__ensure`, compression, build plugins, framework context signals.
+
+Ready for Phase 3 (thin wrappers) and Phase 4 (tests) when you want to proceed.
+
+go
 <!-- /agent:exchange -->

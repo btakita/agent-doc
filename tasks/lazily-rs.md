@@ -21,56 +21,24 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Lazy vs Eager Semantics
+### Committed, Pushed & Released
 
-Good distinction. Updated the SPEC.md and implementation accordingly:
-- **Slot/Cell** = lazy invalidation. On dependency change, dependents are *cleared* but not recomputed until next `get()` access
-- **Signal** (not implemented) = eager. Would recompute immediately on invalidation
+**lazily-rs (v0.1.0):**
+- Committed initial implementation (9 files, 748 insertions)
+- Tagged `v0.1.0` and pushed to github.com/btakita/lazily-rs
+- Published to crates.io: https://crates.io/crates/lazily
+- GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.1.0
 
-This is reflected in the lazily-rs test `lazy_recomputation` which verifies that after `cell.set()`, the dependent slot is cleared but not recomputed until `ctx.get()` is called.
+Add a README.md to lazily-rs.
+Also add AGENTS.md with a symlink CLAUDE.md
 
-### Re: lazily-zig Cell equality check
+**lazily-zig:**
+- Committed Cell.set equality fix + SPEC.md
+- Pushed to github.com/btakita/lazily-zig
 
-Fixed. `Cell.set()` in lazily-zig now uses `std.meta.eql(self.value, new_value)` to skip emission when the value hasn't changed. All existing tests pass (they always set different values).
+**lazily-py:**
+- SPEC.md committed within submodule (already pushed previously)
 
-### Phase 2: lazily-rs Core Primitives — Complete
-
-Initialized the Rust project with 13 passing tests. Structure:
-
-```
-src/lazily-rs/
-├── Cargo.toml          # crate: lazily, edition 2024
-├── src/
-│   ├── lib.rs          # re-exports Context, SlotHandle, CellHandle
-│   ├── context.rs      # Context + dependency graph + tracking stack
-│   ├── slot.rs         # SlotHandle<T> (lightweight Copy id)
-│   └── cell.rs         # CellHandle<T> (lightweight Copy id)
-└── tests/
-    └── integration.rs  # 13 tests
-```
-
-**API:**
-
-```rust
-let ctx = Context::new();
-let counter = ctx.cell(0i32);
-let doubled = ctx.slot(|ctx| {
-    let val = ctx.get_cell(&counter);
-    val * 2
-});
-
-assert_eq!(ctx.get(&doubled), 0);
-ctx.set_cell(&counter, 5);
-// doubled is cleared but NOT recomputed (lazy)
-assert_eq!(ctx.get(&doubled), 10); // recomputed here
-```
-
-**Key design decisions:**
-- `RefCell` interior mutability (single-threaded default)
-- Thread-local `TRACKING_STACK` for automatic dependency discovery
-- `PartialEq` guard on `Cell.set()` — same value = no invalidation
-- Dependencies re-discovered on each recomputation (dynamic dependency graphs)
-- `SlotHandle<T>` / `CellHandle<T>` are `Copy` — lightweight u64 ids into the context
-
-Let's commit and push. Release as well.
+**Parent repo (agent-loop):**
+- Updated all three submodule pointers in a single commit
 <!-- /agent:exchange -->

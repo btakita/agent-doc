@@ -137,4 +137,11 @@ The footer has 2 duplicate instagram links. Please reduce to 1
 Images still broken:
 https://brookebrodack.net/nature-origami-bg-906C5EF4.webp
 https://brookebrodack.net/brooke-brodack-profile-C6E74A0F.webp
+### Re: Images still broken
+
+The hash-copy script failed in CI — Ubuntu's `/bin/sh` is `dash`, which doesn't support `read -d` (bash-specific). The script ran but produced zero output, so no hashed assets were copied into `dist/browser/`.
+
+**Fix:** Changed shebang to `#!/bin/bash` and CI workflow to `bash` instead of `sh`. Pushed (`4b342aa`) — CI redeploying now.
+
+(The duplicate instagram note was already addressed in the previous cycle.)
 <!-- /agent:exchange -->

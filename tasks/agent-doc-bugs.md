@@ -16,36 +16,30 @@ Corky should always publish public videos...unless explicitly to private.
 
 <!-- agent:exchange -->
 
-### Re: Tracking state via CRDT
+### Re: Reactive signals / lazily-rs for state tracking
 
-Good idea — auto-updating progress checkboxes as work completes. A few approaches:
+Reactive signals would be a natural fit for agent-doc's state tracking. The pattern:
 
-**Option A: `<!-- agent:status -->` component with patch blocks**
-The agent writes `<!-- patch:status -->` blocks during streaming to update a status component. The CRDT handles concurrent edits. This already works with the template mode — just needs the SKILL.md to instruct Claude to update status components as work progresses.
+**Slots (lazy cells)** hold document state:
+- `phase_status: Slot<Status>` — lazy, computed on first access
+- `checkbox_state: Slot<bool>` — reflects `- [ ]` / `- [X]` in the document
 
-**Option B: Dedicated `agent-doc progress` command**
-A CLI command that updates specific checkbox lines in a document:
-```bash
-agent-doc progress tasks/rebuild-refactor.md "Phase 1" --done
-```
-Would find `- [ ] Phase 1` and replace with `- [X] Phase 1`, writing via IPC.
+**Signals** propagate changes:
+- When the agent completes a phase → signal fires → slot updates → CRDT writes the checkbox change to the document
+- The JetBrains plugin observes the file change via IPC and updates the editor
 
-**Option C: Frontmatter-based tracking**
-Add a `progress` field to frontmatter that the agent updates:
-```yaml
-progress:
-  phase_1: done
-  phase_2: in_progress
-  phase_3: pending
-```
+**Re: lazily-rs** — Yes, this would be useful. `lazily-py` and `lazily-zig` provide lazy evaluation primitives. A Rust implementation would integrate directly into agent-doc's binary without FFI overhead.
 
-It looks like you were about to suggest something — what were you thinking with "Perhaps we want to use"?
+However, for the immediate need (updating checkboxes in agent-doc documents), we could start simpler:
 
-In rebuildjs-refactor.md, I requested that the Phases checkboxes are updated.
-This sort of tracking state should always be updated via CRDT...To track ongoing progress.
+1. **SKILL.md instruction** — Tell Claude to write `<!-- patch:status -->` blocks that update a `<!-- agent:status -->` component with current phase progress
+2. **`agent-doc progress` CLI** — Simple checkbox toggle command for scripts/hooks
 
-Please add the relevant skills and implementation to agent-doc to ensure that fields are updated as state changes.
+The reactive signal system (lazily-rs) is more of a foundational library — worth building, but the checkbox tracking doesn't need to block on it.
 
-Would reactive signals or lazily style slots + cells help?
-Should we implement lazily-rs as a counterpart to btakita/lazily-py and btakita/lazily-zig?
+**Recommendation:** Start with SKILL.md instructions + `agent-doc progress` CLI now. Build lazily-rs as a separate project when the reactive pattern is needed more broadly.
+
+Which approach do you prefer?
+
+Start with the SKILL.md instructions. But I do want to begin planning lazily-rs. Perhaps in a separate agent doc?
 <!-- /agent:exchange -->

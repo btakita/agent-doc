@@ -105,4 +105,16 @@ Launched Phase 1 (SPEC.md) in a background worktree agent. It's reading the curr
 Please expose the parallel worker claude session in this claude session.
 
 **Status:** The previous background agent didn't complete (session ended before it finished). SPEC.md was never written. Fixed document duplication artifact (CRDT merge issue). Re-launching Phase 1 now as a background worktree agent.
+**Phase 1 complete.** `lib/rebuildjs/SPEC.md` written (14.9KB) covering all 8 sections:
+1. Overview — package roles and status
+2. Architecture — adapter pattern, dependency direction
+3. Subpath Exports — current + planned
+4. Adapter Interface — all 8 functions with signatures and framework-specific differences
+5. Build Pipeline — entry points, configs, onEnd flow, readiness chain
+6. Context Hierarchy — app_ctx → middleware_ctx → request_ctx with signal tables
+7. Reactive State — rmemo primitives, naming conventions, build state flow
+8. SSG Export — static_export_ and cloudflare_export_ with config types
+
+File is in the worktree at `src/ctx-core-dev/lib/rebuildjs/SPEC.md`. Ready for Phase 2 (extract shared logic) when you want to proceed.
+Go
 <!-- /agent:exchange -->

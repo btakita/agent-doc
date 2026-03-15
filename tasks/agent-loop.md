@@ -20,30 +20,23 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-**Completed** — all submodules committed, pushed, and parent pointers updated.
+Yes — the .iml files were committed to 6 submodules. Fixed:
 
-| Submodule | Action |
-|-----------|--------|
-| mail | Committed 94 files (conversations, contacts, drafts, social) + pushed. Note: `contacts/kevin-volk/recordings/20260309-kevin-volk.mp4` (1.5GB) excluded — added to .gitignore. |
-| philosophy | Committed .iml update + pushed |
-| resume | Committed .iml update + pushed (pointer advanced to `0638e8e`) |
-| censible-core | Committed .iml update + pushed |
-| cloudflare | Committed .iml update + pushed |
-| cogov-dev | Committed .iml update + pushed |
-| herbaliciousbliss-dev | Committed .iml update + pushed |
-| agent-doc | Pointer updated (v0.17.9) |
-| corky | Pointer updated (v0.15.2) |
-| ctx-core-dev | Pointer updated |
-| lazily-py | Pointer updated |
-| lazily-zig | Pointer updated |
-| prescience-notes-dev | Pointer updated |
-| rappstack-dev | Pointer updated |
+1. **Reset** each .iml-only commit
+2. **Added `*.iml` to `.gitignore`** in each submodule
+3. **Untracked** the .iml files (kept on disk)
+4. **Force-pushed** to replace the bad commits
 
-**Releases:** All publishable projects (agent-doc, corky, lazily-py, lazily-zig) are at their latest tags — no pending releases needed.
+| Submodule | New Commit |
+|-----------|------------|
+| philosophy | `3a22f35` |
+| resume | `60db19f` |
+| censible-core | `bcf3f65cd` |
+| cloudflare | `f9012d2` |
+| cogov-dev | `1d2c8c0` |
+| herbaliciousbliss-dev | `2d2bdc9` |
 
-Parent commit: `862dc11` — includes all 14 submodule pointers, task docs, skills, settings. Pushed to `main`.
+Parent pointers updated → `fdb95ce`, pushed to `main`.
 
-Also added `*.mp4` to `tasks/youtube/.gitignore` (1.6GB + 3.7GB video files were too large for git).
-
-Was the .iml file added in the commit? If yes...let's reset and ignore iml files.
+Please commit & push submodules..commit and push agent-loop
 <!-- /agent:exchange -->

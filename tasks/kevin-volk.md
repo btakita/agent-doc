@@ -203,4 +203,22 @@ Don't state the current version. I'm updating it so the resume will be stale.
 > "pilots not mechanics"
 
 Explain what this means.
+
+**Re: "Is Python used at CopilotKit?"**
+
+Yes. From the JD (Kevin's Mar 9 email): *"Design high-quality TypeScript & Python SDKs that elegantly abstract complexity while preserving control."* CopilotKit explicitly maintains both TypeScript and Python SDKs. Python is listed as a core requirement, not a bonus. The JD also lists "Python experience" under Bonus Points, and their integrations include Pydantic and LangChain (Python ecosystem).
+
+Given my recent work with agent-doc...how well do you think it would integrate with LangChain?
+
+**Re: version removed from resume**
+
+Done. Removed "v0.1.1" from both the resume lazily-rs entry and the email draft. PDF rebuilt.
+
+**Re: "pilots not mechanics"**
+
+This is from the CopilotKit JD section header: *"We're Looking for Pilots, Not Just Mechanics."* It means they want engineers who **direct AI tools at a systems level** — thinking in terms of architecture, outcomes, and design — rather than manually writing every line of code. A "mechanic" writes code by hand; a "pilot" uses AI (Claude, Cursor, Copilot) to generate, refactor, and explore while evaluating outputs critically and course-correcting in real time.
+
+It's their way of saying: we want engineers who have internalized AI-assisted development as their primary workflow, not people who just use autocomplete. Your YouTube livestreams showing real-time AI-native development are a direct demonstration of "pilot" mode — which is why I referenced the phrase in the email draft.
+
+Got it. Should we add a quote to contextualize that statement or no need?
 <!-- /agent:exchange -->

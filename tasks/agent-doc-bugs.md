@@ -34,4 +34,8 @@ Which response do you want to restore? I can pull it from git history and append
 | `82063fc` | 12:37 | v0.17.7 released (CWD drift fixes) |
 | `e2b6728` | 12:44 | Release context, old response loss, default components |
 | `d38a504` | 12:28 | CWD drift + claims log bugs |
+
+This is a process question. I actually want to do this in tasks/judith-krug.md
+Just wondering what the workflow should look like.
+Should we have an agent-doc command to do this?
 <!-- /agent:exchange -->

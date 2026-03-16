@@ -18,4 +18,9 @@ Added `tmux display-message` to `route.rs::send_command()` — shows a brief fla
 This appears for 2 seconds, giving instant visual feedback that the command was sent, even before Claude Code picks up the input. Uses just the filename (not full path) to keep it short.
 
 All 352 tests pass, clippy clean. Want me to include this in the next release?
+
+I'm working with tasks/judith-krug.md
+The answer from the claude session was deleted while I was reading it.
+The answer was commited to git. Currently HEAD.
+It seems that the snapshot overrode the git HEAD with an older state.
 <!-- /agent:exchange -->

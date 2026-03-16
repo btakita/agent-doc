@@ -7,27 +7,31 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: judith-krug.md response deleted while reading
+### Re: Append mode + findings pipeline
 
-**What happened:** The snapshot has a NEWER version ("Re: Attorney handling MA contract") than HEAD ("Re: Mortgage Automator cancellation experiences & sentiment"). This means:
+Good direction. Here's the proposed architecture:
 
-1. The "cancellation experiences" response was written and committed (8276d98)
-2. A subsequent agent-doc cycle wrote a new response ("Attorney handling") — replacing the exchange content and updating the snapshot
-3. The replacement happened while you were reading the previous response
+**Two-component pipeline:**
 
-This is template/replace mode working as designed — each cycle replaces the exchange component. But the UX is jarring when you're actively reading a response that gets replaced under you.
+| Component | Mode | Purpose |
+|-----------|------|---------|
+| `exchange` | **append** | Conversation — each cycle appends, nothing lost |
+| `findings` | **append** | Persistent data store — key discoveries, research results |
 
-**The current file matches HEAD** (8276d98 — "cancellation experiences"). The "Attorney handling" response exists only in the snapshot. It was written to the file but never committed, and the file appears to have been reverted (possibly by your editor reloading from disk).
+**How it works:**
+1. User writes in `exchange`, agent appends response below
+2. When the agent discovers important data (search results, contract terms, etc.), it also patches `findings` to accumulate the data
+3. `exchange` can be cleared periodically (by user or agent) when conversation gets long — `findings` persists independently
+4. On "inquiry complete," the agent can summarize `findings` into a final deliverable
 
-**Fixes for this UX problem:**
+**Implementation:**
+- **Skill change:** Format responses with two patch blocks — `exchange` for conversation, `findings` for data
+- **Binary change:** Default `components.toml` sets `exchange` and `findings` to `append` mode
+- **Claim change:** `agent-doc claim` scaffolds both components when creating new documents
 
-1. **Don't replace while user is reading:** The watch daemon could detect if the user's cursor is inside the exchange component (via IDE plugin) and defer the write
-2. **Append instead of replace:** Change the default component mode for exchange to `append` instead of `replace` — old responses stay visible
-3. **Git gutter as guard:** Since the response stays uncommitted until the next cycle, the user sees green gutter bars. But if a new cycle starts before they finish reading, the commit + replace happens too fast
+This is a skill + convention change — no binary code changes needed for the basic version (the skill just uses append-mode patch blocks). The binary change would make it the default for all new documents.
 
-Which approach appeals to you? Or is the root issue that the watch daemon triggered too aggressively?
+Want me to implement this? Start with the skill (SKILL.md update) or the binary (components.toml defaults)?
 
-I like append instead of replace.
-I want to use append mode until the entire inquiry is complete. Then we can replace.
-There should be a pipeline where we have the exchange component, but also put findings into another component where the data is kept and not removed.
+Implements
 <!-- /agent:exchange -->

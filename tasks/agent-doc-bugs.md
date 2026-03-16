@@ -7,35 +7,31 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Keeping previous responses + restoring
+### Re: agent-doc command for restoring responses
 
-**Going forward:** With v0.17.10, the `exchange` component is now **append mode** — new responses accumulate below old ones. No more losing content on each cycle.
-
-**For this document:** Previous responses were already replaced before the append-mode change. But they're all in git history. To restore any previous response:
+Yes — an `agent-doc history` command would be natural:
 
 ```bash
-# See all versions of this file
-git log --oneline -- tasks/agent-doc-bugs.md
+# List exchange versions from git history
+agent-doc history <file>
 
-# View a specific version's exchange content
-git show <commit>:tasks/agent-doc-bugs.md
+# Restore a specific version's exchange content (append to current)
+agent-doc history <file> --restore <commit>
 
-# Extract just the exchange section from a commit
-git show <commit>:tasks/agent-doc-bugs.md | sed -n '/<!-- agent:exchange -->/,/<!-- \/agent:exchange -->/p'
+# Show diff between two exchange versions
+agent-doc history <file> --diff <commit1> <commit2>
 ```
 
-Which response do you want to restore? I can pull it from git history and append it to the current document. Here are the recent versions:
+**How it would work:**
+1. Walk git log for the file
+2. For each commit, extract the exchange component content
+3. Show a summary table (commit, date, first line of exchange)
+4. `--restore` appends the old content back into the exchange component
 
-| Commit | Time | Exchange topic |
-|--------|------|---------------|
-| `57dd0e0` | 13:04 | CRDT corruption detected + from_lines fix |
-| `532d447` | 12:52 | Duplicate component tags bug (template parser) |
-| `2ad6144` | 12:47 | CRDT corruption — clean document restored |
-| `82063fc` | 12:37 | v0.17.7 released (CWD drift fixes) |
-| `e2b6728` | 12:44 | Release context, old response loss, default components |
-| `d38a504` | 12:28 | CWD drift + claims log bugs |
+For now, the skill can do this manually — I can pull the judith-krug.md exchange from any commit and write it back. Want me to:
 
-This is a process question. I actually want to do this in tasks/judith-krug.md
-Just wondering what the workflow should look like.
-Should we have an agent-doc command to do this?
+1. **Build the `agent-doc history` command** (proper binary subcommand)
+2. **Just restore the judith-krug.md response now** via git show + agent-doc write
+
+I would want history to prepend the content before the latest response.
 <!-- /agent:exchange -->

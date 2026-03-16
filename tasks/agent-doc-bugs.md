@@ -60,4 +60,19 @@ These need updates to document:
 Want me to update all 4 docs now?
 
 Yes
+
+### Docs updated
+
+All 4 instruction files updated and audit passes:
+
+- **CLAUDE.md** — inline attrs, `history.rs` in layout, IPC `--force-disk` + exit 75, flush behavior updated
+- **README.md** — history subcommand, `--force-disk`, inline attr examples, `inline` format name
+- **SPEC.md** — inline attrs section, mode precedence, history spec, IPC behavior, default components
+- **SKILL.md** — history subcommand, inline attr syntax, `--force-disk`, renamed to "inline mode"
+
+Combined line budget: 374/1000. Ready to commit + release v0.17.14 with the doc updates?
+
+The response was not appended in this tasks/kevin-volk.md. Why?
+
+Are we relying on 
 <!-- /agent:exchange -->

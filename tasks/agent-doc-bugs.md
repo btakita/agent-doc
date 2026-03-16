@@ -7,29 +7,32 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### `agent-doc history` implemented
+### Re: Keep/replace history + CRDT-only writes
 
-9 new tests, all 361 pass, clippy clean. Live test on this document:
+**Keep vs replace:** This is already handled by the component mode in `components.toml`:
+- `mode = "append"` → keeps history (each response appends below)
+- `mode = "replace"` → replaces (current behavior for status)
 
-```
-COMMIT       DATE                       EXCHANGE
---------------------------------------------------------------------------------
-0c57bcf79bce 2026-03-16 00:08:50 -0400  ### Re: Exchange nodes + history design
-c137f9a805e9 2026-03-16 00:06:53 -0400  ### Re: Prepend on restore
-2df30fe12295 2026-03-16 00:00:49 -0400  ### Re: agent-doc command for restoring responses
-073c009d4934 2026-03-15 23:58:14 -0400  ### Re: Keeping previous responses + restoring
-17182cadce98 2026-03-15 23:56:01 -0400  ### v0.17.10 Released
-b91b6dcbcc61 2026-03-15 23:35:14 -0400  ### Implemented: Append-mode exchange + findings pipeline
-...
-```
+The user can switch per-document by editing `components.toml` or per-component inline. No new code needed — just convention.
 
-**Usage:**
-- `agent-doc history <file>` — list exchange versions
-- `agent-doc history <file> --restore <commit>` — prepend old exchange content with `---` separator
+**For history --restore:** Already prepends (keeps both old and current). To replace instead, could add `--replace` flag that replaces exchange content with the old version.
 
-Ready to release v0.17.11?
+**External edit losing typed content — CRDT-only writes:**
 
-Can we make it easy to keep what history is currently in the document?
-Can we make it easy to replace what history is currently in the document? (current behavior)
-We also just had a case where the document was externally edited. So I lost what I was typing. We should **always** use CRDT edits in process via the plugin when available.
+This is the critical bug. When `agent-doc write` falls back to direct disk write (no plugin ACK), it overwrites the file including any unsaved editor buffer changes. The IPC path (plugin) uses Document API which preserves cursor and undo stack, but the disk fallback doesn't.
+
+**Fix:** When the plugin is available (`.agent-doc/patches/` exists), **never fall back to disk write**. Instead:
+1. Write the IPC patch file
+2. Wait for ACK (current 2s timeout)
+3. If ACK timeout: **leave the patch file** and print a warning, don't overwrite the disk file
+4. The plugin will apply it when it next checks
+
+This ensures user edits in the editor are never lost by a disk overwrite. The tradeoff: if the plugin is truly dead, the response stays in the patch file until manually applied. But that's better than losing user work.
+
+Can we have a notification when this happens? Either in the editor or in the claude session.
+The user should have an option to try CRDT again or do the external write.
+
+Should I implement this IPC-priority fix? It's a change to `write.rs` — the `try_ipc` fallback logic.
+
+Why did we attempt the fallback logic?
 <!-- /agent:exchange -->

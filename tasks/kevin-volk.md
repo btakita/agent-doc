@@ -346,4 +346,10 @@ Options:
 
 Recommend option 1. Want me to apply it?
 yes
+
+Applied option 1. Career Highlights now reads: **"rr: pioneered proxy-based test doubles (now `patch` in Python)"**. PDF rebuilt.
+
+> Domain ontology system (152 nodes) since 2014
+
+No need to have `(152 nodes)`...it will be stale. `multi-node`, `n-node`, `Schema based domain ontology system`, or something else?
 <!-- /agent:exchange -->

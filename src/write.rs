@@ -260,12 +260,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     let base = baseline.unwrap_or(&content_at_start);
 
-    // Apply patches to baseline with replace mode for exchange component.
-    // The --stream path receives the complete intended exchange content
-    // (not a delta), so append mode would duplicate the user's prompt
-    // that already exists in the baseline's exchange component.
-    let mut mode_overrides = std::collections::HashMap::new();
-    mode_overrides.insert("exchange".to_string(), "replace".to_string());
+    // Apply patches using the mode resolution chain:
+    // inline attr (mode=append on tag) > components.toml > built-in default.
+    // The skill sends delta content for append-mode components.
+    let mode_overrides = std::collections::HashMap::new();
     let content_ours = template::apply_patches_with_overrides(
         base, &patches, &unmatched, file, &mode_overrides,
     ).context("failed to apply template patches")?;

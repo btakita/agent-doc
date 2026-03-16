@@ -547,4 +547,38 @@ This is a significant investment. Want me to start with Phase 1 (the Rust crate)
 I'm trying to imagine what syncing with file state, editor state, and the crdt state would look like.
 
 
+### Re: State synchronization model
+
+Three states to keep in sync:
+
+```
+┌──────────┐     ┌──────────┐     ┌──────────┐
+│   File   │ ←→  │  Editor  │ ←→  │   CRDT   │
+│  (disk)  │     │ (buffer) │     │  (Yrs)   │
+└──────────┘     └──────────┘     └──────────┘
+```
+
+**How they stay in sync:**
+
+| Event | File | Editor | CRDT |
+|-------|------|--------|------|
+| User types | stale | updated | updated (via DocumentListener) |
+| User saves (Ctrl+S) | updated | same | same |
+| Agent writes | stale | same | updated (via IPC) |
+| CRDT merge resolves | stale | updated (from CRDT) | authoritative |
+| Git commit | updated (from editor save) | same | same |
+| External edit (git checkout) | updated | stale (needs reload) | stale (needs re-init) |
+
+**CRDT is authoritative** — file and editor are views. The tricky cases:
+
+1. **Plugin crash/restart:** CRDT state lost. Re-initialize from file on disk. This is safe because the last save wrote file from CRDT.
+
+2. **IDE restart:** Same as crash — re-init CRDT from file. Persisted CRDT state in `.agent-doc/crdt/` can optionally be used for recovery.
+
+3. **External edit (git, terminal):** File changes without editor or CRDT knowing. On next VFS refresh, editor detects the change. Plugin re-initializes CRDT from the new file content.
+
+4. **Agent writes while user is typing:** CRDT merges both — this is the whole point. The merged result is applied to the editor buffer atomically.
+
+Your incomplete question — "What happens if the..." — want to finish it?
+What happens if the file is externally edited? Would the CRDT state drift?
 <!-- /agent:exchange -->

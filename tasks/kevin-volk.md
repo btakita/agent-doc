@@ -435,4 +435,28 @@ Options:
 I'll push it as a Gmail draft now. You can then open Gmail and use "Schedule send" to set 8AM. Want me to push?
 
 Can we have the cron or corky watch perform the send at 8AM?
+
+Please make a LinkedIn draft for the Lazily Reactive Signals YouTube video. See /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md for inspiration.
+Schedule this post to publish at 8AM Eastern.
+
+**Re: Cron or corky watch for 8AM send**
+
+`corky schedule list` doesn't pick up email drafts — it appears to only track social posts. So corky's scheduler won't help here.
+
+Options for automated 8AM send:
+
+1. **Cron job** — Add a one-shot crontab entry:
+   ```
+   0 8 16 3 * cd /home/brian/work/btakita/agent-loop && corky draft push --send mail/drafts/20260316-kevin-volk-resume-update.md
+   ```
+   This runs at 8:00 AM local time on Mar 16. No crontab currently exists.
+
+2. **`at` command** — Schedule a one-time job:
+   ```
+   echo "cd /home/brian/work/btakita/agent-loop && corky draft push --send mail/drafts/20260316-kevin-volk-resume-update.md" | at 08:00
+   ```
+
+3. **Push as Gmail draft now** — then schedule via Gmail web UI
+
+Option 1 or 2 will auto-send. Option 2 is cleanest for a one-shot. Which do you prefer, or should I just push as a Gmail draft for you to schedule manually?
 <!-- /agent:exchange -->

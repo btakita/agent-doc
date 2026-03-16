@@ -118,8 +118,10 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
         replacement = run_pre_hook(script, component_name, file, &replacement)?;
     }
 
-    // Apply mode
-    let mode = config.map(|c| c.mode.as_str()).unwrap_or("replace");
+    // Apply mode: inline attr > components.toml > default ("replace")
+    let mode = comp.attrs.get("mode").map(|s| s.as_str())
+        .or_else(|| config.map(|c| c.mode.as_str()))
+        .unwrap_or("replace");
     let timestamp = config.is_some_and(|c| c.timestamp);
     let max_entries = config.map(|c| c.max_entries).unwrap_or(0);
 

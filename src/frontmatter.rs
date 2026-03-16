@@ -4,10 +4,10 @@ use std::fmt;
 use uuid::Uuid;
 
 /// Document format: controls document structure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum AgentDocFormat {
-    /// Alternating ## User / ## Assistant blocks
+    /// Alternating ## User / ## Assistant blocks (also known as "inline")
+    #[clap(alias = "inline")]
     Append,
     /// In-place component patching with <!-- agent:name --> markers
     Template,
@@ -16,8 +16,34 @@ pub enum AgentDocFormat {
 impl fmt::Display for AgentDocFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Append => write!(f, "append"),
+            Self::Append => write!(f, "inline"),
             Self::Template => write!(f, "template"),
+        }
+    }
+}
+
+impl Serialize for AgentDocFormat {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Append => serializer.serialize_str("inline"),
+            Self::Template => serializer.serialize_str("template"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentDocFormat {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "append" | "inline" => Ok(Self::Append),
+            "template" => Ok(Self::Template),
+            other => Err(serde::de::Error::unknown_variant(other, &["inline", "append", "template"])),
         }
     }
 }

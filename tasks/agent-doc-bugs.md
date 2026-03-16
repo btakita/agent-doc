@@ -7,30 +7,50 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Prompted fallback + merge strategy
+### Re: Template + append exchange + squash
 
-**Prompted option after 5s:** This can't happen in the binary alone — `agent-doc write` is a one-shot CLI process (pipe stdin, write, exit). The prompt would need to come from the **skill** (Claude session). The flow:
+**Template + append exchange:** This is already how it works with v0.17.10! Your document has `agent_doc_format: template` in frontmatter, and `.agent-doc/components.toml` sets `exchange` to `mode = "append"`. Each cycle the skill writes a `<!-- patch:exchange -->` block that gets appended (not replaced) to the exchange component.
 
-1. `agent-doc write --stream` tries IPC, times out after 2s
-2. Returns exit code indicating "IPC pending, no disk write"
-3. The skill detects this exit code and asks the user: "IPC timeout — write to disk anyway? This will overwrite any unsaved editor changes."
-4. If user says yes: skill re-runs with `--force-disk`
-5. If user says no: response stays in patch file
+Check your `components.toml`:
+```toml
+[exchange]
+mode = "append"    # ← this is what makes exchange append
 
-This is cleaner than building interactive prompts into the binary. The skill is the interactive layer.
+[findings]
+mode = "append"
 
-**3-way merge vs CRDT for the fallback write:**
+[status]
+mode = "replace"
+```
 
-The current `--stream` flag already does CRDT merge (baseline vs current file vs agent response). When falling back to disk write, it uses the same CRDT path — so user edits made between baseline save and write are preserved via CRDT merge. The disk fallback isn't the problem; the problem is that the CRDT merge reads the *disk file* (which may be stale relative to the editor buffer).
+I want to discuss the settings:
+```
+agent_doc_format: template | append
+agent_doc_response: replace | append
+agent_doc_write: crdt | merge
+```
+I renamed mode to `agent_doc_response`. Is there a better name?
+This is strange because we now have `append` being a valid value for both `agent_doc_format` and `agent_doc_response`.
+I wonder if we can consolidate.
 
-The IPC path avoids this entirely because the plugin applies patches to the live Document API (in-memory editor buffer). That's why IPC is strictly better when available.
+If this file doesn't exist for a document, run `agent-doc claim <file>` to create it with defaults.
 
-**Summary:** The fix is skill-level (detect IPC timeout exit code, prompt user) + binary-level (new exit code for "IPC pending"). Want me to implement both?
+**Squash command:** Not yet, but it's a natural complement to `history`. Proposed:
 
-Yes
+```bash
+# Squash all exchange content to just the latest response
+agent-doc squash <file>
 
-I also want to have `agent_doc_format: template` but also append inside of the `agent:exchange` component.
-How can I do this?
+# Squash to a specific commit's content
+agent-doc squash <file> --from <commit>
+```
 
-Is there also an agent-doc command to squash the appended history in the document?
+This would clear the exchange component and write only the latest (or specified) response. The old content survives in git history and can be restored with `agent-doc history --restore`.
+
+Should I implement `squash` now, or focus on the IPC timeout fix + release first? The IPC agent is still building.
+
+Both
+
+Please add the response that I replaced in the history.
+Let's go into `agent_doc_response: append`
 <!-- /agent:exchange -->

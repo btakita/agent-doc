@@ -245,4 +245,7 @@ Steps:
 Alternatively, if restart is disruptive right now, we continue with `--force-disk` and test the plugin fix later.
 
 restarted...try again
+
+I did not see a response. Let's dig deeper.
+How much effort will be needed for the FFI library?
 <!-- /agent:exchange -->

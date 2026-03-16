@@ -181,37 +181,29 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: Mortgage Automator Contract — Public Terms Found**
+**Re: Mortgage Automator cancellation experiences & sentiment**
 
-Yes — their full Terms of Service are public: [mortgageautomator.com/terms-of-service](https://www.mortgageautomator.com/terms-of-service)
+Searched Capterra, G2, Software Advice, TrustRadius, and general web for cancellation complaints.
 
-**The terms are aggressive. Key clauses:**
+**Overall:** Reviews are mostly positive (automation, portals, support). But there's a notable pattern with contract enforcement:
 
-| Clause | Detail |
-|--------|--------|
-| **Term** | 12-month minimum, non-refundable |
-| **Auto-renewal** | Renews automatically for another year unless 45-day written notice (email OK) before term end |
-| **Stopping use ≠ cancellation** | "Discontinuing use does not constitute termination" — she owes the full annual fee regardless |
-| **No early termination** | No option to exit early. No partial refunds. |
-| **No refunds** | "Subscription fees are non-refundable" |
-| **Seat removal** | Removing seats doesn't reduce payment obligation |
+- **One user reported receiving a threatening letter demanding $10K** for "violating a licensing agreement" by logging in on multiple devices. MA threatened to disable access to their data unless they upgraded to a 10-user license. User described it as feeling like extortion.
+- **Competitor Bryt Software** explicitly markets against MA's contract lock-in with "cancel anytime" messaging — suggesting this is a known pain point in the market.
+- **No BBB profile found** — MA is a Canadian company (Toronto-based), so BBB coverage is limited.
+- **No widespread cancellation horror stories** — but review sites don't typically capture cancellation experiences (people leave, they don't review).
 
-**What this means for Judith:**
-1. If she's **within** her initial 12-month term → MA will argue she owes the full annual fee ($18K or $13K)
-2. If she **missed the 45-day window** before a renewal date → locked in for another year
-3. If she sent cancellation **within the 45-day window** → she's clean, MA has no claim
+**Bottom line:** Judith's experience isn't unique. MA's terms are designed to make leaving expensive, and at least one other user has reported aggressive enforcement tactics. This reinforces:
 
-**Critical question:** When exactly did Judith sign, and when is her renewal date? The 45-day notice by email is the escape hatch. If she can show she emailed cancellation ≥45 days before renewal, she's free.
-
-**Recommended action:** Ask Judith (or Robert Ward) for:
-- Her original sign-up date with MA
-- The cancellation email she sent — exact date matters
-- Any contract or order form she signed (may have different terms than the public ToS)
+1. **Get the contract** — the specific terms she signed matter more than the public ToS
+2. **Check the timeline** — if she's past the initial term and within the 45-day window, she has leverage
+3. **Don't panic** — even if MA claims she owes money, enforcing a SaaS contract against a small business customer in a different country (Canada → US) is expensive and rarely worth it for them
+4. **Document everything** — save all emails with MA in case this escalates
 
 Sources:
-- [Mortgage Automator Terms of Service](https://www.mortgageautomator.com/terms-of-service)
-- [Mortgage Automator Terms](https://www.mortgageautomator.com/terms/)
+- [Capterra Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
+- [G2 Reviews](https://www.g2.com/products/mortgage-automator-mortgage-automator/reviews)
+- [Software Advice Reviews](https://www.softwareadvice.com/loan-origination/mortgage-automator-profile/reviews/)
+- [Bryt vs Mortgage Automator](https://www.brytsoftware.com/compare/bryt-vs-mortgage-automator/)
 
-Has anyone else had experience with canceling the Mortgage Automator?
-Any general sentiment?
+Her attorney thinks he can get her out of the contract.
 <!-- /agent:exchange -->

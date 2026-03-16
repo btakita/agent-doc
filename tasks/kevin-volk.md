@@ -401,4 +401,19 @@ Key changes:
 This is a profile-level change — could be done via the Summary filter in copilotkit.toml if the build system supports per-profile summary overrides. Otherwise, edit the master template. Want me to apply?
 
 Does the build system support per-profile summary overrides? If not, implement and make this the summary override for this profile.  
+
+**Re: Per-profile summary override**
+
+Implemented. Added `[content]` table support to `build.py` — any section name can be overridden per-profile with replacement markdown content.
+
+**Changes:**
+1. `build.py` — added `content_overrides = profile.get("content", {})` + applies override when section name matches (keeps heading, replaces body)
+2. `profiles/copilotkit.toml` — added `[content]` section with tooling-first Summary:
+
+> Building open source developer infrastructure in Rust and TypeScript — reactive SDKs (lazily, ctx-core), agent runtimes (agent-doc, agent-kit), and git-native correspondence (corky). Previously architected a real-time multimodal AI pipeline at Presence AI on NVIDIA H100 GPUs via WebRTC. A decade of context engineering — from an extensible domain ontology system (2014) through reactive frameworks to modern agentic systems. Deep expertise in cross-language API design, reactive programming, and collaborative intelligence workflows where agents and humans work in parallel.
+
+Both copilotkit and default profiles build successfully. Master template untouched.
+
+Please schedule the email to be sent at 8AM Eastern.
+Wil
 <!-- /agent:exchange -->

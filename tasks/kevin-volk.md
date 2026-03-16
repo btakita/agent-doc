@@ -332,4 +332,18 @@ Updated. Changed "pioneered proxy test doubles" → "pioneered proxy/patch test 
 You're right — `patch` (pytest/unittest) is the pattern that propagated widely. The proxy concept was the innovation, but naming the lasting form makes it more recognizable to Python-ecosystem readers (which Kevin's client cares about).
 
 So `proxy/patch`, `proxy->patch`, `proxy (now known as patch)`, or something else?
+
+**Re: proxy/patch phrasing**
+
+The detailed rr entry already nails it: *"Pioneered proxy-based test doubles (mock.proxy, stub.proxy) — pattern now standard as `patch` in Python's pytest/unittest"*
+
+For the Career Highlights one-liner, I'd go with: **"pioneered proxy-based test doubles (now `patch` in Python)"** — it tells the evolution story in the fewest words and highlights Python relevance for this role.
+
+Options:
+1. `pioneered proxy-based test doubles (now patch in Python)` — clearest evolution narrative
+2. `pioneered proxy→patch test doubles` — compact but might confuse readers unfamiliar with the history
+3. `pioneered proxy/patch test doubles` — current, but doesn't convey the temporal relationship
+
+Recommend option 1. Want me to apply it?
+yes
 <!-- /agent:exchange -->

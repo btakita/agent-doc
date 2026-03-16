@@ -310,4 +310,18 @@ Updated the AI Products Shipped bullet to include CRDT: "CRDT-based streaming me
 PDF rebuilt.
 
 Should we remove AI Products Shipped from this resume...due to duplicates with  Open Source - Creator / Solo Developer 
+
+**Re: Remove AI Products Shipped from this resume?**
+
+Yes — for the CopilotKit profile, it's redundant. Every project in AI Products Shipped (corky, agent-doc, agent-kit, tmux-router) also appears with *more* detail in Open Source. The Presence AI bullet is already covered in the Experience section. Keeping both adds length without unique information.
+
+Best approach: filter it out via the profile rather than deleting from the master template. Updated `profiles/copilotkit.toml` to exclude it.
+
+Rebuilt PDF.
+
+> pioneered proxy test doubles
+
+pioneered proxy/patch test doubles
+
+patch is used by pytest. I don't think anyone uses proxy at this time.
 <!-- /agent:exchange -->

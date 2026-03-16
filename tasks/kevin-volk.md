@@ -283,4 +283,19 @@ The draft now feels like a continuation of your conversation, not a cold follow-
 > identical semantics across all three
 
 Similar...not identical...correct?
+
+**Re: "Similar...not identical...correct?"**
+
+Correct. Changed "identical semantics" → "consistent semantics" in:
+- Email draft (`mail/drafts/20260316-kevin-volk-resume-update.md`)
+- Resume (`resume/BrianTakita.md`)
+- Rebuilt `BrianTakita-copilotkit.pdf`
+
+"Consistent" is more honest — the API *intent* is the same across languages, but each adapts to its language's idioms (Rust ownership, Python decorators, Zig comptime).
+
+> Evolved from a document-as-interface pattern first built for Tenfore Holdings (2015).
+
+Is not necessary or wanted in this resume. It was only used for BCG due to Anil working managing the Tenfore Holdings project @ Neo Innovations.
+
+agent-doc should include CRDT in the resume.
 <!-- /agent:exchange -->

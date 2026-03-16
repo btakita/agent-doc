@@ -155,4 +155,8 @@ Implemented `PatchWatcher` class in `extension.ts` (260 lines) — mirrors JetBr
 TypeScript compiles clean. Both plugins now have IPC parity.
 
 Ready to commit all pending changes (plugin fixes + VSCode IPC + doc updates) and release v0.17.14?
+
+Can we have a common binary that performs the plugin api...using FFI to work with the editors?
+
+Would it be better 
 <!-- /agent:exchange -->

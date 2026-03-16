@@ -286,4 +286,24 @@ The CLI approach is 5x less effort and avoids cross-platform native library comp
 
 Which path do you prefer?
 What about Java FFI?
+
+### Re: Java FFI
+
+Java has two FFI options:
+
+1. **JNI (classic)** — Kotlin/Java calls native code via `System.loadLibrary()`. Requires writing a JNI wrapper in C/Rust with `#[no_mangle] extern "Java_..."` functions. Works but boilerplate-heavy.
+
+2. **Project Panama / Foreign Function & Memory API** (JDK 22+) — Modern, no JNI boilerplate. Call native functions directly with `Linker.nativeLinker()`. But IntelliJ plugins target JDK 17+ (JBR), and Panama isn't stable there.
+
+**For IntelliJ plugins specifically:** JNI is the only reliable option since plugins run on JetBrains Runtime (JBR, based on JDK 17/21). Panama isn't available.
+
+**The real question:** Is avoiding "externally modified" worth the JNI complexity? The CLI approach works NOW and the only UX issue is the reload flicker. With IntelliJ's auto-reload setting ("Synchronize external changes"), the file reloads silently — no dialog.
+
+If you want to pursue FFI, I'd recommend: Rust crate with `extern "C"` exports → JNI wrapper (2-3h for JetBrains) + node-ffi-rs for VSCode (1-2h). But the CLI + auto-reload is simpler and I can ship it in 30 minutes.
+
+Your call — FFI for clean UX, or CLI for speed?
+
+I'm leaning toward FFI.
+
+Would the FFI to the shared library work across processes? Could another process access the same shared library and address space via FFI, or would our IPC mechanism still be necessary?
 <!-- /agent:exchange -->

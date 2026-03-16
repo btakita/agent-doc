@@ -382,4 +382,23 @@ on NVIDIA H100 GPUs via WebRTC.
 
 But the job is about tooling. Should we change the emphasis to the open source tooling?
 Or go with my most recent job experience?
+
+**Re: Summary opening — Presence AI vs open source tooling?**
+
+For the CopilotKit profile, lead with tooling. The role is about **SDKs, developer infrastructure, and agent runtimes** — not real-time video. Presence AI is impressive but it's the wrong first impression for this reader.
+
+Suggested rewrite:
+
+> Building open source developer infrastructure in Rust and TypeScript — reactive SDKs (lazily, ctx-core), agent runtimes (agent-doc, agent-kit), and git-native correspondence (corky). Previously architected a real-time multimodal AI pipeline at Presence AI on NVIDIA H100 GPUs via WebRTC. A decade of context engineering — from a domain ontology system (2014) through reactive frameworks to modern agentic systems. Deep expertise in cross-language API design, reactive programming, and collaborative intelligence workflows where agents and humans work in parallel.
+
+Key changes:
+- **Leads with tooling** — what CopilotKit cares about
+- **Names the libraries** — lazily, ctx-core, agent-doc, agent-kit, corky
+- **Presence AI moves to second sentence** — still there for credibility, just not the opener
+- **"Cross-language API design"** replaces "event-driven architecture" — maps directly to the JD's TS + Python SDK requirement
+- **Adds "TypeScript"** to the opening alongside Rust — Kevin specifically asked for TS emphasis
+
+This is a profile-level change — could be done via the Summary filter in copilotkit.toml if the build system supports per-profile summary overrides. Otherwise, edit the master template. Want me to apply?
+
+Does the build system support per-profile summary overrides? If not, implement and make this the summary override for this profile.  
 <!-- /agent:exchange -->

@@ -82,11 +82,18 @@ Are we relying on `--force-disk` now? We should fix any root cause issues.
 
 1. **The other Claude session's binary:** If the other tmux pane running kevin-volk.md has `~/.cargo/bin/agent-doc` (0.17.0) in its PATH instead of `.bin/agent-doc` (0.17.13), it doesn't understand `mode=append` on tags. Check with `agent-doc --version` in that pane.
 
+Why would the kevin-volk session be using an old version of agent-doc (0.17.0)?
+Is agent-doc a daemon? I thought it was simply an executable with a short lifecycle.
+
 2. **IPC consuming without applying:** Same bug we found here — the IPC path ACKs patches but the plugin doesn't apply them. The content vanishes silently.
 
 **Are we relying on `--force-disk`?** Yes, temporarily. The IPC path has a bug where the JetBrains plugin claims to consume patches but doesn't apply them. Until the plugin is fixed, `--force-disk` is needed for reliable writes.
 
 **To fix this properly:** The JetBrains plugin's patch consumer needs investigation. The plugin code that watches `.agent-doc/patches/` and applies JSON patches via Document API is silently failing. This is a Kotlin-side bug, not a Rust-side bug.
 
+Fix this.
+
 **Short-term workaround for all sessions:** Update the SKILL.md to always use `--force-disk` until the plugin is fixed. Want me to add that?
+
+No...fix the underlying issue.
 <!-- /agent:exchange -->

@@ -7,32 +7,33 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Keep/replace history + CRDT-only writes
+### Re: Notification + why fallback exists
 
-**Keep vs replace:** This is already handled by the component mode in `components.toml`:
-- `mode = "append"` → keeps history (each response appends below)
-- `mode = "replace"` → replaces (current behavior for status)
+**Why the disk fallback exists:** The IPC path was added in v0.17.5 as an *optimization* — the disk write was the original (only) write path. IPC was layered on top as "try IPC first, fall back to disk if no plugin." The fallback ensures agent-doc works without the IDE plugin installed (terminal-only workflows, CI, etc.).
 
-The user can switch per-document by editing `components.toml` or per-component inline. No new code needed — just convention.
+**The problem:** The fallback is too eager. When the plugin IS installed but slow to ACK (editor busy, indexing, etc.), it falls back to disk write within 2s and overwrites editor buffer changes.
 
-**For history --restore:** Already prepends (keeps both old and current). To replace instead, could add `--replace` flag that replaces exchange content with the old version.
+**Better design:**
 
-**External edit losing typed content — CRDT-only writes:**
+1. **No plugin installed** (`.agent-doc/patches/` doesn't exist) → disk write only (current behavior, correct)
+2. **Plugin installed, ACK received** → IPC write (current behavior, correct)
+3. **Plugin installed, ACK timeout** → NEW behavior:
+   - Leave patch file in place
+   - Print warning to stderr: `[write] IPC timeout — response saved to patch file, awaiting plugin`
+   - Print to Claude session console (visible to user)
+   - **Don't fall back to disk write**
 
-This is the critical bug. When `agent-doc write` falls back to direct disk write (no plugin ACK), it overwrites the file including any unsaved editor buffer changes. The IPC path (plugin) uses Document API which preserves cursor and undo stack, but the disk fallback doesn't.
+**Notification:** The stderr warning is already visible in the Claude session terminal. For the editor, the plugin could show a notification balloon when it finds an unprocessed patch file older than 5s. This gives the user two signals: terminal warning + editor notification.
 
-**Fix:** When the plugin is available (`.agent-doc/patches/` exists), **never fall back to disk write**. Instead:
-1. Write the IPC patch file
-2. Wait for ACK (current 2s timeout)
-3. If ACK timeout: **leave the patch file** and print a warning, don't overwrite the disk file
-4. The plugin will apply it when it next checks
+Can we prompt a option to do an external write after 5s?
+Will this be a 3 way merge or a CRDT?
 
-This ensures user edits in the editor are never lost by a disk overwrite. The tradeoff: if the plugin is truly dead, the response stays in the patch file until manually applied. But that's better than losing user work.
+**Retry/force option:** Add `--force-disk` flag to `agent-doc write` for when the user explicitly wants to bypass IPC:
+```bash
+echo "response" | agent-doc write <file> --stream --force-disk
+```
 
-Can we have a notification when this happens? Either in the editor or in the claude session.
-The user should have an option to try CRDT again or do the external write.
+This keeps the default safe (no data loss) while giving an escape hatch.
 
-Should I implement this IPC-priority fix? It's a change to `write.rs` — the `try_ipc` fallback logic.
-
-Why did we attempt the fallback logic?
+Shall I implement this? It's changes to `write.rs` (IPC fallback logic) + the plugin (stale patch detection).
 <!-- /agent:exchange -->

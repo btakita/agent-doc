@@ -324,4 +324,12 @@ Rebuilt PDF.
 pioneered proxy/patch test doubles
 
 patch is used by pytest. I don't think anyone uses proxy at this time.
+
+**Re: "pioneered proxy/patch test doubles"**
+
+Updated. Changed "pioneered proxy test doubles" → "pioneered proxy/patch test doubles" in the Career Highlights and the rr entry (both occurrences via replace_all). PDF rebuilt.
+
+You're right — `patch` (pytest/unittest) is the pattern that propagated widely. The proxy concept was the innovation, but naming the lasting form makes it more recognizable to Python-ecosystem readers (which Kevin's client cares about).
+
+So `proxy/patch`, `proxy->patch`, `proxy (now known as patch)`, or something else?
 <!-- /agent:exchange -->

@@ -7,31 +7,20 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: agent-doc command for restoring responses
+### Re: Prepend on restore
 
-Yes — an `agent-doc history` command would be natural:
+Makes sense — restored content goes **before** the current exchange content so the document reads chronologically (oldest → newest). Updated spec:
 
 ```bash
-# List exchange versions from git history
-agent-doc history <file>
-
-# Restore a specific version's exchange content (append to current)
 agent-doc history <file> --restore <commit>
-
-# Show diff between two exchange versions
-agent-doc history <file> --diff <commit1> <commit2>
+# Prepends the old exchange content above current content
+# Result: [old response] ... [current response]
 ```
 
-**How it would work:**
-1. Walk git log for the file
-2. For each commit, extract the exchange component content
-3. Show a summary table (commit, date, first line of exchange)
-4. `--restore` appends the old content back into the exchange component
+This preserves the conversation timeline. Shall I build the `history` subcommand now, or just manually restore the judith-krug.md response first?
 
-For now, the skill can do this manually — I can pull the judith-krug.md exchange from any commit and write it back. Want me to:
+Implement the feature. I'm also wondering if we should have distinct "nodes" for each answer.
+Should there be multiple agent:exchange components? Or should we just have a single agent:exchange component where the content gets appended or replaced?
 
-1. **Build the `agent-doc history` command** (proper binary subcommand)
-2. **Just restore the judith-krug.md response now** via git show + agent-doc write
-
-I would want history to prepend the content before the latest response.
+It seems that if we have multiple agent:exchange components, then we can have a cleaner way to keep history.
 <!-- /agent:exchange -->

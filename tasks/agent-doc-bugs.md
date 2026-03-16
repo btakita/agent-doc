@@ -7,33 +7,23 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Notification + why fallback exists
+### Re: Prompted fallback + merge strategy
 
-**Why the disk fallback exists:** The IPC path was added in v0.17.5 as an *optimization* — the disk write was the original (only) write path. IPC was layered on top as "try IPC first, fall back to disk if no plugin." The fallback ensures agent-doc works without the IDE plugin installed (terminal-only workflows, CI, etc.).
+**Prompted option after 5s:** This can't happen in the binary alone — `agent-doc write` is a one-shot CLI process (pipe stdin, write, exit). The prompt would need to come from the **skill** (Claude session). The flow:
 
-**The problem:** The fallback is too eager. When the plugin IS installed but slow to ACK (editor busy, indexing, etc.), it falls back to disk write within 2s and overwrites editor buffer changes.
+1. `agent-doc write --stream` tries IPC, times out after 2s
+2. Returns exit code indicating "IPC pending, no disk write"
+3. The skill detects this exit code and asks the user: "IPC timeout — write to disk anyway? This will overwrite any unsaved editor changes."
+4. If user says yes: skill re-runs with `--force-disk`
+5. If user says no: response stays in patch file
 
-**Better design:**
+This is cleaner than building interactive prompts into the binary. The skill is the interactive layer.
 
-1. **No plugin installed** (`.agent-doc/patches/` doesn't exist) → disk write only (current behavior, correct)
-2. **Plugin installed, ACK received** → IPC write (current behavior, correct)
-3. **Plugin installed, ACK timeout** → NEW behavior:
-   - Leave patch file in place
-   - Print warning to stderr: `[write] IPC timeout — response saved to patch file, awaiting plugin`
-   - Print to Claude session console (visible to user)
-   - **Don't fall back to disk write**
+**3-way merge vs CRDT for the fallback write:**
 
-**Notification:** The stderr warning is already visible in the Claude session terminal. For the editor, the plugin could show a notification balloon when it finds an unprocessed patch file older than 5s. This gives the user two signals: terminal warning + editor notification.
+The current `--stream` flag already does CRDT merge (baseline vs current file vs agent response). When falling back to disk write, it uses the same CRDT path — so user edits made between baseline save and write are preserved via CRDT merge. The disk fallback isn't the problem; the problem is that the CRDT merge reads the *disk file* (which may be stale relative to the editor buffer).
 
-Can we prompt a option to do an external write after 5s?
-Will this be a 3 way merge or a CRDT?
+The IPC path avoids this entirely because the plugin applies patches to the live Document API (in-memory editor buffer). That's why IPC is strictly better when available.
 
-**Retry/force option:** Add `--force-disk` flag to `agent-doc write` for when the user explicitly wants to bypass IPC:
-```bash
-echo "response" | agent-doc write <file> --stream --force-disk
-```
-
-This keeps the default safe (no data loss) while giving an escape hatch.
-
-Shall I implement this? It's changes to `write.rs` (IPC fallback logic) + the plugin (stale patch detection).
+**Summary:** The fix is skill-level (detect IPC timeout exit code, prompt user) + binary-level (new exit code for "IPC pending"). Want me to implement both?
 <!-- /agent:exchange -->

@@ -496,4 +496,55 @@ Includes: doc updates, JetBrains plugin IPC fix, VSCode IPC parity, history comm
 **Next:** Plan the CRDT-via-FFI architecture for real-time collaborative editing between agent and user.
 
 go
+
+### CRDT-via-FFI Architecture Plan
+
+**Goal:** Real-time collaborative editing between user and agent. No external file writes. No "externally modified" dialogs. Cursor and undo preserved.
+
+---
+
+**Phase 1: Shared CRDT library (Rust crate)**
+
+Extract Yrs CRDT logic into `libagent_doc_crdt`:
+- `crdt_doc_new(content: *const c_char) -> *mut CrdtDoc` — create from text
+- `crdt_doc_apply_ops(doc: *mut CrdtDoc, ops_json: *const c_char) -> bool` — apply edit operations
+- `crdt_doc_merge(doc: *mut CrdtDoc, remote_state: *const u8, len: usize) -> *const c_char` — merge remote state, return merged text
+- `crdt_doc_encode(doc: *mut CrdtDoc) -> *const u8` — encode state for transmission
+- `crdt_doc_free(doc: *mut CrdtDoc)` — cleanup
+
+Build target: `cdylib` producing `.so/.dylib/.dll`.
+
+**Phase 2: JetBrains plugin (JNI)**
+
+- Load `libagent_doc_crdt` via JNI at plugin startup
+- `DocumentListener` captures user keystrokes → converts to CRDT ops → applies to in-memory CRDT doc
+- IPC watcher receives agent ops → applies to CRDT doc → syncs result to editor buffer via `WriteCommandAction`
+- CRDT doc is the source of truth; editor buffer is a view
+
+**Phase 3: VSCode extension (node-ffi-rs)**
+
+- Load `libagent_doc_crdt` via `node-ffi-rs` or `napi`
+- `onDidChangeTextDocument` captures user edits → CRDT ops
+- IPC watcher receives agent ops → CRDT merge → `workspace.applyEdit`
+
+**Phase 4: Binary integration**
+
+- `agent-doc write --crdt` outputs CRDT state instead of text
+- Plugin receives CRDT state, merges with local CRDT doc
+- Binary and plugin share the same Yrs version — state is wire-compatible
+
+---
+
+**Key decisions needed:**
+1. **CRDT granularity:** Character-level (Yrs default) or line-level?
+2. **State persistence:** Store CRDT state in `.agent-doc/crdt/` (already exists) or in-memory only?
+3. **Fallback:** What happens when plugin isn't running? Disk write fallback still needed.
+
+**Estimated effort:** ~3 weeks total (1 week per phase, phase 4 is lighter).
+
+This is a significant investment. Want me to start with Phase 1 (the Rust crate), or create a more detailed spec first?
+
+I'm trying to imagine what syncing with file state, editor state, and the crdt state would look like.
+
+
 <!-- /agent:exchange -->

@@ -581,4 +581,30 @@ Three states to keep in sync:
 
 Your incomplete question — "What happens if the..." — want to finish it?
 What happens if the file is externally edited? Would the CRDT state drift?
+
+### Re: External edit + CRDT drift
+
+**Yes, external edits cause CRDT drift.** The CRDT doc represents a history of operations, but an external edit (git checkout, terminal `echo >>`, another editor) bypasses the CRDT entirely — it modifies the file without producing CRDT ops.
+
+**The fix: CRDT re-initialization on external change.**
+
+When the editor detects an external modification (VFS refresh), the plugin:
+1. Discards the current in-memory CRDT doc
+2. Creates a fresh CRDT doc from the new file content
+3. Starts tracking from scratch
+
+This means **CRDT history is lost** on external edit — but that's acceptable because:
+- The file content is the ground truth (what git tracks)
+- CRDT ops are ephemeral (only needed during concurrent agent+user editing)
+- Once the file is saved and committed, CRDT history is irrelevant
+
+**When drift is dangerous:** If the agent is actively writing via CRDT while an external edit happens. The agent's CRDT ops would be applied to the pre-edit content, producing a nonsensical merge. Mitigation: the plugin detects external changes and signals the agent to abort the current write.
+
+**In practice:** External edits during active agent sessions are rare (the user is working in the editor, not the terminal). And `--force-disk` already handles external writes correctly via CRDT merge from baseline.
+
+The CRDT-via-FFI architecture handles this case by treating external edits as "CRDT reset" events — simple and correct.
+
+I just did an autoclaim on tasks/linkedin.md. There was about 20 seconds of no feedback.
+I switched the focused document in the editor.
+Then it the correct tmux pane + claude session picked up the change.
 <!-- /agent:exchange -->

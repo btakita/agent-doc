@@ -114,5 +114,28 @@ No...fix the underlying issue.
 The plugin needs to be rebuilt and reinstalled to take effect. Want me to build the plugin zip?
 
 yes
-What caused the error for the sile
+What caused the silent error? 
+
+### Re: Silent error cause + plugin build + VSCode parity
+
+**What caused the silent error:** `applyPatch()` in PatchWatcher.kt used bare `return` statements (Kotlin's equivalent of early exit) for two failure cases:
+
+```kotlin
+val targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file) ?: run {
+    LOG.warn("Target file not found: ${patch.file}")
+    return  // ← Silent exit, NOT an exception
+}
+```
+
+This `return` exits `applyPatch()` without throwing an exception. The caller (`processPatchFile()`) didn't check return values — it just ran `applyPatch()` and then unconditionally deleted the patch file. The LOG.warn only goes to IntelliJ's debug log (invisible unless you enable debug logging).
+
+**Plugin built:** `agent-doc-jetbrains-0.2.1.zip` is ready at:
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.1.zip
+```
+Install via IntelliJ: Settings → Plugins → gear icon → Install Plugin from Disk.
+
+**VSCode parity:** The VSCode extension does NOT have IPC patch support — no file watcher, no patch application. It only has submit/claim commands. IPC is JetBrains-only. Adding IPC to VSCode would require implementing the same patch file watcher in TypeScript. Want me to add it, or is JetBrains the priority?
+
+yes
 <!-- /agent:exchange -->

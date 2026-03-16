@@ -230,4 +230,19 @@ Want me to help install and test the fixed plugin?
 continue
 
 I did not see the response...so it's still failing.
+
+### Re: IPC still failing
+
+The patches directory is empty (files are being consumed/deleted), but no PatchWatcher log entries appear in `idea.log`. This means the **old plugin** (pre-fix) is still active — it deletes files unconditionally without applying content.
+
+**The fix requires a full IntelliJ restart** after installing the new zip. Hot-reload doesn't replace classes with structural changes (the `applyPatch()` signature changed from `Unit` to `Boolean`).
+
+Steps:
+1. IntelliJ → File → Invalidate Caches / Restart → Restart
+2. After restart, check: Help → Show Log in Finder/Explorer → search for "PatchWatcher" — you should see startup messages
+3. Then re-submit this document to test IPC
+
+Alternatively, if restart is disruptive right now, we continue with `--force-disk` and test the plugin fix later.
+
+restarted...try again
 <!-- /agent:exchange -->

@@ -164,7 +164,12 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 ///
 /// Like `run_template`, but uses CRDT merge instead of git merge-file.
 /// `baseline` is the document content at the time the response was generated.
-pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
+///
+/// When `force_disk` is false and `.agent-doc/patches/` exists (plugin installed),
+/// tries IPC first. On IPC timeout, leaves the patch file in place and exits
+/// with code 75 (EX_TEMPFAIL) instead of falling back to disk write.
+/// When `force_disk` is true, always uses direct disk write.
+pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -189,6 +194,65 @@ pub fn run_stream(file: &Path, baseline: Option<&str>) -> Result<()> {
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
+
+    // Try IPC when plugin is installed and --force-disk is not set
+    if !force_disk {
+        let canonical = file.canonicalize()?;
+        let project_root = find_project_root(&canonical)
+            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let patches_dir = project_root.join(".agent-doc/patches");
+
+        if patches_dir.exists() {
+            // Plugin is installed — try IPC
+            if try_ipc(file, &patches, &unmatched, None, baseline)? {
+                // IPC succeeded — plugin applied patches
+                recover::clear_pending(file)?;
+                return Ok(());
+            }
+            // IPC timeout — patch file was already cleaned up by try_ipc,
+            // but we want to leave a NEW patch file in place for the plugin
+            // to pick up later. Re-write it.
+            let hash = snapshot::doc_hash(file)?;
+            let patch_file = patches_dir.join(format!("{}.json", hash));
+
+            let ipc_patches: Vec<serde_json::Value> = patches
+                .iter()
+                .filter(|p| p.name != "frontmatter")
+                .map(|p| {
+                    serde_json::json!({
+                        "component": p.name,
+                        "content": p.content,
+                    })
+                })
+                .collect();
+
+            let mut ipc_payload = serde_json::json!({
+                "file": canonical.to_string_lossy(),
+                "patches": ipc_patches,
+                "unmatched": unmatched.trim(),
+                "baseline": baseline.unwrap_or(""),
+            });
+
+            // Include frontmatter if present
+            let frontmatter_yaml: Option<String> = patches
+                .iter()
+                .find(|p| p.name == "frontmatter")
+                .map(|p| p.content.trim().to_string());
+            if let Some(ref yaml) = frontmatter_yaml {
+                ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
+            }
+
+            atomic_write(
+                &patch_file,
+                &serde_json::to_string_pretty(&ipc_payload)?,
+            )?;
+
+            eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
+            std::process::exit(75); // EX_TEMPFAIL
+        }
+    }
+
+    // No plugin installed or --force-disk — direct disk write
 
     // Read document state
     let content_at_start = std::fs::read_to_string(file)

@@ -7,42 +7,29 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Exchange nodes + history design
+### `agent-doc history` implemented
 
-**Single exchange with node boundaries** is cleaner than multiple components. Here's why:
+9 new tests, all 361 pass, clippy clean. Live test on this document:
 
-Multiple `agent:exchange-N` components would require dynamic component names, breaking the parser's fixed-name model and complicating `components.toml`. Instead:
-
-**Node model:** A single `exchange` component where each response is a "node" separated by `---` (horizontal rule). Each node maps to a git commit:
-
-```markdown
-<!-- agent:exchange -->
-### Re: First topic
-Response one content.
-
----
-
-### Re: Second topic
-Response two content.
-
----
-
-### Re: Third topic
-Latest response.
-<!-- /agent:exchange -->
+```
+COMMIT       DATE                       EXCHANGE
+--------------------------------------------------------------------------------
+0c57bcf79bce 2026-03-16 00:08:50 -0400  ### Re: Exchange nodes + history design
+c137f9a805e9 2026-03-16 00:06:53 -0400  ### Re: Prepend on restore
+2df30fe12295 2026-03-16 00:00:49 -0400  ### Re: agent-doc command for restoring responses
+073c009d4934 2026-03-15 23:58:14 -0400  ### Re: Keeping previous responses + restoring
+17182cadce98 2026-03-15 23:56:01 -0400  ### v0.17.10 Released
+b91b6dcbcc61 2026-03-15 23:35:14 -0400  ### Implemented: Append-mode exchange + findings pipeline
+...
 ```
 
-**History command uses git commits as node boundaries:**
-- `agent-doc history <file>` — lists commits with first line of each exchange version
-- `agent-doc history <file> --restore <commit>` — prepends that commit's exchange content above `---` separator
+**Usage:**
+- `agent-doc history <file>` — list exchange versions
+- `agent-doc history <file> --restore <commit>` — prepend old exchange content with `---` separator
 
-**Benefits:**
-- Single component, no parser changes
-- Git history = authoritative node timeline
-- `---` separators are visual + parseable
-- Append mode naturally accumulates nodes
+Ready to release v0.17.11?
 
-I'll implement `agent-doc history` with this model. The `---` separator convention is a skill convention (the binary just does git extraction + prepend).
-
-Should the topic name also include the git sha?
+Can we make it easy to keep what history is currently in the document?
+Can we make it easy to replace what history is currently in the document? (current behavior)
+We also just had a case where the document was externally edited. So I lost what I was typing. We should **always** use CRDT edits in process via the plugin when available.
 <!-- /agent:exchange -->

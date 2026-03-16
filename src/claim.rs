@@ -107,6 +107,46 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
+    // Scaffold default components for template documents
+    {
+        let content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let (fm, _) = frontmatter::parse(&content)?;
+        let resolved = fm.resolve_mode();
+        if resolved.format == frontmatter::AgentDocFormat::Template
+            && !content.contains("<!-- agent:status -->")
+            && !content.contains("<!-- agent:exchange -->")
+        {
+            let scaffolded = format!(
+                "{}\n<!-- agent:status -->\n<!-- /agent:status -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+                content.trim_end()
+            );
+            std::fs::write(file, &scaffolded)
+                .with_context(|| format!("failed to write component scaffolding to {}", file.display()))?;
+            eprintln!("scaffolded default components in {}", file.display());
+        }
+
+        // Create default .agent-doc/components.toml if it doesn't exist
+        if resolved.format == frontmatter::AgentDocFormat::Template {
+            let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            let project_root = crate::snapshot::find_project_root(&canonical)
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+            let components_toml = project_root.join(".agent-doc/components.toml");
+            if !components_toml.exists() {
+                if let Some(parent) = components_toml.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    eprintln!("warning: failed to create .agent-doc dir: {}", e);
+                }
+                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n";
+                match std::fs::write(&components_toml, default_config) {
+                    Ok(()) => eprintln!("created {}", components_toml.display()),
+                    Err(e) => eprintln!("warning: failed to create components.toml: {}", e),
+                }
+            }
+        }
+    }
+
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let file_str = file.to_string_lossy();
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());

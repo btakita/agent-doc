@@ -930,5 +930,31 @@ Starting claude...
 
      View Observations Live @ http://localhost:37777
 ```
+
+### Re: Plugin cleanup + autoclaim start-but-no-run bug
+
+**Plugin cleanup: Yes, will add.** `agent-doc plugin install` should scan all known directories for the target plugin and remove older versions before installing the new one. This prevents the competing-installation problem.
+
+**The autoclaim bug is confirmed — it's a known limitation, not a race condition.**
+
+Looking at `route.rs:122-162`, when `auto_start()` fires:
+1. Creates a new tmux pane
+2. Sends `agent-doc start <file>` (which spawns Claude)
+3. Prints: *"Wait for Claude to start, then run `agent-doc route` again to send the command."*
+4. **Returns without sending `/agent-doc run ...`**
+
+The `/agent-doc` command is never dispatched in the auto-start path. The JB plugin calls `route` once — if it hits auto-start, the session starts but the actual document command is lost. When you switched focus documents, the plugin triggered another route call, which found the now-alive pane and sent the command successfully.
+
+**Fix options:**
+
+1. **Poll-and-send:** After `auto_start()`, poll the pane for Claude readiness (watch for the prompt character or a specific output), then send the `/agent-doc` command. ~200ms polling for up to 30s.
+
+2. **Queued command:** Write the pending command to a file (`.agent-doc/pending/<pane_id>.cmd`). The `start.rs` restart loop picks it up after Claude initializes and sends it via Claude's stdin.
+
+3. **Plugin retry:** Have the JB plugin retry `agent-doc route` after a delay (e.g., 5s) when it detects auto-start happened (exit code or stderr marker).
+
+Option 1 is the most robust — the binary handles it entirely. Want me to implement it?
+
+Option 1 seems good. Why is Option 2 less robust?
 <!-- /agent:exchange -->
 ****

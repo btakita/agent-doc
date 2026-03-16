@@ -241,4 +241,30 @@ No need. Kevin sent the JD — he knows the phrase. Using it without a quote sig
 
 Should I also include Rust...since there was interest?
 Do you have the transcript from our phone call?
+
+**Re: Include Rust in the SDK line?**
+
+Yes. Kevin confirmed on the call that CopilotKit has a Rust preference even though it's not in the JD:
+
+> [15:27] Kevin: *"These guys have a preference for people that have Rust, even though Rust is not like on the job description. It's like a nice to have."*
+> [27:43] Kevin: *"Any of the rust stuff, I think is going to be helpful."*
+
+Revised email line to include Rust:
+
+> Maintaining identical semantics across Rust, Python, and Zig required the same cross-language API design discipline that TypeScript, Python, and Rust SDK work demands.
+
+Updated the email draft accordingly.
+
+**Re: Do you have the transcript?**
+
+Yes — `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt` (34 minutes, speaker-diarized). Key highlights:
+
+- **Salary**: Kevin will submit at $200-220K base + equity + 100% health (50% dependents)
+- **Team**: 13 total, 4 engineers, hiring ~7 more
+- **Rust**: Nice-to-have, not in their stack yet but they prefer engineers who know it
+- **Interview process**: 3 rounds — (1) founding engineer informal + AI workflow exercise, (2) panel interview (find a bug in their codebase), (3) CTO culture fit
+- **Culture**: No micromanagement, contribute day one, quarterly offsites, committed to quality
+- **Your strengths Kevin noted**: SDK experience (ctx-core, lazily), Rust interest, agentic workflow experience
+
+Please include the context from the call transcript in the draft.
 <!-- /agent:exchange -->

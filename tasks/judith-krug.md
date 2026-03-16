@@ -181,29 +181,37 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: Mortgage Automator Contract Enforcement**
+**Re: Mortgage Automator Contract — Public Terms Found**
 
-This tracks with Judith's earlier "MA is tripping on me" text — they're escalating from passive-aggressive emails to contract enforcement.
+Yes — their full Terms of Service are public: [mortgageautomator.com/terms-of-service](https://www.mortgageautomator.com/terms-of-service)
 
-**Key questions for Robert Ward:**
-1. What contract did she sign? Term commitment or month-to-month?
-2. How far into the contract? If she paid $18K Y1, is she in a renewal period?
-3. What's the termination fee?
-4. Did she cancel within a grace period?
+**The terms are aggressive. Key clauses:**
 
-**Options (least → most confrontational):**
-1. **Pay the exit fee** — If reasonable ($500-2K), cleanest path. Can factor into Phase 1 pricing if needed
-2. **Negotiate** — MA may settle for less rather than chase a small client
-3. **Review the contract** — Ask Judith for a copy. Many SaaS contracts have unenforceable clauses
-4. **Let it ride** — If month-to-month post-initial-term, they can't enforce much beyond current billing period
+| Clause | Detail |
+|--------|--------|
+| **Term** | 12-month minimum, non-refundable |
+| **Auto-renewal** | Renews automatically for another year unless 45-day written notice (email OK) before term end |
+| **Stopping use ≠ cancellation** | "Discontinuing use does not constitute termination" — she owes the full annual fee regardless |
+| **No early termination** | No option to exit early. No partial refunds. |
+| **No refunds** | "Subscription fees are non-refundable" |
+| **Seat removal** | Removing seats doesn't reduce payment obligation |
 
-**Important:** Don't advise Judith on legal matters directly — you're her tech consultant, not her lawyer. If the contract is complex, she may want a business attorney.
+**What this means for Judith:**
+1. If she's **within** her initial 12-month term → MA will argue she owes the full annual fee ($18K or $13K)
+2. If she **missed the 45-day window** before a renewal date → locked in for another year
+3. If she sent cancellation **within the 45-day window** → she's clean, MA has no claim
 
-**Recommended next step:** Ask Robert Ward to get a copy of the contract. If it's a straightforward early termination fee, she's still saving money vs. staying with MA. TMO signup and Phase 1 proceed regardless.
+**Critical question:** When exactly did Judith sign, and when is her renewal date? The 45-day notice by email is the escape hatch. If she can show she emailed cancellation ≥45 days before renewal, she's free.
 
-**Draft text to Judith:**
+**Recommended action:** Ask Judith (or Robert Ward) for:
+- Her original sign-up date with MA
+- The cancellation email she sent — exact date matters
+- Any contract or order form she signed (may have different terms than the public ToS)
 
-> Hey Judith — Robert mentioned MA is giving you trouble about the contract. If you can dig up a copy of what you signed with them, that'll help us figure out your options. Don't worry — we'll sort it out.
+Sources:
+- [Mortgage Automator Terms of Service](https://www.mortgageautomator.com/terms-of-service)
+- [Mortgage Automator Terms](https://www.mortgageautomator.com/terms/)
 
-Is there any public sources of the contract that the Mortgage Optimizer uses?
+Has anyone else had experience with canceling the Mortgage Automator?
+Any general sentiment?
 <!-- /agent:exchange -->

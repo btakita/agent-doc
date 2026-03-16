@@ -188,7 +188,7 @@ The editor plugins become thin watchers: detect new `.json` file → call `agent
 **FFI (Option B)** is overkill — the editor plugins can't call native FFI directly (JetBrains runs on JVM, VSCode on Node). They'd need JNI/NAPI wrappers, adding complexity. A CLI subprocess is simpler and works everywhere.
 
 I want to avoid the document being externally edited. Would FFI be a way to achieve that while sharing logic?
-Otherwise...I would have to duplicate the logic for each editor.
+Otherwise...I would have to duplicate the logic for each editor
 
 Want me to implement `agent-doc apply-patch` and simplify both plugins?
 
@@ -215,11 +215,17 @@ This is exactly what we built — the bug was just the false ACK. With the fix a
 
 **You don't need FFI.** The editor plugin only needs ~20 lines of logic: watch directory, read JSON, find component markers in document, insert/replace text via editor API, delete file. The shared logic (component parsing, mode resolution) is trivial to replicate — it's just regex matching on `<!-- agent:NAME -->` markers.
 
+I would want FFI for other shared behavior as well. How much overhead & complexity would be introduced with FFI?
+A have been considering FFI for other projects. I started writing lazily-zig and now lazily-rs with FFI in mind.
+
 **Action plan:**
 1. Install the fixed JetBrains plugin (already built: `agent-doc-jetbrains-0.2.1.zip`)
+Installed
 2. Test IPC without `--force-disk` — it should now work correctly
 3. If it works, remove `--force-disk` from the skill
 4. The VSCode extension already has the correct implementation
 
 Want me to help install and test the fixed plugin?
+
+continue
 <!-- /agent:exchange -->

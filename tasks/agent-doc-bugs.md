@@ -7,31 +7,21 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Append mode + findings pipeline
+### Implemented: Append-mode exchange + findings pipeline
 
-Good direction. Here's the proposed architecture:
+**Binary changes (claim.rs):**
+- `agent-doc claim` now scaffolds `<!-- agent:status -->` and `<!-- agent:exchange -->` components for new template documents
+- Creates `.agent-doc/components.toml` with default modes:
+  - `exchange` → append
+  - `findings` → append  
+  - `status` → replace
 
-**Two-component pipeline:**
+**Skill changes (SKILL.md):**
+- Updated template conventions to document all three component modes
+- Added findings accumulation docs (dual-patch: exchange + findings)
+- Noted claim scaffolding behavior
 
-| Component | Mode | Purpose |
-|-----------|------|---------|
-| `exchange` | **append** | Conversation — each cycle appends, nothing lost |
-| `findings` | **append** | Persistent data store — key discoveries, research results |
+All 352 tests pass, clippy clean. Ready to release v0.17.10?
 
-**How it works:**
-1. User writes in `exchange`, agent appends response below
-2. When the agent discovers important data (search results, contract terms, etc.), it also patches `findings` to accumulate the data
-3. `exchange` can be cleared periodically (by user or agent) when conversation gets long — `findings` persists independently
-4. On "inquiry complete," the agent can summarize `findings` into a final deliverable
-
-**Implementation:**
-- **Skill change:** Format responses with two patch blocks — `exchange` for conversation, `findings` for data
-- **Binary change:** Default `components.toml` sets `exchange` and `findings` to `append` mode
-- **Claim change:** `agent-doc claim` scaffolds both components when creating new documents
-
-This is a skill + convention change — no binary code changes needed for the basic version (the skill just uses append-mode patch blocks). The binary change would make it the default for all new documents.
-
-Want me to implement this? Start with the skill (SKILL.md update) or the binary (components.toml defaults)?
-
-Implements
+Release
 <!-- /agent:exchange -->

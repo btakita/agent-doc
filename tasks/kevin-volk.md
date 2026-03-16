@@ -415,5 +415,24 @@ Implemented. Added `[content]` table support to `build.py` — any section name 
 Both copilotkit and default profiles build successfully. Master template untouched.
 
 Please schedule the email to be sent at 8AM Eastern.
-Wil
+Will corky execute the send? Or will this be a cron?
+
+Also, schedule a linkedin post about 
+
+**Re: Schedule email for 8AM Eastern**
+
+Updated the draft frontmatter: `status: approved`, `scheduled_at: 2026-03-16T08:00:00-04:00`.
+
+**Re: Will corky execute the send?**
+
+Corky has `corky draft push <FILE>` which saves as a Gmail draft by default (or sends immediately with `--send`). However, corky does **not** support Gmail's scheduled send API natively — it can only push as a draft or send immediately.
+
+Options:
+1. **Push as Gmail draft now** → manually schedule via Gmail web UI (Gmail supports "Schedule send" on drafts)
+2. **Wait until 8AM and run `corky draft push --send`** — but that requires you to be awake
+3. **Push as draft now, schedule via Gmail** — easiest, most reliable
+
+I'll push it as a Gmail draft now. You can then open Gmail and use "Schedule send" to set 8AM. Want me to push?
+
+Can we have the cron or corky watch perform the send at 8AM?
 <!-- /agent:exchange -->

@@ -7,21 +7,15 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Implemented: Append-mode exchange + findings pipeline
+### v0.17.10 Released
 
-**Binary changes (claim.rs):**
-- `agent-doc claim` now scaffolds `<!-- agent:status -->` and `<!-- agent:exchange -->` components for new template documents
-- Creates `.agent-doc/components.toml` with default modes:
-  - `exchange` → append
-  - `findings` → append  
-  - `status` → replace
+Default component scaffolding + append-mode exchange shipped:
+- crates.io: https://crates.io/crates/agent-doc/0.17.10
+- PyPI: https://pypi.org/project/agent-doc/0.17.10/
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.10
 
-**Skill changes (SKILL.md):**
-- Updated template conventions to document all three component modes
-- Added findings accumulation docs (dual-patch: exchange + findings)
-- Noted claim scaffolding behavior
+Changes: `claim` scaffolds status+exchange components, creates `components.toml` with append-mode defaults, route flash notification. All 352 tests pass.
 
-All 352 tests pass, clippy clean. Ready to release v0.17.10?
-
-Release
+How do I keep previous responses AND the current response?
+I want to restore a previous res
 <!-- /agent:exchange -->

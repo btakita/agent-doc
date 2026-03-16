@@ -248,4 +248,42 @@ restarted...try again
 
 I did not see a response. Let's dig deeper.
 How much effort will be needed for the FFI library?
+
+### Re: FFI library effort estimate
+
+The old plugin is still running despite restart (patch files still consumed without trace). Let's table the plugin debug and assess the FFI approach.
+
+**FFI library scope:**
+
+A shared native library (`libagent_doc_patch`) that both editors load:
+
+```
+libagent_doc_patch.so / .dylib / .dll
+├── apply_patch(json: *const c_char, doc_content: *const c_char) -> *mut c_char
+├── parse_components(content: *const c_char) -> *mut c_char  (JSON array)
+└── free_string(ptr: *mut c_char)
+```
+
+**Effort breakdown:**
+
+| Task | Effort | Notes |
+|------|--------|-------|
+| Extract patch logic into `agent-doc-ffi` crate | 2-3h | Move component parsing, mode resolution, patch application into a lib crate with `extern "C"` exports |
+| JNI wrapper for JetBrains | 1-2h | Kotlin loads `.so` via JNI, calls `apply_patch()` |
+| NAPI/Node-FFI for VSCode | 1-2h | TypeScript loads via `ffi-napi` or `node-ffi-rs` |
+| Build system (cross-platform) | 1-2h | CI to produce .so/.dylib/.dll per platform |
+| **Total** | **5-9h** |
+
+**Alternative: `agent-doc apply-patch` CLI** (much simpler):
+
+| Task | Effort | Notes |
+|------|--------|-------|
+| Add `apply-patch` subcommand | 30min | Already have all the logic, just wire stdin → apply → stdout |
+| Simplify both plugins to call CLI | 1h | Watch dir, spawn `agent-doc apply-patch`, reload buffer |
+| **Total** | **1.5h** |
+
+The CLI approach is 5x less effort and avoids cross-platform native library complexity. The only downside: it writes to disk (external edit). But with `--force-disk` already working correctly via CRDT merge, this is the same behavior we're using now.
+
+Which path do you prefer?
+What about Java FFI?
 <!-- /agent:exchange -->

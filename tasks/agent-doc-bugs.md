@@ -187,5 +187,8 @@ The editor plugins become thin watchers: detect new `.json` file → call `agent
 
 **FFI (Option B)** is overkill — the editor plugins can't call native FFI directly (JetBrains runs on JVM, VSCode on Node). They'd need JNI/NAPI wrappers, adding complexity. A CLI subprocess is simpler and works everywhere.
 
+I want to avoid the document being externally edited. Would FFI be a way to achieve that while sharing logic?
+Otherwise...I would h
+
 Want me to implement `agent-doc apply-patch` and simplify both plugins?
 <!-- /agent:exchange -->

@@ -158,5 +158,34 @@ Ready to commit all pending changes (plugin fixes + VSCode IPC + doc updates) an
 
 Can we have a common binary that performs the plugin api...using FFI to work with the editors?
 
-Would it be better 
+Would it be better to write this layer in Zig or Rust?
+
+### Re: Common binary for editor plugins
+
+Good question. The patch application logic (JSON parsing, component matching, mode resolution, content merging) is duplicated between Kotlin and TypeScript. Extracting it into a shared binary would eliminate this duplication.
+
+**Architecture options:**
+
+| Approach | Binary | Editor Plugin | Communication |
+|----------|--------|--------------|---------------|
+| **A: CLI tool** | `agent-doc apply-patch <file.json>` (Rust) | Thin wrapper: watches dir, calls CLI, reloads file | Process spawn |
+| **B: Shared library** | `libagent_doc.so` (Rust/Zig) | Loads via FFI, calls `apply_patch()` | In-process FFI |
+| **C: Local socket** | `agent-doc patch-server` (Rust daemon) | Connects via Unix socket | IPC socket |
+
+**Recommendation: Option A (CLI tool)** — simplest and already natural:
+
+The `agent-doc` binary already has all the patching logic in Rust. Adding `agent-doc apply-patch <file.json>` would:
+1. Read the JSON patch file
+2. Apply component patches with mode resolution
+3. Write the document atomically
+4. Delete the patch file as ACK
+5. Exit
+
+The editor plugins become thin watchers: detect new `.json` file → call `agent-doc apply-patch` → reload document buffer. ~20 lines per plugin instead of 260.
+
+**Rust vs Zig:** Rust — the patching logic is already in Rust (`component.rs`, `template.rs`, `patch.rs`). No reason to rewrite in Zig. The `agent-doc` binary IS the common binary.
+
+**FFI (Option B)** is overkill — the editor plugins can't call native FFI directly (JetBrains runs on JVM, VSCode on Node). They'd need JNI/NAPI wrappers, adding complexity. A CLI subprocess is simpler and works everywhere.
+
+Want me to implement `agent-doc apply-patch` and simplify both plugins?
 <!-- /agent:exchange -->

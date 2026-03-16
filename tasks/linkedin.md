@@ -75,41 +75,15 @@ javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-messa
 **Note:** LinkedIn lazy-loads messages — scroll up to load older messages before clicking.
 
 <!-- agent:exchange -->
-### Re: LinkedIn post for Lazily YouTube video
+### Posted to LinkedIn
 
-Here's a draft connecting the video, the library, and the philosophy behind lazy reactivity:
+Fixed "Signal (future)" → "Signal (TODO)" to avoid confusion with Rust `Future`.
 
----
+Published via corky: https://www.linkedin.com/feed/update/urn:li:share:7439320822705659904
 
-Just published a live coding session: building a multi-language reactive signals library from scratch.
+Draft file: `mail/social/20260316-lazily-reactive-signals-linkedin.md` (status: published)
 
-lazily is a reactive primitives library implemented in Rust, Zig, and Python. The core insight: **lazy invalidation beats eager recomputation** for most backend work.
-
-When a value changes, dependents are *cleared* — not recomputed. Computation only happens when someone actually reads the value. In a web server with 50 computed values per request, this means computing only the 5 that matter instead of all 50.
-
-The four abstractions:
-- **Context** — owns the reactive graph
-- **Cell** — mutable input (equality-checked, no-op on same value)
-- **Slot** — lazily-computed cache with automatic dependency tracking
-- **Signal** (future) — eager counterpart for UI rendering
-
-Dependencies are dynamic — they re-discover themselves each computation. No stale subscriptions, no manual cleanup.
-
-The name isn't accidental. Lazy evaluation is a form of hydration — prepare the computation, materialize only when needed. Same principle that drives sub-1KB hydration in rappstack.
-
-Watch the full session: https://www.youtube.com/watch?v=hVNmbmY4vgo
-
-Blog post with code examples: https://briantakita.me/posts/2026-03-15-lazily-reactive-signals
-
-lazily on crates.io: https://crates.io/crates/lazily
-
-#Rust #Zig #Python #ReactiveSignals #OpenSource #LazyEvaluation #WebDev #SystemsDesign
-
----
-
-Tone: technical but accessible, emphasizes the "why lazy" insight over implementation details. The three links give different entry points (video watchers, readers, Rust devs). Want me to adjust length, tone, or emphasis?
-
-`**Signal** (future)` seems like it's a Future object. Either make this TODO or leave out the qualifier.
-
-Please post using Corky
+I want to put the bookmarklet snippet somewhere.
+We can keep it in this document as long as we can guarantee that agent-doc or the agent session won't delete it.
+Or we can put it somewhere in mail/ or agent-loop/. Like a scripts/ or linkedin/ directory.
 <!-- /agent:exchange -->

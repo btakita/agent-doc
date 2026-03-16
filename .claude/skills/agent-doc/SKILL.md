@@ -17,7 +17,8 @@ Interactive document session — respond to user edits in a markdown document.
 ```
 
 - `/agent-doc <FILE>` — run the document session workflow (diff, respond, write back)
-- `/agent-doc claim <FILE>` — claim a file for the current tmux pane (run `agent-doc claim <FILE>` via Bash, then stop)
+- `/agent-doc claim <FILE>` — claim a file for the current tmux pane (run `agent-doc claim <FILE>` via Bash, then stop). For new template documents, `agent-doc claim` scaffolds `<!-- agent:status mode=replace -->` and `<!-- agent:exchange mode=append -->` components by default.
+- `/agent-doc history <FILE>` — list exchange versions from git (run `agent-doc history <FILE>` via Bash, then stop). Add `--restore <commit>` to prepend old exchange content.
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
@@ -97,9 +98,9 @@ When responding to a document with multiple user questions/topics, flush partial
 
 ### 4. Write back to the document
 
-Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
+Check the document's `agent_doc_format` frontmatter field (aliases: `agent_doc_mode`, `mode`, `response_mode`).
 
-#### 4a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
+#### 4a. Inline mode (default — no `agent_doc_format` or `agent_doc_format: inline`; `append` accepted as alias)
 
 Use `agent-doc write --stream` to atomically append the response:
 
@@ -114,7 +115,7 @@ Use `agent-doc write --stream` to atomically append the response:
    - Atomic file write (flock + tempfile + rename)
    - Snapshot update
 
-#### 4b. Template mode (`agent_doc_mode: template`)
+#### 4b. Template mode (`agent_doc_format: template`)
 
 Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
 The agent responds with **patch blocks** that target specific components.
@@ -133,6 +134,7 @@ The agent responds with **patch blocks** that target specific components.
    - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
    - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
    - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
+   - The `exchange` component uses **append mode** by default — each cycle appends the response below existing content rather than replacing it
 3. **Pipe through `agent-doc write` with `--stream` flag:**
    ```bash
    echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
@@ -149,8 +151,16 @@ When a template document has a `<!-- agent:status -->` component, update it at n
 **Template document conventions:**
 - `<!-- agent:input -->` — user writes prompts here
 - `<!-- agent:output -->` — agent responds here (or use patch blocks for multiple components)
-- `<!-- agent:exchange -->` — shared conversation surface (user and agent both write inline)
+- `<!-- agent:status -->` — replace mode (current state); updated at milestones with checkbox progress
+- `<!-- agent:exchange -->` — append mode (conversation); each cycle appends the response below existing content
+- `<!-- agent:findings -->` — append mode (persistent data store); agent writes key discoveries, research results, and accumulated data here. Never cleared during normal cycles.
 - Other components (status, architecture, etc.) are agent-managed via patch blocks
+
+**Findings accumulation:** When the agent discovers important data during research, it should patch both `exchange` (conversation response) AND `findings` (data accumulation) in the same write. The `findings` component is append-only — it serves as a persistent record that survives across cycles.
+
+**`--force-disk` flag:** Use `agent-doc write --force-disk` to bypass IPC and write directly to disk when the IDE plugin is unresponsive. Without this flag, IPC timeout exits with code 75 (`EX_TEMPFAIL`).
+
+**Inline component attributes:** Component tags support inline mode overrides: `<!-- agent:name mode=append -->`. Mode precedence: inline attr > `components.toml` > built-in defaults.
 
 **IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
 The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
@@ -179,7 +189,7 @@ agent_doc_session: <uuid or null>
 agent: <name or null>
 model: <model or null>
 branch: <branch or null>
-agent_doc_format: <append | template>  # optional, default: append
+agent_doc_format: <inline | template>  # optional, default: inline (alias: append)
 agent_doc_write: <crdt | stream>      # optional, default: stream
 ---
 ```

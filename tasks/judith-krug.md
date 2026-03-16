@@ -181,34 +181,37 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: Fresh search results — the reviews DO exist, and they're about TMO**
+**Re: TMO contract terms & conditions**
 
-I ran three targeted searches. The reviews are real and appear on **two** Capterra pages:
+TMO does NOT publish their terms, pricing, or contract details publicly. I checked:
+- themortgageoffice.com — no terms of service page, no pricing page
+- Their FAQ says "Contact sales" for pricing
+- Their "Sample Contracts" page (`/sample-contracts/`) is empty — just a blog landing page
+- Their brochure PDF is a Photoshop image (no extractable text)
+- GetApp, SoftwareSuggest, Capterra — all say "contact for pricing"
 
-**1. On the Mortgage Automator reviews page** (users explaining why they switched FROM TMO):
-[capterra.com/p/191761/Mortgage-Automator/reviews/](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
-- User switched ~5 years ago after TMO claimed breach of ToS, demanded upgrade to a 20-person license despite having <5 employees, extorted $10K USD to retain data access
-- Another user: TMO sent a letter threatening to disable data access, demanding $10K for "licensing violation" from logging in on various devices, requiring immediate upgrade to 10-user license despite having only 6 employees
+**One useful finding from search results:** A snippet said TMO's "fees are based on your number of users and the features that you need" and **"they don't force you into a long-term contract."** If true, this is better than MA's 12-month lock-in.
 
-**2. On The Mortgage Office reviews page** (direct TMO complaints):
-[capterra.com/p/9277/The-Mortgage-Office/reviews/](https://www.capterra.com/p/9277/The-Mortgage-Office/reviews/)
-- User reports TMO "threatened to hold their data hostage" demanding $10K for breach of contract from using the software on multiple devices when the contract said single PC only
+**However** — the Capterra reviews tell a different story (users being hit with $10K licensing fees). The marketing claim of "no long-term contract" doesn't mean "no gotchas." The licensing/device clauses are where TMO appears to extract value.
 
-**Summary:** Multiple verified Capterra reviewers independently describe TMO using data access as leverage to extract $10K payments over licensing/device violations. The pattern is consistent: small company (<10 employees), remote/multi-device access triggers a "breach" claim, TMO demands $10K+ and threatens data lockout.
+**What Judith should do before signing:**
+1. **Request the full license agreement in writing** — not just a demo pitch
+2. **Ask specifically:**
+   - What counts as a "seat"? Per user? Per device? Per concurrent session?
+   - Can staff access remotely from home? Does that count as additional seats?
+   - What happens if she exceeds seat count accidentally?
+   - What's the cancellation/termination process?
+   - What's the data export process if she leaves?
+3. **Get answers in writing** (email) — verbal promises won't help in a dispute
+4. **Compare to her MA contract** — she's trading one vendor's aggressive terms for another's. Make sure TMO's terms are actually better
 
-**This is about TMO, not MA.** My original attribution was wrong (I said MA), but the correction stands — and this is directly relevant since Judith is about to sign up for TMO. She should:
-1. Read TMO's contract carefully — especially seat limits and device access clauses
-2. Clarify in writing what "per seat" means (per device? per user? per concurrent session?)
-3. Use her own backup/export strategy from day one — never be in a position where TMO is the only copy of her data
-
-**No proxy needed** — the search engine snippets gave me the review content this time. But if you want to read them yourself, try Proton VPN (Capterra may not block all VPN exit IPs) or Tor.
+**The $600/month pricing from your meeting notes** (2 seats, $400/month per extra) was from Kevin/the sales call, not a public source. That should be confirmed in whatever contract TMO sends.
 
 Sources:
-- [Capterra — Mortgage Automator Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
-- [Capterra — The Mortgage Office Reviews](https://www.capterra.com/p/9277/The-Mortgage-Office/reviews/)
-- [Capterra — TMO Reviews Page 3](https://www.capterra.com/p/9277/The-Mortgage-Office/reviews/?page=3)
-- [Capterra — TMO vs MA Comparison](https://www.capterra.com/compare/9277-191761/The-Mortgage-Office-vs-Mortgage-Automator)
+- [TMO FAQ](https://www.themortgageoffice.com/frequently-asked-questions/)
+- [TMO Sample Contracts page](https://www.themortgageoffice.com/sample-contracts/) (empty)
+- [TMO Products](https://www.themortgageoffice.com/products/)
+- [Capterra TMO Pricing page](https://www.capterra.com/p/9277/The-Mortgage-Office/)
 
-Does TMO have a minimum contract?
-Please review the TMO terms & conditions.
+I want to keep this response and als
 <!-- /agent:exchange -->

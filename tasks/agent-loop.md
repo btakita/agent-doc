@@ -20,23 +20,11 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-Yes — the .iml files were committed to 6 submodules. Fixed:
+**Done.** All submodules clean, agent-loop pushed.
 
-1. **Reset** each .iml-only commit
-2. **Added `*.iml` to `.gitignore`** in each submodule
-3. **Untracked** the .iml files (kept on disk)
-4. **Force-pushed** to replace the bad commits
+- **agent-doc**: Committed pending feature (tmux display-message flash on route) → `ea35b2a`, pushed
+- **philosophy**: Clean (untracked `.iml` already gitignored)
+- All other submodules: already committed and pushed from previous cycle
 
-| Submodule | New Commit |
-|-----------|------------|
-| philosophy | `3a22f35` |
-| resume | `60db19f` |
-| censible-core | `bcf3f65cd` |
-| cloudflare | `f9012d2` |
-| cogov-dev | `1d2c8c0` |
-| herbaliciousbliss-dev | `2d2bdc9` |
-
-Parent pointers updated → `fdb95ce`, pushed to `main`.
-
-Please commit & push submodules..commit and push agent-loop
+Parent: `6cb9134` (agent-doc pointer update), pushed to `main`.
 <!-- /agent:exchange -->

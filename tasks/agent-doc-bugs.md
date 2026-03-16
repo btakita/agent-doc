@@ -138,4 +138,21 @@ Install via IntelliJ: Settings → Plugins → gear icon → Install Plugin from
 **VSCode parity:** The VSCode extension does NOT have IPC patch support — no file watcher, no patch application. It only has submit/claim commands. IPC is JetBrains-only. Adding IPC to VSCode would require implementing the same patch file watcher in TypeScript. Want me to add it, or is JetBrains the priority?
 
 yes
+Can we extract a common binary for both editors and other editors to use?
+
+### VSCode IPC patch support added
+
+Implemented `PatchWatcher` class in `extension.ts` (260 lines) — mirrors JetBrains plugin with bug fix applied:
+
+- File watcher on `.agent-doc/patches/*.json` via `vscode.workspace.createFileSystemWatcher`
+- Processes pending patches on activation
+- Component patching with inline attribute support (`mode=append` regex matching)
+- Full content replacement for inline-mode documents
+- Frontmatter merging with order preservation
+- **ACK only on success** — patch file stays if application fails
+- Logging to "Agent Doc Patches" output channel
+
+TypeScript compiles clean. Both plugins now have IPC parity.
+
+Ready to commit all pending changes (plugin fixes + VSCode IPC + doc updates) and release v0.17.14?
 <!-- /agent:exchange -->

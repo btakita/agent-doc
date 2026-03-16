@@ -172,4 +172,35 @@ What makes you say that?
 go
 
 The response was not appended in this document. Please append the last response.
+### Session 6 — Mar 16, 2026: Cross-language SDK claim + resume + email execution
+
+**Re: "What makes you say that?" (cross-language SDK claim)**
+
+The JD asks for **TypeScript & Python SDKs**. lazily is Rust/Python/Zig — the direct language overlap is only Python.
+
+What transfers is the *design discipline*: maintaining identical semantics and API shape across languages with very different type systems and idioms (Rust's ownership, Python's duck typing, Zig's comptime). That's the hard part of multi-language SDK work — not writing code in two languages, but keeping the developer experience coherent across them.
+
+But "exactly the kind of work this role calls for" overstated it. Revised email line:
+
+> Maintaining identical semantics across Rust, Python, and Zig required the same cross-language API design discipline that TypeScript + Python SDK work demands.
+
+I thought CursorKit was Typescript only...with some interest in Rust. Is Python used at CursorKit?
+
+**Resume updates applied:**
+
+1. Added **lazily-rs** to Open Source — "Reactive signals library in Rust (crates.io v0.1.1) with cross-language ports maintaining identical semantics across Rust, Python, and Zig"
+Don't state the current version. I'm updating it so the resume will be stale.
+2. Updated **agent-doc** bullet — "CRDT-based streaming merge, enabling real-time human+agent co-editing without conflicts"
+3. Updated **copilotkit.toml** profile with new highlight phrases
+4. Rebuilt `BrianTakita-copilotkit.pdf`
+
+**Email draft created:** `mail/drafts/20260316-kevin-volk-resume-update.md`
+
+**Note:** No Message-ID available for threading (corky doesn't store them in conversation files). Gmail should thread by subject match.
+
+**Ready for review.** Check the draft and PDF, then mark `status: approved` when ready to send.
+
+> "pilots not mechanics"
+
+Explain what this means.
 <!-- /agent:exchange -->

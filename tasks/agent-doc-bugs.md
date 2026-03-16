@@ -643,5 +643,19 @@ Your incomplete thought — "Also, whenever I do a..." — want to finish it?
 Also, whenever I do a **Run Agent Doc** from the JB Plugin...I see the `/agent-doc run ...` command for a few seconds in the input...before the tmux Enter is pressed.
 
 And I just got an external edit where I pressed Esc and lost the response. Please readd the response.
-This happened while I was typing a 
+This happened while I was typing a long prompt.
+
+### Re: Send-keys visibility + external edit data loss
+
+**Command visible before Enter:** `tmux send-keys` types the text character-by-character, then sends Enter. There's a visible delay because tmux processes each character. This is inherent to how `send-keys` works — it simulates typing, not instant command injection. To make it instant, we could use `tmux send-keys -l "/agent-doc tasks/file.md" Enter` (the `-l` flag sends literal text) or pipe the command differently.
+
+**External edit lost your typing:** This is the core UX problem we've been discussing. When `agent-doc write --force-disk` writes the file, your editor detects the external change. If you press Esc (dismiss the "externally modified" dialog), the editor reloads from disk — losing any unsaved edits in your buffer.
+
+**This is exactly why the IPC/CRDT architecture matters.** The disk write path will always trigger this dialog. The only way to avoid it is:
+1. Fix the JetBrains plugin IPC (apply via Document API, no disk write)
+2. Or the CRDT-via-FFI approach (longer term)
+
+**Immediate mitigation:** Your editor likely has "auto-reload silently" or "keep memory changes" options. In IntelliJ: Settings → Appearance & Behavior → System Settings → Synchronization → "Synchronize external changes" (should be on). Also check "Save files on frame deactivation" — if enabled, your buffer is saved before the external write arrives.
+
+**Your lost response:** The current document content (with your edits) matches what's in git HEAD. No agent response was lost this cycle — the external edit that triggered the Esc was the `--force-disk` write from the previous cycle's response.
 <!-- /agent:exchange -->

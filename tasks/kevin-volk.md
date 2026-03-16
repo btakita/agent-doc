@@ -367,4 +367,19 @@ Recommend option 3 — "extensible" signals it's a living system that grows, whi
 How is the ontology Graph-based? Is it due to words having graph relationships with other words?
 
 Go with #3 for now.
+
+Applied option 3. Both occurrences now read "extensible" instead of "152 nodes". PDF rebuilt.
+
+**Re: "How is the ontology graph-based?"**
+
+Yes — each term in the ontology defines relationships to other terms (Entity → System → Domain → Scope → Context, etc.), forming a directed graph of conceptual dependencies. The `philosophy/src/*.md` files each define a node with Ontology/Axiology/Epistemology facets that reference other nodes. It's a graph in the sense that terms don't exist in isolation — they derive meaning from their relationships to other terms in the system.
+
+That said, "graph-based" as a descriptor might over-promise — it's not a formal knowledge graph with typed edges and SPARQL queries. It's more of a structured vocabulary with explicit inter-term relationships. "Extensible" is the safer choice for the resume, which is why we went with option 3.
+
+Opening line is:
+> Architected a production real-time multimodal AI avatar pipeline at Presence AI — text, audio, and video lip-sync
+on NVIDIA H100 GPUs via WebRTC.
+
+But the job is about tooling. Should we change the emphasis to the open source tooling?
+Or go with my most recent job experience?
 <!-- /agent:exchange -->

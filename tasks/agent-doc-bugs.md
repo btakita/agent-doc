@@ -7,15 +7,31 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### v0.17.10 Released
+### Re: Keeping previous responses + restoring
 
-Default component scaffolding + append-mode exchange shipped:
-- crates.io: https://crates.io/crates/agent-doc/0.17.10
-- PyPI: https://pypi.org/project/agent-doc/0.17.10/
-- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.10
+**Going forward:** With v0.17.10, the `exchange` component is now **append mode** — new responses accumulate below old ones. No more losing content on each cycle.
 
-Changes: `claim` scaffolds status+exchange components, creates `components.toml` with append-mode defaults, route flash notification. All 352 tests pass.
+**For this document:** Previous responses were already replaced before the append-mode change. But they're all in git history. To restore any previous response:
 
-How do I keep previous responses AND the current response?
-I want to restore a previous res
+```bash
+# See all versions of this file
+git log --oneline -- tasks/agent-doc-bugs.md
+
+# View a specific version's exchange content
+git show <commit>:tasks/agent-doc-bugs.md
+
+# Extract just the exchange section from a commit
+git show <commit>:tasks/agent-doc-bugs.md | sed -n '/<!-- agent:exchange -->/,/<!-- \/agent:exchange -->/p'
+```
+
+Which response do you want to restore? I can pull it from git history and append it to the current document. Here are the recent versions:
+
+| Commit | Time | Exchange topic |
+|--------|------|---------------|
+| `57dd0e0` | 13:04 | CRDT corruption detected + from_lines fix |
+| `532d447` | 12:52 | Duplicate component tags bug (template parser) |
+| `2ad6144` | 12:47 | CRDT corruption — clean document restored |
+| `82063fc` | 12:37 | v0.17.7 released (CWD drift fixes) |
+| `e2b6728` | 12:44 | Release context, old response loss, default components |
+| `d38a504` | 12:28 | CWD drift + claims log bugs |
 <!-- /agent:exchange -->

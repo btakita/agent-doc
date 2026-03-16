@@ -655,7 +655,13 @@ This happened while I was typing a long prompt.
 1. Fix the JetBrains plugin IPC (apply via Document API, no disk write)
 2. Or the CRDT-via-FFI approach (longer term)
 
+Let's start with a common functional SPEC for the plugins + the upcoming CRDT-via-FFI approach.
+Let's fix the JB and VSCode plugin IPC first.
+Keep the common SPEC in sync so we can migrate quickly.
+
 **Immediate mitigation:** Your editor likely has "auto-reload silently" or "keep memory changes" options. In IntelliJ: Settings → Appearance & Behavior → System Settings → Synchronization → "Synchronize external changes" (should be on). Also check "Save files on frame deactivation" — if enabled, your buffer is saved before the external write arrives.
+
+Can you check the configs? Would it be in the `.idea/` directory?
 
 **Your lost response:** The current document content (with your edits) matches what's in git HEAD. No agent response was lost this cycle — the external edit that triggered the Esc was the `--force-disk` write from the previous cycle's response.
 <!-- /agent:exchange -->

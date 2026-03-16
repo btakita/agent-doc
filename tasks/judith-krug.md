@@ -181,27 +181,15 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: "Please print the link" — CORRECTION**
+**Re: Exact link + Capterra access**
 
-I need to correct my earlier statement. The $10K threatening letter was about **The Mortgage Office (TMO)**, NOT Mortgage Automator. The reviewer *switched to* MA because of TMO's aggressive licensing practices.
+**The review URL:** [capterra.com/p/191761/Mortgage-Automator/reviews/](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/) — Capterra doesn't have individual review permalinks. The $10K/TMO review is on this page, posted by a verified user who switched from TMO ~5 years ago. They describe TMO claiming breach of ToS, demanding upgrade to a 20-person license (they had 4-5 employees), and extracting $10K USD to retain data access — all triggered by staff accessing the server remotely.
 
-**The specific review:** [Capterra — Mortgage Automator Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/) — a user describes switching from TMO after TMO claimed they breached terms of service due to staff accessing the server remotely. TMO demanded an immediate upgrade to a 20-person license despite having fewer than 5 employees, and extorted $10K USD just to keep access to their data.
+**Capterra IP block:** Capterra aggressively blocks datacenter IPs and VPNs. Options:
+1. **Tor Browser** — yes, this should work. Capterra blocks known datacenter ranges but Tor exit nodes rotate and many are residential
+2. **LightPanda + Tor** — LightPanda doesn't natively support Tor/SOCKS5 proxying. You'd need to route through a Tor SOCKS proxy (`torsocks lightpanda ...` or configure the system proxy). It's simpler to just use Tor Browser directly
+3. **Google Cache** — try `cache:https://www.capterra.com/p/191761/Mortgage-Automator/reviews/` in Google search
+4. **Web Archive** — `web.archive.org/web/*/capterra.com/p/191761/Mortgage-Automator/reviews/` may have a snapshot
 
-Please send me the exact link of the complaint.
-Capterra blocked my IP address, so we may need alternate means to reach the site. I have torbrowser-launcher.
-Does LightPanda support tor?
-
-**This is actually relevant to Judith's situation** — she's about to sign up for TMO. Worth noting:
-- TMO also has aggressive licensing enforcement (per this Capterra review)
-- TMO charges $400/month per additional seat beyond 2
-- The $10K incident involved remote server access triggering a multi-device license violation
-
-**Implication for the project:** This reinforces the Phase 2 strategy (eventually replacing TMO with a custom system). TMO is a useful stepping stone, but Judith should be aware of their licensing terms before signing up. Read the TMO contract carefully — especially seat limits and remote access clauses.
-
-**Re: Duplicate line** — I see "Her attorney thinks he can get her out of the contract." appears twice (lines 209-210). That's a CRDT merge artifact from a previous cycle. You can delete the duplicate.
-
-Sources:
-- [Capterra — Mortgage Automator Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
-- [Capterra — The Mortgage Office Reviews](https://www.capterra.com/p/9277/The-Mortgage-Office/reviews/)
-- [Capterra — TMO vs MA Comparison](https://www.capterra.com/compare/9277-191761/The-Mortgage-Office-vs-Mortgage-Automator)
+**Quickest path:** Open Tor Browser, navigate to the Capterra URL above, Ctrl+F for "extort" or "$10" to find the specific review.
 <!-- /agent:exchange -->

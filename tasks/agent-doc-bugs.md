@@ -349,4 +349,67 @@ Want me to go this route instead?
 Considering. It would be good to have as much as possible shared in the agent-doc binary.
 The Plugins would interface with the editor api to improve the UX.
 The Specs should reflect this architecture idiom.
+
+### Re: Surgical edits + architecture idiom
+
+**CRDT surgical edits, not full replacement.** The result file would contain *edit operations* (component-level diffs), not the entire document. The plugin applies each edit surgically:
+
+```json
+{
+  "file": "/path/to/doc.md",
+  "edits": [
+    {"range": [1842, 1842], "text": "\n### New response\n\nContent here.\n"},
+    {"range": [45, 78], "text": "- [x] Phase 1\n"}
+  ]
+}
+```
+
+Each edit has a byte range (start, end) and replacement text. The plugin maps these to editor coordinates and applies via Document API. Cursor position is preserved because only the affected ranges change.
+
+How exposed is this to race conditions?
+Such as a delay of transmission, Plugin loop picking it up, applying the change(s) vs the user editing the document.
+
+**Architecture idiom:**
+
+```
+┌─────────────────────────────────────────┐
+│          agent-doc binary (Rust)         │
+│                                         │
+│  All logic:                             │
+│  - Component parsing & mode resolution  │
+│  - Patch application & CRDT merge       │
+│  - Snapshot management                  │
+│  - Git operations                       │
+│  - Edit operation computation           │
+│                                         │
+│  Output: JSON edit operations file      │
+└──────────────┬──────────────────────────┘
+               │ .agent-doc/edits/<hash>.json
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───▼────┐          ┌─────▼────┐
+│  JB    │          │  VSCode  │
+│ Plugin │          │   Ext    │
+│        │          │          │
+│ Thin:  │          │ Thin:    │
+│ Watch  │          │ Watch    │
+│ Apply  │          │ Apply    │
+│ ACK    │          │ ACK      │
+└────────┘          └──────────┘
+```
+
+**Plugin responsibility:** ONLY editor API integration (~50 lines each):
+- Watch `.agent-doc/edits/` for JSON files
+- Apply edit operations to Document/TextDocument API
+- Delete file as ACK
+
+**Binary responsibility:** ALL document logic (already exists):
+- Parse components, resolve modes, compute patches
+- CRDT merge with concurrent edits
+- Output surgical edit operations as JSON
+
+This should be reflected in CLAUDE.md and SPEC.md. Want me to update the specs and implement the edit operations output?
+
+Discussing
 <!-- /agent:exchange -->

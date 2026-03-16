@@ -7,38 +7,42 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Settings naming + append mode
+### Re: Inline component attributes
 
-**Naming consolidation:** You're right — having `append` in both `agent_doc_format` and `agent_doc_response` is confusing. Here's a cleaner model:
+Love this direction. Inline attributes on the component tag is much cleaner than a separate config file:
 
-| Setting | Values | Meaning |
-|---------|--------|---------|
-| `agent_doc_format` | `template` \| `append` | Document structure: components vs User/Assistant blocks |
-| `agent_doc_response` | `replace` \| `append` | How agent responses update the exchange: overwrite vs accumulate |
-| `agent_doc_write` | `crdt` \| `merge` | Write strategy: CRDT conflict-free vs 3-way merge |
+```markdown
+<!-- agent:exchange mode=append -->
+Content here...
+<!-- /agent:exchange -->
 
-`agent_doc_format: template | inline`...so inline instead of append. Migrate existing values of `append` to `inline`.
+<!-- agent:status mode=replace -->
+- [x] Phase 1
+<!-- /agent:status -->
+```
 
-The overlap is `append` meaning different things:
-- `agent_doc_format: append` → document-level structure (alternating blocks)
-- `agent_doc_response: append` → component-level behavior (accumulate responses)
+**Revised settings model:**
 
-**Better name for `agent_doc_response`?** Options:
-- `agent_doc_response` (your proposal) — clear but slightly ambiguous
-- `agent_doc_accumulate` — `true`/`false` (boolean, simpler)
-- `agent_doc_exchange` — `append`/`replace` (scoped to exchange component)
+| Level | Setting | Values |
+|-------|---------|--------|
+| **Document** | `agent_doc_format` | `template` \| `inline` |
+| **Document** | `agent_doc_write` | `crdt` \| `merge` |
+| **Component** | `mode` (inline attr) | `append` \| `replace` \| `prepend` |
 
-I like `agent_doc_exchange: append | replace`
-I'm also considering `agent:exchange: append | replace` because the tag is `agent:exchange`.
-Can we explore component level configurations in this way?
+- `components.toml` becomes optional (project-wide defaults only)
+- Inline `mode=` on the tag takes precedence over `components.toml`
+- Default: `mode=append` for `exchange` and `findings`, `mode=replace` for `status`
 
-Another possibility is `agent:exchange[mode=append|replace]` or `agent:exchange mode="append"|"replace"`
-Which is probably better than the front matter.
-Let's have the default be `agent:exchange mode=append`
+**Implementation:**
+1. Update `component.rs` parser to extract attributes from opening tags
+2. `patch.rs` reads the inline mode when applying patches
+3. `components.toml` remains as fallback defaults
+4. Rename `agent_doc_format: append` → `inline` with backward compat alias
+5. Migrate existing `append` values
 
-I'd go with `agent_doc_response: append|replace` — it's the most intuitive. The "append" overlap with format is acceptable because they operate at different levels (document vs component).
+**For the tag syntax:** `<!-- agent:name mode=append -->` is cleanest — HTML comment attributes, no quotes needed for simple values.
 
-**For this document:** I'll treat it as append mode from now on. Previous responses will accumulate.
+Shall I implement this? It's a parser change in `component.rs` + `patch.rs`.
 
-**Restoring history:** I'll pull the previous responses from git and prepend them. And I'll implement the squash command next.
+yes
 <!-- /agent:exchange -->

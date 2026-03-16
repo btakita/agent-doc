@@ -170,4 +170,6 @@ What makes you say that?
 **Ready to execute** — say the word and I'll apply resume updates, rebuild PDF, and prepare the corky draft.
 
 go
+
+The response was not appended in this document. Please append the last response.
 <!-- /agent:exchange -->

@@ -706,4 +706,20 @@ Derived from the actual JetBrains (13 Kotlin files) and VSCode (extension.ts) im
 Next: debug the JB plugin IPC (why patches are consumed but not applied)?
 
 go
+
+### Re: JB plugin IPC debug — found the root cause
+
+**Two competing plugin installations:**
+- `.local/share/.../agent-doc-jetbrains/` → **0.2.1** (the fix)
+- `.config/.../agent-doc-jetbrains/` → **0.2.0** (broken, false ACK)
+
+IntelliJ loads from `.config/` first, so the **old 0.2.0 was taking precedence**. The new 0.2.1 was installed but never actually loaded.
+
+**Fixed:** Removed the old 0.2.0 from `.config/`. Only 0.2.1 remains in `.local/share/`.
+
+**You need to restart IntelliJ one more time** for this to take effect. After restart, IPC should work correctly — the 0.2.1 plugin has the `applyPatch() → Boolean` fix and will only delete the patch file on successful application.
+
+Please transfer the work for the shared library over FFI into tasks/agent-doc-plugins.md
+
+Do we have a mechanism to verify that the plugin is the correct version? And to install the correct version if it's not?
 <!-- /agent:exchange -->

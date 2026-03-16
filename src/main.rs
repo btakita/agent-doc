@@ -12,6 +12,7 @@ mod diff;
 mod focus;
 mod frontmatter;
 mod git;
+mod history;
 mod init;
 mod layout;
 mod merge;
@@ -80,6 +81,14 @@ enum Commands {
         /// Skip git commit after submit
         #[arg(long)]
         no_git: bool,
+    },
+    /// List or restore exchange component versions from git history
+    History {
+        /// Path to the session document
+        file: PathBuf,
+        /// Restore exchange content from a specific commit (prepend to current)
+        #[arg(long)]
+        restore: Option<String>,
     },
     /// Scaffold a new session document
     Init {
@@ -252,6 +261,9 @@ enum Commands {
         /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
         #[arg(long)]
         ipc: bool,
+        /// Force direct disk write, skip IPC even when plugin is installed
+        #[arg(long)]
+        force_disk: bool,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -373,6 +385,10 @@ fn main() -> anyhow::Result<()> {
             dry_run,
             no_git,
         } => submit::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
+        Commands::History { file, restore } => match restore {
+            Some(commit) => history::restore(&file, &commit),
+            None => history::list(&file),
+        },
         Commands::Init { file, title, agent, mode } => {
             init::run(&file, title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
         }
@@ -461,7 +477,7 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk } => {
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)
@@ -470,7 +486,7 @@ fn main() -> anyhow::Result<()> {
             if is_ipc {
                 write::run_ipc(&file, baseline.as_deref())
             } else if is_stream {
-                write::run_stream(&file, baseline.as_deref())
+                write::run_stream(&file, baseline.as_deref(), force_disk)
             } else if is_template {
                 write::run_template(&file, baseline.as_deref())
             } else {
@@ -479,7 +495,7 @@ fn main() -> anyhow::Result<()> {
                     .context("failed to read document for mode detection")?;
                 let (fm, _) = frontmatter::parse(&content)?;
                 if fm.resolve_mode().is_crdt() {
-                    write::run_stream(&file, baseline.as_deref())
+                    write::run_stream(&file, baseline.as_deref(), force_disk)
                 } else {
                     write::run(&file, baseline.as_deref())
                 }

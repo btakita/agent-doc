@@ -459,4 +459,7 @@ Options for automated 8AM send:
 3. **Push as Gmail draft now** — then schedule via Gmail web UI
 
 Option 1 or 2 will auto-send. Option 2 is cleanest for a one-shot. Which do you prefer, or should I just push as a Gmail draft for you to schedule manually?
+
+Can we update corky to pick up the email draft with the scheduled send time?
+Perhaps corky can read all of the pending email draft schedule times. If any unsent emails are past the schedule time, send the email. This allows editing the schedule time up until the send time.
 <!-- /agent:exchange -->

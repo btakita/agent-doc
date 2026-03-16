@@ -352,4 +352,19 @@ Applied option 1. Career Highlights now reads: **"rr: pioneered proxy-based test
 > Domain ontology system (152 nodes) since 2014
 
 No need to have `(152 nodes)`...it will be stale. `multi-node`, `n-node`, `Schema based domain ontology system`, or something else?
+
+**Re: Remove "152 nodes" — stale count**
+
+Good call. Options for the replacement:
+
+1. `Domain ontology system since 2014` — simplest, no count
+2. `Multi-node domain ontology system since 2014` — vague, adds nothing
+3. `Extensible domain ontology system since 2014` — emphasizes the living/growing nature
+4. `Graph-based domain ontology system since 2014` — describes the structure
+
+Recommend option 3 — "extensible" signals it's a living system that grows, which is more interesting than a stale count. It appears in two places (Career Highlights and the philosophy entry in Other contributions). Want me to apply?
+
+How is the ontology Graph-based? Is it due to words having graph relationships with other words?
+
+Go with #3 for now.
 <!-- /agent:exchange -->

@@ -5,44 +5,26 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-<!-- agent:exchange -->
-
-### Re: Inline component attributes
-
-Love this direction. Inline attributes on the component tag is much cleaner than a separate config file:
-
-```markdown
-<!-- agent:exchange mode=append -->
-Content here...
-<!-- /agent:exchange -->
-
 <!-- agent:status mode=replace -->
 - [x] Phase 1
 <!-- /agent:status -->
-```
 
-**Revised settings model:**
+<!-- agent:exchange mode=append -->
 
-| Level | Setting | Values |
-|-------|---------|--------|
-| **Document** | `agent_doc_format` | `template` \| `inline` |
-| **Document** | `agent_doc_write` | `crdt` \| `merge` |
-| **Component** | `mode` (inline attr) | `append` \| `replace` \| `prepend` |
+### Inline component attributes implemented
 
-- `components.toml` becomes optional (project-wide defaults only)
-- Inline `mode=` on the tag takes precedence over `components.toml`
-- Default: `mode=append` for `exchange` and `findings`, `mode=replace` for `status`
+All 372 tests pass, clippy clean. Changes across 6 files:
 
-**Implementation:**
-1. Update `component.rs` parser to extract attributes from opening tags
-2. `patch.rs` reads the inline mode when applying patches
-3. `components.toml` remains as fallback defaults
-4. Rename `agent_doc_format: append` → `inline` with backward compat alias
-5. Migrate existing `append` values
+**`component.rs`** — Parser extracts `key=value` attributes from opening tags. `Component` struct has `attrs: HashMap<String, String>`.
 
-**For the tag syntax:** `<!-- agent:name mode=append -->` is cleanest — HTML comment attributes, no quotes needed for simple values.
+**`template.rs` + `patch.rs`** — Mode resolution: inline attr > components.toml > built-in default.
 
-Shall I implement this? It's a parser change in `component.rs` + `patch.rs`.
+**`frontmatter.rs`** — `agent_doc_format: inline` is canonical (accepts `append` as alias).
 
-yes
+**`claim.rs`** — Scaffolding uses `<!-- agent:exchange mode=append -->`, `<!-- agent:status mode=replace -->`.
+
+**11 new tests** covering attr parsing, mode precedence, backward compat.
+
+Ready to release v0.17.12?
+Release
 <!-- /agent:exchange -->

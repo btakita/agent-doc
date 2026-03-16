@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 # Judith Krug — Equity Funding Source
@@ -473,4 +474,7 @@ What is the agenda for the Zoom call?
 - First milestone payment ($4K)
 - Brian begins website migration immediately after call
 - Schedule check-in for Phase 1 demo (~2 weeks out)
+
+Robert Ward called me and mentioned that Mortgage Optimizer is trying to enforce a contract that she signed with them.
+Apparently they want her to pay to get out of the contract.
 <!-- /agent:exchange -->

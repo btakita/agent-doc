@@ -664,4 +664,28 @@ Keep the common SPEC in sync so we can migrate quickly.
 Can you check the configs? Would it be in the `.idea/` directory?
 
 **Your lost response:** The current document content (with your edits) matches what's in git HEAD. No agent response was lost this cycle — the external edit that triggered the Esc was the `--force-disk` write from the previous cycle's response.
+
+### Re: Plugin SPEC + IntelliJ config
+
+**IntelliJ sync config found:** `.idea/workspace.xml` has `autoReloadType` set to `SELECTIVE` — this is why you get the "externally modified" dialog. Changing to `ALL` would auto-reload silently:
+
+```xml
+<component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+</component>
+```
+
+Or via UI: Settings → Build, Execution, Deployment → Build Tools → "Reload project after changes in build scripts" → Any changes.
+
+**However**, auto-reload still loses unsaved buffer edits — it just does so silently instead of with a dialog. The real fix is IPC.
+
+**Action plan:**
+1. Write the common plugin SPEC (shared functional requirements for JB + VSCode + future editors)
+2. Debug and fix the JB plugin IPC (why it's still not applying patches after the fix)
+3. Verify VSCode IPC works
+4. Document the CRDT-via-FFI migration path in the SPEC
+
+Want me to start with the plugin SPEC document?
+
+Yes.
 <!-- /agent:exchange -->

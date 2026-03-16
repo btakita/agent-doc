@@ -75,172 +75,41 @@ javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-messa
 **Note:** LinkedIn lazy-loads messages — scroll up to load older messages before clicking.
 
 <!-- agent:exchange -->
-Compacted from 730-line append-mode conversation into template-mode reference document. Bookmarklet moved to its own top-level section. All merge artifacts and duplicate content cleaned up.
+### Re: LinkedIn post for Lazily YouTube video
 
-See the output in /home/brian/work/btakita/agent-loop/mail/contacts/mia-tomeo/20260311-linkedin-mia-tomeo.txt
-
-Modify bookmarklet
-Remove `Status is ...`
-All I care about is the correspondence text and timestamp
-
-### Re: Remove status text from bookmarklet
-
-Looked at the exported file — the header element contains nested HTML with "Status is reachable" and "Mobile • 28m ago" inside `<span>` children. The `childNodes[0].textContent` approach was still capturing that structure.
-
-Fixed by extracting only direct text nodes from the header element (skipping all child elements), and cleaning whitespace. Also simplified the transcript output — just `[timestamp] Name: message`, no date headers cluttering the format.
-
-The bookmarklet wanted to save the file as `20260311-linkedin-.txt`...it should be `20260311-linkedin-mia-tomeo.txt`
-
-### Re: Empty name in filename
-
-The `childNodes` text node filter returned nothing because LinkedIn wraps the name in a `<span>`, not as a bare text node. The fallback `split(/\s{2,}/)` also failed on the whitespace-heavy `textContent`.
-
-**Fix:** Split `textContent` on newlines, trim each, take the first non-empty line. The LinkedIn header structure puts the name on the first line, with "Status is reachable" and "Mobile • 28m ago" on subsequent lines. This is the simplest reliable approach.
-
-Try the updated bookmarklet — it should now save as `20260311-linkedin-mia-tomeo.txt`.
-
-Help me write a post sharing
-https://www.linkedin.com/events/7433272878466359296/
-
-What I have so far:
-> I caught the tail end of this call. But Eric Ries is making a bold stance on applying ethics in the agentic age.
-
-I want to emphasize how we can define and apply philosophy to find deep alignment with each other and with our tools.
-
-### Re: Eric Ries / Incorruptible post
-
-Eric Ries's new book *Incorruptible* argues organizational failure is structural, not ethical — systems quietly reshape behavior. Notably uses Anthropic as a case study. The LinkedIn event was likely a live discussion around these themes.
-
-**Post draft** (ready to paste):
+Here's a draft connecting the video, the library, and the philosophy behind lazy reactivity:
 
 ---
 
-I caught the tail end of Eric Ries's call on building incorruptible organizations. He's making a bold stance: the failure of companies isn't ethical — it's structural. The systems we build quietly reshape behavior until even principled people produce outcomes they never wanted.
+Just published a live coding session: building a multi-language reactive signals library from scratch.
 
-This resonates deeply with what I'm building.
+lazily is a reactive primitives library implemented in Rust, Zig, and Python. The core insight: **lazy invalidation beats eager recomputation** for most backend work.
 
-If organizational drift is structural, then alignment — between people, between teams, between humans and AI agents — is a design problem. Not a values problem. Not a policy problem. A systems design problem.
+When a value changes, dependents are *cleared* — not recomputed. Computation only happens when someone actually reads the value. In a web server with 50 computed values per request, this means computing only the 5 that matter instead of all 50.
 
-This is why I'm obsessed with defining terms precisely. In Existence Lang, every concept starts from the universal set (Existence) and scopes down through explicit context. When your ontology is sloppy, your systems drift. When your terms are precise and composable, alignment becomes structural too.
+The four abstractions:
+- **Context** — owns the reactive graph
+- **Cell** — mutable input (equality-checked, no-op on same value)
+- **Slot** — lazily-computed cache with automatic dependency tracking
+- **Signal** (future) — eager counterpart for UI rendering
 
-The same principle applies to AI agents. An agent without well-defined scope, context, and domain boundaries will drift just like an organization without mission-locked governance. agent-doc is my attempt to make that structure explicit — every interaction captured in a document, every decision traceable, every scope bounded.
+Dependencies are dynamic — they re-discover themselves each computation. No stale subscriptions, no manual cleanup.
 
-Ries uses Anthropic as a case study in Incorruptible. It's no accident that the company building Claude is also experimenting with novel corporate structures to stay aligned with its mission. Alignment isn't a feature you bolt on — it's architecture.
+The name isn't accidental. Lazy evaluation is a form of hydration — prepare the computation, materialize only when needed. Same principle that drives sub-1KB hydration in rappstack.
 
-What systems are you building to keep your work aligned with your intent?
+Watch the full session: https://www.youtube.com/watch?v=hVNmbmY4vgo
 
-https://www.linkedin.com/events/7433272878466359296/
+Blog post with code examples: https://briantakita.me/posts/2026-03-15-lazily-reactive-signals
 
-#Incorruptible #EricRies #ExistenceLang #AgentDoc #AI #Alignment #OrganizationalDesign #Philosophy
+lazily on crates.io: https://crates.io/crates/lazily
 
----
-
-Connects your Existence Lang philosophy (explicit scoping, precise ontology) to Ries's thesis (structural alignment > ethical intentions). The Anthropic case study reference ties it together — same company building Claude. Adjust tone or length as needed.
-
-post to linkedin
-
-### Posted to LinkedIn
-
-Published via corky: https://www.linkedin.com/feed/update/urn:li:share:7437915217499471872
-
-Draft file: `mail/social/20260312-eric-ries-incorruptible-linkedin.md` (status updated to `published`).
-
-
-From David Alger
-> Really cool stuff. I wonder if organizations and companies should have time limits. After that, they have to start over.Otherwise they keep getting stretched and changed for purposes they weren't designed to accomplish.
-
-Help me draft a reply. What I have so far:
-
-> Thank you David! People and institutions may change. It would be interesting to capture the moment and context of when the company during certain moments...such as when it was on a good path. Perhaps other people or companies can then take on the essence of that company in a good state and carve out a different path onward? Kindof like exploring alternative paths via improv?
-> 
-> I wonder if character sheets can be made so an actor c
-
-### Re: Reply to David Alger
-
-Your improv/forking metaphor is strong. Here's a polished version building on your draft:
+#Rust #Zig #Python #ReactiveSignals #OpenSource #LazyEvaluation #WebDev #SystemsDesign
 
 ---
 
-Thank you David! People and institutions do change — and that drift is often invisible until it's too late.
+Tone: technical but accessible, emphasizes the "why lazy" insight over implementation details. The three links give different entry points (video watchers, readers, Rust devs). Want me to adjust length, tone, or emphasis?
 
-Your "time limit" idea is fascinating. What if instead of hard resets, we could snapshot the essence of an organization at its best — capture the principles, the culture, the decision patterns — and let others fork from that state? Like version control for organizational DNA.
+`**Signal** (future)` seems like it's a Future object. Either make this TODO or leave out the qualifier.
 
-It's similar to improv: you take the best "yes, and..." moments and branch into new scenes. The original company may drift, but the patterns that worked become seeds for something new.
-
-That's actually what draws me to spec-driven tooling — making the intent explicit and traceable so it doesn't quietly erode over time. If you can diff your current state against your original mission, drift becomes visible.
-
----
-
-Adjust tone/length as you like. The version-control metaphor ties naturally to your tech background and the Existence Lang work without being too self-promotional for a comment reply.
-
-
-From David Alger
-> Really cool stuff. I wonder if organizations and companies should have time limits. After that, they have to start over.Otherwise they keep getting stretched and changed for purposes they weren't designed to accomplish.
-
-David was my improv teacher around 2006-2009. His theater + shows is in Oakland CA + San Francisco CA. So he works with many in the tech world. I want to craft my reply to be exploratory with characters and stories.
-
-Thank you David! People and institutions may change. It would be interesting to capture the moment and context of when the company during certain moments...such as when it was on a good path. Perhaps other people or companies can then take on the essence of that company in a good state and carve out a different path onward? Kindof like exploring alternative paths via improv?
- 
-I wonder if character sheets can be made so an actor can "align" with the subject at various phases in story.
-
-
----
-
-Thank you David! People and institutions do change — and that drift is often invisible until it's too late.
-
-Your "time limit" idea is fascinating. What if instead of hard resets, we could snapshot the essence of an organization at its best — capture the principles, the culture, the decision patterns — and let others fork from that state? Like version control for organizational DNA.
-
-It's similar to improv: you take the best "yes, and..." moments and branch into new scenes. The original company may drift, but the patterns that worked become seeds for something new.
-
-That's actually what draws me to spec-driven tooling — making the intent explicit and traceable so it doesn't quietly erode over time. If you can diff your current state against your original mission, drift becomes visible.
-
-I wonder if character sheets can be made so an actor can "align" with their subject at various phases in story.
-
----
-
-
-### Re: Revised reply — improv + character sheets
-
-Knowing David was your improv teacher changes everything. This should feel like a conversation between two people who've done scenes together, not a tech blog comment. The character sheet idea is the best part — it bridges his world (theater) and yours (tooling).
-
-**Refined draft:**
-
----
-
-Thank you David! This makes me think about what we explored in improv together. People and institutions change — and that drift is often invisible until the story has moved on without you.
-
-What if instead of hard resets, we could snapshot the essence of an organization at its best — capture the principles, the culture, the decision patterns — and let others fork from that state? Like exploring alternative paths in an improv scene. The original company may drift, but the patterns that worked become seeds for a new scene.
-
-I wonder if character sheets could work here — the way an actor builds alignment with a character at different beats in a story. What if we could build something like that for organizations? A sheet that captures who the company *was* at its best, so someone else can step into that role and take it somewhere new.
-
-That's kind of what I'm trying to build with my tools — making the intent explicit so it doesn't quietly erode. If you can see the gap between where you are and where you started, drift becomes a choice instead of an accident.
-
----
-
-This version:
-- References your shared improv history naturally (not name-dropping, just "what we explored")
-- Uses theater language David will connect with (scenes, beats, character sheets, stepping into a role)
-- The character sheet concept lands as a genuine question, not a pitch
-- Keeps the tech connection light — "my tools" instead of naming agent-doc
-- Ends with an accessible insight rather than a call-to-action
-
-Short enough for a LinkedIn comment reply. Want me to trim further or adjust the improv references?
-
-Edit mail/social/20260313-170000-linkedin.md to link to https://existence-lang.github.io/ instead of rmemo. Use corky to edit the post.
-
-### Re: Edit LinkedIn post — rmemo → Existence Lang
-
-**Done.** Updated the live LinkedIn post:
-
-1. Replaced `rmemo: https://github.com/ctx-core/rmemo` with `Existence Lang: https://existence-lang.github.io/` in the draft
-2. Fixed LinkedIn API version bug in `update_post_at` (`"202401"` → `"202601"` — was expired)
-3. Rebuilt corky and pushed the edit: https://www.linkedin.com/feed/update/urn:li:share:7438328637952667648
-
-Draft file updated: `mail/social/20260313-170000-linkedin.md`
-
-Please make a linkedin post about my latest YouTube video that is titled "Lazily: Building a Multi-Language Reactive Signals Library — Live Session "
-
-https://www.youtube.com/watch?v=hVNmbmY4vgo
-
-The companion blog post is at /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md
+Please post using Corky
 <!-- /agent:exchange -->

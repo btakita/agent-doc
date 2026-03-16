@@ -92,8 +92,27 @@ Is agent-doc a daemon? I thought it was simply an executable with a short lifecy
 **To fix this properly:** The JetBrains plugin's patch consumer needs investigation. The plugin code that watches `.agent-doc/patches/` and applies JSON patches via Document API is silently failing. This is a Kotlin-side bug, not a Rust-side bug.
 
 Fix this.
+Also ensure the VSCode plugin has parity with the JB plugin.
+Update the SPEC.md file(s).
 
 **Short-term workaround for all sessions:** Update the SKILL.md to always use `--force-disk` until the plugin is fixed. Want me to add that?
 
 No...fix the underlying issue.
+
+### Re: IPC plugin bug fixed
+
+**Root cause:** `PatchWatcher.kt::processPatchFile()` deleted the patch file (ACK) unconditionally — even when `applyPatch()` failed silently via early `return` (not exception). The Rust binary saw the file deleted and assumed success.
+
+**Why kevin-volk.md didn't get its response:** The plugin couldn't find the file in the editor's VFS (not indexed yet), returned silently, and the patch file was deleted as if it succeeded. agent-doc is NOT a daemon — it's a short-lived CLI. Each `agent-doc write` call starts, writes, exits. The issue was purely the plugin's false ACK.
+
+**Fix (PatchWatcher.kt):**
+1. `applyPatch()` now returns `Boolean` (true = applied, false = failed)
+2. `processPatchFile()` only deletes the file if `applyPatch()` returns true
+3. On failure: patch file stays in place for retry, warning logged
+4. Added file-not-found retry: waits 200ms, refreshes VFS, tries once more
+
+The plugin needs to be rebuilt and reinstalled to take effect. Want me to build the plugin zip?
+
+yes
+What caused the error for the sile
 <!-- /agent:exchange -->

@@ -26,4 +26,8 @@ The current `--stream` flag already does CRDT merge (baseline vs current file vs
 The IPC path avoids this entirely because the plugin applies patches to the live Document API (in-memory editor buffer). That's why IPC is strictly better when available.
 
 **Summary:** The fix is skill-level (detect IPC timeout exit code, prompt user) + binary-level (new exit code for "IPC pending"). Want me to implement both?
+
+Yes
+
+I also want t
 <!-- /agent:exchange -->

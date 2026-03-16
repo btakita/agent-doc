@@ -267,4 +267,20 @@ Yes — `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt` (34 minute
 - **Your strengths Kevin noted**: SDK experience (ctx-core, lazily), Rust interest, agentic workflow experience
 
 Please include the context from the call transcript in the draft.
+
+**Re: Include call context in draft**
+
+Revised `mail/drafts/20260316-kevin-volk-resume-update.md` with call callbacks:
+
+1. **ctx-core/lazily SDK work** — Kevin flagged these on the call ([22:03], [25:49]). Now referenced in the lazily bullet as "Building on the ctx-core reactive pattern we talked about"
+2. **Rust tooling** — Kevin mentioned CopilotKit's Rust preference ([15:27]). Now in the opening: "I also added more detail on the Rust tooling we discussed"
+3. **corky Python→Rust port** — Kevin was impressed by the spec-driven one-day port ([16:11-16:34]). Added as a closing callback: "I mentioned porting corky from Python to Rust in under a day"
+4. **LangChain** — Kevin mentioned CopilotKit was picked up by LangChain ([06:46]). Now in the agent-doc bullet: "You mentioned CopilotKit integrates with LangChain"
+5. **"pilots not mechanics"** — kept as-is, no quote needed
+
+The draft now feels like a continuation of your conversation, not a cold follow-up. Ready for review at `mail/drafts/20260316-kevin-volk-resume-update.md`.
+
+> identical semantics across all three
+
+Similar...not identical...correct?
 <!-- /agent:exchange -->

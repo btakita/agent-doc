@@ -1,7 +1,8 @@
 ---
 agent_doc_session: a953811a-bf72-4aa9-bbd6-5904a5a07a1d
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 # LinkedIn
@@ -236,4 +237,10 @@ Edit mail/social/20260313-170000-linkedin.md to link to https://existence-lang.g
 3. Rebuilt corky and pushed the edit: https://www.linkedin.com/feed/update/urn:li:share:7438328637952667648
 
 Draft file updated: `mail/social/20260313-170000-linkedin.md`
+
+Please make a linkedin post about my latest YouTube video that is titled "Lazily: Building a Multi-Language Reactive Signals Library — Live Session "
+
+https://www.youtube.com/watch?v=hVNmbmY4vgo
+
+The companion blog post is at /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-15-lazily-reactive-signals.md
 <!-- /agent:exchange -->

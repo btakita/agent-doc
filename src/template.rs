@@ -196,9 +196,10 @@ pub fn apply_patches_with_overrides(
 
     for (idx, patch) in &ops {
         let comp = &components[*idx];
-        // Mode overrides take precedence over config and defaults
+        // Mode precedence: stream overrides > inline attr > components.toml > built-in default
         let mode = mode_overrides.get(&patch.name)
             .map(|s| s.as_str())
+            .or_else(|| comp.attrs.get("mode").map(|s| s.as_str()))
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
             .unwrap_or_else(|| default_mode(&patch.name));
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
@@ -264,7 +265,10 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .iter()
         .map(|comp| {
             let content = comp.content(&doc).to_string();
-            let mode = configs.get(&comp.name).cloned().unwrap_or_else(|| default_mode(&comp.name).to_string());
+            // Inline attr > components.toml > built-in default
+            let mode = comp.attrs.get("mode").cloned()
+                .or_else(|| configs.get(&comp.name).cloned())
+                .unwrap_or_else(|| default_mode(&comp.name).to_string());
             // Compute line number from byte offset
             let line = doc[..comp.open_start].matches('\n').count() + 1;
             ComponentInfo {
@@ -305,9 +309,12 @@ fn load_component_configs(file: &Path) -> std::collections::HashMap<String, Stri
 }
 
 /// Default mode for a component by name.
-/// `exchange` defaults to `append`; all others default to `replace`.
+/// `exchange` and `findings` default to `append`; all others default to `replace`.
 fn default_mode(name: &str) -> &'static str {
-    if name == "exchange" { "append" } else { "replace" }
+    match name {
+        "exchange" | "findings" => "append",
+        _ => "replace",
+    }
 }
 
 /// Apply mode logic (replace/append/prepend).
@@ -648,5 +655,108 @@ All systems go.
         assert_eq!(patches[1].name, "log");
         assert_eq!(patches[1].content, "- Entry 1\n");
         assert!(unmatched.is_empty());
+    }
+
+    // --- Inline attribute mode resolution tests ---
+
+    #[test]
+    fn inline_attr_mode_overrides_config() {
+        // Component has mode=replace inline, but components.toml says append
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        // Write config with append mode for status
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[status]\nmode = \"append\"\n",
+        ).unwrap();
+        // But the inline attr says replace
+        let doc = "<!-- agent:status mode=replace -->\nold\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "status".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Inline replace should win over config append
+        assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn inline_attr_mode_overrides_default() {
+        // exchange defaults to append, but inline says replace
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange mode=replace -->\nold\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn no_inline_attr_falls_back_to_config() {
+        // No inline attr → falls back to components.toml
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[status]\nmode = \"append\"\n",
+        ).unwrap();
+        let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "status".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Config says append, so both old and new should be present
+        assert!(result.contains("old\n"));
+        assert!(result.contains("new\n"));
+    }
+
+    #[test]
+    fn no_inline_attr_no_config_falls_back_to_default() {
+        // No inline attr, no config → built-in defaults
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange -->\nold\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // exchange defaults to append
+        assert!(result.contains("old\n"));
+        assert!(result.contains("new\n"));
+    }
+
+    #[test]
+    fn stream_override_beats_inline_attr() {
+        // Stream mode overrides should still beat inline attrs
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange mode=append -->\nold\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("exchange".to_string(), "replace".to_string());
+        let result = apply_patches_with_overrides(doc, &patches, "", &doc_path, &overrides).unwrap();
+        // Stream override (replace) should win over inline attr (append)
+        assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
     }
 }

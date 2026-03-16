@@ -113,12 +113,12 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
         let resolved = fm.resolve_mode();
-        if resolved.format == frontmatter::AgentDocFormat::Template
-            && !content.contains("<!-- agent:status -->")
-            && !content.contains("<!-- agent:exchange -->")
-        {
+        let has_components = crate::component::parse(&content)
+            .map(|comps| comps.iter().any(|c| c.name == "status" || c.name == "exchange"))
+            .unwrap_or(false);
+        if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
             let scaffolded = format!(
-                "{}\n<!-- agent:status -->\n<!-- /agent:status -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+                "{}\n<!-- agent:status mode=replace -->\n<!-- /agent:status -->\n\n<!-- agent:exchange mode=append -->\n<!-- /agent:exchange -->\n",
                 content.trim_end()
             );
             std::fs::write(file, &scaffolded)

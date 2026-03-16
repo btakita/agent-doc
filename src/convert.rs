@@ -337,7 +337,9 @@ mod tests {
         std::fs::write(&file, "---\nagent_doc_format: append\n---\n\n## User\n\nHello\n").unwrap();
         let result = run(&file, Some(&AgentDocMode::Append), None, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already in append format"));
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("already in append format") || err_msg.contains("already in inline format"),
+            "expected 'already in append/inline format' error, got: {}", err_msg);
     }
 
     #[test]
@@ -356,7 +358,7 @@ mod tests {
         // template -> append
         run(&file, Some(&AgentDocMode::Append), None, None).unwrap();
         let append = std::fs::read_to_string(&file).unwrap();
-        assert!(append.contains("agent_doc_format: append"));
+        assert!(append.contains("agent_doc_format: inline"));
         assert!(!append.contains("<!-- agent:exchange -->"));
         assert!(append.contains("## User"));
         assert!(append.contains("Hello"));

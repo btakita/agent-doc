@@ -1,11 +1,15 @@
 use anyhow::{bail, Result};
+use std::collections::HashMap;
 
 /// A parsed component in a document.
 ///
 /// Components are bounded regions marked by `<!-- agent:name -->...<!-- /agent:name -->`.
+/// Opening tags may contain inline attributes: `<!-- agent:name key=value -->`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
+    /// Inline attributes parsed from the opening tag (e.g., `mode=append`).
+    pub attrs: HashMap<String, String>,
     /// Byte offset of `<` in opening marker.
     pub open_start: usize,
     /// Byte offset past `>` in opening marker (includes trailing newline if present).
@@ -49,16 +53,35 @@ fn is_valid_name(name: &str) -> bool {
 
 /// True if the text inside `<!-- ... -->` is an agent component marker.
 ///
-/// Matches `agent:NAME` (open) or `/agent:NAME` (close).
+/// Matches `agent:NAME [attrs...]` (open) or `/agent:NAME` (close).
 pub fn is_agent_marker(comment_text: &str) -> bool {
     let trimmed = comment_text.trim();
     if let Some(rest) = trimmed.strip_prefix("/agent:") {
         is_valid_name(rest)
     } else if let Some(rest) = trimmed.strip_prefix("agent:") {
-        is_valid_name(rest)
+        // Opening marker may have attributes after the name: `agent:NAME key=value`
+        let name_part = rest.split_whitespace().next().unwrap_or("");
+        is_valid_name(name_part)
     } else {
         false
     }
+}
+
+/// Parse `key=value` pairs from the attribute portion of an opening marker.
+///
+/// Given the text after `agent:NAME `, parses space-separated `key=value` pairs.
+/// Values are unquoted (no quote support needed for simple mode values).
+fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
+    let mut attrs = HashMap::new();
+    for token in attr_text.split_whitespace() {
+        if let Some((key, value)) = token.split_once('=')
+            && !key.is_empty()
+            && !value.is_empty()
+        {
+            attrs.insert(key.to_string(), value.to_string());
+        }
+    }
+    attrs
 }
 
 /// Find byte ranges of code regions (fenced code blocks + inline code spans).
@@ -166,8 +189,8 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
     let len = bytes.len();
     let code_ranges = find_code_ranges(doc);
     let mut templates: Vec<Component> = Vec::new();
-    // Stack of (name, open_start, open_end)
-    let mut stack: Vec<(String, usize, usize)> = Vec::new();
+    // Stack of (name, attrs, open_start, open_end)
+    let mut stack: Vec<(String, HashMap<String, String>, usize, usize)> = Vec::new();
     let mut pos = 0;
 
     while pos + 4 <= len {
@@ -210,7 +233,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 bail!("invalid component name: '{}'", name);
             }
             match stack.pop() {
-                Some((open_name, open_start, open_end)) => {
+                Some((open_name, open_attrs, open_start, open_end)) => {
                     if open_name != name {
                         bail!(
                             "mismatched component: opened '{}' but closed '{}'",
@@ -220,6 +243,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                     }
                     templates.push(Component {
                         name: name.to_string(),
+                        attrs: open_attrs,
                         open_start,
                         open_end,
                         close_start: marker_start,
@@ -228,18 +252,22 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 }
                 None => bail!("closing marker <!-- /agent:{} --> without matching open", name),
             }
-        } else if let Some(name) = trimmed.strip_prefix("agent:") {
-            // Opening marker
+        } else if let Some(rest) = trimmed.strip_prefix("agent:") {
+            // Opening marker — may have attributes: `agent:NAME key=value`
+            let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
+            let name = parts.next().unwrap_or("");
+            let attr_text = parts.next().unwrap_or("");
             if !is_valid_name(name) {
                 bail!("invalid component name: '{}'", name);
             }
-            stack.push((name.to_string(), marker_start, marker_end));
+            let attrs = parse_attrs(attr_text);
+            stack.push((name.to_string(), attrs, marker_start, marker_end));
         }
 
         pos = close;
     }
 
-    if let Some((name, _, _)) = stack.last() {
+    if let Some((name, _, _, _)) = stack.last() {
         bail!(
             "unclosed component: <!-- agent:{} --> without matching close",
             name
@@ -519,5 +547,72 @@ new content here\n\
         let stripped = crate::diff::strip_comments(doc);
         assert!(stripped.contains("new content here"), "content must survive stripping");
         assert!(stripped.contains("<!-- agent:exchange -->"), "agent markers must survive");
+    }
+
+    // --- Inline attribute tests ---
+
+    #[test]
+    fn parse_component_with_mode_attr() {
+        let doc = "<!-- agent:exchange mode=append -->\nContent\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert_eq!(components[0].attrs.get("mode").map(|s| s.as_str()), Some("append"));
+        assert_eq!(components[0].content(doc), "Content\n");
+    }
+
+    #[test]
+    fn parse_component_with_multiple_attrs() {
+        let doc = "<!-- agent:log mode=prepend timestamp=true -->\nData\n<!-- /agent:log -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "log");
+        assert_eq!(components[0].attrs.get("mode").map(|s| s.as_str()), Some("prepend"));
+        assert_eq!(components[0].attrs.get("timestamp").map(|s| s.as_str()), Some("true"));
+    }
+
+    #[test]
+    fn parse_component_no_attrs_backward_compat() {
+        let doc = "<!-- agent:status -->\nOK\n<!-- /agent:status -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "status");
+        assert!(components[0].attrs.is_empty());
+    }
+
+    #[test]
+    fn is_agent_marker_with_attrs() {
+        assert!(is_agent_marker(" agent:exchange mode=append "));
+        assert!(is_agent_marker("agent:status mode=replace"));
+        assert!(is_agent_marker("agent:log mode=prepend timestamp=true"));
+    }
+
+    #[test]
+    fn closing_tag_unchanged_with_attrs() {
+        // Closing tags never have attributes
+        let doc = "<!-- agent:status mode=replace -->\n- [x] Done\n<!-- /agent:status -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        let new_doc = components[0].replace_content(doc, "- [ ] Todo\n");
+        assert!(new_doc.contains("<!-- agent:status mode=replace -->"));
+        assert!(new_doc.contains("<!-- /agent:status -->"));
+        assert!(new_doc.contains("- [ ] Todo"));
+    }
+
+    #[test]
+    fn parse_attrs_unit() {
+        let attrs = parse_attrs("mode=append");
+        assert_eq!(attrs.get("mode").map(|s| s.as_str()), Some("append"));
+
+        let attrs = parse_attrs("mode=replace timestamp=true");
+        assert_eq!(attrs.len(), 2);
+
+        let attrs = parse_attrs("");
+        assert!(attrs.is_empty());
+
+        // Malformed tokens without = are ignored
+        let attrs = parse_attrs("mode=append broken novalue=");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs.get("mode").map(|s| s.as_str()), Some("append"));
     }
 }

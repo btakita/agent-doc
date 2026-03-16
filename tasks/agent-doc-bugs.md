@@ -412,4 +412,19 @@ Such as a delay of transmission, Plugin loop picking it up, applying the change(
 This should be reflected in CLAUDE.md and SPEC.md. Want me to update the specs and implement the edit operations output?
 
 Discussing
+
+### Re: Discussing
+
+Take your time. The key decision points are:
+
+1. **Edit operations format** — byte ranges vs component-level patches
+2. **CRDT in binary vs plugin** — binary computes merge, plugin just applies result
+3. **IPC mechanism** — keep file-based (simple) or move to unix socket (faster, bidirectional)
+
+> Each edit has a byte range (start, end) and replacement text. The plugin maps these to editor coordinates and applies via Document API. Cursor position is preserved because only the affected ranges change.
+
+How exposed is this to race conditions?
+Such as a delay of transmission, Plugin loop picking it up, applying the change(s) vs the user editing the document.
+
+When you're ready, let me know which direction to go. In the meantime, `--force-disk` with CRDT merge is working correctly for all writes.
 <!-- /agent:exchange -->

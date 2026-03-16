@@ -35,4 +35,29 @@ Exchange append mode fix shipped:
 
 Fixed the hardcoded `mode_overrides.insert("exchange", "replace")` in `run_stream()` that was forcing replace mode. Append mode now works correctly — responses accumulate in the exchange component.
 audit docs
+
+### Re: Audit docs
+
+4 instruction files are stale relative to `src/write.rs` (which we modified for the append mode fix):
+
+```
+SKILL.md    ✗ Older than src/write.rs
+CLAUDE.md   ✗ Older than src/write.rs
+README.md   ✗ Older than src/write.rs
+SPEC.md     ✗ Older than src/write.rs
+```
+
+Line budget: 375/1000 (within budget).
+
+These need updates to document:
+- Inline component attributes (`mode=append` on tags)
+- `agent_doc_format: inline` as canonical value
+- `--force-disk` flag
+- `agent-doc history` command
+- IPC-priority behavior (exit 75 on timeout)
+- Exchange append mode (no more hardcoded replace override)
+
+Want me to update all 4 docs now?
+
+Yes
 <!-- /agent:exchange -->

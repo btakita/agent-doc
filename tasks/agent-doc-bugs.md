@@ -956,5 +956,23 @@ The `/agent-doc` command is never dispatched in the auto-start path. The JB plug
 Option 1 is the most robust — the binary handles it entirely. Want me to implement it?
 
 Option 1 seems good. Why is Option 2 less robust?
+
+### Re: Why Option 2 is less robust
+
+**Option 2 (queued command file)** has several weaknesses:
+
+1. **Race on stdin:** `start.rs` runs `claude` as a child process (line 61). Claude owns stdin. To inject the `/agent-doc` command, `start.rs` would need to either pipe stdin through a proxy (complex) or use `tmux send-keys` from within the start loop (adds tmux awareness to start.rs).
+
+2. **Timing ambiguity:** `start.rs` can't check for the pending file *during* `cmd.status()` — that blocks until Claude exits. It would need a separate thread or check between restarts, missing the first-run window entirely.
+
+3. **File cleanup:** If Claude crashes before consuming the command, the pending file persists and replays a stale command on next restart.
+
+4. **Two codepaths:** Both `route.rs` and `start.rs` would need to understand command dispatch, splitting responsibility.
+
+**Option 1 (poll-and-send) is self-contained:** `route.rs::auto_start()` creates the pane, sends `agent-doc start`, polls until Claude is ready (via `tmux capture-pane`, looking for the prompt), then sends `/agent-doc <file>` — all in one function. No file coordination, no cross-module coupling.
+
+I'll implement this: after `tmux.send_keys(&new_pane, &start_cmd)`, poll `tmux capture-pane` every 500ms for up to 30s looking for Claude's ready state. Want me to go ahead?
+
+Yes
 <!-- /agent:exchange -->
 ****

@@ -688,4 +688,22 @@ Or via UI: Settings → Build, Execution, Deployment → Build Tools → "Reload
 Want me to start with the plugin SPEC document?
 
 Yes.
+
+### Plugin SPEC created
+
+Written to `src/agent-doc/editors/PLUGIN-SPEC.md` — common functional spec for all editor plugins.
+
+**Contents:**
+1. **Overview** — architecture principle (thin layer, all logic in binary)
+2. **Phase 1 features** — IPC patch watcher (component matching, mode resolution, ACK protocol, retry), claim/submit/sync actions, prompt polling, notifications
+3. **Phase 2 (CRDT-via-FFI)** — CRDT document model, state synchronization, three-state table
+4. **IPC protocol** — patch file JSON schema, CRDT state exchange format
+5. **Error handling** — never swallow, leave files on failure, graceful degradation
+6. **Testing requirements** — 11 specific test cases
+
+Derived from the actual JetBrains (13 Kotlin files) and VSCode (extension.ts) implementations. Both plugins should conform to this spec going forward.
+
+Next: debug the JB plugin IPC (why patches are consumed but not applied)?
+
+go
 <!-- /agent:exchange -->

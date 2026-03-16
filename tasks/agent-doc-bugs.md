@@ -457,4 +457,31 @@ Binary computes byte ranges (based on disk file content)
 The architecture stays the same: binary outputs component-level patches, plugin finds markers and applies. The byte-range idea was premature optimization.
 
 Would it be possible to implement CRDT within the plugin (or FFI). Where the user writes are tracked via CRDT along with the agent writes. Then reconcile changes to the document that way? The real state of the document would somehow need to be tracked as well.
+
+### Re: CRDT in the plugin
+
+**Yes, this is possible and it's the "real-time collaboration" model** — like Google Docs or VS Code Live Share. Both the user and agent are treated as concurrent editors of the same document, with CRDT tracking all changes from both sides.
+
+**How it would work:**
+
+1. **Plugin maintains a CRDT document** (Yrs/Yjs) in memory alongside the editor buffer
+2. **User keystrokes** → captured via editor's `DocumentListener` → applied to CRDT as "user" operations
+3. **Agent patches** → arrive via IPC → applied to CRDT as "agent" operations
+4. **CRDT resolves** conflicts automatically (interleaves at position, preserves both)
+5. **Plugin syncs** CRDT state back to editor buffer atomically
+
+**The challenge:** Keeping the CRDT doc and editor buffer perfectly synchronized. Every editor undo/redo, every auto-format, every external reload must be reflected in the CRDT. This is essentially building a collaborative editing protocol.
+
+**Libraries that make this feasible:**
+- **Yrs** (Rust) — the CRDT library agent-doc already uses. Could be loaded via FFI from the plugin
+- **Yjs** (JavaScript) — same protocol, native for VSCode extensions
+- **y-crdt** (JVM) — Java bindings for Yrs, available for IntelliJ plugins
+
+**Effort: 2-4 weeks** — this is a significant architecture change. It's the right long-term solution but much more complex than the component-level patch approach.
+
+**Pragmatic middle ground:** Keep the current architecture (binary computes patches, plugin applies) but add the content hash check (mitigation #2 above). This gives 95% of the safety for 5% of the effort. The full CRDT-in-plugin approach can come later when the use cases demand it.
+
+What's your timeline preference — quick win now, or invest in the CRDT architecture?
+
+Let's release the "quick win". Then plan for the CRDT via FFI architecture.
 <!-- /agent:exchange -->

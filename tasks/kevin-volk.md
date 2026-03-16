@@ -1,8 +1,10 @@
 ---
 agent_doc_session: f3e0f1d5-b6ed-4fe8-a470-089f1cd5eb22
-tmux_session: '23'
-agent_doc_mode: template
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
+
 
 Help me prepare for my interview with Kevin Volk. See my correspondence & calendar.
 https://calendar.google.com/calendar/u/0/r/eventedit/MW5mZDFvbmt0N2htMzluM3IzajZqdWY4OWsgYnJpYW4udGFraXRhQG0
@@ -168,12 +170,15 @@ Plan:
 4. Send resume + reply email to Kevin in one clean touchpoint
 <!-- /agent:exchange -->
 
-<!-- agent:input -->
+<!-- agent:exchange -->
 Finish creating the kevin-volk contact.
 Transcribe and diarize the recording.
-<!-- /agent:input -->
-
-<!-- agent:output -->
 
 **Just wait and send tomorrow.** It's only 2 days since the call — sending within 3 days is totally normal. One clean touchpoint (resume + reply) is better than two messages. When the CRDT stream feature is done, update the resume and send everything together.
-<!-- /agent:output -->
+
+Please help me draft a reply to Kevin Volk.
+Help me with my latest resume.
+Reference our latest conversation.
+
+Note my open source work, YouTube videos, and ability to manage Rust and TypeScript Libraries.
+<!-- /agent:exchange -->

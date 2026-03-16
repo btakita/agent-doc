@@ -188,6 +188,7 @@ Searched Capterra, G2, Software Advice, TrustRadius, and general web for cancell
 **Overall:** Reviews are mostly positive (automation, portals, support). But there's a notable pattern with contract enforcement:
 
 - **One user reported receiving a threatening letter demanding $10K** for "violating a licensing agreement" by logging in on multiple devices. MA threatened to disable access to their data unless they upgraded to a 10-user license. User described it as feeling like extortion.
+Please print the link
 - **Competitor Bryt Software** explicitly markets against MA's contract lock-in with "cancel anytime" messaging — suggesting this is a known pain point in the market.
 - **No BBB profile found** — MA is a Canadian company (Toronto-based), so BBB coverage is limited.
 - **No widespread cancellation horror stories** — but review sites don't typically capture cancellation experiences (people leave, they don't review).
@@ -205,5 +206,6 @@ Sources:
 - [Software Advice Reviews](https://www.softwareadvice.com/loan-origination/mortgage-automator-profile/reviews/)
 - [Bryt vs Mortgage Automator](https://www.brytsoftware.com/compare/bryt-vs-mortgage-automator/)
 
+Her attorney thinks he can get her out of the contract.
 Her attorney thinks he can get her out of the contract.
 <!-- /agent:exchange -->

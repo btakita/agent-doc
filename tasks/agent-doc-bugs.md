@@ -306,4 +306,47 @@ Your call — FFI for clean UX, or CLI for speed?
 I'm leaning toward FFI.
 
 Would the FFI to the shared library work across processes? Could another process access the same shared library and address space via FFI, or would our IPC mechanism still be necessary?
+
+### Re: FFI cross-process sharing
+
+**No — FFI cannot share address space across processes.** Each process loads its own copy of the shared library into its own virtual memory. The `agent-doc` CLI process and the IntelliJ JVM are separate processes with isolated address spaces. FFI is in-process only.
+
+**IPC is still necessary** for the CLI → editor communication. The architecture is:
+
+```
+agent-doc write (Rust process)
+    │
+    ├─ Writes JSON patch file to .agent-doc/patches/
+    │
+    └─ IPC boundary (file system)
+        │
+        ├─ IntelliJ plugin (JVM process)
+        │   └─ Loads libagent_doc_patch.so via JNI
+        │       └─ Calls apply_patch() in-process
+        │       └─ Applies result to Document API
+        │
+        └─ VSCode extension (Node process)
+            └─ Loads libagent_doc_patch.so via node-ffi
+                └─ Calls apply_patch() in-process
+                └─ Applies result to TextDocument API
+```
+
+**What FFI buys you:** The patch *application logic* (component parsing, mode resolution, content merging) runs in the shared native library instead of being duplicated in Kotlin/TypeScript. But the IPC mechanism (patch file → watch → ACK) stays the same.
+
+**What FFI does NOT buy you:** Eliminating IPC. The CLI and editor are always separate processes.
+
+**The simpler hybrid:** Instead of FFI, have the CLI do all the logic and output the *result* (patched document content). The editor plugin just needs to:
+1. Watch for a result file
+2. Read the new document content
+3. Replace the editor buffer via Document API
+Would we be using CRDT for "surgical" edits...or would the entire document be replaced?
+4. Delete the result file
+
+This is `agent-doc apply-patch` but outputting to a result file instead of writing to disk. No FFI, no duplicated logic, no external edit. ~1h to implement.
+
+Want me to go this route instead?
+
+Considering. It would be good to have as much as possible shared in the agent-doc binary.
+The Plugins would interface with the editor api to improve the UX.
+The Specs should reflect this architecture idiom.
 <!-- /agent:exchange -->

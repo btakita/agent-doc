@@ -298,4 +298,16 @@ Correct. Changed "identical semantics" → "consistent semantics" in:
 Is not necessary or wanted in this resume. It was only used for BCG due to Anil working managing the Tenfore Holdings project @ Neo Innovations.
 
 agent-doc should include CRDT in the resume.
+
+**Re: Remove Tenfore Holdings reference**
+
+Removed "Evolved from a document-as-interface pattern first built for Tenfore Holdings (2015)" from the agent-doc AI Products Shipped bullet. The Neo Innovation/Tenfore entry remains in the Experience section — it still stands on its own there without the forward reference to agent-doc.
+
+**Re: agent-doc should include CRDT**
+
+Updated the AI Products Shipped bullet to include CRDT: "CRDT-based streaming merge for real-time human+agent co-editing without conflicts" (was "write-safe concurrent editing via 3-way merge"). The Experience section bullet already had CRDT from an earlier update.
+
+PDF rebuilt.
+
+Should we remove AI Products Shipped from this resume...due to duplicates with  Open Source - Creator / Solo Developer 
 <!-- /agent:exchange -->

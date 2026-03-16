@@ -11,30 +11,27 @@ agent_doc_write: crdt
 
 <!-- agent:exchange mode=append -->
 
-### Inline component attributes implemented
+### Re: Append mode not working + IPC bug found
 
-All 372 tests pass, clippy clean. Changes across 6 files:
+**Root cause found:** The IPC path has a critical bug — the plugin ACKs the patch (deletes the JSON file) but doesn't actually apply the content to the document buffer. The binary then optimistically updates the snapshot assuming the content was written. Result: snapshot diverges from the file, and the response is silently lost.
 
-**`component.rs`** — Parser extracts `key=value` attributes from opening tags. `Component` struct has `attrs: HashMap<String, String>`.
+**This explains all the "missing response" issues in this session.** Every IPC write reported "consumed by plugin" but the content never appeared in the document.
 
-**`template.rs` + `patch.rs`** — Mode resolution: inline attr > components.toml > built-in default.
+**Immediate fix:** Using `--force-disk` to bypass IPC for this write. The IPC bug needs to be investigated in the JetBrains plugin (the Kotlin side, not the Rust binary).
 
-**`frontmatter.rs`** — `agent_doc_format: inline` is canonical (accepts `append` as alias).
-
-**`claim.rs`** — Scaffolding uses `<!-- agent:exchange mode=append -->`, `<!-- agent:status mode=replace -->`.
-
-**11 new tests** covering attr parsing, mode precedence, backward compat.
-
-Ready to release v0.17.12?
-Release
-
-I didn't see the response to `Release`...why?
-
+**Your `agent-doc --version` showing 0.17.0:** There's a `~/.cargo/bin/agent-doc` (0.17.0) in your PATH. The skill uses `.bin/agent-doc` (0.17.12, correct). But your terminal's PATH finds the cargo one first. Run:
+```bash
+cargo install agent-doc  # updates ~/.cargo/bin to latest
+# OR
+# Remove ~/.cargo/bin/agent-doc and rely on .bin/ symlink
 ```
-~/work/btakita/agent-loop main ⇡32 !6                                                                                                                                                                                                 02:12:12
+
+**Append mode itself works** — the binary correctly reads `mode=append` from the inline attribute. The issue was purely the IPC path not delivering the content.
+
+Let's test again:
+```
+~/work/btakita/agent-loop main ⇡34 !7                                                                                                                                                                                                 02:21:49
 ❯ agent-doc --version
-agent-doc 0.17.0
+agent-doc 0.17.12
 ```
-
-Is `<!-- agent:exchange mode=append -->` working? Doesn't seem to be appending to the content of agent:exchange.
 <!-- /agent:exchange -->

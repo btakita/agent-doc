@@ -11,27 +11,19 @@ agent_doc_write: crdt
 
 <!-- agent:exchange mode=append -->
 
-### Re: Append mode not working + IPC bug found
+### Re: Test append with 0.17.12
 
-**Root cause found:** The IPC path has a critical bug — the plugin ACKs the patch (deletes the JSON file) but doesn't actually apply the content to the document buffer. The binary then optimistically updates the snapshot assuming the content was written. Result: snapshot diverges from the file, and the response is silently lost.
+Good — you're now on 0.17.12. This response should **append** below the previous one (not replace it). If you can see both "Re: Append mode not working + IPC bug found" AND this "Re: Test append" section in the exchange component, append mode is working.
 
-**This explains all the "missing response" issues in this session.** Every IPC write reported "consumed by plugin" but the content never appeared in the document.
+Using `--force-disk` to bypass the IPC bug for now.
 
-**Immediate fix:** Using `--force-disk` to bypass IPC for this write. The IPC bug needs to be investigated in the JetBrains plugin (the Kotlin side, not the Rust binary).
+### Re: Append mode fix
 
-**Your `agent-doc --version` showing 0.17.0:** There's a `~/.cargo/bin/agent-doc` (0.17.0) in your PATH. The skill uses `.bin/agent-doc` (0.17.12, correct). But your terminal's PATH finds the cargo one first. Run:
-```bash
-cargo install agent-doc  # updates ~/.cargo/bin to latest
-# OR
-# Remove ~/.cargo/bin/agent-doc and rely on .bin/ symlink
-```
+Found and fixed the root cause: `run_stream()` in `write.rs` had a **hardcoded** `mode_overrides.insert("exchange", "replace")` that forced replace mode regardless of inline attributes or `components.toml`. Removed the override — mode resolution now uses the proper chain: inline attr > components.toml > built-in default.
 
-**Append mode itself works** — the binary correctly reads `mode=append` from the inline attribute. The issue was purely the IPC path not delivering the content.
+This response should appear BELOW the previous one. Both "Re: Append mode not working + IPC bug found" section from before (which got lost to the replace override) is gone, but this and future responses will accumulate.
 
-Let's test again:
-```
-~/work/btakita/agent-loop main ⇡34 !7                                                                                                                                                                                                 02:21:49
-❯ agent-doc --version
-agent-doc 0.17.12
-```
+Binary rebuilt. Ready to release v0.17.13 with the fix?
+
+release
 <!-- /agent:exchange -->

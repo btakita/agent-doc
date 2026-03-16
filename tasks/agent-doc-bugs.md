@@ -427,4 +427,34 @@ How exposed is this to race conditions?
 Such as a delay of transmission, Plugin loop picking it up, applying the change(s) vs the user editing the document.
 
 When you're ready, let me know which direction to go. In the meantime, `--force-disk` with CRDT merge is working correctly for all writes.
+
+### Re: Race conditions with byte-range edits
+
+**Yes, byte-range edits are vulnerable to race conditions.** If the user types between when the binary computes the ranges and when the plugin applies them, the byte offsets are stale — edits land at wrong positions or corrupt the document.
+
+**The window of vulnerability:**
+
+```
+Binary computes byte ranges (based on disk file content)
+    │
+    ├─ ~50-200ms gap (file write + plugin poll)
+    │
+    └─ User types during this gap
+         │
+        └─ Plugin applies stale byte ranges → WRONG POSITION
+```
+
+**Mitigations:**
+
+1. **Component-level patches (not byte ranges)** — The plugin finds `<!-- agent:exchange -->` markers at apply time, not at compute time. Even if the user types inside the component, the plugin finds the current marker positions and applies relative to them. This is what the current IPC JSON format already does.
+
+2. **Versioned content hash** — Include a hash of the expected document content in the patch file. The plugin checks: does the current document hash match? If not, the document changed since the patch was computed — reject and leave for retry.
+
+3. **Editor write lock** — Both IntelliJ and VSCode support `WriteCommandAction` / `workspace.applyEdit` which are atomic within the editor's undo system. The user can't type during the edit application itself — only between read and apply.
+
+**Bottom line:** Component-level patches (find markers at apply time) are much safer than byte-range patches. The current IPC format already uses component-level patches — we should keep that approach rather than switching to byte ranges.
+
+The architecture stays the same: binary outputs component-level patches, plugin finds markers and applies. The byte-range idea was premature optimization.
+
+Would it be possible to implement CRDT within the plugin (or FFI). Where the user writes are tracked via CRDT along with the agent writes. Then reconcile changes to the document that way? The real state of the document would somehow need to be tracked as well.
 <!-- /agent:exchange -->

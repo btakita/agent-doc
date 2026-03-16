@@ -111,66 +111,7 @@ The unnamed startup is **CopilotKit** — #1 open-source platform for building A
 
 ## Exchange
 
-<!-- agent:exchange -->
-**Session 1 — Mar 9, 2026:** Initial interview prep, corky sync revealed call details (Mon Mar 9, 4:30 PM EDT, Google Meet). Post-call: identified company as CopilotKit, CTO Jordan Ritter. Reviewed draft reply — caught CursorKit typo, suggested revision with project one-liners. Advised against mentioning existence-lang to recruiter (save for technical interview with Jordan).
-
-**Session 2 — Mar 11, 2026:** Converted document to template mode. User requests: create kevin-volk contact, transcribe and diarize recording.
-
-### Transcription complete
-
-Transcript saved to `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`
-- 34-minute call, 1215 Whisper segments merged into 372 paragraphs
-- Timestamps preserved, no speaker diarization (Whisper medium model)
-
-Contact file updated: `mail/contacts/kevin-volk/CLAUDE.md`
-
-### Diarization complete
-
-Transcript diarized with speaker labels (Kevin/Brian) using contextual analysis. Updated in place at `mail/contacts/kevin-volk/recordings/20260309-kevin-volk.txt`.
-
-**Re: Corky diarizing by default** — noted as a feature request. Currently Whisper transcription doesn't include diarization. Options:
-1. Add pyannote speaker diarization as a post-processing step in corky's transcription pipeline (pyannote has dependency issues on Python 3.14 currently)
-2. Use contextual/LLM-based diarization as a fallback (what we just did)
-
-This should be tracked as a corky feature in `tasks/corky.md`.
-
-### Session 3 — Mar 11, 2026: Resume updated for CopilotKit
-
-**Resume changes** (`resume/BrianTakita.md`):
-
-1. **AI Products Shipped** — Added agent-kit (Rust SDK for agent CLI tools) and tmux-router (declarative tmux pane routing)
-2. **Presence AI entry** — Enhanced with React/Next.js/TypeScript monorepo details: "Next.js + React frontend ↔ GraphQL (urql) ↔ API Services... TypeScript monorepo with 8 internal packages"
-3. **Open Source section** — Added full entries for agent-kit and tmux-router with detailed bullets
-4. **Enhanced descriptions**:
-   - ctx-core: "TypeScript SDK for reactive context management — 150+ composable packages"
-   - lazily-py: "Python SDK for lazy evaluation with context caching — decorator-based dependency injection"
-   - rmemo/RelementJS: "Smallest reactive isomorphic UI library in TypeScript — signals-based state management with zero-overhead hydration, used as React-level infrastructure"
-
-**New profile created** (`resume/profiles/copilotkit.toml`):
-- Highlights TypeScript, Python, React, Rust, Node.js, Agents in skills
-- Bolds SDK/framework/agent/open-source phrases throughout
-- Includes Open Source section (Kevin wants to see it)
-- Removes Freelance entry (Kevin flagged overlapping dates)
-- Keeps SocialChorus (React conversion experience)
-
-**PDF built**: `resume/BrianTakita-copilotkit.pdf`
-
-**Action items updated:**
-- [x] Update resume with TypeScript/Python/SDK/React emphasis
-- [ ] Send updated resume to Kevin
-
-### Session 4 — Mar 11, 2026: Send timing
-
-**Recommendation: just wait and send tomorrow.** No need to message Kevin about the timeline — it's only been 2 days since the call. Sending a polished resume within 3 days of a recruiter screen is perfectly normal. Messaging about a sub-24h delay creates unnecessary noise.
-
-Plan:
-1. Finish CRDT stream feature
-2. Add agent-doc streams to resume (AI Products Shipped + Open Source bullets)
-3. Rebuild `BrianTakita-copilotkit.pdf`
-4. Send resume + reply email to Kevin in one clean touchpoint
-<!-- /agent:exchange -->
-
-<!-- agent:exchange -->
+<!-- agent:history -->
 Finish creating the kevin-volk contact.
 Transcribe and diarize the recording.
 
@@ -181,4 +122,52 @@ Help me with my latest resume.
 Reference our latest conversation.
 
 Note my open source work, YouTube videos, and ability to manage Rust and TypeScript Libraries.
+<!-- /agent:history -->
+
+<!-- agent:exchange mode=append -->
+### Session 5 — Mar 15, 2026: Email draft + resume updates
+
+**Context:** Kevin followed up Mar 13. It's now Mar 15 — 6 days since call, 2 days since follow-up. Resume was updated in Session 3; planned to add CRDT streams + recent work before sending.
+
+**Recent work to highlight for Kevin:**
+
+1. **lazily** (Rust v0.1.1 on crates.io + Python + Zig) — Cross-language reactive primitives with identical semantics. Maps to CopilotKit's TS + Python SDK needs.
+2. **YouTube live sessions** — 3 videos showing AI-native development:
+   - "Lazily: Reactive Primitives Done Right" (Mar 15) — https://www.youtube.com/watch?v=hVNmbmY4vgo
+   - "Building a Sub-1KB Web Framework" (Mar 14) — https://www.youtube.com/watch?v=oFFHVjQaYdA
+   - "Dog-fooding agent-doc Part 2" (Mar 13) — https://www.youtube.com/watch?v=qQCKVQHRQCI
+3. **agent-doc CRDT streams** — Real-time conflict-free merge for concurrent human+agent editing.
+
+**Draft email to Kevin:**
+
+> Hi Kevin,
+>
+> Happy weekend — apologies for the delay. Here's my updated resume with the TypeScript, Python, SDK, and React details you asked for.
+>
+> Since we spoke, I've been shipping across a few projects that are directly relevant:
+>
+> - **lazily** — A reactive signals library I built in Rust, Python, and Zig with identical semantics across all three. Published to crates.io (v0.1.1). Cross-language SDK design is exactly the kind of work this role calls for.
+> - **agent-doc** — Added CRDT-based real-time streaming, so humans and AI agents can edit the same document concurrently without conflicts. Real-time systems + agent runtime intersection.
+> - **YouTube** — I've been live-streaming my development sessions, building frameworks and debugging with AI in real-time. Three recent sessions show the "pilots not mechanics" approach in action:
+>   - Lazily: Reactive Primitives Done Right — https://www.youtube.com/watch?v=hVNmbmY4vgo
+>   - Building a Sub-1KB Web Framework — https://www.youtube.com/watch?v=oFFHVjQaYdA
+>   - Dog-fooding agent-doc — https://www.youtube.com/watch?v=qQCKVQHRQCI
+>
+> Resume is attached. Looking forward to next steps with CopilotKit.
+>
+> Brian
+
+> Cross-language SDK design is exactly the kind of work this role calls for.
+
+What makes you say that?
+
+**Resume updates needed before sending:**
+1. Add lazily to Open Source (cross-language reactive primitives, crates.io)
+2. Add YouTube reference (AI-native development evidence)
+3. Update agent-doc bullet (CRDT streaming)
+4. Rebuild `BrianTakita-copilotkit.pdf`
+
+**Ready to execute** — say the word and I'll apply resume updates, rebuild PDF, and prepare the corky draft.
+
+go
 <!-- /agent:exchange -->

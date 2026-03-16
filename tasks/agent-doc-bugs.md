@@ -27,4 +27,12 @@ All 372 tests pass, clippy clean. Changes across 6 files:
 
 Ready to release v0.17.12?
 Release
+
+I didn't see the response to `Release`...why?
+
+```
+~/work/btakita/agent-loop main ⇡32 !6                                                                                                                                                                                                 02:12:12
+❯ agent-doc --version
+agent-doc 0.17.0
+```
 <!-- /agent:exchange -->

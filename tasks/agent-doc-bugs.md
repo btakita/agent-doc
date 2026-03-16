@@ -35,4 +35,6 @@ I didn't see the response to `Release`...why?
 ❯ agent-doc --version
 agent-doc 0.17.0
 ```
+
+Is `<!-- agent:exchange mode=append -->` working? Doesn't seem to be appending to the content of agent:exchange.
 <!-- /agent:exchange -->

@@ -192,4 +192,6 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 4. **Web Archive** — `web.archive.org/web/*/capterra.com/p/191761/Mortgage-Automator/reviews/` may have a snapshot
 
 **Quickest path:** Open Tor Browser, navigate to the Capterra URL above, Ctrl+F for "extort" or "$10" to find the specific review.
+
+Can you use a tor-enabled headless browser to search the sites?
 <!-- /agent:exchange -->

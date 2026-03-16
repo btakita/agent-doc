@@ -484,4 +484,16 @@ Would it be possible to implement CRDT within the plugin (or FFI). Where the use
 What's your timeline preference — quick win now, or invest in the CRDT architecture?
 
 Let's release the "quick win". Then plan for the CRDT via FFI architecture.
+
+### v0.17.14 Released
+
+Quick win shipped:
+- crates.io: https://crates.io/crates/agent-doc/0.17.14
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.14
+
+Includes: doc updates, JetBrains plugin IPC fix, VSCode IPC parity, history command, route flash notification. 372 tests pass.
+
+**Next:** Plan the CRDT-via-FFI architecture for real-time collaborative editing between agent and user.
+
+go
 <!-- /agent:exchange -->

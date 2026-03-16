@@ -722,4 +722,212 @@ IntelliJ loads from `.config/` first, so the **old 0.2.0 was taking precedence**
 Please transfer the work for the shared library over FFI into tasks/agent-doc-plugins.md
 
 Do we have a mechanism to verify that the plugin is the correct version? And to install the correct version if it's not?
+
+### Re: Plugin task transfer + version verification
+
+**Transferred:** CRDT-via-FFI roadmap written to `tasks/agent-doc-plugins.md` with phases 1-4 and design decisions.
+
+**Plugin version verification already exists:**
+
+```bash
+agent-doc plugin list          # Shows installed versions
+agent-doc plugin install jb    # Install latest JetBrains plugin
+agent-doc plugin update jb     # Update to latest
+```
+
+`plugin.rs` has `jetbrains_plugin_dirs()` which scans all known plugin directories. The competing-installation problem happened because `install` put 0.2.1 in `.local/share/` while the old 0.2.0 was still in `.config/`.
+
+**What's missing:** A pre-flight check that detects stale/duplicate installations and warns. Could add to `agent-doc plugin list`:
+```
+agent-doc-jetbrains:
+  0.2.1 at ~/.local/share/JetBrains/.../agent-doc-jetbrains/  (active)
+  0.2.0 at ~/.config/JetBrains/.../agent-doc-jetbrains/  ⚠️ STALE — remove this
+```
+
+Or better: `agent-doc plugin install` should clean up old installations before installing the new version. Want me to add that?
+
+Yes
+
+I ran this file. A new claude instance started. But did not show up in the tmux pane until I switched the focus document in the editor.
+The the claude session only starts but does not run `/agent-doc run ...`
+
+```
+/home/brian/.cargo/bin/agent-doc start tasks/agent-doc-bugs.md
+~//home/brian/.cargo/bin/agent-doc !11 ?1tasks/agent-doc-bugs.md
+Warning: agent-doc v0.17.14 is available (you have v0.17.12). Run `agent-doc upgrade` to update.
+Registered session 92fba2ac → pane %24
+Starting claude...
+ ▐▛███▜▌   Claude Code v2.1.76
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  SessionStart:startup says: [agent-loop] recent context, 2026-03-16 7:12pm EDT
+     ────────────────────────────────────────────────────────────
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+
+     Context Economics
+       Loading: 50 observations (14,844 tokens to read)
+       Work investment: 77,715 tokens spent on research, building, and decisions
+       Your savings: 81% reduction from reuse
+
+     Mar 16, 2026
+
+     tasks/agent-doc-bugs.md
+       #5943  3:50 AM  ⚖️  CRDT implementation strategy for real-time collaboration
+
+     tasks/kevin-volk.md
+       #5944  3:51 AM  ✅  Resume phrasing recommendations added for proxy/patch test doubles
+
+     src/agent-doc/Cargo.toml
+       #5945           ✅  Version bump to 0.17.14 with passing test suite
+       #5946           🟣  Released v0.17.14 with IPC fixes, VSCode parity, and history commands
+
+     General
+       #5947  3:52 AM  ✅  Tagged and published v0.17.14 to GitHub
+       #5948           ✅  Published agent-doc v0.17.14 to crates.io
+       #5949           ✅  Published agent-doc v0.17.14 to PyPI
+       #5950           ✅  Built optimized release binary locally
+       #5951  3:53 AM  ✅  Created GitHub release v0.17.14 with prebuilt binary
+
+     src/agent-doc/Cargo.toml
+       #5952           🟣  Automated multi-platform release workflow with agent
+
+     tasks/agent-doc-bugs.md
+       #5953  3:55 AM  ✅  Agent-doc bugs documentation updated and committed
+       #5954           🟣  agent-doc v0.17.14 released with IPC improvements and new commands
+
+     tasks/kevin-volk.md
+       #5955  3:57 AM  ✅  Updated Kevin Volk documentation with improved ontology system description
+       #5956  4:00 AM  ✅  Resume wording refined: "extensible" replaces "152 nodes" for ontology description
+
+     tasks/agent-doc-bugs.md
+       #5957           ✅  Agent-doc architecture plan committed to version control
+       #5958  4:01 AM  ✅  State synchronization model documented with live CRDT merge demonstration
+
+     tasks/kevin-volk.md
+       #5959  4:03 AM  ✅  Updated CopilotKit profile to emphasize developer infrastructure
+
+     resume/build.py
+       #5960           🔵  Resume build system supports profile-based filtering and highlighting
+
+     src/corky/CLAUDE.md
+       #5961  4:06 AM  🔵  Corky email workflow operates via Gmail drafts, not direct sending
+
+     General
+       #5962  4:07 AM  🔵  Corky CLI provides draft and schedule subcommands
+
+     tasks/kevin-volk.md
+       #5963  4:09 AM  ✅  Committed Kevin Volk task document updates
+       #5964           ✅  User question added about automated scheduling with cron or corky watch
+
+     General
+       #5965           🔵  Corky has native scheduling capabilities for timed publish/send operations
+       #5966           🔵  Corky schedule run supports dry-run mode for safe testing
+
+     tasks/kevin-volk.md
+       #5967  4:13 AM  ✅  agent-doc committed responses to kevin-volk task file
+       #5968           ✅  New email scheduling task added for corky tool
+
+     General
+       #5969           🔵  at command not available on system
+
+     tasks/kevin-volk.md
+       #5970  4:14 AM  ✅  Response written to kevin-volk task file regarding email scheduling
+
+     mail/drafts/20260316-kevin-volk-resume-update.md
+       #5971           🔴  Fixed attachment path in email draft to Kevin Volk
+
+     #S1715 Understanding agent-doc CRDT handling for external file edits and synchronization behavior (Mar 16, 10:31
+     AM)
+
+     tasks/linkedin.md
+       #5972  10:32 AM  ✅  LinkedIn task documentation committed
+
+     #S1716 Create LinkedIn promotional post for lazily reactive signals library video (Mar 16, 10:33 AM)
+
+     tasks/linkedin.md
+       #5973  10:43 AM  ✅  LinkedIn Post Draft for lazily Library Video
+
+     #S1717 Investigating agent-doc autoclaim delay bug - 20-second lag when commands sent via tmux (Mar 16, 10:43 AM)
+
+     tasks/linkedin.md
+       #5974  10:43 AM  ✅  LinkedIn Post Committed to Version Control
+
+     mail/social/20260316-lazily-reactive-signals-linkedin.md
+       #5975  10:44 AM  🟣  LinkedIn Post Prepared for Corky Publishing
+
+     #S1718 Reviewed agent-doc bugs related to feedback visibility and notification mechanisms (Mar 16, 10:44 AM)
+
+     General
+       #5976  10:44 AM  🔵  Corky Tool Capabilities Explored
+
+     tasks/agent-doc-bugs.md
+       #5977            ✅  Committed agent-doc bug documentation
+
+     General
+       #5978            🔵  LinkedIn Publishing Workflow Commands Discovered
+
+     mail/social/20260312-eric-ries-incorruptible-linkedin.md
+       #5979  10:45 AM  🔵  Corky LinkedIn Post Frontmatter Format Examined
+
+     #S1719 Posted LinkedIn content from tasks/linkedin.md task file (Mar 16, 10:45 AM)
+
+     tasks/agent-doc-bugs.md
+       #5980  10:46 AM  ✅  Agent-doc bug documentation committed to version control
+       #5981            🔵  Agent-doc bugs identified: command visibility and external edit response loss
+       #5982            🔵  Root cause analysis of agent-doc feedback visibility failures
+
+     #S1720 Running agent-doc on tasks/agent-doc-bugs.md to review agent documentation bugs (Mar 16, 11:14 AM)
+
+     tasks/linkedin.md
+       #5983  11:15 AM  ✅  Committed LinkedIn task completion to git
+       #5984            🔵  LinkedIn publishing workflow uses corky tool and mail/social/ draft system
+
+     #S1721 Investigate agent-doc bugs, focusing on auto-reload behavior and dialog issues (Mar 16, 11:22 AM)
+
+     tasks/agent-doc-bugs.md
+       #5985  11:23 AM  ✅  Agent-doc committed documentation updates to agent-doc-bugs.md
+
+     #S1722 Automated job application email to Kevin Volk with scheduled send via systemd timer (Mar 16, 11:26 AM)
+
+     tasks/agent-doc-bugs.md
+       #5986  11:27 AM  ✅  Committed agent-doc bug investigation findings
+
+     src/agent-doc/editors/vscode/src/extension.ts
+       #5987            🔵  VSCode plugin IPC implementation examined
+
+     src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt
+       #5988  11:28 AM  🔵  JetBrains plugin IPC implementation examined
+
+     #S1723 Create plugin specification for agent-doc editor integration covering IPC and CRDT requirements (Mar 16,
+     11:41 AM)
+
+     tasks/corky.md
+       #5989  11:43 AM  ✅  Scheduled email send feature request added to corky backlog
+
+     .agent-doc/patches/e7cc7f7a85d39c090242bb3a72d53651075f5c7f9a1053e25d29aa36657310cc.json
+       #5990  11:47 AM  🔵  Created manual IPC patch file to debug JetBrains plugin patch consumption
+
+     #S1724 Process task file justin-caird.md and manage associated items (Mar 16, 5:56 PM)
+
+     tasks/justin-caird.md
+       #5991  5:56 PM  ✅  Created task tracking file for Justin Caird
+       #5992  5:57 PM  🔵  LinkedIn recruitment outreach tracked for response
+
+
+     Access 78k tokens of past research & decisions for just 14,844t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+```
 <!-- /agent:exchange -->

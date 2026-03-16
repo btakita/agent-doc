@@ -29,5 +29,8 @@ The IPC path avoids this entirely because the plugin applies patches to the live
 
 Yes
 
-I also want t
+I also want to have `agent_doc_format: template` but also append inside of the `agent:exchange` component.
+How can I do this?
+
+Is there also an agent-doc command to squash the appended history in the document?
 <!-- /agent:exchange -->

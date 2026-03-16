@@ -181,31 +181,27 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: Mortgage Automator cancellation experiences & sentiment**
+**Re: "Please print the link" — CORRECTION**
 
-Searched Capterra, G2, Software Advice, TrustRadius, and general web for cancellation complaints.
+I need to correct my earlier statement. The $10K threatening letter was about **The Mortgage Office (TMO)**, NOT Mortgage Automator. The reviewer *switched to* MA because of TMO's aggressive licensing practices.
 
-**Overall:** Reviews are mostly positive (automation, portals, support). But there's a notable pattern with contract enforcement:
+**The specific review:** [Capterra — Mortgage Automator Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/) — a user describes switching from TMO after TMO claimed they breached terms of service due to staff accessing the server remotely. TMO demanded an immediate upgrade to a 20-person license despite having fewer than 5 employees, and extorted $10K USD just to keep access to their data.
 
-- **One user reported receiving a threatening letter demanding $10K** for "violating a licensing agreement" by logging in on multiple devices. MA threatened to disable access to their data unless they upgraded to a 10-user license. User described it as feeling like extortion.
-Please print the link
-- **Competitor Bryt Software** explicitly markets against MA's contract lock-in with "cancel anytime" messaging — suggesting this is a known pain point in the market.
-- **No BBB profile found** — MA is a Canadian company (Toronto-based), so BBB coverage is limited.
-- **No widespread cancellation horror stories** — but review sites don't typically capture cancellation experiences (people leave, they don't review).
+Please send me the exact link of the complaint.
+Capterra blocked my IP address, so we may need alternate means to reach the site. I have torbrowser-launcher.
+Does LightPanda support tor?
 
-**Bottom line:** Judith's experience isn't unique. MA's terms are designed to make leaving expensive, and at least one other user has reported aggressive enforcement tactics. This reinforces:
+**This is actually relevant to Judith's situation** — she's about to sign up for TMO. Worth noting:
+- TMO also has aggressive licensing enforcement (per this Capterra review)
+- TMO charges $400/month per additional seat beyond 2
+- The $10K incident involved remote server access triggering a multi-device license violation
 
-1. **Get the contract** — the specific terms she signed matter more than the public ToS
-2. **Check the timeline** — if she's past the initial term and within the 45-day window, she has leverage
-3. **Don't panic** — even if MA claims she owes money, enforcing a SaaS contract against a small business customer in a different country (Canada → US) is expensive and rarely worth it for them
-4. **Document everything** — save all emails with MA in case this escalates
+**Implication for the project:** This reinforces the Phase 2 strategy (eventually replacing TMO with a custom system). TMO is a useful stepping stone, but Judith should be aware of their licensing terms before signing up. Read the TMO contract carefully — especially seat limits and remote access clauses.
+
+**Re: Duplicate line** — I see "Her attorney thinks he can get her out of the contract." appears twice (lines 209-210). That's a CRDT merge artifact from a previous cycle. You can delete the duplicate.
 
 Sources:
-- [Capterra Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
-- [G2 Reviews](https://www.g2.com/products/mortgage-automator-mortgage-automator/reviews)
-- [Software Advice Reviews](https://www.softwareadvice.com/loan-origination/mortgage-automator-profile/reviews/)
-- [Bryt vs Mortgage Automator](https://www.brytsoftware.com/compare/bryt-vs-mortgage-automator/)
-
-Her attorney thinks he can get her out of the contract.
-Her attorney thinks he can get her out of the contract.
+- [Capterra — Mortgage Automator Reviews](https://www.capterra.com/p/191761/Mortgage-Automator/reviews/)
+- [Capterra — The Mortgage Office Reviews](https://www.capterra.com/p/9277/The-Mortgage-Office/reviews/)
+- [Capterra — TMO vs MA Comparison](https://www.capterra.com/compare/9277-191761/The-Mortgage-Office-vs-Mortgage-Automator)
 <!-- /agent:exchange -->

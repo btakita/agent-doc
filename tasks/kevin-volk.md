@@ -221,4 +221,24 @@ This is from the CopilotKit JD section header: *"We're Looking for Pilots, Not J
 It's their way of saying: we want engineers who have internalized AI-assisted development as their primary workflow, not people who just use autocomplete. Your YouTube livestreams showing real-time AI-native development are a direct demonstration of "pilot" mode — which is why I referenced the phrase in the email draft.
 
 Got it. Should we add a quote to contextualize that statement or no need?
+
+**Re: agent-doc + LangChain integration**
+
+Strong conceptual overlap. agent-doc's core pattern — document as persistent session state with diff-based submissions — maps naturally to LangChain's architecture:
+
+- **LangChain tools**: agent-doc's `submit`, `write`, `recover` commands could be exposed as LangChain tools, letting a LangChain agent operate on documents as a first-class interface
+- **Memory/state**: LangChain agents need persistent memory — agent-doc provides exactly that via snapshot-based state tracking and git-backed history
+- **CRDT concurrent editing**: LangChain's multi-agent patterns (crew, graph) often have multiple agents touching shared state — agent-doc's CRDT merge handles this natively
+- **CopilotKit specifically**: CopilotKit integrates with LangChain for agent orchestration. agent-doc's "agents working inside real documents" pattern aligns with CopilotKit's vision of copilots working inside real applications — not in a chat sidebar, but embedded in the user's actual workspace
+
+The overlap is at the **agent/user interaction layer** — which is exactly where CopilotKit positions itself. This could be a strong talking point with Jordan Ritter.
+
+**Re: "pilots not mechanics" quote**
+
+No need. Kevin sent the JD — he knows the phrase. Using it without a quote signals that you read and internalized his client's language, which is the right move for a recruiter email. Over-explaining would dilute the signal. Keep it as-is.
+
+> same cross-language API design discipline that TypeScript + Python SDK work demands
+
+Should I also include Rust...since there was interest?
+Do you have the transcript from our phone call?
 <!-- /agent:exchange -->

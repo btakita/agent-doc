@@ -7,50 +7,38 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Template + append exchange + squash
+### Re: Settings naming + append mode
 
-**Template + append exchange:** This is already how it works with v0.17.10! Your document has `agent_doc_format: template` in frontmatter, and `.agent-doc/components.toml` sets `exchange` to `mode = "append"`. Each cycle the skill writes a `<!-- patch:exchange -->` block that gets appended (not replaced) to the exchange component.
+**Naming consolidation:** You're right — having `append` in both `agent_doc_format` and `agent_doc_response` is confusing. Here's a cleaner model:
 
-Check your `components.toml`:
-```toml
-[exchange]
-mode = "append"    # ← this is what makes exchange append
+| Setting | Values | Meaning |
+|---------|--------|---------|
+| `agent_doc_format` | `template` \| `append` | Document structure: components vs User/Assistant blocks |
+| `agent_doc_response` | `replace` \| `append` | How agent responses update the exchange: overwrite vs accumulate |
+| `agent_doc_write` | `crdt` \| `merge` | Write strategy: CRDT conflict-free vs 3-way merge |
 
-[findings]
-mode = "append"
+`agent_doc_format: template | inline`...so inline instead of append. Migrate existing values of `append` to `inline`.
 
-[status]
-mode = "replace"
-```
+The overlap is `append` meaning different things:
+- `agent_doc_format: append` → document-level structure (alternating blocks)
+- `agent_doc_response: append` → component-level behavior (accumulate responses)
 
-I want to discuss the settings:
-```
-agent_doc_format: template | append
-agent_doc_response: replace | append
-agent_doc_write: crdt | merge
-```
-I renamed mode to `agent_doc_response`. Is there a better name?
-This is strange because we now have `append` being a valid value for both `agent_doc_format` and `agent_doc_response`.
-I wonder if we can consolidate.
+**Better name for `agent_doc_response`?** Options:
+- `agent_doc_response` (your proposal) — clear but slightly ambiguous
+- `agent_doc_accumulate` — `true`/`false` (boolean, simpler)
+- `agent_doc_exchange` — `append`/`replace` (scoped to exchange component)
 
-If this file doesn't exist for a document, run `agent-doc claim <file>` to create it with defaults.
+I like `agent_doc_exchange: append | replace`
+I'm also considering `agent:exchange: append | replace` because the tag is `agent:exchange`.
+Can we explore component level configurations in this way?
 
-**Squash command:** Not yet, but it's a natural complement to `history`. Proposed:
+Another possibility is `agent:exchange[mode=append|replace]` or `agent:exchange mode="append"|"replace"`
+Which is probably better than the front matter.
+Let's have the default be `agent:exchange mode=append`
 
-```bash
-# Squash all exchange content to just the latest response
-agent-doc squash <file>
+I'd go with `agent_doc_response: append|replace` — it's the most intuitive. The "append" overlap with format is acceptable because they operate at different levels (document vs component).
 
-# Squash to a specific commit's content
-agent-doc squash <file> --from <commit>
-```
+**For this document:** I'll treat it as append mode from now on. Previous responses will accumulate.
 
-This would clear the exchange component and write only the latest (or specified) response. The old content survives in git history and can be restored with `agent-doc history --restore`.
-
-Should I implement `squash` now, or focus on the IPC timeout fix + release first? The IPC agent is still building.
-
-Both
-
-Please add the response that I replaced in the history.
-Let's go into `agent_doc_response: append`
+**Restoring history:** I'll pull the previous responses from git and prepend them. And I'll implement the squash command next.
 <!-- /agent:exchange -->

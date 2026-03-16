@@ -562,6 +562,300 @@ async function popupMenuAction(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// IPC Patch Watcher
+// ---------------------------------------------------------------------------
+
+/**
+ * Watches `.agent-doc/patches/` for JSON patch files written by `agent-doc write --ipc`
+ * and applies them via VS Code's WorkspaceEdit API. This avoids "externally modified"
+ * dialogs and preserves cursor position / undo stack.
+ *
+ * Flow:
+ * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
+ * 2. FileSystemWatcher detects the new file
+ * 3. Reads JSON, finds/opens the target document, applies patches
+ * 4. Saves the document and deletes the JSON file (ACK)
+ * 5. agent-doc polls for deletion and updates the snapshot
+ */
+
+interface IpcComponentPatch {
+    component: string;
+    content: string;
+}
+
+interface IpcPatch {
+    file: string;
+    patches: IpcComponentPatch[];
+    unmatched: string;
+    frontmatter?: string;
+    fullContent?: string;
+}
+
+class PatchWatcher implements vscode.Disposable {
+    private watcher: vscode.FileSystemWatcher | undefined;
+    private patchesDir: string | undefined;
+    private outputChannel: vscode.OutputChannel;
+
+    constructor() {
+        this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
+    }
+
+    start(): void {
+        const patchesDir = this.findPatchesDir();
+        if (!patchesDir) {
+            this.outputChannel.appendLine('PatchWatcher: no .agent-doc/patches/ directory found');
+            return;
+        }
+
+        this.patchesDir = patchesDir;
+
+        // Ensure the directory exists
+        try {
+            fs.mkdirSync(patchesDir, { recursive: true });
+        } catch {
+            // already exists or can't create — either way, continue
+        }
+
+        // Watch for new .json files in the patches directory
+        const pattern = new vscode.RelativePattern(patchesDir, '*.json');
+        this.watcher = vscode.workspace.createFileSystemWatcher(pattern, false, true, true);
+        this.watcher.onDidCreate((uri) => this.onPatchFileCreated(uri));
+
+        this.outputChannel.appendLine(`PatchWatcher: watching ${patchesDir}`);
+
+        // Process any existing patch files on startup
+        this.processPendingPatches(patchesDir);
+    }
+
+    private findPatchesDir(): string | undefined {
+        // Walk up from workspace root to find .agent-doc/patches/
+        const roots = vscode.workspace.workspaceFolders;
+        if (!roots || roots.length === 0) return undefined;
+
+        let dir = roots[0].uri.fsPath;
+        const root = path.parse(dir).root;
+
+        while (dir !== root) {
+            const candidate = path.join(dir, '.agent-doc', 'patches');
+            if (fs.existsSync(path.join(dir, '.agent-doc'))) {
+                return candidate;
+            }
+            dir = path.dirname(dir);
+        }
+
+        // Fallback: use workspace root
+        return path.join(roots[0].uri.fsPath, '.agent-doc', 'patches');
+    }
+
+    private processPendingPatches(dir: string): void {
+        try {
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            for (const file of files) {
+                const uri = vscode.Uri.file(path.join(dir, file));
+                this.onPatchFileCreated(uri);
+            }
+        } catch {
+            // directory might not exist yet
+        }
+    }
+
+    private async onPatchFileCreated(uri: vscode.Uri): Promise<void> {
+        try {
+            const raw = fs.readFileSync(uri.fsPath, 'utf-8');
+            const patch = JSON.parse(raw) as IpcPatch;
+
+            if (!patch.file) {
+                this.outputChannel.appendLine(`PatchWatcher: invalid patch (no file field): ${uri.fsPath}`);
+                return;
+            }
+
+            const applied = await this.applyPatch(patch);
+
+            if (applied) {
+                // ACK: delete the patch file
+                try {
+                    fs.unlinkSync(uri.fsPath);
+                } catch (e: any) {
+                    this.outputChannel.appendLine(`PatchWatcher: failed to delete patch file: ${e.message}`);
+                }
+            } else {
+                this.outputChannel.appendLine(`PatchWatcher: patch not applied, leaving for retry: ${uri.fsPath}`);
+            }
+        } catch (e: any) {
+            this.outputChannel.appendLine(`PatchWatcher: failed to process ${uri.fsPath}: ${e.message}`);
+        }
+    }
+
+    private async applyPatch(patch: IpcPatch): Promise<boolean> {
+        const fileUri = vscode.Uri.file(patch.file);
+
+        // Find or open the target document
+        let document: vscode.TextDocument;
+        try {
+            document = await vscode.workspace.openTextDocument(fileUri);
+        } catch (e: any) {
+            this.outputChannel.appendLine(`PatchWatcher: could not open ${patch.file}: ${e.message}`);
+            return false;
+        }
+
+        const fullRange = new vscode.Range(
+            document.positionAt(0),
+            document.positionAt(document.getText().length),
+        );
+
+        // Full content replacement (inline-mode documents without component markers)
+        if (patch.fullContent != null && patch.fullContent !== '') {
+            const content = document.getText();
+            if (patch.fullContent !== content) {
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(fileUri, fullRange, patch.fullContent);
+                const ok = await vscode.workspace.applyEdit(edit);
+                if (!ok) {
+                    this.outputChannel.appendLine(`PatchWatcher: WorkspaceEdit failed for full content replacement`);
+                    return false;
+                }
+            }
+            await document.save();
+            return true;
+        }
+
+        // Component-based patching (template/stream-mode documents)
+        let content = document.getText();
+
+        // Apply frontmatter patch first
+        if (patch.frontmatter) {
+            content = this.applyFrontmatterPatch(content, patch.frontmatter);
+        }
+
+        // Apply component patches
+        for (const p of patch.patches) {
+            content = this.applyComponentPatch(content, p.component, p.content);
+        }
+
+        // Apply unmatched content to exchange or output component
+        if (patch.unmatched && patch.unmatched.trim() !== '') {
+            const withExchange = this.applyComponentPatch(content, 'exchange', patch.unmatched);
+            if (withExchange !== content) {
+                content = withExchange;
+            } else {
+                content = this.applyComponentPatch(content, 'output', patch.unmatched);
+            }
+        }
+
+        // Apply the combined edit
+        if (content !== document.getText()) {
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(fileUri, fullRange, content);
+            const ok = await vscode.workspace.applyEdit(edit);
+            if (!ok) {
+                this.outputChannel.appendLine(`PatchWatcher: WorkspaceEdit failed for component patches`);
+                return false;
+            }
+        }
+
+        await document.save();
+        return true;
+    }
+
+    /**
+     * Merge YAML key/value pairs into the document's frontmatter.
+     */
+    private applyFrontmatterPatch(doc: string, yamlFields: string): string {
+        if (!doc.startsWith('---\n')) return doc;
+
+        const endIdx = doc.indexOf('\n---\n', 4);
+        if (endIdx < 0) return doc;
+
+        const existingYaml = doc.substring(4, endIdx);
+        const body = doc.substring(endIdx + 5); // skip \n---\n
+
+        // Parse existing frontmatter as key/value pairs (preserve order)
+        const existing = new Map<string, string>();
+        const order: string[] = [];
+        for (const line of existingYaml.split('\n')) {
+            const colonIdx = line.indexOf(':');
+            if (colonIdx > 0) {
+                const key = line.substring(0, colonIdx).trim();
+                const value = line.substring(colonIdx + 1).trim();
+                if (!existing.has(key)) {
+                    order.push(key);
+                }
+                existing.set(key, value);
+            }
+        }
+
+        // Merge new fields
+        for (const line of yamlFields.split('\n')) {
+            const colonIdx = line.indexOf(':');
+            if (colonIdx > 0) {
+                const key = line.substring(0, colonIdx).trim();
+                const value = line.substring(colonIdx + 1).trim();
+                if (key) {
+                    if (!existing.has(key)) {
+                        order.push(key);
+                    }
+                    existing.set(key, value);
+                }
+            }
+        }
+
+        // Rebuild frontmatter
+        const newYaml = order.map(k => `${k}: ${existing.get(k)}`).join('\n');
+        return `---\n${newYaml}\n---\n${body}`;
+    }
+
+    /**
+     * Replace content between `<!-- agent:name ... -->` and `<!-- /agent:name -->` markers.
+     * Handles open tags with inline attributes (e.g., `<!-- agent:exchange mode=append -->`).
+     */
+    private applyComponentPatch(doc: string, component: string, content: string): string {
+        // Match open tag with optional attributes: <!-- agent:NAME ... -->
+        const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`);
+        const closeTag = `<!-- /agent:${component} -->`;
+
+        const openMatch = openPattern.exec(doc);
+        if (!openMatch) return doc;
+
+        const contentStart = openMatch.index + openMatch[0].length;
+        const closeIdx = doc.indexOf(closeTag, contentStart);
+        if (closeIdx < 0) return doc;
+
+        // Parse mode from inline attributes (default: replace)
+        let mode = 'replace';
+        if (openMatch[1]) {
+            const modeMatch = /mode=(\S+)/.exec(openMatch[1]);
+            if (modeMatch) {
+                mode = modeMatch[1];
+            }
+        }
+
+        const before = doc.substring(0, contentStart);
+        const after = doc.substring(closeIdx);
+        const trimmedContent = content.trimEnd();
+
+        if (mode === 'append') {
+            // Append before closing marker, preserving existing content
+            const existing = doc.substring(contentStart, closeIdx);
+            return before + existing.trimEnd() + '\n' + trimmedContent + '\n' + after;
+        }
+
+        // Default: replace mode
+        return before + '\n' + trimmedContent + '\n' + after;
+    }
+
+    private escapeRegex(s: string): string {
+        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    dispose(): void {
+        this.watcher?.dispose();
+        this.outputChannel.dispose();
+    }
+}
+
+let patchWatcher: PatchWatcher | undefined;
+
+// ---------------------------------------------------------------------------
 // Activation / Deactivation
 // ---------------------------------------------------------------------------
 
@@ -603,6 +897,11 @@ export function activate(context: vscode.ExtensionContext): void {
         )
     );
 
+    // IPC Patch Watcher
+    patchWatcher = new PatchWatcher();
+    patchWatcher.start();
+    context.subscriptions.push(patchWatcher);
+
     // Status bar item cleanup
     context.subscriptions.push(statusBarItem);
 }
@@ -622,6 +921,10 @@ export function deactivate(): void {
         clearTimeout(statusBarTimeout);
         statusBarTimeout = undefined;
     }
+
+    // Clean up patch watcher
+    patchWatcher?.dispose();
+    patchWatcher = undefined;
 
     // Reset state
     lastTabSyncSignature = '';

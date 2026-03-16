@@ -15,6 +15,8 @@ Interactive document sessions with AI agents.
 - Use `anyhow` for application errors
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **All deterministic behavior in the binary** — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator (reads diff, generates response, decides what to write). Never implement deterministic document logic in the skill or ad-hoc scripts.
+- **Inline component attributes:** `<!-- agent:name mode=append -->` — mode is configurable on the tag itself. Precedence: inline attr > `components.toml` > built-in defaults.
+- **`agent_doc_format: inline`** is the canonical name for the old "append" format (`append` accepted as backward-compat alias). Template mode uses components; inline mode uses User/Assistant blocks.
 
 ## Module Layout
 
@@ -45,6 +47,7 @@ src/
   prompt.rs         # Detect permission prompts from Claude Code sessions
   skill.rs          # Manage bundled SKILL.md (install/check)
   resync.rs         # Validate sessions.json, remove dead panes
+  history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   plugin.rs         # Editor plugin install/update/list via GitHub Releases
   crdt.rs           # CRDT foundation (yrs-based conflict-free merge)
@@ -144,20 +147,16 @@ User prompt here.
 
 ### Flush Behavior
 
-Stream flushes use **replace mode** for the target component regardless of the component's
-configured mode. This is because the stream buffer is cumulative — each chunk contains the
-full text so far, not just the delta. Without replace mode, append-mode components (like
-`exchange`) would duplicate content on each flush.
+Stream flushes use the normal mode resolution chain (inline attr > `components.toml` > built-in default). `run_stream()` no longer hardcodes replace mode for exchange — mode resolution applies normally.
 
-Implementation: `flush_to_document()` passes mode overrides to
-`template::apply_patches_with_overrides()`.
+Implementation: `flush_to_document()` uses `template::apply_patches()`.
 
 ### IPC-First Writes (v0.17.5)
 
-All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin before falling back to direct disk writes. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. If no plugin is active or ACK times out (2s), the write falls back to atomic disk write.
+All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
 
 - `try_ipc()` — component-level patches for template/stream documents
-- `try_ipc_full_content()` — full document replacement for append-mode documents
+- `try_ipc_full_content()` — full document replacement for inline-mode documents
 - Both are safe to call unconditionally; they return `false` immediately if `.agent-doc/patches/` does not exist
 
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),

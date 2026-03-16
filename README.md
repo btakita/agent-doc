@@ -79,7 +79,7 @@ Follow-up. You can also annotate inline:
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `agent_doc_session` | no | (generated on first run) | Document UUID for tmux pane routing (legacy: `session`) |
-| `agent_doc_format` | no | `template` | Document format: `append` or `template` |
+| `agent_doc_format` | no | `template` | Document format: `inline` (canonical) or `template`. `append` accepted as backward-compat alias for `inline`. |
 | `agent_doc_write` | no | `crdt` | Write strategy: `merge` or `crdt` |
 | `agent_doc_mode` | no | — | **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead |
 | `resume` | no | (none) | Claude conversation ID for `--resume` |
@@ -131,12 +131,14 @@ and the agent sees the cleaned-up doc as ground truth.
 Components are bounded, named regions in a document that can be updated independently:
 
 ```markdown
-<!-- agent:status -->
+<!-- agent:status mode=replace -->
 | Service | State   |
 |---------|---------|
 | api     | healthy |
 <!-- /agent:status -->
 ```
+
+Inline attributes on the tag override `components.toml` and built-in defaults. Precedence: inline attr > `components.toml` > built-in defaults.
 
 Update a component:
 
@@ -230,7 +232,7 @@ agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 
 ## IPC-First Writes
 
-Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plugin before falling back to direct disk writes. When an IDE plugin (JetBrains or VS Code) is active, agent-doc writes a JSON patch to `.agent-doc/patches/` instead of modifying the file directly. The plugin applies the change via Document API, preserving cursor position, undo history, and avoiding "externally modified" dialogs. Falls back to atomic disk write if no plugin responds within 2 seconds.
+Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. agent-doc writes a JSON patch to `.agent-doc/patches/` instead of modifying the file directly. The plugin applies the change via Document API, preserving cursor position, undo history, and avoiding "externally modified" dialogs. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
 
 ## Editor Integration
 
@@ -271,7 +273,12 @@ agent-doc skill install             # install Claude Code skill definition
 agent-doc skill check               # check if installed skill is up to date
 agent-doc patch <file> <component> [content]  # update component (stdin if no content)
 agent-doc watch [--stop] [--status]          # watch daemon (debounce + reactive mode for stream docs)
+agent-doc write <file> --force-disk  # bypass IPC, write directly to disk
+agent-doc history <file>            # list exchange versions from git
+agent-doc history <file> --restore <commit>  # prepend old exchange content
 agent-doc audit-docs                # audit instruction files for staleness
+agent-doc history session.md         # list exchange versions from git
+agent-doc history session.md --restore <commit>  # prepend old exchange content
 agent-doc upgrade                   # upgrade to latest version
 agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
 agent-doc plugin update <editor>    # update editor plugin to latest

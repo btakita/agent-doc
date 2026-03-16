@@ -26,4 +26,13 @@ This response should appear BELOW the previous one. Both "Re: Append mode not wo
 Binary rebuilt. Ready to release v0.17.13 with the fix?
 
 release
+
+### v0.17.13 Released
+
+Exchange append mode fix shipped:
+- crates.io: https://crates.io/crates/agent-doc/0.17.13
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.17.13
+
+Fixed the hardcoded `mode_overrides.insert("exchange", "replace")` in `run_stream()` that was forcing replace mode. Append mode now works correctly — responses accumulate in the exchange component.
+audit docs
 <!-- /agent:exchange -->

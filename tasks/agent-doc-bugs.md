@@ -607,4 +607,25 @@ The CRDT-via-FFI architecture handles this case by treating external edits as "C
 I just did an autoclaim on tasks/linkedin.md. There was about 20 seconds of no feedback.
 I switched the focused document in the editor.
 Then it the correct tmux pane + claude session picked up the change.
+
+### Re: Autoclaim delay + focus-dependent pickup
+
+The 20-second delay followed by "picked up after switching document" suggests the issue is in how `agent-doc route` sends keys to the tmux pane. The `/agent-doc` command is sent via `tmux send-keys`, which types the text into the pane. If Claude Code's input isn't being polled (the session is idle/waiting), there's a delay before it processes the input.
+
+**Why switching documents helped:** When you switch the focused editor tab, the IDE plugin may trigger a VFS refresh or a file-change event that "wakes up" the watch daemon or triggers a claims log write. This secondary event gives Claude Code something to process, and it picks up the queued `/agent-doc` command.
+
+**Possible causes:**
+1. **tmux send-keys timing:** The command was sent but Claude Code was in a sleep/poll cycle and didn't read stdin for ~20s
+2. **Watch daemon debounce:** The file change from claim wasn't triggering the reactive path (zero debounce for CRDT docs requires the file to be recognized as CRDT)
+3. **Claude Code idle behavior:** When no input is pending, Claude Code polls less frequently
+
+**The route flash notification** (v0.17.14) should at least confirm the command was dispatched. Did you see the tmux display-message flash?
+
+I don't think I did. There was feedback from the Plugin but not from the tmux session.
+
+This is likely a Claude Code latency issue rather than an agent-doc bug — we can't control how fast Claude reads its stdin. The flash notification is the best feedback mechanism we have for this.
+
+That doesn't explain why there was no feedback from tmux.
+
+Also, whenever I do
 <!-- /agent:exchange -->

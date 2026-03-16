@@ -92,12 +92,16 @@ class PatchWatcher(private val project: Project) : Disposable {
             val patch = parsePatchJson(json) ?: return
 
             ApplicationManager.getApplication().invokeLater {
-                try {
+                val applied = try {
                     applyPatch(patch)
-                    // ACK: delete the patch file
-                    patchFile.delete()
                 } catch (e: Exception) {
                     LOG.warn("Failed to apply patch from ${patchFile.name}", e)
+                    false
+                }
+                if (applied) {
+                    patchFile.delete()
+                } else {
+                    LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")
                 }
             }
         } catch (e: Exception) {
@@ -105,10 +109,17 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
-    private fun applyPatch(patch: IpcPatch) {
-        val targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file) ?: run {
+    private fun applyPatch(patch: IpcPatch): Boolean {
+        var targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
+        if (targetFile == null) {
+            // Retry once after a short delay — file might not be indexed yet
+            Thread.sleep(200)
+            LocalFileSystem.getInstance().refresh(false)
+            targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
+        }
+        if (targetFile == null) {
             LOG.warn("Target file not found: ${patch.file}")
-            return
+            return false
         }
 
         // Refresh to ensure we have latest content
@@ -116,7 +127,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: run {
             LOG.warn("Could not get document for: ${patch.file}")
-            return
+            return false
         }
 
         WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
@@ -156,6 +167,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
+        return true
     }
 
     /**

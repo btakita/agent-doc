@@ -16,7 +16,7 @@ and git commits.
 
 Frontmatter fields:
 - `agent_doc_session`: Document/routing UUID — permanent identifier for tmux pane routing. Legacy alias: `session` (read but not written).
-- `agent_doc_format`: Document format — `append` or `template` (default: `template`).
+- `agent_doc_format`: Document format — `inline` (canonical), `template` (default: `template`). `append` accepted as backward-compat alias for `inline`.
 - `agent_doc_write`: Write strategy — `merge` or `crdt` (default: `crdt`).
 - `agent_doc_mode`: **Deprecated.** Single field mapping: `append` → format=append, `template` → format=template, `stream` → format=template+write=crdt. Explicit `agent_doc_format`/`agent_doc_write` take precedence. Legacy aliases: `mode`, `response_mode`.
 - `agent`: Agent backend name (overrides config default)
@@ -40,6 +40,8 @@ content here
 ```
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
+
+**Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name mode=append -->`. Mode precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace`).
 
 Per-component behavior is configured in `.agent-doc/components.toml` (see §7.20).
 
@@ -151,6 +153,8 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 4. Register session → pane in `sessions.json`, including window ID
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
+
+**Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status mode=replace -->` and `<!-- agent:exchange mode=append -->` components by default.
 
 **Window Resolution:**
 
@@ -291,14 +295,14 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 ### 7.21 write
 
-`agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc]` — apply patch blocks from stdin to a template document.
+`agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk]` — apply patch blocks from stdin to a template document.
 
 1. Read response (patch blocks) from stdin
 2. Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks
 3. Read document and baseline (from `--baseline-file` or current file)
 4. Apply patches to baseline:
-   - **Exchange component uses replace mode** (overrides the default append), since the `--stream` path receives the complete intended exchange content. Without this override, the user's prompt (already in the baseline exchange) would be duplicated by the append.
-   - All other components use their configured mode (from `.agent-doc/components.toml`) or default (`replace`)
+   - Mode resolution chain applies normally: inline attribute > `components.toml` > built-in default (`replace`)
+   - All components use their resolved mode (no hardcoded overrides for exchange)
 5. CRDT merge: if the file was modified during response generation, merge `content_ours` (baseline + patches) with `content_current` (file on disk) using Yrs CRDT
 6. Atomic write + snapshot save + CRDT state save
 
@@ -306,7 +310,9 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **`--ipc` flag:** Writes a JSON patch file to `.agent-doc/patches/` for IDE plugin consumption instead of modifying the document directly.
 
-**IPC-first behavior (v0.17.5):** The `run` and `stream` commands (and their `flush_to_document` path) automatically try IPC before falling back to direct disk writes. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (append mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC success, snapshot and CRDT state are updated from the file as written by the plugin.
+**`--force-disk` flag:** Bypasses IPC and writes directly to disk, even when `.agent-doc/patches/` exists (plugin installed).
+
+**IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot and CRDT state are updated from the file as written by the plugin.
 
 ### 7.22 watch
 
@@ -319,6 +325,20 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - `--stop` sends SIGTERM to the running daemon (via `.agent-doc/watch.pid`)
 - `--status` reports whether the daemon is running
 - `--debounce` sets the debounce delay in milliseconds (default 500)
+
+### 7.23 history
+
+`agent-doc history <FILE>` — list exchange versions from git history.
+
+1. Scan git log for commits touching `<FILE>`
+2. Extract the `<!-- agent:exchange -->` component content at each commit
+3. Display a list of commits with timestamps and content previews
+
+`agent-doc history <FILE> --restore <COMMIT>` — restore a previous exchange version.
+
+1. Read the exchange content from the specified commit
+2. Prepend the old exchange content into the current document's exchange component
+3. The restored content appears above the current exchange, preserving both
 
 ## 8. Session Routing
 

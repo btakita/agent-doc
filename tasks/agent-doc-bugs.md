@@ -627,5 +627,21 @@ This is likely a Claude Code latency issue rather than an agent-doc bug — we c
 
 That doesn't explain why there was no feedback from tmux.
 
-Also, whenever I do
+
+### Re: No tmux flash + incomplete thought
+
+**Why no tmux flash:** The autoclaim from the IDE calls `agent-doc claim` (not `route`). The claim command does have a `display-message` (claim.rs:170), but `tmux display-message` shows in the tmux status bar area — if Claude Code's output is scrolling, it can be missed. Also, the `-d 3000` (3 second) duration may not be long enough if you're looking at the editor.
+
+The `/agent-doc` command is then sent via `agent-doc route` → `send_command()` which has its own flash. But if the route path goes through auto-start or lazy-claim, the flash fires on a pane that may not be visible yet.
+
+**Better feedback options:**
+1. **Sound/bell:** `tmux send-keys` can include `\a` (bell character) to trigger a terminal bell/notification
+2. **Longer display-message:** Increase from 3s to 5s
+3. **IDE notification:** The plugin already shows feedback — maybe that's sufficient?
+
+Your incomplete thought — "Also, whenever I do a..." — want to finish it?
+Also, whenever I do a **Run Agent Doc** from the JB Plugin...I see the `/agent-doc run ...` command for a few seconds in the input...before the tmux Enter is pressed.
+
+And I just got an external edit where I pressed Esc and lost the response. Please readd the response.
+This happened while I was typing a 
 <!-- /agent:exchange -->

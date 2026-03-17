@@ -142,4 +142,10 @@ Email notifications will fire when YouTube publishes a new Brooke Brodack video.
 - [ ] `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
 
 Change the recipient email to brian.takita@gmail.com
+### Re: Change recipient email
+
+Updated `NOTIFICATION_EMAIL` to `brian.takita@gmail.com` and redeployed. Version: `c28a774d`.
+
+Extract agent:status component.
+compact exchange.
 <!-- /agent:exchange -->

@@ -20,7 +20,8 @@ agent_doc_write: crdt
 
 <!-- agent:status mode=replace -->
 - [x] Ctrl+Shift+U bug: reported to Slack
-- [x] Notifications: Slack config fixed; testing notification-daemon vs dunst
+- [x] Notifications: working with notification-daemon (dunst reverted, not needed)
+- [ ] Slack notification filter: set to "direct mentions only" per workspace (user action in Slack UI)
 - [ ] Reply email with screenshot (need file path)
 <!-- /agent:status -->
 
@@ -162,4 +163,26 @@ If notifications still work under `notification-daemon`, then the original issue
 Yes...it appeared.
 
 I don't want to be notified for every message. Only direct mentions. Please update slack config.
+
+### notification-daemon works — dunst wasn't needed
+
+Good news — `notification-daemon` renders fine under i3. The original notification issue was purely Slack's internal settings. The dunst changes have been fully reverted.
+
+### Re: Only notify for direct mentions
+
+This setting is **server-side per workspace** — it can't be changed via the local config file. You need to set it inside Slack's UI for each workspace:
+
+1. Open Slack → **Preferences** (`Ctrl+,`) → **Notifications**
+2. Under "Notify me about": select **"Direct messages, mentions & keywords"**
+3. Repeat for each workspace (click workspace name in top-left to switch)
+
+You have 5 workspaces:
+- T06D6M966L8
+- T55LHL8UD
+- T031JJZ7Q6T
+- T01KVSV78P7
+- T0A738MJP09
+
+Each needs the preference set individually. This is a one-time change — it persists server-side.
+compact exchange
 <!-- /agent:exchange -->

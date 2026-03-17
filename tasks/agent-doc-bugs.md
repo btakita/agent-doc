@@ -246,4 +246,26 @@ agent-doc plugin install cursor    # Same vsix, different CLI
 Both features are straightforward. The marketplace publish is a one-time setup; the CLI install is a code change to `plugin.rs`. Want me to implement one or both?
 
 What is the difference between cursor and vscode for plugin install? 
+
+### Re: Cursor vs VS Code plugin install
+
+**Same `.vsix` file, different CLI command:**
+
+| | VS Code | Cursor |
+|---|---------|--------|
+| CLI binary | `code` | `cursor` |
+| Install command | `code --install-extension agent-doc-0.2.0.vsix` | `cursor --install-extension agent-doc-0.2.0.vsix` |
+| Extension dir | `~/.vscode/extensions/` | `~/.cursor/extensions/` |
+| Marketplace | VS Code Marketplace | Open VSX (or sideload) |
+| API compatibility | Native | 99% compatible (VS Code fork) |
+
+The extension code is identical — both use the same VS Code Extension API. The only difference is which CLI installs it and where the extensions directory lives.
+
+For `agent-doc plugin install`, the implementation would detect which editors are available:
+```bash
+agent-doc plugin install vscode   # runs: code --install-extension <vsix>
+agent-doc plugin install cursor   # runs: cursor --install-extension <vsix>
+```
+
+Implement both
 <!-- /agent:exchange -->

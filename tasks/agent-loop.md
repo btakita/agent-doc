@@ -27,4 +27,7 @@ Operational task document for agent-loop workspace management.
 - All other submodules: already committed and pushed from previous cycle
 
 Parent: `6cb9134` (agent-doc pointer update), pushed to `main`.
+
+commit and push submodules. Release any unreleased changes.
+commit and push agent-loop
 <!-- /agent:exchange -->

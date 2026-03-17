@@ -507,4 +507,6 @@ Done. Added to `tasks/corky.md` Open items:
 Kevin sent a response. Please draft a reply.
 
 Send the reply
+
+compact exchange
 <!-- /agent:exchange -->

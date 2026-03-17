@@ -99,22 +99,47 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: Architecture decisions + task file
+### Re: Phase 1-5 complete
 
-Got it. Clear plan:
+**Phase 1: npm verification** — All 11 `@rappstack/*` packages confirmed published on npm:
 
-- **`app/briantakita.me`** — stays as submodule (not flattened)
-- **`@btakita/*` packages** (domain--server--briantakita, ui--browser--briantakita, ui--server--briantakita, dev-bin, snippet--rappstack, ui--browser--semantic, ui--server--linkument) — **stay as submodules**
-- **`@rappstack/*` packages** (11 total) — **remove submodules, use yalc (local) / npm (CI)**
-- **Development workflow**: edit in rappstack-dev → `yalc push` → auto-updates briantakita.me-dev
+| Package | npm version |
+|---------|-------------|
+| @rappstack/domain--any--blog | 0.1.2 |
+| @rappstack/domain--browser | 0.1.0 |
+| @rappstack/domain--browser--blog | 0.1.0 |
+| @rappstack/domain--server | 0.1.0 |
+| @rappstack/domain--server--blog | 0.1.1 |
+| @rappstack/ui--any | 0.1.0 |
+| @rappstack/ui--any--blog | 0.1.0 |
+| @rappstack/ui--browser | 0.1.1 |
+| @rappstack/ui--browser--blog | 0.1.0 |
+| @rappstack/ui--server | 0.1.1 |
+| @rappstack/ui--server--blog | 0.1.1 |
 
-All 11 `@rappstack/*` packages are published on npm (confirmed: domain--server@0.1.0, ui--any@0.1.0, domain--any--blog@0.1.2, ui--server@0.1.1). Need to verify the remaining 7 are also published before migration.
+**Phase 2: Submodule removal** — All 11 rappstack submodules removed (`git submodule deinit` + `git rm` + `.git/modules` cleanup).
 
-**Task file created:** `tasks/briantakita.me-yalc-migration.md`
+**Phase 3: Dependency updates** — Changed `workspace:*` → version ranges in 5 files:
+- `app/briantakita.me/package.json` (9 deps)
+- `lib/domain--server--briantakita/package.json` (2 deps)
+- `lib/ui--browser--briantakita/package.json` (1 dep)
+- `lib/ui--server--briantakita/package.json` (6 deps)
+- `lib/snippet--rappstack/package.json` (3 deps)
 
-7 phases: verify npm versions → remove submodules → update deps → update workspaces → yalc setup → CI verification → docs.
+**Phase 4: Workspace config** — No change needed. `"lib/*"` glob still matches remaining 7 btakita packages.
 
-Ready to start Phase 1 (verify all npm versions) when you are.
+**Phase 5: yalc setup** — `.yalc/` and `yalc.lock` already in `.gitignore`.
 
-go
+**Verification:**
+- `bun install` — resolved all deps from npm registry (13 installed, 11 workspace links removed)
+- `bun run build` — builds successfully
+
+**Remaining:**
+- Phase 6: CI verification (push and test GitHub Actions)
+- Phase 7: Documentation
+- Commit submodule changes from within each modified btakita lib (4 submodules have package.json changes)
+
+Note: The btakita lib package.json changes need to be committed from within each submodule repo, then pushed, before committing the parent pointer updates. Want me to proceed with the submodule commits?
+
+yes
 <!-- /agent:exchange -->

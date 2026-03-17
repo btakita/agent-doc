@@ -1533,5 +1533,35 @@ Please cleanup my tmux sessions.
 I tried `Run Agent Doc` on tasks/briantakita.me.md.
 The tmux layout recovered from the cleanup.
 But the `/agent-doc run tasks/briantakita.me.md` did not run.
+
+### Re: briantakita.me.md didn't run + cleanup
+
+**Why the command didn't run from JB plugin:** `auto_start()` created the pane and started Claude, but `wait_for_claude_ready()` likely timed out at 15s. Claude Code with heavy session hooks (182k tokens of context) takes 15-20s to initialize. The timeout expired before `❯` appeared, so `send_command()` was never called.
+
+**Fix:** Increased `wait_for_claude_ready` timeout from 15s to **30s** in `auto_start()`. This gives Claude enough time to load even with large session hooks.
+
+**Manual route works** because by the time you run it, Claude has already finished initializing (pane shows `❯`). The route sees "pane alive" and immediately sends the command — no waiting needed.
+
+**Cleanup done:** Killed pane %33 (the auto-started briantakita.me.md pane). Sessions are clean.
+
+Binary rebuilt and installed.
+
+**Current state of all fixes this session:**
+
+| Fix | Status | Tested |
+|-----|--------|--------|
+| `❯` prompt detection (not `>`) | Done | ✓ |
+| ANSI stripping | Done | ✓ |
+| Poll-based Enter retry with command-text check | Done | ✓ |
+| New files → auto_start (not lazy-claim) | Done | ✓ |
+| Immediate pane focus on creation | Done | ✓ |
+| 30s Claude startup timeout | Done | needs test |
+| JB plugin route logging | Done | needs rebuild |
+| 13 route tests (6 unit + 5 integration + 2 structural) | Done | ✓ |
+| 385 total tests pass | Done | ✓ |
+
+The tmux window layout switched to 1 pane.
+Why?
+Please add a test.
 <!-- /agent:exchange -->
 ****

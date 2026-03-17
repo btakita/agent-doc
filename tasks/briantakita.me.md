@@ -647,4 +647,29 @@ rhonojs_browser__build({
 To use this immediately: publish rebuildjs with the change (or use yalc), then add `watch_dirs` to your build config. Want me to publish rebuildjs@0.71.1?
 
 continue
+### Re: Published rebuildjs@0.71.1
+
+**Published:**
+- `rebuildjs@0.71.1` to npm — includes `watch_dirs` support + `ts_resolve_node_modules_plugin_`
+- briantakita.me-dev updated and pushed to CI
+
+**Features in this release:**
+1. `ts_resolve_node_modules_plugin_()` — resolves `.ts` from node_modules package exports (fixes esbuild 0.27 restriction)
+2. `watch_dirs` config — watches external source directories and triggers rebuilds
+
+**Next steps (open items):**
+- Add `watch_dirs` config to `build.ts` for dev mode (rappstack source dirs)
+- JSON-LD VideoObject for video posts (queued)
+- Search icon fix deployed (verify after CI)
+
+CI running — should pass since the only change is the lockfile with rebuildjs 0.71.1.
+
+I updated the span classes in search__input_label_ in /home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts to include 'h-full' and 'w-full'.
+
+Actual class `class="absolute left-0 flex inset-y-0 pl-2 items-center opacity-75"`
+
+Here is how it looks.
+![img_2.png](img_2.png)
+
+How can we make the updates automatically propagate from rappstack-dev to briantakita.me-dev?
 <!-- /agent:exchange -->

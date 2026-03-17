@@ -282,4 +282,28 @@ Since you chose Option 2, I'll start on that. But note: we could also unblock CI
 Why not reinstate the `.ts` export in rebuildjs?
 
 The video sitemap + JSON-LD work for briantakita.me is queued — I'll do it after CI is unblocked.
+### Re: Why not reinstate .ts exports in rebuildjs?
+
+The `.ts` exports aren't in rebuildjs — they're in the `@rappstack/*` packages. rebuildjs itself is the build framework that calls esbuild.
+
+The issue chain:
+1. `@rappstack/ui--server/package.json` has `"exports": { "./css": "./css/index.ts" }` — maps subpaths to `.ts` files
+2. esbuild 0.27 refuses to bundle `.ts` files resolved from `node_modules` package exports
+3. rebuildjs@0.71 depends on `esbuild@^0.27.3`
+
+**The real fix is in the `@rappstack/*` packages themselves.** Two approaches:
+
+**A) Keep `.ts` exports, add esbuild workaround in rebuildjs:**
+Add an esbuild plugin to rebuildjs that intercepts `node_modules` `.ts` resolutions and allows them. This is a rebuildjs change — you'd publish a new rebuildjs version with this plugin built in.
+
+Yes. Let's do this.
+
+**B) Publish compiled `.js` (Option 2):**
+Change `@rappstack/*` packages to export `.js` + `.d.ts` instead of raw `.ts`. Standard npm practice.
+
+**Option A is actually simpler** — it's a single esbuild plugin in rebuildjs that overrides the `.ts` restriction for packages in `node_modules`. This preserves the current `.ts`-source publishing model and only needs one change (rebuildjs) instead of 11 (every rappstack package).
+
+Want me to implement Option A in rebuildjs?
+
+Yes. Add test(s) in rebuildjs for `.ts`_
 <!-- /agent:exchange -->

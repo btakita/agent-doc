@@ -456,4 +456,45 @@ Local rappstack changes now reflect immediately via `yalc push` from rappstack-d
 Please run server, visit som pages, fix errors.
 
 Please add automated tests, including unit tests, functional tests, smoke tests.
+### Re: Run server, fix errors + add tests
+
+**Server errors fixed:**
+
+1. **`/` route 500** — `request_url_` was null because bun resolved old npm `@rappstack/domain--server@0.1.0` (no null guard) instead of yalc `0.1.1`. Fixed by adding `resolutions` in root `package.json` to force all workspace packages to use yalc versions. Also published missing `@rappstack/domain--server--blog` to yalc.
+
+2. **`/content` route 500** — two issues:
+   - YouTube API returns 400 in dev (key/quota issue). Added try/catch around `rmemo__wait` so page renders with empty video list.
+   - `youtube_video_a1_(ctx)!.map(...)` crashed on null. Added null coalescing (`?? []`) in two places in `content__doc_html.ts`.
+
+3. **`/content/:slug` route 500** — `blog_post__estimate_read_minutes__wait` timed out. Added try/catch to render without read time estimate.
+
+**All routes now 200:**
+| Route | Status |
+|-------|--------|
+| `/` | 200 |
+| `/content` | 200 |
+| `/content/:slug` | 200 |
+| `/sitemap.xml` | 200 |
+| `/robots.txt` | 200 |
+
+**Working on automated tests now...**
+
+**Tests created and passing (19/19):**
+
+| Category | Tests | Details |
+|----------|-------|---------|
+| Smoke | 6 | HTTP status codes for all routes + 404 |
+| Unit | 3 | Post index, site config, blog_site config |
+| Functional | 10 | HTML content, titles, sitemap/RSS structure |
+
+**Test file:** `app/brookebrodack-site/test/routes.test.ts`
+**Run:** `bun test app/brookebrodack-site/test/`
+
+**Changes summary:**
+- `package.json` — added `resolutions` for all `@rappstack/*` yalc packages + `domain--server--blog`
+- `app/content/index.server.ts` — graceful error handling for YouTube API and read time timeouts
+- `lib/ui--server--brookebrodack/content/content__doc_html.ts` — null coalescing for `youtube_video_a1_`
+- `app/brookebrodack-site/test/routes.test.ts` — new test suite (19 tests)
+
+release
 <!-- /agent:exchange -->

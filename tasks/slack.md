@@ -68,6 +68,74 @@ Is my desktop environment now setup to use dunst?
 
 Dunst will start on every i3 session and claim the notification DBus name before `notification-daemon` can.
 
-Can we have an explicit stript or
+Can we have an explicit stript or documentation about this configuration...dunst over notification-daemon
  
+
+### Re: Notifications not working in Slack
+
+Dunst works (test notification confirmed), but Slack's `notificationPlayback: web` means **Slack renders its own popup notifications** — it doesn't use the system notification daemon at all. Dunst fixed system notifications generally, but Slack's internal notification system is a separate issue.
+
+**Most likely cause:** Slack was started Mar 15, before dunst existed. Slack may have cached the broken notification state, or its focus detection thinks the window is active (known Electron bug, May 2025).
+
+**Try these in order:**
+
+1. **Restart Slack** — close and relaunch. This forces Slack to re-initialize notifications with the new daemon:
+   ```sh
+   pkill slack && sleep 2 && slack &
+   ```
+
+2. **Check in-app settings** — Inside Slack: Preferences (Ctrl+,) → Notifications → verify:
+   - "Notify me about" = Direct messages, mentions & keywords (or All)
+   - No notification schedule restricting hours
+   - No DND/pause active (check the bell icon in sidebar)
+
+3. **Test with window unfocused** — Switch to a different i3 workspace, then have someone message you (or use Slack on your phone to message yourself)
+
+4. **Force native notifications** — If web popups still don't appear, try switching to native. In Slack DevTools (Ctrl+Shift+I), run:
+   ```js
+   // Check current method
+   console.log(SlackDesktop?.prefs?.get('notificationPlayback'))
+   ```
+
+Your second question ("Can we have an explicit stript or documentation about") seems incomplete — what were you going to ask?
+
+
+### Re: Documentation for dunst over notification-daemon
+
+Here's the configuration reference. I'll also save this to a persistent location.
+
+**Problem:** CachyOS (Arch-based) installs `notification-daemon` (GNOME) which auto-activates via DBus. Under i3, it silently swallows all notifications — no visual popups appear. Dunst is the standard notification daemon for i3/tiling WM setups.
+
+I was seeing notifications from pulsesms. I think this is a slack only issue.
+I just saw a dunst notification from slack. I 
+
+**Configuration (3 files):**
+
+1. **`~/.config/i3/config`** — Start dunst on login:
+   ```
+   exec --no-startup-id dunst
+   ```
+
+2. **`~/.local/share/dbus-1/services/org.freedesktop.Notifications.service`** — Override DBus activation:
+   ```ini
+   [D-BUS Service]
+   Name=org.freedesktop.Notifications
+   Exec=/usr/bin/dunst
+   ```
+   This prevents `/usr/share/dbus-1/services/org.freedesktop.Notifications.service` (which points to `notification-daemon`) from auto-activating.
+
+3. **`~/.config/dunst/dunstrc`** — Dunst display config (already exists, uses Hack 10pt font). The deprecated settings (`allow_markup`, `bounce_freq`, `geometry`, `startup_notification`, frame/shortcuts sections) should be updated to modern dunst 1.13 format when convenient.
+
+**Verification:**
+```sh
+# Check active notification server
+dbus-send --session --dest=org.freedesktop.Notifications \
+  --print-reply /org/freedesktop/Notifications \
+  org.freedesktop.Notifications.GetServerInformation
+# Should return "dunst" not "Notification Daemon"
+
+# Test
+notify-send "Test" "Should appear as dunst popup"
+```
+
 <!-- /agent:exchange -->

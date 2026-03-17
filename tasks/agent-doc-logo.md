@@ -5,8 +5,9 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 <!-- agent:status mode=replace -->
-- [x] SVG logo created at `src/agent-doc/logo.svg`
-- [ ] Review and iterate on design
+- [x] SVG logo created (two variants)
+- [ ] Review: with eyes vs without eyes
+- [ ] Pick final version
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -28,4 +29,18 @@ Open `src/agent-doc/logo.svg` in a browser to preview. Let me know if you want a
 The brim of the hat should be in front of the document.
 
 Let's see how it looks with an without the eyes.
+
+### Updated: brim in front + two variants
+
+**Fixed layering:** Hat crown and band render behind the document, but the brim now renders **in front** of the document (drawn after the document in SVG paint order). This gives the correct depth effect — the document tucks under the hat brim.
+
+**Two files:**
+- `src/agent-doc/logo.svg` — with eyes (agent personality)
+- `src/agent-doc/logo-no-eyes.svg` — without eyes (cleaner/more professional)
+
+The no-eyes version centers the markdown symbol slightly higher since there's more vertical space. Open both in a browser to compare.
+
+Better without eyes.
+Make the hat look more like a fedora.
+4Something a secret agent would wear.
 <!-- /agent:exchange -->

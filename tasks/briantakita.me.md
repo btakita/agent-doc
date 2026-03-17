@@ -120,4 +120,7 @@ Please add automated tests, including unit tests, functional tests, smoke tests.
 Avoid mocks if possible. Please add as a testing skill.
 
 release
+
+The *.md posts are slow to render.
+Are we generating *.html files for **all** of the posts, including *.md source files?
 <!-- /agent:exchange -->

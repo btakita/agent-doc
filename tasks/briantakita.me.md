@@ -99,40 +99,22 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: briantakita.me-dev — submodules → yalc
+### Re: Architecture decisions + task file
 
-This is a significant architectural change. Currently briantakita.me-dev has **18 library submodules** all wired via `workspace:*` protocol in bun workspaces.
+Got it. Clear plan:
 
-**Current state:**
-- 19 submodules (1 app + 18 libs) linked via `.gitmodules`
-- Bun workspaces: `["app/*", "lib/*", "vendor/*"]`
-- Libraries referenced as `"workspace:*"` in package.json
+- **`app/briantakita.me`** — stays as submodule (not flattened)
+- **`@btakita/*` packages** (domain--server--briantakita, ui--browser--briantakita, ui--server--briantakita, dev-bin, snippet--rappstack, ui--browser--semantic, ui--server--linkument) — **stay as submodules**
+- **`@rappstack/*` packages** (11 total) — **remove submodules, use yalc (local) / npm (CI)**
+- **Development workflow**: edit in rappstack-dev → `yalc push` → auto-updates briantakita.me-dev
 
-**Target state:**
-- Only `app/briantakita.me` remains (not a submodule — it IS the project)
-- Libraries consumed via yalc (local dev) or npm (CI)
-- `lib/` directory populated by `yalc add` instead of git submodules
+All 11 `@rappstack/*` packages are published on npm (confirmed: domain--server@0.1.0, ui--any@0.1.0, domain--any--blog@0.1.2, ui--server@0.1.1). Need to verify the remaining 7 are also published before migration.
 
-**Migration steps:**
-1. Remove all 18 lib submodules from `.gitmodules` and `lib/`
-2. Remove `"lib/*"` from workspaces (keep `"app/*"`)
-3. Change all `"workspace:*"` deps to version ranges (matching npm-published versions)
-4. For local dev: `monorepo_yalc__publish__all` from rappstack-dev/ctx-core-dev → `yalc add @rappstack/* @btakita/*`
-5. Add `.yalc/` and `yalc.lock` to `.gitignore`
-6. CI stays on npm-published versions (no change to deploy.yml)
+**Task file created:** `tasks/briantakita.me-yalc-migration.md`
 
-Any lib/*--briantakita is private to briantakita.me. So use submodules for those.
-Anything that is in the rappstack library and is currently published on npm should use yalc.
+7 phases: verify npm versions → remove submodules → update deps → update workspaces → yalc setup → CI verification → docs.
 
-**Questions before proceeding:**
-- Should `app/briantakita.me` also stop being a submodule? (flatten app into repo root?)
-no
-- The `@btakita/*` packages (domain--server--briantakita, ui--browser--briantakita, ui--server--briantakita) are site-specific — should they stay as submodules or move into the main repo?
-stay as submodules
-- The `@rappstack/*` packages are shared across sites — those clearly belong in yalc. Where do they get developed? rappstack-dev?
+Ready to start Phase 1 (verify all npm versions) when you are.
 
-rappstack-dev
-
-Want me to create a task file for this migration, or discuss architecture first?
-task file
+go
 <!-- /agent:exchange -->

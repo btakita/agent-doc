@@ -310,4 +310,15 @@ CI deployment should be running now. Once deployed, all 180 video blog posts wil
 Remove the "Read Transcript" link. Each video square should link to a separate page. We will remove the old behavior.
 
 The back button on /content/:slug should go back to /content.
+### Re: Direct video card links + back to /content
+
+Done and pushed:
+
+1. **Video cards now link directly to `/content/:slug`** — removed the separate "Read transcript" link and changed the card's `href` from YouTube URL to the post page
+2. **Back button on post pages goes to `/content`** — added `href` parameter to `back_link__a_()`, post page passes `href: '/content'`
+
+Commits: `6b2ada1` (ui--server--brookebrodack), `2966153` (brookebrodack-dev). CI deploying.
+
+Clicking on a video box still opens the video player and remains on /content.
+Instead it should go to /content/:slug
 <!-- /agent:exchange -->

@@ -5,9 +5,8 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 <!-- agent:status mode=replace -->
-- [x] SVG logo created (two variants)
-- [ ] Review: with eyes vs without eyes
-- [ ] Pick final version
+- [x] SVG logo: secret agent fedora, no eyes
+- [ ] Final review
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -42,5 +41,21 @@ The no-eyes version centers the markdown symbol slightly higher since there's mo
 
 Better without eyes.
 Make the hat look more like a fedora.
-4Something a secret agent would wear.
+Something a secret agent would wear.
+
+### Redesigned: secret agent fedora, no eyes
+
+**Hat changes:**
+- **Charcoal/black color** — classic spy hat, not brown
+- **Pinched crown** — proper fedora shape with center crease and side dents
+- **Dark grosgrain ribbon band** — subtle, no gold
+- **Wider brim** (118px radius) with slight upturn on the left — asymmetric like a real fedora
+- **Shadow under brim** — separate filter for hat depth
+- **Highlight details** — subtle edge highlights on crown and brim for dimensionality
+
+**No eyes** — clean document with just the markdown symbol.
+
+Removed `logo-no-eyes.svg` since the main `logo.svg` is now the no-eyes version. Open `src/agent-doc/logo.svg` in a browser to review.
+
+Where is the appropriate folder to put the logo in?
 <!-- /agent:exchange -->

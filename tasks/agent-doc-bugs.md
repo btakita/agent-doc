@@ -1646,5 +1646,28 @@ tasks/briantakita.me.md should have a tmux pane on the right side.
 `Sync: --col tasks/agent-doc-bugs.md --col tasks/briantakita.me.md [focus: tasks/agent-doc-bugs.md]`
 
 release
+
+audit docs
+
+### Re: Sync working + release preparation
+
+**Sync IS working now.** Running `agent-doc sync --col tasks/agent-doc-bugs.md --col tasks/briantakita.me.md`:
+- Auto-started Claude for briantakita.me.md (pane %34)
+- Layout: 2 panes in 2 columns (120x15 + 119x15) — side by side
+- Output: "Sync: 2 panes in 2 columns"
+- Claude is running in %34 with the `❯` prompt
+
+Your earlier test failure was with the pre-fix code (the `session_files` RefCell bug). The fix correctly parses files from `col_args` before sync.
+
+**Release:** Ready to release v0.17.15 with all the routing/sync fixes from this session. Changes:
+
+1. **route.rs:** Poll-based command acceptance with Enter retry, `❯` prompt detection, ANSI stripping, new files → auto_start (not lazy-claim), 30s startup timeout
+2. **sync.rs:** Pre-sync auto-start for files without alive panes
+3. **tmux.rs:** `send_keys` timing, `select_pane` logging, `pane_has_prompt` helper
+4. **prompt.rs:** `strip_ansi` made pub(crate)
+5. **13 route tests** (6 unit + 5 integration + 2 structural)
+
+Want me to bump to v0.17.15 and run the release checklist?
+
+yes
 <!-- /agent:exchange -->
-****

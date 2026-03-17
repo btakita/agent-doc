@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-btak.dev IMAP auth failed. Needs Gmail app password and/or IMAP enabled.
+btak.dev: needs 2FA enabled before app password can be generated for IMAP auth.
 <!-- /agent:status -->
 
 ## Exchange
@@ -99,5 +99,18 @@ I logged into btak.dev@gmail.com...wen to the /apppasswords link.
    ```
 
 Most likely it's #1 — app password. Generate one and update the pass entry, then retry `corky sync`.
+App Passwords require 2-Step Verification to be enabled first. For a personal Gmail account:
 
+1. **Enable 2FA first**: Go to [Google 2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) and turn it on for `btak.dev@gmail.com`
+2. **Then generate App Password**: After 2FA is active, [App Passwords](https://myaccount.google.com/apppasswords) will become available. Create one for "Mail" and save the 16-char code:
+   ```bash
+   pass edit email/btak.dev   # replace with the app password
+   ```
+3. **Retry sync**: `corky sync`
+
+Alternatively, if you don't want 2FA on this account, corky could use **OAuth2 (Gmail API)** instead of IMAP password auth — but that requires `provider = "gmail-api"` support in corky. The current `provider = "gmail"` uses IMAP which needs either the account password (with "less secure apps" — deprecated by Google) or an app password (requires 2FA).
+
+**TL;DR**: Enable 2FA → generate app password → update pass → retry.
+
+Let's do OAuth2 (Gmail API)
 <!-- /agent:output -->

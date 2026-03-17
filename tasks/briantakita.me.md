@@ -341,4 +341,6 @@ What plugin do we use to import *.md & *.md.ts files?
 **`.md.ts` files:** Hand-written TypeScript wrappers. Same `meta_` + default export interface, but use custom component composition (e.g., `tb_a_`, `dl_tree_`). These are compiled by esbuild's native TS support, not the plugin.
 
 Both types are imported in `post/index.ts` as `.md.js` (esbuild compiles `.md` → `.md.js` via the plugin, `.md.ts` → `.md.js` natively).
+
+briantakita.me-dev should not use submodule. Should use yalc instead.
 <!-- /agent:exchange -->

@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-Added btak-dev account to `.corky.toml`. Pending: verify `pass email/btak-dev` exists, then `corky sync`.
+Renamed account to `btak.dev` in `.corky.toml`. Pending: verify `pass email/btak-dev` exists, then `corky sync`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -51,4 +51,17 @@ labels = ["INBOX"]
 Want me to adjust anything?
 
 Change btak-dev to btak.dev
+
+`pass email/btak.dev` is available
+Renamed account key from `btak-dev` to `btak.dev` in `mail/.corky.toml`:
+
+```toml
+[accounts."btak.dev"]
+provider = "gmail"
+user = "btak.dev@gmail.com"
+password_cmd = "pass email/btak-dev"
+labels = ["INBOX"]
+```
+
+Note: TOML keys with dots need quoting (`"btak.dev"`), so the key is `accounts."btak.dev"`. The `password_cmd` path (`pass email/btak-dev`) still uses a hyphen since pass paths don't need to match the account key — adjust if you prefer `pass email/btak.dev`.
 <!-- /agent:output -->

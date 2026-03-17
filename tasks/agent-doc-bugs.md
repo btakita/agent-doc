@@ -1224,5 +1224,21 @@ The tmux pane changed. The `/agent-doc run tasks/corky.md` was in the input but 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
 ```
+
+### Re: Enter key not pressed after command text
+
+**The prompt detection is working now** — the screenshot shows `❯ /agent-doc tasks/corky.md` in Claude's input line, confirming `wait_for_claude_ready()` detected the `❯` prompt and `send_command()` sent the text. But Enter wasn't pressed.
+
+**Root cause:** `send_keys()` in `tmux-router/src/tmux.rs` has only a **50ms delay** between sending the literal text (`-l`) and the Enter key. Claude Code's TUI needs more time to buffer the input. At 50ms, the Enter key arrives before the TUI has processed the text, so it's silently dropped.
+
+**Fix:** Increased the delay from 50ms to **300ms** in `tmux.rs:131`. This is the pause between `tmux send-keys -t %XX -l "/agent-doc ..."` and `tmux send-keys -t %XX Enter`.
+
+**The pane not switching** is a separate UX issue: `select_pane` focuses within tmux, but the IDE window stays in foreground covering the terminal. Switching documents in the IDE triggers a new plugin event that re-focuses.
+
+Binary rebuilt and installed to both locations. Tests pass. Ready to test again.
+
+I ran `Run Agent Doc` on tasks/robert-ward.md
+- The tmux pane did not switch after running robert-ward and keeping the focus on robert-ward (please fix)
+- After switching the editor focus to agent-doc-bugs, the tmux pane did switch. run started
 <!-- /agent:exchange -->
 ****

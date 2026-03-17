@@ -17,7 +17,8 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-btak.dev: deciding between XOAUTH2 (IMAP + OAuth) vs full Gmail API sync vs 2FA + app password.
+- [x] btak.dev account added to .corky.toml
+- [ ] Gmail API sync provider (Option B) — planning
 <!-- /agent:status -->
 
 ## Exchange
@@ -185,4 +186,25 @@ Why am I seeing API Error?
 
 ✻ Cooked for 36s
 ```
+### Re: API Errors
+
+The 500 errors are from Anthropic's API (the Claude backend), not from your code. These are transient server-side issues — nothing you did wrong. The repeated `/agent-doc` invocations queued up while the API was having issues, then all came through once it recovered. No action needed on your end.
+
+### Re: Option B — Gmail API Sync
+
+Got it. I'll build the Gmail API sync provider in corky. This is a multi-file feature — I'll create a task document for it so we can track progress properly.
+
+**Scope for `corky sync` Gmail API provider:**
+1. **Auth scope expansion** — Add `https://mail.google.com/` scope to OAuth flow (currently only has `gmail.settings.basic` + `gmail.labels`)
+2. **Gmail messages client** — `messages.list` (with label filter + date range) and `messages.get` (full RFC822 or metadata+body)
+3. **Provider type** — New `gmail-api` provider in accounts config, reusing existing `[gmail]` OAuth credentials
+4. **Sync logic** — `historyId`-based incremental sync with `.sync-state.json` integration
+5. **Message conversion** — Gmail API response → same maildir-style files corky currently produces from IMAP
+6. **Label routing** — Map Gmail label IDs to corky's label-based routing (already partially exists for filters)
+
+**Not in initial scope:** Pub/Sub push notifications, draft management via API, attachment lazy-fetch (keep it simple for v1).
+
+Want me to start building this now, or should I write a detailed plan first in a separate task doc?
+
+Detailed plan
 <!-- /agent:output -->

@@ -974,5 +974,27 @@ Option 1 seems good. Why is Option 2 less robust?
 I'll implement this: after `tmux.send_keys(&new_pane, &start_cmd)`, poll `tmux capture-pane` every 500ms for up to 30s looking for Claude's ready state. Want me to go ahead?
 
 Yes
+
+### Re: Implementing poll-and-send
+
+**Implemented.** Modified `route.rs::auto_start()` to poll for Claude readiness after starting the session:
+
+**Changes to `route.rs`:**
+- After `tmux.send_keys(&new_pane, &start_cmd)`, calls `wait_for_claude_ready()`
+- Polls `tmux capture-pane` every 500ms for up to 60s
+- Looks for Claude's `>` prompt in the last 5 lines of pane output
+- On success: sends `/agent-doc <file>` via `send_command()`
+- On timeout: prints retry instructions (graceful degradation)
+
+Binary rebuilt (release). The flow is now: create pane → send `agent-doc start` → poll for `>` prompt → send `/agent-doc` command. All self-contained in `auto_start()`.
+
+Ready to test on next autoclaim from the JB plugin.
+
+This did not seem to work with tasks/brookebrodack-dev.md. The same two issues were present:
+- Agent-doc run did not switch the tmux pane. After changing the focused document in the editor, the tmux pane did switch.
+- The polling did not seem to work when activating the new session.
+
+Please investigate the logs.
+Write tests reproducing the issue.
 <!-- /agent:exchange -->
 ****

@@ -554,5 +554,63 @@ So in my case, I edited blog_search__div_, adding 'h-full', 'w-full'. But I did 
 
 How can we make rebuildjs rebuild if the source file changes:
 /home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts
+### Re: Rebuild on rappstack source file changes
 
+This is a local dev workflow question. When you edit `rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts`, the briantakita.me-dev build should pick up the change.
+
+**Current workflow:** rappstack packages are installed from npm — edits in rappstack-dev don't affect briantakita.me-dev until you publish to npm or use yalc.
+
+**Solutions (from lightest to most integrated):**
+
+**A) yalc push with watch:**
+```bash
+# Terminal 1: rappstack-dev — watch and auto-push to yalc on change
+cd rappstack-dev && yalc-publish-all.sh --watch
+
+# Terminal 2: briantakita.me-dev — dev server with watch mode
+cd briantakita.me-dev/app/briantakita.me && bun run dev
+```
+yalc's `--watch` flag auto-publishes on file change. The consumer's `node_modules` gets updated and esbuild's watch mode picks up the change.
+
+**B) Symlink the package directly:**
+```bash
+# Link the rappstack package source directly into node_modules
+ln -sf /path/to/rappstack-dev/lib/ui--browser--blog \
+  node_modules/@rappstack/ui--browser--blog
+```
+esbuild resolves through the symlink and picks up changes instantly. No yalc needed. But fragile — `bun install` breaks it.
+
+**C) Add the rappstack source to esbuild's watch paths:**
+rebuildjs uses `fdir` to scan for entrypoints. If we add the rappstack source directories to the scan, esbuild would watch those files too. This requires a rebuildjs change:
+```javascript
+// In rebuildjs_browser__build / rebuildjs_server__build
+// Add external source dirs to watch
+const watch_dirs = config.watch_dirs ?? []
+for (const dir of watch_dirs) {
+  // scan dir for .ts files and add to entryPoints
+}
+```
+
+Then in briantakita.me-dev `build.ts`:
+```typescript
+rhonojs_browser__build({
+  watch_dirs: ['/path/to/rappstack-dev/lib/ui--browser--blog'],
+  ...
+})
+```
+
+**D) Use Bun's file watcher separately:**
+```bash
+# Watch rappstack source and trigger yalc push on change
+bun --watch -e "
+import { watch } from 'fs'
+watch('/path/to/rappstack-dev/lib/ui--browser--blog', { recursive: true }, ()=>{
+  Bun.spawnSync(['yalc', 'publish', '--push', '--no-scripts'])
+})
+"
+```
+
+**Recommendation:** Option A (yalc --watch) for now. Option C (rebuildjs watch_dirs) for a proper integrated solution. Which do you want?
+
+Option C
 <!-- /agent:exchange -->

@@ -474,4 +474,19 @@ The OAuth token will be cached at `~/.config/corky/tokens.json` for future syncs
 === Account: btak.dev (btak.dev@gmail.com) ===
   Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
 ```
+The error you pasted is from the old binary (before rebuild). The new binary was compiled at 17:31. Try running `corky sync account btak.dev` again — the correct syntax is `corky sync account btak.dev` (not `--account`).
+
+On first run, it will:
+1. Print "Opening browser for Gmail authorization..."
+2. Open your browser to Google's OAuth consent screen
+3. Log in with `btak.dev@gmail.com` and authorize
+4. The browser redirects to `localhost:8484/callback` — corky catches it
+5. Sync begins
+
+If you already tried and the browser opened, complete the OAuth flow there. If you see the same password error, verify you're running the correct binary: `which corky` should show `.bin/corky`.
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+  Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+```
 <!-- /agent:output -->

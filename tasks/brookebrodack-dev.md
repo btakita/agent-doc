@@ -282,4 +282,32 @@ This is unrelated to the blog post feature. The `/content` video player uses the
 **Want me to continue with the remaining deploy tasks** (static export, sitemap, feed card links)?
 
 Yes, continue
+### Re: Deploy tasks complete — pushed
+
+All three remaining tasks done and pushed:
+
+**1. Static export** (`static-export.ts`):
+- Scans `post/content/` directory for `.md` files
+- Generates `/content/:slug` routes for all 180 posts
+- Added to the existing route list
+
+**2. Sitemap** (`sitemap__xml.ts`):
+- Imports `sorted_dehydrated_post_meta_a1_` from blog domain
+- Generates `<url>` entries for all post slugs under `/content/`
+
+**3. Feed card links** (`content__doc_html.ts`):
+- Each video card now has a "Read transcript →" link
+- Slug generated from title (matching the post filename format)
+- Styled as small cyan underline link below the date
+
+**Commits pushed:**
+- `ae6f360` (brookebrodack-site): `feat: add /content/:slug blog post pages with Whisper transcripts`
+- `fbd932b` (ui--server--brookebrodack): `feat: add post page component, sitemap entries, transcript links`
+- `77d6716` (brookebrodack-dev): `feat: blog posts with Whisper transcripts for all 180 YouTube videos`
+
+CI deployment should be running now. Once deployed, all 180 video blog posts will be live at `brookebrodack.net/content/:slug` with full Whisper transcripts, embedded video, and auto-generated tags.
+
+Remove the "Read Transcript" link. Each video square should link to a separate page. We will remove the old behavior.
+
+The back button on /content/:slug should go back to /content.
 <!-- /agent:exchange -->

@@ -289,4 +289,14 @@ The `.vsix` and JB plugin zips are now uploaded to the v0.17.15 GitHub Release. 
 Also need to add `publisher` field to the VSCode extension's `package.json`. What publisher name do you want? (e.g., "btakita" or "agent-doc")
 
 What do you recommend for the publisher name?
+
+### Re: Publisher name recommendation
+
+**"btakita"** — matches your GitHub username, crates.io publisher, and PyPI owner. Keeps it consistent across all package registries. The extension would appear as `btakita.agent-doc` in the marketplace.
+
+Alternative: `"agent-doc"` as a project-specific publisher — but that creates an extra identity to manage and doesn't tie back to you as easily.
+
+Go with `btakita`?
+
+Yes
 <!-- /agent:exchange -->

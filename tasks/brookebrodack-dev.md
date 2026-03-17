@@ -321,4 +321,20 @@ Commits: `6b2ada1` (ui--server--brookebrodack), `2966153` (brookebrodack-dev). C
 
 Clicking on a video box still opens the video player and remains on /content.
 Instead it should go to /content/:slug
+### Re: Video cards still opening inline player
+
+**Root cause:** The `content_feed__a__hyop` browser-side hyperop was calling `evt.preventDefault()` on click, intercepting the navigation and opening the inline YouTube player instead.
+
+**Fix:** Removed the `hyop: 'content_feed__a__hyop'` attribute from the video card `<a>` tag. Also removed the play/pause icon overlays (no longer needed since videos don't play inline on the feed page).
+
+Now clicking a video card navigates directly to `/content/:slug` as a normal link.
+
+Commits: `e73ed4e` (ui--server--brookebrodack), `2943c76` (brookebrodack-dev). Pushed.
+
+Save the transcripts to a separate file that can be downloaded. Make sure the SEO still can access it.
+
+Print the YouTube video description.
+
+Rather than printing the raw transcript on each page, print a summary of each video.
+Analyze the transcript and extract the content. Make an engaging "post" with the content.
 <!-- /agent:exchange -->

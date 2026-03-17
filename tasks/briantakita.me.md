@@ -613,4 +613,38 @@ watch('/path/to/rappstack-dev/lib/ui--browser--blog', { recursive: true }, ()=>{
 **Recommendation:** Option A (yalc --watch) for now. Option C (rebuildjs watch_dirs) for a proper integrated solution. Which do you want?
 
 Option C
+### Re: Option C — watch_dirs implemented
+
+Added `watch_dirs` support to rebuildjs. When configured, esbuild watch mode monitors external directories for `.ts/.tsx/.js/.jsx/.css` changes and triggers rebuilds with 100ms debounce.
+
+**Implementation:** `rebuildjs/server/build/index.js`
+- New `watch_dirs__start()` function using `fs.promises.watch()` with recursive watching
+- Integrated into both `rebuildjs_browser__build` and `rebuildjs_server__build` watch modes
+- Type: `rebuildjs_plugin_config_T.watch_dirs?: string[]`
+
+**Usage in briantakita.me-dev `build.ts`:**
+```typescript
+rhonojs_browser__build({
+  rebuildjs: {
+    watch_dirs: [
+      '/home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/ui--browser--blog',
+      '/home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/ui--server--blog',
+      // ... other rappstack source dirs
+    ]
+  },
+  plugins: [...]
+})
+```
+
+**How it works:**
+1. esbuild creates a `context()` and starts `watch()`
+2. `watch_dirs__start()` spawns async file watchers for each dir
+3. On `.ts` file change → debounce 100ms → `esbuild_ctx.rebuild()`
+4. esbuild re-resolves all imports, picks up changed file via `ts_resolve_node_modules_plugin_`
+
+**Note:** This requires the rappstack source files to be accessible at the `watch_dirs` paths. With yalc, the files are copied to `.yalc/` — so `watch_dirs` should point to the rappstack-dev SOURCE, not the yalc copy. The `ts_resolve_node_modules_plugin_` handles the actual resolution from `node_modules`.
+
+To use this immediately: publish rebuildjs with the change (or use yalc), then add `watch_dirs` to your build config. Want me to publish rebuildjs@0.71.1?
+
+continue
 <!-- /agent:exchange -->

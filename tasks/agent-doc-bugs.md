@@ -365,4 +365,20 @@ Open VSX is where Cursor and VSCodium look for extensions by default. VS Code Ma
 Want me to publish to Open VSX?
 
 Yes
+
+### Re: Open VSX publish
+
+Need a token first:
+
+1. Go to https://open-vsx.org → Sign in with GitHub
+2. Settings → Access Tokens → Generate New Token
+3. Store it: `pass insert btak/OVSX_TOKEN`
+
+Then let me know and I'll publish with:
+```bash
+cd src/agent-doc/editors/vscode
+npx ovsx publish agent-doc-0.2.0.vsix -p "$(pass btak/OVSX_TOKEN)"
+```
+
+Please summarize and highlight import considerations in /home/brian/work/btakita/agent-loop/mail/topics/open-vsx/agreement.txt
 <!-- /agent:exchange -->

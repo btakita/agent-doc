@@ -131,4 +131,7 @@ Many of Brooke's videos (47 so far) have no auto-captions at all — only Whispe
 
 The existing transcripts don't seem complete. Please use corky for all videos.
 Also group content into subjects with tags for each video.
+
+Can the transcriptions be done in parallel? Please tune accordingly using my system resources.
+Also note system temperature and power draw...especially if the gpu is used.
 <!-- /agent:exchange -->

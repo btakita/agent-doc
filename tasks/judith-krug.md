@@ -181,15 +181,20 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-### Re: CRM / GoHighLevel question
+### Re: Send it
 
-Added a GoHighLevel paragraph to the email draft. It references Robert (Waldman, since he's CC'd) naturally — asks if they've discussed setting up a sub-account, and offers to integrate it into the site.
+Email sent via corky:
 
-The paragraph is positioned between the portal question and the "to get rolling" list. It keeps the email concise — one sentence to surface the topic, one sentence to tie it to the website work.
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **BCC:** robertward3@yahoo.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+- **Status:** sent
+- **Draft:** `mail/drafts/20260317-judith-website-kickoff.md`
 
-Note: The email says "Robert" without a last name. Since Robert Waldman is CC'd and he's the one with GoHighLevel access, Judith will know who it refers to. Robert Ward (BCC'd) won't be confused since he knows the players.
+Note: The BCC field was stripped by corky during send (it only includes fields in the sent draft). Robert Ward's BCC was in the original draft metadata. Verify in Gmail's sent folder that the BCC went through.
 
-Draft ready for review at `mail/drafts/20260317-judith-website-kickoff.md`.
-
-Send it
+Please add to the corky SKILL to prefer sending emails as HTML.
+The emails currently formatted as markdown `**New website**`...This should be a html bold instead.
+Fallback to markdown as the text format.
 <!-- /agent:exchange -->

@@ -99,47 +99,25 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: Phase 1-5 complete
+### Re: Submodule commits + CI results
 
-**Phase 1: npm verification** — All 11 `@rappstack/*` packages confirmed published on npm:
+**Submodule commits completed:**
+- 4 btakita libs committed, merged to main, pushed
+- `app/briantakita.me` submodule also needed its package.json committed (was missed initially)
+- Parent pointer updated and pushed (`28b2282`)
 
-| Package | npm version |
-|---------|-------------|
-| @rappstack/domain--any--blog | 0.1.2 |
-| @rappstack/domain--browser | 0.1.0 |
-| @rappstack/domain--browser--blog | 0.1.0 |
-| @rappstack/domain--server | 0.1.0 |
-| @rappstack/domain--server--blog | 0.1.1 |
-| @rappstack/ui--any | 0.1.0 |
-| @rappstack/ui--any--blog | 0.1.0 |
-| @rappstack/ui--browser | 0.1.1 |
-| @rappstack/ui--browser--blog | 0.1.0 |
-| @rappstack/ui--server | 0.1.1 |
-| @rappstack/ui--server--blog | 0.1.1 |
+**CI run #2 (23180727481):**
+- **Install dependencies: PASSED** — migration is working, npm resolution correct
+- **Build and prerender: FAILED** — pre-existing bug, not migration-related:
+  - `request_url__origin_` returns a path (`/1200px-Creation_of_Adam-5XYM72ZV.jpg`) instead of a full URL during prerender
+  - `sorted_dehydrated_post_meta_a1_` returns `undefined` causing `.map()` to fail
+  - Same `request_url` null/undefined issue from observation #6129-#6130
 
-**Phase 2: Submodule removal** — All 11 rappstack submodules removed (`git submodule deinit` + `git rm` + `.git/modules` cleanup).
+The yalc migration itself is complete and verified. The CI build failure is a pre-existing bug in the prerender pipeline that needs separate attention.
 
-**Phase 3: Dependency updates** — Changed `workspace:*` → version ranges in 5 files:
-- `app/briantakita.me/package.json` (9 deps)
-- `lib/domain--server--briantakita/package.json` (2 deps)
-- `lib/ui--browser--briantakita/package.json` (1 dep)
-- `lib/ui--server--briantakita/package.json` (6 deps)
-- `lib/snippet--rappstack/package.json` (3 deps)
+**Migration status:** Phases 1-6 done (CI install passes). Phase 7 (docs) remaining but optional.
 
-**Phase 4: Workspace config** — No change needed. `"lib/*"` glob still matches remaining 7 btakita packages.
+Want me to investigate the prerender `request_url` bug, or is the migration complete from your perspective?
 
-**Phase 5: yalc setup** — `.yalc/` and `yalc.lock` already in `.gitignore`.
-
-**Verification:**
-- `bun install` — resolved all deps from npm registry (13 installed, 11 workspace links removed)
-- `bun run build` — builds successfully
-
-**Remaining:**
-- Phase 6: CI verification (push and test GitHub Actions)
-- Phase 7: Documentation
-- Commit submodule changes from within each modified btakita lib (4 submodules have package.json changes)
-
-Note: The btakita lib package.json changes need to be committed from within each submodule repo, then pushed, before committing the parent pointer updates. Want me to proceed with the submodule commits?
-
-yes
+I began to fix the request_url bug. See my changes in rappstack-dev
 <!-- /agent:exchange -->

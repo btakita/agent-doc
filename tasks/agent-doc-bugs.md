@@ -72,4 +72,28 @@ These are already covered by existing write tests. The real fix for the IPC bug 
 **Immediate action needed:** Rebuild the JetBrains plugin so IPC works. Want me to build it now?
 
 Yes
+
+### Re: Plugin rebuild + version bump
+
+**JB plugin built: v0.2.2**
+- `agent-doc-jetbrains-0.2.2.zip` (unsigned)
+- `agent-doc-jetbrains-0.2.2-signed.zip` (signed)
+
+Both at `src/agent-doc/editors/jetbrains/build/distributions/`.
+
+**Install:** IntelliJ → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.2.zip`. Then **restart IntelliJ** (structural class changes require full restart).
+
+**What's in 0.2.2:**
+- `applyPatch() → Boolean` fix (no more false ACK)
+- File-not-found retry with VFS refresh
+- Route output logging to idea.log
+- Successful route logging (not just errors)
+
+**VSCode plugin:** Already has the correct IPC implementation from v0.17.14 (TypeScript was written with the fix applied). No update needed.
+
+**Plugin SPEC:** Already reflects the ACK-on-success protocol. No update needed.
+
+**Version bump:** JB plugin 0.2.1 → 0.2.2. The old 0.2.0 and 0.2.1 zips should be cleaned up from `build/distributions/` but they're harmless.
+
+tasks/slack.md just had an external edit
 <!-- /agent:exchange -->

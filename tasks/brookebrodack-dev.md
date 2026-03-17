@@ -578,5 +578,29 @@ CPU Whisper on GH Actions runners (~2 cores) takes ~3-5min per video, which is f
 Want me to implement this pipeline?
 
 Yes. Does GH Actions need a Claude Api key?
-Or my Claud Code 
+Or my Claude Code token?
+### Re: Yes, implement pipeline + API key question
+
+**Claude API key** — you need an `ANTHROPIC_API_KEY` from console.anthropic.com, added as a GitHub secret. Your Claude Code token is session-bound and can't be used in CI.
+
+**Pipeline implemented:**
+
+**New file: `app/brookebrodack-site/scripts/generate-posts.ts`**
+- Detects new videos by comparing YouTube DB against existing `.md` files
+- For each new video: `yt-dlp` audio download → `whisper` transcription (CPU, base model) → Claude API summary → `.md` file + transcript `.txt`
+- Regenerates `post/index.ts` with sorted imports
+- Slug algorithm matches `content__doc_html.ts` exactly
+- Graceful error handling (skips failures, continues with remaining)
+
+**Modified: `.github/workflows/deploy.yml`**
+- Installs `openai-whisper` + `yt-dlp` + `@anthropic-ai/sdk`
+- Runs generate-posts script after DB init, before build
+- If new posts generated: auto-commits and pushes before deploy continues
+
+**GitHub secrets needed:**
+- `ANTHROPIC_API_KEY` — Claude API key for AI summaries
+
+**Exit codes:** 0 = no new videos, N = count generated, 255 = fatal error
+
+Script compiles cleanly (164KB bundled). Ready for testing once you add the `ANTHROPIC_API_KEY` secret to the repo.
 <!-- /agent:exchange -->

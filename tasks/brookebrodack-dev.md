@@ -162,4 +162,39 @@ Also note system temperature and power draw...especially if the gpu is used.
 Building CUDA corky now — will start transcription pipeline once compiled.
 
 kKeepa running list of transcribed videos with progress...such as which videos are transcribed and which posts are complete.
+### Re: Running progress list
+
+**CUDA build failed** (whisper-rs-sys binding mismatch) — using CPU-parallel fallback. Bug tracked for corky.
+
+**System:** CPU 78°C, GPU 37°C/60W (idle — CPU-only), Load: 12.2
+
+**Pipeline progress:**
+
+| Stage | Count | Status |
+|-------|-------|--------|
+| Audio downloaded | 108/181 | Downloading... |
+| Transcribed (Whisper) | 5/181 | 2 parallel batches running |
+| Post files created | 85/181 | From earlier script (need transcript update) |
+
+**Completed transcripts:**
+
+| Video ID | Title | Size |
+|----------|-------|------|
+| 1Jc8FLUPaN4 | Wear your #workout | 3.2KB |
+| 36jsFc4H4Kw | My name is waddles | 4.3KB |
+| OYXsqRkj-hg | Definitely blizzard of 26 | 9.5KB |
+| PKRxkj3SBAI | Another pretty day, get out and play | 1.4KB |
+| plInIKyvrqQ | Going mucus free diet is glitching the matrix hard! | 5.5KB |
+
+**Awaiting transcription (103 audio files ready):**
+Downloads outpacing transcription. 2 parallel Whisper instances running at ~1.9x realtime each. Will launch more batches as current ones complete.
+
+**Next steps:**
+1. Continue downloading remaining 73 audio files
+2. Launch additional transcription batches as current ones finish
+3. Once transcripts complete, regenerate post `.md` files with full Whisper transcripts
+4. AI-tag each video with subjects/topics (via batch processing)
+
+tasks/corky.md built the corky whisper gpu integration.
+Please continue using corky gpu transcription
 <!-- /agent:exchange -->

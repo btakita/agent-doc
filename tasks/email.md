@@ -489,4 +489,30 @@ If you already tried and the browser opened, complete the OAuth flow there. If y
 === Account: btak.dev (btak.dev@gmail.com) ===
   Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
 ```
+I just tested the new binary directly and it works:
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+```
+
+No password error — it goes straight to Gmail API OAuth. The binary at `.bin/corky` is correct (verified MD5 match with `target/release/corky`).
+
+**Your terminal might be running a cached/different `corky`.** Try:
+```bash
+# Use the explicit path to the new binary:
+.bin/corky sync account btak.dev
+
+# Or verify which corky you're running:
+which corky
+```
+
+If `which corky` shows a different path (e.g., `~/.cargo/bin/corky`), you're running an older installed version. Either use the full path `.bin/corky` or reinstall: `cargo install --path src/corky --force`.
+
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+  Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+```
 <!-- /agent:output -->

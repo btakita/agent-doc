@@ -416,5 +416,31 @@ yes
 
 **Also:** sitemap.xml now works on production (200 OK).
 
-The briantakita youtube channel videos that we have posts for are not in the sitemap.xml 
+The briantakita youtube channel videos that we have posts for are not in the sitemap.xml
+
+The search box icon is not placed correctly. It should be vertically centered on the left side. The input placeholder and input text should be padded after the search icon.
+![img_1.png](img_1.png)
+### Re: Video sitemap entries
+
+**Done!** All 5 YouTube video posts now have `<video:video>` entries in the sitemap.
+
+**Changes:**
+1. `app/briantakita.me/build.ts` — Added `video_url` extraction to `md_esbuild_plugin_` frontmatter processing
+2. `lib/ui--server--briantakita/sitemap/sitemap__xml.ts` — Added `<video:video>` entries with:
+   - `<video:thumbnail_loc>` — YouTube hqdefault thumbnail
+   - `<video:title>` — Post title (XML-escaped)
+   - `<video:description>` — Post description (XML-escaped)
+   - `<video:content_loc>` — YouTube watch URL
+   - `<video:publication_date>` — Post date
+
+**Verified locally:** 5 posts have video metadata:
+- dogfooding-agent-doc-part1-blog (B-9uI53cRVE)
+- dogfooding-agent-doc-part2-blog (qQCKVQHRQCI)
+- dogfooding-agent-doc-part3-blog (RrZETW8EZEQ)
+- rappstack-live-session (oFFHVjQaYdA)
+- lazily-reactive-signals (hVNmbmY4vgo)
+
+Pushed to CI. Still need to add JSON-LD VideoObject for these posts (the other part of your earlier request).
+
+yes
 <!-- /agent:exchange -->

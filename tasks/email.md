@@ -17,10 +17,11 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-- [x] btak.dev account added to .corky.toml
+- [x] btak.dev account added to .corky.toml (sync_days=30)
 - [x] Gmail API sync provider implemented
 - [x] watch.rs fixed for gmail-api provider
 - [x] Progress indicators added
+- [ ] Verify sync with limited date range
 - [ ] Release 0.17.0
 <!-- /agent:status -->
 
@@ -607,4 +608,16 @@ Rebuilt and reinstalled globally. Restart `corky watch` to see the progress.
 **On the version question** — you're right that `0.17.0` is the correct semver for a new feature. But let's get the sync working reliably first before tagging. The initial full sync of 1.8M messages will take a long time. Once incremental sync via `historyId` kicks in, subsequent runs will be fast.
 
 Want me to also add a `sync_days` config to limit the initial sync window for btak.dev? E.g., `sync_days = 365` would only sync the last year instead of 10 years.
+You're right — 1.8M messages for a personal Gmail is way too many. The issue is the `sync_days = 3650` default (10 years). Even if the query works correctly, Gmail's `messages.list` with `labelIds=INBOX` returns every message that has **ever** been in INBOX — including archived, deleted-from-inbox, etc. Gmail labels are additive; a message stays associated with INBOX in the metadata even after archiving.
+
+btak.dev@gmail.com was set up a few days ago. The sync is probably on brian.takita@gmail.com
+
+**Two fixes applied:**
+
+1. **Set `sync_days = 30`** for btak.dev in `.corky.toml` — limits initial sync to last 30 days
+2. You can increase it later once the initial sync proves working
+
+The `q=after:YYYY/MM/DD` parameter should filter correctly — the previous 10-year window just captured everything. Try `corky sync account btak.dev` now — it should find a much smaller message set.
+
+Once it works with 30 days, you can expand to `sync_days = 365` or `3650` and let it run overnight for the full history.
 <!-- /agent:output -->

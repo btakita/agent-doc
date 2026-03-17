@@ -76,37 +76,28 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 The deployed website styling is broken.
 https://brookebrodack.net/
 
-<!-- agent:exchange -->
-### Re: All videos get posts — parallel agent plan
+<!-- agent:exchange mode=append -->
+### Re: Go — executing
 
-**Inventory:** 181 videos in the database, spanning 2019–2026. Transcripts confirmed available via `youtube-transcript-api` (tested 4 videos successfully — segment counts range from 10 to 499).
+**Phase 1: Post generation** — 9 parallel batches (20 videos each) running now, fetching YouTube transcripts via `youtube-transcript-api` and generating `.md` files in `app/brookebrodack-site/post/content/`.
 
-**Execution plan:**
+Each post includes:
+- YAML frontmatter (title, description, date, tags, video_url)
+- Embedded YouTube iframe
+- Cleaned transcript with timestamps (paragraph breaks on 3+ second gaps)
+- Auto-generated tags based on title keywords
 
-1. **Setup phase** (this session):
-   - Create `app/brookebrodack-site/post/content/` directory
-   - Add the `md_esbuild_plugin_()` to the build (port from briantakita.me)
-   - Add `/content/:slug` route
-   - Create a post generation script
+**Phase 2: Build integration** — porting `md_esbuild_plugin_()` and `index.generate.ts` from briantakita.me (in progress).
 
-2. **Post generation** (parallel agents):
-   - Batch 181 videos into groups of ~20
-   - Each agent fetches transcripts via `youtube-transcript-api`, generates a `.md` file with:
-     - YAML frontmatter: `title`, `description`, `date`, `tags`, `video_url`
-     - Embedded YouTube iframe
-     - Cleaned transcript with timestamps
-     - AI-generated topic summary and key points
-   - Slug format: `YYYY-MM-DD-{slugified-title}.md`
+**Phase 3: Routing** — adding `/content/:slug` route (next).
 
-3. **Integration phase:**
-   - Wire up `post/index.generate.ts` to scan content directory
-   - Update `/content` feed cards to link to `/content/:slug`
-   - Add VideoObject JSON-LD structured data
-   - Update sitemap generation
+Will update as batches complete...
 
-**Transcript approach:** `youtube-transcript-api` (Python) works but is slow (~5-10s per video). For 181 videos, parallel agents (10 batches of ~18) will take ~2-3 minutes total rather than ~20 minutes sequential.
+Should we make a rust package to do this transcribing?
+Or would this be a good feature in corky?
 
-**Ready to start?** I'll begin with the setup phase (build system + routing), then kick off parallel agents for post generation.
+I'm seeing a bunch of errors. Should we download the videos and use Corky to transcribe?
+> *Transcript not available: IpBlocked*
 
-Go
+Please update exchange
 <!-- /agent:exchange -->

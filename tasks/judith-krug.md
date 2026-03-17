@@ -181,62 +181,23 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-### Re: Adjust plan for platform-independent Phase 1
+### Re: BCC Robert Ward + create draft
 
-**Context from Robert Ward calls (March 14-16):**
-- Judith verbally confirmed: "100% Brian's going to work on the website and other stuff"
-- MA is enforcing their 12-month non-refundable contract — Judith's attorney (Canada-based) is fighting it
-- Robert Ward's advice: just start working, build a demo, present it to get paid
-- Both TMO and MA have aggressive contract patterns — long-term play is custom software
-- Judith is hard to pin down (travels constantly, doesn't reply promptly — "gives that to everybody")
+Done. Draft created at `mail/drafts/20260317-judith-website-kickoff.md`:
 
-**Revised Phase 1 — Website + Document Portal (platform-independent):**
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com
+- **BCC:** robertward3@yahoo.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+- **Status:** draft
 
-| Task | Hours | Notes |
-|------|-------|-------|
-| Crawl/export existing site content | 2-3 | Current host uncooperative — crawl it |
-| Cloudflare Pages + domain transfer | 2-3 | Judith owns domain on GoDaddy |
-| Site rebuild (Hono + Workers) | 8-12 | Borrower-facing + investor info pages |
-| Secure document upload portal | 4-6 | Drive/Dropbox integration |
-| **Total** | **16-24** | Fits within M1 ($4K milestone) |
+Same subject line as previous emails to maintain Gmail threading. Robert Ward is BCC'd so he can see the outreach without Judith knowing he's being kept in the loop.
 
-Zero dependency on MA or TMO. Pure website + document portal. The loan management platform decision can happen later.
+Ready to send when you are — review the draft and let me know if you want any changes.
 
-**Draft email to Judith:**
+> Secure document upload portal
 
----
-
-**To:** judithkrug@gmail.com
-**CC:** rwaldman100@gmail.com
-**Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
-
-Hi Judith,
-
-Hope you're doing well. I wanted to let you know I'm ready to get started on the website whenever you are.
-
-The website and document upload portal are completely separate from any loan management platform — so we can move forward on that right now while everything else gets sorted out. Here's what I'd tackle first:
-
-- **New website** on modern hosting (Cloudflare) — faster, more secure, you own everything
-- **Secure document upload portal** for borrowers and investors
-- **Content from your current site** carried over (I can work from what's there)
-
-To get rolling, I just need:
-1. Your GoDaddy login (or just point the domain to Cloudflare — I can walk you through it)
-2. Your logo and any branding preferences
-3. A quick 15-minute call to confirm the site structure you want
-
-This is the first milestone — you'll see it live before anything else moves forward.
-
-When works for a quick call this week?
-
-Brian
-
----
-
-**Notes on tone:** Concise, no price mentioned (let the milestone framing from the proposal stand), no mention of MA/legal situation, focused entirely on her business. Per Robert Ward's coaching.
-
-Want me to save this as a corky draft, or adjust anything first?
-
-BCC robert ward
-Create a draft
+If Judith is forced to use MO, they would provide the document upload portal.
+I don't think she will use MO since her lawyer is confident he can get her out of the contract.
+And MO has been aggressive about enforcing the contract.
 <!-- /agent:exchange -->

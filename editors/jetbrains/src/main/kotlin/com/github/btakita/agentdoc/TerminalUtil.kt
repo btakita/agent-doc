@@ -56,6 +56,9 @@ object TerminalUtil {
                     val exitCode = process.waitFor()
                     if (exitCode != 0) {
                         notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
+                    } else {
+                        // Log route output for debugging (visible in idea.log)
+                        System.err.println("[agent-doc] route succeeded:\n$output")
                     }
                 } finally {
                     onComplete?.invoke()

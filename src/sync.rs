@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, resync, sessions};
+use crate::{frontmatter, resync, route, sessions};
 
 use tmux_router::FileResolution;
 
@@ -52,6 +52,56 @@ pub fn run_with_tmux(
             None => Some(FileResolution::Unmanaged),
         }
     };
+
+    // Pre-sync: auto-start Claude sessions for files that have session UUIDs
+    // but no alive panes. This ensures sync has panes to arrange.
+    // We parse file paths from col_args directly (before tmux_router::sync calls resolve_file).
+    {
+        // Parse file paths from col_args (each arg is "file1.md,file2.md")
+        let all_files: Vec<PathBuf> = col_args
+            .iter()
+            .flat_map(|arg| arg.split(','))
+            .map(|s| PathBuf::from(s.trim()))
+            .collect();
+        for file_path in &all_files {
+            if !file_path.exists() {
+                continue;
+            }
+            let content = match std::fs::read_to_string(file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let (fm, _) = match frontmatter::parse(&content) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let session_id = match fm.session {
+                Some(ref id) => id.clone(),
+                None => continue,
+            };
+
+            let has_alive_pane = sessions::lookup(&session_id)
+                .ok()
+                .flatten()
+                .map(|pane| tmux.pane_alive(&pane))
+                .unwrap_or(false);
+
+            if !has_alive_pane {
+                let file_str = file_path.to_string_lossy().to_string();
+                eprintln!(
+                    "[sync] auto-starting session for {} (no alive pane)",
+                    file_path.display()
+                );
+                if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str) {
+                    eprintln!(
+                        "[sync] warning: auto-start failed for {}: {}",
+                        file_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
 
     let result =
         tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;

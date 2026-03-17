@@ -617,4 +617,8 @@ Can I get a ANTHROPIC_API_KEY from my Claude subscription?
 5. Add as GitHub secret: `gh secret set ANTHROPIC_API_KEY -R btakita/brookebrodack-dev`
 
 **Cost:** ~$0.01-0.03 per video summary with Sonnet. For 1-2 new videos/month, essentially free.
+
+I'll just do the posts on my local machine. I would like to setup an email notification whenever new YouTube episodes are available.
+
+Let's run the sitemap 
 <!-- /agent:exchange -->

@@ -512,4 +512,21 @@ All three repos pushed to GitHub. CI deployment should trigger from the brookebr
 What would happen if the upstream YouTube channel adds a video but it's missing as a page.
 
 Can we fallback to the old `/content` behavior where we play the video?
+### Re: New video without a page + fallback behavior
+
+**What happens now:** If YouTube adds a new video but no `.md` post exists:
+1. `/content` page renders the video card linking to `/content/:slug`
+2. Click → `/content/:slug` → `blog_post_mod_(ctx)` returns falsy → **404** (was previously a crash)
+
+**Fallback implemented:** Video cards now check a `post_slug_set` built from loaded post modules:
+- **Post exists** → links to `/content/:slug` (internal page with summary + transcript)
+- **No post** → links to `https://www.youtube.com/watch?v=<videoId>` (opens YouTube in new tab)
+
+**Changes:**
+- `content__doc_html.ts` — imports post modules, builds slug set, conditionally links to post page or YouTube
+- `content/index.server.ts` — sets blog context on `/content` route (needed for slug set), returns 404 for unknown slugs on `/content/:slug`
+
+Is the :slug automatically created from the YouTube video name? Even for new videos that don't have a page?
+
+Build passes, all 19 tests pass.
 <!-- /agent:exchange -->

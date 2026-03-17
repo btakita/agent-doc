@@ -69,4 +69,29 @@ Please look at the logs.
 Reproduce this situation in tests.
 Find the pattern that caused this issue. Make tests for variations of this pattern.
 Fix.
+
+### Re: Agent-doc sessions scattered across tmux sessions
+
+**Root cause:** `route.rs` hardcoded `TMUX_SESSION_NAME = "claude"` for all operations (`auto_start`, `find_target_pane`), ignoring the document's `tmux_session` frontmatter field (which is `'0'` for this project).
+
+When the user switched to a different tmux session and triggered route, `auto_start` created panes in the "claude" session instead of session "0". Then `join_pane` used `active_pane("claude")` which was in a different window/session than expected.
+
+**Fix:** Route now reads `tmux_session` from the document's frontmatter:
+- `run_with_tmux()` parses `tmux_session` and passes it to `find_target_pane` and `auto_start_in_session`
+- `auto_start()` (public, called by sync.rs) reads `tmux_session` from the file
+- Falls back to `TMUX_SESSION_NAME` ("claude") if not set
+
+**Stray panes found:**
+- `%34` (ripple.md) → session 1
+- `%41` (agent-doc-plugins.md) → session 5
+- `%43` (agent-doc-crdt-duplicate-bug.md) → session claude
+- `%44` (unregistered) → session claude
+
+These should all be in session 0 (per `tmux_session: '0'` in frontmatter).
+
+Binary v0.17.16 built and installed. All 13 route tests pass. Want me to clean up the stray panes?
+
+yes
+
+I also lost the --dangerously-set-permissions for the session.
 <!-- /agent:exchange -->

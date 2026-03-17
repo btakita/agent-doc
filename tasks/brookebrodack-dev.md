@@ -729,4 +729,56 @@ Already done — the fix includes all post pages. Verified locally:
 All URLs use `https://brookebrodack.net` prefix. Needs commit + push to deploy the fix to production.
 
 deploy
+### Re: Deploy
+
+**Committed and pushed all changes:**
+
+| Repo | Commit | Changes |
+|------|--------|---------|
+| `ui--server--brookebrodack` | `32c493d` | Sitemap fix + video card fallback |
+| `brookebrodack-site` | `3b82314` | Route fixes, generate-posts pipeline, 22 tests |
+| `brookebrodack-dev` | `5733297` | All above + WebSub email notification |
+
+CI deploying now. The sitemap fix will go live with this deploy.
+
+**Still needs manual action:**
+- Add Mailchannels DNS records before deploying the WebSub worker
+What is Mailchannels DNS records used for?
+- Submit sitemap in Google Search Console
+
+The build failed
+
+https://github.com/btakita/brookebrodack-dev/actions/runs/23204496800/job/67435911287
+
+```
+Run bun install --frozen-lockfile --ignore-scripts
+bun install v1.3.10 (30e609e0)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--any--blog@.yalc/@rappstack/domain--any--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/ui--server--blog@.yalc/@rappstack/ui--server--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/ui--server@.yalc/@rappstack/ui--server (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/ui--any--blog@.yalc/@rappstack/ui--any--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/ui--any@.yalc/@rappstack/ui--any (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server--youtube@.yalc/@rappstack/domain--server--youtube (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server--blog@.yalc/@rappstack/domain--server--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server--auth@.yalc/@rappstack/domain--server--auth (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server@.yalc/@rappstack/domain--server (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--browser@.yalc/@rappstack/domain--browser (open)
+
++ @anthropic-ai/sdk@0.79.0
++ @btakita/dev-bin@0.1.0
++ @changesets/cli@2.30.0
++ @ctx-core/monorepo@21.4.162
++ @types/js-yaml@4.0.9
++ @typescript-eslint/eslint-plugin@7.18.0
++ @typescript-eslint/parser@7.18.0
++ broken-link-checker@0.7.8
++ bun-types@1.3.10
++ eslint@9.39.4
++ js-yaml@4.1.1
++ typescript@5.9.3
+
+1327 packages installed [1498.00ms]
+Failed to install 10 packages
+Error: Process completed with exit code 1.
+```
 <!-- /agent:exchange -->

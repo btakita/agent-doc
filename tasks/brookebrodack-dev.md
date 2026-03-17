@@ -197,4 +197,17 @@ Downloads outpacing transcription. 2 parallel Whisper instances running at ~1.9x
 
 tasks/corky.md built the corky whisper gpu integration.
 Please continue using corky gpu transcription
+### Re: GPU transcription activated
+
+**GPU transcription confirmed working!** Benchmarked at **184x realtime** on RTX 5090 (56s video = 0.3s transcription). ~200x faster than CPU.
+
+Killed all 6 CPU batches. Running single GPU instance on all 180 files — at this speed, the entire catalog should finish in ~5-10 minutes.
+
+**34 transcripts completed** (from CPU batches before switch). GPU now processing remaining 146.
+
+**System after GPU activation:**
+- GPU: 37°C / 60W (Whisper GPU load is bursty, not sustained)
+- CPU: 79°C (dropping now that CPU batches killed)
+
+Monitoring GPU temp every 10 files. Will report when complete.
 <!-- /agent:exchange -->

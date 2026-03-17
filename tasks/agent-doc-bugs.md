@@ -380,5 +380,36 @@ cd src/agent-doc/editors/vscode
 npx ovsx publish agent-doc-0.2.0.vsix -p "$(pass btak/OVSX_TOKEN)"
 ```
 
+Done
+
 Please summarize and highlight import considerations in /home/brian/work/btakita/agent-loop/mail/topics/open-vsx/agreement.txt
+
+### Re: Open VSX Publisher Agreement Summary
+
+**Standard open-source registry agreement.** No red flags for publishing an MIT-licensed VS Code extension.
+
+**Key points:**
+
+1. **You retain IP** (Section 3e) — Eclipse gets a non-exclusive license to host/distribute, but ownership stays with you.
+
+2. **Default MIT license** (Section 4a) — If you don't specify a license, it defaults to MIT. Since agent-doc is already MIT, this is fine.
+
+3. **No compensation** (Section 5a) — Eclipse doesn't pay you, and you handle your own billing if you ever charge for the extension (not applicable for free/open-source).
+
+4. **They can remove your extension at any time** (Section 7) — Standard marketplace clause. No appeal process mentioned.
+
+5. **You indemnify Eclipse** (Section 9c) — Standard: if someone claims your extension infringes their IP, you defend Eclipse.
+
+6. **Belgian law, Brussels courts** (Section 11c) — Jurisdiction is Belgium (Eclipse Foundation is Belgian AISBL).
+
+7. **30-day termination** (Section 10a) — Either party can terminate with 30 days notice. They'll remove your extensions within 30 days.
+
+8. **No data collection disclosure needed** (Section 6) — Only relevant if your extension collects user data (agent-doc doesn't).
+
+**Important considerations:**
+- The agreement binds you personally AND any "Principal" (employer) if applicable
+- They can update the agreement and continuing to publish means you accept updates (Section 11j)
+- No exclusivity — you can publish the same extension elsewhere (VS Code Marketplace, GitHub, etc.)
+
+**Verdict:** Safe to accept for an MIT-licensed open-source extension. This is essentially the same terms as npm, crates.io, or PyPI — standard registry hosting agreement.
 <!-- /agent:exchange -->

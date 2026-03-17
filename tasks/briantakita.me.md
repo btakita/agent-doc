@@ -418,8 +418,6 @@ yes
 
 The briantakita youtube channel videos that we have posts for are not in the sitemap.xml
 
-The search box icon is not placed correctly. It should be vertically centered on the left side. The input placeholder and input text should be padded after the search icon.
-![img_1.png](img_1.png)
 ### Re: Video sitemap entries
 
 **Done!** All 5 YouTube video posts now have `<video:video>` entries in the sitemap.
@@ -443,4 +441,32 @@ The search box icon is not placed correctly. It should be vertically centered on
 Pushed to CI. Still need to add JSON-LD VideoObject for these posts (the other part of your earlier request).
 
 yes
+
+The search box icon is not placed correctly. It should be vertically centered on the left side. The input placeholder and input text should be padded after the search icon.
+![img_1.png](img_1.png)
+### Re: JSON-LD VideoObject + Search icon fix
+
+**JSON-LD VideoObject:** Queued for next cycle — the video sitemap entries are deployed and working.
+
+**Search icon fix — root cause identified:** The search component's Tailwind classes (`inset-y-0`, `items-center`, `flex`) aren't being generated because they come from `@rappstack/ui--browser--blog` in `node_modules`, which isn't in Tailwind's `@source` scanning paths.
+
+Current `@source` in `index.css.ts`:
+```
+@source "../../lib/**/*.ts";    // scans btakita submodule libs
+@source "../app/**/*.ts";       // scans app code
+```
+
+The `@rappstack/*` packages in `node_modules` are NOT scanned, so Tailwind doesn't generate their utility classes. The result: the search icon span has the correct class attributes but no corresponding CSS rules.
+
+**Fix options:**
+1. **Add `@source` for node_modules** — Tailwind v4 `@source` didn't work with node_modules paths (tried both direct and `.bun/` cache paths)
+2. **Add a safelist** — Force-include the needed utility classes
+3. **Move the search component into the btakita lib** — Override `blog_search__main_fragment_` in `lib/ui--server--briantakita/` so Tailwind scans it
+4. **Add custom CSS** — Write explicit CSS rules for the search icon positioning
+
+Option 3 is the cleanest. Want me to implement it?
+
+I want to keep blog_search__main_fragment_ where it is.
+
+Explain Option 1 & 2 in depth.
 <!-- /agent:exchange -->

@@ -58,4 +58,19 @@ Something a secret agent would wear.
 Removed `logo-no-eyes.svg` since the main `logo.svg` is now the no-eyes version. Open `src/agent-doc/logo.svg` in a browser to review.
 
 Where is the appropriate folder to put the logo in?
+
+### Re: Where to put the logo
+
+The current location `src/agent-doc/logo.svg` (project root) is the right place. This is standard for Rust/open-source projects — the logo sits alongside `README.md`, `Cargo.toml`, and `LICENSE`.
+
+Conventions:
+- **`logo.svg`** at project root — referenced by README, crates.io, GitHub
+- If you later need multiple sizes/formats (PNG for npm, ICO for desktop), create an `assets/` dir
+
+The README can reference it with `![agent-doc logo](logo.svg)`. No need to move it.
+
+Create a png version of the logos.
+Move the logos into an assets directory if needed to manage all of the files.
+
+Use the logo in the agent-doc documentation such as the README, plugins, and any other deployments.
 <!-- /agent:exchange -->

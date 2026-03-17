@@ -3,6 +3,7 @@ agent_doc_session: 92fba2ac-9d1f-4a7a-8764-821a8a08ecd0
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: "--dangerously-set-permissions"
 ---
 
 <!-- agent:status mode=replace -->
@@ -159,6 +160,11 @@ claude_args: "--dangerously-set-permissions"
 claude_args = "--dangerously-set-permissions"
 ```
 
+Set in config.toml.
+```
+claude_args = "--dangerously-set-permissions"
+```
+
 3. **Environment variable:**
 ```bash
 export AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"
@@ -171,4 +177,12 @@ export AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"
 All 385 tests pass. Binary v0.17.16 installed. Ready to release when you want.
 
 Make this document use dangerously-set-permissions
+
+### Re: claude_args added to this document
+
+Added `claude_args: "--dangerously-set-permissions"` to frontmatter. Next time this session restarts (via `agent-doc start`), Claude will launch with elevated permissions automatically.
+
+**Note:** This only takes effect on session restart. The current running session keeps its existing permission state. To apply now, either restart Claude in this pane or press `Shift+Tab` to cycle permissions.
+
+If I set `claude_args: ""` in a document,  
 <!-- /agent:exchange -->

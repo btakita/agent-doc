@@ -718,4 +718,15 @@ Please review and fix. Add automated tests.
 
 All 22 tests pass. Needs commit + push + deploy.
 The sitemap should include all of the video post pages.
+### Re: Include all video post pages in sitemap
+
+Already done — the fix includes all post pages. Verified locally:
+
+- **194 total URLs** in sitemap
+- **190 are `/content/:slug` post pages** (all video posts)
+- **4 static pages** (`/`, `/brookers`, `/content`, `/site`)
+
+All URLs use `https://brookebrodack.net` prefix. Needs commit + push to deploy the fix to production.
+
+deploy
 <!-- /agent:exchange -->

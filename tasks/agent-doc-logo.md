@@ -6,6 +6,10 @@ agent_doc_write: crdt
 ---
 <!-- agent:status mode=replace -->
 - [x] SVG logo: secret agent fedora, no eyes
+- [x] PNG versions (128, 256, 512) in assets/
+- [x] README updated with logo
+- [x] VS Code extension: icon.png + manifest
+- [x] JetBrains plugin: pluginIcon.svg
 - [ ] Final review
 <!-- /agent:status -->
 
@@ -73,4 +77,28 @@ Create a png version of the logos.
 Move the logos into an assets directory if needed to manage all of the files.
 
 Use the logo in the agent-doc documentation such as the README, plugins, and any other deployments.
+
+### PNG versions + assets directory + deployments
+
+**Files created:**
+```
+src/agent-doc/assets/
+  logo.svg          # source (moved from project root)
+  logo-128.png      # 128px — plugin icons
+  logo-256.png      # 256px — README, docs
+  logo-512.png      # 512px — high-res
+```
+
+PNGs generated with `rsvg-convert` (better SVG filter support than ImageMagick).
+
+**Logo deployed to:**
+
+| Location | File | Purpose |
+|----------|------|---------|
+| `README.md` | `<img src="assets/logo.svg">` centered at top | GitHub, crates.io (via `readme = "README.md"`) |
+| `editors/vscode/icon.png` | 128px PNG | VS Code Marketplace icon |
+| `editors/vscode/package.json` | `"icon": "icon.png"` | VS Code extension manifest |
+| `editors/jetbrains/.../META-INF/pluginIcon.svg` | SVG | JetBrains Marketplace icon |
+
+release
 <!-- /agent:exchange -->

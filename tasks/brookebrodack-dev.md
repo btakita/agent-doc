@@ -833,4 +833,15 @@ Added `<video:video>` blocks to all 190 post sitemap entries:
 
 Needs commit + push to deploy.
 Are the videos also in the json+ld?
+### Re: Videos in JSON-LD?
+
+**`/content` feed page** — yes, has `VideoObject` JSON-LD for each video (in `content__doc_html.ts`).
+
+**`/content/:slug` post pages** — no, only has `WebPage` JSON-LD. Missing `VideoObject`.
+
+For Google to associate the embedded video with each post page, each `/content/:slug` should have a `VideoObject` in its JSON-LD `@graph`. This would include `name`, `description`, `thumbnailUrl`, `contentUrl`, `embedUrl`, `uploadDate`.
+
+Want me to add `VideoObject` JSON-LD to the post pages? The video metadata (`video_url`, title, date) is already available from the post frontmatter.
+
+Yes
 <!-- /agent:exchange -->

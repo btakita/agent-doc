@@ -210,4 +210,27 @@ Killed all 6 CPU batches. Running single GPU instance on all 180 files — at th
 - CPU: 79°C (dropping now that CPU batches killed)
 
 Monitoring GPU temp every 10 files. Will report when complete.
+### Re: Transcription & post generation complete
+
+**All 181 videos processed!**
+
+| Stage | Count | Status |
+|-------|-------|--------|
+| Audio downloaded | 180/181 | Done (1 failed) |
+| Whisper transcripts | 180/180 | Done (GPU: 184x realtime) |
+| Post `.md` files | 180 | Done with transcripts + tags |
+| Post `index.ts` | Generated | 180 imports |
+
+**GPU performance:** RTX 5090 peaked at 48°C / 237W. Total transcription time ~5 minutes for all 180 videos.
+
+**Tag coverage:** Each post auto-tagged from title + transcript content. Categories include: meditation, spirituality, yoga, india, travel, fasting, health, healing, veganism, music, sound-healing, nature, animals, content-creation, sobriety, comedy, family, technology, self-improvement, native-culture, art.
+
+**Build integration done:**
+- `md_esbuild_plugin_()` in `build.ts`
+- `post/index.generate.ts` + generated `post/index.ts`
+- Blog dependencies installed (`@rappstack/domain--*--blog`, `@rappstack/ui--*--blog`)
+
+**Remaining:** `/content/:slug` route + post page UI component. Then deploy.
+
+continue
 <!-- /agent:exchange -->

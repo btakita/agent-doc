@@ -766,4 +766,24 @@ Absolute paths bypass the esmcss temp file resolution issue. Tailwind now scans 
 All three pieces are now connected.
 
 The search box is now gone on dev.
+
+Add unit (in libraries), functional (in libraries), and smoke tests (in apps using libraries) for the @source, plugins config, and other features.
+### Re: Search box gone
+
+**Investigated and fixed.** The dev server was not running when you checked — I had killed it during the rebuild cycle.
+
+**What happened:**
+1. I tried adding `resolveDir: absWorkingDir` to the source_map resolve — this broke ESM module initialization order (`relementjs/html` initialized before `relementjs/isomorphic`, causing `tags.a` undefined error)
+2. I also tried redirecting non-rappstack bare specifiers from rappstack source to consumer's `node_modules` — this caused the same initialization issue
+
+**Reverted to simple `source_map`** (no redirect). The build works correctly:
+- `blog_search__div_`, `h-full`, `w-full` all present in the bundle
+- `ctx__new` only defined once (no duplicate deps issue — esbuild deduplicates correctly)
+- Dev server restarted on port 4100
+
+**Cleaned dist and verified:** `rm -rf dist/browser--dev dist/server--dev` → fresh rebuild → server starts cleanly → search fragment renders in HTML → JS bundle loads with all search classes.
+
+Refresh `localhost:4100/search` — the search box should be working with the icon classes from your rappstack-dev edit.
+
+**Note:** The `w-full` class on the icon span makes it stretch 100% width of the label. This is probably not what you want — the icon span should only be as wide as the icon. Consider removing `w-full` from the span and keeping just `h-full` for vertical sizing.
 <!-- /agent:exchange -->

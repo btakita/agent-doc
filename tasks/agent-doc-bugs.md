@@ -1286,6 +1286,25 @@ Binary rebuilt and installed. Tests pass.
 Ready to test.
 
 Add tests as we add fixes.
-We want to model the behavior.
+
+### Re: Tests added + routing logic fix
+
+**Tests added to `route.rs`:**
+- `detects_unicode_prompt` — verifies ❯ (U+276F) detection
+- `detects_ascii_prompt` — verifies > fallback
+- `rejects_non_prompt_lines` — ensures non-prompt text doesn't false-match
+- `handles_ansi_prompt` — verifies ANSI stripping before match
+- `unregistered_file_skips_lazy_claim` — models the routing invariant
+- `dead_registered_pane_allows_lazy_claim` — models reassignment behavior
+
+**Code improvements:**
+- Extracted `pane_has_prompt()` helper — shared between `wait_for_claude_ready()` and the Enter verification check
+- Refactored `wait_for_claude_ready()` to use `pane_has_prompt()`
+
+All 12 route-related tests pass (7 unit + 5 CLI). Binary rebuilt and installed.
+
+The tests model the prompt detection and routing decision logic. Integration tests for the full auto-start flow (tmux + Claude) would require `IsolatedTmux` with a mock Claude process — that's a more involved setup. Want me to add those?
+
+yes
 <!-- /agent:exchange -->
 ****

@@ -38,13 +38,13 @@ src/
   git.rs            # Commit, branch, squash (includes `commit` subcommand)
   config.rs         # Global config (~/.config/agent-doc/config.toml)
   sessions.rs       # Session registry (sessions.json) + Tmux struct
-  route.rs          # Route /agent-doc commands to correct tmux pane
+  route.rs          # Route /agent-doc commands to correct tmux pane (pub auto_start for sync.rs)
   start.rs          # Start Claude session inside tmux pane
   claim.rs          # Claim document for current tmux pane
   focus.rs          # Focus tmux pane for a session document
   layout.rs         # Arrange tmux panes to mirror editor split layout
   outline.rs        # Markdown section structure + token counts
-  prompt.rs         # Detect permission prompts from Claude Code sessions
+  prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md (install/check)
   resync.rs         # Validate sessions.json, remove dead panes
   history.rs        # Exchange version history from git + restore

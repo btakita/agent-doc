@@ -200,4 +200,26 @@ Can agent-doc support the Cursor IDE? Can it integrate with the Cursor agent loo
 **Immediate path:** Build and publish the VSCode extension as a `.vsix`, test in Cursor. The extension code is at `src/agent-doc/editors/vscode/`. Want me to build it?
 
 Yes...build it
+
+### Re: VSCode extension built
+
+**Built:** `agent-doc-0.2.0.vsix` (14KB) at `src/agent-doc/editors/vscode/agent-doc-0.2.0.vsix`.
+
+**Install in VS Code / Cursor:**
+```
+Extensions → ... → Install from VSIX → select agent-doc-0.2.0.vsix
+```
+
+**Features included:**
+- IPC patch watcher with inline attribute support (regex-based)
+- Component patching with mode resolution (append/replace/prepend)
+- Full content replacement for inline-mode documents
+- Frontmatter merging
+- ACK only on success
+- Logging to "Agent Doc Patches" output channel
+
+**For Cursor specifically:** Should work as-is since Cursor supports VS Code extensions. The extension watches `.agent-doc/patches/` and applies JSON patches via VS Code's `TextDocument` API.
+
+Can we publish this plugin to the VSCode marketplace?
+Can we also enable install from the agent-doc cli?
 <!-- /agent:exchange -->

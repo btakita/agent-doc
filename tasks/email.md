@@ -19,7 +19,8 @@ agent_doc_write: crdt
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml
 - [x] Gmail API sync provider implemented & compiled
-- [ ] First sync test with btak.dev
+- [x] Global corky binary updated (cargo install)
+- [ ] Verify sync works from user's terminal
 <!-- /agent:status -->
 
 ## Exchange
@@ -514,5 +515,40 @@ If `which corky` shows a different path (e.g., `~/.cargo/bin/corky`), you're run
 ```
 === Account: btak.dev (btak.dev@gmail.com) ===
   Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+```
+Found the issue — you were running `~/.cargo/bin/corky` (the old globally installed version), not `.bin/corky`. I've now run `cargo install --path src/corky --force` which replaced `~/.cargo/bin/corky` with the new Gmail API version.
+
+Run `corky sync account btak.dev` again — it should work now from any terminal. The OAuth token from the first successful sync (via `.bin/corky`) is already cached, so it should skip the browser auth and go straight to syncing.
+
+(Note: the first test run I did earlier already synced successfully — it processed 1.8M message refs and wrote conversation files. The next run will be incremental.)
+
+```
+~/work/btakita/agent-loop main ⇡70 !11 ?2                                                                                                                                                                                             18:51:59
+❯ corky --version
+corky 0.16.0
+~/work/btakita/agent-loop main ⇡70 !11 ?2                                                                                                                                                                                             18:52:00
+❯ corky watch
+corky watch: polling every 300s (Ctrl-C to stop)
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+  Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+No new messages
 ```
 <!-- /agent:output -->

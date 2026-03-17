@@ -496,4 +496,13 @@ Pushing the draft to Gmail now...
 **Corky feature request noted:** extend `corky schedule run` to scan email drafts with `scheduled_at` — tracked for a future session.
 
 Please transfer feature request to tasks/corky.md
+
+**Re: Transfer feature request to tasks/corky.md**
+
+Done. Added to `tasks/corky.md` Open items:
+> `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
+
+**Housekeeping:** The email draft shows `status: sent` — looks like it was sent. Disabled the systemd timer (`corky-send-kevin.timer`) since it's no longer needed.
+
+Kevin sent a response. Please draft a reply.
 <!-- /agent:exchange -->

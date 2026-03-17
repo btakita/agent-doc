@@ -99,248 +99,40 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [ ] Create yalc tooling for library version publishing
-How can we do this? Should we create a new package?
-- [ ] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-go
-- [ ] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-go
-- [ ] Update YouTube video descriptions (add blog post links)
-go
-- [ ] Tailwind v4 migration for @rebuildjs/tailwindcss
-go
-
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [X] Create yalc tooling for library version publishing
-- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-- [ ] Update YouTube video descriptions (add blog post links)
-- [ ] Tailwind v4 migration for @rebuildjs/tailwindcss
-
----
-
-### Re: Yalc tooling
-
-**No new package needed.** ctx-core-dev already has a `bin/yalc-publish-all.sh` script that iterates workspace packages and runs `yalc publish --push`. The recommended approach:
-
-1. **Copy/adapt** `ctx-core-dev/bin/yalc-publish-all.sh` into `agent-loop/bin/` as a shared utility
-Put this into @ctx-core/monorepo
-2. **In consumer projects** (briantakita.me-dev): `yalc add <pkg>` pulls from local yalc store, `bun install` resolves
-3. **Add to .gitignore**: `.yalc/` and `yalc.lock` are local dev artifacts, never committed
-4. **For CI**: npm-published versions remain the source of truth (as they are now)
-
-The yalc workflow is for **local development only** — iterating on unreleased library changes before publishing to npm.
-
-### Re: Email-to-Slack
-
-Test email sent from `brian.takita@gmail.com` to `dev-slack@briantakita.me` with subject "Test: email-to-Slack verification". **Check Slack to confirm delivery.** The worker parses multipart MIME, converts HTML to text, and posts via `SLACK_WEBHOOK_URL`.
-
-Note: Proton Bridge wasn't running, so used the Gmail account instead.
-
-### Re: Stale GitHub secrets
-
-Done. Deleted from `btakita/briantakita.me-dev`:
-- `VPS_HOST` ✓
-- `VPS_USER` ✓
-- `VPS_SSH_KEY` ✓
-
-### Re: YouTube descriptions
-
-3 videos identified for blog post links:
-
-| Video ID | Title | Blog URL |
-|----------|-------|----------|
-| B-9uI53cRVE | Dog-fooding agent-doc Part 1 | `https://briantakita.me/posts/dogfooding-agent-doc-part1-blog` |
-| qQCKVQHRQCI | Dog-fooding agent-doc Part 2 | `https://briantakita.me/posts/dogfooding-agent-doc-part2-blog` |
-| RrZETW8EZEQ | Dog-fooding agent-doc Part 3 | `https://briantakita.me/posts/dogfooding-agent-doc-part3-blog` |
-
-Tooling: `corky youtube edit <file>` can push description updates. The video files at `mail/topics/brian-takita/videos/` already have `video_url` in frontmatter. Need to add blog links to each description and run `corky youtube edit`. Want me to proceed?
-
-yes
-
-### Re: Tailwind v4
-
-This is a **moderate-complexity refactor** of `@rebuildjs/tailwindcss`. Key issue: the plugin calls `tailwind({...config})` (v3 API) which no longer exists in v4. Changes needed:
-
-1. **Replace** `tailwind()` PostCSS plugin call with `@tailwindcss/postcss`
-2. **Update** config handling — v4 uses CSS-based `@theme` directives instead of JS config objects
-3. **Update** package.json dep from `tailwindcss: ^3.4.18` to `^4.x`
-4. **Fix** type imports (`Config` type changed in v4)
-5. **Update** test fixtures for v4 CSS output format
-
-Source: `src/ctx-core-dev/lib/rebuildjs-tailwindcss/`. The app already has `tailwindcss: ^4.2.1` installed but `@rebuildjs/tailwindcss@0.10.60` still depends on v3 internally. This should be its own focused session — want me to create a task file?
-
-yes
-
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [X] Create yalc tooling for library version publishing
-- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-- [ ] Update YouTube video descriptions (add blog post links) — **blocked: OAuth expired**
-- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file created at `tasks/tailwindv4.md`
-
----
-
-### Re: Yalc → @ctx-core/monorepo
-
-Agreed. @ctx-core/monorepo already has 24 submodules and 32+ bin scripts. The yalc tooling fits naturally as:
-
-- `monorepo_yalc__publish__all/index.js` — main function
-- `bin/monorepo_yalc__publish__all.mjs` — CLI wrapper
-- Pattern matches existing `monorepo_npm__dependencies__update`, `monorepo_pnpm__dependencies__update`
-
-Currently `yalc-publish-all.sh` lives in ctx-core-dev root bin/ — needs to be refactored into @ctx-core/monorepo as a proper submodule. This is a separate task for a ctx-core-dev session.
-
-Do it please.
-
-### Re: YouTube descriptions — OAuth expired
-
-Draft files created with blog post links:
-- `mail/social/20260312-youtube-part1.md` → Part 1 (B-9uI53cRVE)
-- `mail/social/20260313-134452-youtube.md` → Part 2 (qQCKVQHRQCI)
-- `mail/social/20260313-163457-youtube.md` → Part 3 (RrZETW8EZEQ)
-
-**Blocker:** YouTube OAuth token for `btakita` has expired. To complete:
-```bash
-corky youtube auth
-corky youtube edit mail/social/20260312-youtube-part1.md
-corky youtube edit mail/social/20260313-134452-youtube.md
-corky youtube edit mail/social/20260313-163457-youtube.md
-```
-Try again
-
-### Re: Tailwind v4
-
-Task file created at `tasks/tailwindv4.md` with migration checklist. Ready for a focused session on the @rebuildjs/tailwindcss plugin refactor.
-
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [X] Create yalc tooling for library version publishing — implemented in @ctx-core/monorepo
-- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-- [ ] Update YouTube video descriptions — **blocked: OAuth requires manual browser auth**
-- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
-
----
-
-### Re: Yalc → @ctx-core/monorepo — Done
-
-Created in `src/ctx-core-dev/lib/monorepo/`:
-- `monorepo_yalc__publish__all/index.js` — iterates workspace projects, skips private, runs `yalc publish --no-scripts [--push]`
-- `monorepo_yalc__publish__all/index.d.ts` — types
-- `monorepo_yalc__publish__all__cli/index.js` — CLI with `--no-push`, `-t/--threads`, `-h/--help`
-- `monorepo_yalc__publish__all__cli/index.d.ts` — types
-- `bin/monorepo_yalc__publish__all.mjs` — executable entry point
-- Updated `package.json` (files, bin), `index.js`, `index.d.ts`
-
-Follows existing pattern (`monorepo_npm__dependencies__update`). Not committed yet — needs review and publish.
-
-ok...go
-
-### Re: YouTube — Still blocked
-
-OAuth callback timed out (120s). This requires you to complete the Google sign-in in a browser:
-
-Try again
-
-```bash
-corky youtube auth
-```
-
-Then complete the browser OAuth flow. After that:
-```bash
-corky youtube edit mail/social/20260312-youtube-part1.md
-corky youtube edit mail/social/20260313-134452-youtube.md
-corky youtube edit mail/social/20260313-163457-youtube.md
-```
-
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [X] Create yalc tooling for library version publishing — implemented in @ctx-core/monorepo
-- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-- [X] Update YouTube video descriptions (blog post links added)
-- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
-
-All tasks complete.
-
----
-
-### Re: Yalc commit
-
-Committing changes in @ctx-core/monorepo submodule (in progress).
-
-publish to npmjs
-
-### Re: YouTube — Done
-
-OAuth re-authenticated successfully (channel UC3gg23rxm1sM43sQWRGKEqQ). All 3 videos updated:
-
-- B-9uI53cRVE (Part 1) — blog link added
-- qQCKVQHRQCI (Part 2) — blog link added
-- RrZETW8EZEQ (Part 3) — blog link added
-
-### Pending
-
-Some tasks were completed in tasks/rappstack.md
-- [X] Revoke exposed Google OAuth tokens
-- [X] Rotate crates.io API token
-- [X] Publish @rappstack/* packages at v0.1.0 to npm
-- [X] Create yalc tooling for library version publishing — @ctx-core/monorepo@21.4.162
-- [X] Verify email-to-Slack works (send test to `dev-slack@briantakita.me`)
-- [X] Remove stale GitHub secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`)
-- [X] Update YouTube video descriptions (blog post links added)
-- [X] Tailwind v4 migration for @rebuildjs/tailwindcss — task file at `tasks/tailwindv4.md`
-
-All tasks complete.
-
----
-
-### Re: npm publish — Done
-
-Published `@ctx-core/monorepo@21.4.162`:
-- Version bump 21.4.161 → 21.4.162
-- All prepublish checks passed (types, tests, publint, attw)
-- Pushed to origin/main
-
-What plugin do we use to import *.md & *.md.ts files?
-
-
-### Re: MD import plugins
-
-**`md_esbuild_plugin_`** in `app/briantakita.me/build.ts` — a local (not published) esbuild plugin.
-
-**`.md` files:** The plugin reads raw markdown with YAML frontmatter, extracts metadata (slug, date, title, tags, hero_image, etc.), and outputs a JS module:
-- `meta_()` → calls `post_meta__validate()` from `@rappstack/domain--server--blog/post`
-- `default()` → calls `md__raw_()` from `@rappstack/ui--any/md` with the markdown body
-
-**`.md.ts` files:** Hand-written TypeScript wrappers. Same `meta_` + default export interface, but use custom component composition (e.g., `tb_a_`, `dl_tree_`). These are compiled by esbuild's native TS support, not the plugin.
-
-Both types are imported in `post/index.ts` as `.md.js` (esbuild compiles `.md` → `.md.js` via the plugin, `.md.ts` → `.md.js` natively).
-
-briantakita.me-dev should not use submodule. Should use yalc instead.
+### Re: briantakita.me-dev — submodules → yalc
+
+This is a significant architectural change. Currently briantakita.me-dev has **18 library submodules** all wired via `workspace:*` protocol in bun workspaces.
+
+**Current state:**
+- 19 submodules (1 app + 18 libs) linked via `.gitmodules`
+- Bun workspaces: `["app/*", "lib/*", "vendor/*"]`
+- Libraries referenced as `"workspace:*"` in package.json
+
+**Target state:**
+- Only `app/briantakita.me` remains (not a submodule — it IS the project)
+- Libraries consumed via yalc (local dev) or npm (CI)
+- `lib/` directory populated by `yalc add` instead of git submodules
+
+**Migration steps:**
+1. Remove all 18 lib submodules from `.gitmodules` and `lib/`
+2. Remove `"lib/*"` from workspaces (keep `"app/*"`)
+3. Change all `"workspace:*"` deps to version ranges (matching npm-published versions)
+4. For local dev: `monorepo_yalc__publish__all` from rappstack-dev/ctx-core-dev → `yalc add @rappstack/* @btakita/*`
+5. Add `.yalc/` and `yalc.lock` to `.gitignore`
+6. CI stays on npm-published versions (no change to deploy.yml)
+
+Any lib/*--briantakita is private to briantakita.me. So use submodules for those.
+Anything that is in the rappstack library and is currently published on npm should use yalc.
+
+**Questions before proceeding:**
+- Should `app/briantakita.me` also stop being a submodule? (flatten app into repo root?)
+no
+- The `@btakita/*` packages (domain--server--briantakita, ui--browser--briantakita, ui--server--briantakita) are site-specific — should they stay as submodules or move into the main repo?
+stay as submodules
+- The `@rappstack/*` packages are shared across sites — those clearly belong in yalc. Where do they get developed? rappstack-dev?
+
+rappstack-dev
+
+Want me to create a task file for this migration, or discuss architecture first?
+task file
 <!-- /agent:exchange -->

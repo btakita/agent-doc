@@ -299,4 +299,37 @@ Alternative: `"agent-doc"` as a project-specific publisher — but that creates 
 Go with `btakita`?
 
 Yes
+
+### Re: Marketplace publish — PAT needed
+
+Publisher `btakita` is already set in `package.json`. The extension is ready to publish. But we need an Azure DevOps PAT.
+
+**Steps to create the PAT:**
+1. Go to https://dev.azure.com/btakita/_usersSettings/tokens (create org "btakita" if needed)
+2. Create a Personal Access Token with:
+   - Name: "vsce-publish"
+   - Organization: All accessible organizations
+   - Scope: Marketplace → Manage
+3. Copy the token
+4. Store it: `pass insert btak/VSCE_PAT`
+
+Error signing in:
+```
+Sign-in failed
+Error code: interaction_required
+Error message: interaction_required: AADSTS5000225: This tenant has been blocked due to inactivity. To learn more about tenant lifecycle policies, see https://aka.ms/TenantLifecycle Trace ID: aa91eeb1-cd62-485a-9d24-5d35af811a00 Correlation ID: 019cfc4b-2c8a-772d-9a3f-bdaf3dea730b Timestamp: 2026-03-17 14:55:11Z
+```
+
+**Then I can publish:**
+```bash
+cd src/agent-doc/editors/vscode
+npx @vscode/vsce publish -p "$(pass btak/VSCE_PAT)"
+```
+
+The publisher needs to be registered first too:
+```bash
+npx @vscode/vsce create-publisher btakita
+```
+
+Let me know when the PAT is stored in `pass` and I'll publish.
 <!-- /agent:exchange -->

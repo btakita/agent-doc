@@ -1388,5 +1388,27 @@ Please look at logs.
 Add tests to simulate issue.
 
 On top of that, there is no `/agent-doc run tasks/tailwindv4.md` anymore. Not in the input or in the claude session.
+
+### Re: Root cause — wrong acceptance signal + Enter spam
+
+**What happened with tailwindv4.md:** Running `agent-doc route` manually revealed:
+```
+[route] warning: command may not have been accepted after 5.1s (25 Enter retries)
+```
+
+The poll loop sent **25 Enter keys** in 5 seconds. The command WAS accepted (Claude started processing), but `pane_has_prompt()` kept detecting `❯` because **Claude Code always shows the `❯` prompt** — even while processing. The `❯` never disappears. So the loop kept retrying Enter endlessly.
+
+**The 25 Enter retries likely caused the command to be cleared** — each extra Enter submitted blank input or interrupted the command.
+
+**Fix:** Changed the acceptance check from "is `❯` still visible?" to "is the command text still in the input?":
+- Checks if `/agent-doc tasks/tailwindv4.md` is still in the last 5 lines of pane output
+- If the command text is gone (accepted by Claude), stops immediately
+- If still there (Enter didn't work), retries Enter once per 300ms
+- This won't spam Enter — it only retries when the command text is genuinely still in the input
+
+Binary rebuilt and installed. All 11 tests pass.
+
+Same issues with tasks/rappstack.md.
+Neither fix seemed to affect anything.
 <!-- /agent:exchange -->
 ****

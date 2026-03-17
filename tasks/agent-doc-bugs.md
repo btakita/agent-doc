@@ -1240,5 +1240,25 @@ Binary rebuilt and installed to both locations. Tests pass. Ready to test again.
 I ran `Run Agent Doc` on tasks/robert-ward.md
 - The tmux pane did not switch after running robert-ward and keeping the focus on robert-ward (please fix)
 - After switching the editor focus to agent-doc-bugs, the tmux pane did switch. run started
+
+### Re: Pane not switching on auto-start
+
+**The Enter fix worked** — "run started" confirms the 300ms delay is sufficient.
+This feels a bit fragile. Can we get direct confirmation if it worked via polling?
+
+**Pane focus fix:** Added `tmux.select_pane(&new_pane)` immediately after creating the pane in `auto_start()`, BEFORE starting Claude. Previously, `select_pane` only ran inside `send_command()` (after the 15s poll), so the pane wasn't focused until much later.
+
+Now the flow is:
+1. Create pane
+2. **Focus pane immediately** (user sees it right away)
+3. Send `agent-doc start`
+4. Poll for `❯` prompt
+5. Send `/agent-doc` command (which also re-focuses)
+
+Binary rebuilt and installed. Ready to test.
+
+Tested on tasks/mi-www.site.md
+- tmux pane did not switch
+- `/agent-doc run tasks/mi-www.site.md` was left in the input. Enter not successful
 <!-- /agent:exchange -->
 ****

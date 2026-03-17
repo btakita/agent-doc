@@ -672,4 +672,38 @@ Here is how it looks.
 ![img_2.png](img_2.png)
 
 How can we make the updates automatically propagate from rappstack-dev to briantakita.me-dev?
+### Re: Auto-propagate rappstack-dev → briantakita.me-dev
+
+**Two things needed:** `watch_dirs` (triggers rebuild) + `source_map` resolution (resolves from source, not node_modules).
+
+**The gap:** `watch_dirs` triggers a rebuild when rappstack-dev files change, but esbuild still resolves `@rappstack/ui--browser--blog/search` from `node_modules/` — which has the **npm-published** copy, not your local edits.
+
+**Solution: Enhance the ts_resolve plugin with a `source_map`**
+
+Modify `ts_resolve_plugin_()` in `build.ts` to accept a mapping of package prefixes → local source directories. In dev mode:
+
+```typescript
+ts_resolve_plugin_({
+  source_map: {
+    '@rappstack/ui--browser--blog': '/home/brian/.../rappstack-dev/lib/ui--browser--blog',
+    '@rappstack/ui--server--blog':  '/home/brian/.../rappstack-dev/lib/ui--server--blog',
+    '@rappstack/domain--server':    '/home/brian/.../rappstack-dev/lib/domain--server',
+    // ... all 9 packages used
+  }
+})
+```
+
+When resolving `@rappstack/ui--browser--blog/search`:
+1. Match prefix `@rappstack/ui--browser--blog`
+2. Map to source dir → `rappstack-dev/lib/ui--browser--blog/`
+3. Resolve `search` → `search/index.ts`
+4. Return the **source file path** directly
+
+Combined with `watch_dirs` watching the same dirs → edit rappstack-dev file → rebuild triggers → esbuild resolves from source → change appears on localhost.
+
+**About the search icon:** The screenshot shows the icon isn't centered because the `inset-y-0`, `items-center`, `flex` CSS rules are still not in the Tailwind output (the scanning issue). Adding `h-full` and `w-full` won't help without the existing rules working. The direct CSS fix we added earlier should handle this — but your edit to rappstack-dev source won't propagate until the resolution pipeline above is set up.
+
+Want me to implement the `source_map` enhancement in `build.ts`?
+
+Yes
 <!-- /agent:exchange -->

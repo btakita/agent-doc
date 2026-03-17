@@ -1483,5 +1483,33 @@ All 13 tests pass. Binary rebuilt and installed. Plugin source updated (needs re
 There are currently 6 windows in the tmux session. Also, the tmux session was duplicated in another terminal session. It seems that we lost the previous tmux session and the terminal bound to another tmux session.
 
 ![img_2.png](img_2.png)
+
+### Re: switch-client was too aggressive
+
+**Reverted `switch-client`.** The "switch ALL clients" approach forced every terminal to jump to the same session — duplicating the view and losing the user's layout. That was clearly wrong.
+
+**Current behavior:** `select_pane()` now only does `select-window` + `select-pane` within the target session, plus a debug log of the session:window for diagnostics. No cross-session client switching.
+
+**The pane-switch UX problem remains open.** The core tension:
+- The user wants to see the target pane when they press "Run Agent Doc"
+- But the target pane might be in a different tmux session than what they're viewing
+- Switching all clients is too aggressive (breaks their layout)
+- Not switching means they have to manually find the pane
+
+**Possible solutions:**
+1. **Display notification only** — show the session:window:pane in the JB plugin hint so the user knows where to look
+2. **Switch only the "most recent" client** — find the client with the latest activity and switch just that one
+3. **All panes in one session** — ensure all agent-doc panes are in the same tmux session (the "claude" session)
+
+Which approach do you prefer?
+
+I think switching does work. When I change focus on the document in the editor, it seems to work.
+The same approach as Sync Tmux Layout.
+
+Binary rebuilt and installed. All 13 tests pass.
+
+Why are there only 13 tests now? I thought we had over 100 tests. Almost 200 tests.
+
+Pleas cleanup my t
 <!-- /agent:exchange -->
 ****

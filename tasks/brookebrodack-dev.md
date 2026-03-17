@@ -356,4 +356,24 @@ Analyze the transcript and extract the content. Make an engaging "post" with the
    - Post `.md` file gets the AI-generated summary instead
 
 **Starting now.** Will create the transcript files and process posts in parallel batches (~10 agents, ~18 posts each).
+### Re: AI summaries complete — all pushed
+
+**All 190 blog posts now have AI-generated content.** 10 parallel agents processed all videos:
+
+- Engaging 2-3 paragraph summaries (third person, SEO-friendly)
+- Key Topics section with brief descriptions
+- Notable Moments with timestamps and quotes
+- Transcript download link (`/transcripts/{videoId}.txt`)
+
+**Downloadable transcripts:** 180 `.txt` files in `public/transcripts/`, linked from each post page.
+
+**Commits pushed:**
+- `adf299d` (brookebrodack-site): AI-generated blog post summaries
+- `d43b3dd` (brookebrodack-dev): downloadable transcripts + updated submodule
+
+**Cleanup:** Removed 11 duplicate files from agents creating slightly different slug formats. Final count: 190 posts (9 extra from near-duplicate titles getting distinct slugs).
+
+CI deploying now.
+
+Make the video width 100% on the video page.
 <!-- /agent:exchange -->

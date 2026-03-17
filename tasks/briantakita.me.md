@@ -342,4 +342,26 @@ Committed:
 This is a different issue from the esbuild `.ts` resolution — it's about how `app__attach()` mounts Hono sub-apps. Likely needs a rhonojs fix to use `.route()` instead of passing the Hono instance directly.
 
 Fix the errors
+
+current progress?
+Add tests
+### Re: Fix the 4 remaining errors
+
+**Fixed!** All 4 routes now work locally: `/search`, `/rss`, `/rss.xml`, `/robots.txt`.
+
+**Root cause:** Cross-module `instanceof Hono` identity mismatch. The bundled server code creates `Hono` instances using the BUNDLED Hono class (renamed to `Hono2` by esbuild), while rhonojs's `app__attach()` checks `instanceof Hono` using the RUNTIME Hono class from `node_modules`. Different classes = failed check = Hono instance treated as middleware handler = crash.
+
+**Fix:** Published `rhonojs@0.1.3` with duck-typing fallback:
+```javascript
+if (middleware instanceof Hono || 
+    (middleware && typeof middleware.fetch === 'function' && typeof middleware.route === 'function'))
+```
+
+Checks for `.fetch` and `.route` methods as Hono signature instead of relying on `instanceof`.
+
+**Pushed to CI:** `c333e77` — rhonojs 0.1.3 + regenerated lockfile.
+
+https://briantakita.me/sitemap.xml is not working
+
+Add tests. Including 
 <!-- /agent:exchange -->

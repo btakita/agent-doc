@@ -77,201 +77,35 @@ The deployed website styling is broken.
 https://brookebrodack.net/
 
 <!-- agent:exchange -->
-## Assistant
+### Re: Video blog posts strategy
 
-**Root cause:** `build.ts` conditionally skipped `relysjs__ready__wait()` when `watch: false` (production builds):
+**Recommended approach: Video plays at top, blog content below — single URL per video.**
 
-```ts
-// Bug — ready wait skipped for non-watch builds:
-if (config?.rebuildjs?.watch !== false) {
-    build_promises.push(relysjs__ready__wait(300_000))
-}
-```
+Rather than a separate blog link on each `/content` card, push the URL when a video is clicked (or via a dedicated link) to `/content/:slug`, where:
 
-This caused `process.exit(0)` to fire before the `@rebuildjs/tailwindcss` plugin finished processing CSS through PostCSS. Result: raw `@tailwind` directives in the output CSS, no `<link>` tags in rendered HTML, completely unstyled pages.
+1. **Video plays at the top** (sticky, same as current `/content` behavior)
+2. **Blog post content renders below** the player — description, timestamps, commentary, related links
+3. **`/content` feed** stays as-is (video grid), but each card links to `/content/:slug` instead of (or in addition to) inline playback
 
-**Fix:** Always await `relysjs__ready__wait()` regardless of watch mode:
+**Why this over separate `/posts` or `/blog`:**
 
-```ts
-build_promises.push(relysjs__ready__wait(300_000))
-```
+- **SEO juice stays concentrated** — `/content/` is already indexed; adding depth under it (`/content/dodgeball-tournament`) builds topical authority on that path
+- **No navigation confusion** — Brooke's audience expects video content, not a traditional blog. Keeping it under `/content` feels native
+- **YouTube embed + written content = rich pages** — Google indexes the text, the video gets watch time, structured data (VideoObject JSON-LD) ties them together
+- **Matches briantakita.me pattern** — markdown files with `video_url` frontmatter, but adapted to brookebrodack's existing content route
 
-**Verified:**
-- CSS now starts with `/*! tailwindcss v4.2.1 */` with full utility classes
-- `dist/browser/` contains CSS files
-- Server injects `<link rel="stylesheet">` tags
-- Committed and pushed — CI deployment running
+**Implementation sketch:**
 
-## User
-Switch to `agent_doc_format: template`
+1. **Content directory**: `app/brookebrodack-site/post/content/` with `.md` files per video (same format as briantakita.me)
+2. **New route**: `/content/:slug` renders video player + markdown body
+3. **Feed cards**: Add a link icon or "Read more" to each `/content` grid card pointing to the slug route
+4. **SEO**: VideoObject JSON-LD on each post page, sitemap entries, meta description from post frontmatter
+5. **Build**: Reuse the same `md_esbuild_plugin_()` pattern from briantakita.me (both repos share the rhonojs build system)
 
-https://brookebrodack.net/ does not have images being served
-There is no background image nor is brooke's profile image being served
-### Re: Images not loading
+**Open question:** Should all videos get posts, or start with a curated subset? Generating a short SEO-optimized summary for every video is possible (YouTube descriptions + transcript extraction), but curated posts with real commentary would rank better.
 
-**Root cause:** The `object-store-asset` esbuild plugin generates content-hashed URLs (e.g., `brooke-brodack-profile-C6E74A0F.webp`) but the R2 bucket at `assets.brookebrodack.net` only contained the original unhashed files (`images/brooke-brodack-profile.webp`). The upload scripts never created hashed copies.
+All videos should get posts. This would involve making a CC transcript for each video.
+Creating topics for each video. Describing the topic, what was said, and supporting content.
 
-**Fix:** Serve hashed assets from Cloudflare Pages instead of R2:
-
-1. **Created `assets--hash-copy.sh`** — copies each file from `public/assets/` into `dist/browser/` with `{name}-{SHA256_8_UPPER}{ext}` naming (matching the esbuild plugin's scheme)
-2. **Updated `deploy.yml`** — added hash-copy step after build, changed `ASSET_BASE_URL` from `https://assets.brookebrodack.net` to `https://brookebrodack.net` (serve from Pages)
-3. **Updated `.env`** — local dev matches CI
-
-**Verified locally:** All 4 critical assets hash correctly:
-- `brooke-brodack-profile-C6E74A0F.webp` ✓
-- `nature-origami-bg-906C5EF4.webp` ✓
-- `brooke-brodack-logo-C9FC9BBB.jpg` ✓
-- `brooke-brodack-profile-6CCF7860.jpg` ✓
-
-**Committed and pushed** (`71d2334`) — CI deployment running.
-
-The footer has 2 duplicate instagram links. Please reduce to 1 
-### Re: Duplicate Instagram links
-
-Removed the second instagram entry (`@makingandmeaning_brooke`) from `app/brookebrodack-site/config.ts` — both pointed to the same `instagram_url`. Kept `@brookebrodack`.
-
-Committed in brookebrodack-site (`c64adca`) and updated submodule pointer (`f7eeb61`). CI deploying.
-
-The footer has 2 duplicate instagram links. Please reduce to 1
-
-Images still broken:
-https://brookebrodack.net/nature-origami-bg-906C5EF4.webp
-https://brookebrodack.net/brooke-brodack-profile-C6E74A0F.webp
-### Re: Images still broken
-
-The hash-copy script failed in CI — Ubuntu's `/bin/sh` is `dash`, which doesn't support `read -d` (bash-specific). The script ran but produced zero output, so no hashed assets were copied into `dist/browser/`.
-
-**Fix:** Changed shebang to `#!/bin/bash` and CI workflow to `bash` instead of `sh`. Pushed (`4b342aa`) — CI redeploying now.
-
-(The duplicate instagram note was already addressed in the previous cycle.)
-
-Clicking on a video in https://brookebrodack.net/content/ causes the video to be invisible.
-The video does play and the audio is head...but the video is not seen.
-### Re: Invisible video player
-
-Three bugs found:
-
-1. **Aspect ratio inverted** (`YT_player.ts:90`): `clientWidth * 16 / 9` → `clientWidth * 9 / 16`. The old formula made the iframe absurdly tall (711px for 400px wide), getting clipped by `max-h` to a region above the visible area.
-
-2. **Animation race condition** (`content__hyop.ts`): `video__div__open()` plays all animations including `YT_iframe__wanimato_`, but the YT player loads async. By the time `YT_iframe__wanimato_` is created (after player ready), `video__div__open` already ran — so the iframe animation never played forward, `finish_currentTime` stayed falsy, and the `hidden` class was never removed. Fix: play the iframe animation explicitly after creation if the video div is already open.
-
-3. **Reduced-motion users** (`content__doc_html.ts`): The YT_player__div had `hidden` + `scale-0` + `motion-reduce:scale-100` but no `motion-reduce:block`. The `hidden` class (`display:none`) overrode the scale fix. Added `motion-reduce:block` to the div, plus a fallback in the click handler to directly remove `hidden` when animations are disabled.
-
-Committed and pushed (`28c0c14`) — CI deploying.
-
-.YT_player__div is 0x0. The video is not visible
-### Re: YT_player__div 0x0
-
-The `hidden` class was on the **parent div** (`.YT_player__div`), but the animation memo at line 300 was toggling `hidden` on `YT_iframe__wanimato.el` — which is the **iframe** child (from `YT_player.getIframe()`). The parent div kept `display:none` forever, causing 0x0 dimensions even though audio played (YouTube iframes can play audio while hidden).
-
-**Fix:** Changed the `hidden` class toggle to target `YT_iframe__div_(ctx)` (the parent div reference) instead of `YT_iframe__wanimato.el` (the iframe). Also fixed the reduced-motion fallback to target the parent div.
-
-Committed and pushed (`6bfaae1`) — CI deploying.
-
-.YT_player__div still hidden
-### Re: YT_player__div still hidden
-
-The animation-based `hidden` toggle was unreliable — race conditions between animation creation, play, and the finish event meant the memo didn't always remove `hidden` in time.
-
-**Simplified fix:** Directly call `YT_iframe__div_(ctx)?.classList.remove('hidden')` when a video is clicked, before playing. No more relying on animation state for initial visibility. The animation memo still handles re-adding `hidden` on close (reverse animation finish).
-
-Committed and pushed (`ef3e99c`) — CI deploying.
-
-Still hidden. see brookebrodack.video__div.html
-### Re: Still hidden (DOM snapshot analysis)
-
-From the DOM snapshot, two root causes:
-
-1. **`video__div` has `style="height: 0px"`** — JS sets `style.height = '0'` on init, and the height animation was skipped (reduced-motion or timing). Inline styles override CSS classes like `motion-reduce:lg:h-[600px]`. **Fix:** In `video__div__open`, when no animation is available, set `style.height` directly to the target height.
-
-2. **`YT_iframe__div_` is a detached DOM reference** — YouTube's `new YT.Player(div)` replaces the div with an iframe. The div ref becomes detached. All `classList` operations on it have no effect on the live DOM. **Fix:** Use `YT_player.getIframe()` for all class manipulation (remove `hidden`, `scale-0`). The animation memo's `wanimato.el` already points to the iframe (correct), but the hidden toggle was using the detached div ref.
-
-Also added proper close handling for reduced-motion: resets `video__div.style.height` to `'0'` and re-adds `hidden` on the iframe.
-
-Committed and pushed (`de27c15`) — CI deploying.
-
-Opening a video a shows video a.
-Closing video a then opening video b start video b but video b is hidden.
-Closing video b then reopening video b starts and shows video b. video b is visible.
-### Re: Close A → Open B still hidden
-
-Added explicit height and visibility reset in the click handler itself — not relying on animation state at all. Now on every video click:
-
-1. `iframe.classList.remove('hidden')` — always
-2. `iframe.classList.remove('scale-0')` — always
-3. `video__div.style.height = target` — if stuck at 0px
-
-This handles all edge cases (first open, reopen, switch) without depending on animation finish events or wanimato state machine timing.
-
-Committed and pushed (`da17790`) — CI deploying.
-
-Note: The previous fix for `video__div__is_open_` check in the memo was correct but insufficient — the animation state machine has too many timing edge cases. The direct approach in the click handler is more reliable.
-
-Opening a video a shows video a.
-Closing video a then opening video b start video b but video b is hidden.
-Closing video b then reopening video b starts and shows video b. video b is visible.
-
-See brookebrodack.video__div.html for the page state.
-
-Issue with autoscroll in /content/:
-- Scroll down the page. Click a video thumbnail. Autoscrolls to the top
-- Close the video
-- Scroll down the page. Click a video thumbnail. Does not autoscroll to the top
-- Close the video by pressing Esc
-- Click a video thumbnail. Autoscrolls to the top
-### Re: Close→Open still hidden + autoscroll
-
-**Root cause of hidden bug:** The `hidden` class on the iframe was being toggled by an animation finish event memo with complex race conditions. Every fix added more complexity. The fundamental design was wrong — using `display:none` (hidden class) on a child element to control visibility, when the parent already controls visibility via `height: 0`.
-
-**Fix:** Eliminated the `hidden` class entirely:
-- Removed `hidden` and `scale-0` from YT_player__div server template
-- Added `overflow-hidden` to `video__div` parent — now `height: 0` + `overflow: hidden` is the sole visibility mechanism
-- Removed the `hidden` toggle memo from `YT_iframe__wanimato_` (was the source of all race conditions)
-- Removed `classList.remove('hidden')` from click handler (no longer needed)
-- Simplified reduced-motion close handler (just reset height, no hidden toggle)
-
-This eliminates the entire class of `hidden` race condition bugs. The iframe is always visible (never `display:none`) — the parent container's height controls whether it's seen.
-
-**Autoscroll:** The scroll-to-top on first click is caused by `sticky` + `top-0` positioning on `video__div` when opened. The height change (0→600px) with sticky positioning causes the browser to adjust scroll position. This is CSS behavior, not a JS bug. The inconsistency (first click scrolls, second doesn't) was related to the animation state — now with the simplified approach, the scroll behavior should be more consistent.
-
-Committed and pushed (`bfcc6e3`) — CI deploying.
-
-https://brookebrodack.net/content/ still exhibits the same behavior.
-See brookebrodack.content.html for the full html
-### Re: Same behavior persists
-
-The deployed HTML confirms our changes ARE live (no `hidden` class, `overflow-hidden` on parent). The DOM snapshot shows `height: 600px` — so the first open works.
-
-The close→open issue is likely caused by `fill: both` on the height animation. After close reverses the animation, `fill: both` keeps the visual height at 0 even though `style.height` might read "600px". On second open, the check `style.height === "0px"` was false, so height wasn't re-set. The animation's `play()` should restart but may not override the fill state properly.
-
-**Fix:** Always set `style.height` on every open — both in `video__div__open()` and in the click handler. No conditional check. This ensures the inline style is always fresh, regardless of animation fill state.
-
-Committed and pushed (`d2d0c34`) — CI deploying.
-
-Same behavior. See:
-- brookebrodack.success.html
-- brookebrodack.failure.html
-### Re: Success vs Failure HTML comparison
-
-Comparing the two snapshots revealed the actual bug:
-
-- **Success**: `video__div` has `sticky bg-cyan-600/90 border-b-1px border-white/.3 shadow-md`
-- **Failure**: `video__div` is MISSING those classes — no `sticky`
-
-Both have `height: 600px` and no `hidden` class. The video IS rendered in both cases — but without `sticky`, the video div is at the top of the page (position: static), so when the user is scrolled down, they can't see it. It's there, just off-screen.
-
-**Root cause:** The `sticky` class was toggled by `site__header_video__div__background_` which depended on `YT_iframe__wanimato_.is_finish && !!finish_currentTime`. After close→open, the iframe animation state wasn't reaching the finish state in time (or at all), so `sticky` was never applied.
-
-**Fix:** Changed `site__header_video__div__background_` to use `video__div__is_open_(ctx)` directly instead of the iframe animation state. This is immediate and deterministic — `sticky` is added the moment the video is opened, removed the moment it's closed. No animation state dependency.
-
-Committed and pushed (`5889d2f`) — CI deploying.
-
-Let's create posts about her Youtube video content.
-There is /content, which is a feed of BrookeBrodack's videos.
-I want to have a companion blog post for each video...similar to how it's done with briantakita.me with the BrianTakita Youtube videos.
-
-There will be seo value.
-How do you think we should present these blog posts?
-As a separate link in each /content video?
-Should we push the url, play the video at the top of the screen, and show the content under the video?
+Use parallel agents to go through each video.
 <!-- /agent:exchange -->

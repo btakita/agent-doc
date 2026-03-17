@@ -816,4 +816,21 @@ Yes — Google supports a **Video Sitemap** extension. Adding `<video:video>` ta
 Each post page already has an embedded YouTube video with all this metadata available from the post frontmatter. Want me to add video sitemap entries to `sitemap__xml.ts`?
 
 Yes
+### Re: Video sitemap entries — done
+
+Added `<video:video>` blocks to all 190 post sitemap entries:
+
+- `xmlns:video` namespace on `<urlset>`
+- Each post URL now includes: `thumbnail_loc`, `title`, `description`, `content_loc`, `publication_date`
+- Video IDs extracted from `video_url` frontmatter field
+- All text XML-escaped
+- Also updated `build.ts` to pass `video_url` through the markdown plugin
+
+**Files changed:**
+- `sitemap/sitemap__xml.ts` — video sitemap entries
+- `build.ts` — expose `video_url` in post meta
+- `test/routes.test.ts` — video sitemap test (23 tests pass)
+
+Needs commit + push to deploy.
+Are the videos also in the json+ld?
 <!-- /agent:exchange -->

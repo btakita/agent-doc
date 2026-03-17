@@ -706,4 +706,35 @@ Combined with `watch_dirs` watching the same dirs → edit rappstack-dev file �
 Want me to implement the `source_map` enhancement in `build.ts`?
 
 Yes
+### Re: source_map implemented
+
+**Done!** Modified `app/briantakita.me/build.ts` with two enhancements:
+
+**1. `source_map` in ts_resolve_plugin:**
+- Maps all 9 `@rappstack/*` packages to local source dirs in `rappstack-dev/lib/`
+- When resolving `@rappstack/ui--browser--blog/search` → directly returns `rappstack-dev/lib/ui--browser--blog/search/index.ts`
+- Only active in dev mode (`watch !== false`)
+- Falls back to `Bun.resolveSync()` (node_modules) for non-mapped packages
+
+**2. `watch_dirs` auto-configured:**
+- All 9 rappstack source dirs added to `watch_dirs` in dev mode
+- Both browser and server builds watch the same dirs
+- On file change → 100ms debounce → rebuild → resolves from source
+
+**Dev workflow now:**
+```bash
+cd briantakita.me-dev/app/briantakita.me && bun run dev
+# Edit rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts
+# → watch_dirs detects change → rebuild → source_map resolves from source → localhost updates
+```
+
+**Production builds** (`watch: false`) skip both `source_map` and `watch_dirs`, resolving from `node_modules` as before.
+
+**Build verified:** `bun run build.ts` completes successfully with the changes.
+
+Also fixed a duplicate `import type { Plugin }` that was in the file.
+
+I still don't see `h-full` and `w-full` in the `.search__input_label span` element. The changes are not propagating.
+Please investigate by running in this session.
+The page is http://localhost:4100/search
 <!-- /agent:exchange -->

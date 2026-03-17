@@ -529,4 +529,25 @@ Can we fallback to the old `/content` behavior where we play the video?
 Is the :slug automatically created from the YouTube video name? Even for new videos that don't have a page?
 
 Build passes, all 19 tests pass.
+### Re: Slug creation for new videos
+
+The slug is generated **at render time** from the YouTube video title — yes, even for new videos without a page. The algorithm in `content__doc_html.ts`:
+
+```
+title → lowercase → strip special chars → spaces to hyphens → truncate to 80 chars
+```
+
+But having a slug doesn't create a page. The slug only links to `/content/:slug` if a matching `.md` file exists in `post/content/`. For new videos without a page, the card links to YouTube instead.
+
+**To add a page for a new video**, you'd need to:
+1. Download audio + transcribe with corky
+2. Generate AI summary
+3. Create `.md` file in `post/content/`
+4. Add import to `post/index.ts`
+5. Rebuild and deploy
+
+This pipeline could be automated in CI (WebSub detects new video → generate post → commit → deploy), but that's not built yet.
+
+Let's create the software for a pipeline for new videos.
+Can github 
 <!-- /agent:exchange -->

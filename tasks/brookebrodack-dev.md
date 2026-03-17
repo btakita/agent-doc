@@ -265,4 +265,13 @@ Both have `height: 600px` and no `hidden` class. The video IS rendered in both c
 **Fix:** Changed `site__header_video__div__background_` to use `video__div__is_open_(ctx)` directly instead of the iframe animation state. This is immediate and deterministic — `sticky` is added the moment the video is opened, removed the moment it's closed. No animation state dependency.
 
 Committed and pushed (`5889d2f`) — CI deploying.
+
+Let's create posts about her Youtube video content.
+There is /content, which is a feed of BrookeBrodack's videos.
+I want to have a companion blog post for each video...similar to how it's done with briantakita.me with the BrianTakita Youtube videos.
+
+There will be seo value.
+How do you think we should present these blog posts?
+As a separate link in each /content video?
+Should we push the url, play the video at the top of the screen, and show the content under the video?
 <!-- /agent:exchange -->

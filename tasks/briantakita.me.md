@@ -326,4 +326,20 @@ Yes. Add test(s) in rebuildjs for `.ts` support. Add to rebuildjs' SPEC.md
 Want me to commit and push to test CI?
 
 yes. I added schema-dts as a dependency in domain--server--briantakita
+### Re: CI push results
+
+**Progress:** CI install passes, build compiles, prerender runs — down to **4 errors** (from 105+).
+
+Fix the errors
+
+Committed:
+- `app/briantakita.me`: ts_resolve_plugin_ + highlight.js + marked-highlight deps, reverted yalc ref to npm
+- `lib/domain--server--briantakita`: schema-dts dependency
+- Regenerated bun.lock
+
+**Remaining 4 errors:** `TypeError: handler is not a function (handler is an instance of Hono2)` — this is a Hono sub-app routing issue in `rhonojs/app__attach()`. Affects RSS, robots.txt, and similar routes mounted as sub-apps. The main page routes (/, /about, /open-source, /portfolio, all blog posts) render fine.
+
+This is a different issue from the esbuild `.ts` resolution — it's about how `app__attach()` mounts Hono sub-apps. Likely needs a rhonojs fix to use `.route()` instead of passing the Hono instance directly.
+
+Fix the errors
 <!-- /agent:exchange -->

@@ -48,6 +48,7 @@ agent_doc_mode: template
 - `corky sync imports` config dispatcher (designed in session, not implemented)
 - `corky doc upload` (stashed, coming soon)
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
+- **HTML email sending** — `corky draft push --send` should convert markdown body to HTML (`pulldown-cmark`), send as `multipart/alternative` (HTML + plain text fallback). Currently sends raw markdown as plain text, causing `**bold**` to appear as literal asterisks. Default behavior, no flag needed. Files: `src/draft/mod.rs` (`compose_email()`), `Cargo.toml`.
 
 <!-- agent:exchange -->
 **Released v0.15.3** — CUDA transcription build fix.

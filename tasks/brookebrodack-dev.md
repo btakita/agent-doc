@@ -858,4 +858,17 @@ Verified: post pages now include `VideoObject` in their JSON-LD script tag along
 All tests pass. Ready to commit + push with the video sitemap changes.
 
 deploy
+
+### Re: Deploy
+
+**Committed and pushed:**
+
+| Repo | Commit | Changes |
+|------|--------|---------|
+| `ui--server--brookebrodack` | `b1d05e9` | Video sitemap entries + VideoObject JSON-LD |
+| `brookebrodack-site` | `01a3f75` | video_url in post meta + sitemap test |
+| `brookebrodack-dev` | `1ab00bb` | Submodule updates |
+
+CI deploying. This adds video structured data for all 190 posts — both in the sitemap XML and page-level JSON-LD.
+The css is messed up in http://localhost:4101/
 <!-- /agent:exchange -->

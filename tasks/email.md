@@ -418,4 +418,33 @@ Want me to start implementation, or any adjustments to this plan?
 
 Is this a full replacement for imap? Will google continue supporting imap?
 Other email hosts will use imap, so I need to keep compatability.
+### Re: IMAP Compatibility
+
+**No, this is not replacing IMAP.** The Gmail API provider is an *additional* sync backend alongside IMAP, not a replacement. The architecture is:
+
+```
+corky sync
+  ├── provider = "gmail"          → IMAP sync (existing, unchanged)
+  ├── provider = "gmail-api"      → Gmail API sync (new)
+  ├── provider = "protonmail-bridge" → IMAP sync (existing, unchanged)
+  └── provider = "imap"           → Generic IMAP sync (existing, unchanged)
+```
+
+**IMAP stays for:**
+- ProtonMail Bridge (already using it)
+- Any future non-Gmail providers (Fastmail, self-hosted, etc.)
+- Gmail accounts that prefer IMAP (e.g., your personal account with app password already working)
+
+**Gmail API is only for:**
+- Gmail accounts where IMAP auth is blocked (like btak.dev without 2FA)
+- Gmail accounts where you want better threading/labels
+- Any Gmail account you choose to configure with `provider = "gmail-api"`
+
+**Will Google keep supporting IMAP?** Google has not announced deprecation of IMAP. They did kill "less secure apps" (plain password auth) in 2022, but IMAP itself still works with app passwords or XOAUTH2. That said, their investment is clearly in the API — IMAP gets no new features and has aggressive rate limits. It's likely to remain available but increasingly second-class.
+
+**Bottom line:** Your personal account (`brian.takita@gmail.com`) keeps using `provider = "gmail"` (IMAP) — it works fine. ProtonMail keeps using `provider = "protonmail-bridge"`. Only btak.dev switches to `provider = "gmail-api"`. All three coexist in the same sync run.
+
+Ready to start implementation?
+
+Yes
 <!-- /agent:output -->

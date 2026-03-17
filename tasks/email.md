@@ -642,5 +642,16 @@ Combined with `login_hint` (pre-selects the right account in the consent screen)
 
 Rebuilt and reinstalled. Try `corky sync account btak.dev` now — it will prompt OAuth for btak.dev@gmail.com specifically.
 
-`corky watch` should respond to Ctrl+C properly. It should stop any syncing and kill the process. 
+`corky watch` should respond to Ctrl+C properly. It should stop any syncing and kill the process.
+`corky watch` already has Ctrl+C handling — it sets a shutdown flag and checks between phases. But the Gmail API sync runs inside a blocking thread and doesn't check the flag during its long fetch loop. So Ctrl+C is received but the sync keeps running until it finishes.
+
+The issue is architectural: the sync function is synchronous (blocking thread) and doesn't have access to the shutdown signal. Two options:
+
+1. **Quick fix**: Set a `SIGINT` handler that calls `process::exit(0)` after the first Ctrl+C — hard kill. Safe because sync state isn't saved until after the loop completes.
+
+2. **Better fix**: Pass a cancellation token into the sync functions and check it periodically in the message fetch loop.
+
+Option 1 is fine for now — the sync state is only saved on successful completion, so a mid-sync exit just means it re-fetches next time. Want me to implement that? Or should we move on to the release and track this as a follow-up?
+
+Implement Option 2.
 <!-- /agent:output -->

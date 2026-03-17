@@ -332,4 +332,20 @@ npx @vscode/vsce create-publisher btakita
 ```
 
 Let me know when the PAT is stored in `pass` and I'll publish.
+
+### Re: Azure AD tenant blocked
+
+The Azure DevOps tenant was deactivated due to inactivity. Options:
+
+1. **Reactivate the tenant:** Go to https://aka.ms/TenantLifecycle — Microsoft allows reactivation within a grace period. Sign in at https://portal.azure.com with the same Microsoft account and follow the reactivation flow.
+
+2. **Create a new Azure DevOps org:** Go to https://dev.azure.com and create a fresh organization (e.g., "btakita-dev"). Then create a PAT from there. This bypasses the blocked tenant.
+
+Do I need to give Microsoft my Credit Card info to open an account...just to publish a plugin?
+   
+3. **Skip marketplace, use Open VSX instead:** Open VSX (https://open-vsx.org) is the alternative marketplace used by Cursor, VSCodium, and other VS Code forks. Publish with `npx ovsx publish` — requires a different token (Eclipse Foundation account, not Azure). Cursor users would find it here.
+
+4. **GitHub Releases only:** Already working — `agent-doc plugin install vscode` downloads from GitHub Releases. No marketplace needed. Users just run the CLI command.
+
+**Recommendation:** Option 2 (new org) is fastest if you want marketplace presence. Option 4 (GitHub Releases) is already done and works for CLI users. Which do you prefer?
 <!-- /agent:exchange -->

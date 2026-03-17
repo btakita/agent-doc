@@ -636,6 +636,8 @@ Modified the WebSub worker (`workers/websub/index.ts`) to send an email via Mail
 
 Deploy when ready: `cd workers/websub && npx wrangler deploy`
 
+Please modify the CloudFlare DNS using the api.
+
 **2. Google Search Console — manual steps needed**
 
 The sitemap is live at `https://brookebrodack.net/sitemap.xml` (verified 200). Google's sitemap ping endpoint is deprecated — you need to use Search Console:
@@ -781,4 +783,13 @@ ENOENT: No such file or directory: failed to link package: @rappstack/domain--br
 Failed to install 10 packages
 Error: Process completed with exit code 1.
 ```
+### Re: Mailchannels question + CI build failure
+
+**Mailchannels** is a free email delivery service integrated with Cloudflare Workers. It lets the WebSub worker send you an email notification when a new YouTube video is detected — no external email service or API key needed. The DNS records authorize the worker to send emails from `@brookebrodack.net`.
+
+**CI build failure — fixed and pushed** (`54685d2`):
+
+The `.yalc/` directory is local-only (gitignored). CI was trying to install `file:.yalc/@rappstack/...` paths that don't exist. Added a CI step that replaces yalc paths with `^0.1.0` (npm versions) before `bun install`. Also removed `--frozen-lockfile` since the package.json is modified in CI.
+
+CI should be re-running now.
 <!-- /agent:exchange -->

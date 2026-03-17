@@ -19,8 +19,7 @@ agent_doc_write: crdt
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml (sync_days=30)
 - [x] Gmail API sync provider implemented
-- [x] Fixed: login_hint for correct Google account selection
-- [x] Removed stale token (was brian.takita, not btak.dev)
+- [x] login_hint + email verification safeguard
 - [ ] Re-authorize with btak.dev@gmail.com
 - [ ] Release 0.17.0
 <!-- /agent:status -->
@@ -631,4 +630,17 @@ You're right — the OAuth flow authenticated with `brian.takita@gmail.com` (you
 3. **Set `sync_days = 30`** for btak.dev
 
 Rebuilt and reinstalled. Run `corky sync account btak.dev` — the OAuth flow will open your browser pre-selected to `btak.dev@gmail.com`. Make sure to authorize with that account, not your personal one.
+Added a post-auth safeguard. After getting the OAuth token, corky now calls `GET /gmail/v1/users/me/profile` to verify the authenticated email matches the configured account. If there's a mismatch, it fails with a clear error:
+
+```
+Account mismatch: OAuth token is for 'brian.takita@gmail.com' but account is configured as 'btak.dev@gmail.com'.
+Delete the stale token with: corky filter auth
+Then re-run sync to re-authenticate with the correct account.
+```
+
+Combined with `login_hint` (pre-selects the right account in the consent screen), this provides both prevention and detection.
+
+Rebuilt and reinstalled. Try `corky sync account btak.dev` now — it will prompt OAuth for btak.dev@gmail.com specifically.
+
+`corky watch` should respond to Ctrl+C properly. It should stop any syncing and kill the process. 
 <!-- /agent:output -->

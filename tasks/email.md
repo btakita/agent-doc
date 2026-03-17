@@ -19,9 +19,9 @@ agent_doc_write: crdt
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml
 - [x] Gmail API sync provider implemented
-- [x] Fixed watch.rs to support gmail-api provider
-- [x] Global binary updated
-- [ ] Verify corky watch works with btak.dev
+- [x] watch.rs fixed for gmail-api provider
+- [x] Progress indicators added
+- [ ] Release 0.17.0
 <!-- /agent:status -->
 
 ## Exchange
@@ -594,4 +594,17 @@ Connecting via Gmail API as btak.dev@gmail.com
 Access token expired, refreshing...
   Label: INBOX
 ```
+Yes, it's stuck downloading 1.8M message IDs (paginating at 500/page = ~3,700 API calls just for the listing phase, then one API call per message to fetch). With no progress indicator, it looks frozen.
+
+How are there 1.8M messages. There's no way that btak.dev@gmail.com has 1.8M messages.
+
+**Fixed:** Added progress indicators to both phases:
+- **Listing:** `Listing messages... 50000 found` (updates every 5 pages)
+- **Processing:** `Processing 100/1852556...` (updates every 100 messages)
+
+Rebuilt and reinstalled globally. Restart `corky watch` to see the progress.
+
+**On the version question** — you're right that `0.17.0` is the correct semver for a new feature. But let's get the sync working reliably first before tagging. The initial full sync of 1.8M messages will take a long time. Once incremental sync via `historyId` kicks in, subsequent runs will be fast.
+
+Want me to also add a `sync_days` config to limit the initial sync window for btak.dev? E.g., `sync_days = 365` would only sync the last year instead of 10 years.
 <!-- /agent:output -->

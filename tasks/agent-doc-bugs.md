@@ -1455,5 +1455,33 @@ All 11 tests pass. Binary rebuilt and installed. Ready to test.
 
 Please add relevant logging to answer the questions that you asked me.
 Please add tests to simulate the issue.
+
+### Re: Logging + tests added
+
+**Logging added:**
+
+1. **`select_pane()` in tmux.rs** now logs:
+   - Which session the pane is in
+   - How many clients are attached
+   - Which clients are being switched from which session → target session
+   
+   Example output:
+   ```
+   [tmux] select_pane %31 in session '0', switching 3 client(s)
+   [tmux] switching client /dev/pts/5 from session '1' → '0'
+   [tmux] switching client /dev/pts/32 from session '5' → '0'
+   ```
+
+2. **JB plugin** now logs successful route output to `idea.log` (via `System.err.println`). Previously only errors were logged. After rebuilding the plugin, you'll see route output in `Help → Show Log in Files`.
+
+**Tests added:**
+- `select_pane_switches_window` — creates two windows in an isolated tmux, selects a pane in window 1, verifies it becomes the active pane
+- `command_text_cleared_after_acceptance` — verifies that after a command is executed, the command text is no longer in the prompt (acceptance detection)
+
+All 13 tests pass. Binary rebuilt and installed. Plugin source updated (needs rebuild: `./gradlew buildPlugin`).
+
+There are currently 6 windows in the tmux session. Also, the tmux session was duplicated in another terminal session. It seems that we lost the previous tmux session and the terminal bound to another tmux session.
+
+![img_2.png](img_2.png)
 <!-- /agent:exchange -->
 ****

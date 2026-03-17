@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-Renamed account to `btak.dev` in `.corky.toml`. Pending: verify `pass email/btak-dev` exists, then `corky sync`.
+btak.dev account configured in `.corky.toml` with `pass email/btak.dev`. Ready for `corky sync`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -64,4 +64,21 @@ labels = ["INBOX"]
 ```
 
 Note: TOML keys with dots need quoting (`"btak.dev"`), so the key is `accounts."btak.dev"`. The `password_cmd` path (`pass email/btak-dev`) still uses a hyphen since pass paths don't need to match the account key — adjust if you prefer `pass email/btak.dev`.
+Updated `password_cmd` to match the available pass path:
+
+```toml
+[accounts."btak.dev"]
+provider = "gmail"
+user = "btak.dev@gmail.com"
+password_cmd = "pass email/btak.dev"
+labels = ["INBOX"]
+```
+
+Ready for `corky sync` whenever you want to test it.
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting to imap.gmail.com:993 as btak.dev@gmail.com
+  Error syncing btak.dev: No Response: [AUTHENTICATIONFAILED] Invalid credentials (Failure)
+```
 <!-- /agent:output -->

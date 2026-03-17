@@ -190,19 +190,21 @@ fn install_jetbrains(release: &Value) -> Result<()> {
 // --- VS Code ---
 
 fn detect_code_cmd() -> &'static str {
-    // Check for codium first
-    if std::process::Command::new("codium")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        return "codium";
+    // Check for cursor first, then codium, then code
+    for cmd in ["cursor", "codium", "code"] {
+        if std::process::Command::new(cmd)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return cmd;
+        }
     }
     "code"
 }
 
 fn install_vscode(release: &Value) -> Result<()> {
-    let (asset_name, url) = find_asset(release, "agent-doc-vscode", "vsix")?;
+    let (asset_name, url) = find_asset(release, "agent-doc", "vsix")?;
     eprintln!("Found asset: {asset_name}");
 
     let tmp = download_to_temp(url)?;
@@ -219,7 +221,7 @@ fn install_vscode(release: &Value) -> Result<()> {
     }
 
     let version = release_version(release);
-    eprintln!("Extension installed ({version}).");
+    eprintln!("Extension installed ({version}) via `{code}`.");
     Ok(())
 }
 
@@ -229,8 +231,8 @@ pub fn install(editor: &str) -> Result<()> {
     let release = fetch_latest_release()?;
     match editor {
         "jetbrains" | "jb" | "idea" => install_jetbrains(&release),
-        "vscode" | "code" | "vscodium" | "codium" => install_vscode(&release),
-        _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode"),
+        "vscode" | "code" | "vscodium" | "codium" | "cursor" => install_vscode(&release),
+        _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     }
 }
 
@@ -253,11 +255,11 @@ pub fn update(editor: &str) -> Result<()> {
             }
             install_jetbrains(&release)
         }
-        "vscode" | "code" | "vscodium" | "codium" => {
-            // VS Code handles update-in-place via --install-extension
+        "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            // VS Code/Cursor handles update-in-place via --install-extension
             install_vscode(&release)
         }
-        _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode"),
+        _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     }
 }
 

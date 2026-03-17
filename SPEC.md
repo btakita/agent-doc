@@ -22,6 +22,7 @@ Frontmatter fields:
 - `agent`: Agent backend name (overrides config default)
 - `model`: Model override (passed to agent backend)
 - `branch`: Reserved for branch tracking
+- `claude_args`: Additional CLI arguments for the `claude` process (space-separated string, see §6.1)
 
 All fields are optional and default to null. Resolution: explicit `agent_doc_format`/`agent_doc_write` > deprecated `agent_doc_mode` > defaults (template + crdt). The body alternates `## User` and `## Assistant` blocks (append format) or uses named components (template format).
 
@@ -89,7 +90,19 @@ Config overrides `command` and `args` for any agent name.
 
 Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-doc/config.toml`).
 
-Fields: `default_agent`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+Fields: `default_agent`, `claude_args`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+
+### 6.1 claude_args
+
+Additional CLI arguments passed to the `claude` process when spawned by `agent-doc start`. Space-separated string.
+
+Three sources, in precedence order (highest first):
+
+1. **Frontmatter**: `claude_args: "--dangerously-set-permissions"` in the document's YAML frontmatter
+2. **Global config**: `claude_args = "--dangerously-set-permissions"` in `~/.config/agent-doc/config.toml`
+3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"`
+
+The resolved args are split on whitespace and prepended to the `claude` command before other flags (e.g., `--continue`).
 
 ## 7. Commands
 

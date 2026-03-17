@@ -90,6 +90,7 @@ Follow-up. You can also annotate inline:
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |
 | `branch` | no | (none) | Git branch for session commits |
+| `claude_args` | no | (none) | Additional CLI args for `claude` process (space-separated) |
 
 ### Two interaction modes
 
@@ -192,6 +193,32 @@ Each run auto-commits the document for inline diff highlighting in your editor.
 | `--no-git` | Skip git entirely |
 
 Cleanup: `agent-doc clean <file>` squashes all session commits into one.
+
+## Configuration
+
+### claude_args
+
+Pass additional CLI arguments to the `claude` process spawned by `agent-doc start`. Three sources, highest precedence first:
+
+**1. Document frontmatter** (per-document):
+```yaml
+---
+agent_doc_session: 05304d74-...
+claude_args: "--dangerously-set-permissions"
+---
+```
+
+**2. Global config** (`~/.config/agent-doc/config.toml`):
+```toml
+claude_args = "--dangerously-set-permissions"
+```
+
+**3. Environment variable**:
+```sh
+export AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"
+```
+
+Args are split on whitespace and prepended to the `claude` command before other flags.
 
 ## Agent Backends
 

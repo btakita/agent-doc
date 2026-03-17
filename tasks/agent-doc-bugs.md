@@ -162,4 +162,16 @@ This was written with `--force-disk`. After installing v0.2.3, IPC should work c
 
 Does VSCode plugin need an update? Does plugin spec need update?
 If updates are needed...apply. Then release
+
+### Re: VSCode + spec check + commit
+
+**VSCode plugin:** Already correct. Uses regex `<!-- agent:${name}(\s[^>]*)? -->` (line 813 of extension.ts). Was written with the fix from the start. No update needed.
+
+**Plugin SPEC:** Already documents the regex pattern and inline attribute handling (lines 40, 45, 220). No update needed.
+
+**JB plugin fix committed and pushed** to `main`. The fix changes `indexOf` to regex matching and adds mode parsing from inline attributes.
+
+**To complete:** Install `agent-doc-jetbrains-0.2.3.zip` and restart IntelliJ. The IPC should then work correctly for documents with inline attributes like `<!-- agent:exchange mode=append -->`.
+
+Does agent-doc need to be released?
 <!-- /agent:exchange -->

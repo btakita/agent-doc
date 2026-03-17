@@ -160,5 +160,6 @@ Then **restart IntelliJ**.
 
 This was written with `--force-disk`. After installing v0.2.3, IPC should work correctly — the regex will match `<!-- agent:exchange mode=append -->` and apply the patch with append mode.
 
-release
+Does VSCode plugin need an update? Does plugin spec need update?
+If updates are needed...apply. Then release
 <!-- /agent:exchange -->

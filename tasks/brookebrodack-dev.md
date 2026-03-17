@@ -620,5 +620,31 @@ Can I get a ANTHROPIC_API_KEY from my Claude subscription?
 
 I'll just do the posts on my local machine. I would like to setup an email notification whenever new YouTube episodes are available.
 
-Let's run the sitemap 
+### Re: Email notifications + Google Search Console
+
+**1. Email notifications — implemented**
+
+Modified the WebSub worker (`workers/websub/index.ts`) to send an email via Mailchannels when a new video is detected:
+- Parses YouTube Atom XML for video title, ID, publish date
+- Sends HTML email with thumbnail, title, YouTube link
+- Errors are logged but don't block the GitHub Actions dispatch
+- Recipient: `brian@briantakita.me`
+
+**DNS records needed** (one-time setup in Cloudflare):
+1. `_mailchannels.brookebrodack.net` TXT `"v=mc1 cfid=brookebrodack-websub.brian-takita.workers.dev"` — authorizes worker to send
+2. `brookebrodack.net` TXT `"v=spf1 include:relay.mailchannels.net -all"` — SPF for deliverability
+
+Deploy when ready: `cd workers/websub && npx wrangler deploy`
+
+**2. Google Search Console — manual steps needed**
+
+The sitemap is live at `https://brookebrodack.net/sitemap.xml` (verified 200). Google's sitemap ping endpoint is deprecated — you need to use Search Console:
+
+1. Go to **search.google.com/search-console**
+2. Add property: `brookebrodack.net`
+3. Verify ownership via DNS TXT record (Cloudflare makes this easy)
+4. Sitemaps → Submit: `https://brookebrodack.net/sitemap.xml`
+
+Want me to add the DNS records for Mailchannels and Search Console verification now?
+Let's run the sitemap on Google Search Console.
 <!-- /agent:exchange -->

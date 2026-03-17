@@ -376,4 +376,49 @@ Analyze the transcript and extract the content. Make an engaging "post" with the
 CI deploying now.
 
 Make the video width 100% on the video page.
+### Re: Full-width video iframe
+
+Added CSS rule to `post__doc_html.ts`:
+
+```css
+.post__doc_html article iframe { width: 100%; aspect-ratio: 16/9; height: auto; }
+```
+
+This overrides the hardcoded `width="560" height="315"` on the iframe elements from the markdown posts, making the video fill the article width while maintaining 16:9 aspect ratio.
+
+Pushed: `9b22b31` (ui--server--brookebrodack), `85e9a77` (brookebrodack-dev).
+
+Error
+```
+~/work/btakita/agent-loop/src/brookebrodack-dev main                                                                                                                                                                           2m 46s 00:56:08
+❯ bun run dev
+$ cd ./app/brookebrodack-site && bun dev
+$ bun run dev:sourcemap__resolve__bun
+$ sourcemap__resolve__bun -f index.ts
+browser__build|watch
+server__build|watch
+server started on port 4101
+33268 |     ] = ns_id_be_memo_pair_(
+33269 |       "request",
+33270 |       "request_url__origin",
+33271 |       (ctx) => {
+33272 |         const request_url = request_url_(ctx);
+33273 |         const { hostname: hostname3, port } = request_url;
+                                                      ^
+TypeError: Cannot destructure property 'hostname' from null or undefined value
+    at <anonymous> (../../../../node_modules/.bun/@rappstack+domain--server@0.1.0+19d347667ae97a06/node_modules/@rappstack/domain--server/request/index.ts:31:29)
+    at memo__run (../../../../node_modules/.bun/ctx-core@7.2.34/node_modules/ctx-core/all/rmemo/index.js:204:16)
+    at memo (../../../../node_modules/.bun/ctx-core@7.2.34/node_modules/ctx-core/all/rmemo/index.js:18:19)
+    at <anonymous> (../../../../node_modules/.bun/@rappstack+domain--server@0.1.0+19d347667ae97a06/node_modules/@rappstack/domain--server/request/index.ts:9:73)
+    at memo__run (../../../../node_modules/.bun/ctx-core@7.2.34/node_modules/ctx-core/all/rmemo/index.js:204:16)
+    at memo (../../../../node_modules/.bun/ctx-core@7.2.34/node_modules/ctx-core/all/rmemo/index.js:18:19)
+    at layout__doc_html_ (../../../../lib/ui--server--brookebrodack/layout/layout__doc_html.ts:52:19)
+    at <anonymous> (../../app/content/index.server.ts:36:3)
+      at async dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
+      at async compress2 (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/middleware/compress/index.js:8:11)
+      at async dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
+      at async <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:118:73)
+      at async dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
+      at async <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
+```
 <!-- /agent:exchange -->

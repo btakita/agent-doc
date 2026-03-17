@@ -7,10 +7,8 @@ agent_doc_write: crdt
 <!-- agent:status mode=replace -->
 - [x] SVG logo: secret agent fedora, no eyes
 - [x] PNG versions (128, 256, 512) in assets/
-- [x] README updated with logo
-- [x] VS Code extension: icon.png + manifest
-- [x] JetBrains plugin: pluginIcon.svg
-- [ ] Final review
+- [x] README, VS Code, JetBrains deployed
+- [x] Released to GitHub (0bebebc)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -101,4 +99,14 @@ PNGs generated with `rsvg-convert` (better SVG filter support than ImageMagick).
 | `editors/jetbrains/.../META-INF/pluginIcon.svg` | SVG | JetBrains Marketplace icon |
 
 release
+
+### Released
+
+Committed and pushed to `agent-doc` main:
+- **Commit:** `0bebebc` — "Add agent-doc logo: markdown file wearing a secret agent fedora"
+- **Push:** `dcd3375..0bebebc main -> main`
+- **Parent submodule pointer updated:** `19f7cba`
+
+Logo is now live on GitHub. The README renders the SVG at the top of the repo page.
+
 <!-- /agent:exchange -->

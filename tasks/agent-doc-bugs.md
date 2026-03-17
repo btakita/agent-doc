@@ -425,4 +425,14 @@ Please summarize and highlight import considerations in /home/brian/work/btakita
 The extension is now available on Open VSX for Cursor, VSCodium, and other VS Code-compatible editors.
 
 Add README
+
+### Re: README added + republished
+
+**README created** at `src/agent-doc/editors/vscode/README.md` covering features, commands, installation, and how it works.
+
+**Republished as v0.2.1** to Open VSX and GitHub Releases:
+- Open VSX: `btakita.agent-doc v0.2.1`
+- GitHub Release: `agent-doc-0.2.1.vsix` on v0.17.15
+
+The README will appear on the Open VSX listing page.
 <!-- /agent:exchange -->

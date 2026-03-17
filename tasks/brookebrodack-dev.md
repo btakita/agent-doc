@@ -605,4 +605,16 @@ Or my Claude Code token?
 Script compiles cleanly (164KB bundled). Ready for testing once you add the `ANTHROPIC_API_KEY` secret to the repo.
 
 Can I get a ANTHROPIC_API_KEY from my Claude subscription?
+### Re: ANTHROPIC_API_KEY from Claude subscription?
+
+**No** — your Claude Pro subscription (claude.ai) is separate from the API. Different products, different billing.
+
+**To get an API key:**
+1. Go to **console.anthropic.com** (not claude.ai)
+2. Create account or sign in (same email works)
+3. Add payment method (pay-per-use, separate from subscription)
+4. API Keys → Create Key
+5. Add as GitHub secret: `gh secret set ANTHROPIC_API_KEY -R btakita/brookebrodack-dev`
+
+**Cost:** ~$0.01-0.03 per video summary with Sonnet. For 1-2 new videos/month, essentially free.
 <!-- /agent:exchange -->

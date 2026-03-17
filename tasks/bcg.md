@@ -4,9 +4,6 @@ tmux_session: '23'
 agent_doc_mode: template
 ---
 
-
-
-
 # Dave Franklin — BCG AI Factory Builder
 
 ## Context

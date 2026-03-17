@@ -181,46 +181,59 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-**Re: TMO contract terms & conditions**
+### Re: Adjust plan for platform-independent Phase 1
 
-TMO does NOT publish their terms, pricing, or contract details publicly. I checked:
-- themortgageoffice.com — no terms of service page, no pricing page
-- Their FAQ says "Contact sales" for pricing
-- Their "Sample Contracts" page (`/sample-contracts/`) is empty — just a blog landing page
-- Their brochure PDF is a Photoshop image (no extractable text)
-- GetApp, SoftwareSuggest, Capterra — all say "contact for pricing"
+**Context from Robert Ward calls (March 14-16):**
+- Judith verbally confirmed: "100% Brian's going to work on the website and other stuff"
+- MA is enforcing their 12-month non-refundable contract — Judith's attorney (Canada-based) is fighting it
+- Robert Ward's advice: just start working, build a demo, present it to get paid
+- Both TMO and MA have aggressive contract patterns — long-term play is custom software
+- Judith is hard to pin down (travels constantly, doesn't reply promptly — "gives that to everybody")
 
-**One useful finding from search results:** A snippet said TMO's "fees are based on your number of users and the features that you need" and **"they don't force you into a long-term contract."** If true, this is better than MA's 12-month lock-in.
+**Revised Phase 1 — Website + Document Portal (platform-independent):**
 
-**However** — the Capterra reviews tell a different story (users being hit with $10K licensing fees). The marketing claim of "no long-term contract" doesn't mean "no gotchas." The licensing/device clauses are where TMO appears to extract value.
+| Task | Hours | Notes |
+|------|-------|-------|
+| Crawl/export existing site content | 2-3 | Current host uncooperative — crawl it |
+| Cloudflare Pages + domain transfer | 2-3 | Judith owns domain on GoDaddy |
+| Site rebuild (Hono + Workers) | 8-12 | Borrower-facing + investor info pages |
+| Secure document upload portal | 4-6 | Drive/Dropbox integration |
+| **Total** | **16-24** | Fits within M1 ($4K milestone) |
 
-**What Judith should do before signing:**
-1. **Request the full license agreement in writing** — not just a demo pitch
-2. **Ask specifically:**
-   - What counts as a "seat"? Per user? Per device? Per concurrent session?
-   - Can staff access remotely from home? Does that count as additional seats?
-   - What happens if she exceeds seat count accidentally?
-   - What's the cancellation/termination process?
-   - What's the data export process if she leaves?
-3. **Get answers in writing** (email) — verbal promises won't help in a dispute
-4. **Compare to her MA contract** — she's trading one vendor's aggressive terms for another's. Make sure TMO's terms are actually better
+Zero dependency on MA or TMO. Pure website + document portal. The loan management platform decision can happen later.
 
-**The $600/month pricing from your meeting notes** (2 seats, $400/month per extra) was from Kevin/the sales call, not a public source. That should be confirmed in whatever contract TMO sends.
+**Draft email to Judith:**
 
-Sources:
-- [TMO FAQ](https://www.themortgageoffice.com/frequently-asked-questions/)
-- [TMO Sample Contracts page](https://www.themortgageoffice.com/sample-contracts/) (empty)
-- [TMO Products](https://www.themortgageoffice.com/products/)
-- [Capterra TMO Pricing page](https://www.capterra.com/p/9277/The-Mortgage-Office/)
+---
 
-Judith Has not gotten back to me. Mortgage Optimizer is trying to legally enforce the contract that she signed with them.
+**To:** judithkrug@gmail.com
+**CC:** rwaldman100@gmail.com
+**Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
 
-Please review the phone call transcripts with Robert Ward for more context.
+Hi Judith,
 
-I need to get started working so I can get paid.
+Hope you're doing well. I wanted to let you know I'm ready to get started on the website whenever you are.
 
-Please adjust the plan to begin with work that does not depend on the Mortgage Optimizer vs TMO decision.
-I believe we will go with TMO. But let's start with the website and any other work that can be done for Phase 1.
+The website and document upload portal are completely separate from any loan management platform — so we can move forward on that right now while everything else gets sorted out. Here's what I'd tackle first:
 
-After, let's draft an email to begin the project.
+- **New website** on modern hosting (Cloudflare) — faster, more secure, you own everything
+- **Secure document upload portal** for borrowers and investors
+- **Content from your current site** carried over (I can work from what's there)
+
+To get rolling, I just need:
+1. Your GoDaddy login (or just point the domain to Cloudflare — I can walk you through it)
+2. Your logo and any branding preferences
+3. A quick 15-minute call to confirm the site structure you want
+
+This is the first milestone — you'll see it live before anything else moves forward.
+
+When works for a quick call this week?
+
+Brian
+
+---
+
+**Notes on tone:** Concise, no price mentioned (let the milestone framing from the proposal stand), no mention of MA/legal situation, focused entirely on her business. Per Robert Ward's coaching.
+
+Want me to save this as a corky draft, or adjust anything first?
 <!-- /agent:exchange -->

@@ -1,7 +1,8 @@
 ---
 agent_doc_session: 134b8b90-5450-4747-8404-1a96c6300e53
 tmux_session: '0'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 Can we convert mi-www.site from Solid Start to rappstack...The same stack that briantakita.me, brookebrodack.net, and cogov.tech uses?
@@ -13,7 +14,7 @@ Yes...let's convert censible. And mi-www.site
 
 Who controls the dns of censible.co?
 
-<!-- agent:output -->
+<!-- agent:exchange mode=append -->
 **Proceeding with the conversion.**
 
 ### Done:
@@ -78,5 +79,6 @@ Who controls the dns of censible.co?
 - `esmcss` — CSS extraction
 - `ctx-core` — Reactive memoization (rmemo), context system
 
-/agent-doc compact
-<!-- /agent:output -->
+converted to agent:exchange
+compact exchange
+<!-- /agent:exchange -->

@@ -50,21 +50,13 @@ agent_doc_mode: template
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 
 <!-- agent:exchange -->
-**CUDA build fixed.** Bumped `whisper-rs` from 0.15 to 0.16 in `Cargo.toml`.
+**Released v0.15.3** — CUDA transcription build fix.
 
-**Root cause:** whisper-rs-sys v0.14.1 uses bindgen 0.71.1, which generates opaque structs for `_IO_FILE` and `whisper_full_params` (size 1 byte) but still emits C-derived size assertions expecting 216/296 bytes. The subtraction underflows → compile error. This is a known bindgen issue (rust-lang/rust-bindgen#2691, #3264).
-
-**Fix:** whisper-rs 0.16.0 pulls in whisper-rs-sys 0.15.0 which sets `bindgen::RustTarget::stable(88, 0)` to prevent incompatible layout checks.
-
-**No code changes needed** — corky's usage of the whisper-rs API is compatible with 0.16 (`.full()` return type changed from `Result<c_int, _>` to `Result<(), _>`, but we only `?`-propagate it).
-
-**Verified:**
-- `cargo check --features transcribe-cuda` — compiles clean
-- All tests pass with `--features transcribe-cuda`
-- Dep changes: bindgen 0.71.1→0.72.1, whisper-rs-sys 0.14.1→0.15.0
-
-Ready to commit in corky submodule and release when you say.
-
-release
+- `whisper-rs` 0.15→0.16, `whisper-rs-sys` 0.14.1→0.15.0, `bindgen` 0.71.1→0.72.1
+- All tests pass, no code changes
+- Published: crates.io, PyPI, GitHub Releases
+- GitHub release: https://github.com/btakita/corky/releases/tag/v0.15.3
+- Binary installed locally (v0.15.3)
+- Parent submodule pointer updated
 <!-- /agent:exchange -->
 ****

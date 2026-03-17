@@ -1325,5 +1325,23 @@ All 11 route tests pass (6 unit + 5 integration). Binary rebuilt and installed.
 
 Have we fixed the tmux pane switch error?
 Do we wait for an explicit confirmation that the run was submitted via Enter?
+
+### Re: Status of pane switch + Enter confirmation
+
+**1. Pane switch: Yes, fixed** (line 144-147 in `auto_start()`). `tmux.select_pane(&new_pane)` runs immediately after pane creation — this calls `tmux select-window` + `tmux select-pane`, making the new pane active within tmux. Caveat: if the IDE window has OS-level focus (covering the terminal), you won't see the switch until you alt-tab. tmux focus and OS window focus are separate.
+
+**2. Enter confirmation: Yes, implemented** (lines 166-188). After `send_command()`:
+- Waits 500ms for Claude to process
+- Captures pane content
+- If `❯` prompt still visible → retries Enter via `send_keys_raw("Enter")`
+- If prompt gone → logs "Command accepted (prompt gone)"
+
+**What hasn't been tested yet:** The latest build includes the routing fix (new files → `auto_start()` instead of lazy-claim). Previous test failures were all on the old code path where new files hit lazy-claim and none of these fixes applied. The next test should be different.
+
+Still broken: ![img_1.png](img_1.png)
+- `Run Agent Doc` on tasks/obs.md did not swap tmux pane
+- `/agent-doc run tasks/obs.md` still in input. Enter not pressed.
+
+Please fix with tests.
 <!-- /agent:exchange -->
 ****

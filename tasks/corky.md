@@ -47,6 +47,7 @@ agent_doc_mode: template
 - `collapsible_if` clippy refactor (48 instances)
 - `corky sync imports` config dispatcher (designed in session, not implemented)
 - `corky doc upload` (stashed, coming soon)
+- `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 
 <!-- agent:exchange -->
 Compacted 650 lines → ~50. Converted to template mode. What's next for corky?

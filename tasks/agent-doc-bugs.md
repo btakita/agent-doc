@@ -1015,5 +1015,21 @@ Binary rebuilt and installed to both locations. Ready to test again.
 
 Same issues with tasks/kevin-volk.md
 I tried running this file but the plugin said route already in progress. Why?
+
+### Re: Wrong prompt character + route blocking
+
+**Two bugs found and fixed:**
+
+1. **Wrong prompt character.** Claude Code uses `❯` (U+276F, heavy right-pointing angle), NOT `>` (ASCII). The detection was looking for the wrong character. Captured a live Claude pane to confirm:
+   ```
+   ❯ 
+   ```
+   Fixed `wait_for_claude_ready()` to match both `❯` and `>`.
+
+2. **60s blocking.** The poll blocked the `agent-doc route` process for up to 60s. The JB plugin's `SubmitAction` has an `AtomicBoolean` routing guard — while one route is blocked in the poll, ALL other route calls get "Route already in progress". Reduced timeout to **15s** (Claude typically initializes in 5-10s).
+
+Both binaries updated (`~/.cargo/bin` + `.bin/`). Tests pass.
+
+Ready to test again — the prompt detection should actually work now.
 <!-- /agent:exchange -->
 ****

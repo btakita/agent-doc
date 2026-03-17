@@ -75,15 +75,9 @@ javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-messa
 **Note:** LinkedIn lazy-loads messages — scroll up to load older messages before clicking.
 
 <!-- agent:exchange -->
-### Posted to LinkedIn
+The bookmarklet is already in the static section of this document (## LinkedIn Conversation Export Bookmarklet, lines 63-75). In template mode, `agent-doc write` only patches `<!-- agent:exchange -->` — the static sections above it are never touched by the agent. So it's safe here.
 
-Fixed "Signal (future)" → "Signal (TODO)" to avoid confusion with Rust `Future`.
+The exchange section does get compacted/replaced over time, but the bookmarklet lives *outside* the exchange component.
 
-Published via corky: https://www.linkedin.com/feed/update/urn:li:share:7439320822705659904
-
-Draft file: `mail/social/20260316-lazily-reactive-signals-linkedin.md` (status: published)
-
-I want to put the bookmarklet snippet somewhere.
-We can keep it in this document as long as we can guarantee that agent-doc or the agent session won't delete it.
-Or we can put it somewhere in mail/ or agent-loop/. Like a scripts/ or linkedin/ directory.
+If you want a second copy for extra safety: `agent-loop/bin/linkedin-export-bookmarklet.js` would be a natural spot. But given the template mode guarantee, keeping it in this document is fine.
 <!-- /agent:exchange -->

@@ -77,35 +77,36 @@ The deployed website styling is broken.
 https://brookebrodack.net/
 
 <!-- agent:exchange -->
-### Re: Video blog posts strategy
+### Re: All videos get posts — parallel agent plan
 
-**Recommended approach: Video plays at top, blog content below — single URL per video.**
+**Inventory:** 181 videos in the database, spanning 2019–2026. Transcripts confirmed available via `youtube-transcript-api` (tested 4 videos successfully — segment counts range from 10 to 499).
 
-Rather than a separate blog link on each `/content` card, push the URL when a video is clicked (or via a dedicated link) to `/content/:slug`, where:
+**Execution plan:**
 
-1. **Video plays at the top** (sticky, same as current `/content` behavior)
-2. **Blog post content renders below** the player — description, timestamps, commentary, related links
-3. **`/content` feed** stays as-is (video grid), but each card links to `/content/:slug` instead of (or in addition to) inline playback
+1. **Setup phase** (this session):
+   - Create `app/brookebrodack-site/post/content/` directory
+   - Add the `md_esbuild_plugin_()` to the build (port from briantakita.me)
+   - Add `/content/:slug` route
+   - Create a post generation script
 
-**Why this over separate `/posts` or `/blog`:**
+2. **Post generation** (parallel agents):
+   - Batch 181 videos into groups of ~20
+   - Each agent fetches transcripts via `youtube-transcript-api`, generates a `.md` file with:
+     - YAML frontmatter: `title`, `description`, `date`, `tags`, `video_url`
+     - Embedded YouTube iframe
+     - Cleaned transcript with timestamps
+     - AI-generated topic summary and key points
+   - Slug format: `YYYY-MM-DD-{slugified-title}.md`
 
-- **SEO juice stays concentrated** — `/content/` is already indexed; adding depth under it (`/content/dodgeball-tournament`) builds topical authority on that path
-- **No navigation confusion** — Brooke's audience expects video content, not a traditional blog. Keeping it under `/content` feels native
-- **YouTube embed + written content = rich pages** — Google indexes the text, the video gets watch time, structured data (VideoObject JSON-LD) ties them together
-- **Matches briantakita.me pattern** — markdown files with `video_url` frontmatter, but adapted to brookebrodack's existing content route
+3. **Integration phase:**
+   - Wire up `post/index.generate.ts` to scan content directory
+   - Update `/content` feed cards to link to `/content/:slug`
+   - Add VideoObject JSON-LD structured data
+   - Update sitemap generation
 
-**Implementation sketch:**
+**Transcript approach:** `youtube-transcript-api` (Python) works but is slow (~5-10s per video). For 181 videos, parallel agents (10 batches of ~18) will take ~2-3 minutes total rather than ~20 minutes sequential.
 
-1. **Content directory**: `app/brookebrodack-site/post/content/` with `.md` files per video (same format as briantakita.me)
-2. **New route**: `/content/:slug` renders video player + markdown body
-3. **Feed cards**: Add a link icon or "Read more" to each `/content` grid card pointing to the slug route
-4. **SEO**: VideoObject JSON-LD on each post page, sitemap entries, meta description from post frontmatter
-5. **Build**: Reuse the same `md_esbuild_plugin_()` pattern from briantakita.me (both repos share the rhonojs build system)
+**Ready to start?** I'll begin with the setup phase (build system + routing), then kick off parallel agents for post generation.
 
-**Open question:** Should all videos get posts, or start with a curated subset? Generating a short SEO-optimized summary for every video is possible (YouTube descriptions + transcript extraction), but curated posts with real commentary would rank better.
-
-All videos should get posts. This would involve making a CC transcript for each video.
-Creating topics for each video. Describing the topic, what was said, and supporting content.
-
-Use parallel agents to go through each video.
+Go
 <!-- /agent:exchange -->

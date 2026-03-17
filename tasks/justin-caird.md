@@ -5,6 +5,9 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 <!-- agent:status mode=replace -->
+- [x] Research ECI Solutions & Justin Caird
+- [x] Draft response
+- [ ] Review and send
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -27,4 +30,46 @@ Looking forward to your feedback!
 
 Justin Caird
 Sr. Recruiter
+### Research: ECI Solutions
+
+**ECI Software Solutions** — 30-year-old cloud ERP provider for SMBs. 25,000+ customers, 90+ countries, 2,100 employees, Fort Worth TX. Verticals: manufacturing, construction, distribution, building supply, office tech, field service.
+
+**Tech stack:** C#.NET, JavaScript, Python, cloud-first. Products include M1 (manufacturing ERP), EvolutionX (B2B e-commerce), Cognytics (BI), Davisware (field service).
+
+**AI push:** "Practical AI in Business" focus at ECI Connect 2026, actively embedding AI features into ERP suite. This role is about building agents that write/maintain code to modernize 20-year-old systems.
+
+**Justin Caird:** Sr. Technical Recruiter at ProSearch Strategies (external agency), not directly at ECI. Based in Portland, ME. Background: Brightcove, Philips, CoreInformation Technology.
+
+**No existing contact file** in mail/contacts/.
+
+### Match Analysis
+
+Strong fit for the agentic systems angle:
+- agent-doc IS "building agents that write/maintain code"
+- Presence AI pipeline = production AI systems at scale
+- 20+ years of legacy modernization experience (Backbone→React at SocialChorus, Rails upgrades at TrueCar, etc.)
+- C# is on your skills list (Generic Query Analyzer, .NET at SafeSchoolz/NASPP)
+
+Concern: C#.NET isn't your primary recent language, but the patterns transfer. The role emphasizes AI/agents over language-specific expertise.
+
+### Draft LinkedIn response:
+
+Hi Justin,
+
+Thanks for reaching out — this resonates with what I've been building.
+
+I've been shipping agentic developer tooling in Rust and TypeScript: agent-doc (a document-as-interface for persistent AI sessions with CRDT-based concurrent editing), corky (git-native correspondence with agentic workflows), and lazily (cross-language reactive signals). Before that, I architected the real-time multimodal AI pipeline at Presence AI on NVIDIA H100 GPUs.
+
+The idea of building agents that write and maintain code on legacy systems is exactly the problem space I'm in — agent-doc is literally an agent runtime for this kind of work. I'd be happy to chat about how these patterns apply to modernizing ERP systems.
+
+I'm available this week. What works for you?
+
+Brian
+
+**Notes on the draft:**
+- Leads with what you're building (agents) not where you worked
+- Names specific projects to demonstrate "true builder" — not just someone who uses AI tools
+- Connects agent-doc directly to their problem ("agents that write and maintain code")
+- Keeps it short — Justin asked for a quick call, not a thesis
+- Doesn't mention C# since the role de-emphasizes traditional coding
 <!-- /agent:exchange -->

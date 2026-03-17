@@ -689,4 +689,18 @@ Google will crawl it within a few hours. The sitemap includes all 180+ `/content
 - [ ] Commit and push latest changes (fallback links, generate-posts script, email notification)
 
 Please force the sitemap to be reindexed.
+### Re: Force sitemap reindex
+
+There's no programmatic way to force Google to reindex — the ping API was deprecated in 2023, and the Indexing API only works for JobPosting/BroadcastEvent types.
+
+**Options:**
+1. **Resubmit in Search Console** — Sitemaps → click your sitemap → "Resubmit" (fastest signal to Google)
+2. **URL Inspection** — paste specific URLs → "Request Indexing" (~10/day limit)
+3. **Wait** — Google auto-crawls sitemaps for active sites (usually within hours)
+
+Since `brookebrodack.net` is already in GSC and the sitemap returns 200, Google will pick it up. Resubmitting in the Sitemaps tab is the strongest signal you can send.
+
+The sitemap is broken at https://brookebrodack.net/sitemap.xml
+
+Please review and fix. Add automated tests.
 <!-- /agent:exchange -->

@@ -1343,5 +1343,23 @@ Still broken: ![img_1.png](img_1.png)
 - `/agent-doc run tasks/obs.md` still in input. Enter not pressed.
 
 Please fix with tests.
+
+### Re: Still broken — Enter retry moved to send_command
+
+**Why it still failed:** The obs.md session has a **registered alive pane** (`%29`). Route took Step 1 (line 48: `send_command(registered_pane, ...)`), which DOESN'T go through `auto_start()`. The Enter verification was only in `auto_start()` — useless for the most common path.
+
+**Fixes:**
+
+1. **Enter retry loop moved to `send_command()` itself** — now covers ALL code paths (registered alive, lazy-claim, AND auto_start). After sending, waits 1s, checks if `❯` prompt is still visible, retries Enter up to 2 more times.
+
+2. **`send_keys()` delay increased to 1000ms** (from 300ms). Claude Code's TUI with heavy session hooks needs more time to process literal text before Enter.
+
+The delay either takes too long or is fragile. Is there a way to loop with a confirmation whether or not the Enter triggered the submission?
+
+3. **Removed duplicate verification from `auto_start()`** — `send_command()` handles it now.
+
+**The fix is now path-independent:** no matter how route.rs reaches `send_command()`, the Enter verification runs.
+
+All 11 tests pass. Binary rebuilt and installed.
 <!-- /agent:exchange -->
 ****

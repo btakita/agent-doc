@@ -703,4 +703,19 @@ Since `brookebrodack.net` is already in GSC and the sitemap returns 200, Google 
 The sitemap is broken at https://brookebrodack.net/sitemap.xml
 
 Please review and fix. Add automated tests.
+
+### Re: Broken sitemap — fixed
+
+**Root cause:** `request_url__origin_(ctx)` returned `undefined` in production (proxy/CDN strips request origin). Also, post modules weren't loaded for the sitemap route.
+
+**Fixes:**
+1. `sitemap__xml.ts` — replaced `request_url__origin_(ctx)` with `site__website_(ctx)` (reads canonical `https://brookebrodack.net` from config)
+2. `index.server.ts` — added `blog_site__set` + `post_mod_a1__set` to `/sitemap.xml` route so post URLs are included
+3. `routes.test.ts` — added 5 sitemap-specific tests: valid XML, no `undefined`, URLs start with `https://brookebrodack.net`, post URLs present, static pages present
+
+**Before:** `<loc>/undefined/content</loc>` (4 URLs, all broken)
+**After:** `<loc>https://brookebrodack.net/content/slug</loc>` (180+ URLs, all valid)
+
+All 22 tests pass. Needs commit + push + deploy.
+The sitemap should include all of the video post pages.
 <!-- /agent:exchange -->

@@ -1670,4 +1670,26 @@ Your earlier test failure was with the pre-fix code (the `session_files` RefCell
 Want me to bump to v0.17.15 and run the release checklist?
 
 yes
+
+### v0.17.15 Released
+
+All targets published:
+- **crates.io:** https://crates.io/crates/agent-doc/0.17.15
+- **PyPI:** agent-doc 0.17.15 (2 packages uploaded)
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.15
+
+**What's in v0.17.15:**
+- Poll-based Enter retry with command-text acceptance check (not prompt-based)
+- ❯ (U+276F) prompt detection with ANSI stripping
+- New files → auto_start (not lazy-claim stealing)
+- Sync pre-phase auto-starts sessions for files without alive panes
+- 30s Claude startup timeout
+- select_pane logging
+- Plugin SPEC document
+- 13 route tests (385 total)
+
+Binary: `agent-doc 0.17.15` installed locally.
+
+audit docs
+compact exchange
 <!-- /agent:exchange -->

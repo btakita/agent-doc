@@ -795,4 +795,25 @@ CI should be re-running now.
 
 Should the YouTube video links be on the sitemap as well?
 Google Search Console has a "Discovered Videos" column.
+### Re: YouTube video links in sitemap
+
+Yes — Google supports a **Video Sitemap** extension. Adding `<video:video>` tags to post URLs helps videos appear in Google Video search and populates the "Discovered Videos" column in GSC.
+
+**Format:**
+```xml
+<url>
+  <loc>https://brookebrodack.net/content/slug</loc>
+  <video:video>
+    <video:thumbnail_loc>https://i.ytimg.com/vi/VIDEO_ID/hqdefault.jpg</video:thumbnail_loc>
+    <video:title>Video Title</video:title>
+    <video:description>Description</video:description>
+    <video:content_loc>https://www.youtube.com/watch?v=VIDEO_ID</video:content_loc>
+    <video:publication_date>2025-07-13T00:00:00Z</video:publication_date>
+  </video:video>
+</url>
+```
+
+Each post page already has an embedded YouTube video with all this metadata available from the post frontmatter. Want me to add video sitemap entries to `sitemap__xml.ts`?
+
+Yes
 <!-- /agent:exchange -->

@@ -138,5 +138,27 @@ This response was written with `--force-disk`.
 Another external modification on tasks/slack.md while I was typing
 
 I didn't see it. You should be able to see the file contents though.
-Please fix. 
+Please fix. Use automated tests.
+
+### Re: Found the IPC bug — inline attributes not matched
+
+**Root cause:** `applyComponentPatch()` in PatchWatcher.kt searched for `<!-- agent:exchange -->` but the document has `<!-- agent:exchange mode=append -->`. The `indexOf` returned -1, so no patch was applied. The function returned the original document unchanged, and `applyPatch()` returned `true` (no exception = success).
+
+The plugin deleted the patch file (ACK) without actually changing the document.
+
+**Fix (v0.2.3):**
+- `applyComponentPatch` now uses regex: `<!-- agent:name(\s[^>]*)? -->` — matches tags with or without inline attributes
+- Parses `mode=append` from inline attributes and applies correct mode (append/prepend/replace)
+- Added logging: "Patch applied (X chars changed)" or "Patch produced no changes"
+
+**Plugin v0.2.3 built.** Install:
+```
+Settings → Plugins → gear → Install from Disk →
+src/agent-doc/editors/jetbrains/ build/distributions/agent-doc-jetbrains-0.2.3.zip
+```
+Then **restart IntelliJ**.
+
+This was written with `--force-disk`. After installing v0.2.3, IPC should work correctly — the regex will match `<!-- agent:exchange mode=append -->` and apply the patch with append mode.
+
+release
 <!-- /agent:exchange -->

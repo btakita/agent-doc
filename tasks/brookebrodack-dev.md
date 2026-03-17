@@ -647,4 +647,28 @@ The sitemap is live at `https://brookebrodack.net/sitemap.xml` (verified 200). G
 
 Want me to add the DNS records for Mailchannels and Search Console verification now?
 Let's run the sitemap on Google Search Console.
+### Re: Run sitemap on Google Search Console
+
+Google Search Console requires browser interaction — here's what to do:
+
+**Step 1: Open Search Console**
+Go to: https://search.google.com/search-console
+
+**Step 2: Add property**
+- Click "Add property"
+- Choose "URL prefix" → enter `https://brookebrodack.net/`
+- For verification, choose "DNS record" method
+- Google will give you a TXT record value like `google-site-verification=XXXXX`
+
+**Step 3: Add the DNS record**
+Tell me the verification code and I'll add it via the Cloudflare API.
+
+**Step 4: Verify and submit sitemap**
+- Click "Verify" in Search Console
+- Go to Sitemaps → enter `sitemap.xml` → Submit
+
+Once you give me the Google verification code, I'll add that plus the Mailchannels DNS records in one go.
+
+I already have a GSC property for brookebrodack.net
+https://search.google.com/search-console?resource_id=sc-domain%3Abrookebrodack.net
 <!-- /agent:exchange -->

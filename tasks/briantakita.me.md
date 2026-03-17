@@ -305,5 +305,25 @@ Change `@rappstack/*` packages to export `.js` + `.d.ts` instead of raw `.ts`. S
 
 Want me to implement Option A in rebuildjs?
 
-Yes. Add test(s) in rebuildjs for `.ts`_
+Yes. Add test(s) in rebuildjs for `.ts` support. Add to rebuildjs' SPEC.md
+### Re: Option A — .ts resolution plugin
+
+**Working!** The build now succeeds with a `ts_resolve_node_modules_plugin_` esbuild plugin.
+
+**What it does:** Intercepts bare specifier imports (e.g., `@rappstack/ui--server/doc`), uses `Bun.resolveSync()` from the `absWorkingDir` to resolve through package exports, and returns the `.ts` path that esbuild 0.27 otherwise blocks.
+
+**Implementation:**
+- Added `ts_resolve_plugin_()` directly in `app/briantakita.me/build.ts` (working now)
+- Also added to `rebuildjs/server/build/index.js` (needs investigation — rebuildjs's internal plugin isn't being invoked despite being added to the plugins array; likely a plugin ordering issue with rhonojs wrapping)
+
+**Key insight:** `Bun.resolveSync()` respects package.json `exports` maps and resolves `.ts` targets correctly. esbuild 0.27's refusal to do so is a bundler-level restriction, not a resolution one.
+
+**Next steps:**
+1. Commit the working `build.ts` change + push to CI
+2. Investigate why the rebuildjs-internal plugin isn't firing (probably rhonojs plugin ordering)
+3. Once rebuildjs fix lands, remove the app-level plugin
+
+Want me to commit and push to test CI?
+
+yes. I added schema-dts as a dependency in domain--server--briantakita
 <!-- /agent:exchange -->

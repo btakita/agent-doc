@@ -53,7 +53,8 @@ agent_doc_mode: template
 <!-- agent:status mode=replace -->
 - [x] HTML email sending (multipart/alternative)
 - [x] `collapsible_if` refactor (61 instances across 26 files)
-- [ ] Commit & release changes
+- [x] Committed to `src/corky/` (2 commits)
+- [ ] Version bump + release (awaiting version number)
 - [ ] Attachment phases 2-3 (inline images, clipboard)
 - [ ] `corky sync imports` config dispatcher
 - [ ] `corky doc upload`
@@ -121,4 +122,27 @@ go
 `make check` passes clean — all 199+ tests pass, clippy clean. Changes are uncommitted in `src/corky/`, ready for review.
 
 Commit & release changes
+
+### Committed
+
+Two commits in `src/corky/`:
+
+1. **`9d2ff4d`** — `refactor: collapse nested if statements across 26 files`
+   - Removed `collapsible_if = "allow"` lint override (subagent missed this — fixed manually)
+   - 26 files, -160/+102 lines
+
+2. **`9e80cc1`** — `feat: HTML email sending via multipart/alternative`
+   - `pulldown-cmark 0.12` added, `markdown_to_html()` helper, 4 new tests
+   - 2 files, +115/-25 lines
+
+**Version bump needed for release.** Current: `0.15.3`. What version? Suggest `0.16.0` since HTML email is a feature change and collapsible_if is a refactor with let-chain syntax changes.
+
+Implement the rest of the pending feature list. This will all be in the minor release:
+
+```
+- [ ] Attachment phases 2-3 (inline images, clipboard)
+- [ ] `corky sync imports` config dispatcher
+- [ ] `corky doc upload`
+- [ ] `corky schedule run`
+```
 <!-- /agent:exchange -->

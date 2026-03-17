@@ -173,3 +173,5 @@ Claimed `tasks/corky.md` for pane %26 (session `584ef929`). Note: this replaced 
 corky 0.12.1 supports attachments. Please send a reply to the sent email with the attached screenshot.
 
 Convert to agent:exchange
+
+My Slack notifications are not working. Please diagnose.

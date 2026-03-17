@@ -184,5 +184,13 @@ Added `claude_args: "--dangerously-set-permissions"` to frontmatter. Next time t
 
 **Note:** This only takes effect on session restart. The current running session keeps its existing permission state. To apply now, either restart Claude in this pane or press `Shift+Tab` to cycle permissions.
 
-If I set `claude_args: ""` in a document,  
+
+### Re: Empty claude_args in frontmatter
+
+If you set `claude_args: ""` in frontmatter and `claude_args = "--dangerously-set-permissions"` in config.toml, the **frontmatter wins** (empty string). Claude would launch with no extra args — the config.toml value is overridden.
+
+This is correct behavior: frontmatter is the per-document override. If a document explicitly sets `claude_args: ""`, it means "no extra args for this document, regardless of global config."
+
+**To NOT override:** Simply omit `claude_args` from frontmatter entirely. Then config.toml (or env var) applies. `None` (absent) is different from `Some("")` (explicitly empty).
+ 
 <!-- /agent:exchange -->

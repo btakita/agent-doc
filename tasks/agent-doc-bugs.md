@@ -195,4 +195,24 @@ This is correct behavior: frontmatter is the per-document override. If a documen
 
 I'm still being asked for permissions in this session.
 How can we force the running session to use the global->document configuration?
+
+### Re: Forcing permissions for the running session
+
+The `claude_args` config only applies when `agent-doc start` spawns a **new** Claude process. The current running session was started without `--dangerously-set-permissions`, and there's no way to inject that flag into an already-running Claude Code process.
+
+**Options to fix the current session:**
+
+1. **Restart this session:** Kill the pane and re-route. The new `agent-doc start` will read the frontmatter and pass `--dangerously-set-permissions`:
+   ```
+   # In this tmux pane, press Ctrl+C to exit Claude, then 'q' to quit agent-doc start
+   # Then from your editor: Run Agent Doc on this file
+   ```
+
+2. **Use Shift+Tab** in Claude's TUI to toggle "bypass permissions" — this is the runtime equivalent of `--dangerously-set-permissions`.
+
+3. **Set in Claude's own config** (`~/.claude/settings.json`): Add `"permissions": "dangerously-set"` — this applies to ALL Claude sessions globally, not just agent-doc ones.
+
+Option 2 is fastest for right now.
+
+release
 <!-- /agent:exchange -->

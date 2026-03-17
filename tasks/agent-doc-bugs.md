@@ -348,4 +348,21 @@ Do I need to give Microsoft my Credit Card info to open an account...just to pub
 4. **GitHub Releases only:** Already working — `agent-doc plugin install vscode` downloads from GitHub Releases. No marketplace needed. Users just run the CLI command.
 
 **Recommendation:** Option 2 (new org) is fastest if you want marketplace presence. Option 4 (GitHub Releases) is already done and works for CLI users. Which do you prefer?
+
+### Re: Microsoft credit card requirement
+
+**No credit card needed.** Azure DevOps has a free tier — creating an organization and generating a PAT doesn't require payment. The sign-up uses a Microsoft account (Outlook, GitHub SSO, etc.), not an Azure subscription.
+
+However, if the old tenant is blocked and reactivation requires Azure subscription setup, that flow might ask for billing info.
+
+**Easier alternative: Open VSX.** No Microsoft account needed at all:
+1. Create account at https://open-vsx.org (uses GitHub OAuth)
+2. Generate a token
+3. `npx ovsx publish agent-doc-0.2.0.vsix -p <token>`
+
+Open VSX is where Cursor and VSCodium look for extensions by default. VS Code Marketplace is only needed for vanilla VS Code users — and they can use `agent-doc plugin install vscode` (GitHub Releases) instead.
+
+Want me to publish to Open VSX?
+
+Yes
 <!-- /agent:exchange -->

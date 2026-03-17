@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-btak.dev account configured in `.corky.toml` with `pass email/btak.dev`. Ready for `corky sync`.
+btak.dev IMAP auth failed. Needs Gmail app password and/or IMAP enabled.
 <!-- /agent:status -->
 
 ## Exchange
@@ -81,4 +81,23 @@ Ready for `corky sync` whenever you want to test it.
 Connecting to imap.gmail.com:993 as btak.dev@gmail.com
   Error syncing btak.dev: No Response: [AUTHENTICATIONFAILED] Invalid credentials (Failure)
 ```
+IMAP auth failed — the password in `pass email/btak.dev` isn't accepted by Gmail. This usually means one of:
+
+1. **App password needed**: Gmail with 2FA requires an [App Password](https://myaccount.google.com/apppasswords), not your regular password. Generate one under "Security → App passwords" and update:
+   ```bash
+   pass edit email/btak.dev   # paste the 16-char app password
+   ```
+
+I logged into btak.dev@gmail.com...wen to the /apppasswords link.
+`The setting you are looking for is not available for your account.`
+
+2. **IMAP not enabled**: Go to Gmail Settings → "See all settings" → "Forwarding and POP/IMAP" → enable IMAP for `btak.dev@gmail.com`.
+
+3. **Wrong password stored**: Verify the stored value:
+   ```bash
+   pass email/btak.dev   # check it looks right (no trailing newlines/spaces)
+   ```
+
+Most likely it's #1 — app password. Generate one and update the pass entry, then retry `corky sync`.
+
 <!-- /agent:output -->

@@ -497,4 +497,19 @@ Please add automated tests, including unit tests, functional tests, smoke tests.
 - `app/brookebrodack-site/test/routes.test.ts` — new test suite (19 tests)
 
 release
+### Re: Release
+
+**Committed and pushed all changes:**
+
+| Repo | Commit | Description |
+|------|--------|-------------|
+| `ui--server--brookebrodack` | `fbe62f3` | fix: null guard for youtube_video_a1_ |
+| `brookebrodack-site` | `49d6463` | feat: graceful error handling + test suite |
+| `brookebrodack-dev` | `408ef92` | feat: yalc migration, fixes, and tests |
+
+All three repos pushed to GitHub. CI deployment should trigger from the brookebrodack-dev push.
+
+What would happen if the upstream YouTube channel adds a video but it's missing as a page.
+
+Can we fallback to the old `/content` behavior where we play the video?
 <!-- /agent:exchange -->

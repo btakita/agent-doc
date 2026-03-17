@@ -50,23 +50,21 @@ agent_doc_mode: template
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 
 <!-- agent:exchange -->
-Compacted exchange (was ~455 lines). Session history above has release details.
+**CUDA build fixed.** Bumped `whisper-rs` from 0.15 to 0.16 in `Cargo.toml`.
 
-**Recent releases:** v0.13.4 (unified corky skill via agent-kit), v0.14.0 (CPU transcription default), v0.14.1, v0.15.0 (YouTube upload, LinkedIn edit, profiles consolidation). All published to crates.io, PyPI, GitHub Releases.
+**Root cause:** whisper-rs-sys v0.14.1 uses bindgen 0.71.1, which generates opaque structs for `_IO_FILE` and `whisper_full_params` (size 1 byte) but still emits C-derived size assertions expecting 216/296 bytes. The subtraction underflows → compile error. This is a known bindgen issue (rust-lang/rust-bindgen#2691, #3264).
 
-**Key decisions:**
-- Single `/corky` skill (merged email + corky, deleted redundant agent-doc skill)
-- `/simplify`, `make check`, `audit-docs` = review pipeline (documented in corky AGENTS.md)
-- `/review` orchestrator skill deferred until friction justifies it
-- Transcribe: CPU default, GPU opt-in (`--features transcribe-cuda`), diarize opt-in
-- agent-doc skill stays focused on document sessions only
+**Fix:** whisper-rs 0.16.0 pulls in whisper-rs-sys 0.15.0 which sets `bindgen::RustTarget::stable(88, 0)` to prevent incompatible layout checks.
 
-**Tests added:** 5 social draft tests (YouTube fields, LinkedIn post_id round-trip). 268 pass total.
+**No code changes needed** — corky's usage of the whisper-rs API is compatible with 0.16 (`.full()` return type changed from `Result<c_int, _>` to `Result<(), _>`, but we only `?`-propagate it).
 
-**Open item added:** `corky schedule run` — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Cron-based scheduled email sends.
+**Verified:**
+- `cargo check --features transcribe-cuda` — compiles clean
+- All tests pass with `--features transcribe-cuda`
+- Dep changes: bindgen 0.71.1→0.72.1, whisper-rs-sys 0.14.1→0.15.0
 
-What's next for corky?
+Ready to commit in corky submodule and release when you say.
 
-Fix the corky CUDA build for the transcribe command.
+release
 <!-- /agent:exchange -->
 ****

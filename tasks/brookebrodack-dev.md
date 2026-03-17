@@ -844,4 +844,18 @@ For Google to associate the embedded video with each post page, each `/content/:
 Want me to add `VideoObject` JSON-LD to the post pages? The video metadata (`video_url`, title, date) is already available from the post frontmatter.
 
 Yes
+### Re: VideoObject JSON-LD — done
+
+Added `VideoObject` to each post page's JSON-LD `@graph` in `post__doc_html.ts`:
+
+- Extracts `video_url` from post frontmatter metadata
+- Parses YouTube video ID from URL
+- Adds `VideoObject` with: `name`, `description`, `thumbnailUrl`, `contentUrl`, `embedUrl`, `uploadDate`, `author`
+- Only added when post has a `video_url` field
+
+Verified: post pages now include `VideoObject` in their JSON-LD script tag alongside the existing `WebPage`.
+
+All tests pass. Ready to commit + push with the video sitemap changes.
+
+deploy
 <!-- /agent:exchange -->

@@ -447,4 +447,9 @@ corky sync
 Ready to start implementation?
 
 Yes
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+  Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+```
 <!-- /agent:output -->

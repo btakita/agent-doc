@@ -1,10 +1,10 @@
 ---
-session: 22f64516-0a5f-4527-9037-9464d02cdf08
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 22f64516-0a5f-4527-9037-9464d02cdf08
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
+
 
 In the slack linux client, Ctrl+Shift+u is bound to both Insert Hyperlink and Underline Selected Text.
 
@@ -171,3 +171,5 @@ Claimed `tasks/corky.md` for pane %26 (session `584ef929`). Note: this replaced 
 ## User
 
 corky 0.12.1 supports attachments. Please send a reply to the sent email with the attached screenshot.
+
+Convert to agent:exchange

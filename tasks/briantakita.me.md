@@ -99,25 +99,22 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: Submodule commits + CI results
+### Re: request_url fix in rappstack-dev
 
-**Submodule commits completed:**
-- 4 btakita libs committed, merged to main, pushed
-- `app/briantakita.me` submodule also needed its package.json committed (was missed initially)
-- Parent pointer updated and pushed (`28b2282`)
+Found your changes in `rappstack-dev/lib/domain--server/request/index.ts`:
 
-**CI run #2 (23180727481):**
-- **Install dependencies: PASSED** — migration is working, npm resolution correct
-- **Build and prerender: FAILED** — pre-existing bug, not migration-related:
-  - `request_url__origin_` returns a path (`/1200px-Creation_of_Adam-5XYM72ZV.jpg`) instead of a full URL during prerender
-  - `sorted_dehydrated_post_meta_a1_` returns `undefined` causing `.map()` to fail
-  - Same `request_url` null/undefined issue from observation #6129-#6130
+1. **Null guard with `nullish__none_`** — `request_url__origin_` and `request_url__href_` now gracefully handle null `request_url` instead of crashing on destructuring
+2. **Import fix** — `relysjs/server` → `rhonojs/server` (stale import from pre-migration)
 
-The yalc migration itself is complete and verified. The CI build failure is a pre-existing bug in the prerender pipeline that needs separate attention.
+This addresses the root cause: during prerender, `request_url_(ctx)` returns null because there's no real HTTP request. The `nullish__none_` wrapper short-circuits and returns `none` instead of throwing `TypeError: Cannot destructure property 'hostname' of null`.
 
-**Migration status:** Phases 1-6 done (CI install passes). Phase 7 (docs) remaining but optional.
+**Next steps to get this into CI:**
+1. Commit + push `domain--server` in rappstack-dev
+2. Publish `@rappstack/domain--server` to npm (bump to 0.1.1)
+3. In briantakita.me-dev: `bun update @rappstack/domain--server` to pick up the new version
+4. Push briantakita.me-dev to trigger CI
 
-Want me to investigate the prerender `request_url` bug, or is the migration complete from your perspective?
+Want me to handle the publish + integration, or are you driving this?
 
-I began to fix the request_url bug. See my changes in rappstack-dev
+There are some type errors. Please fix those.
 <!-- /agent:exchange -->

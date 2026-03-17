@@ -342,4 +342,11 @@ What preventative and stabilizing care can robert do?
 **Timeline concern:** 4 weeks with an exposed root is already pushing it. The longer the roots sit exposed, the higher the infection risk. Robert should prioritize seeing a dentist — even a dental school clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combination.
 
 Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
+
+Transcribe
+[phone_20260316-014818_13109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260316-014818_13109684542.amr)
+[phone_20260315-225612_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260315-225612_3109684542.amr)
+[phone_20260315-114203_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260315-114203_3109684542.amr)
+[phone_20260314-221922_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260314-221922_3109684542.amr)
+[phone_20260314-035658_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260314-035658_3109684542.amr)
 <!-- /agent:exchange -->

@@ -577,7 +577,6 @@ CPU Whisper on GH Actions runners (~2 cores) takes ~3-5min per video, which is f
 
 Want me to implement this pipeline?
 
-
-
-
+Yes. Does GH Actions need a Claude Api key?
+Or my Claud Code 
 <!-- /agent:exchange -->

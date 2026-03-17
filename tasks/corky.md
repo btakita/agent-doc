@@ -50,7 +50,7 @@ agent_doc_mode: template
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 - **HTML email sending** — `corky draft push --send` should convert markdown body to HTML (`pulldown-cmark`), send as `multipart/alternative` (HTML + plain text fallback). Currently sends raw markdown as plain text, causing `**bold**` to appear as literal asterisks. Default behavior, no flag needed. Files: `src/draft/mod.rs` (`compose_email()`), `Cargo.toml`.
 
-<!-- agent:exchange -->
+<!-- agent:exchange mode=append -->
 **Released v0.15.3** — CUDA transcription build fix.
 
 - `whisper-rs` 0.15→0.16, `whisper-rs-sys` 0.14.1→0.15.0, `bindgen` 0.71.1→0.72.1
@@ -58,6 +58,32 @@ agent_doc_mode: template
 - Published: crates.io, PyPI, GitHub Releases
 - GitHub release: https://github.com/btakita/corky/releases/tag/v0.15.3
 - Binary installed locally (v0.15.3)
-- Parent submodule pointer updated
+- Parent submodule pointer update
+
+Implement multipart/alternative
+
+Do `collapsible_if` refactor.
+
+Add agent:status component to this file.
+
+### HTML Email Sending — Implementation Plan
+
+Investigated `src/draft/mod.rs` — confirmed the issue. `compose_email()` sends raw markdown as `text/plain` (lettre default). Bold, links, headers all appear as literal markdown syntax in email clients.
+
+**Changes needed:**
+
+1. **Add `pulldown-cmark` dependency** to `Cargo.toml`
+2. **Modify `compose_email()`** in `src/draft/mod.rs`:
+   - Convert markdown body → HTML via `pulldown-cmark`
+   - Without attachments: `MultiPart::alternative()` with `SinglePart::plain(body)` + `SinglePart::html(html_body)`
+   - With attachments: `MultiPart::mixed()` containing `MultiPart::alternative(plain + html)` + attachment parts
+3. **No new flags** — default behavior, always sends both plain text and HTML
+
+**Key details from code review:**
+- `lettre 0.11` already supports `MultiPart::alternative()` and `SinglePart::html()`
+- `mime_guess` already present for attachments
+- Both `send_email()` (SMTP) and `push_to_drafts()` (IMAP) use the same `Message`, so HTML works for both paths
+- Tests in `tests/test_draft.rs` need HTML output assertions
+
+Ready to implement when you want to start this. Estimated ~50 lines changed across 2 files.
 <!-- /agent:exchange -->
-****

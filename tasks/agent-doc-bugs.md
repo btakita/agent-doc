@@ -192,5 +192,7 @@ If you set `claude_args: ""` in frontmatter and `claude_args = "--dangerously-se
 This is correct behavior: frontmatter is the per-document override. If a document explicitly sets `claude_args: ""`, it means "no extra args for this document, regardless of global config."
 
 **To NOT override:** Simply omit `claude_args` from frontmatter entirely. Then config.toml (or env var) applies. `None` (absent) is different from `Some("")` (explicitly empty).
- 
+
+I'm still being asked for permissions in this session.
+How can we force the running session to use the global->document configuration?
 <!-- /agent:exchange -->

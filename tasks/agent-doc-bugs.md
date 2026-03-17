@@ -174,4 +174,12 @@ If updates are needed...apply. Then release
 **To complete:** Install `agent-doc-jetbrains-0.2.3.zip` and restart IntelliJ. The IPC should then work correctly for documents with inline attributes like `<!-- agent:exchange mode=append -->`.
 
 Does agent-doc need to be released?
+
+### Re: No agent-doc release needed
+
+**No.** The JB plugin fix is Kotlin-only — the Rust binary wasn't changed. v0.17.15 is current. The plugin is distributed separately (Install from Disk), not via crates.io/PyPI.
+
+Just install `agent-doc-jetbrains-0.2.3.zip` and restart IntelliJ.
+
+Can agent-doc support the Cursor IDE? Can it integrate with the Cursor agent loop?
 <!-- /agent:exchange -->

@@ -568,4 +568,30 @@ The Gmail API sync changes are currently uncommitted in `src/corky`. Before rele
 Should I proceed with bumping to `0.17.0` and committing? Or do you want a different version?
 
 Why not a patch release. It seems like a bug fix. Is there a feature being released?
+Fair point. The new feature is the `gmail-api` provider — a whole new sync backend (`gmail_api_sync.rs`, auth scope expansion, provider dispatch in both `sync/mod.rs` and `watch.rs`, new `GmailLabelState` type, `base64` dependency). That's a new capability, not a bug fix.
+
+But if you see it as fixing the "can't sync btak.dev without 2FA" problem, then a patch makes sense from a user perspective.
+
+**Summary of changes:**
+- New file: `src/sync/gmail_api_sync.rs` (~400 lines) — Gmail REST API sync provider
+- Modified: `src/filter/gmail_auth.rs` — scoped OAuth, `GMAIL_SYNC_SCOPE` constant
+- Modified: `src/sync/mod.rs` — provider dispatch for `gmail-api`
+- Modified: `src/sync/types.rs` — `GmailLabelState` struct
+- Modified: `src/watch.rs` — provider dispatch for `gmail-api`
+- Modified: `Cargo.toml` — `base64` dependency
+
+Your call: `0.16.1` (patch) or `0.17.0` (minor)?
+
+The current `corky watch` is stick. Is this because it's currently syncing? There are no indicators. If it's due to downloading messages, could we add an indicator?
+
+```
+~/work/btakita/agent-loop main ⇡71 !11 ?2                                                                                                                                                                                      3m 51s 18:55:52
+❯ corky watch
+corky watch: polling every 300s (Ctrl-C to stop)
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+Access token expired, refreshing...
+  Label: INBOX
+```
 <!-- /agent:output -->

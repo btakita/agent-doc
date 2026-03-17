@@ -469,4 +469,61 @@ Option 3 is the cleanest. Want me to implement it?
 I want to keep blog_search__main_fragment_ where it is.
 
 Explain Option 1 & 2 in depth.
+### Re: Options 1 & 2 in depth
+
+**Option 1: Add `@source` for node_modules**
+
+Tailwind v4 uses `@source` directives to tell the scanner where to find class names. The challenge: `bun install` puts packages in `node_modules/.bun/<hash>/node_modules/<pkg>/` with symlinks — the resolved paths are not predictable.
+
+What I tried:
+- `@source "../../node_modules/@rappstack/**/*.ts"` — didn't work (symlinks?)
+- `@source "../../node_modules/.bun/@rappstack*/**/*.ts"` — didn't work (glob didn't match `.bun/` structure)
+
+**What might work:** The Tailwind v4 `@source` directive may need the FULL resolved path without symlinks. We could:
+1. Create a `tailwind.sources.ts` script that resolves all `@rappstack/*` package paths and generates `@source` lines
+2. Or create a simple file that imports all the rappstack modules and Tailwind will scan it:
+
+```typescript
+// app/briantakita.me/tailwind-sources.ts
+// This file exists solely for Tailwind to scan classes from npm packages
+export { blog_search__main_fragment_ } from '@rappstack/ui--server--blog/search'
+export { blog_search__div_ } from '@rappstack/ui--browser--blog/search'
+// ... other rappstack components used
+```
+
+Then add `@source "../tailwind-sources.ts"` to the CSS. Tailwind would follow the import to find the source file and scan its classes.
+
+**Option 2: Add a safelist**
+
+Tailwind v4 supports `@utility` for custom utilities, but doesn't have a traditional `safelist` like v3. Instead, you can force-include classes by referencing them in scanned content.
+
+**Approach A — Dummy source file:**
+```typescript
+// app/briantakita.me/tailwind-safelist.ts
+// Classes used by @rappstack packages that Tailwind doesn't scan
+const _ = [
+  'absolute', 'relative', 'block', 'flex', 'inset-y-0',
+  'left-0', 'pl-2', 'pl-10', 'pr-3', 'py-3', 'items-center',
+  'opacity-75', 'rounded', 'border', 'border-skin-fill',
+  'bg-skin-fill', 'text-skin-base', 'w-full', 'h-4', 'w-4',
+  'fill-skin-base',
+]
+```
+
+Then the `@source "../app/**/*.ts"` directive picks these up. This is the simplest approach — just a file listing all the class names that the npm packages use.
+
+**Approach B — CSS layer:**
+Add the raw CSS rules that Tailwind would generate:
+```css
+@layer utilities {
+  .inset-y-0 { top: 0; bottom: 0; }
+}
+```
+
+But this duplicates what Tailwind already knows.
+
+**My recommendation:** Option 2, Approach A (safelist file). It's 5 minutes of work, no npm publish needed, and it's maintainable. Want me to implement it?
+
+Yes.
+I also want a robust solution for Option 1.
 <!-- /agent:exchange -->

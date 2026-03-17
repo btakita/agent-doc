@@ -792,4 +792,32 @@ The search box is still missing in the page
 ![2026-03-17_19-51.png](../../../../Pictures/agent-loop/2026-03-17_19-51.png)
 
 Also note that the attribute `data-dehydrated_post_meta_a1=...` is very large.
+### Re: Search box still missing — root cause + fix
+
+**Root cause found:** The `source_map` approach resolved `@rappstack/*` imports directly to rappstack-dev source files. But those source files import `ctx-core`, `relementjs`, etc. from their OWN `node_modules` (rappstack-dev/lib/*/node_modules/), creating **duplicate instances** of shared libraries. The search component's hydration used a different `ctx-core` context than the rest of the app, causing silent hydration failure (the `nofouc` class never gets removed).
+
+**Fix: Switched from `source_map` to symlinks.**
+
+```bash
+# node_modules/@rappstack/* → rappstack-dev/lib/*
+ln -sf .../rappstack-dev/lib/ui--browser--blog \
+  node_modules/@rappstack/ui--browser--blog
+# (all 9 packages)
+```
+
+**Why symlinks work:** esbuild resolves `@rappstack/ui--browser--blog/search` through `node_modules/` → follows the symlink to rappstack-dev source → gets the live `.ts` file. But crucially, when that file imports `ctx-core` or `relementjs`, esbuild resolves those from **briantakita.me-dev's `node_modules`** (the correct `resolveDir`), not rappstack-dev's. Single instance of all shared deps.
+
+**Verified:**
+- `ctx__new` defined only once (no duplicate deps)
+- Zero `rappstack-dev` paths in the bundle
+- `h-full`, `w-full` present in the JS
+- `@source` absolute path still works for Tailwind CSS scanning
+
+**Created `bin/link-rappstack.sh`** — run after `bun install` to restore symlinks.
+
+**Dev server running** on port 4100. Please refresh `localhost:4100/search` and check if the search box appears now.
+
+**Re: large `data-dehydrated_post_meta_a1`:** This is the serialized post metadata (all 51 posts with title, slug, description, tags) for client-side Fuse.js search. It's expected to be large. Could be optimized by trimming unnecessary fields or lazy-loading, but it's not causing the hydration issue.
+
+release ctx-core, rappstack, and briantakita.me
 <!-- /agent:exchange -->

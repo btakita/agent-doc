@@ -114,4 +114,16 @@ https://brookebrodack.net/
 - [ ] Add `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
 
 Add the Mailchannels DNS record using the CF api please
+### Re: Mailchannels DNS records
+
+**Done via Cloudflare API:**
+
+1. **Worker auth TXT** — `_mailchannels.brookebrodack.net` → `v=mc1 cfid=brookebrodack-websub.brian-takita.workers.dev`
+2. **SPF record** — updated existing `v=spf1 include:zoho.com ~all` to `v=spf1 include:zoho.com include:relay.mailchannels.net ~all`
+
+(Preserved the existing Zoho include to avoid breaking email.)
+
+**Ready to deploy the WebSub worker:** `cd src/brookebrodack-dev/workers/websub && npx wrangler deploy`
+
+go
 <!-- /agent:exchange -->

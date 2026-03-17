@@ -140,4 +140,35 @@ Should we add a GUIDE for more edge case configurations, or can we have all of t
 **README over GUIDE:** Agreed — all configuration goes in README. No separate GUIDE file.
 
 Will report results when the implementation completes.
+
+### Re: claude_args implemented
+
+**All 3 sources implemented, documented, committed, and pushed.**
+
+**Usage examples:**
+
+1. **Per-document** (frontmatter):
+```yaml
+---
+claude_args: "--dangerously-set-permissions"
+---
+```
+
+2. **Global config** (`~/.config/agent-doc/config.toml`):
+```toml
+claude_args = "--dangerously-set-permissions"
+```
+
+3. **Environment variable:**
+```bash
+export AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"
+```
+
+**Precedence:** frontmatter > config.toml > env var
+
+**Files changed:** frontmatter.rs, config.rs, start.rs, SPEC.md, README.md (+ route.rs tmux_session fix)
+
+All 385 tests pass. Binary v0.17.16 installed. Ready to release when you want.
+
+Make this document use dangerously-set-permissions
 <!-- /agent:exchange -->

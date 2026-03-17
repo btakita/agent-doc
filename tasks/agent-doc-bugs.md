@@ -1361,5 +1361,32 @@ The delay either takes too long or is fragile. Is there a way to loop with a con
 **The fix is now path-independent:** no matter how route.rs reaches `send_command()`, the Enter verification runs.
 
 All 11 tests pass. Binary rebuilt and installed.
+
+### Re: Poll-based Enter confirmation
+
+**Replaced fixed delays with a poll loop.** `send_command()` now:
+
+1. Sends text + Enter (100ms between, minimal)
+2. Polls every 200ms: is the `❯` prompt still visible?
+3. If prompt gone → command accepted (logs time + retry count)
+4. If prompt still there → sends another Enter immediately
+5. Repeats for up to 5s total
+
+**Why this is better:**
+- **Fast path:** If Enter works on first try, exits in ~200ms (not 1000ms)
+- **Reliable:** If Enter is dropped, retries automatically every 200ms
+- **Self-healing:** No fragile fixed delay — adapts to however long Claude's TUI needs
+- **Observable:** Logs `"Command accepted (0.4s, 0 Enter retries)"` or `"Command accepted (1.2s, 3 Enter retries)"`
+
+The `send_keys()` base delay is back to 100ms (fine for most uses). The Claude-specific retry logic lives in `send_command()` where it belongs.
+
+All 11 tests pass. Binary rebuilt and installed.
+
+Calling `Run Agent Doc` on tasks/tailwindv4.md did not swap the tmux pane.
+Why not?
+Please look at logs.
+Add tests to simulate issue.
+
+On top of that, there is no `/agent-doc run tasks/tailwindv4.md` anymore. Not in the input or in the claude session.
 <!-- /agent:exchange -->
 ****

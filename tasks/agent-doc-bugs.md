@@ -93,5 +93,23 @@ Binary v0.17.16 built and installed. All 13 route tests pass. Want me to clean u
 
 yes
 
-I also lost the --dangerously-set-permissions for the session.
+
+### Re: Cleanup done + permissions loss
+
+**Stray panes cleaned up.** Killed 4 panes in wrong sessions:
+- `%34` (ripple.md) from session 1
+- `%41` (agent-doc-plugins.md) from session 5
+- `%43`, `%44` from session claude
+
+All 13 agent-doc panes now in session 0.
+
+**`--dangerously-set-permissions` lost:** `start.rs` spawns `claude` without any permission flags. When `auto_start` creates a new session, it just runs `claude` (or `claude --continue`). The `--dangerously-set-permissions` flag from your original manual session isn't preserved.
+
+**Fix options:**
+1. **Frontmatter field:** Add `claude_flags: "--dangerously-set-permissions"` to frontmatter, read in `start.rs`
+2. **Global config:** Add `claude_args` to `~/.config/agent-doc/config.toml`
+3. **Environment variable:** `AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"`
+
+Option 1 is per-document (some documents may not need elevated permissions). Option 2/3 is global. Which do you prefer?
+I also lost the --dangerously-set-permissions for this session.
 <!-- /agent:exchange -->

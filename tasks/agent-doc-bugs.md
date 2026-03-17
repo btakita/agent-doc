@@ -1510,6 +1510,28 @@ Binary rebuilt and installed. All 13 tests pass.
 
 Why are there only 13 tests now? I thought we had over 100 tests. Almost 200 tests.
 
-Pleas cleanup my t
+
+### Re: Switching works on focus change + test count + cleanup
+
+**Pane switching:** Good — the switching works when you change focus in the editor. That's the claim/route path triggered by the JB plugin's file change listener. The "same approach as Sync Tmux Layout" makes sense — it stays within the session.
+
+**Test count:** There are **385 tests** total (364 unit + 21 CLI integration). The "13 tests" I reported was just the filtered count from `cargo test -- route::tests`. All 385 pass.
+
+**Tmux cleanup done.** Killed 15 idle agent-doc panes across sessions 0, 1, 5, and claude. Kept:
+- `%24` (this session — session 0:0)
+- `%0`, `%1` (claude panes in session 0:1)
+- `%10` (zsh in session 0:1)
+- All panes in session 1 (zsh, corky, bun, sh)
+- `%16` (zsh in session 5)
+
+Session "claude" was automatically removed (empty after cleanup).
+
+Before: 4 sessions, 20 windows, 16 agent-doc panes
+After: 3 sessions, 8 windows, 1 agent-doc pane (this one)
+Please cleanup my tmux sessions.
+
+I tried `Run Agent Doc` on tasks/briantakita.me.md.
+The tmux layout recovered from the cleanup.
+But the `/agent-doc run tasks/briantakita.me.md` did not run.
 <!-- /agent:exchange -->
 ****

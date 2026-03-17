@@ -429,5 +429,5 @@ TypeError: Cannot destructure property 'hostname' from null or undefined value
 
 Pushed: `009cf01` (brookebrodack-site), `b3318a3` (brookebrodack-dev).
 
-Use yalc 
+Use yalc for @rappstack/* dependencies.
 <!-- /agent:exchange -->

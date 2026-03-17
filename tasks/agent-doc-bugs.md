@@ -1031,5 +1031,198 @@ I tried running this file but the plugin said route already in progress. Why?
 Both binaries updated (`~/.cargo/bin` + `.bin/`). Tests pass.
 
 Ready to test again — the prompt detection should actually work now.
+
+I ran tasks/corky.md in this JB editor pane.
+The tmux pane did not change.
+I switched focused document in the editor.
+The tmux pane changed. The `/agent-doc run tasks/corky.md` was in the input but Enter was not pressed.
+
+```
+ ▐▛███▜▌   Claude Code v2.1.76
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  SessionStart:startup says: [agent-loop] recent context, 2026-03-16 10:07pm EDT
+     ────────────────────────────────────────────────────────────
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+
+     Context Economics
+       Loading: 50 observations (15,994 tokens to read)
+       Work investment: 96,968 tokens spent on research, building, and decisions
+       Your savings: 84% reduction from reuse
+
+     Mar 16, 2026
+
+     tasks/agent-doc-bugs.md
+       #5980  10:46 AM  ✅  Agent-doc bug documentation committed to version control
+       #5981            🔵  Agent-doc bugs identified: command visibility and external edit response loss
+       #5982            🔵  Root cause analysis of agent-doc feedback visibility failures
+
+     tasks/linkedin.md
+       #5983  11:15 AM  ✅  Committed LinkedIn task completion to git
+       #5984            🔵  LinkedIn publishing workflow uses corky tool and mail/social/ draft system
+
+     tasks/agent-doc-bugs.md
+       #5985  11:23 AM  ✅  Agent-doc committed documentation updates to agent-doc-bugs.md
+       #5986  11:27 AM  ✅  Committed agent-doc bug investigation findings
+
+     src/agent-doc/editors/vscode/src/extension.ts
+       #5987            🔵  VSCode plugin IPC implementation examined
+
+     src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt
+       #5988  11:28 AM  🔵  JetBrains plugin IPC implementation examined
+
+     tasks/corky.md
+       #5989  11:43 AM  ✅  Scheduled email send feature request added to corky backlog
+
+     .agent-doc/patches/e7cc7f7a85d39c090242bb3a72d53651075f5c7f9a1053e25d29aa36657310cc.json
+       #5990  11:47 AM  🔵  Created manual IPC patch file to debug JetBrains plugin patch consumption
+
+     #S1725 agent-doc verification of tasks/agent-doc-bugs.md - no changes detected (Mar 16, 5:56 PM)
+
+     tasks/justin-caird.md
+       #5991  5:56 PM  ✅  Created task tracking file for Justin Caird
+       #5992  5:57 PM  🔵  LinkedIn recruitment outreach tracked for response
+
+     #S1726 Investigating agent-doc command routing bug in tasks/agent-doc-bugs.md (Mar 16, 7:15 PM)
+
+     tasks/agent-doc-bugs.md
+       #5993  7:16 PM  ✅  agent-doc committed documentation update to bug tracking file
+
+     #S1727 Architectural discussion on agent-doc command handling implementation options (Mar 16, 7:20 PM)
+
+     tasks/agent-doc-bugs.md
+       #5994  7:21 PM  🔵  Auto-start command loss bug in route.rs identified and solution selected
+
+     #S1728 Document agent-doc poll-and-send implementation for auto-start race condition fix (Mar 16, 7:25 PM)
+
+     tasks/agent-doc-bugs.md
+       #5995  7:26 PM  ✅  Agent-doc response committed for agent-doc-bugs task
+       #5996           ⚖️  Selected poll-and-send implementation over queued command file for agent-doc
+
+     src/agent-doc/src/route.rs
+       #5997  7:27 PM  🟣  Implemented automatic command injection after Claude startup in auto_start
+
+     tasks/agent-doc-bugs.md
+       #5998  9:23 PM  🟣  Poll-and-send for Claude readiness in auto_start
+
+     #S1729 Documented routing architecture recommendation for brookebrodack-dev content strategy (Mar 16, 9:23 PM)
+
+     src/agent-doc/src/route.rs
+       #5999  9:28 PM  🔵  Poll-and-send only covers auto-start path, not lazy-claim
+
+     src/agent-doc/src/prompt.rs
+       #6000           🔄  Made strip_ansi public for reuse in route module
+
+     #S1730 Document agent-doc polling failure root cause and fix (Mar 16, 9:29 PM)
+
+     tasks/brookebrodack-dev.md
+       #6001  9:29 PM  ✅  Committed routing architecture documentation for brookebrodack-dev
+       #6002           🔵  Reviewed brookebrodack-dev project status and video content strategy
+
+     tasks/agent-doc-bugs.md
+       #6003  9:32 PM  🔴  Fixed agent-doc polling failure caused by wrong binary version
+
+     #S1731 Review brookebrodack-dev task progress and prepare for video post generation implementation (Mar 16, 9:32
+     PM)
+
+     src/brookebrodack-dev/app/brookebrodack-site/db/app.db
+       #6004  9:32 PM  🔵  Documented YouTube video integration architecture and inventory
+
+     src/agent-doc/src/route.rs
+       #6005  9:33 PM  🔴  Fixed Claude readiness detection to match Unicode ❯ prompt character
+
+     General
+       #6006           ✅  Installed YouTube transcript extraction tooling
+
+     src/agent-doc/src/route.rs
+       #6007           ✅  Reduced Claude readiness polling timeout from 60s to 15s
+
+     app/brookebrodack-site/db/app.db
+       #6008  9:37 PM  🔵  Verified YouTube transcript extraction capability
+       #6009           🔵  Confirmed transcript availability across diverse video samples
+
+     tasks/agent-doc-plugins.md
+       #6010  9:39 PM  ✅  Created agent-doc plugins documentation
+
+     #S1732 Process kevin-volk.md task file - coordinate CopilotKit interview scheduling with Kevin (Mar 16, 9:39 PM)
+
+     mail/drafts/20260316-kevin-volk-reply-forward.md
+       #6011  9:40 PM  ✅  Email draft created for CopilotKit interview scheduling confirmation
+
+     tasks/kevin-volk.md
+       #6012  9:41 PM  ✅  Task tracking document updated via agent-doc CRDT streaming
+
+     General
+       #6013  9:42 PM  ✅  Created blog post content directory infrastructure
+
+     tmp/generate_posts.py
+       #6014           🟣  Implemented YouTube video blog post generation script
+
+     #S1733 Document or review tasks/brookebrodack-dev.md file (Mar 16, 9:42 PM)
+
+     tasks/kevin-volk.md
+       #6015  9:43 PM  ✅  Committed agent response for Kevin Volk CopilotKit coordination task
+
+     app/brookebrodack-site/package.json
+       #6016  9:45 PM  ✅  Added rappstack blog package dependencies
+
+     app/brookebrodack-site/build.ts
+       #6017  9:46 PM  🟣  Implemented markdown esbuild plugin for blog posts
+
+     tasks/brookebrodack-dev.md
+       #6018  9:48 PM  ✅  Task documentation committed for brookebrodack-dev
+       #6019           🔵  Reviewed brookebrodack-dev project status and completed migration work
+
+     #S1734 Post generation and video transcription pipeline for brookebrodack-dev project (Mar 16, 9:51 PM)
+
+     tasks/brookebrodack-dev.md
+       #6020  9:51 PM  ✅  Agent response committed to version control
+
+     General
+       #6021  9:52 PM  ✅  Installed yt-dlp for YouTube video downloading
+
+     tmp/generate_posts.py
+       #6022           ✅  Stopped sequential post generation script
+
+     tmp/audio/_T-gv15rDmg.wav
+       #6023  9:53 PM  🟣  Tested YouTube audio download with yt-dlp
+       #6024  9:55 PM  🔵  Encountered buffer size error in corky transcribe
+
+     tmp/audio/_T-gv15rDmg-16k.wav
+       #6025  9:56 PM  🔴  Converted audio to 16kHz mono WAV for corky compatibility
+       #6026  10:00 PM  🟣  Successfully transcribed YouTube video with corky and Whisper
+
+     General
+       #6027  10:01 PM  🔵  System has RTX 5090 GPU available but not utilized by corky
+
+     ../corky/Cargo.toml
+       #6028            🔵  Corky has transcribe-cuda feature for GPU acceleration
+
+     ../../tmp/claude-1000/-home-brian-work-btakita-agent-loop/7f9184a7-85e7-4b7c-84dd-ad103c202125/tasks/bunwuml38.outp
+     ut
+       #6029  10:02 PM  🔵  Corky CUDA transcription build fails with whisper-rs-sys struct size mismatch
+
+
+     Access 97k tokens of past research & decisions for just 15,994t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /agent-doc tasks/corky.md
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+```
 <!-- /agent:exchange -->
 ****

@@ -996,5 +996,24 @@ This did not seem to work with tasks/brookebrodack-dev.md. The same two issues w
 
 Please investigate the logs.
 Write tests reproducing the issue.
+
+### Re: Investigating polling failure
+
+**Root cause: wrong binary.** The JB plugin's `resolveAgentDoc()` searches `~/bin`, `~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin` — it found `~/.cargo/bin/agent-doc` which was **v0.17.12** (pre-fix). The poll-and-send code only existed in `.bin/agent-doc` (v0.17.14 local build).
+
+**Fixed:**
+1. `cargo install --path .` → `~/.cargo/bin/agent-doc` is now v0.17.14 with the fix
+2. Hardened `wait_for_claude_ready()`:
+   - **Strips ANSI escape codes** before matching (Claude's prompt has formatting)
+   - Checks last **10 non-empty lines** (was 5 including blanks)
+   - Logs progress every 5s so user sees activity
+   - Logs time-to-ready on success
+
+**Also added:** The JB plugin should include the project `.bin/` directory in its search path (higher priority than `~/.cargo/bin`). This is a plugin-side change for later.
+
+Binary rebuilt and installed to both locations. Ready to test again.
+
+Same issues with tasks/kevin-volk.md
+I tried running this file but the plugin said route already in progress. Why?
 <!-- /agent:exchange -->
 ****

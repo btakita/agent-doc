@@ -233,4 +233,36 @@ Monitoring GPU temp every 10 files. Will report when complete.
 **Remaining:** `/content/:slug` route + post page UI component. Then deploy.
 
 continue
+### Re: Route & UI component implemented
+
+**`/content/:slug` route now working.** Created:
+
+1. **`config/blog_site.ts`** — extends existing `site` config with `post_mod_a1` (180 post modules), `page__post_count`, `home__post_count`
+2. **`ctx/brookebrodack_blog_request_ctx.ts`** — blog-aware request context that sets up `blog_site`, `post_mod_a1`, marked renderer, and JSON-LD refs
+3. **`lib/ui--server--brookebrodack/post/post__doc_html.ts`** — post page component with:
+   - Layout with nature origami background
+   - Site header with post title
+   - Article section with prose styling (white/80 bg, rounded, shadow)
+   - Blog post content rendered via `blog_post__tag_()` (markdown → HTML)
+   - Footer and back link
+4. **Updated `content/index.server.ts`** — added `/content/:slug` route that:
+   - Sets `blog_post_slug_or_page_num`
+   - Awaits estimated read time computation
+   - Renders `post__doc_html_`
+5. **Fixed dependency resolution** — added `@rappstack/domain--*--blog` to UI lib's package.json (esbuild resolves from source file location)
+
+**Build status:** `bun run build` passes. Dev server starts on port 4101.
+
+**Remaining for deploy:**
+- Update `static-export.ts` to render `/content/:slug` routes
+- Update sitemap to include post URLs
+- Update `/content` feed cards to link to `/content/:slug`
+- Push and trigger CI
+
+On /content, clicking a video, I see an error:
+
+```
+Sign in to confirm you’re not a bot
+This helps protect our community. Learn more
+```
 <!-- /agent:exchange -->

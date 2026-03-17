@@ -1437,5 +1437,23 @@ No. Nothing happened. I did see the JB plugin prompt that the command was routed
 If the pane switch is the only remaining issue, the fix would be: have `send_command()` also switch the tmux client to the correct session using `tmux switch-client`.
 
 The pane should always switch to the correct tmux pane.
+
+### Re: switch-client for cross-session visibility
+
+**Fixed.** `select_pane()` in `tmux.rs` now switches ALL attached tmux clients to the session containing the target pane.
+
+**What was happening:** `select-window` + `select-pane` only change the active pane *within* a session. If the user's terminal is viewing a different tmux session (e.g., session "5" while the pane is in session "0"), the change is invisible.
+
+**The fix:** After `select-window` + `select-pane`, the code now:
+1. Gets the session name for the target pane (`tmux display-message -p "#{session_name}"`)
+2. Lists all attached clients (`tmux list-clients -F "#{client_tty}"`)
+3. Switches each client to the target session (`tmux switch-client -c <tty> -t <session>`)
+
+This ensures every terminal viewing tmux will jump to the correct session/window/pane.
+
+All 11 tests pass. Binary rebuilt and installed. Ready to test.
+
+Please add relevant logging to answer the questions that you asked me.
+Please add tests to simulate the issue.
 <!-- /agent:exchange -->
 ****

@@ -13,7 +13,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{frontmatter, sessions};
+use crate::{config, frontmatter, sessions};
 
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
@@ -29,6 +29,13 @@ pub fn run(file: &Path) -> Result<()> {
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("Generated session UUID: {}", session_id);
     }
+
+    // Resolve claude_args: frontmatter > config > env var
+    let (fm, _body) = frontmatter::parse(&updated_content)?;
+    let resolved_claude_args = fm
+        .claude_args
+        .or_else(|| config::load().ok().and_then(|c| c.claude_args))
+        .or_else(|| std::env::var("AGENT_DOC_CLAUDE_ARGS").ok());
 
     // Must be inside tmux
     if !sessions::in_tmux() {
@@ -50,6 +57,12 @@ pub fn run(file: &Path) -> Result<()> {
     let mut first_run = true;
     loop {
         let mut cmd = std::process::Command::new("claude");
+        // Add resolved claude_args before other flags
+        if let Some(ref args) = resolved_claude_args {
+            for arg in args.split_whitespace() {
+                cmd.arg(arg);
+            }
+        }
         if !first_run {
             // After first run, continue the previous session
             cmd.arg("--continue");

@@ -166,6 +166,10 @@ pub struct Frontmatter {
         rename = "agent_doc_stream"
     )]
     pub stream_config: Option<StreamConfig>,
+    /// Additional CLI arguments to pass to the `claude` process.
+    /// Space-separated string (e.g., "--dangerously-set-permissions").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_args: Option<String>,
 }
 
 impl Frontmatter {
@@ -302,6 +306,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                     fm.write_mode = Some(w);
                 }
             }
+            "claude_args" => fm.claude_args = val_str(),
             _ => {
                 eprintln!("[frontmatter] ignoring unknown patch field: {}", key_str);
             }
@@ -415,6 +420,7 @@ mod tests {
             format: None,
             write_mode: None,
             stream_config: None,
+            claude_args: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

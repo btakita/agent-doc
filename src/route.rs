@@ -38,6 +38,13 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
+    // Use tmux_session from frontmatter if available, otherwise default
+    let target_session = frontmatter::parse(&updated_content)
+        .ok()
+        .and_then(|(fm, _)| fm.tmux_session)
+        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+    eprintln!("[route] target tmux session: {}", target_session);
+
     let file_path = file.to_string_lossy();
     let registered = sessions::lookup(&session_id)?;
 
@@ -59,7 +66,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
     // For unregistered files (no prior session), skip to auto-start so each file
     // gets its own Claude session instead of stealing an existing one.
     if registered.is_some()
-        && let Some(new_pane) = find_target_pane(tmux, pane) {
+        && let Some(new_pane) = find_target_pane(tmux, pane, &target_session) {
             eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
             sessions::register(&session_id, &new_pane, &file_path)?;
             send_command(tmux, &new_pane, &file_path)?;
@@ -72,7 +79,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
-    auto_start(tmux, file, &session_id, &file_path)?;
+    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session)?;
     Ok(())
 }
 
@@ -148,23 +155,30 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
 }
 
 /// Find an active target pane for lazy claiming.
-fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>) -> Option<String> {
+fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str) -> Option<String> {
     let target = explicit_pane
         .map(|p| p.to_string())
-        .or_else(|| tmux.active_pane(TMUX_SESSION_NAME));
+        .or_else(|| tmux.active_pane(session_name));
     target.filter(|p| tmux.pane_alive(p))
 }
 
-/// Auto-start a new Claude session in tmux.
-///
-/// Cascade:
-/// 1. tmux not running → create "claude" session
-/// 2. "claude" session missing → create it
-/// 3. "claude" session exists → create new window
-/// 4. Send `agent-doc start <file>` in new pane
-///
+/// Auto-start a new Claude session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Result<()> {
+    // Read tmux_session from frontmatter, fall back to TMUX_SESSION_NAME
+    let session_name = if let Ok(content) = std::fs::read_to_string(file) {
+        frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm.tmux_session)
+            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
+    } else {
+        TMUX_SESSION_NAME.to_string()
+    };
+    auto_start_in_session(tmux, file, session_id, file_path, &session_name)
+}
+
+/// Auto-start a new Claude session in a specific tmux session.
+fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     // Resolve the agent-doc binary path (same binary that's currently running)
@@ -173,11 +187,10 @@ pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -
         .to_string_lossy()
         .to_string();
 
-    let new_pane = tmux.auto_start(TMUX_SESSION_NAME, &cwd)?;
+    let new_pane = tmux.auto_start(session_name, &cwd)?;
 
     // Join into the existing active window instead of leaving in a separate window.
-    // auto_start creates a new window; we want the pane alongside existing panes.
-    if let Some(active) = tmux.active_pane(TMUX_SESSION_NAME)
+    if let Some(active) = tmux.active_pane(session_name)
         && active != new_pane
         && let Err(e) = tmux.join_pane(&new_pane, &active, "-dh")
     {

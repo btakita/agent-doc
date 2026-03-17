@@ -139,9 +139,9 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 1. Prune stale entries from `sessions.json`
 2. Ensure session UUID in frontmatter (generate if missing)
 3. Look up pane in `sessions.json`
-4. If pane alive → `tmux send-keys` `/agent-doc <FILE>` + Enter, focus pane
-5. If pane dead or unregistered → lazy-claim to active pane in `claude` tmux session (or `--pane P`), register, send command, auto-sync layout for all files in the same window
-6. If no active pane available → auto-start cascade (create session/window, start Claude, register)
+4. If pane alive → send `/agent-doc <FILE>` via `send_keys`, then Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), focus pane
+5. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`), register, send command, auto-sync layout for all files in the same window. Unregistered files skip lazy-claim entirely.
+6. If no active pane available → auto-start cascade (create session/window, start Claude, register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command)
 
 ### 7.9 claim
 
@@ -256,6 +256,8 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 `agent-doc sync --col <FILES>,... [--col <FILES>,...] [--window W] [--focus FILE]` — declarative 2D layout sync.
 
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
+
+**Pre-sync auto-start:** Before the layout algorithm runs, sync parses file paths from `--col` args and auto-starts Claude sessions (via `route::auto_start()`) for any files that have session UUIDs in frontmatter but no alive panes. This ensures sync has panes to arrange.
 
 **Reconciliation algorithm** (simple 2-step detach/attach):
 1. **SNAPSHOT** — query current pane order in target window

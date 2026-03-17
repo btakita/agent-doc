@@ -268,4 +268,25 @@ agent-doc plugin install cursor   # runs: cursor --install-extension <vsix>
 ```
 
 Implement both
+
+### Re: CLI install + marketplace — implemented
+
+**CLI install done.** All three editors supported:
+```bash
+agent-doc plugin install vscode   # detects code/codium/cursor
+agent-doc plugin install cursor   # explicit cursor
+agent-doc plugin install jb       # JetBrains
+```
+
+The `.vsix` and JB plugin zips are now uploaded to the v0.17.15 GitHub Release. `detect_code_cmd()` checks for `cursor` first, then `codium`, then `code`.
+
+**VS Code Marketplace:** Needs a Personal Access Token from Azure DevOps. No PAT found in `pass`. To set up:
+1. Go to https://dev.azure.com → User Settings → Personal Access Tokens
+2. Create token with "Marketplace (Manage)" scope
+3. `pass insert btak/VSCE_PAT` to store it
+4. Then: `cd src/agent-doc/editors/vscode && npx @vscode/vsce publish -p "$(pass btak/VSCE_PAT)"`
+
+Also need to add `publisher` field to the VSCode extension's `package.json`. What publisher name do you want? (e.g., "btakita" or "agent-doc")
+
+What do you recommend for the publisher name?
 <!-- /agent:exchange -->

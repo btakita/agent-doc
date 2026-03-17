@@ -98,7 +98,7 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 
 ## Exchange
 
-<!-- agent:exchange -->
+<!-- agent:exchange mode=append -->
 ### Re: Type errors fixed
 
 Fixed `rappstack-dev/lib/domain--server/request/index.ts`:
@@ -114,4 +114,6 @@ Both functions now return `undefined` when inputs are nullish (during prerender)
 Ready for commit + publish when you want to proceed.
 
 go
+
+Please add automated tests, including unit tests, functional tests, smoke tests.
 <!-- /agent:exchange -->

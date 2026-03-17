@@ -513,4 +513,5 @@ GitHub Actions deploy is **queued** (run `23092709527`). Cloudflare Pages will b
 
 Fixed: `package.json` had yalc path (`file:.yalc/@rebuildjs/tailwindcss`) — changed to `^0.11.1` (npm) before committing.
 
+compact exchange
 <!-- /agent:exchange -->

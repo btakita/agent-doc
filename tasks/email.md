@@ -18,9 +18,10 @@ agent_doc_write: crdt
 
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml
-- [x] Gmail API sync provider implemented & compiled
-- [x] Global corky binary updated (cargo install)
-- [ ] Verify sync works from user's terminal
+- [x] Gmail API sync provider implemented
+- [x] Fixed watch.rs to support gmail-api provider
+- [x] Global binary updated
+- [ ] Verify corky watch works with btak.dev
 <!-- /agent:status -->
 
 ## Exchange
@@ -551,4 +552,9 @@ Syncing label: voice-sms
 
 No new messages
 ```
+Found it — `corky watch` has its own sync loop in `watch.rs` that was calling `resolve_password` directly without the `gmail-api` provider check. Fixed `watch.rs` to dispatch `gmail-api` accounts to `gmail_api_sync::sync_account()` (same pattern as `sync/mod.rs`).
+
+Rebuilt and reinstalled globally. Restart `corky watch` and btak.dev should sync via Gmail API now.
+
+release
 <!-- /agent:output -->

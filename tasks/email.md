@@ -136,4 +136,53 @@ This is a meaningful feature to build in corky. Two options:
 Which option do you prefer? Or would you rather just enable 2FA and use the app password approach?
 
 Which one is better long term. Option A or Option B?
+**Option B (Gmail API sync) is better long-term.** Here's why:
+
+| | Option A (XOAUTH2 + IMAP) | Option B (Gmail API) |
+|---|---|---|
+| **Auth** | OAuth2 token → IMAP XOAUTH2 | OAuth2 token → REST API |
+| **Threading** | Manual (subject-slug heuristic) | Native `threadId` from Gmail |
+| **Incremental sync** | IMAP UIDs (fragile across expunge) | `historyId` (Google-guaranteed) |
+| **Labels** | IMAP folder mapping (limited) | Full label API (multi-label per message) |
+| **Rate limits** | Gmail throttles IMAP aggressively | API quota is generous (250 units/sec) |
+| **Attachments** | IMAP FETCH BODY[] (full download) | Separate attachment endpoint (lazy fetch) |
+| **Push notifications** | IMAP IDLE (connection-heavy) | `watch()` via Pub/Sub (webhook) |
+| **Multi-account** | Separate IMAP connections | Same HTTP client, different tokens |
+| **Effort** | ~1 day | ~3-5 days |
+
+**Key advantages of Option B:**
+- Gmail is deprecating IMAP in favor of their API — XOAUTH2 is a band-aid on a shrinking platform
+- Native threading (`threadId`) eliminates the fragile subject-based dedup corky currently does
+- `historyId` incremental sync is more reliable than IMAP UID tracking
+- The OAuth2 infra, HTTP client (`ureq`), and token management already exist in corky
+- Labels map 1:1 to corky's label routing — no folder→label translation needed
+
+**Option A still has a role** as a quick unblock: implement XOAUTH2 now to get btak.dev syncing today, then build Gmail API sync as the strategic replacement. They're not mutually exclusive.
+
+**Recommendation:** Start with Option A to unblock btak.dev immediately (~1 day), then build Option B as the proper Gmail provider over the next sprint. Option A becomes the fallback for edge cases.
+
+Do Option B
+
+Why am I seeing API Error?
+```
+✻ Churned for 45s
+
+❯ /agent-doc tasks/email.md
+  ⎿  API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server
+     error"},"request_id":"req_011CZ9EFFLSce5VaUHumS5bT"}
+
+✻ Worked for 1m 3s
+
+❯ /agent-doc tasks/email.md
+  ⎿  API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server
+     error"},"request_id":"req_011CZ9ES9UHCz94sPU3sxjuA"}
+
+✻ Churned for 34s
+
+❯ /agent-doc tasks/email.md
+  ⎿  API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server
+     error"},"request_id":"req_011CZ9EX92dLTE1f49c1ajvC"}
+
+✻ Cooked for 36s
+```
 <!-- /agent:output -->

@@ -503,5 +503,7 @@ Steps 1–2 are CI-runnable. Step 3 requires Claude Code. Each step skips gracef
 This documents the convention now — the `/review` orchestrator skill can come later when there's enough friction to justify it. The 3 steps are already individually available in the environment.
 
 What's next for corky?
+
+compact exchange
 <!-- /agent:exchange -->
 ****

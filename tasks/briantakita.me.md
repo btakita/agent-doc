@@ -229,4 +229,36 @@ This means the yalc migration approach has a fundamental problem: the rappstack 
 What do you want to do?
 
 Option 2
+### Re: briantakita.me videos + Option 2
+
+**briantakita.me video posts — sitemap & JSON-LD:**
+
+No. briantakita.me does NOT currently include video metadata in the sitemap or JSON-LD. Some posts have `video_url` in their frontmatter (e.g., `dogfooding-agent-doc-part2-blog.md`, `rappstack-live-session.md`), but:
+
+- **Sitemap:** No `<video:video>` entries — just standard `<url>` for each post slug
+- **JSON-LD:** No `VideoObject` — only standard `BlogPosting` schema
+
+This is different from brookebrodack-dev, which has both. To add video support to briantakita.me, you'd need to:
+1. Add `<video:video>` metadata to `sitemap__xml.ts` for posts with `video_url`
+2. Add `VideoObject` JSON-LD to `post__doc_html.ts` when `video_url` is present
+3. Both changes would be in `lib/ui--server--briantakita/`
+
+Do it
+
+### Re: Option 2 — publish compiled .js
+
+This is a significant change across all 11 `@rappstack/*` packages. High-level plan:
+
+1. **Add build step** to each rappstack package: `tsc --declaration --emitDeclarationOnly` + `esbuild` to emit `.js` from `.ts`
+2. **Update `exports`** in each `package.json`: map subpaths to `.js` files (e.g., `"./css": "./dist/css/index.js"`)
+3. **Update `files`** to include `dist/` and exclude source `.ts`
+4. **Add `prepublishOnly`** script: `bun run build`
+5. **Bump versions** and publish all 11 packages
+6. **Update briantakita.me-dev** to pick up new versions
+
+This is ~3-4 hours of work across the packages. Want me to start with one package (e.g., `@rappstack/domain--server`) as a proof of concept, or tackle all 11 at once?
+
+Why did brookebrodack-dev work with the same dependencies.
+
+In the meantime, the fastest way to restore CI is to revert the submodule removal temporarily (Option 1) while Option 2 is being implemented.
 <!-- /agent:exchange -->

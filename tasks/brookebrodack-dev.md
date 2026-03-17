@@ -100,4 +100,35 @@ I'm seeing a bunch of errors. Should we download the videos and use Corky to tra
 > *Transcript not available: IpBlocked*
 
 Please update exchange
+### Re: Transcription & IpBlocked errors
+
+**What happened:** 9 parallel transcript fetches hit YouTube's rate limit. Killed all batches, restarted sequentially with 2s delays.
+
+**Current status (81/181 posts generated):**
+- 14 posts with successful transcripts
+- 20 posts rate-limited (transcript pending)
+- 47 posts where captions aren't available at all
+- 100 posts still being generated (sequential script running)
+
+**On your questions — corky transcript feature vs Rust package:**
+
+Corky is the better home. It already handles media workflows. A `corky transcript` command could:
+- `corky transcript <url>` — fetch YouTube auto-captions (fast, free, rate-limited)
+- `corky transcript --whisper <url>` — download video + local Whisper transcription (reliable, no rate limits, higher quality)
+
+Many of Brooke's videos (47 so far) have no auto-captions at all — only Whisper/local transcription would work for those. This makes the corky feature even more valuable.
+
+**Build integration completed:**
+- Added `@rappstack/domain--*--blog` and `@rappstack/ui--*--blog` dependencies
+- Added `md_esbuild_plugin_()` to `build.ts` (ported from briantakita.me)
+- Created `post/index.generate.ts` (scans content dir, generates import index)
+- Still needed: `/content/:slug` route and post page UI component
+
+**Pragmatic plan forward:**
+1. Finish generating all 181 post shells (title + iframe + tags, even without transcripts)
+2. Build the `/content/:slug` route and post page component
+3. Track `corky transcript --whisper` as a follow-up feature for backfilling transcripts
+
+The existing transcripts don't seem complete. Please use corky for all videos.
+Also group content into subjects with tags for each video.
 <!-- /agent:exchange -->

@@ -40,4 +40,33 @@ agent-doc run tasks/email.md is resulting with API Error: 500. Please diagnose.
 
 ✻ Cooked for 36s
 ```
+
+### Re: API Error 500 on tasks/email.md
+
+**This is an Anthropic API server-side error**, not an agent-doc issue. The 500 status code means Claude's backend is returning an internal server error.
+
+**Evidence:** Three consecutive attempts all return the same error pattern:
+```
+API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}
+```
+
+**Possible causes:**
+1. **Anthropic service degradation** — check https://status.anthropic.com
+2. **Context too large** — if `tasks/email.md` + session hook produces a prompt that exceeds the model's limit, the API may 500 instead of returning a proper error
+3. **Transient outage** — the API may recover on its own
+
+**To diagnose:**
+- Does this session (agent-doc-bugs.md) work fine? If yes, it's specific to the email.md session's context.
+- Try `claude --continue` in the email.md pane to see if the session resumes.
+- Check the document size: `wc -c tasks/email.md` — if it's very large, compact the exchange first.
+
+Please take a look at all of the tmux sessions, windows, and panes.
+The agent-doc sessions are all over the place now.
+The issue may have happened when I switched to a different tmux session, back to the editor, then ran a agent document.
+Perhaps the last selected tmux session is used somewhere?
+But now the agent-doc tmux windows & tmux panes are spread across 2 tmux sessions.
+Please look at the logs.
+Reproduce this situation in tests.
+Find the pattern that caused this issue. Make tests for variations of this pattern.
+Fix.
 <!-- /agent:exchange -->

@@ -4,6 +4,7 @@
   "description": "Submit markdown documents to AI agents via agent-doc",
   "version": "0.2.0",
   "publisher": "btakita",
+  "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",

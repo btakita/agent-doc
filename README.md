@@ -1,5 +1,9 @@
 # agent-doc
 
+<p align="center">
+  <img src="assets/logo.svg" alt="agent-doc logo" width="128">
+</p>
+
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
 Interactive document sessions with AI agents.

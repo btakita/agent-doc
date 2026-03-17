@@ -181,28 +181,15 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-### Re: M1 scope — portal signoff vs platform-independent alternatives
+### Re: CRM / GoHighLevel question
 
-You're right — the original M1 was "Website + document upload portal" ($4K). Since the portal depends on the MA/TMO outcome, the email now explicitly asks Judith to decide:
+Added a GoHighLevel paragraph to the email draft. It references Robert (Waldman, since he's CC'd) naturally — asks if they've discussed setting up a sub-account, and offers to integrate it into the site.
 
-**Updated email** (`mail/drafts/20260317-judith-website-kickoff.md`):
-- Expanded website deliverables to show more value: borrower intake pages, investor section, content refresh
-- **Asks directly:** "Would you like me to build the document upload portal as part of this phase, or wait until the loan management platform is settled?"
-- Offers alternative scope if she defers: SEO, analytics, referring broker section
+The paragraph is positioned between the portal question and the "to get rolling" list. It keeps the email concise — one sentence to surface the topic, one sentence to tie it to the website work.
 
-**Platform-independent work that could fill M1 scope (if portal deferred):**
+Note: The email says "Robert" without a last name. Since Robert Waldman is CC'd and he's the one with GoHighLevel access, Judith will know who it refers to. Robert Ward (BCC'd) won't be confused since he knows the players.
 
-| Feature | Hours | Platform dependency |
-|---------|-------|-------------------|
-| Website migration + rebuild | 15-20 | None |
-| Borrower intake forms + lead capture | 3-4 | None |
-| Investor info section (private pages) | 3-4 | None |
-| SEO + Google Business Profile | 2-3 | None |
-| Analytics dashboard (Cloudflare) | 1-2 | None |
-| Referring broker section | 2-3 | None |
-| **Total** | **26-36** | All platform-independent |
+Draft ready for review at `mail/drafts/20260317-judith-website-kickoff.md`.
 
-That's actually more hours than M1's $4K covers at $100/hr — so plenty to fill the milestone without the portal. The email gives Judith the choice without making it awkward.
-
-Sounds good. Let's also ask about the CRM decision. Robert Waldman has a CRM enterprise version that she may be able to use for free.
+Send it
 <!-- /agent:exchange -->

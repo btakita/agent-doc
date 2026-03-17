@@ -126,4 +126,20 @@ Add the Mailchannels DNS record using the CF api please
 **Ready to deploy the WebSub worker:** `cd src/brookebrodack-dev/workers/websub && npx wrangler deploy`
 
 go
+### Re: Deploy WebSub worker
+
+**Deployed** to `https://brookebrodack-websub.brian-takita.workers.dev`
+
+- 6 env bindings configured
+- Cron: `0 0 */7 * *` (WebSub subscription renewal)
+- Version: `08dcc285-157a-4333-af84-af1ea811a8a3`
+
+Email notifications will fire when YouTube publishes a new Brooke Brodack video.
+
+**All pending items resolved:**
+- [x] Mailchannels DNS records added
+- [x] WebSub worker deployed with email notification
+- [ ] `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
+
+Change the recipient email to brian.takita@gmail.com
 <!-- /agent:exchange -->

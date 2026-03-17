@@ -126,5 +126,84 @@ Are we generating *.html files for **all** of the posts, including *.md source f
 
 Are all of the posts and YouTube videos in the sitemap?
 Does the json-ld include the YouTube Videos?
-See tasks/brookebrodack-dev.md to see recent run 
+See tasks/brookebrodack-dev.md to see recent run
+
+The gh actions has numerous errors:
+https://github.com/btakita/briantakita.me-dev/actions/runs/23202564958/job/67428798783
+
+```
+Run cd app/briantakita.me
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+build|done
+build|done
+server started on port 4100
+[static_export] using external server: http://localhost:4100
+[static_export] site_url: ***
+[static_export] discovered 158 routes from sitemap
+[static_export] / -> dist/static/index.html (43703 bytes)
+[static_export] /about -> dist/static/about/index.html (70210 bytes)
+[static_export] /open-source -> dist/static/open-source/index.html (113927 bytes)
+[static_export] /portfolio -> dist/static/portfolio/index.html (109185 bytes)
+39 |     ] = ns_id_be_memo_pair_(
+40 |       "request",
+41 |       "request_url__origin",
+42 |       (ctx) => {
+43 |         const request_url = request_url_(ctx);
+44 |         const { hostname, port } = request_url;
+                                        ^
+TypeError: Cannot destructure property 'hostname' from null or undefined value
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:44:36)
+      at memo__run (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:204:17)
+      at memo (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:18:20)
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:22:79)
+      at memo__run (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:204:17)
+      at memo (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:18:20)
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2287:12)
+      at jsonld__add (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:246:17)
+      at blog_post__main__article_ (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2278:28)
+      at blog_post__main_fragment_ (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2235:7)
+...
+17 |   "../../node_modules/@rappstack/domain--server/request/index.ts"() {
+18 |     [
+19 |       ,
+20 |       request_url__href_
+21 |     ] = id_be_memo_pair_("request_url__href", (ctx) => {
+22 |       return new URL(request_url__pathname_(ctx) + request_url__search_(ctx), request_url__origin_(ctx)).href;
+                  ^
+TypeError: "NaN" cannot be parsed as a URL.
+ code: "ERR_INVALID_URL"
+
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:22:14)
+      at memo__run (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:204:17)
+      at memo (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/ctx-core/all/rmemo/index.js:18:20)
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2287:12)
+      at jsonld__add (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:246:17)
+      at blog_post__main__article_ (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2278:28)
+      at blog_post__main_fragment_ (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:2235:7)
+      at post__doc_html_ (/home/runner/work/briantakita.me-dev/briantakita.me-dev/app/briantakita.me/dist/server--dev/index.server-PJ5X54UL.js:10288:5)
+
+...
+```
+
+Please fix all of the errors.
+
+### Re: Sitemap + JSON-LD for brookebrodack-dev
+
+**Are all posts and YouTube videos in the sitemap?**
+
+Yes for posts — all 190 blog posts are in the sitemap via `sorted_dehydrated_post_meta_a1_`. Posts with `video_url` get `<video:video>` metadata in the sitemap entry. All 190 posts have `video_url` fields, so all get video sitemap metadata.
+
+Standalone YouTube videos (from the API, not associated with a blog post) are NOT in the sitemap — only blog post routes (`/content/{slug}`) appear.
+
+**Does the JSON-LD include YouTube Videos?**
+
+Yes, in two places:
+
+1. **Individual post pages** (`post__doc_html.ts`) — when a post has `video_url`, a `VideoObject` is added with name, description, thumbnailUrl, contentUrl, embedUrl, uploadDate, and author reference.
+
+2. **Content feed page** (`content__doc_html.ts`) — renders all YouTube API videos as `VideoObject` entries with `isPartOf` relationship to the main Article.
+
+**Summary:** Blog posts with videos = in both sitemap AND JSON-LD. Standalone YouTube API videos = in JSON-LD on the content page only, NOT in sitemap.
+
+Add automated tests for errors.
 <!-- /agent:exchange -->

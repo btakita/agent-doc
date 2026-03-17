@@ -404,4 +404,6 @@ Accidental dial / hang-up. Content: "Bye."
 
 **Corrections:**
 - The Capterra $10K extortion review was about TMO, not MA — Brian corrected this on call 10
+
+Please archive the transcri in contacts/robert-ward/recordings
 <!-- /agent:exchange -->

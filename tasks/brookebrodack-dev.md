@@ -421,4 +421,13 @@ TypeError: Cannot destructure property 'hostname' from null or undefined value
       at async dispatch (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/compose.js:22:23)
       at async <anonymous> (/home/brian/work/btakita/agent-loop/src/brookebrodack-dev/node_modules/.bun/hono@4.12.8/node_modules/hono/dist/hono-base.js:301:31)
 ```
+### Re: TypeError: Cannot destructure hostname from null
+
+**Root cause:** `brookebrodack_blog_request_ctx__ensure` used `blog_site__set` which sets the site via a lazy reactive memo. The `request_url_` memo (from `relysjs/server`) wasn't being initialized properly because the blog context helper bypassed the standard request context setup.
+
+**Fix:** Replaced the separate `brookebrodack_blog_request_ctx__ensure` with the working `brookebrodack_request_ctx__ensure` (same one `/content` uses). Blog-specific context (`blog_site__set`, `post_mod_a1__set`, `blog_post_slug_or_page_num__set`) is now set inline in the route handler.
+
+Pushed: `009cf01` (brookebrodack-site), `b3318a3` (brookebrodack-dev).
+
+Use yalc 
 <!-- /agent:exchange -->

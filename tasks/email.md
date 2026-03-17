@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-btak.dev: needs 2FA enabled before app password can be generated for IMAP auth.
+btak.dev: deciding between XOAUTH2 (IMAP + OAuth) vs full Gmail API sync vs 2FA + app password.
 <!-- /agent:status -->
 
 ## Exchange
@@ -113,4 +113,27 @@ Alternatively, if you don't want 2FA on this account, corky could use **OAuth2 (
 **TL;DR**: Enable 2FA → generate app password → update pass → retry.
 
 Let's do OAuth2 (Gmail API)
+Corky already has Gmail OAuth2 infrastructure — but only for **filter management**, not email sync. Here's the current state:
+
+**What exists:**
+- Full OAuth2 flow in `src/corky/src/filter/gmail_auth.rs` (token exchange, refresh, storage)
+- Gmail API client for filters and labels
+- OAuth credentials already configured in `.corky.toml` (`[gmail]` section)
+
+**What's missing for Gmail API sync:**
+- Gmail Messages API (`messages.list`, `messages.get`) — fetching email bodies
+- `historyId`-based incremental sync (replacing IMAP UID tracking)
+- A `gmail-api` provider type alongside the existing `gmail` (IMAP) provider
+
+This is a meaningful feature to build in corky. Two options:
+
+**Option A — XOAUTH2 for IMAP** (smaller change): Use the existing OAuth2 tokens with IMAP's `AUTHENTICATE XOAUTH2` mechanism. The `imap` crate supports this. This keeps the IMAP sync code intact, just swaps the auth method. No app password needed.
+
+**Option B — Full Gmail API sync** (larger): Add `messages.list`/`messages.get` endpoints, build a new sync provider. More work but eliminates IMAP dependency entirely for Gmail accounts.
+
+**Recommended: Option A** — it's the smallest path to getting btak.dev syncing without 2FA/app passwords. The OAuth2 tokens from filter auth can be reused with expanded scopes (`https://mail.google.com/`).
+
+Which option do you prefer? Or would you rather just enable 2FA and use the app password approach?
+
+Which one is better long term. Option A or Option B?
 <!-- /agent:output -->

@@ -430,4 +430,30 @@ TypeError: Cannot destructure property 'hostname' from null or undefined value
 Pushed: `009cf01` (brookebrodack-site), `b3318a3` (brookebrodack-dev).
 
 Use yalc for @rappstack/* dependencies.
+### Re: Use yalc for rappstack
+
+**Done.** All 9 `@rappstack/*` packages now linked via yalc from local rappstack-dev:
+
+| Package | Version |
+|---------|---------|
+| `@rappstack/domain--any--blog` | 0.1.2 |
+| `@rappstack/domain--server` | 0.1.1 |
+| `@rappstack/domain--server--auth` | 0.1.0 |
+| `@rappstack/domain--server--youtube` | 0.1.0 |
+| `@rappstack/domain--browser` | 0.1.0 |
+| `@rappstack/ui--any` | 0.1.0 |
+| `@rappstack/ui--any--blog` | 0.1.0 |
+| `@rappstack/ui--server` | 0.1.1 |
+| `@rappstack/ui--server--blog` | 0.1.1 |
+
+**Changes:**
+- `.gitignore` — added `.yalc/` and `yalc.lock`
+- `package.json` — versions updated to yalc-linked versions
+- `bun run build` passes
+
+Local rappstack changes now reflect immediately via `yalc push` from rappstack-dev.
+
+Please run server, visit som pages, fix errors.
+
+Please add automated tests, including unit tests, functional tests, smoke tests.
 <!-- /agent:exchange -->

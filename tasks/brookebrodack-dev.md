@@ -871,4 +871,20 @@ deploy
 
 CI deploying. This adds video structured data for all 190 posts — both in the sitemap XML and page-level JSON-LD.
 The css is messed up in http://localhost:4101/
+### Re: CSS messed up on localhost
+
+I checked the server-side output and everything looks correct:
+- CSS file loads (200, 80KB Tailwind v4)
+- All Tailwind classes present in HTML and CSS (`min-h-screen`, `bg-cover`, `fill-gray-900`, etc.)
+- Background image URL resolves correctly
+
+Could you describe what specifically looks wrong? Possible causes:
+1. **Browser cache** — try hard refresh (Ctrl+Shift+R)
+2. **Tailwind v4 `@source` paths** — if you added new UI files outside the scanned directories
+3. **Dev server stale build** — try `bun run build && bun run dev`
+
+What does the page look like? Missing background? Wrong layout? Unstyled text?
+
+The css is fine now.
+It may have been a momentary glitch.
 <!-- /agent:exchange -->

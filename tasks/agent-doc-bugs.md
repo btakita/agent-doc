@@ -1410,5 +1410,32 @@ Binary rebuilt and installed. All 11 tests pass.
 
 Same issues with tasks/rappstack.md.
 Neither fix seemed to affect anything.
+
+### Re: Fix works from CLI, investigating JB plugin path
+
+**The fix IS working.** Running `agent-doc route tasks/rappstack.md` from CLI:
+```
+[route] Pane %31 is alive
+[route] Sent /agent-doc tasks/rappstack.md → pane %31
+[route] Command accepted (0.3s, 0 Enter retries)
+```
+Command accepted, 0 retries, Claude started processing. Works with and without `$TMUX` env vars.
+
+**Why you might not see the tmux pane switch:** You have 3 tmux clients attached:
+- `/dev/pts/0` → session 0
+- `/dev/pts/5` → session 1  
+- `/dev/pts/32` → session 5
+
+Pane %31 is in session **0**, window 5. `select-pane` switches within session 0. If your visible terminal is showing session 1 or 5, you won't see the change. `select-pane` can't change which session a terminal client is viewing.
+
+**Two questions to confirm:**
+1. Which terminal/tmux session are you looking at when you press "Run Agent Doc"?
+I don't remember.
+2. After pressing it, do you see the command running if you switch to the right tmux session?
+No. Nothing happened. I did see the JB plugin prompt that the command was routed.
+
+If the pane switch is the only remaining issue, the fix would be: have `send_command()` also switch the tmux client to the correct session using `tmux switch-client`.
+
+The pane should always switch to the correct tmux pane.
 <!-- /agent:exchange -->
 ****

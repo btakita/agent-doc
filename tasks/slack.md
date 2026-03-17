@@ -20,7 +20,7 @@ agent_doc_write: crdt
 
 <!-- agent:status mode=replace -->
 - [x] Ctrl+Shift+U bug: reported to Slack
-- [x] Notifications: fully resolved (dunst + Slack config)
+- [x] Notifications: Slack config fixed; testing notification-daemon vs dunst
 - [ ] Reply email with screenshot (need file path)
 <!-- /agent:status -->
 
@@ -148,4 +148,18 @@ PulseSMS was already sending notifications via dunst, confirming the system noti
 
 Let's try the original notification-daemon config again.
 
+
+### Reverted to notification-daemon
+
+1. Killed dunst
+2. Removed DBus override (`~/.local/share/dbus-1/services/org.freedesktop.Notifications.service`)
+3. Removed `exec --no-startup-id dunst` from `~/.config/i3/config`
+
+`notification-daemon` (GNOME 3.20.0) auto-activated via DBus and is now the active notification server. Sent a test notification — **did you see it?**
+
+If notifications still work under `notification-daemon`, then the original issue was purely Slack's notification settings and dunst wasn't needed. If the test notification didn't appear visually, then `notification-daemon` truly can't render under i3 and we should switch back to dunst.
+
+Yes...it appeared.
+
+I don't want to be notified for every message. Only direct mentions. Please update slack config.
 <!-- /agent:exchange -->

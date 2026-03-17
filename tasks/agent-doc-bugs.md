@@ -1306,5 +1306,24 @@ All 12 route-related tests pass (7 unit + 5 CLI). Binary rebuilt and installed.
 The tests model the prompt detection and routing decision logic. Integration tests for the full auto-start flow (tmux + Claude) would require `IsolatedTmux` with a mock Claude process — that's a more involved setup. Want me to add those?
 
 yes
+
+### Re: Integration tests with IsolatedTmux
+
+**5 integration tests added** using `IsolatedTmux` (isolated tmux server per test):
+
+1. **`wait_for_claude_ready_detects_prompt`** — Mock Claude script prints startup text, waits 500ms, then echoes `❯`. Verifies detection within 5s.
+
+2. **`wait_for_claude_ready_times_out_without_prompt`** — Creates a pane running `sleep 30` directly (no shell, no prompt). Verifies 2s timeout fires correctly.
+
+3. **`send_keys_delivers_command_with_enter`** — Shell reads stdin via `read CMD`, send_keys sends `/agent-doc test.md`. Verifies `GOT:/agent-doc test.md` appears (proving Enter was pressed and the command was delivered).
+
+4. **`pane_has_prompt_detects_unicode`** — Runs `exec bash -c 'echo ❯; cat'` to put ❯ in the pane without a shell prompt interfering. Verifies `pane_has_prompt()`.
+
+5. **`full_auto_start_flow`** — End-to-end: create pane → mock Claude (❯ after 300ms, then `cat` to accept input) → `wait_for_claude_ready` → `send_keys` with command → verify command appears in pane.
+
+All 11 route tests pass (6 unit + 5 integration). Binary rebuilt and installed.
+
+Have we fixed the tmux pane switch error?
+Do we wait for an explicit confirmation that the run was submitted via Enter?
 <!-- /agent:exchange -->
 ****

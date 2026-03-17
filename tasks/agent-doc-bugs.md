@@ -96,4 +96,25 @@ Both at `src/agent-doc/editors/jetbrains/build/distributions/`.
 **Version bump:** JB plugin 0.2.1 → 0.2.2. The old 0.2.0 and 0.2.1 zips should be cleaned up from `build/distributions/` but they're harmless.
 
 tasks/slack.md just had an external edit
+
+### Re: tasks/slack.md external edit
+
+That's the IPC bug in action — another Claude session wrote to `tasks/slack.md` via `--force-disk` (direct disk write), which triggered the "externally modified" dialog in your editor.
+
+**This will stop happening once you install the v0.2.2 plugin.** With the fixed plugin:
+1. `agent-doc write` sends a JSON patch file to `.agent-doc/patches/`
+2. The plugin detects it, applies via Document API (no disk write)
+3. No "externally modified" dialog
+4. Cursor and undo preserved
+
+**To install now:**
+```
+Settings → Plugins → gear → Install from Disk → 
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.2.zip
+```
+Then restart IntelliJ.
+
+Until installed, all sessions use `--force-disk` which always triggers external edit notifications.
+
+I upgraded and just saw another External modification for tasks/slack.md
 <!-- /agent:exchange -->

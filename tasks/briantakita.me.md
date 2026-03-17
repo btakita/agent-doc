@@ -261,4 +261,25 @@ This is ~3-4 hours of work across the packages. Want me to start with one packag
 Why did brookebrodack-dev work with the same dependencies.
 
 In the meantime, the fastest way to restore CI is to revert the submodule removal temporarily (Option 1) while Option 2 is being implemented.
+### Re: Why brookebrodack-dev works
+
+**Root cause found:** The difference is **esbuild version**.
+
+- **brookebrodack-dev:** `rebuildjs` → `esbuild@0.18.20` (older, allows `.ts` in package exports)
+- **briantakita.me-dev:** `rebuildjs@0.71` → `esbuild@^0.27.3` (newer, **blocks `.ts` files from `node_modules`**)
+
+esbuild 0.27 introduced a breaking change: it refuses to resolve/bundle `.ts` source files from `node_modules/` packages. The `@rappstack/*` packages export `.ts` source files, which worked with older esbuild but not 0.27+.
+
+**Confirmed by testing:** Even a direct absolute path to `node_modules/@rappstack/ui--server/doc/index.ts` fails with esbuild 0.27.
+
+**Fix options (revised):**
+1. **Downgrade rebuildjs** to a version that uses esbuild <0.27 (quick unblock, but may miss features)
+2. **Publish compiled `.js`** in rappstack packages (Option 2 — proper long-term fix)
+3. **Pin esbuild** in rebuildjs to <0.27 (requires rebuildjs release)
+
+Since you chose Option 2, I'll start on that. But note: we could also unblock CI immediately by pointing `rebuildjs` to a pre-0.27 version while Option 2 is implemented.
+
+Why not reinstate the `.ts` export in rebuildjs?
+
+The video sitemap + JSON-LD work for briantakita.me is queued — I'll do it after CI is unblocked.
 <!-- /agent:exchange -->

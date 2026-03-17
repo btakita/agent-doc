@@ -116,4 +116,6 @@ Ready for commit + publish when you want to proceed.
 go
 
 Please add automated tests, including unit tests, functional tests, smoke tests.
+
+Avoid mocks if possible. Please add as a testing skill.
 <!-- /agent:exchange -->

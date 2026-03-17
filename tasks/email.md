@@ -557,4 +557,15 @@ Found it — `corky watch` has its own sync loop in `watch.rs` that was calling 
 Rebuilt and reinstalled globally. Restart `corky watch` and btak.dev should sync via Gmail API now.
 
 release
+The Gmail API sync changes are currently uncommitted in `src/corky`. Before releasing, we need to:
+
+1. **Commit changes** inside the corky submodule
+2. **Decide on version** — current is `0.16.0`. This is a feature addition (new provider). Bump to `0.17.0`?
+3. **Run `make check`** (clippy + tests)
+4. **Update SPEC.md** if needed
+5. **Tag + publish** (crates.io, GitHub release)
+
+Should I proceed with bumping to `0.17.0` and committing? Or do you want a different version?
+
+Why not a patch release. It seems like a bug fix. Is there a feature being released?
 <!-- /agent:output -->

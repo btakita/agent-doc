@@ -134,4 +134,32 @@ Also group content into subjects with tags for each video.
 
 Can the transcriptions be done in parallel? Please tune accordingly using my system resources.
 Also note system temperature and power draw...especially if the gpu is used.
+### Re: Parallel transcription & system resources
+
+**Your system:**
+- CPU: Ryzen 9 9950X3D (16C/32T)
+- RAM: 186GB (139GB available)
+- GPU: RTX 5090 32GB VRAM
+- CPU temp: 59°C, GPU temp: 37°C, GPU power: 60W idle (575W limit)
+
+**Good news:** Corky already has `transcribe-cuda` feature! Currently building with CUDA support. With GPU:
+- CPU-only: ~1.9x realtime (12min video = 6.5min transcription)
+- GPU (RTX 5090): expected ~10-30x realtime (12min video = 24-72 seconds)
+
+**Parallel strategy:**
+- **GPU path (building now):** 1 GPU instance handles all 181 videos sequentially — GPU is fast enough that parallelism isn't needed. Expected total: ~30-90 min for all videos.
+- **CPU fallback:** If CUDA build fails, run 4 parallel CPU instances (each ~2GB RAM). With 32 threads, each instance gets 8 threads. Expected total: ~2 hours.
+
+**Pipeline (per video):**
+1. `yt-dlp -x --audio-format wav` → download audio
+2. `ffmpeg -ar 16000 -ac 1` → resample to 16kHz mono (Whisper requirement)
+3. `corky transcribe --language en` → Whisper large-v3-turbo transcription
+4. AI-generated subject tags + topic summary (Claude via batch)
+5. Write `.md` post file
+
+**Monitoring:** Will track GPU temp, power draw, and CPU temp between batches. RTX 5090 at 575W TDP will run hot under sustained Whisper load — I'll throttle if GPU temp exceeds 80°C.
+
+Building CUDA corky now — will start transcription pipeline once compiled.
+
+kKeepa running list of transcribed videos with progress...such as which videos are transcribed and which posts are complete.
 <!-- /agent:exchange -->

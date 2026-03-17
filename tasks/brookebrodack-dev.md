@@ -792,4 +792,7 @@ Error: Process completed with exit code 1.
 The `.yalc/` directory is local-only (gitignored). CI was trying to install `file:.yalc/@rappstack/...` paths that don't exist. Added a CI step that replaces yalc paths with `^0.1.0` (npm versions) before `bun install`. Also removed `--frozen-lockfile` since the package.json is modified in CI.
 
 CI should be re-running now.
+
+Should the YouTube video links be on the sitemap as well?
+Google Search Console has a "Discovered Videos" column.
 <!-- /agent:exchange -->

@@ -50,6 +50,16 @@ agent_doc_mode: template
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 - **HTML email sending** — `corky draft push --send` should convert markdown body to HTML (`pulldown-cmark`), send as `multipart/alternative` (HTML + plain text fallback). Currently sends raw markdown as plain text, causing `**bold**` to appear as literal asterisks. Default behavior, no flag needed. Files: `src/draft/mod.rs` (`compose_email()`), `Cargo.toml`.
 
+<!-- agent:status mode=replace -->
+- [x] HTML email sending (multipart/alternative)
+- [x] `collapsible_if` refactor (61 instances across 26 files)
+- [ ] Commit & release changes
+- [ ] Attachment phases 2-3 (inline images, clipboard)
+- [ ] `corky sync imports` config dispatcher
+- [ ] `corky doc upload`
+- [ ] `corky schedule run`
+<!-- /agent:status -->
+
 <!-- agent:exchange mode=append -->
 **Released v0.15.3** — CUDA transcription build fix.
 
@@ -86,4 +96,29 @@ Investigated `src/draft/mod.rs` — confirmed the issue. `compose_email()` sends
 - Tests in `tests/test_draft.rs` need HTML output assertions
 
 Ready to implement when you want to start this. Estimated ~50 lines changed across 2 files.
+
+go
+
+### Implementation Complete
+
+**1. HTML Email Sending (multipart/alternative)** — Done
+
+- Added `pulldown-cmark = "0.12"` to `Cargo.toml`
+- New `markdown_to_html()` helper in `src/draft/mod.rs` — uses strikethrough, tables, smart punctuation
+- `compose_email()` now always builds `MultiPart::alternative()` (plain + HTML)
+- With attachments: `MultiPart::mixed()` wraps `alternative` + attachment parts
+- 4 new tests: `test_markdown_to_html_basic`, `test_markdown_to_html_links_and_lists`, `test_compose_email_contains_html`, `test_compose_email_with_attachment_contains_html`
+
+**2. `collapsible_if` Refactor** — Done
+
+- `cargo clippy --fix` collapsed 61 nested `if` statements across 26 source files
+- Uses Rust 2024 `let` chains (`if let ... && let ...`)
+- Removed `[lints.clippy] collapsible_if = "allow"` override from `Cargo.toml`
+- Files: `accounts.rs`, `app_config.rs`, `cal/auth.rs`, `contact/from_conversation.rs`, `contact/info.rs`, `draft/migrate.rs`, `draft/mod.rs`, `filter/gmail_auth.rs`, `help.rs`, `mailbox/add.rs`, `mailbox/remove.rs`, `mailbox/rename.rs`, `mailbox/validate_draft.rs`, `main.rs`, `resolve.rs`, `schedule.rs`, `social/auth.rs`, `social/mod.rs`, `social/profiles.rs`, `sync/imap_sync.rs`, `sync/manifest.rs`, `sync/sms_import.rs`, `transcribe/audio.rs`, `transcribe/model.rs`, `upgrade.rs`, `watch.rs`
+
+**3. Status Component** — Added below.
+
+`make check` passes clean — all 199+ tests pass, clippy clean. Changes are uncommitted in `src/corky/`, ready for review.
+
+Commit & release changes
 <!-- /agent:exchange -->

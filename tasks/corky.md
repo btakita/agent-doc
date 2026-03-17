@@ -53,12 +53,12 @@ agent_doc_mode: template
 <!-- agent:status mode=replace -->
 - [x] HTML email sending (multipart/alternative)
 - [x] `collapsible_if` refactor (61 instances across 26 files)
-- [x] Committed to `src/corky/` (2 commits)
-- [ ] Version bump + release (awaiting version number)
-- [ ] Attachment phases 2-3 (inline images, clipboard)
-- [ ] `corky sync imports` config dispatcher
-- [ ] `corky doc upload`
-- [ ] `corky schedule run`
+- [x] `corky schedule run` (already complete)
+- [x] `corky sync imports` config dispatcher
+- [x] Attachment phases 2-3 (inline images, clipboard)
+- [x] All committed (4 commits in src/corky/)
+- [ ] Version bump + release → v0.16.0?
+- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -145,4 +145,48 @@ Implement the rest of the pending feature list. This will all be in the minor re
 - [ ] `corky doc upload`
 - [ ] `corky schedule run`
 ```
+
+### Feature Assessment
+
+After thorough research of the codebase:
+
+1. **`corky schedule run`** — Already complete. 732 lines, 26 tests, integrated with `corky watch`. Scans `social/`, `drafts/`, `mailboxes/*/drafts/` for `scheduled_at` past due. Nothing to implement.
+
+2. **`corky sync imports` dispatcher** — No code exists. Need `[imports]` config in `.corky.toml` + dispatcher that routes to existing `sms_import`, `telegram_import`, `slack_import` handlers. Straightforward.
+
+3. **Attachment phases 2-3** — Phase 1 (file attachments via `--attach`) is complete. Phase 2 (inline images) follows the social post pattern (`images: []` in frontmatter). Phase 3 (clipboard) needs system integration (`xclip`/`pbpaste`).
+
+4. **`corky doc upload`** — Stub only ("coming soon — requires Google Drive API OAuth"). Needs OAuth flow design, `[google_drive]` config section, Drive API integration. Most complex of the four — recommend deferring to its own session.
+
+**Implementing now:** sync imports dispatcher + attachment phases 2-3. Deferring doc upload.
+
+### All Features Implemented
+
+**`corky sync imports` dispatcher** — `30bb96a`
+- New `src/sync/imports.rs` with `ImportConfig` struct + dispatcher
+- `[[imports]]` config in `.corky.toml` with type/path/label/account fields
+- Dispatches to existing sms/telegram/slack handlers
+- Tilde expansion, default label/account, skip-on-missing-path
+- 6 tests, SPEC.md § 16b added
+- 7 files, +318 lines
+
+**Attachment phases 2-3** — `aa073e8`
+- Phase 2: `images:` YAML frontmatter, `--image` flag on `draft new`, CID-based inline images in `multipart/related`
+- Phase 3: `corky draft attach --clipboard` (wl-paste/xclip/pngpaste), `--file`, `--inline` flags
+- `resolve_media_path()` helper for tilde + relative path resolution
+- 4 files, +513/-16 lines
+
+**`corky schedule run`** — already complete (732 lines, 26 tests)
+
+**`corky doc upload`** — deferred (needs Google Drive OAuth design session)
+
+All tests pass, clippy clean. Four commits total in `src/corky/`:
+1. `9d2ff4d` — collapsible_if refactor
+2. `9e80cc1` — HTML email (multipart/alternative)
+3. `30bb96a` — sync imports dispatcher
+4. `aa073e8` — attachment phases 2-3
+
+Ready for version bump. Suggest **v0.16.0** (multiple new features).
+
+go
 <!-- /agent:exchange -->

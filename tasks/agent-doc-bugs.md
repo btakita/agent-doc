@@ -182,4 +182,22 @@ Does agent-doc need to be released?
 Just install `agent-doc-jetbrains-0.2.3.zip` and restart IntelliJ.
 
 Can agent-doc support the Cursor IDE? Can it integrate with the Cursor agent loop?
+
+### Re: Cursor IDE support
+
+**Yes, agent-doc can support Cursor.** Cursor is a VS Code fork, so the existing VSCode extension should work with minimal changes:
+
+**IPC (patch watcher):** The VSCode extension's `PatchWatcher` class already supports inline attributes (regex-based). It would work in Cursor as-is — just install the `.vsix` file.
+
+**Agent loop integration:** Cursor has its own AI agent (Cursor Agent). Integration options:
+
+1. **Cursor as editor only** — Use Cursor for editing, agent-doc + Claude Code for the AI loop (current architecture). Cursor's PatchWatcher handles IPC. This works today.
+
+2. **Cursor Agent as backend** — Replace Claude Code with Cursor's agent. Would need a new agent backend in `agent/` that communicates with Cursor's API instead of spawning `claude`. More speculative — Cursor's agent API isn't as well-documented as Claude's CLI.
+
+3. **Hybrid** — Use Cursor for inline edits (its strength), agent-doc for document sessions (ours). The two don't conflict — different tools for different tasks.
+
+**Immediate path:** Build and publish the VSCode extension as a `.vsix`, test in Cursor. The extension code is at `src/agent-doc/editors/vscode/`. Want me to build it?
+
+Yes...build it
 <!-- /agent:exchange -->

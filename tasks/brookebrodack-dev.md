@@ -603,4 +603,6 @@ Or my Claude Code token?
 **Exit codes:** 0 = no new videos, N = count generated, 255 = fatal error
 
 Script compiles cleanly (164KB bundled). Ready for testing once you add the `ANTHROPIC_API_KEY` secret to the repo.
+
+Can I get a ANTHROPIC_API_KEY from my Claude subscription?
 <!-- /agent:exchange -->

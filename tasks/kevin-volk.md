@@ -505,4 +505,6 @@ Done. Added to `tasks/corky.md` Open items:
 **Housekeeping:** The email draft shows `status: sent` — looks like it was sent. Disabled the systemd timer (`corky-send-kevin.timer`) since it's no longer needed.
 
 Kevin sent a response. Please draft a reply.
+
+Send the reply
 <!-- /agent:exchange -->

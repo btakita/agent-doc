@@ -1,7 +1,8 @@
 ---
 agent_doc_session: b8ffc710-b4af-4cb4-947b-32fab6ca3e14
 tmux_session: '23'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 
@@ -72,4 +73,6 @@ Yes — that would be a powerful rhetorical move. It directly demonstrates your 
 The closing question is punchy and makes the reader confront their own position. The side-by-side makes the case better than any argument could.
 
 **Risk:** Some HN users will see the meta-demonstration as smug or trolling. You could soften by dropping the closing question and letting the comparison speak for itself. Your call on tone.
+
+compact exchange
 <!-- /agent:exchange -->

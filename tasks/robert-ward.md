@@ -251,102 +251,157 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
-*C*Compacmpacted. CContent archived to `/hoe/brient an/work/brchived takia/ago `/home/bnt-loo/.agent-oc/archives/6d80de6e787d2dd84a42304a61aacian/work/btaki110edc241ddcea/agea15a1444598b26910f6nt-20260315-023752.md*
-/loop/.agent--doc copact
-Cmpacte/archives/6d. Archived exchange cont80dentto6e787d2dd84a42304a61aaca110edc241ddceea15a1444d598b26910f6-20260315-023752.md`.*
-/agent--doc/archives/`.
+### Transcription complete — 5 calls (Mar 13–16)
 
-R compact
-Cobet hpad his middle botctomed. tooth broke of 4 weeks ago. The root is stArchill attached.
-Robvert had his midde top tooth broke off 2 weeks ago. The root is still attached.
+Whisper (small model). Speaker attribution by conversational context.
 
-Is citus ok to eat util he has xcha procedure to replacnge the teeth?What is the ieal home care protocol that is natural...for Robert to o?
-What preventativconte annt to st.abilizing care can robert -do?
-### Re: Robert's broken teeth — home ca/are
+---
 
-**Cchirus — avoid or minimize.** Thveexposed dentin and root surfaes as/`.
+## Call 6: 2026-03-13 11:56 PM ET (~20 min)
+**File:** `phone_20260314-035658_3109684542.amr`
 
-Robere porous an acid-sensitive. Citrus oranges, lemons, grapefruit) has pH 2-4 which erodes exposed dtin rhapidy and can irritate th pulp if it'd close tohis iddlexposu bottom tooth broke. Iof Rf 4 weeks agobe. The rt eatsoot is still attached.
-Ritrus ayway: inse with plain wate immediatbely after, wait 30 mi before brushing (acid sofrtens namel/hadentin, brush hing s middle top tootoo h broke off 2 weeksoon abrades it.**Natural home care prot agool:**
+**Topics:** Judith follow-up (no response to onboarding email), Robert moved out of storage garage (no deposit returned), personal catch-up (Brooke/Hawaii, weather, politics).
 
-1. **Saltwater rinse** — 1/2 tsp sea salt in 8 oz war water, swish 30 s. Thec, 3-4x daily. A rootiseptic, reduces inflammation, promotes healing.
+**Robert:** And was everything going with, did you have another talk to Judith?
+**Brian:** No.
+**Robert:** She said to you, if I remember correctly, she said she's all in with you.
+**Brian:** Yeah, but I sent her the next steps, so no response back. I also CC'd Robert too, the other guy.
 
-2. **Clove oil** (eugel) — dab on exposed root area ithstill attached.
+**Robert:** She's so rich and so busy she overbooks herself and then lets things go and then has to be reminded. If you're able to do that, you're the guy.
+**Brian:** All right, I'll remind her then.
+**Robert:** But in a nice way. Keep her on track and remind her what she agreed to. In a polite way.
 
-Is citrus ottok to eat un swab or patin relief. Natl he has a pral analgocesic andantimicrobial. Available at any health od stoure.
+**Brian:** I need to get started though. I could just get started and if I can get the first phase done I could hand stuff over to her.
+**Robert:** Yeah, genius. Might as well just get started because she already said yes. You're golden — just start, we'll do the work.
+**Brian:** I think I can get the first phase done in a few days. Reach out to her, have a demo, and then I can get paid.
 
-3. **Oil pulling** — 1 tbspe coconut oil, swish 15-20 min in tho re orning before eating. Reduces bacterial load, supports gum health around ce the hexposed roots.
+[Robert's storage move complete — landlord didn't return $325 deposit]
 
-4. **Sot-bristle brush nly** — brush gently aound the broken teeth. Never use mediu or hard bristles on exposed roots.
+**Robert:** I got it done Friday the 13th. The guy did not give me the deposit yet.
+**Brian:** That sucks. You should have just done the legal thing then — you would've been guaranteed to get the deposit back.
 
-5. **Avoid temperature extremes** — exposed dentin conducts heteeth?
-   What/cold directly to s the nerve.oom-temp food and drinks.
+[Robert mentions broken teeth — bottom one broke 4 weeks ago, top one 2 weeks ago]
 
-6. **urmeric paste** —e mix turmeric pode + coconut oil, apply doal gus arhoun affected temeth Anti-inflammatory. Rinse after 10 min.**Prevent cativre ad s protabilizing care:**
+**Robert:** I finally woke up and I decided I got to go this week to the dentist. Could we look on AI — what sort of protocol until I can get to the dentist?
 
-**Temporary ental cement** (Dentemp or similar, available at drugstores) — Robert canol ver the exosed roots to protect them from bthateria, acid, and sensitivity. Reapply as needed.
-- **Remineralizing rinse** — baking sda rinse (1/2 tsp in water) after eals neutralizes acid and suports mineral bal is nane.
+[Brian reads dental care advice from agent-doc — citrus warning, saltwater rinse, clove oil, oil pulling, temporary dental cement]
 
-- **Diet** — favor soft, alkalinural...for Robe foort to dso?
-  What void sticky/haprd foods that could frature more of te remaeventatining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avoca ando.
+**Robert:** Turmeric paste — that's what I gotta do. And temporary dental cement, have you ever heard of that stuff?
+**Brian:** I sent you a long text and email with all the details.
 
-- **Kstabilizing careep roots clean** — food debris packed around eposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or  careful flossin around adjacent te robert do?
+**Robert:** I'm going to call Judith tomorrow. I'm going to hit her up hard. I'm going to add you on the call. Keep your phone on.
+**Brian:** Whenever you can get in touch with her, sounds good.
 
-Thereth.
+---
 
-- **Wath fis about 1/4 or ifection signs** — swelling, persisf the bottom throbbingoth pain, fever, pus, bad tasteleft. If any of these appear, he needs
-  There is antibiotics and professional care urbout 1/5 of the tly. A root with expose pulp can abscess.
+## Call 7: 2026-03-14 6:19 PM ET (~22 min)
+**File:** `phone_20260314-221922_3109684542.amr`
 
-**Timeline conern:** 4 weeks with n exposed oot is already pushing it. The longer the roots sit exposed, the higher the infetion risk. Robert sp toothould prioritize seeing a dentst — e len a dental chool clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combinationft.
+**Topics:** Judith not responding to anyone (not just Brian), Robert coaching Brian to just start work, Robert's dental advice follow-up, Robert planning Mexico dental trip.
 
-Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
-Robert had his middle bottom tooth broke off 4 weeks ago. The root is still attached.
-There is about 1/4 of the bottom tooth left.
-Robert had his middle top tooth broke off 2 weeks ago. The root is still attached.
-There is about 1/5 of the top tooth left.
+**Robert:** I just wanted to see if you had communication with Judith.
+**Brian:** I sent her some information about events that she likes. And I reached out to her.
+**Robert:** Did she get back to you?
+**Brian:** No.
+**Robert:** She's not getting back to anybody. Not me. Not you. That's her. We have to just accept that. I was just wanting you to know you're not the only one.
 
-Is citrus ok to eat until he has a procedure to replace the teeth?
-What is the ideal home care protocol that is natural...for Robert to do?
-What preventative and stabilizing care can robert do?
+**Robert:** She makes good money — multiple rental properties in Malibu. She flies around, travels a lot. She's wealthy.
 
-### Re: Robert's broken teeth — home care
+**Brian:** Can you tell me where we are? I sent her next steps — we're gonna meet, move her site over to the new server, she needs a new account. I could start doing some work but I want her to set up her own account.
+**Robert:** She doesn't want to — she wants you to do it. But she's so busy, she overbooks herself. If you're able to remind her, you're the guy.
 
-**Citrus — avoid or minimize.** The exposed dentin and root surfaces are porous and acid-sensitive. Citrus (oranges, lemons, grapefruit) has pH 2-4 which erodes exposed dentin rapidly and can irritate the pulp if it's close to exposure. If Robert eats citrus anyway: rinse with plain water immediately after, wait 30 min before brushing (acid softens enamel/dentin, brushing too soon abrades it).
+**Brian:** I think I can get the first phase done. I could just get started, reach out to her, have a demo.
+**Robert:** Yeah, might as well just get started. She already said yes.
+**Brian:** But she never agreed to any of this officially.
+**Robert:** I'm going to hit her up hard. Tomorrow. I'm going to add you on the call.
 
-**Natural home care protocol:**
+[Robert's broken teeth follow-up — numbness and weird sensations in jaw. Plans to go to Mexico for dental work]
 
-1. **Saltwater rinse** — 1/2 tsp sea salt in 8 oz warm water, swish 30 sec, 3-4x daily. Antiseptic, reduces inflammation, promotes healing.
+**Robert:** I'm having numbness and weird sensations in my whole jaw. I finally woke up and decided I got to go this week to the dentist.
+**Brian:** [Reads dental care protocol from agent-doc] Avoid citrus — erodes exposed dentin rapidly.
+**Robert:** I'm eating an orange right now! Shit.
 
-2. **Clove oil** (eugenol) — dab on exposed root area with cotton swab for pain relief. Natural analgesic and antimicrobial. Available at any health food store.
+[Brian sends dental advice via text and email. Robert confirms Mexico dental trip — someone driving him there Monday or Tuesday]
 
-3. **Oil pulling** — 1 tbsp coconut oil, swish 15-20 min in the morning before eating. Reduces bacterial load, supports gum health around the exposed roots.
+---
 
-4. **Soft-bristle brush only** — brush gently around the broken teeth. Never use medium or hard bristles on exposed roots.
+## Call 8: 2026-03-15 7:42 AM ET (~2 sec)
+**File:** `phone_20260315-114203_3109684542.amr`
 
-5. **Avoid temperature extremes** — exposed dentin conducts heat/cold directly to the nerve. Room-temp food and drinks.
+Accidental dial / hang-up. Content: "Bye."
 
-6. **Turmeric paste** — mix turmeric powder + coconut oil, apply to gums around affected teeth. Anti-inflammatory. Rinse after 10 min.
+---
 
-**Preventative and stabilizing care:**
+## Call 9: 2026-03-15 6:56 PM ET (~30 min)
+**File:** `phone_20260315-225612_3109684542.amr`
 
-- **Temporary dental cement** (Dentemp or similar, available at drugstores) — Robert can cover the exposed roots to protect them from bacteria, acid, and sensitivity. Reapply as needed.
+**Topics:** Judith's Mortgage Automator contract enforcement (Robert relaying info), Brian researching MA contract terms live on the call, Bryt Software alternative, Capterra reviews.
 
-- **Remineralizing rinse** — baking soda rinse (1/2 tsp in water) after meals neutralizes acid and supports mineral balance.
+**Robert:** There's something weird going on. Remember how Judith was saying they were doing a hard sell? Now she said she signed a contract and she's consulting. The number one thing she said is Brian's got a job with Judith for other things. She's going to hire a lawyer to get out of the contract.
+**Brian:** Oh, God.
+**Robert:** Apparently they're forcing her to do the mortgage optimizer somehow. Judith has a good attorney and she thinks she will win — how can these people force you into shit like that?
 
-- **Diet** — favor soft, alkaline foods. Avoid sticky/hard foods that could fracture more of the remaining tooth structure. Good: cooked vegetables, soups, smoothies (non-citrus), rice, eggs, avocado.
+**Brian:** [Reading from agent-doc research] We got their terms of service. Term is 12 month minimum, non-refundable, auto-renewal. Stopping use does not constitute termination — she owes the full annual fee regardless. No early termination. No partial refunds. Removing seats doesn't remove payment obligation.
+**Robert:** What the fuck?
 
-- **Keep roots clean** — food debris packed around exposed roots = infection risk. Gentle water irrigation (Water Pik on low setting) or careful flossing around adjacent teeth.
+**Brian:** If she sent cancellation within the 45-day window, she's clean.
+**Robert:** Yeah, I don't know what she signed.
 
-- **Watch for infection signs** — swelling, persistent throbbing pain, fever, pus, bad taste. If any of these appear, he needs antibiotics and professional care urgently. A root with exposed pulp can abscess.
+**Brian:** [Continues reading] One user reported receiving a threatening letter demanding $10,000 for violating license agreement by logging in on multiple devices. Mortgage Automator threatened to disable access to their data unless they upgraded to a 10-user license. Described as feeling like extortion.
+**Robert:** Oh shit.
 
-**Timeline concern:** 4 weeks with an exposed root is already pushing it. The longer the roots sit exposed, the higher the infection risk. Robert should prioritize seeing a dentist — even a dental school clinic (UCLA, USC) offers reduced-cost care. In the meantime, the temporary cement + saltwater routine is the most important combination.
+**Brian:** Competitor Bryt Software explicitly markets against MA's contract lock-in with "cancel anytime" messaging. Bottom line — Judith's experience isn't unique. MA's terms are designed to make leaving expensive.
 
-Please rewrite response. The response was garbled by the agent-doc CRDT. tasks/agent-doc-bugs.md is fixing the issue.
+**Brian:** [Finding Bryt Software pricing] $890 a year. That's a really good price.
+**Robert:** What a weird industry.
 
-Transcribe
-[phone_20260316-014818_13109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260316-014818_13109684542.amr)
-[phone_20260315-225612_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260315-225612_3109684542.amr)
-[phone_20260315-114203_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260315-114203_3109684542.amr)
-[phone_20260314-221922_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260314-221922_3109684542.amr)
-[phone_20260314-035658_3109684542.amr](../mail/contacts/robert-ward/recordings/phone_20260314-035658_3109684542.amr)
+[Discussion continues — Robert mentions Judith has a spiritual/health coaching side business. Brian has a bug in agent-doc that garbled the response, fixes it on the fly]
+
+---
+
+## Call 10: 2026-03-15 9:48 PM ET (~35 min)
+**File:** `phone_20260316-014818_13109684542.amr`
+
+**Topics:** TMO extortion correction (it was TMO, not MA), Judith update (attorney handling it, website confirmed), Robert's housing crisis (Ari giving up apartment), deposit dispute continued.
+
+**Brian:** That complaint I was telling you about was actually the Mortgage Office. The Mortgage Office actually tried to extort the money for the extra seats. So that's the company Judith is going with now and she has a relationship with them.
+**Robert:** But it just sounds like all these companies, these vendors — it sounds like a nightmare.
+**Brian:** From a liability standpoint, it would be better just to have her own software.
+
+**Robert:** She said 100% Brian's going to do the website and other stuff when the attorney wins the case with Mortgage Automator. She was confident.
+**Brian:** I just hope it happens soon because I got to make some money.
+**Robert:** I'm going to call her again tomorrow. We need to get done. The website for sure.
+
+[Robert's housing situation — Ari is giving up the apartment Robert is staying in]
+
+**Robert:** Ari just now said he's going to give up the place I was staying in. So I better start looking real fast.
+**Brian:** Can you take over the rent?
+**Robert:** No, they're remodeling the building. It's going to be upwards of $2,500.
+**Brian:** Why don't you get a roommate?
+
+[Robert still hasn't gotten his $325 deposit back from the storage garage landlord]
+
+**Robert:** She's going to be like the godmother of this industry pretty soon. She's going to have the power, she's going to take down these big ass companies and take over.
+**Brian:** Yeah, she's got the technology play. She can definitely take a big chunk of it.
+
+---
+
+## Key Takeaways (Calls 6–10)
+
+**Judith / Equity Funding Source:**
+- Judith not responding to emails/texts — Robert confirms this is normal for her ("she does that to everybody")
+- Robert coaching Brian: just start the website work, she already said yes
+- MA contract enforcement confirmed — Judith hired a lawyer, confident she'll win
+- Judith's lawyer is apparently based in Canada (same country as MA)
+- Website is 100% confirmed — other work pending attorney resolution
+- Brian shared MA terms of service and Capterra reviews with Robert live on call
+
+**Robert's Situation:**
+- Storage garage move complete (Friday Mar 13) — landlord withheld $325 deposit
+- Broken teeth getting worse — numbness and jaw sensations. Mexico dental trip planned (early next week)
+- Housing crisis: Ari giving up the apartment Robert is in. Needs to find new place fast. Building being remodeled, rent going to ~$2,500
+- Brian offered to help look for housing again (Craigslist rooms/shared)
+
+**Corrections:**
+- The Capterra $10K extortion review was about TMO, not MA — Brian corrected this on call 10
 <!-- /agent:exchange -->

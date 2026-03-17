@@ -337,4 +337,23 @@ Print the YouTube video description.
 
 Rather than printing the raw transcript on each page, print a summary of each video.
 Analyze the transcript and extract the content. Make an engaging "post" with the content.
+### Re: Downloadable transcripts + descriptions + AI summaries
+
+**Three changes needed:**
+
+1. **Downloadable transcript files** — save raw transcripts as `.txt` files in `public/transcripts/:videoId.txt`, linked from each post page. SEO-accessible via normal URL.
+
+2. **YouTube descriptions** — add to each post's markdown frontmatter as `description` field (already there for most, but many are just the title). Will pull actual descriptions from the database.
+
+3. **AI-generated post content** — this is the big one. 180 posts need engaging summaries extracted from transcripts. Plan:
+   - Use parallel subagents to process batches of videos
+   - Each agent reads the transcript, analyzes topics/themes, and generates:
+     - An engaging intro paragraph
+     - Key topics discussed (with timestamp references)
+     - Notable quotes
+     - Context/background where relevant
+   - Raw transcript moves to a downloadable `.txt` file
+   - Post `.md` file gets the AI-generated summary instead
+
+**Starting now.** Will create the transcript files and process posts in parallel batches (~10 agents, ~18 posts each).
 <!-- /agent:exchange -->

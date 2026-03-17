@@ -56,8 +56,8 @@ agent_doc_mode: template
 - [x] `corky schedule run` (already complete)
 - [x] `corky sync imports` config dispatcher
 - [x] Attachment phases 2-3 (inline images, clipboard)
-- [x] All committed (4 commits in src/corky/)
-- [ ] Version bump + release → v0.16.0?
+- [x] v0.16.0 released (crates.io, PyPI, GitHub)
+- [x] Binary installed, submodule pointer updated
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -189,4 +189,23 @@ All tests pass, clippy clean. Four commits total in `src/corky/`:
 Ready for version bump. Suggest **v0.16.0** (multiple new features).
 
 go
+
+### Released v0.16.0
+
+- Version bumped in `Cargo.toml` + `pyproject.toml`
+- Tagged `v0.16.0`, pushed to origin
+- Published to **crates.io**: https://crates.io/crates/corky/0.16.0
+- Published to **PyPI**: corky 0.16.0
+- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.16.0
+- Binary installed locally (v0.16.0)
+- Parent submodule pointer updated
+
+5 commits in this release:
+1. `9d2ff4d` — collapsible_if refactor (26 files)
+2. `9e80cc1` — HTML email (multipart/alternative)
+3. `30bb96a` — sync imports dispatcher
+4. `aa073e8` — attachment phases 2-3
+5. `c950387` — version bump to 0.16.0
+
+compact exchange
 <!-- /agent:exchange -->

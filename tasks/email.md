@@ -17,7 +17,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status -->
-Awaiting next action. Pending: btak-dev account setup in `.corky.toml`.
+Added btak-dev account to `.corky.toml`. Pending: verify `pass email/btak-dev` exists, then `corky sync`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -28,4 +28,27 @@ Converted to template mode and compacted conversation history. The document now 
 Pending from last session: adding `btak-dev` (btak.dev@gmail.com) account to `mail/.corky.toml`. Want me to proceed with that?
 
 Yes. Add btak-dev
+Added `btak-dev` account to `mail/.corky.toml`:
+
+```toml
+[accounts.btak-dev]
+provider = "gmail"
+user = "btak.dev@gmail.com"
+password_cmd = "pass email/btak-dev"
+labels = ["INBOX"]
+```
+
+**Assumptions:**
+- Password stored at `pass email/btak-dev` — adjust if your pass path differs
+- `labels = ["INBOX"]` — add more labels if you want specific label sync
+- No `default = true` since the personal account is already default
+
+**Next steps:**
+- Ensure `pass email/btak-dev` exists (Gmail app password)
+- Run `corky sync` to verify the new account connects
+- Add Gmail API OAuth for btak-dev if you want filter management on this account too
+
+Want me to adjust anything?
+
+Change btak-dev to btak.dev
 <!-- /agent:output -->

@@ -206,4 +206,27 @@ Yes, in two places:
 **Summary:** Blog posts with videos = in both sitemap AND JSON-LD. Standalone YouTube API videos = in JSON-LD on the content page only, NOT in sitemap.
 
 Add automated tests for errors.
+
+I'm talkabout about the posts on briantakita.me that are of YouTube videos. Do the videos with posts on briantakita.me have sitemap entries and json-ld objects?
+### Re: CI errors + root cause
+
+The CI errors show the OLD `@rappstack/domain--server@0.1.0` code (no null guards). Root cause: **bun's lockfile was pinned to 0.1.0** despite package.json requiring 0.1.2.
+
+**Fixed:** Deleted and regenerated `bun.lock` — now correctly resolves 0.1.2 with the null guard fix.
+
+**However, a deeper issue surfaced:** The regenerated lockfile resolves `@rappstack/*` packages from npm (not workspace). These npm-published packages export `.ts` source files (not compiled `.js`). **esbuild can't resolve `.ts` from `node_modules`** — it only resolves `.ts` from workspace packages.
+
+This means the yalc migration approach has a fundamental problem: the rappstack packages aren't designed for npm consumption. They only work as workspace packages where bun/esbuild can resolve `.ts` source files.
+
+**Options:**
+1. **Revert submodule removal** — keep rappstack packages as workspace submodules (fastest to restore CI)
+2. **Publish compiled `.js`** — update rappstack build to emit `.js` + `.d.ts` files (proper npm packaging)
+3. **Use yalc in CI** — have CI run `yalc add` before `bun install` (hacky)
+4. **Add esbuild plugin** — custom resolver that handles `.ts` from `node_modules/@rappstack/*`
+
+**Recommendation:** Option 2 is the right long-term fix, but option 1 is fastest to unblock CI now. Option 4 is worth trying as a middle ground.
+
+What do you want to do?
+
+Option 2
 <!-- /agent:exchange -->

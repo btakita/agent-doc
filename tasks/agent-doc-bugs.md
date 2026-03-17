@@ -1591,5 +1591,22 @@ This will auto-start a Claude session, register the pane, and the layout sync wi
 **The cleanup was too aggressive** — killing the panes also destroyed the session registrations. A safer cleanup approach would be to keep registered sessions intact but kill only panes that aren't in the registry (truly orphaned). Let me know if you want me to start fresh sessions for specific task files.
 
 Should `Sync Tmux Layout` start a session if there is no active session for the editor in the layout?
+
+### Re: Should Sync Tmux Layout auto-start sessions?
+
+**Yes — that would make the workflow seamless.** Currently, Sync Tmux Layout (`agent-doc sync`) only arranges panes that are already registered in `sessions.json`. If a file has no active session, it's silently skipped.
+
+**Proposed behavior:** When `sync` encounters a file with no registered/alive pane:
+1. Call `auto_start()` to create a new Claude session for that file
+2. Register the new pane
+3. Include it in the layout arrangement
+
+This would mean opening a set of task files in the editor and pressing "Sync Tmux Layout" would automatically start Claude sessions for all of them — no manual route needed.
+
+**Tradeoff:** Starting multiple Claude sessions at once is resource-heavy (each spawns a Claude Code process). May want a limit or confirmation for >3 new sessions.
+
+This is a good feature request for the next iteration. Want me to add it to `tasks/agent-doc-plugins.md` or implement it now?
+
+now
 <!-- /agent:exchange -->
 ****

@@ -1608,5 +1608,28 @@ This would mean opening a set of task files in the editor and pressing "Sync Tmu
 This is a good feature request for the next iteration. Want me to add it to `tasks/agent-doc-plugins.md` or implement it now?
 
 now
+
+### Re: Sync auto-start implemented
+
+**Done.** `agent-doc sync` now auto-starts Claude sessions for files that have session UUIDs but no alive panes.
+
+**How it works:** Before the layout sync runs, a new "pre-sync" phase iterates over all resolved files:
+1. For each file with a session UUID, checks if the registered pane is alive
+2. If no alive pane exists, calls `route::auto_start()` to create a new Claude session
+3. The new pane gets registered
+4. Then `tmux_router::sync` runs with all panes available for layout arrangement
+
+**Changes:**
+- `route.rs`: `auto_start()` made `pub` so `sync.rs` can call it
+- `sync.rs`: Added pre-sync auto-start phase before `tmux_router::sync()`
+
+All 385 tests pass. Binary rebuilt and installed.
+
+**To test:** Open multiple task files in the editor and run "Sync Tmux Layout" — it should auto-start Claude sessions for each file and arrange them in the layout.
+
+Add tests
+Test all known edge cases.
+
+I ran S
 <!-- /agent:exchange -->
 ****

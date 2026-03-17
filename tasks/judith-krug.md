@@ -213,5 +213,14 @@ Sources:
 - [TMO Products](https://www.themortgageoffice.com/products/)
 - [Capterra TMO Pricing page](https://www.capterra.com/p/9277/The-Mortgage-Office/)
 
-I want to keep this response and als
+Judith Has not gotten back to me. Mortgage Optimizer is trying to legally enforce the contract that she signed with them.
+
+Please review the phone call transcripts with Robert Ward for more context.
+
+I need to get started working so I can get paid.
+
+Please adjust the plan to begin with work that does not depend on the Mortgage Optimizer vs TMO decision.
+I believe we will go with TMO. But let's start with the website and any other work that can be done for Phase 1.
+
+After, let's draft an email to begin the project.
 <!-- /agent:exchange -->

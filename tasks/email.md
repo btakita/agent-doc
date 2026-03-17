@@ -18,7 +18,7 @@ agent_doc_write: crdt
 
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml
-- [ ] Gmail API sync provider (Option B) — planning
+- [ ] Gmail API sync provider — detailed plan written, awaiting approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -207,4 +207,215 @@ Got it. I'll build the Gmail API sync provider in corky. This is a multi-file fe
 Want me to start building this now, or should I write a detailed plan first in a separate task doc?
 
 Detailed plan
+### Gmail API Sync Provider — Detailed Plan
+
+**Goal:** Add `provider = "gmail-api"` to corky so btak.dev (and future Gmail accounts) can sync without IMAP/app passwords, using OAuth2 + Gmail REST API.
+
+---
+
+#### Phase 1: Auth Scope Expansion
+
+**Files:** `src/filter/gmail_auth.rs`
+
+Currently requests:
+```
+gmail.settings.basic + gmail.labels
+```
+
+Need to add:
+```
+https://www.googleapis.com/auth/gmail.readonly
+```
+
+(Read-only is sufficient for sync. `https://mail.google.com/` is full access — overkill for v1.)
+
+**Changes:**
+- Add a `GMAIL_SYNC_SCOPE` constant with `gmail.readonly`
+- Modify `get_access_token()` to accept required scopes parameter
+- When token's stored scopes don't include the needed scope, trigger re-auth
+- Update `run_auth_flow()` to accept dynamic scopes
+
+**Token key:** Use `gmail:{account_name}` (already supported) so each account gets its own token.
+
+---
+
+#### Phase 2: Gmail Messages Client
+
+**New file:** `src/sync/gmail_api.rs`
+
+**Endpoints needed:**
+
+1. **`messages.list`** — Get message IDs matching criteria
+   ```
+   GET https://gmail.googleapis.com/gmail/v1/users/me/messages
+     ?labelIds=INBOX
+     &q=after:2024/01/01
+     &maxResults=500
+     &pageToken={next}
+   ```
+   Returns: `{ messages: [{id, threadId}], nextPageToken, resultSizeEstimate }`
+
+2. **`messages.get`** — Fetch full message
+   ```
+   GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}
+     ?format=full
+   ```
+   Returns: headers, payload (MIME tree), labelIds, threadId, historyId, internalDate
+
+3. **`history.list`** — Incremental sync (Phase 4)
+   ```
+   GET https://gmail.googleapis.com/gmail/v1/users/me/history
+     ?startHistoryId={id}
+     &historyTypes=messageAdded
+   ```
+
+**Message parsing:**
+- Extract headers from `payload.headers[]` (Subject, From, To, CC, Date)
+- Extract body from `payload.parts[]` — walk MIME tree for `text/plain`
+- Base64url decode body data (`payload.parts[].body.data`)
+- Map `labelIds` to label names via the existing `fetch_label_map()` in `src/filter/push.rs`
+
+---
+
+#### Phase 3: Provider Integration
+
+**Files:** `src/accounts.rs`, `src/sync/mod.rs`
+
+**Account config:**
+```toml
+[accounts."btak.dev"]
+provider = "gmail-api"
+user = "btak.dev@gmail.com"
+labels = ["INBOX"]
+```
+
+No `password_cmd` needed — auth is via OAuth2 token.
+
+**Changes to `src/accounts.rs`:**
+- Add `"gmail-api"` to `provider_presets()` (no IMAP/SMTP defaults needed)
+- Skip `resolve_password()` for `gmail-api` accounts
+
+**Changes to `src/sync/mod.rs`:**
+- In the main sync loop, dispatch based on provider:
+  ```rust
+  match account.provider.as_str() {
+      "gmail-api" => gmail_api::sync_account(name, &account, state, full)?,
+      _ => imap_sync::sync_account(/* existing args */)?,
+  }
+  ```
+
+---
+
+#### Phase 4: Sync State & Incremental Sync
+
+**File:** `src/sync/types.rs`
+
+Add Gmail-specific state alongside existing IMAP state:
+
+```rust
+pub struct GmailLabelState {
+    pub last_history_id: Option<u64>,
+    pub last_internal_date: Option<i64>,  // epoch ms, for initial sync cutoff
+    pub synced_message_ids: HashSet<String>,  // for dedup during initial sync
+}
+```
+
+**Sync flow:**
+
+*Initial sync (no history_id):*
+1. `messages.list` with `q=after:{sync_days_ago}` for each label
+2. Paginate through all results
+3. `messages.get` each message ID
+4. Convert to `Message` struct, call existing `merge_message_to_file()`
+5. Track highest `historyId` from fetched messages
+6. Save `last_history_id` to state
+
+*Incremental sync (has history_id):*
+1. `history.list` with `startHistoryId`
+2. For each `messagesAdded` event, fetch the new message
+3. Convert and merge as above
+4. Update `last_history_id`
+
+*History ID expired (410 Gone):*
+- Google returns 404/410 if history is too old
+- Fall back to full sync for that label
+
+---
+
+#### Phase 5: Message Conversion
+
+**Reuse existing infrastructure:**
+- `Message` struct from `src/sync/types.rs` — same fields
+- `merge_message_to_file()` from `src/sync/imap_sync.rs` — thread merging, dedup, markdown output
+- `thread_key_from_subject()` — OR use Gmail's native `threadId` (better!)
+
+**Key improvement:** Use Gmail's `threadId` as the thread key instead of subject-based heuristic. This eliminates the fragile subject-slug matching.
+
+```rust
+// Instead of:
+let thread_key = thread_key_from_subject(&message.subject);
+// Use:
+let thread_key = gmail_thread_id;  // from messages.get response
+```
+
+**Message ID:** Use Gmail message ID (string) instead of IMAP UID (u32).
+
+---
+
+#### Phase 6: Label Routing
+
+**Reuse existing `build_label_routes()`** — it already works with label name strings. Gmail API returns label names via `fetch_label_map()`, so the mapping is:
+
+1. Fetch `labelIds` from each message
+2. Resolve IDs to names via label map
+3. Pass label names to existing routing logic
+
+**Gmail system labels** (INBOX, SENT, STARRED, etc.) map to well-known IDs — the existing `SYSTEM_LABELS` map in `push.rs` handles this.
+
+---
+
+#### Implementation Order
+
+| Step | What | Files | Effort |
+|------|-------|-------|--------|
+| 1 | Auth scope expansion | `gmail_auth.rs` | 2h |
+| 2 | Gmail messages client | new `gmail_api.rs` | 4h |
+| 3 | Provider dispatch | `accounts.rs`, `sync/mod.rs` | 1h |
+| 4 | Sync state for Gmail | `sync/types.rs` | 1h |
+| 5 | Main sync loop | `gmail_api.rs` | 4h |
+| 6 | Thread key = Gmail threadId | `gmail_api.rs`, `imap_sync.rs` | 1h |
+| 7 | Integration test | manual test with btak.dev | 1h |
+| 8 | Update `.corky.toml` | `mail/.corky.toml` | 5m |
+
+**Total estimate:** ~14h of implementation
+
+---
+
+#### Config Change for btak.dev
+
+Once built, update `.corky.toml`:
+```toml
+[accounts."btak.dev"]
+provider = "gmail-api"
+user = "btak.dev@gmail.com"
+labels = ["INBOX"]
+# No password_cmd needed — uses OAuth2
+```
+
+First `corky sync` will trigger browser OAuth flow, then subsequent syncs use the cached/refreshed token.
+
+---
+
+#### Out of Scope (v1)
+
+- Pub/Sub push notifications (use polling for now)
+- Draft management via API (keep SMTP for drafts)
+- Attachment lazy-fetch (fetch full message body)
+- Send via Gmail API (keep SMTP)
+- `messages.batchGet` optimization (sequential for v1)
+
+Want me to start implementation, or any adjustments to this plan?
+
+Is this a full replacement for imap? Will google continue supporting imap?
+Other email hosts will use imap, so I need to keep compatability.
 <!-- /agent:output -->

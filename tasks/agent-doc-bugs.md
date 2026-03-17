@@ -435,4 +435,6 @@ Add README
 - GitHub Release: `agent-doc-0.2.1.vsix` on v0.17.15
 
 The README will appear on the Open VSX listing page.
+
+compact exchange
 <!-- /agent:exchange -->

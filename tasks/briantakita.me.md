@@ -526,4 +526,33 @@ But this duplicates what Tailwind already knows.
 
 Yes.
 I also want a robust solution for Option 1.
+### Re: Search icon fix implemented
+
+**Option 2 (direct CSS) worked.** Added missing Tailwind utility rules to `index.css.ts`:
+
+```css
+.inset-y-0 { top: 0; bottom: 0; }
+.items-center { align-items: center; }
+.pl-10 { padding-left: 2.5rem; }
+/* + focus, placeholder, border-opacity, shadow rules */
+```
+
+**Option 1 (`@source`) investigation results:**
+- `@source "../../node_modules/@rappstack/**/*.ts"` — Tailwind v4 didn't resolve through symlinks
+- `@source "../../node_modules/.bun/@rappstack*/**/*.ts"` — glob didn't match bun's cache structure
+- `@source "../tailwind-safelist.ts"` with `class="..."` comments — Tailwind didn't extract classes from `.ts` comments
+- The root issue: `index.css.ts` is a template literal processed by esmcss, and `@source` paths are resolved relative to a temp file during processing, not the original source location
+
+**For a robust Option 1 solution**, the esmcss/rebuildjs Tailwind plugin would need to resolve `@source` paths relative to the original `.css.ts` file, not the generated temp CSS. This requires a change in the esmcss or rebuildjs Tailwind integration.
+
+**Verified:** Dev build CSS includes the rules, and the deploy pipeline uses `browser--dev` CSS via `cp -r dist/browser--dev/* dist/static/`. Pushed to CI.
+
+How can I edit a component in rappstack and see the changes in the localhost dev server?
+Can I have rebuildjs look at the source code of the yalc packages...causing a rebuild if the source code in the yalc package changes?
+
+So in my case, I edited blog_search__div_, adding 'h-full', 'w-full'. But I did not see the changes on localhost:4100/search.
+
+How can we make rebuildjs rebuild if the source file changes:
+/home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts
+
 <!-- /agent:exchange -->

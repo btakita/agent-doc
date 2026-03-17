@@ -671,4 +671,22 @@ Once you give me the Google verification code, I'll add that plus the Mailchanne
 
 I already have a GSC property for brookebrodack.net
 https://search.google.com/search-console?resource_id=sc-domain%3Abrookebrodack.net
+### Re: GSC property exists
+
+Since you already have `brookebrodack.net` in Search Console, just submit the sitemap:
+
+1. Open: https://search.google.com/search-console?resource_id=sc-domain%3Abrookebrodack.net
+2. Left sidebar → **Sitemaps**
+3. Enter: `https://brookebrodack.net/sitemap.xml`
+4. Click **Submit**
+
+Google will crawl it within a few hours. The sitemap includes all 180+ `/content/:slug` post URLs.
+
+**Still pending from this session:**
+- [ ] Deploy WebSub email notification worker (`cd workers/websub && npx wrangler deploy`)
+- [ ] Add Mailchannels DNS records (SPF + worker auth TXT)
+- [ ] Submit sitemap in GSC (manual, steps above)
+- [ ] Commit and push latest changes (fallback links, generate-posts script, email notification)
+
+Please force the sitemap to be reindexed.
 <!-- /agent:exchange -->

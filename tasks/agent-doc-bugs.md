@@ -124,4 +124,20 @@ Add to SPEC and README documentation.
 
 Should we add a GUIDE for more edge case configurations, or can we have all of the configuration options in README. README would be preferred.
 
+
+### Re: Implementing all 3 claude_args options
+
+**Implementation in progress** (background agent). Changes:
+
+1. **frontmatter.rs**: Adding `claude_args: Option<String>` field
+2. **config.rs**: Adding `claude_args` to global config (`~/.config/agent-doc/config.toml`)
+3. **start.rs**: Resolving claude_args from frontmatter > config > env var, passing to `claude` process
+4. **README.md**: Configuration section with all 3 sources documented
+5. **SPEC.md**: claude_args specification
+
+**Precedence order:** frontmatter (per-document) > global config > env var (`AGENT_DOC_CLAUDE_ARGS`)
+
+**README over GUIDE:** Agreed — all configuration goes in README. No separate GUIDE file.
+
+Will report results when the implementation completes.
 <!-- /agent:exchange -->

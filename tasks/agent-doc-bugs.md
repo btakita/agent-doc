@@ -112,4 +112,16 @@ All 13 agent-doc panes now in session 0.
 
 Option 1 is per-document (some documents may not need elevated permissions). Option 2/3 is global. Which do you prefer?
 I also lost the --dangerously-set-permissions for this session.
+
+### Re: Permissions lost for this session
+
+The current session was started via `auto_start` which spawned `claude` without `--dangerously-set-permissions`. To restore permissions for this session, you can press `Shift+Tab` to cycle permission modes in Claude Code's TUI — it should have the "bypass permissions on" option visible at the bottom of the pane.
+
+For a permanent fix across all future sessions, which approach do you prefer (frontmatter, global config, or env var)?
+
+Implement all 3 options.
+Add to SPEC and README documentation.
+
+Should we add a GUIDE for more edge case configurations, or can we have all of the configuration options in README. README would be preferred.
+
 <!-- /agent:exchange -->

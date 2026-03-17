@@ -262,4 +262,6 @@ Note the changes to the frontmatter.
 | 10 (Mar 15 9:48 PM) | `recordings/phone_20260316-014818_13109684542.txt` | `.amr` |
 
 All transcripts located at `mail/contacts/robert-ward/recordings/` — `.txt` files next to their `.amr` source audio.
+
+compact transcripts in this file
 <!-- /agent:exchange -->

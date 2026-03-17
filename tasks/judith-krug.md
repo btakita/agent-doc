@@ -236,4 +236,7 @@ Brian
 **Notes on tone:** Concise, no price mentioned (let the milestone framing from the proposal stand), no mention of MA/legal situation, focused entirely on her business. Per Robert Ward's coaching.
 
 Want me to save this as a corky draft, or adjust anything first?
+
+BCC robert ward
+Create a draft
 <!-- /agent:exchange -->

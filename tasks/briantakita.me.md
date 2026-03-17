@@ -123,4 +123,8 @@ release
 
 The *.md posts are slow to render.
 Are we generating *.html files for **all** of the posts, including *.md source files?
+
+Are all of the posts and YouTube videos in the sitemap?
+Does the json-ld include the YouTube Videos?
+See tasks/brookebrodack-dev.md to see recent run 
 <!-- /agent:exchange -->

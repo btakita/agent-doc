@@ -181,24 +181,28 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-### Re: Document upload portal scope
+### Re: M1 scope — portal signoff vs platform-independent alternatives
 
-Good call. Updated the email draft (`mail/drafts/20260317-judith-website-kickoff.md`):
+You're right — the original M1 was "Website + document upload portal" ($4K). Since the portal depends on the MA/TMO outcome, the email now explicitly asks Judith to decide:
 
-- Removed "document upload portal" as a standalone bullet — if MA stays, they provide that
-- Changed to "Secure document handling built in from day one" — vaguer, works either way
-- Removed "document upload portal" from the intro sentence too
+**Updated email** (`mail/drafts/20260317-judith-website-kickoff.md`):
+- Expanded website deliverables to show more value: borrower intake pages, investor section, content refresh
+- **Asks directly:** "Would you like me to build the document upload portal as part of this phase, or wait until the loan management platform is settled?"
+- Offers alternative scope if she defers: SEO, analytics, referring broker section
 
-The website itself is the unambiguous deliverable. Document upload can be scoped once the MA situation resolves:
-- **If MA goes away:** We build a full upload portal (Phase 2 scope, 12-16 hours)
-- **If MA stays:** We just need secure links/embeds to MA's portal from the website
+**Platform-independent work that could fill M1 scope (if portal deferred):**
 
-Either way, the website migration is pure value with zero platform dependency.
+| Feature | Hours | Platform dependency |
+|---------|-------|-------------------|
+| Website migration + rebuild | 15-20 | None |
+| Borrower intake forms + lead capture | 3-4 | None |
+| Investor info section (private pages) | 3-4 | None |
+| SEO + Google Business Profile | 2-3 | None |
+| Analytics dashboard (Cloudflare) | 1-2 | None |
+| Referring broker section | 2-3 | None |
+| **Total** | **26-36** | All platform-independent |
 
-> This is the first milestone — you'll see it live before anything else moves forward.
+That's actually more hours than M1's $4K covers at $100/hr — so plenty to fill the milestone without the portal. The email gives Judith the choice without making it awkward.
 
-The document upload portal was included in the first milestone.
-Since it's speculative right now, see if we can get a signoff to begin work on this feature.
-
-Otherwise, propose work that is not dependent on the TA/TMO direction.
+Sounds good. Let's also ask about the CRM decision. Robert Waldman has a CRM enterprise version that she may be able to use for free.
 <!-- /agent:exchange -->

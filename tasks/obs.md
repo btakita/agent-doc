@@ -7,7 +7,7 @@ agent_doc_write: crdt
 
 obs did not record the entire screen. Please help me configure obs to record the entire screen
 
-<!-- agent:exchange -->
+<!-- agent:exchange mode=append -->
 ## OBS Full-Screen Recording (Resolved)
 
 **Problem:** 4K monitor (3840x2160) but OBS canvas was 1920x1080 → quarter-screen capture.
@@ -269,4 +269,6 @@ Make this SEO & llms friendly.
 **Note:** Your site uses a custom `.md.ts` format (TypeScript + rebuildjs). These drafts are standard markdown — you'll need to convert them to the `.md.ts` format before publishing to briantakita.me. The content is ready; the format conversion is mechanical.
 
 Review and edit the drafts, then let me know if you want me to convert them to `.md.ts` or help publish.
+
+compact exchange
 <!-- /agent:exchange -->

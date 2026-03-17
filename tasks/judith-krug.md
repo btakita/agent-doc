@@ -181,23 +181,24 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange -->
-### Re: BCC Robert Ward + create draft
+### Re: Document upload portal scope
 
-Done. Draft created at `mail/drafts/20260317-judith-website-kickoff.md`:
+Good call. Updated the email draft (`mail/drafts/20260317-judith-website-kickoff.md`):
 
-- **To:** judithkrug@gmail.com
-- **CC:** rwaldman100@gmail.com
-- **BCC:** robertward3@yahoo.com
-- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
-- **Status:** draft
+- Removed "document upload portal" as a standalone bullet — if MA stays, they provide that
+- Changed to "Secure document handling built in from day one" — vaguer, works either way
+- Removed "document upload portal" from the intro sentence too
 
-Same subject line as previous emails to maintain Gmail threading. Robert Ward is BCC'd so he can see the outreach without Judith knowing he's being kept in the loop.
+The website itself is the unambiguous deliverable. Document upload can be scoped once the MA situation resolves:
+- **If MA goes away:** We build a full upload portal (Phase 2 scope, 12-16 hours)
+- **If MA stays:** We just need secure links/embeds to MA's portal from the website
 
-Ready to send when you are — review the draft and let me know if you want any changes.
+Either way, the website migration is pure value with zero platform dependency.
 
-> Secure document upload portal
+> This is the first milestone — you'll see it live before anything else moves forward.
 
-If Judith is forced to use MO, they would provide the document upload portal.
-I don't think she will use MO since her lawyer is confident he can get her out of the contract.
-And MO has been aggressive about enforcing the contract.
+The document upload portal was included in the first milestone.
+Since it's speculative right now, see if we can get a signoff to begin work on this feature.
+
+Otherwise, propose work that is not dependent on the TA/TMO direction.
 <!-- /agent:exchange -->

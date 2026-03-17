@@ -20,14 +20,24 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-**Done.** All submodules clean, agent-loop pushed.
+### Submodules committed & pushed
 
-- **agent-doc**: Committed pending feature (tmux display-message flash on route) → `ea35b2a`, pushed
-- **philosophy**: Clean (untracked `.iml` already gitignored)
-- All other submodules: already committed and pushed from previous cycle
+| Submodule | Commit | Summary |
+|-----------|--------|---------|
+| **agent-doc** | `7b8c95c`, `b043099` | vscode v0.2.1 + README, bump to v0.17.16 |
+| **briantakita.me-dev** | `c557bc2` | add @rappstack/domain--server dep |
+| **brookebrodack-dev** | `7c09f1e` | deploy workflow + deps + site build |
+| **rappstack-dev** | `19ee4da` | update domain--server |
+| **tmux-router** | `7391d14`, `2c65cfd` | send_keys timing + focus_pane logging, bump to v0.2.5 |
 
-Parent: `6cb9134` (agent-doc pointer update), pushed to `main`.
+### Released
 
-commit and push submodules. Release any unreleased changes.
-commit and push agent-loop
+- **agent-doc v0.17.16** — crates.io, PyPI, GitHub Release (binary + vsix + JB plugin)
+- **tmux-router v0.2.5** — crates.io, GitHub Release (binary)
+
+Add VERSIONS.md to tmux-router
+
+### agent-loop
+
+Parent repo committed (`2b39ffb`) and pushed — all submodule pointers + task documents updated.
 <!-- /agent:exchange -->

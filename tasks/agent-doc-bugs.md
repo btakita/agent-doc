@@ -1260,5 +1260,32 @@ Binary rebuilt and installed. Ready to test.
 Tested on tasks/mi-www.site.md
 - tmux pane did not switch
 - `/agent-doc run tasks/mi-www.site.md` was left in the input. Enter not successful
+
+### Re: Enter verification + wrong code path
+
+**Three fixes:**
+
+1. **Wrong code path was the main issue.** For unregistered files (new task), `find_target_pane()` found an existing active pane and lazy-claimed it — stealing another session. The poll-and-send logic only lives in `auto_start()`, which was never reached. **Fix:** Lazy-claim now only triggers when a *registered* pane has died. New files always go to `auto_start()`.
+
+2. **Enter verification via polling.** After `send_command()`, waits 500ms and checks if the `❯` prompt is still visible. If the prompt is still there (command not accepted), retries the Enter key. This provides the direct confirmation you asked about.
+
+3. **Pane focus** was already added in the previous cycle. Now that new files hit `auto_start()`, the `select_pane` call will actually execute.
+
+Binary rebuilt and installed. Tests pass.
+
+**Summary of all auto-start fixes this session:**
+- ❯ prompt detection (not ASCII >)
+- 300ms send_keys delay (not 50ms)
+- Enter key retry on failure
+- Immediate pane focus after creation
+- New files → auto_start (not lazy-claim)
+- 15s timeout (not 60s)
+- ANSI code stripping
+- Debug logging every 5s
+
+Ready to test.
+
+Add tests as we add fixes.
+We want to model the behavior.
 <!-- /agent:exchange -->
 ****

@@ -99,22 +99,19 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: request_url fix in rappstack-dev
+### Re: Type errors fixed
 
-Found your changes in `rappstack-dev/lib/domain--server/request/index.ts`:
+Fixed `rappstack-dev/lib/domain--server/request/index.ts`:
 
-1. **Null guard with `nullish__none_`** — `request_url__origin_` and `request_url__href_` now gracefully handle null `request_url` instead of crashing on destructuring
-2. **Import fix** — `relysjs/server` → `rhonojs/server` (stale import from pre-migration)
+- Simplified `request_url__href_` — replaced `nullish__none_(tup(...))` with explicit null checks. Clearer control flow, no `tup` import needed.
+- Simplified `request_url__origin_` — replaced `nullish__none_([request_url_(ctx)], ...)` with explicit null guard. Added `request_ctx_T` type annotation to the callback parameter.
+- Removed unused `tup` import.
 
-This addresses the root cause: during prerender, `request_url_(ctx)` returns null because there's no real HTTP request. The `nullish__none_` wrapper short-circuits and returns `none` instead of throwing `TypeError: Cannot destructure property 'hostname' of null`.
+Both functions now return `undefined` when inputs are nullish (during prerender), avoiding the `TypeError` crash.
 
-**Next steps to get this into CI:**
-1. Commit + push `domain--server` in rappstack-dev
-2. Publish `@rappstack/domain--server` to npm (bump to 0.1.1)
-3. In briantakita.me-dev: `bun update @rappstack/domain--server` to pick up the new version
-4. Push briantakita.me-dev to trigger CI
+**Type check result:** `request/index.ts` compiles cleanly. Two pre-existing errors remain in `jsonld/index.ts` and `rdfa/index.ts` (unrelated — `string | undefined` not assignable to `nested_url_segment_a_T`).
 
-Want me to handle the publish + integration, or are you driving this?
+Ready for commit + publish when you want to proceed.
 
-There are some type errors. Please fix those.
+go
 <!-- /agent:exchange -->

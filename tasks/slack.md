@@ -20,9 +20,8 @@ agent_doc_write: crdt
 
 <!-- agent:status mode=replace -->
 - [x] Ctrl+Shift+U bug: reported to Slack
-- [x] Notifications: fixed and verified (dunst running, i3 config, DBus override)
+- [x] Notifications: fully resolved (dunst + Slack config)
 - [ ] Reply email with screenshot (need file path)
-- [ ] Confirm Slack notifications work (user test)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -107,7 +106,7 @@ Here's the configuration reference. I'll also save this to a persistent location
 **Problem:** CachyOS (Arch-based) installs `notification-daemon` (GNOME) which auto-activates via DBus. Under i3, it silently swallows all notifications — no visual popups appear. Dunst is the standard notification daemon for i3/tiling WM setups.
 
 I was seeing notifications from pulsesms. I think this is a slack only issue.
-I just saw a dunst notification from slack. I 
+I just saw a dunst notification from slack. I changed my slack notification config.
 
 **Configuration (3 files):**
 
@@ -137,5 +136,16 @@ dbus-send --session --dest=org.freedesktop.Notifications \
 # Test
 notify-send "Test" "Should appear as dunst popup"
 ```
+
+
+### Slack notifications confirmed working
+
+The fix was two-part:
+1. **System level:** dunst replacing notification-daemon (already done)
+2. **Slack level:** notification config change inside Slack preferences
+
+PulseSMS was already sending notifications via dunst, confirming the system notification stack was working — the issue was Slack-specific settings. Now resolved.
+
+Let's try the original notification-daemon config again.
 
 <!-- /agent:exchange -->

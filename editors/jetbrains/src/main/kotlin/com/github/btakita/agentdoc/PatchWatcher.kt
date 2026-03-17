@@ -162,6 +162,9 @@ class PatchWatcher(private val project: Project) : Disposable {
 
             if (result != content) {
                 document.setText(result)
+                LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
+            } else {
+                LOG.warn("Patch produced no changes for ${patch.file}")
             }
         })
 
@@ -212,23 +215,33 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Replace content between `<!-- agent:name -->` and `<!-- /agent:name -->` markers.
+     * Replace content between `<!-- agent:name -->` (with optional attributes) and `<!-- /agent:name -->` markers.
+     * Supports inline attributes like `<!-- agent:name mode=append -->`.
      */
     private fun applyComponentPatch(doc: String, component: String, content: String): String {
-        val openTag = "<!-- agent:$component -->"
+        // Match open tag with optional attributes: <!-- agent:name ... -->
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:$component -->"
 
-        val openIdx = doc.indexOf(openTag)
-        if (openIdx < 0) return doc
-
-        val contentStart = openIdx + openTag.length
+        val openMatch = openPattern.find(doc) ?: return doc
+        val contentStart = openMatch.range.last + 1
         val closeIdx = doc.indexOf(closeTag, contentStart)
         if (closeIdx < 0) return doc
 
+        // Check mode from inline attributes (e.g., mode=append)
+        val attrs = openMatch.groupValues.getOrNull(1) ?: ""
+        val modeMatch = Regex("""mode=(\w+)""").find(attrs)
+        val mode = modeMatch?.groupValues?.getOrNull(1) ?: "replace"
+
         val before = doc.substring(0, contentStart)
+        val existingContent = doc.substring(contentStart, closeIdx)
         val after = doc.substring(closeIdx)
 
-        return before + "\n" + content.trimEnd() + "\n" + after
+        return when (mode) {
+            "append" -> before + existingContent.trimEnd() + "\n" + content.trimEnd() + "\n" + after
+            "prepend" -> before + "\n" + content.trimEnd() + "\n" + existingContent.trimStart() + after
+            else -> before + "\n" + content.trimEnd() + "\n" + after // replace
+        }
     }
 
     override fun dispose() {

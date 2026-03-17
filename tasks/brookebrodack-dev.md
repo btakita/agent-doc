@@ -549,5 +549,35 @@ But having a slug doesn't create a page. The slug only links to `/content/:slug`
 This pipeline could be automated in CI (WebSub detects new video → generate post → commit → deploy), but that's not built yet.
 
 Let's create the software for a pipeline for new videos.
-Can github 
+### Re: New video pipeline
+
+Your message got cut off ("Can github actions or cl..."), but I'll address the design question.
+
+**Current flow:** WebSub worker detects new video → triggers `workflow_dispatch` → GitHub Actions rebuilds with latest YouTube API data → deploys to Cloudflare Pages. The new video appears on `/content` but links to YouTube (no post page).
+
+**What's missing:** Automatic post generation (transcription + AI summary + `.md` file creation).
+
+**Pipeline options:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **GitHub Actions** | Already has WebSub trigger, can run corky/whisper, full repo access | No GPU (CPU-only Whisper ~2min/video), runner minutes cost |
+| **Cloudflare Worker** | Fast, cheap | No GPU, can't run Whisper, limited execution time |
+| **Self-hosted runner** | GPU access (RTX 5090), fast transcription | Needs always-on machine |
+| **Hybrid** | GH Actions orchestrates, calls self-hosted for GPU work | More complex |
+
+**Recommended: GitHub Actions with CPU Whisper fallback**
+
+The pipeline would add a step to `deploy.yml`:
+1. Detect new videos (compare YouTube API response against existing `.md` files)
+2. For each new video: download audio → CPU Whisper transcription → AI summary via Claude API → create `.md` file
+3. Commit new posts → rebuild with new content → deploy
+
+CPU Whisper on GH Actions runners (~2 cores) takes ~3-5min per video, which is fine for 1-2 new videos at a time. For batch operations (like the initial 180), you'd still use your local GPU.
+
+Want me to implement this pipeline?
+
+
+
+
 <!-- /agent:exchange -->

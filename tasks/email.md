@@ -18,7 +18,8 @@ agent_doc_write: crdt
 
 <!-- agent:status -->
 - [x] btak.dev account added to .corky.toml
-- [ ] Gmail API sync provider — detailed plan written, awaiting approval
+- [x] Gmail API sync provider implemented & compiled
+- [ ] First sync test with btak.dev
 <!-- /agent:status -->
 
 ## Exchange
@@ -447,6 +448,27 @@ corky sync
 Ready to start implementation?
 
 Yes
+
+```
+=== Account: btak.dev (btak.dev@gmail.com) ===
+  Error resolving password for btak.dev: Account "btak.dev@gmail.com" has no password or password_cmd
+```
+The error happened because `corky sync` was running the old binary (before the Gmail API code was compiled). I've now:
+
+1. **Implemented the Gmail API sync provider** — new file `src/corky/src/sync/gmail_api_sync.rs`
+2. **Added auth scope expansion** — `gmail_auth.rs` now supports `gmail.readonly` scope
+3. **Updated provider dispatch** — `sync/mod.rs` routes `gmail-api` accounts to the new sync module
+4. **Added sync state types** — `GmailLabelState` with `last_history_id` for incremental sync
+5. **Updated `.corky.toml`** — btak.dev now uses `provider = "gmail-api"` (no password_cmd needed)
+6. **Built release binary** — `cargo build --release` completed, `.bin/corky` symlink updated
+
+**Try `corky sync --account btak.dev` now.** It should:
+- Open your browser for Gmail OAuth2 authorization (first time only)
+- Authorize with btak.dev@gmail.com
+- Fetch messages from INBOX via Gmail API
+- Write them to `mail/conversations/` as markdown
+
+The OAuth token will be cached at `~/.config/corky/tokens.json` for future syncs.
 
 ```
 === Account: btak.dev (btak.dev@gmail.com) ===

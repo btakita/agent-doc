@@ -222,4 +222,28 @@ Extensions → ... → Install from VSIX → select agent-doc-0.2.0.vsix
 
 Can we publish this plugin to the VSCode marketplace?
 Can we also enable install from the agent-doc cli?
+
+### Re: VS Code marketplace + CLI install
+
+**VS Code Marketplace:** Yes. Requirements:
+1. A publisher account on https://marketplace.visualstudio.com (free, uses Azure DevOps PAT)
+2. `npx @vscode/vsce publish` with the PAT
+3. Add `publisher` field to `package.json`
+4. Add `icon`, `repository`, and `categories` fields for the listing
+
+The extension is ready — just needs the marketplace metadata. Want me to set it up?
+
+**CLI install (`agent-doc plugin install vscode`):** Already partially implemented. `plugin.rs` has `jetbrains_plugin_dirs()` for JB. Adding a `vscode` target would:
+1. Download the `.vsix` from GitHub Releases (or build locally)
+2. Run `code --install-extension <path>` (VS Code CLI)
+3. For Cursor: `cursor --install-extension <path>`
+
+```bash
+agent-doc plugin install vscode    # Install from GitHub Releases
+agent-doc plugin install cursor    # Same vsix, different CLI
+```
+
+Both features are straightforward. The marketplace publish is a one-time setup; the CLI install is a code change to `plugin.rs`. Want me to implement one or both?
+
+What is the difference between cursor and vscode for plugin install? 
 <!-- /agent:exchange -->

@@ -412,4 +412,17 @@ Please summarize and highlight import considerations in /home/brian/work/btakita
 - No exclusivity — you can publish the same extension elsewhere (VS Code Marketplace, GitHub, etc.)
 
 **Verdict:** Safe to accept for an MIT-licensed open-source extension. This is essentially the same terms as npm, crates.io, or PyPI — standard registry hosting agreement.
+
+### Re: Published to Open VSX
+
+**Published: btakita.agent-doc v0.2.0** on Open VSX.
+
+- Namespace created: `btakita`
+- Extension: https://open-vsx.org/extension/btakita/agent-doc
+- Install in Cursor/VSCodium: search "agent-doc" in extensions
+- CLI: `agent-doc plugin install vscode` (downloads from GitHub Releases)
+
+The extension is now available on Open VSX for Cursor, VSCodium, and other VS Code-compatible editors.
+
+Add README
 <!-- /agent:exchange -->

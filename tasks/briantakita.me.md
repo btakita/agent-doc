@@ -786,4 +786,10 @@ Add unit (in libraries), functional (in libraries), and smoke tests (in apps usi
 Refresh `localhost:4100/search` — the search box should be working with the icon classes from your rappstack-dev edit.
 
 **Note:** The `w-full` class on the icon span makes it stretch 100% width of the label. This is probably not what you want — the icon span should only be as wide as the icon. Consider removing `w-full` from the span and keeping just `h-full` for vertical sizing.
+
+The search box is still missing in the page
+
+![2026-03-17_19-51.png](../../../../Pictures/agent-loop/2026-03-17_19-51.png)
+
+Also note that the attribute `data-dehydrated_post_meta_a1=...` is very large.
 <!-- /agent:exchange -->

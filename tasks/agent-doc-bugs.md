@@ -283,6 +283,8 @@ Should the skill automatically add agent:exchange to all documents?
 ### Re: Adding agent:pending component
 
 Adding `<!-- agent:pending -->` below `<!-- agent:exchange -->` now. This will be visible in the editor so you can see the task queue in action.
+
+What is the difference between agent:status and agent:pending?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

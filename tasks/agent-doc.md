@@ -246,11 +246,46 @@ Each pane kept its original window — they're now in session 0 in individual wi
 Implement:
 -  Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
 - `TmuxBatch` — command batching to reduce flicker: Would this be in tmux-router?
+
+### Re: Execution Mode in config.toml + TmuxBatch
+
+**1. Execution mode in `config.toml`** — implemented in `config.rs`:
+
+```toml
+# ~/.config/agent-doc/config.toml
+execution_mode = "hybrid"  # or "parallel" or "sequential"
+```
+
+Added `ExecutionMode` enum (`Hybrid` | `Parallel` | `Sequential`) with `Default` = `Hybrid`. The Config struct now has `execution_mode: Option<ExecutionMode>`. The skill can read it via `config::load()?.execution_mode.unwrap_or_default()`.
+
+**2. `TmuxBatch` in tmux-router** — implemented in `tmux.rs`:
+
+```rust
+let mut batch = TmuxBatch::new(&tmux);
+batch.add(&["select-window", "-t", "%5"]);
+batch.add(&["select-pane", "-t", "%5"]);
+batch.execute()?;
+```
+
+- Collects multiple tmux commands and joins them with `;` separator
+- Single tmux invocation instead of N separate process spawns
+- Fire-and-forget (`execute()`) or output-capturing (`execute_output()`)
+- Exported from `tmux_router::TmuxBatch`
+- `select_pane()` already converted to use TmuxBatch (2 invocations → 1)
+- 2 unit tests + doctest
+
+**Yes, TmuxBatch lives in tmux-router** — it's a tmux-level optimization, not agent-doc-specific. Any consumer of tmux-router can use it.
+
+**Tests:** tmux-router 58 tests (2 new), agent-doc 446 tests. All passing, clippy clean.
+
+release
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] Execution mode in `config.toml` — read hybrid/parallel/sequential from global config
+- [x] `TmuxBatch` — command batching to reduce flicker (tmux-router)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
@@ -258,11 +293,9 @@ Implement:
 - `agent-doc status` — Ratatui TUI with dashboard + interactive pane attachment
 - Sub-profiles for submodule workflows in `.agent-doc/config.toml`
 - Docker sandboxing (`--sandboxed`)
-- `TmuxBatch` — command batching to reduce flicker
 - `agent/api.rs` — direct HTTP API backend
 - `agent-doc init --dashboard` — scaffold template with log + status components
 - Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
-- Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
 - Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
 - `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
 - CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks

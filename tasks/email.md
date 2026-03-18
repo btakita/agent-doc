@@ -671,4 +671,16 @@ The `sync/mod.rs` (non-watch sync) passes `None` since it doesn't have a shutdow
 Rebuilt and installed. Restart `corky watch` to test.
 
 ![img_3.png](img_3.png)
+The OAuth app ("correspondence") is in testing mode in Google Cloud Console. Only approved test users can authorize. `btak.dev@gmail.com` needs to be added as a test user.
+
+**Fix:** Go to [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → OAuth consent screen → Test users → Add `btak.dev@gmail.com`.
+
+https://console.cloud.google.com/auth/overview?project=unop-d3871 does not have **Test users**
+
+The `brian.takita@gmail.com` account worked earlier because it was already listed as a test user (or is the project owner). Once you add `btak.dev@gmail.com` as a test user, the OAuth flow will work.
+
+(This is only needed during testing mode. Once the app is published/verified, any Google account can authorize.)
+
+Should I consider adding a google app for corky so other people can quickly get started?
+And/Or should there be instructions for users to setup their own app?
 <!-- /agent:output -->

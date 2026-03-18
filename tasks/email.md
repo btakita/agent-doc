@@ -20,8 +20,11 @@ agent_doc_write: crdt
 - [x] btak.dev account added to .corky.toml (sync_days=30)
 - [x] Gmail API sync provider implemented
 - [x] login_hint + email verification safeguard
-- [x] Ctrl+C cancellation token in watch mode
-- [ ] Re-authorize with btak.dev@gmail.com
+- [x] Ctrl+C cancellation token
+- [x] README Gmail API setup instructions
+- [x] Todo: public Google app (tasks/todo/)
+- [ ] Add btak.dev as test user in Cloud Console
+- [ ] Verify sync with btak.dev@gmail.com
 - [ ] Release 0.17.0
 <!-- /agent:status -->
 
@@ -709,4 +712,21 @@ Let's have a tasks/todo directory. Add corky-public-google-app.md has a todo tas
 Want me to draft the README section for Gmail API setup?
 
 Yes.
+Done:
+
+1. **Created `tasks/todo/corky-public-google-app.md`** — tracks the published Google OAuth app as a future task
+2. **Added Gmail API section to README** — step-by-step setup instructions covering:
+   - Creating OAuth credentials in Google Cloud Console
+   - Configuring `.corky.toml` with `provider = "gmail-api"`
+   - First sync with OAuth flow
+   - Notes on testing mode, login_hint, and email verification
+
+The README section is placed between "Slack import" and "Development" sections.
+
+Next steps: add `btak.dev@gmail.com` as a test user in the Cloud Console, then test the sync.
+
+release
+
+Let's rename the INBOX label for btak.dev@gmail.com to btak.dev.
+Rename all
 <!-- /agent:output -->

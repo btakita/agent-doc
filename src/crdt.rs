@@ -214,7 +214,41 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     // Read merged result
     let text = ours_doc.get_or_insert_text(TEXT_KEY);
     let txn = ours_doc.transact();
-    Ok(text.get_string(&txn))
+    let merged = text.get_string(&txn);
+
+    // Post-merge dedup: remove identical adjacent blocks (#15)
+    Ok(dedup_adjacent_blocks(&merged))
+}
+
+/// Remove identical adjacent text blocks separated by blank lines.
+///
+/// After a CRDT merge, both sides may independently append the same content
+/// (e.g., a `### Re:` section), resulting in duplicate adjacent blocks.
+/// This pass identifies and removes duplicates while preserving intentionally
+/// repeated content (only dedup blocks >= 2 non-empty lines to avoid
+/// false positives on short repeated lines like `---` or blank lines).
+pub fn dedup_adjacent_blocks(text: &str) -> String {
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    if blocks.len() < 2 {
+        return text.to_string();
+    }
+
+    let mut result: Vec<&str> = Vec::with_capacity(blocks.len());
+    for block in &blocks {
+        let trimmed = block.trim();
+        // Only dedup substantial blocks (>= 2 non-empty lines)
+        let non_empty_lines = trimmed.lines().filter(|l| !l.trim().is_empty()).count();
+        if non_empty_lines >= 2
+            && let Some(prev) = result.last()
+            && prev.trim() == trimmed
+        {
+            eprintln!("[crdt] dedup: removed duplicate block ({} lines)", non_empty_lines);
+            continue;
+        }
+        result.push(*block);
+    }
+
+    result.join("\n\n")
 }
 
 /// Compact a CRDT state by re-encoding (GC tombstones where possible).
@@ -853,5 +887,45 @@ commit and push all rappstack packages.
             !merged.contains("CompleteUser") && !merged.contains("Complete\nUser"),
             "Character interleaving detected. Got:\n{}", merged
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // dedup_adjacent_blocks tests (#15)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dedup_removes_identical_adjacent_blocks() {
+        let text = "### Re: Question\nAnswer here.\n\n### Re: Question\nAnswer here.\n\nDifferent block.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result.matches("### Re: Question").count(), 1);
+        assert!(result.contains("Different block."));
+    }
+
+    #[test]
+    fn dedup_preserves_different_adjacent_blocks() {
+        let text = "### Re: First\nAnswer one.\n\n### Re: Second\nAnswer two.";
+        let result = dedup_adjacent_blocks(text);
+        assert!(result.contains("### Re: First"));
+        assert!(result.contains("### Re: Second"));
+    }
+
+    #[test]
+    fn dedup_ignores_short_repeated_lines() {
+        // Single-line blocks like "---" should not be deduped
+        let text = "---\n\n---\n\nContent.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn dedup_handles_empty_text() {
+        assert_eq!(dedup_adjacent_blocks(""), "");
+    }
+
+    #[test]
+    fn dedup_no_change_when_no_duplicates() {
+        let text = "Block A\nLine 2.\n\nBlock B\nLine 2.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result, text);
     }
 }

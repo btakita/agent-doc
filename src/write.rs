@@ -283,9 +283,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // inline attr (patch=append on tag) > components.toml > built-in default.
     // The skill sends delta content for append-mode components.
     let mode_overrides = std::collections::HashMap::new();
-    let content_ours = template::apply_patches_with_overrides(
+    let mut content_ours = template::apply_patches_with_overrides(
         base, &patches, &unmatched, file, &mode_overrides,
     ).context("failed to apply template patches")?;
+
+    // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
+    if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
+        content_ours = crate::frontmatter::merge_fields(&content_ours, &fm_patch.content)
+            .context("failed to merge frontmatter patch")?;
+    }
 
     // Acquire advisory lock
     let doc_lock = acquire_doc_lock(file)?;

@@ -852,4 +852,33 @@ release ctx-core, rappstack, and briantakita.me
 Shall I proceed with the release sequence?
 
 proceed
+Add SPEC.md files for the changed packages. So we retain the changes.
+### Re: Release completed
+
+**1. rappstack-dev/lib/ui--browser--blog:**
+- Committed `search__input_label` class + `h-full`/`w-full` changes
+- **Fixed broken 0.1.1 publish** — had `workspace:*` deps that break npm consumers
+- Replaced `workspace:*` with `^0.1.0` version ranges
+- Published `@rappstack/ui--browser--blog@0.1.2` to npm
+- Pushed to GitHub, updated rappstack-dev submodule pointer
+
+**2. briantakita.me-dev:**
+- Committed `build.ts` (ts_resolve_plugin_, watch_dirs), `index.css.ts` (@source absolute path)
+- Created `bin/link-rappstack.sh` for local dev symlinks
+- Cleaned yalc artifacts, removed symlinks
+- Regenerated `bun.lock` with `@rappstack/ui--browser--blog@0.1.2`
+- **Pushed to CI** — `3604c0d`
+
+**3. agent-loop submodule pointers** — staged for ctx-core-dev, rappstack-dev, briantakita.me-dev
+
+**Issue found during release:** `@rappstack/ui--browser--blog@0.1.1` was published with `workspace:*` in its dependencies (from rappstack-dev monorepo). This broke `bun install` for any consumer. Fixed in 0.1.2.
+
+**CI running** — check GitHub Actions for briantakita.me-dev deploy status.
+
+**Note:** The `@source` absolute path in `index.css.ts` points to your local rappstack-dev path. This works locally but **will fail on CI** since the path doesn't exist on the runner. The CI will fall back to scanning `../../lib/**/*.ts` and `../app/**/*.ts`. If rappstack classes are missing from the production CSS, we'll need to either:
+1. Add a safelist back for CI
+2. Conditionally include `@source` only when the path exists
+3. Use the tailwind-safelist.ts approach
+
+compact exchange
 <!-- /agent:exchange -->

@@ -438,4 +438,22 @@ All targets published:
 Let's fix the current issues in the tmux session:
 - 10 windows...there should be 2
 - right pane was swapped with tmux session 1. We now have the `corky watch` pane, which belongs in tmux session 1. tmux session 1 has `agent-doc` which belongs in out tmux session 0.
+
+### Re: Fixing tmux session layout
+
+**Done.** Session 0 now has 2 windows (down from 10):
+- **Window 0:** 9 agent-doc panes (consolidated from 7 extra windows)
+- **Window 1:** stash (unchanged)
+
+**Swapped panes between sessions:**
+- `%48` (agent-doc) moved from session 1 → session 0 window 0
+- `%51` (corky watch) moved from session 0 → session 1
+
+**Registry fix:** Removed wrong registration of `%51` as `tasks/todo/corky-public-google-app.md` — that pane was actually running `corky watch`, not agent-doc.
+
+**Ran `agent-doc sync --col 2`** to apply the column layout.
+
+The self-healing `resync --fix` feature (deferred from last session) would have caught both issues automatically: wrong-session panes and stale registrations. Still on the backlog for v0.17.18.
+
+Implement `resync --fix`. Window 0 has an incorrect layout.
 <!-- /agent:exchange -->

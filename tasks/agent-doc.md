@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.19.0 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
+**Version:** v0.19.0+dev | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Config:** ExecutionMode (hybrid/parallel/sequential)
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** CRDT dedup, frontmatter patches
 <!-- /agent:status -->
 
 ## Architecture
@@ -296,12 +296,49 @@ Implement:
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
 - CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
+
+Are these issue already implemented?
+
+### Re: Binary-vs-Agent Docs + CRDT Dedup + Frontmatter Patches
+
+All three implemented:
+
+**1. Binary-vs-agent responsibility split** — added table to `CLAUDE.md`:
+
+| Owner | Responsibilities |
+|-------|-----------------|
+| **Binary** (Rust) | Component parsing, CRDT merge, snapshots, atomic writes, git, tmux routing, undo/extract/transfer |
+| **Skill** (SKILL.md) | Reading diff, interpreting intent, generating responses, deciding what to write, pending item management |
+
+Rule of thumb: unit-testable with fixed inputs → binary. Requires NL understanding → skill.
+
+**2. CRDT conservative dedup (#15)** — `dedup_adjacent_blocks()` in `crdt.rs`:
+- Post-merge pass that removes identical adjacent text blocks
+- Only dedup substantial blocks (>= 2 non-empty lines) to avoid false positives on `---` or blank lines
+- Applied automatically at the end of `merge()` before returning
+- 5 unit tests
+
+**3. CRDT frontmatter patches (#16)** — fixed disk write path in `write.rs`:
+- `run_stream()` now applies `patch:frontmatter` on the disk write path (was only applied in IPC path)
+- If a patch named "frontmatter" exists, calls `frontmatter::merge_fields()` after component patches
+- Fixes the inconsistency where frontmatter changes were lost when IPC timed out
+
+**Tests:** 451 (157 lib + 273 bin + 21 int) — 5 new dedup tests. Clippy clean.
+
+release
+
+VERSIONS.md is not uptodate
+
+BUGS:
+- 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
+- [x] Document binary-vs-agent responsibility split in README/CLAUDE.md
+- [x] CRDT conservative dedup (#15) — post-merge pass for identical adjacent blocks
+- [x] CRDT frontmatter patches (#16) — patch:frontmatter target for YAML updates
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
@@ -313,6 +350,4 @@ Implement:
 - Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
 - Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
 - `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
-- CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
-- CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
 <!-- /agent:pending -->

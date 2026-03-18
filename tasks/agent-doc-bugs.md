@@ -57,7 +57,7 @@ Your message was cut off: "It seems that person prompts sometimes" — want to f
 **Analysis of your options:**
 
 **1. `<!-- agent:pending -->
-- [ ] Should the skill automatically add agent:pending/agent:exchange to all documents?
+(empty — all items addressed)
 <!-- /agent:pending -->
 ```
 
@@ -359,6 +359,16 @@ I corrected it manually.
 Also "discuss" was not replaced in `agent:pending`.
 
 ```
+
+### Re: Cleanup + bugs acknowledged
+
+**Bugs you caught:**
+1. **Triple backtick formatting** — the scaffold code blocks were missing their `<!-- /agent:exchange -->` closing lines (truncated). You fixed manually.
+2. **"discuss" not removed from `agent:pending`** — the `patch:pending` write replaced the content but "discuss" survived because the snapshot wasn't updated between the exchange and pending writes. This is a timing issue in the write pipeline.
+
+**Exchange cleanup:** The `agent-doc compact` command fails because the broken code blocks contain `<!-- /agent:exchange -->` tags that the parser interprets as real component closers. To clean up, I'll compact in the next cycle after this response commits.
+
+**Pending cleanup:** Clearing stale items and "discuss" text now.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -374,7 +384,7 @@ Yes
 While it is useful to see pending below exchange...especially for long exchange content...I can forsee accidently adding prompts meant for exchange into the pending content.
 We should assume additions to `agent:pending` were meant for `agent:exchange`.
 
-
+clean up exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

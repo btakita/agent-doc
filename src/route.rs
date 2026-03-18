@@ -48,13 +48,31 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
     let file_path = file.to_string_lossy();
     let registered = sessions::lookup(&session_id)?;
 
-    // Step 1: Check if registered pane is alive
+    // Step 1: Check if registered pane is alive AND in the correct tmux session
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            eprintln!("[route] Pane {} is alive", registered_pane);
-            return send_command(tmux, registered_pane, &file_path);
+            // Verify the pane is in the target tmux session
+            let pane_session = tmux
+                .cmd()
+                .args(["display-message", "-t", registered_pane, "-p", "#{session_name}"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+
+            if pane_session == target_session {
+                eprintln!("[route] Pane {} is alive in session '{}'", registered_pane, pane_session);
+                return send_command(tmux, registered_pane, &file_path);
+            }
+            eprintln!(
+                "[route] Pane {} is alive but in wrong session ('{}', expected '{}'). Will re-create.",
+                registered_pane, pane_session, target_session
+            );
+            // Don't kill — the user might want to keep the session.
+            // Just proceed to auto-start in the correct session.
+        } else {
+            eprintln!("[route] Pane {} is dead", registered_pane);
         }
-        eprintln!("[route] Pane {} is dead", registered_pane);
     } else {
         eprintln!(
             "[route] No pane registered for session {}",
@@ -162,6 +180,32 @@ fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str
     target.filter(|p| tmux.pane_alive(p))
 }
 
+/// Find a registered agent-doc pane in the target tmux session.
+/// Used by auto_start to join alongside an existing agent-doc pane (not any random pane).
+fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane: &str) -> Option<String> {
+    let registry = sessions::load().ok()?;
+    for entry in registry.values() {
+        if entry.pane == exclude_pane || entry.pane.is_empty() {
+            continue;
+        }
+        if !tmux.pane_alive(&entry.pane) {
+            continue;
+        }
+        // Check if this pane is in the target session
+        if let Ok(output) = tmux
+            .cmd()
+            .args(["display-message", "-t", &entry.pane, "-p", "#{session_name}"])
+            .output()
+        {
+            let pane_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if pane_session == session_name {
+                return Some(entry.pane.clone());
+            }
+        }
+    }
+    None
+}
+
 /// Auto-start a new Claude session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Result<()> {
@@ -189,12 +233,16 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
 
     let new_pane = tmux.auto_start(session_name, &cwd)?;
 
-    // Join into the existing active window instead of leaving in a separate window.
-    if let Some(active) = tmux.active_pane(session_name)
-        && active != new_pane
-        && let Err(e) = tmux.join_pane(&new_pane, &active, "-dh")
-    {
-        eprintln!("[route] warning: join_pane failed ({} → {}): {}", new_pane, active, e);
+    // Join alongside an existing registered agent-doc pane in the target session.
+    // Don't use active_pane() — it could return a non-agent-doc pane (e.g., corky).
+    let join_target = find_registered_pane_in_session(tmux, session_name, &new_pane);
+    if let Some(target) = join_target {
+        eprintln!("[route] joining new pane {} alongside registered pane {} in session '{}'", new_pane, target, session_name);
+        if let Err(e) = tmux.join_pane(&new_pane, &target, "-dh") {
+            eprintln!("[route] warning: join_pane failed ({} → {}): {}", new_pane, target, e);
+        }
+    } else {
+        eprintln!("[route] no registered pane found in session '{}' to join alongside", session_name);
     }
 
     // Register immediately so subsequent route calls find this pane
@@ -595,5 +643,57 @@ mod tests {
             "command should have been executed, got: {}",
             content
         );
+    }
+
+    #[test]
+    fn pane_session_detection() {
+        // Verify we can detect which session a pane is in
+        let iso = IsolatedTmux::new("route-test-session");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        // Check session name
+        let output = iso
+            .cmd()
+            .args(["display-message", "-t", &pane, "-p", "#{session_name}"])
+            .output()
+            .unwrap();
+        let detected_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(
+            detected_session, session,
+            "pane should be in session '{}'", session
+        );
+    }
+
+    #[test]
+    fn pane_in_wrong_session_detected() {
+        // Create panes in two different sessions, verify we can distinguish them
+        let iso = IsolatedTmux::new("route-test-wrong-sess");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create session "correct" with a pane
+        let correct_pane = iso.auto_start("correct", &cwd).unwrap();
+
+        // Create session "wrong" with another pane
+        let wrong_pane = iso.auto_start("wrong", &cwd).unwrap();
+
+        // Verify they're in different sessions
+        let correct_session = iso
+            .cmd()
+            .args(["display-message", "-t", &correct_pane, "-p", "#{session_name}"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap();
+        let wrong_session = iso
+            .cmd()
+            .args(["display-message", "-t", &wrong_pane, "-p", "#{session_name}"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap();
+
+        assert_eq!(correct_session, "correct");
+        assert_eq!(wrong_session, "wrong");
+        assert_ne!(correct_session, wrong_session, "panes should be in different sessions");
     }
 }

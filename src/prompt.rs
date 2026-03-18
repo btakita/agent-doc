@@ -198,9 +198,9 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
 /// Looks for patterns like:
 /// ```text
 ///  Do you want to proceed?
-///    1. Yes
-///  ❯ 2. Yes, and don't ask again for: ...
-///    3. No
+///    [1] Yes
+///  ❯ [2] Yes, and don't ask again for: ...
+///    [3] No
 ///
 ///  Esc to cancel · ctrl+e to explain
 /// ```
@@ -240,7 +240,7 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
             continue;
         }
 
-        // Check for numbered option pattern: "N. label" with optional ❯ prefix
+        // Check for bracket option pattern: "[N] label" with optional ❯ prefix
         if let Some(opt) = parse_option_line(trimmed) {
             let is_selected = trimmed.starts_with('❯') || trimmed.starts_with('>');
             if is_selected {
@@ -271,7 +271,10 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
     }
 }
 
-/// Parse a single option line like "1. Yes" or "❯ 2. Yes, and don't ask..."
+/// Parse a single option line like "[1] Yes" or "❯ [2] Yes, and don't ask..."
+///
+/// Only matches the bracket format `[N] label` used by Claude Code's TUI.
+/// Does NOT match markdown numbered lists (`1. item`).
 fn parse_option_line(line: &str) -> Option<PromptOption> {
     // Strip leading ❯ or > marker
     let stripped = line
@@ -279,11 +282,14 @@ fn parse_option_line(line: &str) -> Option<PromptOption> {
         .trim_start_matches('>')
         .trim();
 
-    // Match "N. label" where N is a digit
-    let dot_pos = stripped.find('.')?;
-    let num_str = &stripped[..dot_pos];
+    // Match "[N] label" where N is a number
+    if !stripped.starts_with('[') {
+        return None;
+    }
+    let bracket_close = stripped.find(']')?;
+    let num_str = &stripped[1..bracket_close];
     let index: usize = num_str.parse().ok()?;
-    let label = stripped[dot_pos + 1..].trim().to_string();
+    let label = stripped[bracket_close + 1..].trim().to_string();
 
     if label.is_empty() {
         return None;
@@ -341,9 +347,9 @@ mod tests {
    Capture pane content
 
  Do you want to proceed?
-   1. Yes
- ❯ 2. Yes, and don't ask again for: tmux capture-pane:*
-   3. No
+   [1] Yes
+ ❯ [2] Yes, and don't ask again for: tmux capture-pane:*
+   [3] No
 
  Esc to cancel · ctrl+e to explain
 "#;
@@ -377,8 +383,8 @@ mod tests {
    /home/brian/file.txt
 
  Allow this action?
-   1. Yes
-   2. No
+   [1] Yes
+   [2] No
 
  Esc to cancel
 "#;
@@ -403,14 +409,14 @@ mod tests {
 
     #[test]
     fn parse_option_line_basic() {
-        let opt = parse_option_line("1. Yes").unwrap();
+        let opt = parse_option_line("[1] Yes").unwrap();
         assert_eq!(opt.index, 1);
         assert_eq!(opt.label, "Yes");
     }
 
     #[test]
     fn parse_option_line_with_cursor() {
-        let opt = parse_option_line("❯ 2. Yes, and don't ask again").unwrap();
+        let opt = parse_option_line("❯ [2] Yes, and don't ask again").unwrap();
         assert_eq!(opt.index, 2);
         assert_eq!(opt.label, "Yes, and don't ask again");
     }
@@ -419,6 +425,29 @@ mod tests {
     fn parse_option_line_no_match() {
         assert!(parse_option_line("Not an option").is_none());
         assert!(parse_option_line("").is_none());
+    }
+
+    #[test]
+    fn parse_option_line_rejects_markdown_numbered_list() {
+        // Must NOT match markdown numbered lists
+        assert!(parse_option_line("1. First item").is_none());
+        assert!(parse_option_line("2. Second item").is_none());
+        assert!(parse_option_line("❯ 3. Third item").is_none());
+    }
+
+    #[test]
+    fn markdown_numbered_list_not_detected_as_prompt() {
+        let content = r#"
+ Here is a list of steps:
+
+   1. Install the package
+   2. Run the setup script
+   3. Verify the output
+
+ Esc to cancel
+"#;
+        let info = parse_prompt(content);
+        assert!(!info.active, "markdown numbered list should not be detected as prompt");
     }
 
     #[test]

@@ -129,8 +129,18 @@ All targets published:
 **Session total: 7 releases** (v0.17.16 through v0.17.22).
 
 Will this fix cleanup tasks/todo/corky-public-google-app.md? Or will it just prevent it from happening in the first place?
+
+### Re: Prevention only — corky doc already fixed
+
+**Prevention only.** The v0.17.22 fix prevents future corruption — `sanitize_component_tags()` now handles UTF-8 correctly, so new writes won't produce mojibake.
+
+The corky-public-google-app.md was **already manually fixed** earlier in this session (replaced all `â` with `—`). No further cleanup needed there.
+
+To summarize: the fix stops the bleeding (new writes are safe), and the existing wound was already stitched (manual replacement done).
+
+fix tasks/todo/corky-public-google-app.md
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Investigate and fix UTF-8 encoding corruption in write pipeline
+
 <!-- /agent:pending -->

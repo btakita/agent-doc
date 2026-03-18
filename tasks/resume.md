@@ -13,6 +13,7 @@ agent_doc_write: crdt
 **PDF**: auto-generated via GitHub Action, deployed to [btakita.github.io/resume](https://btakita.github.io/resume/)
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
+**agent-resume**: `src/agent-resume/` — Rust crate scaffolded, compiles, render + validate working
 <!-- /agent:status -->
 
 ## Completed
@@ -119,9 +120,56 @@ The following are taken:
 Awaiting your pick, then I'll scaffold the crate.
 
 Let's go with agent-resume. I like vitae as well, but it's less discoverable and could be used for other things.
+
+### Re: agent-resume crate scaffolded
+
+**`agent-resume`** it is. Crate scaffolded at `src/agent-resume/` with:
+
+**Structure:**
+```
+src/agent-resume/
+├── Cargo.toml          # clap, serde, toml, anyhow, glob
+├── src/
+│   ├── main.rs         # CLI: render, validate subcommands
+│   ├── lib.rs          # module exports
+│   ├── data.rs         # Experience, Accomplishment, Phrases, Skill types
+│   ├── profile.rs      # Profile with Target (match_tags), Highlight, Sections
+│   ├── score.rs        # Tag-overlap scoring + accomplishment selection
+│   └── render.rs       # Markdown rendering from scored data
+└── data/
+    └── experiences/
+        └── presence-ai.toml   # First sample entry (Director of Engineering)
+```
+
+**Working commands:**
+- `agent-resume validate -d data` — parses all TOML, reports experience count
+- `agent-resume render -d data` — outputs scored markdown to stdout
+- `agent-resume render -d data -p profiles/target.toml` — filtered by profile
+
+**Sample output** (presence-ai.toml → markdown):
+```markdown
+### Presence AI — *Director of Engineering*
+<small>2022-09 – 2025-12 (3 yrs 3 mos) | Remote</small>
+- Built real-time AI avatar pipeline...
+- Designed reactive signal graph architecture...
+(5 accomplishments total)
+```
+
+**Next steps:**
+1. Create remaining experience TOML files (from BrianTakita.md)
+2. Add skills.toml taxonomy
+3. Add profile-based filtering (match_tags scoring already works)
+4. Integrate with build.py (call `agent-resume render` from Python)
+
+Create a btakita/agent-resume github project.
+Make a git submodule in agent-loop.
+
+Continue with Next steps
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Pick crate name and scaffold Rust project
-- [ ] Implement experience + skills database
+- [x] Pick crate name and scaffold Rust project
+- [ ] Create experience TOML files from BrianTakita.md
+- [ ] Add skills.toml taxonomy
+- [ ] Integrate with build.py
 <!-- /agent:pending -->

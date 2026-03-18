@@ -431,6 +431,20 @@ Add `agent:pending` component below `agent:exchange`.
 - If neither works, try: "APIs & Services" → "Credentials" → click on the OAuth client → then navigate to consent screen from there
 
 The `agent:pending` component has been added below `agent:exchange`. You can now write pending items there as checkbox lists.
+
+### Re: Can't find youtube.readonly scope
+
+**It's a separate API.** The YouTube scope (`https://www.googleapis.com/auth/youtube.readonly`) won't appear until you enable the YouTube Data API:
+
+1. APIs & Services → Library → search **"YouTube Data API v3"** → Enable
+2. Then the YouTube scopes appear in the consent screen scope picker
+
+Gmail and YouTube are separate Google APIs — each must be enabled independently in your project. If you don't need YouTube for the public app right now, skip it and add later. The `client_id` doesn't change.
+
+I added:
+- gmail.readonly
+- gmail.send
+- gmail.settings.basic
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

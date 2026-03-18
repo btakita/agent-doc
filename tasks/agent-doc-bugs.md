@@ -518,8 +518,29 @@ agent_doc_write: crdt
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
+
+### Re: Use markdown AST for patch placement
+
+**Good idea.** Currently patch application uses naive string search (find `&lt;!-- agent:NAME --&gt;` / `&lt;!-- /agent:NAME --&gt;` tags). Using the pulldown-cmark AST for patch placement would:
+
+1. **Correctly identify component boundaries** — the AST knows which HTML comments are top-level vs inside code blocks, blockquotes, or other structures
+2. **Prevent the code-block corruption bugs** — patches would only target HTML nodes at the document root level
+3. **Handle edge cases** — components inside indented lists, nested blockquotes, etc.
+
+**Implementation plan:**
+- Parse the document with pulldown-cmark
+- Walk the AST events to find `Event::Html` nodes matching the component pattern
+- Use the offset ranges from `into_offset_iter()` to locate the exact byte positions
+- Apply the patch at those positions instead of using string search
+
+This would replace the tag-finding logic in `component.rs` `parse()` and the content replacement in `template.rs` `apply_patches()`. The component parser already uses pulldown-cmark for code ranges — extending it to also provide component positions is natural.
+
+Want me to implement this? It's a deeper refactor of the write pipeline.
 <!-- /agent:exchange -->
 ```
+
+The patch response above went to the incorrect place.
+Add tests and fix.
 
 The below patch was added in the fenced document above. Are we using the ast to determine where to apply a patch from the agent session?
 
@@ -551,7 +572,5 @@ Please use the markdown ast to determine where to place the patch from the agent
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Why was "agent:pending component" prompt not addressed?
-- [x] Are we using AST to determine where to apply patches?
-- [x] "This was not addressed" — what was missed?
+- [ ] Use pulldown-cmark AST for patch placement (not just code range detection)
 <!-- /agent:pending -->

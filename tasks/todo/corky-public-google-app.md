@@ -90,4 +90,41 @@ So Terraform is purely maintainer-side infrastructure management. Users get a se
 Only if they use the public Corky app. I need to set that up and register it in the public store. And it needs approval.
 
 I also want to provide a self-serve solution for people to manage their own infrastructure.
+
+### Re: Two tracks — public app + self-serve infrastructure
+
+Right, so there are two parallel tracks:
+
+**Track 1: Public Corky App (you manage)**
+- Register OAuth app in GCP Console
+- Submit for Google security review (`gmail.readonly`)
+- Publish privacy policy + terms of service
+- Embed approved `client_id` in corky binary
+- Users just authenticate — zero setup
+
+The `client_id` can also be configurable.
+
+**Track 2: Self-Serve (user manages their own GCP project)**
+Options for making self-serve easy:
+
+1. **`corky init` CLI wizard** — Shell out to `gcloud` commands to walk users through creating their own OAuth app:
+   ```
+   corky init gmail
+   # Opens browser → Create Project → Enable Gmail API
+   # Creates OAuth consent screen + credentials
+   # Writes client_id/client_secret to ~/.config/corky/gmail.toml
+   ```
+   Most user-friendly — no Terraform, just `gcloud` CLI.
+
+Good. But we may also support other providers. Such as AWS, Azure, etc.
+
+2. **Bundled Terraform module** — Ship `terraform/` in the corky repo. Users run `terraform apply`. Reproducible but higher barrier.
+
+3. **Guided docs + config template** — Step-by-step guide with screenshots. User creates GCP project manually, pastes credentials into `corky.toml`. Lowest dependency, most manual.
+
+**Recommendation:** Start with option 3 (docs + config template) — works today, no new code. Build toward option 1 (`corky init`) as a future convenience. Terraform module is nice-to-have for power users.
+
+Option 3 sounds good as long as it is in sync. AWS CDK is nice because it enforces the synced configuration...even if it does require care to not wipe out production data.
+
+The two tracks are independent — ship self-serve docs immediately while Google security review for the public app is pending (can take weeks).
 <!-- /agent:exchange -->

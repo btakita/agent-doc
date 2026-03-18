@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.30 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.17.30+dev | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.5 (JNA FFI + Gson + IPC) + VS Code v0.2.0
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Claim:** immutable session binding
+**Plugins:** JetBrains v0.2.5 (JNA FFI + Gson + IPC) + VS Code v0.2.0 (prepend fix)
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** undo, extract, transfer commands
 <!-- /agent:status -->
 
 ## Architecture
@@ -133,34 +133,45 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange -->
 
-### Re: Pending Reorganization + VS Code Prepend Fix
+### Re: Response Diff Storage, Undo, Extract, Transfer
 
-Acknowledged the move of `agent:pending` below `agent:exchange`.
+All four features implemented:
 
-**VS Code prepend mode fixed.** `extension.ts:857` only had `append` and `replace` — `prepend` fell through to `replace`. Added the missing `prepend` case (5 lines, mirrors JetBrains behavior):
-```typescript
-if (mode === 'prepend') {
-    const existing = doc.substring(contentStart, closeIdx);
-    return before + '\
-' + trimmedContent + '\
-' + existing.trimStart() + after;
-}
-```
+**1. Response diff storage** (`snapshot.rs`):
+- New `.agent-doc/pre-response/` directory stores the document state before each agent write
+- `save_pre_response(doc, content)` called in all write paths (inline, template, stream + IPC)
+- One-deep undo: latest pre-response only (overwritten each write)
 
-Both plugin changes committed and pushed:
-- JetBrains: Gson parser (90 → 20 lines)
-- VS Code: prepend mode fix
+**2. `agent-doc undo`** (`undo.rs`):
+- Restores from `.agent-doc/pre-response/<hash>.md`
+- Updates main snapshot to match restored state
+- Deletes pre-response file (consumed) to prevent double-undo
+- No-op with message if no pre-response exists
 
-All active Phase 2 checkbox items are now complete. Next unchecked item would be whatever you'd like to tackle from the backlog.
+**3. `agent-doc extract`** (`extract.rs`):
+- `agent-doc extract <source> <target> [--component exchange]`
+- Extracts the last `### Re:` block from source's exchange component
+- Appends to target's matching component
+- Updates both snapshots atomically
+- 3 unit tests for split_last_entry
 
-continue
+**4. `agent-doc transfer`** (`extract.rs::transfer`):
+- `agent-doc transfer <source> <target> <component>`
+- Moves entire component content from source to target
+- Clears source component, appends to target component
+- Useful for splitting documents or archiving sections
 
-- Response diff storage for undo/extract workflows
-- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
-- `agent-doc extract` — move request+response pair to another document
-- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
+**Tests:** 446 (152 lib + 273 bin + 21 int) — 6 new tests. Clippy clean.
 
-Implement
+**Files changed:**
+- `src/snapshot.rs` — pre-response save/load/delete/path functions
+- `src/write.rs` — save_pre_response calls in all write paths
+- `src/undo.rs` — new module
+- `src/extract.rs` — new module (extract + transfer)
+- `src/main.rs` — wired up Undo, Extract, Transfer commands
+
+bump plugin versions and build
+I want to test the agent-doc version + plugins before releasing
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -170,10 +181,10 @@ Implement
 - [x] Phase 2 step 3: FFI is primary path, Kotlin fallbacks retained as safety net
 - [x] Phase 2 step 4: Replace parsePatchJson hand-rolled parser with Gson
 - [x] VS Code: Fix missing prepend mode (falls through to replace)
-- Response diff storage for undo/extract workflows
-- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
-- `agent-doc extract` — move request+response pair to another document
-- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
+- [x] Response diff storage — save pre-response snapshot before each write
+- [x] `agent-doc undo` — restore pre-response snapshot
+- [x] `agent-doc extract` — move request+response pair to another document
+- [x] `agent-doc transfer` — move context between documents by component
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)

@@ -138,6 +138,12 @@ Again, when my prompt is located before the patch response, my prompt is lost wh
 
 Can we diff against the CRDT patch to get the human prompt?
 
+Also want to get my missed prompt:
+
+Is there a markdown ast parser?
+So we can avoid these sort of issues.
+
+
 ### Re: Backtick corruption — document fixed
 
 **What happened:** Line 130 had `` `&lt;!-- agent:pending patch=replace --&gt; `` — the backtick opened but the tag content continued onto the next line. Inline code spans are single-line in CommonMark, so the parser correctly did NOT treat it as inline code. The tag was parsed as a real component opener, eating the pending component.
@@ -149,6 +155,26 @@ Can we diff against the CRDT patch to get the human prompt?
 **4 new tests added** confirming inline backtick code spans work correctly (single, double, mixed).
 
 **Prevention:** The `sanitize_component_tags()` in `write.rs` (v0.17.22) should catch this for agent-generated content. For user-typed content, the backtick must close on the same line to be treated as inline code.
+
+### Re: Prompt lost when before patch response in diff
+
+**The problem:** When you type a prompt ABOVE the last response, and the next cycle's diff contains both your prompt AND the previous response (which was just committed), the skill sees them as one blob and only processes the response portion — your prompt gets swallowed.
+
+**Diffing against the CRDT patch:** Yes, this could work. The idea:
+1. The CRDT patch contains exactly what the agent wrote (the response)
+2. The full diff contains user edits + agent response
+3. Subtracting the CRDT patch from the full diff isolates the user's edits
+
+**Simpler approach:** The snapshot already captures the state before the agent wrote. The diff between snapshot and current file shows BOTH user edits and agent response. But the commit in step 0b commits the agent's response — so after commit, the diff should only contain user edits.
+
+**The real issue:** The snapshot is updated when `agent-doc write` runs (step 4), which includes the response. So next cycle's diff = current - snapshot = only user changes since last write. This SHOULD work correctly. If your prompt is being lost, it means either:
+1. The snapshot was updated AFTER your prompt was written (race condition)
+2. The diff computation is stripping your prompt somehow
+3. The skill is seeing the prompt but not responding to it (the multi-prompt loss issue)
+
+**Most likely:** #3 — I see your prompt in the diff but fail to address it because I'm focused on the agent response portion. This is the skill-side attention problem, not a CRDT issue.
+
+Let me be more disciplined: I will address EVERY line in the diff, not just the parts that seem like new questions.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

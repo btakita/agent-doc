@@ -60,4 +60,8 @@ tasks/todo/corky-public-google-app.md has a fencing issue with the latest patch.
 
 Was it caused by an agent-doc bug? Or the skill?
 
+This document is malformed. No closed agent:exchange tag. No opening agent:pending tag.
+
+Diagnose the cause, add tests
+
 <!-- /agent:pending -->

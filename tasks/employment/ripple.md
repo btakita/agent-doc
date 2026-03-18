@@ -99,7 +99,127 @@ I'm being deliberate rather than rushing — I want to find a role where my deep
 
 Do you have the email thread with Priya? If yes, draft a response.
 I want it be a html multipart response with proper formatting for gmail.
-Fallback to markdown 
+Fallback to markdown in the text encoding.
+
+### Email Draft
+
+Yes, I have the full thread. The latest message is from Priya (Wed Mar 18, 9:24 AM): "Good morning, I am waiting for your response." This is on the rate confirmation thread (Thread ID: 19cfd24fbc0fcd87).
+
+Here's the draft reply. To send via corky or Gmail, you'll need the HTML and text parts:
+
+---
+
+**To:** priya.v@ritsolinc.com
+**Subject:** RE: Rate Confirmation : Brian Takita : Front-End Engineer With Solid AI experience : 100% Remote
+**In-Reply-To:** Thread 19cfd24fbc0fcd87
+
+---
+
+**Text part (markdown fallback):**
+
+```
+Hi Priya,
+
+Good morning! Here are the answers to the hiring manager's questions:
+
+**1. AI Experience**
+
+I have two years of hands-on production AI experience, spanning real-time multimodal systems and agentic developer tooling.
+
+*Presence AI (April 2024 – February 2026) — Lead Backend Engineer, AI Pipeline*
+
+At Presence AI, I architected and maintained the production real-time multimodal AI avatar pipeline. The system processed text, audio, and video through AI inference on NVIDIA H100 GPUs, delivering lip-synced AI avatar responses to users via WebRTC/LiveKit with sub-second latency.
+
+Key technical work:
+- Designed the full inference pipeline: facial landmark detection → LatentSync (VAE decode, denoising, frame restoration) → idle video generation → frame sequencing
+- Built streaming AI response infrastructure — real-time audio/video chunking with progressive rendering
+- Developed the AI observability layer: monitoring inference latency, GPU utilization, frame quality metrics, and pipeline health
+- Implemented quality evaluation for AI outputs: automated visual quality scoring, A/B testing for model versions, and regression detection
+- Built the TypeScript monorepo (8 internal packages) powering the full stack
+- Pioneered an iterative agentic development methodology with closed-loop agent auditing and human-in-the-loop feedback
+
+*Open Source AI Tooling (2024 – present)*
+
+I'm actively building production-grade AI agent infrastructure:
+
+- agent-doc — Interactive document session tool for persistent AI conversations. CRDT-based streaming merge for real-time human+agent co-editing. Built in Rust with JetBrains and VS Code plugins.
+- corky — Git-native correspondence system (Rust). Syncs email, Telegram, and Slack with per-topic agent context. Published on crates.io and PyPI.
+- existence-lang — Domain ontology language for structuring agent reasoning across domains.
+
+I use Claude Code daily as my primary development environment.
+
+**2. Why did you leave Presence AI last month?**
+
+Presence AI shut down in February 2026. The founders decided the real-time consumer AI avatar product was not viable in its current market, and the company ceased operations. My departure was not by choice.
+
+**3. Why don't you have something lined up already?**
+
+I'm actively engaged on multiple fronts. I'm in conversation with several recruiters and companies, and we're at various stages of the interview process. Presence AI only shut down last month, so I'm early in the cycle.
+
+I'm also using this transition strategically — investing time building open source agent tooling that keeps me at the cutting edge of AI development. The tools I'm building solve real problems: streaming AI responses, managing persistent AI sessions, and orchestrating agentic workflows.
+
+I'm also currently working with a client, so I have active professional commitments while I find the right opportunity.
+
+Best regards,
+Brian Takita
+```
+
+---
+
+**HTML part:**
+
+```html
+<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+<p>Hi Priya,</p>
+
+<p>Good morning! Here are the answers to the hiring manager's questions:</p>
+
+<h3 style="color: #1a1a1a; border-bottom: 1px solid #ddd; padding-bottom: 4px;">1. AI Experience</h3>
+
+<p>I have two years of hands-on production AI experience, spanning real-time multimodal systems and agentic developer tooling.</p>
+
+<h4 style="color: #444;">Presence AI (April 2024 – February 2026) — Lead Backend Engineer, AI Pipeline</h4>
+
+<p>At Presence AI, I architected and maintained the production real-time multimodal AI avatar pipeline. The system processed text, audio, and video through AI inference on NVIDIA H100 GPUs, delivering lip-synced AI avatar responses to users via WebRTC/LiveKit with sub-second latency.</p>
+
+<p><strong>Key technical work:</strong></p>
+<ul>
+<li>Designed the full inference pipeline: facial landmark detection → LatentSync (VAE decode, denoising, frame restoration) → idle video generation → frame sequencing</li>
+<li>Built streaming AI response infrastructure — real-time audio/video chunking with progressive rendering</li>
+<li>Developed the AI observability layer: monitoring inference latency, GPU utilization, frame quality metrics, and pipeline health</li>
+<li>Implemented quality evaluation for AI outputs: automated visual quality scoring, A/B testing for model versions, and regression detection</li>
+<li>Built the TypeScript monorepo (8 internal packages) powering the full stack</li>
+<li>Pioneered an iterative agentic development methodology with closed-loop agent auditing and human-in-the-loop feedback</li>
+</ul>
+
+<h4 style="color: #444;">Open Source AI Tooling (2024 – present)</h4>
+
+<p>I'm actively building production-grade AI agent infrastructure:</p>
+<ul>
+<li><strong>agent-doc</strong> — Interactive document session tool for persistent AI conversations. CRDT-based streaming merge for real-time human+agent co-editing. Built in Rust with JetBrains and VS Code plugins.</li>
+<li><strong>corky</strong> — Git-native correspondence system (Rust). Syncs email, Telegram, and Slack with per-topic agent context. Published on crates.io and PyPI.</li>
+<li><strong>existence-lang</strong> — Domain ontology language for structuring agent reasoning across domains.</li>
+</ul>
+
+<p>I use Claude Code daily as my primary development environment.</p>
+
+<h3 style="color: #1a1a1a; border-bottom: 1px solid #ddd; padding-bottom: 4px;">2. Why did you leave Presence AI last month?</h3>
+
+<p>Presence AI shut down in February 2026. The founders decided the real-time consumer AI avatar product was not viable in its current market, and the company ceased operations. My departure was not by choice.</p>
+
+<h3 style="color: #1a1a1a; border-bottom: 1px solid #ddd; padding-bottom: 4px;">3. Why don't you have something lined up already?</h3>
+
+<p>I'm actively engaged on multiple fronts. I'm in conversation with several recruiters and companies, and we're at various stages of the interview process. Presence AI only shut down last month, so I'm early in the cycle.</p>
+
+<p>I'm also using this transition strategically — investing time building open source agent tooling that keeps me at the cutting edge of AI development. The tools I'm building solve real problems: streaming AI responses, managing persistent AI sessions, and orchestrating agentic workflows.</p>
+
+<p>I'm also currently working with a client, so I have active professional commitments while I find the right opportunity.</p>
+
+<p>Best regards,<br>Brian Takita</p>
+</div>
+```
+
+Review and edit — let me know when you want to send it, or if you want any changes.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

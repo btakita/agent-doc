@@ -26,6 +26,12 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
 - [ ] Phase 1: Register public Google OAuth app
+  - [ ] Create GCP project
+  - [ ] Enable Gmail API
+  - [ ] Configure OAuth consent screen
+  - [ ] Create OAuth client credentials
+  - [ ] Draft privacy policy & terms of service
+  - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command
 - [ ] Phase 4: Self-serve documentation
@@ -234,4 +240,47 @@ Explored corky codebase. Good foundations already exist:
 Ready to start on any phase. Phase 1 requires GCP Console access. Phases 2-4 are code — want me to start implementing?
 
 Implement phase 1
+
+### Re: Implement Phase 1
+
+Phase 1 requires GCP Console access (`gcloud` CLI not installed). Here are the exact manual steps:
+
+**Step 1: Create GCP Project**
+1. Go to console.cloud.google.com → Create Project
+2. Project name: "corky-mail" (or your preferred name)
+3. Note the project ID
+
+**Step 2: Enable Gmail API**
+1. APIs & Services → Library → Search "Gmail API" → Enable
+
+**Step 3: Configure OAuth Consent Screen**
+1. APIs & Services → OAuth consent screen
+2. User Type: **External**
+3. App name: **Corky**
+4. User support email: your email
+5. Developer contact: your email
+6. Scopes: Add `https://www.googleapis.com/auth/gmail.readonly`
+7. Privacy policy URL + Terms of service URL (see below)
+
+**Step 4: Create OAuth Client**
+1. Credentials → Create Credentials → OAuth client ID
+2. Application type: **Desktop app**
+3. Name: "Corky Desktop"
+4. Save `client_id` and `client_secret` (store in `pass` for safekeeping)
+
+**Step 5: Privacy Policy & Terms of Service**
+I can draft these for the corky repo right now. They'd live at:
+- `docs/privacy-policy.md` → hosted via GitHub Pages or raw GitHub URL
+- `docs/terms-of-service.md`
+
+**Step 6: Submit for Verification**
+After configuring the consent screen, click "Prepare for verification". Google reviews the app (2-6 weeks for `gmail.readonly`).
+
+**What I can do now:** Draft the privacy policy and terms of service documents. Want me to create those?
+
+Yes
+
+**What you need to do:** Steps 1-4 in GCP Console, then paste the `client_id` back here so we can proceed to Phase 2.
+
+Make use of newly-added `agent:pending`
 <!-- /agent:exchange -->

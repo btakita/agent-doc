@@ -18,35 +18,32 @@ Operational task document for agent-loop workspace management.
 - `.sync-state.json` gitignore for corky/mail
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
-<!-- agent:exchange -->
+<!-- agent:exchange patch= -->
 
-### Re: SPEC.md verification + Meta-cognition
+### Re: SPEC.md + pending component
 
-**SPEC.md added to pre-release checklist.** Two new rows in the verification table:
-- **SPEC.md is current** — if one exists, verify it reflects current architecture. Flag drift.
-- **No architecture-docs drift** — cross-check CLAUDE.md, README.md, and SPEC.md against actual code structure. Flag inconsistencies.
+**Created `.claude/skills/dev/SPEC.md`** — a project-agnostic specification for the dev skill. Another project can use this SPEC.md as a behavioral contract to build their own `/dev` skill.
 
-**Meta-cognition section added.** New `## Meta-Cognition — Self-Update` section in SKILL.md defines:
+**SPEC.md structure (10 sections):**
+1. **Overview** — thin orchestrator architecture, no CLI binary needed
+2. **Architecture** — invocation → skill → agent → toolchain → targets
+3. **Commands** — check, release, status, changelog (behavioral contracts)
+4. **Project Type Detection** — marker file → project type mapping (Cargo.toml, package.json, etc.)
+5. **Pre-Release Verification Checklist** — 9 mandatory checks including SPEC.md and drift detection
+6. **Release Workflows** — generic workflow + publication target table with verify commands
+7. **Secret Handling** — resolution protocol + path registry pattern
+8. **Meta-Cognition** — trigger → action table + update protocol
+9. **Workspace Integration** — cross-project updates + conventions
+10. **Customization** — three-layer model: SPEC.md (invariant) → SKILL.md (workspace config) → project CLAUDE.md (overrides)
 
-**When the skill self-updates:**
-- Release fails due to missing step → add it
-- New submodule added → update project tables + dependency ordering
-- New publication target → add workflow section
-- Pre-release check catches something new → add to checklist
-- Secret path changes → update secret handling
-- User corrects behavior → encode as rule
+**Key design insight:** SPEC.md is the **invariant layer** (what the skill MUST do), SKILL.md is the **configuration layer** (workspace-specific tables, secret paths, dependency graphs). Any project can take the SPEC.md and write their own SKILL.md to match their workspace.
 
-**Architecture-documentation drift detection** is now baked into both `/dev check` and `/dev release` — it compares CLAUDE.md, SPEC.md, and README.md against actual implementation and flags mismatches before proceeding.
+**Pending component** — now active. Using it going forward.
 
-The key insight: the skill accumulates operational knowledge over time. Each release teaches it something, and those lessons persist in the SKILL.md for the next session.
-
-Updated SKILL.md is at `.claude/skills/dev/SKILL.md` — ready for a test drive or further iteration
-
-Please use the agent:pending component.
-
-Add a SPEC.md for this skill. So another project can use the SPEC.md to build up their own custom dev skill.
-
+**Truncated message:** Your message "I want " appears cut off again. Could you complete it?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [x] Add SPEC.md for the dev skill (portable spec for other projects)
+- [ ] Respond to truncated message: "I want " (awaiting completion)
 <!-- /agent:pending -->

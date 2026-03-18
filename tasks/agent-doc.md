@@ -133,45 +133,30 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange -->
 
-### Re: Response Diff Storage, Undo, Extract, Transfer
+### Re: Plugin Bumps + Build for Testing
 
-All four features implemented:
+All built and ready for testing:
 
-**1. Response diff storage** (`snapshot.rs`):
-- New `.agent-doc/pre-response/` directory stores the document state before each agent write
-- `save_pre_response(doc, content)` called in all write paths (inline, template, stream + IPC)
-- One-deep undo: latest pre-response only (overwritten each write)
+| Artifact | Version | Location |
+|----------|---------|----------|
+| `agent-doc` binary | v0.17.30 (dev) | `~/.cargo/bin/agent-doc` (installed) |
+| `libagent_doc.so` | v0.17.30 | `target/release/libagent_doc.so` |
+| JetBrains plugin | v0.2.6 | `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.6.zip` (unsigned + signed) |
+| VS Code extension | v0.2.3 | `editors/vscode/agent-doc-0.2.3.vsix` |
 
-**2. `agent-doc undo`** (`undo.rs`):
-- Restores from `.agent-doc/pre-response/<hash>.md`
-- Updates main snapshot to match restored state
-- Deletes pre-response file (consumed) to prevent double-undo
-- No-op with message if no pre-response exists
+**To test:**
+- `agent-doc undo tasks/agent-doc.md` — should restore pre-response state
+- `agent-doc extract source.md target.md` — moves last exchange entry
+- `agent-doc transfer source.md target.md exchange` — moves full component
+- `agent-doc lib-path` — should print shared library path
+- JetBrains: Install `agent-doc-jetbrains-0.2.6.zip` from disk, verify IPC patching still works
+- VS Code: Install `agent-doc-0.2.3.vsix`, verify prepend mode works
 
-**3. `agent-doc extract`** (`extract.rs`):
-- `agent-doc extract <source> <target> [--component exchange]`
-- Extracts the last `### Re:` block from source's exchange component
-- Appends to target's matching component
-- Updates both snapshots atomically
-- 3 unit tests for split_last_entry
+Let me know when you're ready to release or if anything needs fixing.
 
-**4. `agent-doc transfer`** (`extract.rs::transfer`):
-- `agent-doc transfer <source> <target> <component>`
-- Moves entire component content from source to target
-- Clears source component, appends to target component
-- Useful for splitting documents or archiving sections
+release
 
-**Tests:** 446 (152 lib + 273 bin + 21 int) — 6 new tests. Clippy clean.
-
-**Files changed:**
-- `src/snapshot.rs` — pre-response save/load/delete/path functions
-- `src/write.rs` — save_pre_response calls in all write paths
-- `src/undo.rs` — new module
-- `src/extract.rs` — new module (extract + transfer)
-- `src/main.rs` — wired up Undo, Extract, Transfer commands
-
-bump plugin versions and build
-I want to test the agent-doc version + plugins before releasing
+compact exchange
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

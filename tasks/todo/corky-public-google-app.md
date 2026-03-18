@@ -170,4 +170,26 @@ This gives runtime sync validation — the "enforcement" happens when you run `c
 Should it be one or both?:
 - `corky doctor gmail`
 - `corky gmail doctor`
+
+### Re: CLI subcommand order — `corky doctor gmail` vs `corky gmail doctor`
+
+Two philosophies:
+
+| | Verb-first | Noun-first |
+|---|---|---|
+| Pattern | `corky doctor gmail` | `corky gmail doctor` |
+| Precedent | `git log`, `cargo build`, `kubectl get` | `gh pr list`, `npm run` |
+| Groups by | Action — `corky doctor` checks all | Provider — `corky gmail` is namespace |
+
+**Recommendation: verb-first (`corky doctor gmail`).** Reasons:
+
+1. **Consistent with existing corky CLI** — `corky sync`, `corky filter` are verb-first already
+2. **`corky doctor` (no args)** naturally checks all providers — clean default. Noun-first has no unified entry point
+3. **Discoverability** — `corky --help` lists actions; users pick action, then narrow by provider
+
+Noun-first (`corky gmail ...`) makes sense if you accumulate many provider-specific subcommands later. But you can add `corky gmail doctor` as an alias without conflict.
+
+**Start with `corky doctor gmail`. Alias `corky gmail doctor` later if the namespace grows.**
+
+go
 <!-- /agent:exchange -->

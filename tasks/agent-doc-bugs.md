@@ -388,6 +388,8 @@ Yes
 2. **`agent-doc diff --wait`:** Added `--wait` flag that calls `wait_for_stable_content()` before diffing. The skill can use `agent-doc diff --wait <FILE>` to get truncation-safe content. 3 new tests.
 
 Committed and pushed. Ready to release as v0.17.25.
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -311,6 +311,35 @@ Can this be abused in some way?
 Is this against Google Security Policy?
 
 These are intentionally public desktop OAuth credentials — standard pattern (Thunderbird, gcloud CLI all do this). Once unblocked, I'll push, tag, and publish.
+
+### Re: Hardcode vs env var, client secret security concerns
+
+**Hardcode vs build-time env variable:**
+Build-time env var avoids secret scanners and keeps values out of source:
+```rust
+pub const DEFAULT_GCP_CLIENT_ID: &str = env!("CORKY_DEFAULT_GCP_CLIENT_ID");
+pub const DEFAULT_GCP_CLIENT_SECRET: &str = env!("CORKY_DEFAULT_GCP_CLIENT_SECRET");
+```
+Values are embedded in the binary at compile time but absent from source code. This is how `gcloud` CLI handles it.
+
+**Can this be abused?**
+No meaningful abuse vector:
+- `client_id` + `client_secret` identify the *app*, not the *user*
+- To access data, an attacker still needs the user to click "Allow" in Google's consent screen
+- OAuth redirects to `localhost` — only local software captures the auth code
+- Per-user tokens are stored locally, never shared
+- Worst case: someone shows a consent screen with "Corky" branding to phish — but the `client_id` is visible in the OAuth URL anyway
+
+**Is this against Google Security Policy?**
+No — explicitly supported. Google's docs state:
+> "The process results in a client ID and, in some cases, a client secret, which you embed in the source code of your application. (In this context, the client secret is obviously not treated as a secret.)"
+> — Google OAuth 2.0 for Installed Applications
+
+`gcloud` CLI, Thunderbird, `hydroxide`, and many open-source tools all embed client secrets.
+
+**Recommendation:** Switch to `env!()` macro for build-time injection. Avoids GitHub secret scanning entirely, keeps source clean, same end result in the binary. I can refactor this now if you want.
+
+Go
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

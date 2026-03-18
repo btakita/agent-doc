@@ -728,5 +728,5 @@ Next steps: add `btak.dev@gmail.com` as a test user in the Cloud Console, then t
 release
 
 Let's rename the INBOX label for btak.dev@gmail.com to btak.dev.
-Rename all
+Rename all of the labels in the emails to/from btak.dev@gmail.com
 <!-- /agent:output -->

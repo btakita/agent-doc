@@ -385,6 +385,9 @@ While it is useful to see pending below exchange...especially for long exchange 
 We should assume additions to `agent:pending` were meant for `agent:exchange`.
 
 clean up exchange
+
+Is `agent:pending` in a consistent state?
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

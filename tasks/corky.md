@@ -62,150 +62,20 @@ agent_doc_mode: template
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
-**Released v0.15.3** — CUDA transcription build fix.
+### v0.15.3 → v0.16.0 Session Summary
 
-- `whisper-rs` 0.15→0.16, `whisper-rs-sys` 0.14.1→0.15.0, `bindgen` 0.71.1→0.72.1
-- All tests pass, no code changes
-- Published: crates.io, PyPI, GitHub Releases
-- GitHub release: https://github.com/btakita/corky/releases/tag/v0.15.3
-- Binary installed locally (v0.15.3)
-- Parent submodule pointer update
+**v0.15.3** released — CUDA transcription build fix (whisper-rs 0.16, bindgen 0.72.1). Published crates.io/PyPI/GitHub.
 
-Implement multipart/alternative
+**v0.16.0** released — 5 commits:
+1. `9d2ff4d` — Collapsed 61 nested `if` statements across 26 files, removed `collapsible_if = "allow"` lint override (Rust 2024 let-chains)
+2. `9e80cc1` — HTML email via `multipart/alternative` (pulldown-cmark 0.12, `markdown_to_html()` helper, 4 tests)
+3. `30bb96a` — `corky sync imports` config dispatcher (`[[imports]]` in `.corky.toml`, routes to sms/telegram/slack handlers, 6 tests)
+4. `aa073e8` — Attachment phases 2-3: inline images (`images:` YAML, CID refs, `multipart/related`) + clipboard (`corky draft attach --clipboard`, wl-paste/xclip/pngpaste)
+5. `c950387` — Version bump to 0.16.0
 
-Do `collapsible_if` refactor.
+Published: [crates.io](https://crates.io/crates/corky/0.16.0) | [PyPI](https://pypi.org/project/corky/0.16.0/) | [GitHub](https://github.com/btakita/corky/releases/tag/v0.16.0)
 
-Add agent:status component to this file.
+**Noted:** `corky schedule run` was already complete (732 lines, 26 tests). `corky doc upload` deferred (needs Google Drive OAuth design).
 
-### HTML Email Sending — Implementation Plan
-
-Investigated `src/draft/mod.rs` — confirmed the issue. `compose_email()` sends raw markdown as `text/plain` (lettre default). Bold, links, headers all appear as literal markdown syntax in email clients.
-
-**Changes needed:**
-
-1. **Add `pulldown-cmark` dependency** to `Cargo.toml`
-2. **Modify `compose_email()`** in `src/draft/mod.rs`:
-   - Convert markdown body → HTML via `pulldown-cmark`
-   - Without attachments: `MultiPart::alternative()` with `SinglePart::plain(body)` + `SinglePart::html(html_body)`
-   - With attachments: `MultiPart::mixed()` containing `MultiPart::alternative(plain + html)` + attachment parts
-3. **No new flags** — default behavior, always sends both plain text and HTML
-
-**Key details from code review:**
-- `lettre 0.11` already supports `MultiPart::alternative()` and `SinglePart::html()`
-- `mime_guess` already present for attachments
-- Both `send_email()` (SMTP) and `push_to_drafts()` (IMAP) use the same `Message`, so HTML works for both paths
-- Tests in `tests/test_draft.rs` need HTML output assertions
-
-Ready to implement when you want to start this. Estimated ~50 lines changed across 2 files.
-
-go
-
-### Implementation Complete
-
-**1. HTML Email Sending (multipart/alternative)** — Done
-
-- Added `pulldown-cmark = "0.12"` to `Cargo.toml`
-- New `markdown_to_html()` helper in `src/draft/mod.rs` — uses strikethrough, tables, smart punctuation
-- `compose_email()` now always builds `MultiPart::alternative()` (plain + HTML)
-- With attachments: `MultiPart::mixed()` wraps `alternative` + attachment parts
-- 4 new tests: `test_markdown_to_html_basic`, `test_markdown_to_html_links_and_lists`, `test_compose_email_contains_html`, `test_compose_email_with_attachment_contains_html`
-
-**2. `collapsible_if` Refactor** — Done
-
-- `cargo clippy --fix` collapsed 61 nested `if` statements across 26 source files
-- Uses Rust 2024 `let` chains (`if let ... && let ...`)
-- Removed `[lints.clippy] collapsible_if = "allow"` override from `Cargo.toml`
-- Files: `accounts.rs`, `app_config.rs`, `cal/auth.rs`, `contact/from_conversation.rs`, `contact/info.rs`, `draft/migrate.rs`, `draft/mod.rs`, `filter/gmail_auth.rs`, `help.rs`, `mailbox/add.rs`, `mailbox/remove.rs`, `mailbox/rename.rs`, `mailbox/validate_draft.rs`, `main.rs`, `resolve.rs`, `schedule.rs`, `social/auth.rs`, `social/mod.rs`, `social/profiles.rs`, `sync/imap_sync.rs`, `sync/manifest.rs`, `sync/sms_import.rs`, `transcribe/audio.rs`, `transcribe/model.rs`, `upgrade.rs`, `watch.rs`
-
-**3. Status Component** — Added below.
-
-`make check` passes clean — all 199+ tests pass, clippy clean. Changes are uncommitted in `src/corky/`, ready for review.
-
-Commit & release changes
-
-### Committed
-
-Two commits in `src/corky/`:
-
-1. **`9d2ff4d`** — `refactor: collapse nested if statements across 26 files`
-   - Removed `collapsible_if = "allow"` lint override (subagent missed this — fixed manually)
-   - 26 files, -160/+102 lines
-
-2. **`9e80cc1`** — `feat: HTML email sending via multipart/alternative`
-   - `pulldown-cmark 0.12` added, `markdown_to_html()` helper, 4 new tests
-   - 2 files, +115/-25 lines
-
-**Version bump needed for release.** Current: `0.15.3`. What version? Suggest `0.16.0` since HTML email is a feature change and collapsible_if is a refactor with let-chain syntax changes.
-
-Implement the rest of the pending feature list. This will all be in the minor release:
-
-```
-- [ ] Attachment phases 2-3 (inline images, clipboard)
-- [ ] `corky sync imports` config dispatcher
-- [ ] `corky doc upload`
-- [ ] `corky schedule run`
-```
-
-### Feature Assessment
-
-After thorough research of the codebase:
-
-1. **`corky schedule run`** — Already complete. 732 lines, 26 tests, integrated with `corky watch`. Scans `social/`, `drafts/`, `mailboxes/*/drafts/` for `scheduled_at` past due. Nothing to implement.
-
-2. **`corky sync imports` dispatcher** — No code exists. Need `[imports]` config in `.corky.toml` + dispatcher that routes to existing `sms_import`, `telegram_import`, `slack_import` handlers. Straightforward.
-
-3. **Attachment phases 2-3** — Phase 1 (file attachments via `--attach`) is complete. Phase 2 (inline images) follows the social post pattern (`images: []` in frontmatter). Phase 3 (clipboard) needs system integration (`xclip`/`pbpaste`).
-
-4. **`corky doc upload`** — Stub only ("coming soon — requires Google Drive API OAuth"). Needs OAuth flow design, `[google_drive]` config section, Drive API integration. Most complex of the four — recommend deferring to its own session.
-
-**Implementing now:** sync imports dispatcher + attachment phases 2-3. Deferring doc upload.
-
-### All Features Implemented
-
-**`corky sync imports` dispatcher** — `30bb96a`
-- New `src/sync/imports.rs` with `ImportConfig` struct + dispatcher
-- `[[imports]]` config in `.corky.toml` with type/path/label/account fields
-- Dispatches to existing sms/telegram/slack handlers
-- Tilde expansion, default label/account, skip-on-missing-path
-- 6 tests, SPEC.md § 16b added
-- 7 files, +318 lines
-
-**Attachment phases 2-3** — `aa073e8`
-- Phase 2: `images:` YAML frontmatter, `--image` flag on `draft new`, CID-based inline images in `multipart/related`
-- Phase 3: `corky draft attach --clipboard` (wl-paste/xclip/pngpaste), `--file`, `--inline` flags
-- `resolve_media_path()` helper for tilde + relative path resolution
-- 4 files, +513/-16 lines
-
-**`corky schedule run`** — already complete (732 lines, 26 tests)
-
-**`corky doc upload`** — deferred (needs Google Drive OAuth design session)
-
-All tests pass, clippy clean. Four commits total in `src/corky/`:
-1. `9d2ff4d` — collapsible_if refactor
-2. `9e80cc1` — HTML email (multipart/alternative)
-3. `30bb96a` — sync imports dispatcher
-4. `aa073e8` — attachment phases 2-3
-
-Ready for version bump. Suggest **v0.16.0** (multiple new features).
-
-go
-
-### Released v0.16.0
-
-- Version bumped in `Cargo.toml` + `pyproject.toml`
-- Tagged `v0.16.0`, pushed to origin
-- Published to **crates.io**: https://crates.io/crates/corky/0.16.0
-- Published to **PyPI**: corky 0.16.0
-- **GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.16.0
-- Binary installed locally (v0.16.0)
-- Parent submodule pointer updated
-
-5 commits in this release:
-1. `9d2ff4d` — collapsible_if refactor (26 files)
-2. `9e80cc1` — HTML email (multipart/alternative)
-3. `30bb96a` — sync imports dispatcher
-4. `aa073e8` — attachment phases 2-3
-5. `c950387` — version bump to 0.16.0
-
-compact exchange
+Release
 <!-- /agent:exchange -->

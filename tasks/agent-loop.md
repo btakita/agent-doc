@@ -57,4 +57,9 @@ Commands (slash commands) → Workflows (orchestration) → Agents (fresh contex
 ---
 
 **Re: your skill idea** — your message appears truncated: *"I want to have a skill for general development and r"*. Could you complete the thought? I'm guessing something like "general development and research" or "general development and refactoring"?
+
+> I want to have a skill for general development and release orchestration.
+> I may end up using a completely custom home-grows skill.
+> But review get-shit-done first.
+
 <!-- /agent:exchange -->

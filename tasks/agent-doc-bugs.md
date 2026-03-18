@@ -597,4 +597,8 @@ All targets published:
 - tmux-router 0.2.6 dependency (published `split_window` method)
 
 **Note:** Had to publish tmux-router 0.2.6 first since `split_window` was a new method not in the published crate.
+
+audit docs
+compact exchange
+
 <!-- /agent:exchange -->

@@ -72,6 +72,22 @@ resource "google_iap_client" "corky_oauth" {
 
 **Recommendation:** Terraform is the pragmatic choice — mature GCP provider, state management, and corky doesn't need CDK-level imperative flexibility.
 
-This would require the user to install Terraform?
+This would require the person to install Terraform?
 How would this be used?
+
+### Re: Would users need Terraform? / How would this be used?
+
+**No, end users of corky would NOT need Terraform.** Terraform is only for *you* (the corky maintainer) to provision the GCP project. Here's the end-to-end flow:
+
+1. **Maintainer (you):** Use Terraform to create the GCP project, OAuth consent screen, and client credentials. One-time setup + occasional updates.
+2. **Build pipeline:** The OAuth `client_id` gets embedded in the corky binary at build time (or served from a config endpoint). For "installed application" OAuth flows, the client_id is inherently public — security comes from the OAuth redirect and user consent, not from hiding the client ID.
+3. **End user:** Sets `provider = "gmail-api"` in their corky config without custom `[gmail]` credentials. Corky uses the built-in public app credentials. User clicks through the OAuth consent screen in their browser — no GCP project, no Terraform, no developer setup.
+
+**Key insight:** This is the same model used by Thunderbird, offlineimap, and other desktop Gmail clients. The `client_id` ships with the binary; the `client_secret` for installed apps is also considered public per Google's own docs.
+
+So Terraform is purely maintainer-side infrastructure management. Users get a seamless "just log in" experience.
+
+Only if they use the public Corky app. I need to set that up and register it in the public store. And it needs approval.
+
+I also want to provide a self-serve solution for people to manage their own infrastructure.
 <!-- /agent:exchange -->

@@ -220,6 +220,8 @@ Brian Takita
 ```
 
 Review and edit — let me know when you want to send it, or if you want any changes.
+
+send it
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

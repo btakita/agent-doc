@@ -235,4 +235,26 @@ What would happen with agent:pending patch=append or patch=prepend?
 | `output` | replace | Latest response only |
 
 Is the 2nd column the default patch value?
+
+### Re: Default patch values
+
+**No — the 2nd column shows the *recommended* patch value, not the default.** The actual default for all components is `replace`. The table shows what each component *should* be set to via `patch=` attribute or `components.toml`.
+
+We should make this the default value.
+All of these components should be documented in README...with the default patch value.
+
+Currently, `exchange` and `findings` get `patch=append` because:
+- `exchange` has a built-in default of `append` in the Rust code (hardcoded for this specific component name)
+- `findings` also has a built-in default of `append`
+- All other components default to `replace`
+
+So the built-in defaults are:
+
+| Component | Built-in default | Rationale |
+|-----------|-----------------|-----------|
+| `exchange` | append | Hardcoded in Rust |
+| `findings` | append | Hardcoded in Rust |
+| Everything else | replace | Generic default |
+
+The inline `patch=` attribute or `components.toml` can override any of these. The precedence chain is: inline `patch=` > `components.toml` > built-in defaults.
 <!-- /agent:exchange -->

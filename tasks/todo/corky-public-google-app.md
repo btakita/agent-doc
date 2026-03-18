@@ -26,11 +26,8 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
-- [x] Phase 2: Built-in default credentials in corky (ready to commit)
-  - [x] Add default client_id/client_secret constants
-  - [x] GmailConfig fallback to defaults
-  - [x] Update `corky init --provider gmail-api`
-- [ ] Phase 3: `corky doctor` command
+- [x] Phase 2: Built-in default credentials in corky (committed)
+- [x] Phase 3: `corky doctor` command (ready to commit)
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:status -->
 
@@ -186,14 +183,57 @@ Phase 2 is complete. Ready to commit in the corky submodule when you approve.
 
 commit
 implement phase 3
+
+### Phase 2 committed, starting Phase 3
+
+**Committed in corky submodule:** `3b35cbc` — "feat: built-in GCP OAuth credentials for zero-config Gmail API sync"
+
+**Phase 3: `corky doctor` command**
+
+Implementing now. The plan:
+1. Add `Doctor` variant to `Commands` enum in `cli.rs`
+2. Create `src/doctor/mod.rs` with per-provider health checks
+3. Gmail checks: valid client_id, token exists, token not expired, scopes match
+4. Generic checks: config parseable, mail directory exists, account reachable
+
+### Phase 3 implemented
+
+**New file: `src/doctor.rs`** (189 lines) — `corky doctor [PROVIDER]`
+
+**Health checks:**
+1. **Config** — loads `.corky.toml`, prints resolved path
+2. **Mail directory** — verifies data dir exists
+3. **Per-account:**
+   - `gmail-api`: credential source (config/env/defaults), sync token existence + expiry
+   - `gmail`/`imap`/`protonmail-bridge`: password_cmd configured, IMAP host/port
+4. **Gmail filter auth** — filter management token exists + valid (when `[gmail]` present)
+5. Optional `--provider` filters to matching accounts
+
+**Output format:**
+```
+✓ Config loaded: /path/to/.corky.toml
+✓ Mail directory: /path/to/mail/
+
+Account: default (gmail-api)
+  ✓ OAuth credentials resolved (built-in defaults)
+  ✓ Token exists
+  ✗ Token expired — run `corky sync` to re-authenticate
+```
+
+**Wired up in:** `cli.rs` (Doctor variant), `lib.rs` (module), `main.rs` (dispatch)
+
+`cargo check` passes. Ready to commit and move to Phase 4, or review first.
+
+add tests for corky doctor.
+implement:
+- `corky doctor gmail`
+- `corky doctor linkedin`
+- `corky doctor youtube`
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
-- [x] Phase 2: Built-in default credentials in corky (ready to commit)
-  - [x] Add default client_id/client_secret constants
-  - [x] GmailConfig fallback to defaults
-  - [x] Update `corky init --provider gmail-api`
-- [ ] Phase 3: `corky doctor` command
+- [x] Phase 2: Built-in default credentials in corky (committed)
+- [x] Phase 3: `corky doctor` command (ready to commit)
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:pending -->

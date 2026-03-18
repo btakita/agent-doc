@@ -821,4 +821,41 @@ All systems go.
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
     }
+
+    #[test]
+    fn apply_patches_ignores_component_tags_in_code_blocks() {
+        // Component tags inside a fenced code block should not be patch targets.
+        // Only the real top-level component should receive the patch content.
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+# Scaffold Guide
+
+Here is an example of a component:
+
+```markdown
+<!-- agent:status -->
+example scaffold content
+<!-- /agent:status -->
+```
+
+<!-- agent:status -->
+real status content
+<!-- /agent:status -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "status".to_string(),
+            content: "patched status\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+
+        // The real component should be patched
+        assert!(result.contains("patched status\n"), "real component should receive the patch");
+        // The code block example should be untouched
+        assert!(result.contains("example scaffold content"), "code block content should be preserved");
+        // The code block's markers should still be there
+        assert!(result.contains("```markdown\n<!-- agent:status -->"), "code block markers should be preserved");
+    }
 }

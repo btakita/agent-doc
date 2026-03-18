@@ -170,6 +170,8 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 5. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`), register, send command, auto-sync layout for all files in the same window. Unregistered files skip lazy-claim entirely.
 6. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
 
+**Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning and falls back to the default session. It does NOT create new tmux sessions. The fallback order is: current tmux session (if running inside tmux) → default `claude` session.
+
 **Auto-start algorithm (`auto_start_in_session`):**
 1. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
 2. Search `sessions.json` for a registered pane that is alive and in the target tmux session

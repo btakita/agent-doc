@@ -3,6 +3,29 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Execution mode for skill-level parallelism.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionMode {
+    /// First doc direct, 2nd+ concurrent use subagent (default)
+    #[default]
+    Hybrid,
+    /// Every /agent-doc spawns subagent
+    Parallel,
+    /// Fully sequential, cheapest
+    Sequential,
+}
+
+impl std::fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hybrid => write!(f, "hybrid"),
+            Self::Parallel => write!(f, "parallel"),
+            Self::Sequential => write!(f, "sequential"),
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -13,6 +36,10 @@ pub struct Config {
     /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default)]
     pub claude_args: Option<String>,
+    /// Execution mode: hybrid (default), parallel, sequential.
+    /// Controls how the skill handles concurrent /agent-doc invocations.
+    #[serde(default)]
+    pub execution_mode: Option<ExecutionMode>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

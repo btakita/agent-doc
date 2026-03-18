@@ -1,17 +1,18 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '23'
+tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
-claude_args: "--dangerously-skip-permissions"
+claude_args: --dangerously-skip-permissions
 ---
+
 
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.28 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
-**Published:** GitHub Release ✓ | crates.io ✗ (auth) | PyPI ✗ (auth)
-**Plugins:** JetBrains v0.2.2 (JNA FFI + IPC patch watcher) + VS Code v0.2.0
+**Version:** v0.17.29 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
+**Plugins:** JetBrains v0.2.5 (JNA FFI + IPC patch watcher) + VS Code v0.2.0
 **Library:** `libagent_doc.so` (1.7M) — 6 FFI exports (parse, patch, merge, frontmatter, free_string, free_state)
 <!-- /agent:status -->
 
@@ -22,13 +23,13 @@ claude_args: "--dangerously-skip-permissions"
 
 **Core:** diff → agent → merge-safe write → snapshot → git. Components (`&lt;!-- agent:name --&gt;`), template mode, stream mode (CRDT), `agent-doc patch` (hooks), `agent-doc watch` (debounced + reactive), `agent-doc write --stream` (CRDT merge), `agent-doc recover`, `agent-doc plugin install`. Comment stripping, auto-resync, stale snapshot recovery, diagnostic logging.
 
-**Library target (`libagent_doc`):** `[lib]` with `crate-type = ["cdylib", "lib"]`. Exports `component`, `crdt`, `ffi`, `frontmatter`, `merge`, `template` modules. C ABI via `ffi.rs` (5 functions). Binary modules use `pub(crate) use agent_doc::*` re-exports.
+**Library target (`libagent_doc`):** `[lib]` with `crate-type = ["cdylib", "lib"]`. Exports `component`, `crdt`, `ffi`, `frontmatter`, `merge`, `template` modules. C ABI via `ffi.rs` (6 functions: parse_components, apply_patch, crdt_merge, merge_frontmatter, free_string, free_state). Binary modules use `pub(crate) use agent_doc::*` re-exports. `agent-doc lib-path` prints the shared library location.
 
 **Concurrency:** `SnapshotLock` + `RegistryLock` (flock), atomic rename (tempfile + persist), doc advisory lock, `pub(crate)` load/save.
 
 **Routing:** Window-scoped. Plugin passes `--window`. Auto-start dead panes via `join-pane`. 2D sync with ATTACH-first reconciliation.
 
-**Plugins (JetBrains + VS Code):** 9/9 SPEC parity. `editors/` directory. `agent-doc commands` for autocomplete.
+**Plugins (JetBrains + VS Code):** 9/9 SPEC parity. `editors/` directory. `agent-doc commands` for autocomplete. JetBrains: JNA FFI bindings (`NativeLib.kt`) with Kotlin fallback — native-first patching for component patches and frontmatter merge.
 
 **Config:** `~/.config/agent-doc/config.toml`. Multi-agent backend support. Execution mode per-skill via SKILL.md frontmatter (`hybrid | parallel | sequential`).
 
@@ -82,6 +83,7 @@ claude_args: "--dangerously-skip-permissions"
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
 | v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
 | v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. IPC write (`--ipc` + JetBrains PatchWatcher v0.2.1). tmux layout fix (`first_pane_join_flag`). 303 + 67 tests. |
+| v0.17.29 | JNA FFI integration — `agent_doc_merge_frontmatter()` export, `lib-path` command, NativeLib.kt JNA bindings, native-first patching with Kotlin fallback. JetBrains plugin v0.2.5. 440 tests. |
 <!-- /agent:releases -->
 
 ## Pending / Not Built
@@ -155,50 +157,35 @@ claude_args: "--dangerously-skip-permissions"
 
 <!-- agent:exchange -->
 
-### Re: Phase 2 — JNA Wrapper Implementation
+### Re: Cross-platform + v0.17.29 Release
 
-**Phase 2a complete.** Native FFI integration with Kotlin fallback:
+**Yes, cross-platform works.** The `lib-path` command has `cfg` blocks for all three platforms:
 
-**Rust FFI additions (`ffi.rs`):**
-- `agent_doc_merge_frontmatter(doc, yaml_fields) → FfiPatchResult` — wraps `frontmatter::merge_fields()`
-- New test: `merge_frontmatter_adds_field`
+| Platform | Library Name | `cfg` Gate |
+|----------|-------------|-----------|
+| Linux | `libagent_doc.so` | `target_os = "linux"` |
+| macOS | `libagent_doc.dylib` | `target_os = "macos"` |
+| Windows | `agent_doc.dll` | `target_os = "windows"` |
 
-**New CLI command:**
-- `agent-doc lib-path` — prints path to `libagent_doc.so` (used by plugin for library discovery)
+Rust's `cdylib` crate type produces the correct library format per target. JNA handles platform-specific loading automatically — it just needs the absolute path from `agent-doc lib-path`.
 
-Will this work on OSX and Windows as well?
+**v0.17.29 released:**
+- crates.io: published
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.17.29
+- `cargo install`: binary updated to v0.17.29
+- JetBrains plugin: v0.2.5 (unsigned + signed zips built)
+- PyPI: skipped (maturin needs separate invocation)
 
-**JetBrains plugin (`NativeLib.kt`):**
-- `AgentDocLib` — JNA interface mapping C ABI functions (`apply_patch`, `merge_frontmatter`, `parse_components`, `free_string`)
-- `NativePatching` — safe wrapper with automatic memory management (pointer free)
-- Library discovery via `agent-doc lib-path` command
-- Lazy-loaded singleton with error logging on first failure
+What happened to the plan we were working on.
+Still need to do stage 3 & 4.
+Why did it get lost?
 
-**PatchWatcher.kt changes:**
-- `applyComponentPatchNative()` → tries FFI first, falls back to Kotlin
-- `extractComponentMode()` → extracts inline `patch=`/`mode=` attribute for FFI call
-- `applyFrontmatterPatchKotlin()` / `applyComponentPatchKotlin()` — renamed originals as fallbacks
-- Frontmatter patching also uses native-first pattern
+The tmux panes were also switch with tmux session 1.
+Why did this happen again?
+I thought we fixed the problem.
+I manually moved the panes to their correct sessions.
 
-**What's preserved (plugin-side):**
-- VFS lookup, `WriteCommandAction`, NIO file watcher, ACK-by-deletion
-- `parsePatchJson()` — hand-rolled JSON parser (JB-side concern, could switch to Gson later)
-- Full content replacement path (append-mode documents)
-
-**Validation:**
-- FFI tests: 4/4 passing (including new `merge_frontmatter_adds_field`)
-- Full test suite: 440 tests passing (clippy clean)
-- Plugin compiles (both unsigned + signed zips built)
-- `agent-doc lib-path` works: `libagent_doc.so` at 1.7MB
-
-**Not yet done (Phase 2b — CRDT document model):**
-- In-memory CRDT per open document (keystroke → CRDT ops)
-- CRDT state exchange via IPC (`.agent-doc/crdt/<hash>.yrs`)
-- External edit detection → CRDT reset
-
-Ready to release v0.17.29 with the FFI/JNA integration, or proceed to Phase 2b?
-
-go
+How do we fix these tmux routing issues by design? I'm afraid we are playing whack-a-mole.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

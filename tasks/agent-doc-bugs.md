@@ -347,5 +347,27 @@ The tmux pane for tasks/email.md was swapped with the `corky watch` pane from th
 The claiming tmux pane for tasks/email.md is now in the other tmux session.
 
 Diagnose what happened with the logs.
-If 
+If the "smoking gun" is not found, add logging to identify the "smoking gun".
+
+### Re: Corky pane swapped with email.md pane
+
+**What happened:**
+1. email.md's pane (%48) was in session 1 (wrong session — should be 0)
+2. Route detected wrong session: "Pane %48 alive but in wrong session ('1', expected '0')"
+3. Route proceeded to auto-start in session 0
+4. `auto_start` created a new window, then `join_pane` tried to join alongside the "active pane" in session 0
+5. The active pane in session 0 was `%51` — the corky watch pane (NOT an agent-doc pane)
+6. `join_pane` moved the new window alongside `%51`, and the sync/claim process registered `%51` as email.md's pane
+
+**Root cause:** `active_pane(session_name)` returns ANY active pane in the session — including non-agent-doc panes like corky. The `join_pane` should only target panes that are registered agent-doc sessions.
+
+**Fix needed:** In `auto_start_in_session`, instead of `tmux.active_pane(session_name)`, find a registered agent-doc pane in the target session to join alongside. If none exists, don't join (let the new window stay separate).
+
+This is a deeper fix that needs the registry to be consulted during auto-start. Want me to implement it now, or defer to the next session with the other routing improvements?
+Add tests to simulate the conditions for issue.
+Fix the issue.
+
+The JB plugin incorrectly parsed the claude question with a sublist.
+
+![2026-03-17_21-33.png](../../../../Pictures/agent-loop/2026-03-17_21-33.png)
 <!-- /agent:exchange -->

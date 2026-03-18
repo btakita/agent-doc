@@ -456,4 +456,13 @@ Let's fix the current issues in the tmux session:
 The self-healing `resync --fix` feature (deferred from last session) would have caught both issues automatically: wrong-session panes and stale registrations. Still on the backlog for v0.17.18.
 
 Implement `resync --fix`. Window 0 has an incorrect layout.
+
+Window 0 now has a 9 pane layout.
+It should have a 2 pane layout.
+
+I tried `Sync Tmux Layout` and it split 1 pane of the 9 panes into 2 panes. Now there are 10 panes.
+Now there are 2 panes but they are vertical orientation. They should be horizontal.
+Even switching the selected editor document, the tmux pane orientation remains vertical.
+
+Pl
 <!-- /agent:exchange -->

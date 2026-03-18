@@ -455,22 +455,45 @@ Both issues closed with resolution comments:
 - **#16** (CRDT frontmatter patches) — closed. Resolved in v0.20.0 with `patch:frontmatter` on disk write path.
 
 Create github issues for all items in agent:pending. Link to github issues
+
+### Re: GitHub Issues Created
+
+All 13 pending items now have GitHub issues:
+
+| # | Title |
+|---|-------|
+| [#17](https://github.com/btakita/agent-doc/issues/17) | Multi-tmux-session per editor |
+| [#18](https://github.com/btakita/agent-doc/issues/18) | Multi-editor per tmux session |
+| [#19](https://github.com/btakita/agent-doc/issues/19) | Plugin phases 5-7 |
+| [#20](https://github.com/btakita/agent-doc/issues/20) | Multi-agent backends |
+| [#21](https://github.com/btakita/agent-doc/issues/21) | agent-doc deep |
+| [#22](https://github.com/btakita/agent-doc/issues/22) | agent-doc status TUI |
+| [#23](https://github.com/btakita/agent-doc/issues/23) | Sub-profiles |
+| [#24](https://github.com/btakita/agent-doc/issues/24) | Docker sandboxing |
+| [#25](https://github.com/btakita/agent-doc/issues/25) | agent/api.rs |
+| [#26](https://github.com/btakita/agent-doc/issues/26) | agent-doc init --dashboard |
+| [#27](https://github.com/btakita/agent-doc/issues/27) | Capture/log workflow |
+| [#28](https://github.com/btakita/agent-doc/issues/28) | Blog post |
+| [#29](https://github.com/btakita/agent-doc/issues/29) | agent-doc stream |
+
+Explain:
+- Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Multi-tmux-session per editor — allow an editor to manage panes across multiple tmux sessions (e.g., session per topic/project). Requires session set in config, routing picks from allowed sessions.
-- Multi-editor per tmux session — allow multiple editors (IntelliJ + VS Code) to share a tmux session. Requires editor ID in claims, namespaced IPC patch files.
-- Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
-- Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
-- `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
-- `agent-doc status` — Ratatui TUI with dashboard + interactive pane attachment
-- Sub-profiles for submodule workflows in `.agent-doc/config.toml`
-- Docker sandboxing (`--sandboxed`)
-- `agent/api.rs` — direct HTTP API backend
-- `agent-doc init --dashboard` — scaffold template with log + status components
-- Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
-- Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
-- `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
+- Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
+- Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
+- Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))
+- Multi-agent backends — codex, gemini ([#20](https://github.com/btakita/agent-doc/issues/20))
+- `agent-doc deep` — parallel subagent fan-out with worktrees ([#21](https://github.com/btakita/agent-doc/issues/21))
+- `agent-doc status` — Ratatui TUI dashboard ([#22](https://github.com/btakita/agent-doc/issues/22))
+- Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
+- Docker sandboxing (`--sandboxed`) ([#24](https://github.com/btakita/agent-doc/issues/24))
+- `agent/api.rs` — direct HTTP API backend ([#25](https://github.com/btakita/agent-doc/issues/25))
+- `agent-doc init --dashboard` ([#26](https://github.com/btakita/agent-doc/issues/26))
+- Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
+- Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
+- `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
 <!-- /agent:pending -->

@@ -504,6 +504,24 @@ All targets published:
 - VERSIONS.md backfilled (82 entries)
 
 **Session total: 11 releases** (v0.17.16-v0.17.26).
+
+The Claim For Tmux Pane defaults to configuring the agent document to have:
+
+```
+---
+agent_doc_session: 0438d54a-d57a-4767-965e-eb3e8e5888f9
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
+---
+<!-- agent:status mode=replace -->
+<!-- /agent:status -->
+
+<!-- agent:exchange mode=append -->
+<!-- /agent:exchange -->
+```
+
+We should also have a agent:pending component.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -132,6 +132,12 @@ The CLAUDE.local.md already says "The `.bin/agent-doc` symlink points to `src/ag
 7. **`cargo install --path .`** (ensures `~/.cargo/bin/agent-doc` matches)
 
 The right pane in session 0 window 0 is non-responsive to Ctrl+C. Please fix
+
+### Re: Non-responsive pane
+
+**Fixed.** Pane %82 was a dead Claude session showing "Resume this session with: claude --resume...". The session had ended but the pane was still alive displaying the exit message. Killed the pane — it will be recreated on next route.
+
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

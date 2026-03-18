@@ -488,9 +488,24 @@ Yes
 Both are skill-side changes — no Rust changes needed. The input/exchange separation is now documented and ready to use. Add `agent:input` to any template document to enable dedicated prompt entry.
 
 release
+
+agent-doc has Cargo.lock uncommitted
+
+### v0.17.26 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.26
+- **PyPI:** agent-doc 0.17.26
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.26
+
+**What's in v0.17.26:**
+- PLUGIN-SPEC updated with all recent features
+- agent:input support in SKILL.md
+- VERSIONS.md backfilled (82 entries)
+
+**Session total: 11 releases** (v0.17.16-v0.17.26).
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Update PLUGIN-SPEC.md with recent features
-- [x] Implement agent:input + agent:exchange separation in SKILL.md
+
 <!-- /agent:pending -->

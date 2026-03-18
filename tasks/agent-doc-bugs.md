@@ -123,15 +123,10 @@ Do you have logs as to why the prompt was missed?
 
 **This is the lost-prompt problem we designed `agent:pending` to solve.** The pending component would have captured the full prompt as a checkbox item, surviving across cycles. The current exchange-only flow loses prompts that are added between diff computation and write-back.
 
-We already have `<!-- agent:pending patch=replace -->` in this document.
-Why did you say this?
->The current exchange-only flow loses prompts that are added between diff computation and write-back.
- 
 
-Whenever `/agent-doc run ...` is called, `agent:pending` should immediately be populated.
+I put the full `agent:pending patch=replace` tag inside of backticks.
+But the document got corrupted. Please add a test for this scenario to ensure this does not happen again.
 
-<!-- /agent:exchange -->
-
-<!-- agent:pending patch=replace -->
-
+We already have `<!-- agent:pending patch=replace -->
+- [x] Populate agent:pending immediately before responding (not after)
 <!-- /agent:pending -->

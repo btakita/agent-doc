@@ -327,15 +327,6 @@ Rule of thumb: unit-testable with fixed inputs → binary. Requires NL understan
 
 release
 
-VERSIONS.md is not uptodate
-
-BUGS:
-- Extra tmux windows in tmux session 0
-- tmux window bleedover into tmux session 1
-
-Find root cause.
-Add tests for root causes.
-Fix root causes.
 
 ### Re: v0.20.0 Release + VERSIONS.md + Extra Tmux Windows Bug
 
@@ -349,6 +340,18 @@ Fix root causes.
 - Something else?
 
 If it's the 5 windows from the session 1 migration, those can be cleaned up by running `agent-doc resync --fix` or manually closing the orphaned windows.
+
+There are new windows. Issue is still here. Please look in logs.
+
+VERSIONS.md is not uptodate
+
+BUGS:
+- Extra tmux windows in tmux session 0
+- tmux window bleedover into tmux session 1
+
+Find root cause.
+Add tests for root causes.
+Fix root causes.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

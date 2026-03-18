@@ -20,9 +20,41 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-**Done.** Created `VERSIONS.md` in tmux-router with changelog for all 10 releases (v0.1.0–v0.2.5). Committed (`68802b1`), pushed. Parent pointer updated (`424e5d3`), pushed.
+### GSD Review
 
-Please review https://github.com/gsd-build/get-shit-done
+**get-shit-done** (34k stars, MIT) is a meta-prompting / context engineering framework for Claude Code (and other AI coding agents). Key observations:
 
-I want to have a skill f
+**What it does well:**
+- **Context rot mitigation** — its core thesis is sound: spawn fresh subagents with clean context windows instead of accumulating conversation history. This is the same principle behind our subagent strategy in CLAUDE.md.
+- **Spec-driven pipeline** — requirements → research → plans → execution → verification. Structured `.planning/` directory with markdown + JSON state files.
+- **Multi-agent orchestration** — 15 specialized agents (debugger, verifier, planner, UI auditor, etc.) spawned by thin orchestrator workflows (41 workflows, 37 commands).
+- **File-based state** — no database, everything is human-readable markdown in `.planning/`. Survives `/clear` and context resets.
+- **Multi-runtime** — supports Claude Code, Gemini CLI, OpenCode, Codex, Copilot, Antigravity.
+
+**Architecture:**
+```
+Commands (slash commands) → Workflows (orchestration) → Agents (fresh context)
+                                                           ↓
+                                                     CLI Tools (gsd-tools.cjs)
+                                                           ↓
+                                                     .planning/ (file state)
+```
+
+**Comparison with our setup:**
+| Aspect | GSD | agent-loop |
+|--------|-----|------------|
+| State management | `.planning/` dir with templates | `tasks/` docs + agent-doc snapshots |
+| Agent orchestration | Markdown-defined agents spawned per-task | Claude Code subagents + skills |
+| Context engineering | Fresh context per agent spawn | agent-doc template mode (exchange/pending) |
+| Verification | Dedicated verifier agent + plan-checker | `make check` + manual review |
+| Scope | General project management framework | Workspace-specific tooling |
+
+**Takeaways:**
+- GSD is opinionated and heavy (37 commands, 41 workflows, 15 agents). Good for greenfield projects where you want a full lifecycle framework.
+- Our agent-doc approach is lighter — the document IS the interface, no separate `.planning/` state dir.
+- Worth borrowing: their verification patterns (dedicated verifier agent), codebase mapping agent, and the "thin orchestrator" pattern for workflows.
+
+---
+
+**Re: your skill idea** — your message appears truncated: *"I want to have a skill for general development and r"*. Could you complete the thought? I'm guessing something like "general development and research" or "general development and refactoring"?
 <!-- /agent:exchange -->

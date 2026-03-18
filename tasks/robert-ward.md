@@ -69,4 +69,14 @@ Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
 **Compacted.** Calls 1–5 reduced from ~190 lines of verbose dialogue to 5 compact summaries (~20 lines total). Full transcripts remain archived at `mail/contacts/robert-ward/recordings/`. Key Takeaways section preserved unchanged.
+
+Robert reserved 2 public storage units over the phone.
+Robert moved his items into 1 of the storage units.
+Robert is attempting to cancel the 2nd storage unit.
+
+PS still wants to charge $40 for the admin charge.
+
+Robert wants to reverse the $40 charge with his bank.
+
+Can his bank reverse the charge. Would PS retaliate in any way?
 <!-- /agent:exchange -->

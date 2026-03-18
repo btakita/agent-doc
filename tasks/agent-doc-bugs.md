@@ -56,23 +56,10 @@ Your message was cut off: "It seems that person prompts sometimes" — want to f
 
 **Analysis of your options:**
 
-**1. `<!-- agent:pending -->` component** — **Best option.** Each user prompt gets tracked as a pending item. The agent processes them sequentially, marking each as addressed. If a cycle is interrupted, unaddressed prompts remain visible in the document. No hidden state — everything is in the markdown. Clean, auditable, document-as-truth.
-
-**2. lazily-rs reactive state** — Overkill for this use case. The document IS the state. Adding a reactive layer introduces the hidden-state and memory-leak risks you identified. The document-as-truth principle already provides the right architecture.
-
-**3. Alternative: Skill-side diff queue.** The SKILL.md logic (Claude Code side) could:
-- Parse the diff as discrete user additions (separated by blank lines or `###` headers)
-- Process each sequentially, responding to each with a checkpoint flush
-- The snapshot advances only after the full response is written
-- If interrupted, unprocessed additions remain in the next diff
-
-**Recommendation:** Option 1 (`agent:pending`) for the Rust side + Option 3 for the skill side. The pending component makes prompt tracking visible and persistent. The skill-side queue ensures each prompt gets a response even in multi-prompt cycles.
-
-**Implementation sketch:**
-```markdown
-<!-- agent:pending mode=replace -->
-- [ ] Update docs for resync --fix
-- [ ] Design prompt tracking
+**1. `<!-- agent:pending -->
+- [x] Add agent:pending component to this document
+- [x] Should the skill automatically add agent:pending/agent:exchange to all documents?
+- [x] What is the difference between agent:status and agent:pending?
 <!-- /agent:pending -->
 ```
 
@@ -285,6 +272,44 @@ Should the skill automatically add agent:exchange to all documents?
 Adding `<!-- agent:pending -->` below `<!-- agent:exchange -->` now. This will be visible in the editor so you can see the task queue in action.
 
 What is the difference between agent:status and agent:pending?
+
+### Re: status vs pending
+
+**`agent:status`** — A human-readable summary of where things stand. Updated at milestones. Shows phase progress like `- [x] Phase 1\
+- [ ] Phase 2`. The agent writes it; the user reads it. It's a dashboard.
+
+**`agent:pending`** — A task queue of user prompts waiting to be processed. The user writes items (or the skill extracts them from the diff); the agent processes and checks them off. It's an inbox.
+
+| | `status` | `pending` |
+|---|---------|-----------|
+| **Who writes** | Agent | User (+ skill auto-extracts) |
+| **Who reads** | User | Agent (to know what to do next) |
+| **Content** | Phase/milestone progress | Checkbox task items |
+| **Lifecycle** | Updated at milestones | Items added/removed each cycle |
+| **Purpose** | "Where are we?" | "What needs doing?" |
+
+They complement each other: `pending` is the work queue, `status` is the progress report.
+
+### Re: Should skill auto-add agent:pending/exchange?
+
+**Yes, for template documents.** When `agent-doc claim` scaffolds a new template document, it already creates `agent:status` and `agent:exchange`. Adding `agent:pending` to the scaffold makes sense — it's zero-cost if unused (empty component) and immediately useful when the user starts writing multiple prompts.
+
+The `claim.rs` scaffold would become:
+```markdown
+<!-- agent:status patch=replace -->
+<!-- /agent:status -->
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->
+```
+
+Want me to update `claim.rs` to include `agent:pending` in the scaffold?
+
+Yes
+While 
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

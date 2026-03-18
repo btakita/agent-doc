@@ -217,16 +217,31 @@ class PatchWatcher(private val project: Project) : Disposable {
     /**
      * Replace content between `<!-- agent:name -->` (with optional attributes) and `<!-- /agent:name -->` markers.
      * Supports inline attributes like `<!-- agent:name patch=append -->` (or `mode=append` as alias).
+     * Skips matches that fall inside fenced code blocks.
      */
     private fun applyComponentPatch(doc: String, component: String, content: String): String {
         // Match open tag with optional attributes: <!-- agent:name ... -->
         val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:$component -->"
 
-        val openMatch = openPattern.find(doc) ?: return doc
+        val codeRanges = findCodeBlockRanges(doc)
+
+        // Find the first open tag match that is NOT inside a fenced code block
+        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+        } ?: return doc
+
         val contentStart = openMatch.range.last + 1
-        val closeIdx = doc.indexOf(closeTag, contentStart)
-        if (closeIdx < 0) return doc
+
+        // Find close tag that is also NOT inside a fenced code block
+        var searchFrom = contentStart
+        var closeIdx: Int
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom)
+            if (closeIdx < 0) return doc
+            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+            searchFrom = closeIdx + closeTag.length
+        }
 
         // Check mode from inline attributes: patch= takes precedence, mode= as fallback
         val attrs = openMatch.groupValues.getOrNull(1) ?: ""
@@ -244,6 +259,33 @@ class PatchWatcher(private val project: Project) : Disposable {
             "prepend" -> before + "\n" + content.trimEnd() + "\n" + existingContent.trimStart() + after
             else -> before + "\n" + content.trimEnd() + "\n" + after // replace
         }
+    }
+
+    /**
+     * Find byte ranges of fenced code blocks in the document.
+     * Returns a list of (start, end) pairs where start is the offset of the opening
+     * fence line and end is the offset just past the closing fence line.
+     */
+    private fun findCodeBlockRanges(doc: String): List<Pair<Int, Int>> {
+        val ranges = mutableListOf<Pair<Int, Int>>()
+        val fencePattern = Regex("""^[ \t]*```""", RegexOption.MULTILINE)
+        var insideFence = false
+        var fenceStart = 0
+
+        for (match in fencePattern.findAll(doc)) {
+            if (!insideFence) {
+                fenceStart = match.range.first
+                insideFence = true
+            } else {
+                // End of fenced block: include everything up to the end of the closing fence line
+                val lineEnd = doc.indexOf('\n', match.range.last + 1)
+                val blockEnd = if (lineEnd >= 0) lineEnd + 1 else doc.length
+                ranges.add(Pair(fenceStart, blockEnd))
+                insideFence = false
+            }
+        }
+
+        return ranges
     }
 
     override fun dispose() {

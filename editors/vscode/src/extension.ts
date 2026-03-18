@@ -807,18 +807,36 @@ class PatchWatcher implements vscode.Disposable {
     /**
      * Replace content between `<!-- agent:name ... -->` and `<!-- /agent:name -->` markers.
      * Handles open tags with inline attributes (e.g., `<!-- agent:exchange patch=append -->` or `mode=append` as alias).
+     * Skips matches that fall inside fenced code blocks.
      */
     private applyComponentPatch(doc: string, component: string, content: string): string {
         // Match open tag with optional attributes: <!-- agent:NAME ... -->
-        const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`);
+        const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`, 'g');
         const closeTag = `<!-- /agent:${component} -->`;
 
-        const openMatch = openPattern.exec(doc);
+        const codeRanges = this.findCodeBlockRanges(doc);
+
+        // Find the first open tag match that is NOT inside a fenced code block
+        let openMatch: RegExpExecArray | null = null;
+        while ((openMatch = openPattern.exec(doc)) !== null) {
+            const matchStart = openMatch.index;
+            const insideCode = codeRanges.some(([start, end]) => matchStart >= start && matchStart < end);
+            if (!insideCode) break;
+        }
         if (!openMatch) return doc;
 
         const contentStart = openMatch.index + openMatch[0].length;
-        const closeIdx = doc.indexOf(closeTag, contentStart);
-        if (closeIdx < 0) return doc;
+
+        // Find close tag that is also NOT inside a fenced code block
+        let closeIdx = -1;
+        let searchFrom = contentStart;
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom);
+            if (closeIdx < 0) return doc;
+            const insideCode = codeRanges.some(([start, end]) => closeIdx >= start && closeIdx < end);
+            if (!insideCode) break;
+            searchFrom = closeIdx + closeTag.length;
+        }
 
         // Parse mode from inline attributes: patch= takes precedence, mode= as fallback
         let mode = 'replace';
@@ -844,6 +862,34 @@ class PatchWatcher implements vscode.Disposable {
 
         // Default: replace mode
         return before + '\n' + trimmedContent + '\n' + after;
+    }
+
+    /**
+     * Find byte ranges of fenced code blocks in the document.
+     * Returns an array of [start, end] pairs where start is the offset of the
+     * opening fence line and end is the offset just past the closing fence line.
+     */
+    private findCodeBlockRanges(doc: string): Array<[number, number]> {
+        const ranges: Array<[number, number]> = [];
+        const fencePattern = /^[ \t]*```/gm;
+        let insideFence = false;
+        let fenceStart = 0;
+        let match: RegExpExecArray | null;
+
+        while ((match = fencePattern.exec(doc)) !== null) {
+            if (!insideFence) {
+                fenceStart = match.index;
+                insideFence = true;
+            } else {
+                // End of fenced block: include everything up to end of closing fence line
+                const lineEnd = doc.indexOf('\n', match.index + match[0].length);
+                const blockEnd = lineEnd >= 0 ? lineEnd + 1 : doc.length;
+                ranges.push([fenceStart, blockEnd]);
+                insideFence = false;
+            }
+        }
+
+        return ranges;
     }
 
     private escapeRegex(s: string): string {

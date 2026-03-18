@@ -556,8 +556,30 @@ Implementing the AST-based patch placement now.
 **The real fix:** Update the JB plugin's `PatchWatcher.kt` `applyPatch` function to skip component tags inside code blocks. The Rust side is fine; the plugin side has the naive string matching bug.
 
 Want me to fix the JB plugin?
+
+### Re: Plugin component matching + FFI
+
+**Is plugin-side matching necessary?** Currently yes — the IPC patch JSON contains component names and content, and the plugin needs to know WHERE in the document to apply them. But the plugin could be much simpler:
+
+**Option A (current):** Plugin parses the document, finds component tags, applies patches. Duplicates the Rust logic (poorly).
+
+**Option B (simpler, no FFI):** The Rust side writes the FULL document content (not just patches) to the IPC file. The plugin just replaces the entire document via Document API. No component matching needed — the Rust side already computed the final document state.
+
+**Option C (FFI):** Share the Rust component parser via FFI. The JB plugin calls into the Rust library for component matching. Correct but complex (JNI bridge, native library distribution).
+
+**Recommendation: Option B first, then C.** Option B eliminates the plugin-side matching bug immediately — the Rust side does all the work, the plugin just applies the result. FFI can come later for advanced features (real-time validation, inline diagnostics).
+
+The IPC format change would be:
+- Current: `{"file": "...", "patches": [{"component": "exchange", "content": "..."}]}`
+- New: `{"file": "...", "full_content": "...the entire document..."}`
+
+Want me to implement Option B?
 <!-- /agent:exchange -->
 ```
+
+Would Option B cause an external edit error or cause the editor to lose track of the cursor?
+Both are unacceptable. If either is the case, we can go with Option A for now.
+But we need to start Option C after that.
 
 Is it necessary for the plugin do component matching?
 Should we begin the FFI so we have the same rust logic for the component matching?
@@ -595,6 +617,5 @@ Please use the markdown ast to determine where to place the patch from the agent
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Implement AST-based patch placement — already correct in Rust
-- [ ] Fix JB plugin applyPatch to skip code-block component tags
+- [ ] Implement full-content IPC (Option B) to eliminate plugin-side matching
 <!-- /agent:pending -->

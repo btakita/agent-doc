@@ -31,7 +31,8 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
   - [x] Configure OAuth consent screen (scopes added)
   - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
-  - [ ] Host privacy policy & ToS at public URLs
+  - [x] Push docs to corky repo (deploying via GitHub Pages)
+  - [ ] Enter URLs in consent screen
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command
@@ -97,6 +98,26 @@ Requires GitHub Pages enabled on the corky repo (Settings → Pages). The mdBook
 2. Enable GitHub Pages on corky repo + push docs: Already done
 3. Enter privacy policy + ToS URLs in consent screen: we need to push to gh pages
 4. Submit for verification
+
+### Re: Enable Gmail API, push docs to GitHub Pages
+
+**How to enable Gmail API:**
+1. GCP Console → select project "corky" (corky-490604)
+2. Left sidebar → "APIs & Services" → "Enabled APIs & services"
+3. Click "+ ENABLE APIS AND SERVICES" at the top
+4. Search "Gmail API" → click it → click "ENABLE": Enabled. Should I enable YouTube as well? Which one?
+
+**Docs pushed to GitHub Pages:**
+- Committed privacy policy, ToS, and updated SUMMARY.md in corky repo
+- Pushed to `main` — the `mdbook.yml` workflow will auto-deploy to GitHub Pages
+- URLs once deployed:
+  - `https://btakita.github.io/corky/reference/privacy-policy.html`
+  - `https://btakita.github.io/corky/reference/terms-of-service.html`
+
+**After deployment completes** (check GitHub Actions tab), enter those URLs in the GCP consent screen:
+- OAuth consent screen → App information → Privacy policy link + Terms of service link: I don't see App information
+
+Then you can submit for verification.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -106,7 +127,8 @@ Requires GitHub Pages enabled on the corky repo (Settings → Pages). The mdBook
   - [x] Configure OAuth consent screen (scopes added)
   - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
-  - [ ] Host privacy policy & ToS at public URLs
+  - [x] Push docs to corky repo (deploying via GitHub Pages)
+  - [ ] Enter URLs in consent screen
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command

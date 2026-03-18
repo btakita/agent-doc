@@ -284,11 +284,14 @@ agent-doc resync          # dry-run: prune dead panes, report issues
 agent-doc resync --fix    # also fix detected issues
 ```
 
-**Dry-run (no `--fix`):** Removes entries whose tmux panes no longer exist, purges idle stash windows (30s grace period), logs orphaned `claude`/`stash` windows, and reports wrong-session or wrong-process panes without changing them.
+**Dry-run (no `--fix`):** Removes entries whose tmux panes no longer exist, purges idle stash windows (30s grace period), logs orphaned `claude`/`stash` windows, and reports wrong-session, wrong-process, or wrong-window panes without changing them.
 
 **With `--fix`:**
 - **Wrong-session panes** (pane is in a different tmux session than the document's `tmux_session` frontmatter) — kills the pane and deregisters it. The next `route` auto-starts in the correct session.
 - **Wrong-process panes** (pane is running a non-agent-doc process, e.g. `corky watch`) — deregisters the entry but leaves the foreign process alive.
+- **Wrong-window panes** (pane is in a separate non-stash window from the majority of panes in the same tmux session) — moves the pane into the stash window via `stash_pane`. The next `sync` or `layout` will rejoin it into the correct window.
+
+**Stash windows:** When `split-window` fails during auto-start (e.g. minimum pane size constraint), the new pane is created in a fresh window and immediately moved to the stash window so no extra visible windows appear. Stash windows are named `stash`; if tmux auto-deduplicates the name they become `stash-2`, `stash-3`, etc. — all such names are recognized and eligible for purging.
 
 **Process allowlist:** `agent-doc`, `claude`, `node` are valid agent processes. Idle shells (`zsh`, `bash`, `sh`, `fish`) are also allowed (a shell means the agent process hasn't started yet or has exited).
 

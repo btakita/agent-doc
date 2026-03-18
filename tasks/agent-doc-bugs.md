@@ -115,6 +115,23 @@ The `agent-doc start` command spawns Claude sessions using the `~/.cargo/bin/` b
 **This explains the persistent window proliferation** — the tmux-spawned sessions used the old binary without stash, session validation, or split-window fixes.
 
 Everytime we release a package, we need to install it with the latest release version.
+
+### Re: Install after release
+
+**Agreed.** The release process should include `cargo install --path .` as a final step. I'll update the CLAUDE.md release checklist and the `/dev` skill to always run `cargo install` after `cargo publish`.
+
+The CLAUDE.local.md already says "The `.bin/agent-doc` symlink points to `src/agent-doc/target/release/agent-doc` — without a release build, the symlink target stays stale." But the `~/.cargo/bin/` copy also needs updating, which `cargo install --path .` handles.
+
+**Updated release checklist:**
+1. Bump version
+2. `make check`
+3. Commit + push + tag
+4. `cargo publish`
+5. `maturin publish`
+6. `gh release create` with binary
+7. **`cargo install --path .`** (ensures `~/.cargo/bin/agent-doc` matches)
+
+The right pane in session 0 window 0 is non-responsive to Ctrl+C. Please fix
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

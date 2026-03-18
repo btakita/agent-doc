@@ -127,4 +127,47 @@ Good. But we may also support other providers. Such as AWS, Azure, etc.
 Option 3 sounds good as long as it is in sync. AWS CDK is nice because it enforces the synced configuration...even if it does require care to not wipe out production data.
 
 The two tracks are independent — ship self-serve docs immediately while Google security review for the public app is pending (can take weeks).
+
+### Re: Configurable client_id, multi-cloud, and sync concerns
+
+**Configurable `client_id`:** Yes — the config should support overriding the public app credentials:
+
+```toml
+[gmail]
+client_id = "user-provided-id.apps.googleusercontent.com"
+client_secret = "user-provided-secret"
+```
+
+When present, corky uses these instead of the built-in defaults. The public app is just the fallback.
+
+**Multi-cloud providers:** The `corky init` pattern generalizes:
+
+- `corky init gmail` → GCP OAuth setup
+- `corky init outlook` → Azure AD app registration
+- `corky init aws-ses` → AWS SES/WorkMail credentials
+
+Each cloud has its own CLI (`gcloud`, `az`, `aws`) and OAuth/API model, but the guided setup → write credentials pattern is the same.
+
+**Sync concern:** You're right that plain docs drift. The CDK appeal is declarative state enforcement. For corky's case though, the sync problem is narrow:
+
+- The "infrastructure" is just an OAuth app + API enablement — one-time setup, rarely changes
+- Unlike full cloud deployments (lambdas, databases, networking), there's minimal ongoing drift
+- The main sync point is "does `client_id` match your OAuth app?" — corky validates that at runtime when auth fails
+
+For CDK-style enforcement without requiring users to learn IaC, consider a **`corky doctor`** subcommand:
+
+```
+corky doctor gmail
+# ✓ OAuth app exists and is valid
+# ✓ gmail.readonly scope authorized
+# ✓ Token not expired
+# ✗ Refresh token missing — run `corky auth gmail`
+```
+
+This gives runtime sync validation — the "enforcement" happens when you run `corky doctor`, not via infrastructure state files. Lighter weight than Pulumi/Terraform, and users don't need to install anything extra.
+
+`corky doctor` sounds good.
+Should it be one or both?:
+- `corky doctor gmail`
+- `corky gmail doctor`
 <!-- /agent:exchange -->

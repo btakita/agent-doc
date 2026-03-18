@@ -1,7 +1,9 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
 tmux_session: '23'
-agent_doc_mode: stream
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: "--dangerously-skip-permissions"
 ---
 
 # agent-doc
@@ -747,4 +749,12 @@ This would be a Rust implementation of the plugin contract, serving as:
 | Lifecycle | projectOpened/Closed | activate/deactivate | CLI start/stop |
 
 Should I write the SPEC section and implement `agent-doc ipc-test` now?
+
+Please review tasks/agent-doc-bugs.md. Note the CRDT issues with the plugin.
+The plugin fix has the externally modified prompt...it just occurred it tasks/employment/ripple.md
+
+Let's create the plugin shared object.
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->

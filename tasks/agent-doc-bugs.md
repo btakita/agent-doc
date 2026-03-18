@@ -26,9 +26,32 @@ Please diagnose. Use the logs to debug. Can you recognize what caused the prolif
 
 Add tests to simulate the root cause of the proliferation of tmux windows.
 Add tests for the "self healing" `agent-doc --resync`. Why did it not work?
-go
+
+speculation: The issue is caused by focusing on another tmux session.
+The focusing on the editor. But focus on the claiming tmux session is bypassed.
+So I wonder if we are using the last selected tmux session for anything.
+When we call agent-doc run, the claiming tmux session should effectively override any preference for the last selected tmux session...since focusing on the claiming tmux session may be bypassed.
+
+### Re: Window proliferation — root cause + resync gap
+
+**Cleaned up:** 6 extra windows killed, registry cleared, back to 2 windows.
+
+**Root cause:** When the IDE triggers `agent-doc route` for multiple documents simultaneously, each route tries `split_window` but the window gets progressively smaller. After 2-3 splits succeed, the remaining ones fail with "pane too small" and fall back to `auto_start()` which creates new windows.
+
+If a stash window is "full", why not create another stash window?
+Can we robustly track where the binding agent session is stashed?
+
+**Why resync didn't catch it:** `resync --fix` only checks wrong-session and wrong-process. It does NOT check **wrong-window** — panes scattered across multiple windows when they should be consolidated.
+
+**Two fixes needed:**
+1. **Route:** When split fails, stash the pane instead of creating a new window
+2. **Resync:** Add wrong-window detection — consolidate panes in separate windows: or an available stash window
+
+Want me to implement both?
+yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Fix route fallback: stash instead of new window when split fails
+- [ ] Add wrong-window detection to resync --fix
 <!-- /agent:pending -->

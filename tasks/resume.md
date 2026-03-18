@@ -226,10 +226,49 @@ This would be a new `search-index` subcommand in agent-resume that reads data.to
 
 Integrate with build.py first.
 How much of build.py does agent-resume replace?
+
+Add README.md, SPEC.md, AGENTS.md (with CLAUDE.md) symlink to agent-resume
+
+### Re: build.py integration — what agent-resume replaces
+
+**build.py does 10 things — agent-resume replaces 7:**
+
+| Step | build.py | agent-resume |
+|------|----------|-------------|
+| 1. Load profile | `load_profile()` | Already done |
+| 2. Read template | `read_template()` | Replaced — data.toml is the source |
+| 3. Split sections (h2) | `split_sections()` | Replaced — assembles sections, doesn't parse |
+| 4. Filter sections | `include` list | Replaced by tag scoring |
+| 5. Content overrides | `content_overrides` | Replaced by phrase system |
+| 6. Filter experiences | `filter_experience()` | Replaced by `score_experience()` |
+| 7. Bold skills | `bold_skills()` | TODO — move to Rust |
+| 8. Bold phrases | `bold_phrases()` | TODO — move to Rust |
+| 9. Markdown → HTML | pandoc subprocess | Stays in Python |
+| 10. HTML → PDF | weasyprint | Stays in Python |
+
+**New flow:**
+```
+agent-resume render -d data.toml -p profiles/target.toml > tailored.md
+# build.py only does:
+pandoc tailored.md → HTML
+weasyprint HTML → PDF
+```
+
+**build.py shrinks to ~30 lines** — call agent-resume, pipe to pandoc, pipe to weasyprint. All content assembly logic moves to Rust.
+
+**Still need to implement in agent-resume:**
+1. Bold phrase injection (regex in Rust — `bold_phrases()` equivalent)
+2. Bold skill injection (for Skills section)
+3. Full resume assembly (Summary, Skills, Career Highlights, AI Products Shipped, Experience, Education, Certifications, Languages — not just Experience)
+4. Contact header rendering
+5. Profile `include`/`experience` compat (or fully replace with tag scoring)
+
+Want me to start implementing the full resume assembly now?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Consolidate to single data.toml in resume repo
+- [ ] Implement full resume assembly in agent-resume (bold phrases, all sections)
+- [ ] Slim down build.py to pandoc+weasyprint only
 - [ ] Resume website search feature
-- [ ] Integrate agent-resume with build.py
 <!-- /agent:pending -->

@@ -32,7 +32,7 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
   - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
   - [x] Push docs to corky repo (deploying via GitHub Pages)
-  - [ ] Enter URLs in consent screen
+  - [x] Enter URLs + logo in consent screen
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command
@@ -83,6 +83,33 @@ After adding the URLs, the last Phase 1 step is submitting for verification.
 You can also create a 120x120 version from the SVG source at `src/corky/assets/logo.svg` if you want exact dimensions, but 128x128 is fine.
 
 How do I submit for Google verification?
+
+### Re: How to submit for Google verification
+
+**Step-by-step:**
+
+1. GCP Console → "APIs & Services" → "OAuth consent screen"
+2. Look for the **"Audience"** tab (new console) or **"Publishing status"** section
+3. Your app is currently in **"Testing"** mode. Click **"Publish App"** or **"Push to production"**
+4. Google warns that restricted scopes require verification → click **"Confirm"**
+5. This submits your app for Google's security review
+
+**What Google may request during review:**
+- A **YouTube video** (unlisted) demonstrating the OAuth flow and how corky uses each scope
+- Proof the privacy policy covers the requested data access
+- **Domain verification** — proving you own `btakita.github.io` (usually via Google Search Console or a DNS TXT record)
+- A written explanation of why each scope is needed
+
+**Timeline:**
+- **2-6 weeks** for restricted Gmail scopes
+- During review: app stays in testing mode (100 test users max)
+- After approval: "unverified" warning disappears, any Google user can authenticate
+
+**Tip:** The video is the most common sticking point. Keep it simple: show `corky sync` running, the OAuth popup, and briefly explain each scope's purpose (read emails, send drafts, manage filters).
+
+Phase 1 is nearly complete — just this submission step left!
+I submitted. Phase 1 done.
+Continue to Phase 2
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -93,7 +120,7 @@ How do I submit for Google verification?
   - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
   - [x] Push docs to corky repo (deploying via GitHub Pages)
-  - [x] Enter URLs in consent screen
+  - [x] Enter URLs + logo in consent screen
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command

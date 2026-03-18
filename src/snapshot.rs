@@ -197,6 +197,58 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-response snapshot (for undo/extract)
+// ---------------------------------------------------------------------------
+
+const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
+
+/// Compute the pre-response snapshot path for a given document.
+/// Returns `<project_root>/.agent-doc/pre-response/<hash>.md`.
+pub fn pre_response_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root.join(PRE_RESPONSE_DIR).join(format!("{}.md", hash)))
+}
+
+/// Save the pre-response snapshot (the document content before the agent's response).
+/// Called by write paths before applying patches/appending response.
+pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
+    let path = pre_response_path_for(doc)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    std::io::Write::write_all(&mut tmp, content.as_bytes())
+        .with_context(|| "failed to write pre-response temp file")?;
+    tmp.persist(&path)
+        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    eprintln!("[snapshot] saved pre-response snapshot for {}", doc.display());
+    Ok(())
+}
+
+/// Load the pre-response snapshot for a document.
+pub fn load_pre_response(doc: &Path) -> Result<Option<String>> {
+    let path = pre_response_path_for(doc)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(std::fs::read_to_string(&path)?))
+}
+
+/// Delete the pre-response snapshot for a document.
+pub fn delete_pre_response(doc: &Path) -> Result<()> {
+    let path = pre_response_path_for(doc)?;
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // CRDT state persistence (for stream mode)
 // ---------------------------------------------------------------------------
 

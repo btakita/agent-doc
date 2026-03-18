@@ -8,6 +8,7 @@ mod compact;
 mod config;
 mod convert;
 mod diff;
+mod extract;
 mod focus;
 mod git;
 mod history;
@@ -29,6 +30,7 @@ mod start;
 mod stream;
 mod submit;
 mod sync;
+mod undo;
 mod upgrade;
 mod watch;
 mod write;
@@ -344,6 +346,30 @@ enum Commands {
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+    /// Undo the last agent response (restore pre-response state)
+    Undo {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Extract the last exchange entry from source to target document
+    Extract {
+        /// Source document
+        source: PathBuf,
+        /// Target document
+        target: PathBuf,
+        /// Component name to extract from (default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// Transfer entire component content from source to target document
+    Transfer {
+        /// Source document
+        source: PathBuf,
+        /// Target document
+        target: PathBuf,
+        /// Component name to transfer
+        component: String,
+    },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
     /// List all available commands as JSON (for editor plugin autocomplete)
@@ -540,6 +566,9 @@ fn main() -> anyhow::Result<()> {
             convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
         }
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
+        Commands::Undo { file } => undo::run(&file),
+        Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
+        Commands::Transfer { source, target, component } => extract::transfer(&source, &target, &component),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
         Commands::LibPath => {

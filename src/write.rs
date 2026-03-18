@@ -45,6 +45,9 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Save response to pending store (survives context compaction)
     recover::save_pending(file, &response)?;
 
+    // Save pre-response snapshot for undo
+    snapshot::save_pre_response(file, base)?;
+
     // Build "ours": baseline + response appended
     let mut content_ours = base.to_string();
     // Ensure trailing newline before appending
@@ -127,6 +130,9 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     let base = baseline.unwrap_or(&content_at_start);
 
+    // Save pre-response snapshot for undo
+    snapshot::save_pre_response(file, base)?;
+
     // Apply patches to baseline
     let content_ours = template::apply_patches(base, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
@@ -199,6 +205,13 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
+    }
+
+    // Save pre-response snapshot for undo (before IPC or disk write)
+    {
+        let pre_content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {} for pre-response", file.display()))?;
+        snapshot::save_pre_response(file, &pre_content)?;
     }
 
     // Try IPC when plugin is installed and --force-disk is not set

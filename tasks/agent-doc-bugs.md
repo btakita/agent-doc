@@ -476,10 +476,21 @@ This is a key design question. Currently the exchange component holds both user 
 Want me to implement this input/exchange separation?
 
 Yes
+
+### Re: PLUGIN-SPEC + input/exchange — done
+
+**PLUGIN-SPEC.md updated** with 6 additions: patch= attribute, pending component, stash windows, diff --wait, tag sanitization, pulldown-cmark. Committed and pushed.
+
+**SKILL.md updated** with agent:input support:
+- Step 2: `agent:input` is primary prompt source when non-empty
+- Step 4b: `patch:input` with empty content clears input after processing
+
+Both are skill-side changes — no Rust changes needed. The input/exchange separation is now documented and ready to use. Add `agent:input` to any template document to enable dedicated prompt entry.
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Update PLUGIN-SPEC.md with recent features
-- [x] Add truncation tip to scaffold/docs
-- [ ] Design agent:input + agent:exchange separation
+- [x] Update PLUGIN-SPEC.md with recent features
+- [x] Implement agent:input + agent:exchange separation in SKILL.md
 <!-- /agent:pending -->

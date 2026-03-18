@@ -1,7 +1,8 @@
 ---
 agent_doc_session: db08a891-c339-4a49-9f49-2d8a1f30ed10
-tmux_session: '23'
-agent_doc_mode: template
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 
@@ -77,4 +78,13 @@ Re: [Ashby fraud detection post](https://www.linkedin.com/posts/amberio_ashbyhid
 **Not a risk:** AI-assisted writing style. ATS fraud detection focuses on identity/profile patterns, not prose. All your claims are verifiable (GitHub repos, crates.io, npm, named employers, public commit history since 2006).
 
 **Recommendation:** Always use a profile that removes overlapping Freelance dates for ATS submissions. For direct recruiter sends, explain overlap verbally.
+
+Let's build an experience + skills "database" to enable custom resumes that fit the job description.
+
+We want to move beyond a static description for each experience.
+Instead, we want to break out tags, keywords, phrases, snippets of info.
+All of which be recombined into  prose for 1p
 <!-- /agent:exchange -->
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

@@ -57,9 +57,8 @@ Your message was cut off: "It seems that person prompts sometimes" — want to f
 **Analysis of your options:**
 
 **1. `<!-- agent:pending -->
-- [x] Add agent:pending component to this document
-- [x] Should the skill automatically add agent:pending/agent:exchange to all documents?
-- [x] What is the difference between agent:status and agent:pending?
+- [x] Update claim.rs to scaffold agent:pending
+- [ ] User's incomplete thought: "While it is useful to see pe..."
 <!-- /agent:pending -->
 ```
 
@@ -300,16 +299,30 @@ The `claim.rs` scaffold would become:
 <!-- /agent:status -->
 
 <!-- agent:exchange patch=append -->
+
+### Re: claim.rs scaffold updated
+
+**Done.** `agent-doc claim` now scaffolds `agent:pending` alongside `agent:status` and `agent:exchange` for new template documents:
+
+```markdown
+<!-- agent:status patch=replace -->
+<!-- /agent:status -->
+
+<!-- agent:exchange patch=append -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->
 ```
 
+Committed and pushed.
+
 Want me to update `claim.rs` to include `agent:pending` in the scaffold?
 
 Yes
-While 
+
+While it is useful to see pending below exchange...especially for long exchange content...I can forsee accidently adding prompts meant for exchange into the pending content.
+We should assume additions to `agent:pending` were meant for `agent:exchange`.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

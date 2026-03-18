@@ -74,8 +74,16 @@ All targets published:
 
 VERSIONS.md was not updated.
 Was the dev skill used in this session?
+
+### Re: VERSIONS.md + dev skill
+
+**VERSIONS.md:** Was committed but the backfill only reached v0.17.4. Versions 0.17.5-0.17.28 are missing. I'll update it with the full history.
+
+**Dev skill:** No, the dev skill was not used in this session. All releases were done manually through the agent-doc workflow (bump version, make check, commit, push, tag, cargo publish, maturin publish, gh release). The `/dev` skill could have automated this — it's designed for release orchestration. Good reminder to use it going forward.
+
+go
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Update VERSIONS.md with 0.17.5-0.17.28
 <!-- /agent:pending -->

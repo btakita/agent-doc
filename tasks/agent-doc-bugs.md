@@ -142,4 +142,9 @@ I thought we were using rust for the at least some of the pending tracking.
 Committed and pushed. This document's `<!-- agent:status mode=replace -->` and `<!-- agent:exchange mode=append -->` still work via backward compat — you can update them to `patch=` at your convenience.
 
 **Pending tracking:** Deferred to next cycle — the `agent:pending` component is a skill-side addition that needs careful design of the checkpoint/flush behavior. Want to tackle it in a fresh session?
+
+What if we treat the document as the "memory".
+Would the skill be sufficient to manage checking the boxes and ensuring the pending component content is consistent?
+The document would be the source of truth.
+If there are dependencies between tasks, we can have a graph language that we can use to track the task dependencies and their status.
 <!-- /agent:exchange -->

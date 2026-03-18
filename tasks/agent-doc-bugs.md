@@ -78,6 +78,8 @@ Diagnose the cause, add tests, and fix.
 **The real fix needed:** `agent-doc write` should HTML-escape any `&lt;!-- agent:` or `&lt;!-- /agent:` patterns in the response content before writing. This is a Rust-side fix — the write pipeline should sanitize response text to prevent component tag injection.
 
 Want me to implement the write-side sanitization now?
+
+yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

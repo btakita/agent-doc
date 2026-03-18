@@ -297,6 +297,55 @@ For future sends, we can add Gmail API send support to corky as a feature — th
 **YouTube videos:** I'd skip them for this response. The hiring manager asked three specific questions — adding YouTube links would make it feel like you're overcompensating rather than directly answering. Keep it tight and confident.
 
 **However**, if you get to the interview stage, YouTube demos of your tools would be excellent to show during the conversation ("let me show you how this works"). Save that card for when it has maximum impact — in a live demo, not buried in a recruiter email.
+
+### Re: Pasting HTML + IMAP config
+
+**Pasting HTML in Gmail:** Gmail's compose window doesn't accept raw HTML paste — it escapes tags. Two workarounds:
+
+1. **Rich text paste trick:** Open the HTML file in a browser (save as `.html`, double-click to open), select all the rendered content, copy, then paste into Gmail compose. Gmail preserves the rich formatting from the clipboard. This is the fastest approach.
+
+2. **Gmail API create draft:** Use the existing Gmail API OAuth token to create a draft with raw HTML via the API. This bypasses the compose UI entirely.
+
+**Recommended right now:** Option 1 — save the HTML block to a `.html` file, open in browser, copy the rendered text, paste into Gmail reply. Takes 30 seconds.
+
+Want me to save the HTML to a temp file you can open in your browser?
+
+---
+
+**IMAP with real login + password:** Gmail deprecated "Less Secure Apps" (plain password IMAP login) in 2022. The only options for IMAP access are:
+
+1. **App Passwords** — but you said that setting isn't available for your account
+2. **OAuth2 IMAP** — corky already uses this for sync via `gmail-api` provider
+3. **Enable 2-Step Verification first** — App Passwords only appear after 2FA is enabled. Go to https://myaccount.google.com/security → enable 2-Step Verification → then App Passwords should become available
+
+The most likely fix: **enable 2FA on btak.dev@gmail.com first**, then App Passwords will unlock, and you can use SMTP for sending.
+<!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->
+2. **Gmail API create draft:** Use the existing Gmail API OAuth token to create a draft with raw HTML via the API. This bypasses the compose UI entirely:
+   ```bash
+   # This would need corky support, but as a one-off you could use curl:
+   # 1. Get access token from corky's token store
+   # 2. POST to Gmail API drafts.create with the MIME message
+   ```
+   This is more complex but would be the proper automated path.
+
+**Recommended right now:** Option 1 — save the HTML block to a `.html` file, open in browser, copy the rendered text, paste into Gmail reply. Takes 30 seconds.
+
+Want me to save the HTML to a temp file you can open in your browser?
+
+---
+
+**IMAP with real login + password:** Gmail deprecated "Less Secure Apps" (plain password IMAP login) in 2022. The only options for IMAP access are:
+
+1. **App Passwords** — but you said that setting isn't available for your account
+2. **OAuth2 IMAP** — corky already uses this for sync via `gmail-api` provider
+3. **Enable 2-Step Verification first** — App Passwords only appear after 2FA is enabled. Go to https://myaccount.google.com/security → enable 2-Step Verification → then App Passwords should become available
+
+The most likely fix: **enable 2FA on btak.dev@gmail.com first**, then App Passwords will unlock, and you can use SMTP for sending.
+
+I don't want 2FA. Let's use the deprecated plan password IMAP for now.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

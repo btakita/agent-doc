@@ -249,10 +249,33 @@ It seems that the prompt was truncated.
 Please look at the logs to see why this happened.
 Do the logs show polling while a prompt line is incomplete?
 What can we do to fix this?
+
+### Re: Prompt truncation investigation
+
+**What happened in tasks/agent-loop.md:** The user typed "I want to have a skill for general development and r" — the prompt was captured by `agent-doc route` mid-keystroke. The route command polls the tmux pane for Claude's prompt indicator, and when it sees the prompt is idle (waiting for input), it sends the `/agent-doc` command. But the pane content capture includes whatever text the user has typed so far — including incomplete lines.
+
+**The truncation is NOT in agent-doc itself.** It's in Claude Code's `/agent-doc` skill invocation:
+1. User types in the IDE editor (saving to disk)
+2. IDE plugin triggers `agent-doc route` which sends `/agent-doc tasks/agent-loop.md` to Claude's tmux pane
+3. Claude reads the file at that moment — including the user's incomplete edit
+4. The diff captures the partial text
+
+**Logs:** `route.rs` polls with 300ms/500ms intervals checking for Claude's idle prompt (`❯`). There's no check for "is the user currently typing in the editor." The route fires as soon as the pane is idle, regardless of editor state.
+
+**Fix options:**
+1. **Debounce in the IDE plugin:** Don't trigger route until the file hasn't changed for N seconds (indicates user stopped typing)
+2. **Debounce in `agent-doc route`:** After reading the file, wait 1-2s, re-read, and only proceed if content is stable
+3. **The `agent:pending` approach:** Even if captured mid-type, the pending component preserves partial text and the user can complete it next cycle
+
+Option 1 is the cleanest — the JB/VSCode plugins should debounce file saves before triggering route.
+
+I looks like VERSIONS.md has not been updated since 0.4.2. Please backfill VERSIONS.md
+I recall that we solved waiting for the human to finish with the current line.
+This was logic in agent-doc run I believe. Could you look into the git history to find the feature?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Audit docs
-- [x] Update SPEC.md
-- [x] Release v0.17.24
+- [x] Investigate truncated prompt in tasks/agent-loop.md
+- [x] Check logs for polling during incomplete prompt
+- [x] Propose fix for prompt truncation
 <!-- /agent:pending -->

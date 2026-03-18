@@ -464,12 +464,44 @@ $ make test
 - Assertions check the rendered DOM, not the raw HTML source
 
 compact exchange
+
+### Exchange Summary (compacted)
+
+**Rust crate decision:** Hybrid approach — `agent-resume` (Rust CLI) handles content assembly, `build.py` (Python) handles pandoc+weasyprint PDF pipeline. Chose `agent-resume` name over alternatives (vitae, recompose, resumatic).
+
+**agent-resume implementation:**
+- Scaffolded at `src/agent-resume/`, published to [btakita/agent-resume](https://github.com/btakita/agent-resume)
+- Submodule in agent-loop at `src/agent-resume`
+- Commands: `build`, `render`, `validate`, `search-index`
+- Single `resume/data.toml` (14 experiences, 37 skills, 45 accomplishments) — consolidated from per-experience TOML files
+- Full resume assembly: contact, summary, skills, career highlights, experience, education, certifications, languages
+- Profile-driven phrase/skill bolding via `profiles/default.toml`
+
+**build.py refactor:** 280 → 125 lines. Removed all content assembly logic. Now calls `agent-resume build` then pipes through pandoc → weasyprint.
+
+**Search feature:** `search.html` + `search-index.json` for GitHub Pages. Vanilla JS, tag filtering, keyword search, relevance scoring.
+
+**Bugs fixed:**
+- `renderResults()` null guard (DATA race condition before `loadData()` complete)
+- `search-index.json` cargo output contamination (use installed binary, not `cargo run`)
+
+**Test suite:** 12 pytest tests — 5 search-index validation + 7 LightPanda DOM tests. `make test` runs them.
+
+**.mise.toml:** Python 3.14 venv auto-created.
+
+Create the context for deepak-rana contact.
+
+Transcribe phone calls:
+[phone_20260318-140543_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-140543_7324225948.amr)
+[phone_20260318-122359_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-122359_7324225948.amr)
+[phone_20260318-120421_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-120421_7324225948.amr)
+[phone_20260317-174729_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260317-174729_7324225948.amr)
+[phone_20260317-174403_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260317-174403_7324225948.amr)
+[phone_20260317-163830_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260317-163830_7324225948.amr)
+
+Create a custom resume for Apex Systems: Deepak Rana: Guide me through any miss
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Resume website search feature
-- [x] Fix search-index.json cargo output contamination
-- [x] LightPanda test passed
-- [x] Add test suite using LightPanda + HTTP server
-- [x] Add .mise.toml for Python venv
+
 <!-- /agent:pending -->

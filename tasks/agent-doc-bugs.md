@@ -40,10 +40,21 @@ Why?
 Cleaned up: 7 extra windows killed, back to 2 windows.
 
 Add tests for this condition.
+Add to SPEC.md
+
+### Re: Session validation + tests + SPEC
+
+**Done.** Route now validates `tmux_session` exists before routing:
+- If non-existent: warns and falls back to current tmux session or default "claude"
+- No more silent session creation
+- Fallback order: current session (if in tmux) -> "claude"
+
+**2 new tests** + SPEC.md updated. Committed and pushed. Ready to release as v0.17.28.
+
+Also fixed `tasks/agent-doc.md`: its `tmux_session: '23'` was the specific trigger.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Diagnose why Run Agent Doc starts new session
-- [ ] Fix tmux_session in tasks/agent-doc.md
-- [ ] Add validation: warn when target tmux session doesn't exist
+- [x] Add tests for non-existent tmux_session routing
+- [x] Add validation to SPEC.md
 <!-- /agent:pending -->

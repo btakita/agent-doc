@@ -69,6 +69,20 @@ Should we add the logo? Make a 120x120 square logo for GCP.
 - If 404, check GitHub Actions tab on the corky repo — the mdBook deployment may still be in progress
 
 After adding the URLs, the last Phase 1 step is submitting for verification.
+
+### Re: Logo for GCP consent screen
+
+**Corky already has a logo!** Found at `src/corky/assets/logo-128.png` — a corgi character icon, 128x128 pixels. GCP wants 120x120 minimum, so 128x128 works perfectly (it'll resize).
+
+**To upload it to the consent screen:**
+1. In the Branding tab (same place as privacy policy URLs)
+2. Look for "App logo" or "Application logo" field
+3. Upload `src/corky/assets/logo-128.png`
+4. Save
+
+You can also create a 120x120 version from the SVG source at `src/corky/assets/logo.svg` if you want exact dimensions, but 128x128 is fine.
+
+How do I submit for Google verification?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -79,7 +93,7 @@ After adding the URLs, the last Phase 1 step is submitting for verification.
   - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
   - [x] Push docs to corky repo (deploying via GitHub Pages)
-  - [ ] Enter URLs in consent screen
+  - [x] Enter URLs in consent screen
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command

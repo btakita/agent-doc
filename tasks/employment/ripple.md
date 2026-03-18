@@ -235,6 +235,44 @@ Draft created at `mail/drafts/2026-03-18-re-rate-confirmation-brian-takita-front
 The draft is ready at the path above — status set to `approved`. Which approach do you want?
 
 Configure OAuth please
+
+Should I include some of my YouTube videos or would that be too much detail for this inquiry?
+
+### OAuth Configuration
+
+After investigating corky's codebase, **corky doesn't support sending via Gmail API** — sending only works via SMTP. The `gmail-api` provider is read-only (used for sync).
+
+**Quickest fix — add SMTP credentials for btak.dev:**
+
+1. Generate a Gmail App Password (requires 2-Step Verification):
+   - Go to https://myaccount.google.com/apppasswords
+   - Sign in as btak.dev@gmail.com
+   - Create an app password for "Mail"
+   - Store it: `pass insert email/btak.dev/app-password`
+
+2. Add SMTP config to `mail/.corky.toml`:
+   ```toml
+   [accounts."btak.dev"]
+   provider = "gmail-api"
+   user = "btak.dev@gmail.com"
+   labels = ["INBOX"]
+   sync_days = 30
+   password_cmd = "pass email/btak.dev/app-password"
+   smtp_host = "smtp.gmail.com"
+   smtp_port = 465
+   ```
+
+3. Then send:
+   ```bash
+   corky draft push --send mail/drafts/2026-03-18-re-rate-confirmation-brian-takita-front-end-engineer-with-so.md
+   ```
+
+**Alternative — just copy-paste now:**
+The draft is ready. Open Gmail, reply to Priya's thread, paste the content. You can configure SMTP later for future sends.
+
+Gmail API send support would be a corky feature request (needs `gmail.send` scope + API endpoint handler). That's a future improvement, not something we can do right now.
+
+Which path — App Password setup or copy-paste?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

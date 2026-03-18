@@ -188,6 +188,34 @@ Please reinstall the plugin from `editors/jetbrains/build/distributions/agent-do
 Should we release the crate package as well, or will this replace the distribution on the github packages page?
 
 btw, there are some agent-doc windows in tmux session 1. This should not have happened. Why were they moved to tmux session 1?
+
+### Re: Release + Tmux Session 1 Panes
+
+**Release:** The Gson revert only affects the JetBrains plugin (Kotlin code), not the Rust binary. crates.io v0.18.0 is fine — the binary never used Gson. However, we should release v0.18.1 to include the claim scaffolding h2 headers fix and keep the tag pointing to the correct commit. The GitHub Release binary would then include all fixes.
+
+Want me to proceed with v0.18.1?
+
+**Tmux session 1 panes:** Found 5 panes in session `1` that all have `tmux_session: 0` in frontmatter:
+
+| File | Pane | Actual Session | Frontmatter |
+|------|------|---------------|-------------|
+| corky-public-google-app.md | %86 | 1 | 0 |
+| ripple.md | %71 | 1 | 0 |
+| agent-doc-bugs.md | %24 | 1 | 0 |
+| agent-loop.md | %84 | 1 | 0 |
+| corky.md | %85 | 1 | 0 |
+
+The immutable binding fix (v0.17.30) prevents `claim.rs` from overwriting `tmux_session` in frontmatter. But it doesn't prevent the panes themselves from being moved at the tmux level (manual `move-pane`, `join-pane` targeting wrong session, or `auto_start` creating panes in the wrong session before the validation was added).
+
+**Root cause:** These panes were likely created or moved before the v0.17.30 fix was installed. The fix prevents *future* frontmatter rewrites, but existing misplaced panes need manual correction or `resync --fix`.
+
+**To fix now:** `agent-doc resync --fix` should detect and kill the wrong-session panes. On next route, they'll be auto-started in the correct session (0).
+
+**Design gap:** `route.rs` already validates session on route (lines 66-87), but `auto_start` may still create panes in the fallback session if the document's tmux_session didn't exist at auto-start time. The fallback logic should be tighter — refuse to start rather than start in the wrong session.
+
+Will this update help recover existing tmux panes in tmux session 1? Should I just manually close those panes? Or should I move those panes into tmux session 0?
+
+release
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

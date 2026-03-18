@@ -483,4 +483,22 @@ The extra 7 panes from earlier were already cleaned up by the IDE's "Sync Tmux L
 There are currently 10 tmux windows in the tmux session.
 Did the logs catch why?
 Please fix
+
+### Re: 10 windows → 2 windows
+
+**Fixed.** Killed 8 extra windows (2, 4-10) containing solo agent-doc panes that spilled out during earlier sync attempts. Session 0 now has 2 windows:
+- **Window 0:** 2 panes (agent-doc-bugs.md + corky-public-google-app.md)
+- **Window 3:** stash (5 panes)
+
+**Why it happened:** When `agent-doc sync` tried to arrange 9 panes in 2 columns, the terminal was too short (15 rows). Panes that couldn't fit got broken out into separate windows. Each subsequent sync attempt made it worse.
+
+**Root cause for sync:** The sync algorithm uses `join-pane` which fails with "pane too small" when the target window can't fit another pane. When it fails, the pane stays in its own window rather than being stashed.
+
+**Registry cleaned:** Deregistered 7 killed panes. These sessions will auto-restart via `route` when you open those documents again.
+
+**Still pending from your requests:**
+1. `--dangerously-set-permissions` → `--dangerously-skip-permissions` rename
+2. `resync --fix` — implemented, needs release
+
+Release.
 <!-- /agent:exchange -->

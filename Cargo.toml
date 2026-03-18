@@ -1,11 +1,19 @@
 [package]
 name = "agent-doc"
-version = "0.17.27"
+version = "0.17.28"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 readme = "README.md"
+
+[lib]
+name = "agent_doc"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "agent-doc"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"

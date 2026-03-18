@@ -98,7 +98,7 @@ fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
 ///
 /// Uses `pulldown-cmark` AST parsing with `offset_iter()` to accurately detect
 /// code regions per the CommonMark spec.
-pub(crate) fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
+pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let parser = Parser::new_ext(doc, Options::empty());
     let mut iter = parser.into_offset_iter();
@@ -548,15 +548,16 @@ ok
 
     #[test]
     fn double_backtick_comment_before_agent_marker() {
-        // Regression: `` `<!--` `` followed by agent marker should not be a huge comment
+        // Regression: `` `<!--` `` followed by agent marker should not confuse the parser
         let doc = "\
 <!-- agent:exchange -->\n\
 text `` `<!--` `` description\n\
 new content here\n\
 <!-- /agent:exchange -->\n";
-        let stripped = crate::diff::strip_comments(doc);
-        assert!(stripped.contains("new content here"), "content must survive stripping");
-        assert!(stripped.contains("<!-- agent:exchange -->"), "agent markers must survive");
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert!(components[0].content(doc).contains("new content here"));
     }
 
     // --- Inline attribute tests ---

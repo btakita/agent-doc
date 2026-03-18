@@ -40,5 +40,13 @@ Operational task document for agent-loop workspace management.
 
 The key insight: the skill accumulates operational knowledge over time. Each release teaches it something, and those lessons persist in the SKILL.md for the next session.
 
-Updated SKILL.md is at `.claude/skills/dev/SKILL.md` — ready for a test drive or further iteration.
+Updated SKILL.md is at `.claude/skills/dev/SKILL.md` — ready for a test drive or further iteration
+
+Please use the agent:pending component.
+
+Add a SPEC.md for this skill. So another project can use the SPEC.md to build up their own custom dev skill.
+
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->

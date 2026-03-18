@@ -49,9 +49,33 @@ Can we robustly track where the binding agent session is stashed?
 
 Want me to implement both?
 yes
+
+### Re: Both fixes implemented
+
+**Fix 1 — Route stash fallback:**
+- When `split_window` fails, `auto_start()` creates the pane, then `stash_pane()` immediately moves it to the stash window
+- No more visible window proliferation
+- If stashing fails, pane stays in new window with warning logged
+
+**Fix 2 — Resync wrong-window detection:**
+- Groups panes by tmux session, finds majority window, flags minority-window panes as `WrongWindow`
+- Stash windows excluded from detection
+- `--fix` moves wrong-window panes to stash via `stash_pane()`
+
+**6 new tests** covering stash fallback, wrong-window detection, stash exclusion, and fix behavior.
+
+**Re: Your speculation about tmux session focus:** You're right that the claiming tmux session should override any "last selected" preference. The `tmux_session` frontmatter field is used by route to determine the target session — it doesn't rely on the currently focused tmux session. But the window proliferation was caused by concurrent routes + pane-too-small failures, not by session focus.
+
+**Re: Multiple stash windows:** The `stash_pane()` implementation in tmux-router handles this — if the stash window can't fit another pane, it creates "stash-2", etc.
+
+**Re: Tracking stashed sessions:** The sessions registry already tracks which pane belongs to which file. When a stashed pane needs to be activated, `route` finds it in the registry, splits it into the visible window, and updates the registration.
+
+Binary built. Ready to release as v0.17.23.
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix route fallback: stash instead of new window when split fails
-- [ ] Add wrong-window detection to resync --fix
+- [x] Fix route fallback: stash instead of new window when split fails
+- [x] Add wrong-window detection to resync --fix
 <!-- /agent:pending -->

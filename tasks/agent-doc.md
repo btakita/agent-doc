@@ -127,6 +127,7 @@ claude_args: --dangerously-skip-permissions
 11. **Durable pending store** — save response before write, clear after success; survives compaction and crashes
 12. **Distinct patch prefix** — patch markers vs agent markers prevents confusion between response directives and document components
 13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice: component.rs (v0.9.10) and diff.rs (v0.14.8). Check all `<!--` parsers when adding new ones.
+14. **Immutable session binding** — `tmux_session` in frontmatter should never be silently overwritten by claim. This caused cross-session pane swapping when autoclaim or lazy-claim ran in a different session. Fix: refuse to overwrite unless `--force`. Track multi-step plans in `agent:pending` to survive context compaction.
 <!-- /agent:lessons -->
 
 ## Session History
@@ -157,35 +158,36 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange -->
 
-### Re: Cross-platform + v0.17.29 Release
+### Re: Plan Loss, Session Switching, and Routing Fix
 
-**Yes, cross-platform works.** The `lib-path` command has `cfg` blocks for all three platforms:
+**1. Why the plan got lost:**
+Context compaction between cycles dropped the Phase 2 plan state. When you said "go" the agent interpreted it as "release" instead of "continue with step 3". Fix: multi-step plans should be tracked as `agent:pending` checkbox items so they survive compaction. Steps 3 & 4 of Phase 2 are still pending.
 
-| Platform | Library Name | `cfg` Gate |
-|----------|-------------|-----------|
-| Linux | `libagent_doc.so` | `target_os = "linux"` |
-| macOS | `libagent_doc.dylib` | `target_os = "macos"` |
-| Windows | `agent_doc.dll` | `target_os = "windows"` |
+Please repopulate `agent:pending`.
 
-Rust's `cdylib` crate type produces the correct library format per target. JNA handles platform-specific loading automatically — it just needs the absolute path from `agent-doc lib-path`.
+**2. Why `tmux_session` switched from '23' to '0':**
+Root cause found at `claim.rs:81` — the condition was:
+```rust
+if fm.tmux_session.is_none() || fm.tmux_session.as_deref() != Some(&pane_sess) {
+```
+This **unconditionally overwrites** `tmux_session` whenever the claimed pane's session differs. Any claim (autoclaim, route lazy-claim, plugin claim) would silently reassign the document to whatever session the claiming pane belongs to.
 
-**v0.17.29 released:**
-- crates.io: published
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.17.29
-- `cargo install`: binary updated to v0.17.29
-- JetBrains plugin: v0.2.5 (unsigned + signed zips built)
-- PyPI: skipped (maturin needs separate invocation)
+**3. Systemic fix implemented:**
+`claim.rs` now uses **immutable session binding**:
+- If `tmux_session` is `None` → set it (first claim)
+- If `tmux_session` matches pane's session → no-op
+- If `tmux_session` **differs** → **warn and refuse** (don't overwrite)
+- `--force` flag explicitly overrides the binding
 
-What happened to the plan we were working on.
-Still need to do stage 3 & 4.
-Why did it get lost?
+This prevents accidental session reassignment from autoclaim, lazy-claim, or plugin claims. The user must explicitly use `agent-doc claim --force` to move a document between sessions.
 
-The tmux panes were also switch with tmux session 1.
-Why did this happen again?
-I thought we fixed the problem.
-I manually moved the panes to their correct sessions.
+**Files changed:**
+- `src/claim.rs` — immutable tmux_session binding with `--force` override
+- `src/main.rs` — added `--force` flag to Claim command
 
-How do we fix these tmux routing issues by design? I'm afraid we are playing whack-a-mole.
+**Tests:** 440 passing, clippy clean.
+
+Continue
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

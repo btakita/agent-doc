@@ -574,8 +574,26 @@ The IPC format change would be:
 - New: `{"file": "...", "full_content": "...the entire document..."}`
 
 Want me to implement Option B?
+
+### Re: Option B concerns — cursor + external edit
+
+**You're right — Option B would cause both issues.** Replacing the entire document via Document API:
+- **Cursor position:** Would reset to start or end. Unacceptable for active editing.
+- **External edit dialog:** Depends on implementation, but full content replacement via Document API should avoid this (it's an in-memory change, not a disk write). However, if the content differs significantly from what the editor has in its buffer, it could trigger undo-stack issues.
+
+**Option A (fix plugin-side matching) is the right immediate fix.** The JB plugin's regex just needs to skip fenced code blocks — same logic we implemented in Rust. A simple state machine: track if we're inside ` ``` ` fences, skip matches when inside.
+
+**Option C (FFI) is the proper long-term solution.** Sharing the Rust parser via FFI means the plugin and the CLI have identical behavior. The JNI bridge for JB and NAPI for VSCode.
+
+**Plan:**
+1. **Now:** Fix JB plugin's `applyPatch` to skip code-block component tags (Option A)
+2. **Next release cycle:** Begin FFI shared library (Option C)
+
+Want me to fix the JB plugin now?
 <!-- /agent:exchange -->
 ```
+
+Yes
 
 Would Option B cause an external edit error or cause the editor to lose track of the cursor?
 Both are unacceptable. If either is the case, we can go with Option A for now.
@@ -617,5 +635,5 @@ Please use the markdown ast to determine where to place the patch from the agent
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement full-content IPC (Option B) to eliminate plugin-side matching
+- [ ] Fix JB plugin applyPatch to skip code-block tags (Option A)
 <!-- /agent:pending -->

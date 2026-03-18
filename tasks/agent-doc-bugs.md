@@ -134,6 +134,10 @@ Whenever `/agent-doc run` is called, `agent:pending` should immediately be popul
 Is there a markdown ast parser?
 So we can avoid these sort of issues.
 
+Again, when my prompt is located before the patch response, my prompt is lost when both the prompt then the patch response is in the run diff.
+
+Can we diff against the CRDT patch to get the human prompt?
+
 ### Re: Backtick corruption — document fixed
 
 **What happened:** Line 130 had `` `&lt;!-- agent:pending patch=replace --&gt; `` — the backtick opened but the tag content continued onto the next line. Inline code spans are single-line in CommonMark, so the parser correctly did NOT treat it as inline code. The tag was parsed as a real component opener, eating the pending component.

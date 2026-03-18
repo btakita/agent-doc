@@ -359,6 +359,17 @@ Let me create the file now.
 Good feedback — noted for future. The HTML file is at: `file:///tmp/ripple-reply.html`
 
 Where is this context saved? Which file?
+
+### Re: Where is this context saved?
+
+The file:// protocol feedback was saved in two places:
+
+1. **Memory file:** `~/.claude/projects/-home-brian-work-btakita-agent-loop/memory/feedback_file_protocol_paths.md`
+2. **Memory index:** `~/.claude/projects/-home-brian-work-btakita-agent-loop/memory/MEMORY.md` (under "UX Preferences")
+
+This is Claude Code's auto-memory system — persistent across conversations. Next session, I'll already know to use `file:///` paths for browser-openable files.
+
+Let's save this as an email skill or in email/AGENTS.md
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

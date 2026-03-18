@@ -264,6 +264,8 @@ weasyprint HTML → PDF
 5. Profile `include`/`experience` compat (or fully replace with tag scoring)
 
 Want me to start implementing the full resume assembly now?
+
+yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

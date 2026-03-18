@@ -9,10 +9,10 @@ claude_args: "--dangerously-skip-permissions"
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.27 | **Tests:** 440 (151 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.17.28 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✗ (auth) | PyPI ✗ (auth)
-**Plugins:** JetBrains v0.2.1 (IPC patch watcher) + VS Code v0.2.0
-**Library:** `libagent_doc.so` (1.5M) — 5 FFI exports (parse, patch, merge, free)
+**Plugins:** JetBrains v0.2.2 (JNA FFI + IPC patch watcher) + VS Code v0.2.0
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports (parse, patch, merge, frontmatter, free_string, free_state)
 <!-- /agent:status -->
 
 ## Architecture
@@ -154,34 +154,51 @@ claude_args: "--dangerously-skip-permissions"
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: PLUGIN-SPEC.md and Phase 2 Planning
 
-**Yes, `editors/PLUGIN-SPEC.md` is the authoritative spec.** The architecture section notes "9/9 SPEC parity" — both plugins implement all Phase 1 features (2.1–2.11). The spec codifies what was built.
+### Re: Phase 2 — JNA Wrapper Implementation
 
-Phase 2 (CRDT-via-FFI) is defined in spec sections 3.1–3.2. The library target from Phase 1 is the foundation.
+**Phase 2a complete.** Native FFI integration with Kotlin fallback:
 
-**Duplicated logic the FFI eliminates:**
+**Rust FFI additions (`ffi.rs`):**
+- `agent_doc_merge_frontmatter(doc, yaml_fields) → FfiPatchResult` — wraps `frontmatter::merge_fields()`
+- New test: `merge_frontmatter_adds_field`
 
-| Duplicated Logic | JetBrains | VS Code | FFI Replacement |
-|---|---|---|---|
-| Component matching + mode | `applyComponentPatch()` | `applyComponentPatch()` | `agent_doc_apply_patch()` |
-| Code block detection | `findCodeBlockRanges()` | `findCodeBlockRanges()` | Built into `parse_components()` |
-| Frontmatter merge | `applyFrontmatterPatch()` | `applyFrontmatterPatch()` | Not yet exported (needs FFI add) |
-| JSON parsing | 90-line hand-rolled parser | `JSON.parse()` (native) | N/A (JB-only issue) |
+**New CLI command:**
+- `agent-doc lib-path` — prints path to `libagent_doc.so` (used by plugin for library discovery)
 
-**VS Code gap found:** Missing `prepend` mode — falls through to `replace`. Auto-fixed when N-API replaces inline logic.
+Will this work on OSX and Windows as well?
 
-**Phase 2 plan — JNI wrapper:**
-1. Add `agent_doc_merge_frontmatter()` to `ffi.rs`
-2. Create JNI bindings in `editors/jetbrains/` to `libagent_doc.so`
-3. Replace `applyComponentPatch`, `findCodeBlockRanges`, `parsePatchJson`, `applyFrontmatterPatch` with FFI calls
-4. Keep plugin-side: VFS lookup, `WriteCommandAction`, NIO watcher, ACK, retry
+**JetBrains plugin (`NativeLib.kt`):**
+- `AgentDocLib` — JNA interface mapping C ABI functions (`apply_patch`, `merge_frontmatter`, `parse_components`, `free_string`)
+- `NativePatching` — safe wrapper with automatic memory management (pointer free)
+- Library discovery via `agent-doc lib-path` command
+- Lazy-loaded singleton with error logging on first failure
 
-Awaiting direction: proceed with Phase 2 JNI, or fix VS Code prepend gap first?
+**PatchWatcher.kt changes:**
+- `applyComponentPatchNative()` → tries FFI first, falls back to Kotlin
+- `extractComponentMode()` → extracts inline `patch=`/`mode=` attribute for FFI call
+- `applyFrontmatterPatchKotlin()` / `applyComponentPatchKotlin()` — renamed originals as fallbacks
+- Frontmatter patching also uses native-first pattern
 
-proceed with phase 2
+**What's preserved (plugin-side):**
+- VFS lookup, `WriteCommandAction`, NIO file watcher, ACK-by-deletion
+- `parsePatchJson()` — hand-rolled JSON parser (JB-side concern, could switch to Gson later)
+- Full content replacement path (append-mode documents)
 
-Continue
+**Validation:**
+- FFI tests: 4/4 passing (including new `merge_frontmatter_adds_field`)
+- Full test suite: 440 tests passing (clippy clean)
+- Plugin compiles (both unsigned + signed zips built)
+- `agent-doc lib-path` works: `libagent_doc.so` at 1.7MB
+
+**Not yet done (Phase 2b — CRDT document model):**
+- In-memory CRDT per open document (keystroke → CRDT ops)
+- CRDT state exchange via IPC (`.agent-doc/crdt/<hash>.yrs`)
+- External edit detection → CRDT reset
+
+Ready to release v0.17.29 with the FFI/JNA integration, or proceed to Phase 2b?
+
+go
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

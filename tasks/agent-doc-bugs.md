@@ -104,4 +104,42 @@ Want me to implement this in the skill and document it?
 
 Yes. I'm also not liking mode=append|replace...Should we call it patch=append|replace instead?
 mode is too generic. This is how we are patching the content of the component.
+
+### Re: Rename mode→patch + implement pending
+
+**`mode` → `patch` rename:** Agreed. `patch=append|replace|prepend` is more precise — it describes the patching strategy, not a generic "mode." Current syntax `<!-- agent:name mode=append -->` becomes `<!-- agent:name patch=append -->`.
+
+**Backward compatibility:** Accept both `mode=` and `patch=` during a transition period, with `patch=` taking precedence. This lets existing documents keep working while new ones use the better name.
+
+**Changes needed:**
+1. `component.rs` — parse `patch=` attribute (alongside `mode=` for compat)
+2. `patch.rs` — use the resolved patch strategy
+3. `components.toml` — rename `mode` key to `patch` (keep `mode` as alias)
+4. SKILL.md, SPEC.md, README.md — update docs
+5. All existing documents — update inline attributes (can be done gradually)
+
+**Pending tracking:** I'll implement the `agent:pending` component behavior in the SKILL.md skill logic. This is a skill-side change (Claude Code interprets the component), not a Rust change (the Rust side already handles replace-mode components).
+
+I'll implement both now. The `mode→patch` rename goes in Rust; the pending tracking goes in the skill.
+
+I thought we were using rust for the at least some of the pending tracking.
+
+### Re: mode→patch rename implemented
+
+**Done.** `patch=append|replace|prepend` is now the primary inline attribute. `mode=` kept as backward-compatible alias.
+
+**Changes (12 files):**
+- `component.rs` — new `patch_mode()` method: checks `patch=` first, falls back to `mode=`
+- `patch.rs` — `ComponentConfig.mode` renamed to `patch` with `#[serde(alias = "mode")]`
+- `template.rs` — all `attrs.get("mode")` → `patch_mode()`
+- `claim.rs` — scaffold now uses `patch=`
+- `write.rs` — updated comment
+- JB plugin + VSCode extension — updated parsers for `patch=` with `mode=` fallback
+- CLAUDE.md, SPEC.md, README.md, PLUGIN-SPEC.md — docs updated
+- SKILL.md (repo-level) — updated manually
+- 7 new tests for attribute parsing and precedence
+
+Committed and pushed. This document's `<!-- agent:status mode=replace -->` and `<!-- agent:exchange mode=append -->` still work via backward compat — you can update them to `patch=` at your convenience.
+
+**Pending tracking:** Deferred to next cycle — the `agent:pending` component is a skill-side addition that needs careful design of the checkpoint/flush behavior. Want to tackle it in a fresh session?
 <!-- /agent:exchange -->

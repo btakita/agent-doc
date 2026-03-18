@@ -213,9 +213,25 @@ Committed and pushed. Ready to release when you want.
 audit docs
 update SPEC.md
 
-Let add a skill for library
+### Re: Audit docs + SPEC + skill for library
+
+**1. Audit docs — done.** 4 stale files updated (pulldown-cmark note in README/SPEC). Audit passes clean.
+
+**2. SPEC.md — updated.** Added code range exclusion paragraph in component parsing section.
+
+**3. "Add a skill for library" — need clarification.** What do you mean by "library"? Some possibilities:
+- A skill for managing Rust library crates (cargo publish, version bumping)?
+- A skill for the `instruction-files` crate (audit-docs functionality)?
+- A skill for a new "library" feature in agent-doc?
+- Something else?
+
+Please clarify and I'll implement.
+
+release. I will address the skill in tasks/agent-loop.md
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
+- [x] Audit docs
+- [x] Update SPEC.md
+- [ ] Add a skill for library (awaiting clarification)
 <!-- /agent:pending -->

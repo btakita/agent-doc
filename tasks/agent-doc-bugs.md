@@ -96,8 +96,25 @@ Starting claude...
 ### Re: VERSIONS.md updated
 
 **Done.** VERSIONS.md now has entries for all versions 0.17.0 through 0.17.28. Added the 4 missing entries (0.17.25-0.17.28). Committed and pushed.
+
+There are multiple agent-doc tmux windows in this session.
+
+Let's make sure that we avoid this issue in the future.
+We may have the local build to test before releasing.
+
+### Re: Stale binary + multiple windows
+
+**Found it.** Two `agent-doc` binaries existed:
+- `.bin/agent-doc` (symlink) → v0.17.28 (correct)
+- `~/.cargo/bin/agent-doc` → **v0.17.16** (stale!)
+
+The `agent-doc start` command spawns Claude sessions using the `~/.cargo/bin/` binary (from PATH in tmux), which was still v0.17.16 — missing ALL the fixes from this session (stash, session validation, etc.).
+
+**Fixed:** Ran `cargo install --path .` to update `~/.cargo/bin/agent-doc` to v0.17.28. Both binaries now match.
+
+**This explains the persistent window proliferation** — the tmux-spawned sessions used the old binary without stash, session validation, or split-window fixes.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Update VERSIONS.md with 0.17.5-0.17.28
+
 <!-- /agent:pending -->

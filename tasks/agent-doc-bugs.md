@@ -294,5 +294,25 @@ I may be running multiple editors with their own claiming tmux session.
 This is a good feature for v0.17.17. Want me to implement the session-aware resync now?
 Can we have a way for active agent sessions using agent-doc claims to identify each other?
 
-I still see 
+I still see 10 tmux windows in this tmux session.
+
+### Re: Session identification + window cleanup
+
+**Session identification:** Yes — `sessions.json` already tracks which pane belongs to which file. Each registered session has a `pane`, `file`, and `window` field. Any agent-doc session can query the registry to find all other active sessions:
+
+```bash
+agent-doc resync          # Lists all registered sessions + pane status
+agent-doc plugin list     # Shows installed plugins
+```
+
+For inter-session discovery, we could add `agent-doc sessions list` that shows all active sessions with their file, pane, and tmux session — making it easy to see who's running where.
+
+**10 windows:** Each `auto_start` creates a new window because `join_pane` only works when there's an existing pane to join alongside. When starting from scratch (no panes in the target session), each file gets its own window. The fix is to run **Sync Tmux Layout** after starting sessions — it consolidates windows into the editor's column layout.
+
+Want me to:
+1. Run sync now to consolidate the 10 windows?
+2. Implement session-aware resync that auto-cleans wrong-session panes?
+3. Add `agent-doc sessions list` command?
+
+2 and 3
 <!-- /agent:exchange -->

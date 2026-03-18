@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.30+dev | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.18.0 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.5 (JNA FFI + Gson + IPC) + VS Code v0.2.0 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** undo, extract, transfer commands
+**Plugins:** JetBrains v0.2.6 (JNA FFI + Gson + IPC) + VS Code v0.2.3 (prepend fix)
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** undo, extract, transfer
 <!-- /agent:status -->
 
 ## Architecture
@@ -83,7 +83,8 @@ claude_args: --dangerously-skip-permissions
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
 | v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
 | v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. IPC write (`--ipc` + JetBrains PatchWatcher v0.2.1). tmux layout fix (`first_pane_join_flag`). 303 + 67 tests. |
-| v0.17.29 | JNA FFI integration — `agent_doc_merge_frontmatter()` export, `lib-path` command, NativeLib.kt JNA bindings, native-first patching with Kotlin fallback. JetBrains plugin v0.2.5. 440 tests. |
+| v0.17.29-v0.17.30 | JNA FFI integration, `merge_frontmatter()` export, `lib-path` command, Gson parser, VS Code prepend fix, immutable session binding. 440 tests. |
+| v0.18.0 | `undo` (pre-response restore), `extract` (move last exchange entry), `transfer` (move component content). Pre-response snapshot storage. JetBrains v0.2.6, VS Code v0.2.3. 446 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -126,50 +127,43 @@ claude_args: --dangerously-skip-permissions
 
 **v0.16.1:** Native compact for template/stream mode. Published v0.16.1.
 
-**v0.17.0:** Split `agent_doc_mode` into `agent_doc_format` (append | template) + `agent_doc_write` (merge | crdt). `resolve_mode()` with backward-compatible deprecation. CRDT as default write strategy. Convert CLI extended with `--agent-doc-format`/`--agent-doc-write` flags. Refactored 12 files, removed dead code. 303 tests.
+**v0.17.0-v0.17.30:** Split `agent_doc_mode` into `agent_doc_format` + `agent_doc_write`. IPC write + JetBrains PatchWatcher. JNA FFI bindings (NativeLib.kt) with Kotlin fallback. Gson JSON parser. VS Code prepend mode fix. Immutable `tmux_session` binding (`--force`). `lib-path` command. `merge_frontmatter()` FFI export.
+
+**v0.18.0:** `undo` (pre-response snapshot restore), `extract` (move last exchange entry between docs), `transfer` (move full component between docs). Pre-response snapshot storage in all write paths. JetBrains v0.2.6, VS Code v0.2.3. 446 tests.
 <!-- /agent:history -->
 
 ## Exchange
 
 <!-- agent:exchange -->
 
-### Re: Plugin Bumps + Build for Testing
+### Re: v0.18.0 Release + Compact
 
-All built and ready for testing:
+**v0.18.0 released:**
+- crates.io: published
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.18.0
+- cargo install: updated to v0.18.0
+- JetBrains plugin: v0.2.6 (built, not published to marketplace)
+- VS Code extension: v0.2.3 (built, not published to marketplace)
 
-| Artifact | Version | Location |
-|----------|---------|----------|
-| `agent-doc` binary | v0.17.30 (dev) | `~/.cargo/bin/agent-doc` (installed) |
-| `libagent_doc.so` | v0.17.30 | `target/release/libagent_doc.so` |
-| JetBrains plugin | v0.2.6 | `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.6.zip` (unsigned + signed) |
-| VS Code extension | v0.2.3 | `editors/vscode/agent-doc-0.2.3.vsix` |
+**Session recap (v0.17.27 → v0.18.0):**
+- Library target with C FFI (6 exports) + `lib-path` command
+- JetBrains JNA bindings (NativeLib.kt) with Kotlin fallback
+- Gson JSON parser replacing 90-line hand-written parser
+- VS Code prepend mode fix
+- Immutable tmux_session binding (`--force` to override)
+- Pre-response snapshot storage + `undo` command
+- `extract` and `transfer` commands for content movement between documents
+- 446 tests (up from 440)
 
-**To test:**
-- `agent-doc undo tasks/agent-doc.md` — should restore pre-response state
-- `agent-doc extract source.md target.md` — moves last exchange entry
-- `agent-doc transfer source.md target.md exchange` — moves full component
-- `agent-doc lib-path` — should print shared library path
-- JetBrains: Install `agent-doc-jetbrains-0.2.6.zip` from disk, verify IPC patching still works
-- VS Code: Install `agent-doc-0.2.3.vsix`, verify prepend mode works
-
-Let me know when you're ready to release or if anything needs fixing.
-
-release
-
-compact exchange
+agent-doc templates should always have a header (h2) in front of a component...like in this document.
+It works as code folding.
+This should be the canonical pattern.
+Please add to agent-doc SKILL.md and binary where applicable.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Release v0.17.30 with immutable session binding fix
-- [x] Phase 2 step 3: FFI is primary path, Kotlin fallbacks retained as safety net
-- [x] Phase 2 step 4: Replace parsePatchJson hand-rolled parser with Gson
-- [x] VS Code: Fix missing prepend mode (falls through to replace)
-- [x] Response diff storage — save pre-response snapshot before each write
-- [x] `agent-doc undo` — restore pre-response snapshot
-- [x] `agent-doc extract` — move request+response pair to another document
-- [x] `agent-doc transfer` — move context between documents by component
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)

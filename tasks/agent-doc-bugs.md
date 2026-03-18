@@ -138,7 +138,7 @@ The corky-public-google-app.md was **already manually fixed** earlier in this se
 
 To summarize: the fix stops the bleeding (new writes are safe), and the existing wound was already stitched (manual replacement done).
 
-fix tasks/todo/corky-public-google-app.md
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

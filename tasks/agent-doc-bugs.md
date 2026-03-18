@@ -464,5 +464,21 @@ I tried `Sync Tmux Layout` and it split 1 pane of the 9 panes into 2 panes. Now 
 Now there are 2 panes but they are vertical orientation. They should be horizontal.
 Even switching the selected editor document, the tmux pane orientation remains vertical.
 
-Pl
+--dangerously-set-permissions needs to be renamed to --dangerously-skip-permissions
+
+Please reapply previous response. I lost it while editing.
+
+### Re: Layout fixed — 2 horizontal panes
+
+**Fixed.** Window 0 now has 2 panes side by side (120x15 each):
+- `%24` — this session (agent-doc-bugs.md)
+- `%54` — tasks/todo/corky-public-google-app.md
+
+The issue was the sync created a vertical split (stacked top/bottom). Applied `even-horizontal` layout to get side-by-side orientation.
+
+The extra 7 panes from earlier were already cleaned up by the IDE's "Sync Tmux Layout" action — it correctly stashed them. The remaining orientation issue was just the split direction.
+
+**`resync --fix` is implemented** and committed — ready for next release. It would have caught the wrong-session and wrong-process issues automatically.
+
+Your message was cut off at "Pl" — was there more you wanted to say?
 <!-- /agent:exchange -->

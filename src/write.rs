@@ -733,8 +733,10 @@ pub fn sanitize_component_tags(content: &str) -> String {
 
     while pos + 4 <= len {
         if &bytes[pos..pos + 4] != b"<!--" {
-            result.push(bytes[pos] as char);
-            pos += 1;
+            // Advance by one UTF-8 character (not one byte) to preserve multi-byte sequences
+            let ch_len = utf8_char_len(bytes[pos]);
+            result.push_str(&content[pos..pos + ch_len]);
+            pos += ch_len;
             continue;
         }
 
@@ -762,13 +764,23 @@ pub fn sanitize_component_tags(content: &str) -> String {
         pos = close;
     }
 
-    // Append remaining bytes
-    while pos < len {
-        result.push(bytes[pos] as char);
-        pos += 1;
+    // Append remaining content (as a str slice to preserve UTF-8)
+    if pos < len {
+        result.push_str(&content[pos..]);
     }
 
     result
+}
+
+/// Return the byte length of the UTF-8 character starting with `first_byte`.
+fn utf8_char_len(first_byte: u8) -> usize {
+    match first_byte {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xFF => 4,
+        _ => 1, // continuation byte — shouldn't happen at a char boundary
+    }
 }
 
 /// Find the end of an HTML comment (position after `-->`), starting search from `start`.
@@ -1189,5 +1201,74 @@ mod tests {
         let input = "Just some normal markdown content.\n\nWith paragraphs and **bold**.";
         let result = sanitize_component_tags(input);
         assert_eq!(result, input, "normal content should pass through unchanged");
+    }
+
+    #[test]
+    fn sanitize_preserves_utf8_em_dash() {
+        // Em dash U+2014 is 3 bytes in UTF-8: 0xE2, 0x80, 0x94
+        let input = "This is a test \u{2014} with em dashes \u{2014} in content.";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "em dashes must survive sanitization unchanged");
+
+        // Verify at the byte level
+        assert_eq!(
+            result.as_bytes(),
+            input.as_bytes(),
+            "byte-level content must be identical"
+        );
+    }
+
+    #[test]
+    fn sanitize_preserves_mixed_utf8_and_agent_tags() {
+        // Content with UTF-8 characters AND agent tags that need escaping
+        let input = "Response with \u{2014} em dash and <!-- agent:exchange --> tag reference.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("\u{2014}"),
+            "em dash must be preserved, got: {:?}",
+            result
+        );
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "agent tag must be escaped"
+        );
+    }
+
+    #[test]
+    fn sanitize_preserves_various_unicode() {
+        // Test various multi-byte UTF-8 characters
+        let input = "Caf\u{00E9} \u{2019}quotes\u{2019} \u{2014} \u{2026} \u{1F600}";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "all unicode must survive sanitization");
+    }
+
+    #[test]
+    fn ipc_json_preserves_utf8_em_dash() {
+        // Verify that serde_json serialization preserves em dashes in IPC payloads
+        let content = "Response with \u{2014} em dash.";
+        let payload = serde_json::json!({
+            "file": "/tmp/test.md",
+            "patches": [{
+                "component": "exchange",
+                "content": content,
+            }],
+            "unmatched": "",
+            "baseline": "",
+        });
+
+        let json_str = serde_json::to_string_pretty(&payload).unwrap();
+        // Parse it back and verify the content is preserved
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let parsed_content = parsed["patches"][0]["content"].as_str().unwrap();
+        assert_eq!(
+            parsed_content, content,
+            "em dash must survive JSON round-trip"
+        );
+
+        // Also verify the raw JSON contains the UTF-8 bytes, not escaped sequences
+        assert!(
+            json_str.contains("\u{2014}"),
+            "JSON should contain raw UTF-8 em dash"
+        );
     }
 }

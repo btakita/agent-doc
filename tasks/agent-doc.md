@@ -10,9 +10,9 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.18.0 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.18.1 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.6 (JNA FFI + Gson + IPC) + VS Code v0.2.3 (prepend fix)
+**Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
 **Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** undo, extract, transfer
 <!-- /agent:status -->
 
@@ -216,6 +216,18 @@ The immutable binding fix (v0.17.30) prevents `claim.rs` from overwriting `tmux_
 Will this update help recover existing tmux panes in tmux session 1? Should I just manually close those panes? Or should I move those panes into tmux session 0?
 
 release
+
+### Re: Tmux Panes Recovery + v0.18.1 Release
+
+**Tmux panes in session 1:** Just close them. They'll auto-restart in session `0` on the next `/agent-doc` route. Moving panes between sessions is complex and error-prone — closing + auto-restart is the clean path.
+
+**v0.18.1 released:**
+- crates.io: published
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.18.1
+- cargo install: updated to v0.18.1
+- Includes: Gson revert, h2 scaffolding, SKILL.md canonical pattern, pre-response snapshots
+
+Move the agent-doc tmux panes in tmux session 1 into tmux session 0 stash(es). 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

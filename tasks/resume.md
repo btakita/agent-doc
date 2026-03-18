@@ -13,7 +13,7 @@ agent_doc_write: crdt
 **PDF**: auto-generated via GitHub Action, deployed to [btakita.github.io/resume](https://btakita.github.io/resume/)
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
-**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — 14 experiences, 35+ skills, render + validate working
+**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — full resume assembly working, build/render/validate commands, docs added
 <!-- /agent:status -->
 
 ## Completed
@@ -266,11 +266,46 @@ weasyprint HTML → PDF
 Want me to start implementing the full resume assembly now?
 
 yes
+
+### Re: Full resume assembly implemented
+
+**Done.** `agent-resume build` now generates a complete resume markdown from data.toml:
+
+**New `build` command:**
+```bash
+agent-resume build -d data.toml                       # Full resume, no emphasis
+agent-resume build -d data.toml -p profiles/default.toml  # With phrase/skill bolding
+```
+
+**What it assembles:**
+1. Contact header (name, LinkedIn, email, GitHub, location, website, phone)
+2. Summary
+3. Skills (with profile-driven bolding)
+4. Career Highlights (8 entries)
+5. Experience (14 entries, filterable by profile)
+6. Education
+7. Certifications
+8. Languages
+
+**Phrase/skill bolding works** — tested with `profiles/default.toml`:
+- Skills section: `**Rust**`, `**Python**`, `**TypeScript**`, etc.
+- Body text: 83+ phrases bolded via case-insensitive regex
+
+**Docs added:**
+- `README.md` — user-facing docs with quick start + data/profile format
+- `CLAUDE.md` — architecture reference for AI agents
+- `AGENTS.md` → symlink to CLAUDE.md
+
+**data.toml extended** with contact, summary, career highlights, education, certifications, languages sections.
+
+**Next:** Slim down `build.py` to just pandoc+weasyprint, calling `agent-resume build` for content.
+
+continue
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Consolidate to single data.toml in resume repo
-- [ ] Implement full resume assembly in agent-resume (bold phrases, all sections)
+- [x] Implement full resume assembly in agent-resume
+- [x] Add README.md, CLAUDE.md, AGENTS.md to agent-resume
 - [ ] Slim down build.py to pandoc+weasyprint only
 - [ ] Resume website search feature
 <!-- /agent:pending -->

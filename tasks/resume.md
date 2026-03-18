@@ -98,10 +98,30 @@ The following are taken:
 - resume
 - resume-builder
 - resume-generator
+
+### Re: Crate naming
+
+**`agent-resume`** is solid — fits the `agent-*` ecosystem (agent-doc, agent-kit). Other options:
+
+| Name | Vibe | Available? |
+|------|------|-----------|
+| **agent-resume** | Ecosystem match, clear purpose | Yes (confirmed) |
+| **resume-craft** | Emphasizes assembly/composition | Likely |
+| **resumatic** | Compact, memorable | Likely |
+| **cv-forge** | Build metaphor, international term | Likely |
+| **recompose** | "re-combine + compose" — fits the data recombination concept | Likely |
+| **vitae** | Latin for "life" (curriculum vitae), clean | Likely |
+
+**My pick: `agent-resume`** — obvious choice. Signals it's part of your agent tooling ecosystem, immediately communicates purpose, pairs naturally with `agent-doc`. The `agent-*` prefix is becoming your brand.
+
+`recompose` is the runner-up if you want something more evocative of the recombination concept, but less discoverable.
+
+Awaiting your pick, then I'll scaffold the crate.
+
+Let's go with agent-resume. I like vitae as well, but it's less discoverable and could be used for other things.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Title correction: Presence AI = Director of Engineering, not Co-Founder
-- [x] Rust crate vs Python decision for resume data layer
-- [ ] Implement experience + skills database (awaiting direction: Python or Rust)
+- [ ] Pick crate name and scaffold Rust project
+- [ ] Implement experience + skills database
 <!-- /agent:pending -->

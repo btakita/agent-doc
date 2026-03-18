@@ -20,50 +20,42 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: Composable dev skill
+### Re: Human-driven SPEC evolution + borrowable skill repos
 
-Yes — implemented a CLAUDE.md-style configuration hierarchy for the dev skill. Updated both SKILL.md and SPEC.md.
+Added **§11 SPEC Evolution — Human-Driven, AI-Assisted** to SPEC.md. Five subsections:
 
-**Resolution chain (deepest wins):**
-```
-SPEC.md (invariant — behavioral contract)
-  ↓
-SKILL.md (workspace defaults)
-  ↓
-src/<project>/DEV.md (project overrides — checked in)
-  ↓
-src/<project>/DEV.local.md (private overrides — gitignored)
-```
+**§11.1 Bootstrapping a New Dev Skill:**
+1. Start from an existing SPEC (copy/reference)
+2. Strip workspace-specific content
+3. Create your SKILL.md adapted to your workspace
+4. Iterate via conversation — AI assists, human decides
+5. Add per-project DEV.md as needed
 
-**Per-project DEV.md** uses YAML frontmatter for structured overrides:
-- `project_type` — override auto-detection
-- `publication_targets` — custom list
-- `extra_checks` / `skip_checks` — add or suppress verification steps
-- `secret_paths` — per-target secret manager paths
-- `pre_release` / `post_release` — custom hooks
-- Free-form markdown below for human context
+**§11.2 Borrowing from Other Skill Repos:**
+- Copy sections, reference upstream, diverge freely
+- AI discovery pattern: search for published SPECs → present relevant sections → human cherry-picks
+- Never auto-merge entire SPECs
 
-**Merge semantics** vary by field type:
-- **Last wins:** `project_type`, `publication_targets`
-- **Append:** `extra_checks`, `skip_checks`, `pre_release`, `post_release` (accumulate across layers)
-- **Deep merge:** `secret_paths` (per-target, deepest wins)
+**§11.3 SPEC Sections as Modules:**
+Each numbered section is independently adoptable. Required sections (Commands, Project Detection, Checklist, Workflows, Secrets) vs optional (Meta-Cognition, Composability, SPEC Evolution). A minimal workspace might only adopt §3-§7.
 
-**Design parallel:**
-| Claude Code | Dev Skill |
-|------------|-----------|
-| `CLAUDE.md` (root) | `SKILL.md` (workspace) |
-| `CLAUDE.md` (subdir) | `DEV.md` (per-project) |
-| `CLAUDE.local.md` | `DEV.local.md` |
-| `AGENTS.overrides.md` | Future: `DEV.overrides.md` |
+**§11.4 Version History:**
+Changelog comment in SPEC for fork lineage tracking.
 
-**Backward compatible** — projects without DEV.md files fall back to auto-detection + SKILL.md defaults + CLAUDE.md. No migration needed.
+**§11.5 Anti-Patterns:**
+- AI-generated SPEC without human review
+- Monolithic SPEC covering everything
+- Blind upstream merge
+- SPEC drift from practice (dead sections)
+
+The core philosophy: **the human drives, the AI assists**. The SPEC is a curated document, not an auto-generated one. People should borrow sections from skill repos they admire, not adopt entire frameworks wholesale.
+
+Are we complete?
 <!-- /agent:exchange -->
 
 <!-- agent:input -->
-I want the process to create a SPEC to be highly configurable. The human should drive the evolution of the dev SPEC with AI assistance. We should encourage people to "borrow" from other skill repos.
 <!-- /agent:input -->
 
 <!-- agent:pending patch=replace -->
-- [x] Make dev skill composable (CLAUDE.md-style hierarchy with subdirectory overrides)
-- [ ] Respond to truncated message: "I want " (awaiting completion)
+- [x] Make SPEC creation process configurable + human-driven + borrowable
 <!-- /agent:pending -->

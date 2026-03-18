@@ -860,6 +860,12 @@ class PatchWatcher implements vscode.Disposable {
             return before + existing.trimEnd() + '\n' + trimmedContent + '\n' + after;
         }
 
+        if (mode === 'prepend') {
+            // Prepend after opening marker, preserving existing content
+            const existing = doc.substring(contentStart, closeIdx);
+            return before + '\n' + trimmedContent + '\n' + existing.trimStart() + after;
+        }
+
         // Default: replace mode
         return before + '\n' + trimmedContent + '\n' + after;
     }

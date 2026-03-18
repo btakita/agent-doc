@@ -57,7 +57,7 @@ Your message was cut off: "It seems that person prompts sometimes" — want to f
 **Analysis of your options:**
 
 **1. `<!-- agent:pending -->
-- [x] Treat free-text additions to agent:pending as exchange prompts
+- [ ] Should the skill automatically add agent:pending/agent:exchange to all documents?
 <!-- /agent:pending -->
 ```
 
@@ -298,6 +298,7 @@ The `claim.rs` scaffold would become:
 <!-- /agent:status -->
 
 <!-- agent:exchange patch=append -->
+```
 
 ### Re: claim.rs scaffold updated
 
@@ -308,6 +309,7 @@ The `claim.rs` scaffold would become:
 <!-- /agent:status -->
 
 <!-- agent:exchange patch=append -->
+```
 
 ### Re: Pending additions → exchange prompts
 
@@ -325,6 +327,38 @@ The `claim.rs` scaffold would become:
 4. Write `patch:pending` without the free text (only checkboxes remain)
 
 I'll update the SKILL.md pending tracking section with this rule.
+
+### Re: discuss (moved from pending)
+
+*[Free text "discuss" detected in `agent:pending` — moved to exchange per the free-text rule.]*
+
+**Session summary — what we've built tonight:**
+
+| Version | Features |
+|---------|----------|
+| v0.17.16 | `tmux_session` routing from frontmatter, `claude_args` 3-source config |
+| v0.17.17 | `parse_option_line` bracket format fix (no more markdown false positives) |
+| v0.17.18 | `resync --fix` (wrong-session/wrong-process detection) |
+| v0.17.19 | `split-window` auto_start (no orphaned windows), 11 new tests |
+| v0.17.20 | `patch=` rename from `mode=`, component defaults table in docs |
+
+**Design decisions made:**
+- `agent:pending` component with replace-mode task queue
+- Free-text in pending → exchange (prevents lost prompts)
+- Document-as-memory (no hidden state)
+- Dependency tracking via `(depends: name)` syntax
+- `patch=append|replace|prepend` naming (clearer than `mode=`)
+
+**Open item in pending:** "Should the skill automatically add agent:pending/agent:exchange to all documents?" — already implemented in claim.rs for template documents. Should I mark it done?
+
+What would you like to discuss?
+
+Yes...it's done. Seems implemented.
+Looks like the triple backtick formatting is not correct though.
+I corrected it manually.
+Also "discuss" was not replaced in `agent:pending`.
+
+```
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -339,10 +373,12 @@ Yes
 
 While it is useful to see pending below exchange...especially for long exchange content...I can forsee accidently adding prompts meant for exchange into the pending content.
 We should assume additions to `agent:pending` were meant for `agent:exchange`.
+
+
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Add agent:pending component to this document
 - [ ] Should the skill automatically add agent:pending/agent:exchange to all documents?
-yes
+discuss
 <!-- /agent:pending -->

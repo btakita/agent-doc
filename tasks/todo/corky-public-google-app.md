@@ -43,6 +43,32 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/aab8e49aea61417e3521b779b6c7cb27283e0b8f17d03f0d4285ff625b1a4920-20260318-060920.md`*
 
 show instructions for adding privacy
+
+### Re: Instructions for adding privacy policy URLs
+
+**Step-by-step for the current GCP Console:**
+
+1. Go to `console.cloud.google.com`
+2. Select project **"corky"** (corky-490604) in the top dropdown
+3. Left sidebar → **"APIs & Services"** → **"OAuth consent screen"**
+4. Look for tabs across the top. Click **"Branding"**
+5. Scroll to find these fields:
+   - **"Application privacy policy link"** → `https://btakita.github.io/corky/reference/privacy-policy.html`
+   - **"Application terms of service link"** → `https://btakita.github.io/corky/reference/terms-of-service.html`
+6. Click **Save**
+
+Should we add the logo? Make a 120x120 square logo for GCP.
+
+**If no "Branding" tab exists:**
+- Click the edit/pencil icon next to your app name
+- Walk through the wizard — URLs are in step 1 ("App information")
+- The fields are labeled "Application privacy policy link" and "Application terms of service link"
+
+**Verify the URLs are live first:**
+- Check `https://btakita.github.io/corky/reference/privacy-policy.html` loads in your browser
+- If 404, check GitHub Actions tab on the corky repo — the mdBook deployment may still be in progress
+
+After adding the URLs, the last Phase 1 step is submitting for verification.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

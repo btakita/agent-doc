@@ -180,6 +180,27 @@ fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str
     target.filter(|p| tmux.pane_alive(p))
 }
 
+/// Check if a window with the given name exists in the target tmux session.
+fn has_named_window(tmux: &Tmux, session_name: &str, window_name: &str) -> bool {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-windows",
+            "-t",
+            session_name,
+            "-F",
+            "#{window_name}",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines().any(|l| l.trim() == window_name)
+        }
+        _ => false,
+    }
+}
+
 /// Find a registered agent-doc pane in the target tmux session.
 /// Used by auto_start to join alongside an existing agent-doc pane (not any random pane).
 fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane: &str) -> Option<String> {
@@ -270,8 +291,28 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
             }
         }
     } else {
-        eprintln!("[route] no registered pane found in session '{}', creating new window", session_name);
-        tmux.auto_start(session_name, &cwd)?
+        // Check if an "agent-doc" named window already exists in the target session.
+        // If yes, stash the new pane to prevent window proliferation.
+        let has_agent_doc_window = has_named_window(tmux, session_name, "agent-doc");
+        if has_agent_doc_window {
+            eprintln!(
+                "[route] no registered pane but 'agent-doc' window exists in session '{}', creating + stashing",
+                session_name
+            );
+            let pane = tmux.auto_start(session_name, &cwd)?;
+            if let Err(stash_err) = tmux.stash_pane(&pane, session_name) {
+                eprintln!(
+                    "[route] warning: stash failed ({}), pane {} remains in new window",
+                    stash_err, pane
+                );
+            } else {
+                eprintln!("[route] stashed new pane {} to avoid window proliferation", pane);
+            }
+            pane
+        } else {
+            eprintln!("[route] no registered pane found in session '{}', creating new window", session_name);
+            tmux.auto_start(session_name, &cwd)?
+        }
     };
 
     // Register immediately so subsequent route calls find this pane
@@ -859,6 +900,80 @@ mod tests {
             w_fb_after,
             stash_win.unwrap(),
             "fallback pane should be in the stash window"
+        );
+    }
+
+    // --- has_named_window tests ---
+
+    #[test]
+    fn has_named_window_detects_agent_doc_window() {
+        let iso = IsolatedTmux::new("route-test-named-win");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create session (first window gets default name, not "agent-doc")
+        let _pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            !has_named_window(&iso, session, "agent-doc"),
+            "should not find 'agent-doc' window before renaming"
+        );
+
+        // Rename the window to "agent-doc"
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+        assert!(
+            has_named_window(&iso, session, "agent-doc"),
+            "should find 'agent-doc' window after renaming"
+        );
+    }
+
+    #[test]
+    fn has_named_window_false_for_nonexistent_session() {
+        let iso = IsolatedTmux::new("route-test-named-win-no-sess");
+        assert!(
+            !has_named_window(&iso, "nonexistent", "agent-doc"),
+            "should return false for nonexistent session"
+        );
+    }
+
+    #[test]
+    fn else_branch_stashes_when_agent_doc_window_exists() {
+        // When no registered pane is found but an "agent-doc" window already
+        // exists, the new pane should be stashed to prevent window proliferation.
+        let iso = IsolatedTmux::new("route-test-else-stash");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a session and rename its window to "agent-doc"
+        let existing_pane = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+
+        // Simulate what the else branch does: auto_start + stash
+        let new_pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(iso.pane_alive(&new_pane));
+
+        // The new pane should be in a different window initially
+        let existing_win = iso.pane_window(&existing_pane).unwrap();
+        let new_win_before = iso.pane_window(&new_pane).unwrap();
+        assert_ne!(existing_win, new_win_before);
+
+        // Stash it
+        iso.stash_pane(&new_pane, session).unwrap();
+
+        // After stash: pane is alive and in the stash window
+        assert!(iso.pane_alive(&new_pane));
+        let stash_win = iso.find_stash_window(session);
+        assert!(stash_win.is_some(), "stash window should exist");
+        let new_win_after = iso.pane_window(&new_pane).unwrap();
+        assert_eq!(
+            new_win_after,
+            stash_win.unwrap(),
+            "new pane should be in stash window"
         );
     }
 }

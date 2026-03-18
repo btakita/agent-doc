@@ -178,7 +178,7 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 /// - Maximum recheck attempts reached (prevents infinite loops)
 ///
 /// Returns the stable file content.
-fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
+pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
     const RECHECK_DELAY_MS: u64 = 200;
     const MAX_RECHECKS: u32 = 25; // 5 seconds max
 
@@ -341,9 +341,19 @@ pub fn is_stale_snapshot(snapshot_content: &str, document_content: &str) -> bool
 }
 
 /// Print the diff to stdout (for the `diff` subcommand).
-pub fn run(file: &Path) -> Result<()> {
+///
+/// When `wait` is true, reads the file and snapshot, runs truncation
+/// detection via `wait_for_stable_content()`, then outputs the diff.
+/// This exposes the Rust truncation detection to external callers
+/// (e.g., the Claude Code skill) before they compute their own diff.
+pub fn run(file: &Path, wait: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+    if wait {
+        let previous = snapshot::resolve(file)?.unwrap_or_default();
+        let _stable = wait_for_stable_content(file, &previous)?;
+        eprintln!("[diff --wait] content is stable");
     }
     match compute(file)? {
         Some(diff) => print!("{}", diff),
@@ -410,7 +420,7 @@ mod tests {
 
     #[test]
     fn run_file_not_found() {
-        let err = run(Path::new("/nonexistent/file.md")).unwrap_err();
+        let err = run(Path::new("/nonexistent/file.md"), false).unwrap_err();
         assert!(err.to_string().contains("file not found"));
     }
 
@@ -735,5 +745,57 @@ Please fix the bug.\n\
         let content = "line1\nline2\n";
         let last = extract_last_added_line(content, content);
         assert_eq!(last, None);
+    }
+
+    // --- diff --wait tests ---
+
+    #[test]
+    fn run_with_wait_stable_content() {
+        // When content is already stable, --wait should not change behavior
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let snapshot_content = "line1\n";
+        std::fs::write(&doc, "line1\nline2\n").unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        // run with wait=true should detect changes normally
+        let result = run(&doc, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_with_wait_no_changes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "line1\nline2\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // No changes — should succeed with wait=true
+        let result = run(&doc, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn wait_for_stable_content_returns_immediately_when_complete() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let content = "Complete sentence.\n";
+        std::fs::write(&doc, content).unwrap();
+        let previous = "";
+
+        let start = std::time::Instant::now();
+        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, content);
+        // Should return almost immediately (no recheck needed)
+        assert!(elapsed.as_millis() < 500, "should not delay for complete content");
     }
 }

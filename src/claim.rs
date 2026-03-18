@@ -25,7 +25,7 @@ use std::path::Path;
 
 use crate::{frontmatter, resync, sessions};
 
-pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
 
     // Check for stale claims on this specific file and log if found
@@ -72,19 +72,43 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         sessions::current_pane()?
     };
 
-    // Detect tmux session name from the pane and write to frontmatter if not set
+    // Detect tmux session name from the pane and write to frontmatter.
+    // Only set tmux_session if not already set. If already set and differs,
+    // warn but do NOT overwrite — this prevents accidental session reassignment.
     let tmux = sessions::Tmux::default_server();
     if let Ok(pane_sess) = tmux.pane_session(&pane_id) {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
-        if fm.tmux_session.is_none() || fm.tmux_session.as_deref() != Some(&pane_sess) {
-            let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
-            if updated != content {
-                std::fs::write(file, &updated)
-                    .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
-                eprintln!("set tmux_session={} in {}", pane_sess, file.display());
+        match &fm.tmux_session {
+            None => {
+                // Not set yet — write the detected session
+                let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
+                if updated != content {
+                    std::fs::write(file, &updated)
+                        .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
+                    eprintln!("set tmux_session={} in {}", pane_sess, file.display());
+                }
             }
+            Some(existing) if existing != &pane_sess => {
+                if force {
+                    // --force: overwrite tmux_session binding
+                    let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
+                    if updated != content {
+                        std::fs::write(file, &updated)
+                            .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
+                        eprintln!("forced tmux_session={} (was '{}') in {}", pane_sess, existing, file.display());
+                    }
+                } else {
+                    // Already set to a different session — warn, don't overwrite
+                    eprintln!(
+                        "warning: {} has tmux_session='{}' but pane {} is in session '{}'. \
+                         Not overwriting. Use --force to change session binding.",
+                        file.display(), existing, pane_id, pane_sess
+                    );
+                }
+            }
+            _ => {} // Already matches — nothing to do
         }
     }
 

@@ -27,8 +27,8 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 <!-- agent:status mode=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [x] Phase 2: Built-in default credentials in corky (committed)
-- [x] Phase 3: `corky doctor` command (ready to commit)
-- [ ] Phase 4: Self-serve documentation
+- [x] Phase 3: `corky doctor` command (committed)
+- [x] Phase 4: Self-serve documentation (ready to commit)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -254,11 +254,32 @@ Ready to commit Phase 3.
 
 commit
 implement phase 4
+
+### Phase 3 committed, Phase 4 implemented
+
+**Phase 3 committed:** `16b2050` — "feat: `corky doctor` command with per-provider health checks" (737 lines, 5 files)
+
+**Phase 4: Self-serve documentation created:**
+
+- **`docs/guide/self-hosted-gmail.md`** (99 lines) — Step-by-step guide covering:
+  - Why self-host (privacy, control, no dependency)
+  - GCP project creation + Gmail API enablement
+  - OAuth consent screen + Desktop client setup
+  - `.corky.toml` configuration (inline + `_cmd` variants)
+  - `corky doctor gmail` verification
+  - First sync instructions
+  - Notes: testing mode sufficient for personal use
+
+- **`docs/SUMMARY.md`** updated — "Self-Hosted Gmail" added under Guide section
+
+Ready to commit Phase 4. After this, all 4 phases are complete!
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [x] Phase 2: Built-in default credentials in corky (committed)
-- [x] Phase 3: `corky doctor` command (ready to commit)
-- [ ] Phase 4: Self-serve documentation
+- [x] Phase 3: `corky doctor` command (committed)
+- [x] Phase 4: Self-serve documentation (ready to commit)
 <!-- /agent:pending -->

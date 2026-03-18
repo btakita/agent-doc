@@ -579,4 +579,22 @@ Resync tests (7):
 All tests pass. Release binary installed. Ready to release when you want.
 
 Release
+
+audit docs
+compact exchange
+
+### v0.17.19 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.19
+- **PyPI:** agent-doc 0.17.19
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.19
+
+**What's in v0.17.19:**
+- `auto_start_in_session` uses `split-window` directly in existing window (no more orphaned windows)
+- 11 new tests (4 route + 7 resync)
+- `resync` refactored with testable pure functions
+- tmux-router 0.2.6 dependency (published `split_window` method)
+
+**Note:** Had to publish tmux-router 0.2.6 first since `split_window` was a new method not in the published crate.
 <!-- /agent:exchange -->

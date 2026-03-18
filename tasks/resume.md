@@ -14,6 +14,7 @@ agent_doc_write: crdt
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
 **agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — complete: build, render, validate, search-index commands; search.html for GitHub Pages
+**Tests**: `make test` — 12 tests (search index validation + LightPanda DOM tests)
 <!-- /agent:status -->
 
 ## Completed
@@ -423,10 +424,52 @@ agent-resume search-index -d data.toml > search-index.json
 Add test suite using lightpanda and the http server.
 
 Please add .mise.toml for the python venv.
+
+### Re: Test suite + .mise.toml
+
+**1. `.mise.toml` — done.**
+
+```toml
+[tools]
+python = "3.14"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+```
+
+Auto-creates a `.venv` when you `cd` into the resume directory. Pytest installed inside the venv.
+
+**2. Test suite — 12 tests, all passing.**
+
+Created `tests/test_search.py` with two test classes:
+
+**`TestSearchIndex`** (5 tests) — validates `search-index.json`:
+- Has experiences, correct schema, accomplishments have text
+- No empty tags, no cargo output contamination
+
+**`TestSearchPage`** (7 tests) — LightPanda + HTTP server:
+- Page loads, all experiences rendered in DOM
+- Search input exists, tags rendered
+- Results count matches expected (`14 of 14`)
+- PDF download link and LinkedIn link present
+
+```
+$ make test
+12 passed in 3.97s
+```
+
+**How it works:**
+- `pytest` fixture starts a `SimpleHTTPRequestHandler` on port 18923
+- `lightpanda fetch --dump html` renders the page with JS execution
+- Assertions check the rendered DOM, not the raw HTML source
+
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Resume website search feature
 - [x] Fix search-index.json cargo output contamination
 - [x] LightPanda test passed
+- [x] Add test suite using LightPanda + HTTP server
+- [x] Add .mise.toml for Python venv
 <!-- /agent:pending -->

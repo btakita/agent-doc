@@ -88,5 +88,7 @@ Release
   - Fixed 15 collapsible_if warnings in new code + too_many_arguments lint
 - `14b005c` — Version bump to 0.17.0
 - Published: [crates.io](https://crates.io/crates/corky/0.17.0) | [PyPI](https://pypi.org/project/corky/0.17.0/) | [GitHub](https://github.com/btakita/corky/releases/tag/v0.17.0)
-- Binary installed locally (v0.17.0), submodule pointer updated
+ - Binary installed locally (v0.17.0), submodule pointer updated
+
+backfill corky's VERSIONS.md to include all releases
 <!-- /agent:exchange -->

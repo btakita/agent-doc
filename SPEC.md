@@ -98,9 +98,9 @@ Additional CLI arguments passed to the `claude` process when spawned by `agent-d
 
 Three sources, in precedence order (highest first):
 
-1. **Frontmatter**: `claude_args: "--dangerously-set-permissions"` in the document's YAML frontmatter
-2. **Global config**: `claude_args = "--dangerously-set-permissions"` in `~/.config/agent-doc/config.toml`
-3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"`
+1. **Frontmatter**: `claude_args: "--dangerously-skip-permissions"` in the document's YAML frontmatter
+2. **Global config**: `claude_args = "--dangerously-skip-permissions"` in `~/.config/agent-doc/config.toml`
+3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"`
 
 The resolved args are split on whitespace and prepended to the `claude` command before other flags (e.g., `--continue`).
 

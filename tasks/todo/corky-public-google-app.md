@@ -30,7 +30,7 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
   - [ ] Enable Gmail API
   - [ ] Configure OAuth consent screen
   - [ ] Create OAuth client credentials
-  - [ ] Draft privacy policy & terms of service
+  - [x] Draft privacy policy & terms of service
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
 - [ ] Phase 3: `corky doctor` command
@@ -283,4 +283,37 @@ Yes
 **What you need to do:** Steps 1-4 in GCP Console, then paste the `client_id` back here so we can proceed to Phase 2.
 
 Make use of newly-added `agent:pending`
+
+Does `corky-mail` capture the social media (linkedin), video (youtube), chat (slack, Telegram) correspondence?
+
+### Re: Draft privacy policy & terms of service
+
+Done. Created both documents in the corky repo:
+
+- **`src/corky/docs/reference/privacy-policy.md`** — Emphasizes: no data collection, no telemetry, all local storage, gmail.readonly scope only, open source
+- **`src/corky/docs/reference/terms-of-service.md`** — Covers: as-is warranty, public OAuth app terms, self-hosted alternative, termination rights
+
+Key points in the privacy policy:
+- Corky collects zero data — everything stays on the user's machine
+- OAuth tokens stored locally, never sent to any server except Google
+- No analytics, no tracking, no third-party data sharing
+- Users can revoke access anytime via Google Account settings
+
+These need a public URL for the OAuth consent screen. Options:
+1. **GitHub Pages** from the corky repo (e.g., `corky.dev/privacy-policy`)
+2. **Raw GitHub URL** (works but not pretty)
+3. **Custom domain** if you have one
+
+The GitHub repo URL in the contact section uses `nicegoodwork/corky` — update this to the actual repo path.
+
+### Re: `agent:pending` component
+
+The document doesn't have an `<!-- agent:pending -->` component yet. To use it, add this to the document (e.g., after the exchange component closing tag):
+
+```markdown
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->
+```
+
+Then write pending items as checkbox lists there. I'll process them sequentially in future cycles.
 <!-- /agent:exchange -->

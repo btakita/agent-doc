@@ -133,27 +133,34 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange -->
 
-### Re: Pending Repopulated + Phase 2 Completion
+### Re: Pending Reorganization + VS Code Prepend Fix
 
-I moved pending below `agent:exchange`.
+Acknowledged the move of `agent:pending` below `agent:exchange`.
 
-**Pending repopulated** with checkbox items for the active Phase 2 work items at the top, followed by the existing backlog.
+**VS Code prepend mode fixed.** `extension.ts:857` only had `append` and `replace` — `prepend` fell through to `replace`. Added the missing `prepend` case (5 lines, mirrors JetBrains behavior):
+```typescript
+if (mode === 'prepend') {
+    const existing = doc.substring(contentStart, closeIdx);
+    return before + '\
+' + trimmedContent + '\
+' + existing.trimStart() + after;
+}
+```
 
-**v0.17.30 released** with immutable session binding:
-- crates.io + GitHub Release + cargo install done
+Both plugin changes committed and pushed:
+- JetBrains: Gson parser (90 → 20 lines)
+- VS Code: prepend mode fix
 
-**Phase 2 step 3 — status: already done.**
-FFI is the primary path; Kotlin implementations are fallbacks (safety net for when the native library isn't available). Removing them entirely would break first-install scenarios. The architecture is correct as-is.
-
-**Phase 2 step 4 — done.**
-Replaced the 90-line hand-written JSON parser (`parsePatchJson`) with Gson (bundled with IntelliJ Platform). Reduced from 90 lines + 4 helper functions to 20 lines using `com.google.gson.Gson`. Plugin compiles and both zips built.
-
-**All Phase 2a work is complete.** The JetBrains plugin now:
-- Uses FFI for component patching and frontmatter merge (with Kotlin fallback)
-- Uses Gson for JSON parsing (replacing hand-rolled parser)
-- Discovers the native library via `agent-doc lib-path`
+All active Phase 2 checkbox items are now complete. Next unchecked item would be whatever you'd like to tackle from the backlog.
 
 continue
+
+- Response diff storage for undo/extract workflows
+- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
+- `agent-doc extract` — move request+response pair to another document
+- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
+
+Implement
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -162,7 +169,7 @@ continue
 - [x] Release v0.17.30 with immutable session binding fix
 - [x] Phase 2 step 3: FFI is primary path, Kotlin fallbacks retained as safety net
 - [x] Phase 2 step 4: Replace parsePatchJson hand-rolled parser with Gson
-- [ ] VS Code: Fix missing prepend mode (falls through to replace)
+- [x] VS Code: Fix missing prepend mode (falls through to replace)
 - Response diff storage for undo/extract workflows
 - `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
 - `agent-doc extract` — move request+response pair to another document

@@ -28,7 +28,8 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [x] Phase 2: Built-in default credentials in corky (committed)
 - [x] Phase 3: `corky doctor` command (committed)
-- [x] Phase 4: Self-serve documentation (ready to commit)
+- [x] Phase 4: Self-serve documentation (committed)
+- [ ] Release
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -275,11 +276,32 @@ implement phase 4
 Ready to commit Phase 4. After this, all 4 phases are complete!
 
 release
+
+### Phase 4 committed, ready to release
+
+**Phase 4 committed:** `87c4a41` — "docs: self-hosted Gmail setup guide"
+
+**All 4 phases committed in corky submodule:**
+1. `5022e4f` — docs: privacy policy and terms of service
+2. `3b35cbc` — feat: built-in GCP OAuth credentials
+3. `16b2050` — feat: `corky doctor` command
+4. `87c4a41` — docs: self-hosted Gmail setup guide
+
+**Release:** Current version is `0.17.0`. What version should this release be? These are two new features (built-in credentials + doctor command) plus docs. Suggest **`0.18.0`** (minor bump for new features).
+
+Confirm the version and I'll:
+1. Bump `Cargo.toml` + `pyproject.toml`
+2. `make check` (clippy + test)
+3. Push to remote
+4. Tag + publish (crates.io, PyPI, GitHub Release)
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [x] Phase 2: Built-in default credentials in corky (committed)
 - [x] Phase 3: `corky doctor` command (committed)
-- [x] Phase 4: Self-serve documentation (ready to commit)
+- [x] Phase 4: Self-serve documentation (committed)
+- [ ] Release
 <!-- /agent:pending -->

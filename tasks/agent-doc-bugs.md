@@ -432,8 +432,25 @@ Perhaps we can provide a tip somewhere.
 **Already the case.** `exchange` defaults to `patch=append` in the Rust code (hardcoded in `template.rs`). The inline `patch=append` attribute on this document's exchange tag is redundant but harmless — it just makes the behavior explicit.
 
 Your text was truncated ("exchang" instead of "exchange"). This is the truncation bug — the skill doesn't yet call `agent-doc diff --wait` before reading. I should add that to the SKILL.md workflow now.
+
+### Re: Tip for users + diff --wait now in SKILL.md
+
+**Updated SKILL.md** to call `agent-doc diff --wait` before computing diffs. This session just used it — content was reported stable.
+
+**Re: "Perhaps we can provide a tip somewhere"** — good idea. Options:
+1. **In the IDE plugin:** Show a tooltip "Wait for the prompt indicator before typing" or "Save when ready to submit"
+Make sure the PLUGIN-SPEC.md is up to date with these feature additions.
+I'm still planning on implementing plugin login into a shared library via FFI.
+2. **In the document scaffold:** Add a comment at the top explaining the workflow
+Not necessary.
+3. **In the exchange component:** The agent could note "your text appears truncated" when `looks_truncated()` fires
+Good idea. Let's add that.
+
+Which approach do you prefer?
+
+I also want to enable agent:input to be used with agent:exchange to avoid CRDT unintentionally overwriting current progress.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Add diff --wait call to SKILL.md workflow
+- [x] Add diff --wait call to SKILL.md workflow
 <!-- /agent:pending -->

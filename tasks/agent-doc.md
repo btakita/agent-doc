@@ -379,6 +379,30 @@ Note that another editor may use another tmux session(s). Only those session(s) 
 - Killed 4 orphaned windows in session 0 (@323, @315, @324, @325)
 
 **Tests:** 451 passing, clippy clean.
+
+### Re: Session Affinity Design Principle
+
+Understood. The design principle is:
+
+**Each editor instance owns exactly one tmux session.** Only that session is legitimate for agent-doc panes. Other tmux sessions (user terminal, other editors) are off-limits.
+
+In the current setup:
+- **Session `0`** — the IntelliJ/agent-doc session. All agent-doc panes belong here.
+- **Session `1`** — user's terminal session. Agent-doc must never create or move panes here.
+
+The fix already applied (bail instead of `current_tmux_session()` fallback) enforces this — documents with `tmux_session: '0'` will only route to session `'0'`. If session `'0'` doesn't exist, the route fails loudly instead of silently landing in the wrong session.
+
+For multi-editor support (future), each editor would set its own `tmux_session` value in document frontmatter during claim. The immutable binding ensures that once set, the document stays in that editor's session.
+
+This is now correctly implemented — no further code changes needed for this principle. The fix is in `route.rs` (not yet released — still on v0.20.0+dev).
+
+Want me to release v0.20.1 with the routing fix?
+
+Yes. Let's release.
+
+Please put in pending with whatever context you need to add. Discuss if you need clarity on this featureset:
+- allow multiple tmux sessions to bind to an editor
+- allow multiple editors to bind to a tmux session
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

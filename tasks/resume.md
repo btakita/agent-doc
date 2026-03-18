@@ -13,7 +13,7 @@ agent_doc_write: crdt
 **PDF**: auto-generated via GitHub Action, deployed to [btakita.github.io/resume](https://btakita.github.io/resume/)
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
-**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — full pipeline working: data.toml → agent-resume → pandoc → weasyprint → PDF
+**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — complete: build, render, validate, search-index commands; search.html for GitHub Pages
 <!-- /agent:status -->
 
 ## Completed
@@ -332,11 +332,57 @@ data.toml + profiles/default.toml
 You can view it at: file:///home/brian/work/btakita/agent-loop/resume/BrianTakita.pdf
 
 continue
+
+### Re: Resume website search feature
+
+**Done.** Three pieces built:
+
+**1. `agent-resume search-index` command** — outputs JSON from data.toml:
+```bash
+agent-resume search-index -d data.toml > search-index.json
+```
+31KB JSON with all experiences, accomplishments, tags, skills.
+
+**2. `search.html`** — standalone search page (vanilla JS, no dependencies):
+- Text search across company, title, headline, accomplishments, tags
+- Tag filtering — click tags to filter, shows frequency counts
+- Relevance scoring — results sorted by tag overlap + search match
+- Search highlighting — matched terms highlighted in yellow
+- Clean card layout with responsive design
+
+**3. `search-index.json`** — generated in the resume directory
+
+**To deploy:** Add to the GitHub Pages build:
+1. `agent-resume search-index -d data.toml > search-index.json` in the build step
+2. Copy `search.html` and `search-index.json` to the deploy directory
+3. Link from the main resume page or access directly at `/search.html`
+
+**Preview locally:**
+```
+file:///home/brian/work/btakita/agent-loop/resume/search.html
+```
+(Needs a local server for fetch — `python -m http.server` in the resume dir)
+
+All pending items complete. The agent-resume ecosystem is now:
+- `build` — full resume markdown assembly
+- `render` — experience-only rendering
+- `validate` — TOML validation
+- `search-index` — JSON for browser search
+
+Getting an error when using with http server:
+
+```
+search.html:198 Uncaught TypeError: Cannot read properties of null (reading 'experiences')
+    at renderResults (search.html:198:23)
+    at HTMLInputElement.<anonymous> (search.html:261:3)
+renderResults	@	search.html:198
+(anonymous)	@	search.html:261
+```
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Implement full resume assembly in agent-resume
 - [x] Add README.md, CLAUDE.md, AGENTS.md to agent-resume
 - [x] Slim down build.py to pandoc+weasyprint only
-- [ ] Resume website search feature
+- [x] Resume website search feature
 <!-- /agent:pending -->

@@ -190,4 +190,29 @@ The first lines define the DAG; the checkbox items are the work. Skill processes
 **Next step:** Implement the pending tracking in SKILL.md. Want me to do it now, or save for a fresh session? This session has been very productive — we shipped v0.17.16 through v0.17.19 plus the `patch=` rename.
 
 go
+
+### Re: Pending tracking implemented + v0.17.20 released
+
+**v0.17.20 released** (all targets: crates.io, PyPI, GitHub):
+- `patch=` inline attribute (renamed from `mode=`)
+- 7 new attribute parsing tests
+- Updated JB + VSCode plugins
+
+**Pending tracking added to SKILL.md:**
+
+The skill now manages `<!-- agent:pending patch=replace -->` as a task queue:
+
+1. Read pending component, parse `- [ ]` / `- [x]` items
+2. Remove `[x]` items from previous cycle (already addressed)
+3. Extract new prompts from diff, add as `- [ ]` items
+4. Process each unchecked item sequentially, mark `[x]` after responding
+5. Write `patch:pending` with updated list alongside exchange response
+
+**Dependency tracking** supported via `(depends: item_name)` — skill only processes items with all dependencies checked.
+
+**No Rust changes needed** — the existing replace-mode component infrastructure handles everything. The pending logic is purely in the SKILL.md instructions.
+
+This is ready to use. Add `<!-- agent:pending patch=replace --><!-- /agent:pending -->` to any template document to enable it.
+
+What would happen with agent:pending patch=append or patch=prepend?
 <!-- /agent:exchange -->

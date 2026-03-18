@@ -340,6 +340,24 @@ No — explicitly supported. Google's docs state:
 **Recommendation:** Switch to `env!()` macro for build-time injection. Avoids GitHub secret scanning entirely, keeps source clean, same end result in the binary. I can refactor this now if you want.
 
 Go
+
+### Refactored to env!(), push still blocked by history
+
+Current code uses `env!()` — no hardcoded secrets. But GitHub catches historical commits that had them.
+
+**Refactored:** `src/filter/gmail_auth.rs` now uses `env!("CORKY_DEFAULT_GCP_CLIENT_ID")` and `env!("CORKY_DEFAULT_GCP_CLIENT_SECRET")`. Makefile reads from `pass` automatically. `make check` passes.
+
+**Push blocked:** Historical commits `3b35cbc` and `0ecf2d1` still contain the hardcoded values.
+
+**Options:**
+1. **Allowlist** (recommended) — click both URLs. Public credentials, one-time action.
+2. **Rewrite history** — force-push to remove from history. More risk.
+
+Visit both URLs to unblock, then I'll complete the release:
+1. `https://github.com/btakita/corky/security/secret-scanning/unblock-secret/3B6qbKoAKJRjlDLHGU5Ctw38uwm`
+2. `https://github.com/btakita/corky/security/secret-scanning/unblock-secret/3B6qbJSSznD3Z47O7q72Kxv7aCV`
+
+done
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

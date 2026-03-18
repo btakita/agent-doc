@@ -806,7 +806,7 @@ class PatchWatcher implements vscode.Disposable {
 
     /**
      * Replace content between `<!-- agent:name ... -->` and `<!-- /agent:name -->` markers.
-     * Handles open tags with inline attributes (e.g., `<!-- agent:exchange mode=append -->`).
+     * Handles open tags with inline attributes (e.g., `<!-- agent:exchange patch=append -->` or `mode=append` as alias).
      */
     private applyComponentPatch(doc: string, component: string, content: string): string {
         // Match open tag with optional attributes: <!-- agent:NAME ... -->
@@ -820,11 +820,14 @@ class PatchWatcher implements vscode.Disposable {
         const closeIdx = doc.indexOf(closeTag, contentStart);
         if (closeIdx < 0) return doc;
 
-        // Parse mode from inline attributes (default: replace)
+        // Parse mode from inline attributes: patch= takes precedence, mode= as fallback
         let mode = 'replace';
         if (openMatch[1]) {
+            const patchMatch = /patch=(\S+)/.exec(openMatch[1]);
             const modeMatch = /mode=(\S+)/.exec(openMatch[1]);
-            if (modeMatch) {
+            if (patchMatch) {
+                mode = patchMatch[1];
+            } else if (modeMatch) {
                 mode = modeMatch[1];
             }
         }

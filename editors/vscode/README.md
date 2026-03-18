@@ -8,7 +8,7 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 - **Claim documents** to assign them to specific Claude sessions
 - **Sync tmux layout** to mirror your editor's tab arrangement
 - **IPC patch watcher** applies agent responses directly via Document API (no external file change dialogs)
-- **Component patching** with inline attribute support (`mode=append`, `mode=replace`)
+- **Component patching** with inline attribute support (`patch=append`, `patch=replace`; `mode=` accepted as backward-compatible alias)
 
 ## Requirements
 

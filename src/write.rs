@@ -261,7 +261,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     let base = baseline.unwrap_or(&content_at_start);
 
     // Apply patches using the mode resolution chain:
-    // inline attr (mode=append on tag) > components.toml > built-in default.
+    // inline attr (patch=append on tag) > components.toml > built-in default.
     // The skill sends delta content for append-mode components.
     let mode_overrides = std::collections::HashMap::new();
     let content_ours = template::apply_patches_with_overrides(

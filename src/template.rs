@@ -199,7 +199,7 @@ pub fn apply_patches_with_overrides(
         // Mode precedence: stream overrides > inline attr > components.toml > built-in default
         let mode = mode_overrides.get(&patch.name)
             .map(|s| s.as_str())
-            .or_else(|| comp.attrs.get("mode").map(|s| s.as_str()))
+            .or_else(|| comp.patch_mode())
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
             .unwrap_or_else(|| default_mode(&patch.name));
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
@@ -266,7 +266,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .map(|comp| {
             let content = comp.content(&doc).to_string();
             // Inline attr > components.toml > built-in default
-            let mode = comp.attrs.get("mode").cloned()
+            let mode = comp.patch_mode().map(|s| s.to_string())
                 .or_else(|| configs.get(&comp.name).cloned())
                 .unwrap_or_else(|| default_mode(&comp.name).to_string());
             // Compute line number from byte offset
@@ -299,7 +299,10 @@ fn load_component_configs(file: &Path) -> std::collections::HashMap<String, Stri
             && let Ok(table) = content.parse::<toml::Table>()
         {
             for (name, value) in &table {
-                if let Some(mode) = value.get("mode").and_then(|v| v.as_str()) {
+                // "patch" is the primary key; "mode" is a backward-compatible alias
+                if let Some(mode) = value.get("patch").and_then(|v| v.as_str())
+                    .or_else(|| value.get("mode").and_then(|v| v.as_str()))
+                {
                     result.insert(name.clone(), mode.to_string());
                 }
             }
@@ -736,6 +739,65 @@ All systems go.
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // exchange defaults to append
+        assert!(result.contains("old\n"));
+        assert!(result.contains("new\n"));
+    }
+
+    #[test]
+    fn inline_patch_attr_overrides_config() {
+        // Component has patch=replace inline, but components.toml says append
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[status]\nmode = \"append\"\n",
+        ).unwrap();
+        let doc = "<!-- agent:status patch=replace -->\nold\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "status".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn inline_patch_attr_overrides_mode_attr() {
+        // Both patch= and mode= present; patch= wins
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange patch=replace mode=append -->\nold\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn toml_patch_key_works() {
+        // components.toml uses `patch = "append"` instead of `mode = "append"`
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[status]\npatch = \"append\"\n",
+        ).unwrap();
+        let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "status".to_string(),
+            content: "new\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("old\n"));
         assert!(result.contains("new\n"));
     }

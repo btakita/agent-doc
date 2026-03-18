@@ -42,7 +42,7 @@ content here
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
 
-**Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name mode=append -->`. Mode precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace`).
+**Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name patch=append -->`. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. Precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace`).
 
 Per-component behavior is configured in `.agent-doc/components.toml` (see §7.20).
 
@@ -174,7 +174,7 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
 
-**Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status mode=replace -->` and `<!-- agent:exchange mode=append -->` components by default.
+**Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status patch=replace -->` and `<!-- agent:exchange patch=append -->` components by default.
 
 **Window Resolution:**
 

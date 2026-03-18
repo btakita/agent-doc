@@ -137,7 +137,7 @@ and the agent sees the cleaned-up doc as ground truth.
 Components are bounded, named regions in a document that can be updated independently:
 
 ```markdown
-<!-- agent:status mode=replace -->
+<!-- agent:status patch=replace -->
 | Service | State   |
 |---------|---------|
 | api     | healthy |

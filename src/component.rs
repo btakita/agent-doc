@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
-    /// Inline attributes parsed from the opening tag (e.g., `mode=append`).
+    /// Inline attributes parsed from the opening tag (e.g., `patch=append`).
     pub attrs: HashMap<String, String>,
     /// Byte offset of `<` in opening marker.
     pub open_start: usize,
@@ -25,6 +25,14 @@ impl Component {
     #[allow(dead_code)] // public API — used by tests and future consumers
     pub fn content<'a>(&self, doc: &'a str) -> &'a str {
         &doc[self.open_end..self.close_start]
+    }
+
+    /// Get the patch mode from inline attributes.
+    ///
+    /// Checks `patch=` first, falls back to `mode=` for backward compatibility.
+    pub fn patch_mode(&self) -> Option<&str> {
+        self.attrs.get("patch").map(|s| s.as_str())
+            .or_else(|| self.attrs.get("mode").map(|s| s.as_str()))
     }
 
     /// Replace the content between markers, returning the new document.
@@ -597,6 +605,37 @@ new content here\n\
         assert!(new_doc.contains("<!-- agent:status mode=replace -->"));
         assert!(new_doc.contains("<!-- /agent:status -->"));
         assert!(new_doc.contains("- [ ] Todo"));
+    }
+
+    #[test]
+    fn parse_component_with_patch_attr() {
+        let doc = "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert_eq!(components[0].patch_mode(), Some("append"));
+        assert_eq!(components[0].content(doc), "Content\n");
+    }
+
+    #[test]
+    fn patch_attr_takes_precedence_over_mode() {
+        let doc = "<!-- agent:exchange patch=replace mode=append -->\nContent\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components[0].patch_mode(), Some("replace"));
+    }
+
+    #[test]
+    fn mode_attr_backward_compat() {
+        let doc = "<!-- agent:exchange mode=append -->\nContent\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components[0].patch_mode(), Some("append"));
+    }
+
+    #[test]
+    fn no_patch_or_mode_attr() {
+        let doc = "<!-- agent:exchange -->\nContent\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components[0].patch_mode(), None);
     }
 
     #[test]

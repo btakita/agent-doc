@@ -42,7 +42,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - Content region is everything between the open tag's end and the close tag's start.
 
 **Mode resolution:**
-- Parse `mode=<value>` from the open tag's inline attributes (the `(\s[^>]*)` capture group).
+- Parse `patch=<value>` (or `mode=<value>` as backward-compatible alias) from the open tag's inline attributes (the `(\s[^>]*)` capture group). `patch=` takes precedence if both are present.
 - Supported modes:
   - `replace` (default): replace content region with `\n` + trimmed content + `\n`
   - `append`: preserve existing content, append `\n` + trimmed content + `\n` before close tag
@@ -217,7 +217,7 @@ Each plugin implementation should have tests (or manual test procedures) coverin
 1. **Patch application -- replace mode:** Content between markers is fully replaced.
 2. **Patch application -- append mode:** New content is appended after existing content, before the close marker.
 3. **Patch application -- prepend mode:** New content is inserted after the open marker, before existing content.
-4. **Component matching with inline attributes:** `<!-- agent:exchange mode=append -->` is correctly parsed; mode is extracted from attributes.
+4. **Component matching with inline attributes:** `<!-- agent:exchange patch=append -->` is correctly parsed; mode is extracted from attributes. `mode=append` also works as a backward-compatible alias.
 5. **Full content replacement:** `fullContent` field replaces entire document; `patches` array is ignored.
 6. **Frontmatter merge:** New keys are appended, existing keys are updated, key order is preserved.
 7. **Missing component graceful fallback:** Patch for a non-existent component is skipped without error; `unmatched` falls back from `exchange` to `output`.

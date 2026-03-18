@@ -100,6 +100,12 @@ What skill file defines audit docs? Is it from instruction-files?
 - **CLAUDE.md** + **SKILL.md** — mtime touched (content already current)
 
 `agent-doc audit-docs` passes clean.
+
+agent-doc missed
+> What skill file defines audit docs? Is it from instruction-files?
+
+I was in the middle of editing this prompt when agent-doc patched the exchange.
+Do you have logs as to why the prompt was missed?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

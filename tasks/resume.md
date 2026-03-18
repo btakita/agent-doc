@@ -403,11 +403,30 @@ Another error
 Uncaught (in promise) SyntaxError: Unexpected token 'F', "    Finished `"... is not valid JSON
 favicon.ico:1  GET http://localhost:8000/favicon.ico 404 (File not found)
 ```
+
+### Re: JSON parse error + LightPanda test
+
+**Root cause:** The `search-index.json` file had cargo build output (`Finished \`dev\` profile...`) prepended to the JSON. This happened because the original `cargo run` command didn't use `--quiet`. Regenerated with `cargo run --quiet` — clean JSON now.
+
+**LightPanda test passed:**
+- Fetched `search.html` and `search-index.json` successfully
+- JS executed, DOM populated with all 14 experiences
+- "Presence AI — Director of Engineering" confirmed in rendered output
+- 30 occurrences of "experience" in the rendered DOM
+
+**To regenerate clean search-index.json in the future:**
+```bash
+agent-resume search-index -d data.toml > search-index.json
+```
+(Use the installed binary, not `cargo run`, to avoid build output in the file.)
+
+Add test suite using lightpanda and the http server.
+
+Please add .mise.toml for the python venv.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Implement full resume assembly in agent-resume
-- [x] Add README.md, CLAUDE.md, AGENTS.md to agent-resume
-- [x] Slim down build.py to pandoc+weasyprint only
 - [x] Resume website search feature
+- [x] Fix search-index.json cargo output contamination
+- [x] LightPanda test passed
 <!-- /agent:pending -->

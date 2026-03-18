@@ -319,35 +319,25 @@ Want me to save the HTML to a temp file you can open in your browser?
 3. **Enable 2-Step Verification first** — App Passwords only appear after 2FA is enabled. Go to https://myaccount.google.com/security → enable 2-Step Verification → then App Passwords should become available
 
 The most likely fix: **enable 2FA on btak.dev@gmail.com first**, then App Passwords will unlock, and you can use SMTP for sending.
-<!-- /agent:exchange -->
-
-<!-- agent:pending patch=replace -->
-<!-- /agent:pending -->
-2. **Gmail API create draft:** Use the existing Gmail API OAuth token to create a draft with raw HTML via the API. This bypasses the compose UI entirely:
-   ```bash
-   # This would need corky support, but as a one-off you could use curl:
-   # 1. Get access token from corky's token store
-   # 2. POST to Gmail API drafts.create with the MIME message
-   ```
-   This is more complex but would be the proper automated path.
-
-**Recommended right now:** Option 1 — save the HTML block to a `.html` file, open in browser, copy the rendered text, paste into Gmail reply. Takes 30 seconds.
-
-Want me to save the HTML to a temp file you can open in your browser?
-
----
-
-**IMAP with real login + password:** Gmail deprecated "Less Secure Apps" (plain password IMAP login) in 2022. The only options for IMAP access are:
-
-1. **App Passwords** — but you said that setting isn't available for your account
-2. **OAuth2 IMAP** — corky already uses this for sync via `gmail-api` provider
-3. **Enable 2-Step Verification first** — App Passwords only appear after 2FA is enabled. Go to https://myaccount.google.com/security → enable 2-Step Verification → then App Passwords should become available
-
-The most likely fix: **enable 2FA on btak.dev@gmail.com first**, then App Passwords will unlock, and you can use SMTP for sending.
 
 I don't want 2FA. Let's use the deprecated plan password IMAP for now.
+
+### Re: Plain password IMAP
+
+Unfortunately, **Google fully killed "Less Secure Apps" in September 2022** — plain password IMAP/SMTP to Gmail no longer works for any account. There's no way around it.
+
+**Your realistic options right now (fastest first):**
+
+1. **Browser paste (2 minutes):** I'll save the HTML to a file, you open it in your browser, copy the rendered text, paste into Gmail reply. Done.
+
+2. **Gmail API draft creation (5 minutes):** I use the existing OAuth token from corky's token store to create a Gmail draft via the API with proper HTML formatting. You then open Gmail and hit Send on the draft. This keeps the HTML formatting intact.
+
+3. **Enable 2FA + App Password (10 minutes):** Enables automated SMTP sending for all future emails. One-time setup.
+
+Option 2 is probably the sweet spot — proper HTML, no 2FA needed, uses existing OAuth. Want me to do that?
+
+Option 2
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

@@ -146,6 +146,18 @@ Components are bounded, named regions in a document that can be updated independ
 
 Inline attributes on the tag override `components.toml` and built-in defaults. Precedence: inline attr > `components.toml` > built-in defaults.
 
+### Standard component names
+
+| Component | Default `patch` | Description |
+|-----------|----------------|-------------|
+| `exchange` | append | Conversation history — each cycle appends |
+| `findings` | append | Accumulated research data — grows over time |
+| `status` | replace | Current state — updated at milestones |
+| `pending` | replace | Task queue — auto-cleaned each cycle |
+| `output` | replace | Latest agent response only |
+| `input` | replace | User prompt area |
+| (custom) | replace | All other components default to replace |
+
 Update a component:
 
 ```sh

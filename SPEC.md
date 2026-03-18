@@ -44,6 +44,18 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name patch=append -->`. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. Precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace`).
 
+**Standard component names:**
+
+| Component | Default `patch` | Description |
+|-----------|----------------|-------------|
+| `exchange` | append | Conversation history — each cycle appends |
+| `findings` | append | Accumulated research data — grows over time |
+| `status` | replace | Current state — updated at milestones |
+| `pending` | replace | Task queue — auto-cleaned each cycle |
+| `output` | replace | Latest agent response only |
+| `input` | replace | User prompt area |
+| (custom) | replace | All other components default to replace |
+
 Per-component behavior is configured in `.agent-doc/components.toml` (see §7.20).
 
 ## 3. Snapshot System

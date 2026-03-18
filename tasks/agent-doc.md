@@ -478,6 +478,40 @@ All 13 pending items now have GitHub issues:
 
 Explain:
 - Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
+
+### Re: Sub-profiles for Submodule Workflows (#23)
+
+**Problem:** In the `agent-loop` workspace, each submodule (`src/agent-doc/`, `src/corky/`, `src/presence/`, etc.) has its own CLAUDE.md, release process, and conventions. When `/agent-doc` routes to a document inside a submodule, the Claude session needs submodule-specific context (e.g., `src/agent-doc/CLAUDE.md` conventions, not the root `CLAUDE.md`).
+
+**Current behavior:** The `agent-doc start` command launches Claude with `--cwd` set to the project root. The SKILL.md skill reads the diff and generates a response in the root context. Submodule-specific conventions (release process, test commands, module layout) aren't automatically loaded.
+
+**Proposed solution:** A `[profiles]` section in `.agent-doc/config.toml` that maps path prefixes to configuration overrides:
+
+```toml
+[profiles."src/agent-doc"]
+claude_args = "--dangerously-skip-permissions"
+cwd = "src/agent-doc"   # start Claude in the submodule
+agent = "claude"
+model = "opus"
+
+[profiles."src/corky"]
+cwd = "src/corky"
+model = "sonnet"
+```
+
+When `agent-doc start` or `agent-doc route` resolves a file path, it checks if the file matches a profile prefix. If so, it uses that profile's settings (cwd, agent, model, claude_args) instead of the global defaults.
+
+**Impact:** Submodule-specific `CLAUDE.md` files would be loaded automatically because Claude starts in the submodule directory. Release conventions, test commands, and module layouts would all be in scope without the user needing to set `cwd` manually in each document's frontmatter.
+
+**Complexity:** Low-medium. The config parser needs a new section, and `start.rs`/`route.rs` need profile resolution. No new subcommands needed.
+
+We have more problems with the tmux panes. Same set of issues.
+- tmux windows moved to tmux session 1
+- 1 extra tmux window in tmux session 0
+- A tmux pane was swapped between tmux session 1 and tmux session 0 window 0
+
+I thought we just added a feature to have a 1-to-1 binding between the tmux session and the agent-doc project.
+Why are these issues still happening?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

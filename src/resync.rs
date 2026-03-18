@@ -6,7 +6,7 @@
 //! With `--fix`, performs additional checks:
 //! 1. Kills panes that are in the wrong tmux session (vs frontmatter `tmux_session`)
 //! 2. Deregisters panes running non-agent-doc processes (e.g., `corky watch`)
-//! Both actions cause the next `route` to auto-start in the correct session.
+//!    Both actions cause the next `route` to auto-start in the correct session.
 
 use anyhow::Result;
 
@@ -240,16 +240,17 @@ fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
 
         // Check 1: Is the pane running an agent-doc/claude process?
         let pane_cmd = pane_current_command(tmux, &entry.pane);
-        if let Some(ref cmd) = pane_cmd {
-            if !AGENT_PROCESSES.contains(&cmd.as_str()) && !IDLE_SHELLS.contains(&cmd.as_str()) {
-                issues.push(Issue::WrongProcess {
-                    key: key.clone(),
-                    file: label.to_string(),
-                    pane: entry.pane.clone(),
-                    process: cmd.clone(),
-                });
-                continue; // Don't also check session for wrong-process panes
-            }
+        if let Some(ref cmd) = pane_cmd
+            && !AGENT_PROCESSES.contains(&cmd.as_str())
+            && !IDLE_SHELLS.contains(&cmd.as_str())
+        {
+            issues.push(Issue::WrongProcess {
+                key: key.clone(),
+                file: label.to_string(),
+                pane: entry.pane.clone(),
+                process: cmd.clone(),
+            });
+            continue; // Don't also check session for wrong-process panes
         }
 
         // Check 2: Is the pane in the expected tmux session?

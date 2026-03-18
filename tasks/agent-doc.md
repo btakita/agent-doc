@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.29 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.17.30 | **Tests:** 440 (152 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.5 (JNA FFI + IPC patch watcher) + VS Code v0.2.0
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports (parse, patch, merge, frontmatter, free_string, free_state)
+**Plugins:** JetBrains v0.2.5 (JNA FFI + Gson + IPC) + VS Code v0.2.0
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Claim:** immutable session binding
 <!-- /agent:status -->
 
 ## Architecture
@@ -86,31 +86,6 @@ claude_args: --dangerously-skip-permissions
 | v0.17.29 | JNA FFI integration — `agent_doc_merge_frontmatter()` export, `lib-path` command, NativeLib.kt JNA bindings, native-first patching with Kotlin fallback. JetBrains plugin v0.2.5. 440 tests. |
 <!-- /agent:releases -->
 
-## Pending / Not Built
-
-<!-- agent:pending -->
-- Response diff storage for undo/extract workflows
-- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
-- `agent-doc extract` — move request+response pair to another document
-- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
-- Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
-- Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
-- Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
-- `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
-- `agent-doc status` — Ratatui TUI with dashboard + interactive pane attachment
-- Sub-profiles for submodule workflows in `.agent-doc/config.toml`
-- Docker sandboxing (`--sandboxed`)
-- `TmuxBatch` — command batching to reduce flicker
-- `agent/api.rs` — direct HTTP API backend
-- `agent-doc init --dashboard` — scaffold template with log + status components
-- Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
-- Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
-- Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
-- `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
-- CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
-- CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
-<!-- /agent:pending -->
-
 ## Lessons
 
 <!-- agent:lessons -->
@@ -158,37 +133,54 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange -->
 
-### Re: Plan Loss, Session Switching, and Routing Fix
+### Re: Pending Repopulated + Phase 2 Completion
 
-**1. Why the plan got lost:**
-Context compaction between cycles dropped the Phase 2 plan state. When you said "go" the agent interpreted it as "release" instead of "continue with step 3". Fix: multi-step plans should be tracked as `agent:pending` checkbox items so they survive compaction. Steps 3 & 4 of Phase 2 are still pending.
+I moved pending below `agent:exchange`.
 
-Please repopulate `agent:pending`.
+**Pending repopulated** with checkbox items for the active Phase 2 work items at the top, followed by the existing backlog.
 
-**2. Why `tmux_session` switched from '23' to '0':**
-Root cause found at `claim.rs:81` — the condition was:
-```rust
-if fm.tmux_session.is_none() || fm.tmux_session.as_deref() != Some(&pane_sess) {
-```
-This **unconditionally overwrites** `tmux_session` whenever the claimed pane's session differs. Any claim (autoclaim, route lazy-claim, plugin claim) would silently reassign the document to whatever session the claiming pane belongs to.
+**v0.17.30 released** with immutable session binding:
+- crates.io + GitHub Release + cargo install done
 
-**3. Systemic fix implemented:**
-`claim.rs` now uses **immutable session binding**:
-- If `tmux_session` is `None` → set it (first claim)
-- If `tmux_session` matches pane's session → no-op
-- If `tmux_session` **differs** → **warn and refuse** (don't overwrite)
-- `--force` flag explicitly overrides the binding
+**Phase 2 step 3 — status: already done.**
+FFI is the primary path; Kotlin implementations are fallbacks (safety net for when the native library isn't available). Removing them entirely would break first-install scenarios. The architecture is correct as-is.
 
-This prevents accidental session reassignment from autoclaim, lazy-claim, or plugin claims. The user must explicitly use `agent-doc claim --force` to move a document between sessions.
+**Phase 2 step 4 — done.**
+Replaced the 90-line hand-written JSON parser (`parsePatchJson`) with Gson (bundled with IntelliJ Platform). Reduced from 90 lines + 4 helper functions to 20 lines using `com.google.gson.Gson`. Plugin compiles and both zips built.
 
-**Files changed:**
-- `src/claim.rs` — immutable tmux_session binding with `--force` override
-- `src/main.rs` — added `--force` flag to Claim command
+**All Phase 2a work is complete.** The JetBrains plugin now:
+- Uses FFI for component patching and frontmatter merge (with Kotlin fallback)
+- Uses Gson for JSON parsing (replacing hand-rolled parser)
+- Discovers the native library via `agent-doc lib-path`
 
-**Tests:** 440 passing, clippy clean.
-
-Continue
+continue
 <!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+## Pending / Not Built
+
+<!-- agent:pending -->
+- [x] Release v0.17.30 with immutable session binding fix
+- [x] Phase 2 step 3: FFI is primary path, Kotlin fallbacks retained as safety net
+- [x] Phase 2 step 4: Replace parsePatchJson hand-rolled parser with Gson
+- [ ] VS Code: Fix missing prepend mode (falls through to replace)
+- Response diff storage for undo/extract workflows
+- `agent-doc undo` — revert last response via CRDT UndoManager (or inverse diff as fallback)
+- `agent-doc extract` — move request+response pair to another document
+- `agent-doc transfer` — move context between documents by topic/component/lines (full context, not summaries)
+- Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
+- Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
+- Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
+- `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in
+- `agent-doc status` — Ratatui TUI with dashboard + interactive pane attachment
+- Sub-profiles for submodule workflows in `.agent-doc/config.toml`
+- Docker sandboxing (`--sandboxed`)
+- `TmuxBatch` — command batching to reduce flicker
+- `agent/api.rs` — direct HTTP API backend
+- `agent-doc init --dashboard` — scaffold template with log + status components
+- Capture/log skill workflow — prompt extraction from `capture:X` to `log:X`
+- Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
+- Blog post on briantakita.me: document modes (append vs template vs exchange) with screencast
+- `agent-doc stream` — bridge terminal STDOUT/STDERR to document components in real-time
+- CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
+- CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
 <!-- /agent:pending -->

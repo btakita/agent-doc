@@ -42,7 +42,8 @@ agent-doc outline session.md             # section structure + token counts
 agent-doc outline session.md --json      # JSON output for tooling
 agent-doc patch dashboard.md status "new content"  # update a component
 agent-doc watch                          # auto-submit on file change
-agent-doc resync                         # validate sessions, remove dead panes
+agent-doc resync                         # validate sessions, prune dead panes
+agent-doc resync --fix                   # also fix wrong-session/wrong-process panes
 agent-doc commit session.md              # git add + commit with timestamp
 agent-doc prompt session.md              # detect permission prompts → JSON
 agent-doc skill install                  # install Claude Code skill definition
@@ -259,8 +260,27 @@ agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 3. `route` checks if the pane is alive — if so, sends the command (with Enter retry verification) and focuses the pane
 4. If the pane is dead (previously registered), `route` lazy-claims to an active pane in the `claude` tmux session, syncs the layout, then sends the command
 5. New/unregistered files skip lazy-claim and go directly to auto-start, so each file gets its own Claude session
-6. If no active pane is available, auto-starts a new Claude session in tmux (30s startup timeout with `❯` prompt detection)
+6. If no active pane is available, auto-starts a new Claude session in tmux: first tries `split-window` in an existing window that has a registered agent-doc pane (avoids creating throwaway windows), falls back to creating a new window if no registered panes exist (30s startup timeout with `❯` prompt detection)
 7. `sync` auto-starts Claude sessions for files with session UUIDs but no alive panes before arranging the layout
+
+## Resync
+
+Validate `sessions.json` against live tmux state and fix inconsistencies.
+
+```sh
+agent-doc resync          # dry-run: prune dead panes, report issues
+agent-doc resync --fix    # also fix detected issues
+```
+
+**Dry-run (no `--fix`):** Removes entries whose tmux panes no longer exist, purges idle stash windows (30s grace period), logs orphaned `claude`/`stash` windows, and reports wrong-session or wrong-process panes without changing them.
+
+**With `--fix`:**
+- **Wrong-session panes** (pane is in a different tmux session than the document's `tmux_session` frontmatter) — kills the pane and deregisters it. The next `route` auto-starts in the correct session.
+- **Wrong-process panes** (pane is running a non-agent-doc process, e.g. `corky watch`) — deregisters the entry but leaves the foreign process alive.
+
+**Process allowlist:** `agent-doc`, `claude`, `node` are valid agent processes. Idle shells (`zsh`, `bash`, `sh`, `fish`) are also allowed (a shell means the agent process hasn't started yet or has exited).
+
+**Automatic pruning:** `resync::prune()` runs automatically before `route`, `sync`, and `claim` operations — you only need to run `agent-doc resync` explicitly for diagnostics or `--fix`.
 
 ## IPC-First Writes
 
@@ -297,7 +317,8 @@ agent-doc claim <file> [--window W] [--pane P]  # claim file for a tmux pane
 agent-doc focus <file> [--pane P]              # focus tmux pane for a session
 agent-doc layout <files> --split h [--window W] # arrange panes (window-scoped)
 agent-doc outline <file> [--json]    # section structure + token counts
-agent-doc resync                    # validate sessions, remove dead panes
+agent-doc resync                    # validate sessions, prune dead panes, report issues
+agent-doc resync --fix              # also kill wrong-session panes, deregister wrong-process panes
 agent-doc prompt <file> [--all]     # detect permission prompts → JSON
 agent-doc prompt --answer N <file>  # answer prompt option N
 agent-doc commit <file>             # git add + commit with timestamp

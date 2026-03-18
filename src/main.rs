@@ -234,7 +234,11 @@ enum Commands {
         json: bool,
     },
     /// Validate sessions.json against live tmux panes, remove stale entries
-    Resync,
+    Resync {
+        /// Actually kill wrong-session panes and deregister stale entries (without this flag, dry-run only)
+        #[arg(long)]
+        fix: bool,
+    },
     /// Manage the Claude Code skill definition
     Skill {
         #[command(subcommand)]
@@ -450,7 +454,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Outline { file, json } => outline::run(&file, json),
-        Commands::Resync => resync::run(),
+        Commands::Resync { fix } => resync::run(fix),
         Commands::Skill { command } => match command {
             SkillCommands::Install { reload } => {
                 let updated = skill::install_and_check_updated()?;

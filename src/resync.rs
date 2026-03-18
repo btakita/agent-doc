@@ -2,10 +2,70 @@
 //!
 //! Delegates to `tmux_router::prune()` for the core prune logic.
 //! The `run()` function adds verbose output for the standalone `agent-doc resync` command.
+//!
+//! With `--fix`, performs additional checks:
+//! 1. Kills panes that are in the wrong tmux session (vs frontmatter `tmux_session`)
+//! 2. Deregisters panes running non-agent-doc processes (e.g., `corky watch`)
+//! Both actions cause the next `route` to auto-start in the correct session.
 
 use anyhow::Result;
 
+use crate::frontmatter;
 use crate::sessions::{self, Tmux};
+
+/// Valid process names for agent-doc panes.
+const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "node"];
+
+/// Shells considered idle (not running an agent process).
+const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
+
+/// A problem detected during resync --fix analysis.
+#[derive(Debug)]
+enum Issue {
+    /// Pane is in a different tmux session than the document's frontmatter expects.
+    WrongSession {
+        key: String,
+        file: String,
+        pane: String,
+        actual_session: String,
+        expected_session: String,
+    },
+    /// Pane is running a process that is not agent-doc or claude.
+    WrongProcess {
+        key: String,
+        file: String,
+        pane: String,
+        process: String,
+    },
+}
+
+impl std::fmt::Display for Issue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Issue::WrongSession {
+                file,
+                pane,
+                actual_session,
+                expected_session,
+                ..
+            } => write!(
+                f,
+                "{} (pane {}) in session '{}', expected '{}'",
+                file, pane, actual_session, expected_session
+            ),
+            Issue::WrongProcess {
+                file,
+                pane,
+                process,
+                ..
+            } => write!(
+                f,
+                "{} (pane {}) running '{}', expected agent-doc/claude",
+                file, pane, process
+            ),
+        }
+    }
+}
 
 /// Quietly prune dead panes and deduplicate entries.
 /// Called automatically before route, sync, and claim operations.
@@ -22,9 +82,6 @@ pub fn prune() -> Result<usize> {
     log_orphaned_windows(&tmux);
     Ok(removed)
 }
-
-/// Shells considered idle (not running an agent process).
-const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
 
 /// Purge stash windows where all panes are idle shells.
 ///
@@ -158,8 +215,141 @@ fn log_orphaned_windows(tmux: &Tmux) {
     }
 }
 
+/// Detect issues with alive panes: wrong tmux session or wrong process.
+fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
+    let registry = match sessions::load() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("resync: failed to load registry: {}", e);
+            return Vec::new();
+        }
+    };
+
+    let mut issues = Vec::new();
+
+    for (key, entry) in &registry {
+        if !tmux.pane_alive(&entry.pane) {
+            continue; // Dead panes are handled by prune()
+        }
+
+        let label = if entry.file.is_empty() {
+            key.as_str()
+        } else {
+            entry.file.as_str()
+        };
+
+        // Check 1: Is the pane running an agent-doc/claude process?
+        let pane_cmd = pane_current_command(tmux, &entry.pane);
+        if let Some(ref cmd) = pane_cmd {
+            if !AGENT_PROCESSES.contains(&cmd.as_str()) && !IDLE_SHELLS.contains(&cmd.as_str()) {
+                issues.push(Issue::WrongProcess {
+                    key: key.clone(),
+                    file: label.to_string(),
+                    pane: entry.pane.clone(),
+                    process: cmd.clone(),
+                });
+                continue; // Don't also check session for wrong-process panes
+            }
+        }
+
+        // Check 2: Is the pane in the expected tmux session?
+        if entry.file.is_empty() {
+            continue; // Can't check frontmatter without a file path
+        }
+
+        let expected_session = match std::fs::read_to_string(&entry.file) {
+            Ok(content) => match frontmatter::parse(&content) {
+                Ok((fm, _)) => fm.tmux_session,
+                Err(_) => None,
+            },
+            Err(_) => None,
+        };
+
+        if let Some(ref expected) = expected_session {
+            match tmux.pane_session(&entry.pane) {
+                Ok(actual) if actual != *expected => {
+                    issues.push(Issue::WrongSession {
+                        key: key.clone(),
+                        file: label.to_string(),
+                        pane: entry.pane.clone(),
+                        actual_session: actual,
+                        expected_session: expected.clone(),
+                    });
+                }
+                Err(e) => {
+                    eprintln!(
+                        "resync: failed to query session for pane {}: {}",
+                        entry.pane, e
+                    );
+                }
+                _ => {} // Matches expected session — no issue
+            }
+        }
+    }
+
+    issues
+}
+
+/// Get the current command running in a tmux pane.
+fn pane_current_command(tmux: &Tmux, pane_id: &str) -> Option<String> {
+    let output = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-p",
+            "#{pane_current_command}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if cmd.is_empty() { None } else { Some(cmd) }
+}
+
+/// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
+fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
+    if issues.is_empty() {
+        return Ok(0);
+    }
+
+    let registry_path = sessions::registry_path();
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let mut registry = sessions::load()?;
+    let mut fixed = 0;
+
+    for issue in issues {
+        match issue {
+            Issue::WrongSession { key, pane, .. } => {
+                // Kill the pane (next route will auto-start in correct session)
+                if let Err(e) = tmux.kill_pane(pane) {
+                    eprintln!("resync: failed to kill pane {}: {}", pane, e);
+                    continue;
+                }
+                registry.remove(key);
+                eprintln!("  fixed: {}", issue);
+                fixed += 1;
+            }
+            Issue::WrongProcess { key, .. } => {
+                // Just deregister — don't kill the foreign process
+                registry.remove(key);
+                eprintln!("  fixed: {}", issue);
+                fixed += 1;
+            }
+        }
+    }
+
+    if fixed > 0 {
+        sessions::save(&registry)?;
+    }
+    Ok(fixed)
+}
+
 /// Verbose resync for the standalone `agent-doc resync` command.
-pub fn run() -> Result<()> {
+pub fn run(fix: bool) -> Result<()> {
     let tmux = Tmux::default_server();
     let registry_path = sessions::registry_path();
 
@@ -187,6 +377,23 @@ pub fn run() -> Result<()> {
         eprintln!("All {} session(s) have live panes.", before);
     }
 
+    // Detect issues with alive panes
+    let issues = detect_issues(&tmux);
+    if !issues.is_empty() {
+        if fix {
+            eprintln!("\nFixing {} issue(s):", issues.len());
+            let fixed = apply_fixes(&tmux, &issues)?;
+            eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
+        } else {
+            eprintln!("\nFound {} issue(s) (run with --fix to resolve):", issues.len());
+            for issue in &issues {
+                eprintln!("  {}", issue);
+            }
+        }
+    } else {
+        eprintln!("\nNo session/process issues detected.");
+    }
+
     // Show current state
     let registry = sessions::load()?;
     if !registry.is_empty() {
@@ -197,10 +404,9 @@ pub fn run() -> Result<()> {
             } else {
                 entry.file.as_str()
             };
-            eprintln!("  {} → pane {}", label, entry.pane);
+            eprintln!("  {} -> pane {}", label, entry.pane);
         }
     }
 
     Ok(())
 }
-

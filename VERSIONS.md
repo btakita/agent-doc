@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.17.28
+
+- **Validate tmux_session before routing**: Guard against routing to a non-existent tmux session.
+
+## 0.17.27
+
+- **Plugin code-block fix**: JetBrains and VS Code plugins skip component tags inside fenced code blocks. JB plugin 0.2.4, VSCode 0.2.2.
+
+## 0.17.26
+
+- **PLUGIN-SPEC docs update**: Document recent plugin features in PLUGIN-SPEC.
+
+## 0.17.25
+
+- **Stash else-branch fix**: Fix else-branch stash logic. Use `diff --wait` for truncation detection.
+
 ## 0.17.24
 
 - **Pulldown-cmark for code range detection**: Replace hand-rolled code span/fence parser with `pulldown-cmark` in component parser. Stash overflow panes instead of creating new windows.

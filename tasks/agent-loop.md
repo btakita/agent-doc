@@ -20,24 +20,9 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-### Submodules committed & pushed
+**Done.** Created `VERSIONS.md` in tmux-router with changelog for all 10 releases (v0.1.0–v0.2.5). Committed (`68802b1`), pushed. Parent pointer updated (`424e5d3`), pushed.
 
-| Submodule | Commit | Summary |
-|-----------|--------|---------|
-| **agent-doc** | `7b8c95c`, `b043099` | vscode v0.2.1 + README, bump to v0.17.16 |
-| **briantakita.me-dev** | `c557bc2` | add @rappstack/domain--server dep |
-| **brookebrodack-dev** | `7c09f1e` | deploy workflow + deps + site build |
-| **rappstack-dev** | `19ee4da` | update domain--server |
-| **tmux-router** | `7391d14`, `2c65cfd` | send_keys timing + focus_pane logging, bump to v0.2.5 |
+Please review https://github.com/gsd-build/get-shit-done
 
-### Released
-
-- **agent-doc v0.17.16** — crates.io, PyPI, GitHub Release (binary + vsix + JB plugin)
-- **tmux-router v0.2.5** — crates.io, GitHub Release (binary)
-
-Add VERSIONS.md to tmux-router
-
-### agent-loop
-
-Parent repo committed (`2b39ffb`) and pushed — all submodule pointers + task documents updated.
+I want to have a skill f
 <!-- /agent:exchange -->

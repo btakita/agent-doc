@@ -401,4 +401,21 @@ All 15 route tests pass. Binary installed.
 Want me to implement the fix in `prompt.rs`?
 
 Implement fix. Would the boundary marker be "reliable"...as in we can rely on it always being present?
+
+### Re: Implementing prompt parsing fix
+
+**No, a boundary marker would NOT be reliable.** Claude Code's TUI output format is not under our control — Anthropic can change it at any time, and different versions may render prompts differently. A boundary marker would be fragile.
+
+**The robust fix:** Changed `parse_option_line()` to only match the `[N] label` bracket format that Claude Code actually uses for permission prompts. Markdown numbered lists (`1. item`, `2. item`) are now correctly ignored.
+
+**Changes in `prompt.rs`:**
+- `parse_option_line()` now requires `[N]` bracket format (not `N.` dot format)
+- All existing test fixtures updated to use `[1] Yes`, `[2] No` format
+- 2 new tests added:
+  - `parse_option_line_rejects_markdown_numbered_list` — verifies `1. item` returns `None`
+  - `markdown_numbered_list_not_detected_as_prompt` — full pane capture with numbered list + "Esc to cancel" footer is not misdetected
+
+All 23 prompt-related tests pass. Release binary rebuilt.
+
+release
 <!-- /agent:exchange -->

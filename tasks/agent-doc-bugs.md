@@ -175,6 +175,26 @@ So we can avoid these sort of issues.
 **Most likely:** #3 — I see your prompt in the diff but fail to address it because I'm focused on the agent response portion. This is the skill-side attention problem, not a CRDT issue.
 
 Let me be more disciplined: I will address EVERY line in the diff, not just the parts that seem like new questions.
+
+### Re: Markdown AST parser for component detection
+
+**Yes.** Several Rust markdown AST parsers exist:
+
+- **pulldown-cmark** — The standard. CommonMark-compliant, streaming parser. Used by rustdoc. Returns events like `Event::Html(tag)`, `Event::Code(text)`, `Event::Start(CodeBlock)`. We could filter component tags to only those in `Event::Html` positions (not inside `Code` or `CodeBlock` events).
+
+- **markdown** — Newer, also CommonMark. Returns an AST tree instead of events.
+
+- **comrak** — GitHub Flavored Markdown. Full AST with node types.
+
+**How it would help:** Instead of our regex-based `find_code_ranges()` + `is_agent_marker()`, we'd parse the markdown AST and only match HTML comments that appear as top-level HTML nodes — not inside code spans, code blocks, or other inline contexts. This would eliminate the entire class of "component tag inside code" bugs.
+
+**Trade-off:** pulldown-cmark is ~50KB added to the binary. The current regex approach is simpler but fragile. An AST parser would be more correct but adds a dependency.
+
+**Recommendation:** Add `pulldown-cmark` and use it in `component.rs` for marker detection. It's the de facto standard for Rust markdown parsing and would make the parser bulletproof against code-context false positives.
+
+Want me to implement the switch to pulldown-cmark?
+
+Yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

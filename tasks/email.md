@@ -20,6 +20,7 @@ agent_doc_write: crdt
 - [x] btak.dev account added to .corky.toml (sync_days=30)
 - [x] Gmail API sync provider implemented
 - [x] login_hint + email verification safeguard
+- [x] Ctrl+C cancellation token in watch mode
 - [ ] Re-authorize with btak.dev@gmail.com
 - [ ] Release 0.17.0
 <!-- /agent:status -->
@@ -654,4 +655,20 @@ The issue is architectural: the sync function is synchronous (blocking thread) a
 Option 1 is fine for now — the sync state is only saved on successful completion, so a mid-sync exit just means it re-fetches next time. Want me to implement that? Or should we move on to the release and track this as a follow-up?
 
 Implement Option 2.
+Implemented Option 2 — cancellation token. The `Arc<AtomicBool>` shutdown flag from `watch.rs` is now passed through:
+
+`watch.rs` → `poll_once(shutdown)` → `gmail_api_sync::sync_account(..., shutdown)` → checked in:
+- **Message listing loop** — checks between pages, returns partial results on shutdown
+- **Message processing loop** — checks between messages, exits cleanly
+
+When Ctrl+C is pressed during a Gmail API sync, you'll see:
+```
+    Sync interrupted by shutdown signal
+```
+
+The `sync/mod.rs` (non-watch sync) passes `None` since it doesn't have a shutdown mechanism — Ctrl+C there just kills the process normally.
+
+Rebuilt and installed. Restart `corky watch` to test.
+
+![img_3.png](img_3.png)
 <!-- /agent:output -->

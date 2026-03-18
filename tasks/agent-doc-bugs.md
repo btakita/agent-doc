@@ -195,6 +195,25 @@ Let me be more disciplined: I will address EVERY line in the diff, not just the 
 Want me to implement the switch to pulldown-cmark?
 
 Yes
+
+### Re: pulldown-cmark implemented
+
+**Done.** Replaced the 100-line manual `find_code_ranges()` with ~25 lines using `pulldown-cmark::Parser::into_offset_iter()`. 
+
+**What changed:**
+- Added `pulldown-cmark = "0.12"` dependency
+- `find_code_ranges()` now uses pulldown-cmark events: `Event::Code` for inline spans, `Event::Start/End(CodeBlock)` for fenced blocks
+- Removed the manual `memchr_byte()` helper
+- Added test for inline code span mid-line edge case
+
+**Result:** All 414 unit + 21 integration tests pass. The parser is now CommonMark-compliant for code range detection. Component tags inside ANY code context (inline, fenced, indented) are correctly ignored.
+
+Committed and pushed. Ready to release when you want.
+
+audit docs
+update SPEC.md
+
+Let add a skill for library
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

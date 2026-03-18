@@ -81,4 +81,27 @@ The agent reads pending items, processes each, checks them off, and writes `<!--
 Want me to implement this?
 
 Will patch:pending delete items once they are complete?
+
+### Re: Will patch:pending delete completed items?
+
+**It depends on the component mode.** Since `agent:pending` uses `mode=replace`, each `patch:pending` replaces the entire component content. The agent controls what remains:
+
+- **Option A: Check off then delete** — Agent marks `[x]` on the current cycle, removes the item on the next cycle. Gives the user one cycle to see it was addressed.
+- **Option B: Immediate delete** — Agent omits completed items from the replacement. Cleaner, but no visibility that the item was processed.
+- **Option C: Keep checked items** — Agent keeps `[x]` items indefinitely. User manually deletes when satisfied. Most conservative.
+
+**Recommended: Option A** (check off, then remove next cycle). The pending component stays concise while giving brief visibility. The exchange component has the full response anyway, so the audit trail is there.
+
+The skill logic would be:
+1. Read `agent:pending` — get list of items
+2. For each unchecked item: process it, write response to exchange, mark `[x]`
+3. Remove items that were already `[x]` from last cycle
+4. Write `patch:pending` with the updated list
+
+This way completed items survive exactly one cycle for visibility, then auto-clean.
+
+Want me to implement this in the skill and document it?
+
+Yes. I'm also not liking mode=append|replace...Should we call it patch=append|replace instead?
+mode is too generic. This is how we are patching the content of the component.
 <!-- /agent:exchange -->

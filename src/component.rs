@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
 /// A parsed component in a document.
@@ -94,108 +95,35 @@ fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
 
 /// Find byte ranges of code regions (fenced code blocks + inline code spans).
 /// Markers inside these ranges are treated as literal text, not component markers.
+///
+/// Uses `pulldown-cmark` AST parsing with `offset_iter()` to accurately detect
+/// code regions per the CommonMark spec.
 pub(crate) fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
-    let bytes = doc.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
-
-    while pos < len {
-        // Fenced code blocks: line starting with optional whitespace + ``` or ~~~
-        if pos == 0 || bytes[pos - 1] == b'\n' {
-            // Skip leading whitespace on this line
-            let mut fence_pos = pos;
-            while fence_pos < len && bytes[fence_pos] == b' ' {
-                fence_pos += 1;
+    let parser = Parser::new_ext(doc, Options::empty());
+    let mut iter = parser.into_offset_iter();
+    while let Some((event, range)) = iter.next() {
+        match event {
+            // Inline code span: `code` or ``code``
+            Event::Code(_) => {
+                ranges.push((range.start, range.end));
             }
-            if fence_pos + 3 <= len {
-                let fence_char = bytes[fence_pos];
-                if (fence_char == b'`' || fence_char == b'~')
-                    && bytes[fence_pos + 1] == fence_char
-                    && bytes[fence_pos + 2] == fence_char
-                {
-                    let block_start = pos;
-                    // Skip past the opening fence line
-                    pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
-                    // Find closing fence (also allowing leading whitespace)
-                    loop {
-                        if pos >= len {
-                            ranges.push((block_start, len));
-                            break;
-                        }
-                        let mut close_fence_pos = pos;
-                        while close_fence_pos < len && bytes[close_fence_pos] == b' ' {
-                            close_fence_pos += 1;
-                        }
-                        if close_fence_pos + 3 <= len
-                            && bytes[close_fence_pos] == fence_char
-                            && bytes[close_fence_pos + 1] == fence_char
-                            && bytes[close_fence_pos + 2] == fence_char
-                        {
-                            let end = memchr_byte(b'\n', bytes, close_fence_pos).map_or(len, |p| p + 1);
-                            ranges.push((block_start, end));
-                            pos = end;
-                            break;
-                        }
-                        pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
-                    }
-                    continue;
-                }
-            }
-        }
-
-        // Inline code spans: `...`, ``...``, ```...``` (CommonMark §6.1)
-        // A code span begins with N backticks and ends with exactly N backticks.
-        if bytes[pos] == b'`' {
-            let span_start = pos;
-            // Count opening backticks
-            let mut n = 0;
-            while pos + n < len && bytes[pos + n] == b'`' {
-                n += 1;
-            }
-            // Skip if this is a fenced code block (3+ backticks at line start)
-            // — already handled above
-            if n >= 3 && (span_start == 0 || bytes[span_start - 1] == b'\n') {
-                pos += n;
-                continue;
-            }
-            pos += n;
-            // Find closing sequence of exactly N backticks (not more, not fewer)
-            loop {
-                if pos >= len {
-                    break;
-                }
-                // Inline code spans cannot span newlines in our context
-                if bytes[pos] == b'\n' {
-                    break;
-                }
-                if bytes[pos] == b'`' {
-                    let mut close_n = 0;
-                    while pos + close_n < len && bytes[pos + close_n] == b'`' {
-                        close_n += 1;
-                    }
-                    if close_n == n {
-                        ranges.push((span_start, pos + close_n));
-                        pos += close_n;
+            // Fenced or indented code block: consume until End(CodeBlock)
+            Event::Start(Tag::CodeBlock(_)) => {
+                let block_start = range.start;
+                let mut block_end = range.end;
+                for (inner_event, inner_range) in iter.by_ref() {
+                    block_end = inner_range.end;
+                    if matches!(inner_event, Event::End(TagEnd::CodeBlock)) {
                         break;
                     }
-                    // Wrong number of backticks — skip past them
-                    pos += close_n;
-                    continue;
                 }
-                pos += 1;
+                ranges.push((block_start, block_end));
             }
-            continue;
+            _ => {}
         }
-
-        pos += 1;
     }
-
     ranges
-}
-
-fn memchr_byte(needle: u8, haystack: &[u8], start: usize) -> Option<usize> {
-    haystack[start..].iter().position(|&b| b == needle).map(|i| start + i)
 }
 
 /// Parse all components from a document.
@@ -774,6 +702,22 @@ Another example: `<!-- agent:also-fake patch=replace -->` is just documentation.
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "real");
         assert_eq!(components[0].content(doc), "real content\n");
+    }
+
+    #[test]
+    fn inline_code_mid_line_with_surrounding_text_ignored() {
+        // Edge case: component tag inside inline code span on a line with other content
+        // before and after — must not be parsed as a real component marker.
+        let doc = "\
+Wrap markers like `<!-- agent:status -->` in backticks to show them literally.
+<!-- agent:real -->
+actual content
+<!-- /agent:real -->
+";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "real");
+        assert_eq!(components[0].content(doc), "actual content\n");
     }
 
     #[test]

@@ -44,115 +44,57 @@ agent_doc_write: crdt
 
 <!-- agent:exchange -->
 
-### Re: Experience + Skills Database for Custom Resumes
+### Re: Title correction & Rust crate question
 
-Great direction. Your current system already has the right bones — plain template + profile-driven emphasis/filtering. The missing layer is **structured experience data** that lets you recombine content per job description instead of maintaining static prose.
+**Title fix noted** — correcting the Presence AI example. Your actual title is "Director of Engineering" at Presence AI, not Co-Founder. The example TOML and phrases will reflect that.
 
-**Proposed architecture:**
+**Should this be a Rust crate?** Honest tradeoff:
 
-```
-resume/
-├── BrianTakita.md          # still the master template (generated from DB)
-├── build.py                 # extended to assemble from DB
-├── profiles/                # existing — controls emphasis + filtering
-└── data/                    # NEW — the "database"
-    ├── skills.toml          # skill taxonomy with tags
-    ├── experiences/          # one file per role
-    │   ├── presence-ai.toml
-    │   ├── censible.toml
-    │   ├── neo-innovation.toml
-    │   └── ...
-    └── projects/             # one file per shipped product
-        ├── corky.toml
-        ├── agent-doc.toml
-        └── ...
-```
+**Arguments for Rust:**
+- Fits your ecosystem — agent-doc, tagpath, existence-lang are all Rust
+- Could integrate as an `agent-doc` subcommand or standalone CLI
+- TOML parsing is native (serde + toml crate)
+- Tag matching / scoring is a good fit for Rust's type system
+- Dog-food it the same way you dog-food agent-doc
 
-**Experience entry structure** (`data/experiences/presence-ai.toml`):
+**Arguments for keeping Python:**
+- `build.py` already works — weasyprint and pandoc are Python-native
+- The data layer (load TOML → score → select → assemble markdown) is ~200 lines of Python
+- Adding Rust means maintaining two build paths or rewriting PDF generation
+- Not performance-critical — runs once per resume build
 
-Looks good...I'm not actually a Co-Founder though. I was a Director Level.
+**Pragmatic recommendation: Hybrid.** Keep weasyprint/pandoc in Python for PDF generation (no Rust equivalent is as good). Build the **data layer** as a Rust CLI that:
+1. Loads experience TOML files + profile
+2. Scores/selects accomplishments by tag overlap
+3. Assembles the markdown template → stdout
+
+Then `build.py` calls the Rust CLI for content assembly and handles PDF rendering.
+
+**My vote:** Start with pure Python extension to `build.py` (fastest to ship), extract to Rust later if the scoring/assembly logic gets complex enough to warrant it.
+
+**Corrected Presence AI example:**
+
 ```toml
 [meta]
 company = "Presence AI"
-title = "Co-Founder & Principal Engineer"
+title = "Director of Engineering"
 start = "2022-09"
 end = "2025-12"
 duration = "3 yrs 3 mos"
 location = "Remote"
-type = "startup"  # startup | enterprise | consulting | freelance
+type = "startup"
 
-[tags]
-domains = ["AI/ML", "real-time systems", "video", "WebRTC"]
-skills = ["Python", "Rust", "TypeScript", "React", "FastAPI", "Docker", "AWS"]
-patterns = ["reactive programming", "event-driven", "context engineering", "agentic workflows"]
-level = ["architecture", "full-stack", "infrastructure", "team-lead"]
-
-# Atomic accomplishments — each is a recombinable unit
-[[accomplishments]]
-text = "Built real-time AI avatar pipeline processing video/audio streams"
-tags = ["AI/ML", "real-time", "video", "pipeline"]
-impact = "core-product"
-
-[[accomplishments]]
-text = "Designed reactive signal graph for sub-100ms avatar response latency"
-tags = ["reactive programming", "performance", "architecture"]
-impact = "technical-innovation"
-
-[[accomplishments]]
-text = "Implemented WebRTC streaming infrastructure for live avatar sessions"
-tags = ["WebRTC", "infrastructure", "real-time"]
-impact = "infrastructure"
-
-# Phrases — reusable fragments for prose assembly
 [phrases]
-headline = "Co-founded AI avatar startup; built real-time video pipeline"
+headline = "Led engineering at AI avatar startup; built real-time video pipeline"
 one_liner = "Real-time AI avatar pipeline with reactive signal architecture"
 technical = "Reactive signal graph, WebRTC streaming, sub-100ms latency"
 ```
 
-**Skills taxonomy** (`data/skills.toml`):
-
-```toml
-[skills.rust]
-display = "Rust"
-category = "language"
-tags = ["systems", "performance", "safety"]
-years = 5
-
-[skills.context_engineering]
-display = "Context Engineering"
-category = "practice"
-tags = ["AI/ML", "agentic", "architecture"]
-related = ["agentic workflows", "agent tooling"]
-```
-
-**How profiles would use it:**
-
-```toml
-# profiles/django-fullstack.toml
-[target]
-match_tags = ["Python", "Django", "React", "API", "full-stack"]
-prioritize = ["backend", "infrastructure", "team-lead"]
-max_bullets_per_experience = 4
-
-[highlight]
-# auto-generated from matched tags + manual overrides
-auto_from_tags = true
-extra_phrases = ["distributed systems"]
-```
-
-**Build flow changes:**
-1. Load profile with `match_tags`
-2. Score each experience/accomplishment by tag overlap with target
-3. Select top-N accomplishments per role (sorted by relevance)
-4. Assemble prose from accomplishment text + phrases
-5. Apply existing emphasis/filtering pipeline
-
-**Your message was truncated** at "All of which be recombined into effective prose for su..." — finish that thought, or proceed with this structure?
-
-Yes.
-Would it make sense to have a Rust Crate to support this tool?
+Ready to proceed with implementation. Which direction: Python-first or Rust crate?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- [x] Title correction: Presence AI = Director of Engineering, not Co-Founder
+- [x] Rust crate vs Python decision for resume data layer
+- [ ] Implement experience + skills database (awaiting direction: Python or Rust)
 <!-- /agent:pending -->

@@ -73,9 +73,24 @@ yes
 Binary built. Ready to release as v0.17.23.
 
 release
+
+### v0.17.23 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.23
+- **PyPI:** agent-doc 0.17.23
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.23
+
+**What's in v0.17.23:**
+- Stash overflow panes (route fallback fix)
+- Wrong-window detection in resync --fix
+- 6 new tests
+
+**Session total: 8 releases** (v0.17.16–v0.17.23).
+
+audit docs
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix route fallback: stash instead of new window when split fails
-- [x] Add wrong-window detection to resync --fix
+
 <!-- /agent:pending -->

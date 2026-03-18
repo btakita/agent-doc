@@ -256,4 +256,24 @@ Binary rebuilt and installed.
 
 Did you add tests?
 And did you add logs?
+
+### Re: Tests and logs added
+
+**Logs already present** in the session validation code:
+- `[route] Pane %XX is alive in session 'Y'` — correct session
+- `[route] Pane %XX is alive but in wrong session ('Y', expected 'Z'). Will re-create.` — wrong session detected
+- `[route] target tmux session: X` — which session the document targets
+
+**Tests added (2 new, 15 total route tests):**
+
+1. `pane_session_detection` — creates a pane in an isolated tmux, verifies `#{session_name}` correctly returns the session name
+2. `pane_in_wrong_session_detected` — creates panes in two different sessions ("correct" and "wrong"), verifies they report different session names
+
+All 15 route tests pass. Binary rebuilt and installed.
+
+Let's have a "self-healing" way to clean up extra tmux windows.
+Be careful not to be overeager however.
+I may be running multiple editors with their own claiming tmux session.
+
+
 <!-- /agent:exchange -->

@@ -69,6 +69,34 @@ continue
 
 Finish Phase 1. Enable Gmail API. We can host the privacy policy & ToS at https://btakita.github.io/corky/
 Should we create a github organization for corky instead?
+
+### Re: Finish Phase 1, hosting, and GitHub org
+
+**Enable Gmail API:** Manual step — GCP Console → APIs & Services → Library → "Gmail API" → Enable. Do this now if not done.
+
+**Hosting at `btakita.github.io/corky/`:** Works well. URLs would be:
+- `https://btakita.github.io/corky/reference/privacy-policy.html`
+- `https://btakita.github.io/corky/reference/terms-of-service.html`
+
+Requires GitHub Pages enabled on the corky repo (Settings → Pages). The mdBook docs structure is already there.
+
+**GitHub organization?**
+
+| | Personal (`btakita/corky`) | Org (`corkymail/corky`) |
+|---|---|---|
+| URL | `btakita.github.io/corky` | `corkymail.github.io` |
+| Branding | Personal project feel | Professional/official |
+| Migration | None | Transfer repo, update refs |
+| Multi-maintainer | Via collaborators | Native org teams |
+| Google verification | Fine | Slightly more legitimate |
+
+**Recommendation:** Stay on `btakita/corky` for now — don't let org setup block Phase 1. GitHub auto-redirects if you transfer later. OAuth URLs can be updated post-verification.
+
+**Remaining Phase 1 steps:**
+1. Enable Gmail API (you, in console): How?
+2. Enable GitHub Pages on corky repo + push docs: Already done
+3. Enter privacy policy + ToS URLs in consent screen: we need to push to gh pages
+4. Submit for verification
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

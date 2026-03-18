@@ -349,7 +349,7 @@ Since Gmail and YouTube are both Google APIs, they share one GCP project. One OA
 - `gmail.readonly` — read messages/metadata
 - `gmail.send` — send emails (corky saves as drafts first)
 - `gmail.settings.basic` — manage filters/labels
-- (optional) `youtube.readonly` — YouTube channel data
+- (optional) `youtube.readonly` — YouTube channel data: I don't see youtube.readonly
 
 Is this just for Corky Desktop? How do I add scopes?
 I renamed my private app to agent-loop. agent-loop has web oauth permissions.
@@ -422,4 +422,26 @@ This is actually the intended self-serve workflow: corky docs list the required 
 So Phase 2 is not blocked by verification. You can ship it immediately.
 
 Add `agent:pending` component below `agent:exchange`.
+
+### Re: OAuth console UI correction + adding agent:pending
+
+**Scope editing:** Apologies for the stale instructions. Google has been redesigning the console. The current path depends on which console version you see:
+- **New console:** "APIs & Services" → "OAuth consent screen" → click the app name → "Data Access" tab → manage scopes
+- **Classic console:** "OAuth consent screen" → "Edit App" → step through the wizard to "Scopes"
+- If neither works, try: "APIs & Services" → "Credentials" → click on the OAuth client → then navigate to consent screen from there
+
+The `agent:pending` component has been added below `agent:exchange`. You can now write pending items there as checkbox lists.
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+- [ ] Phase 1: Register public Google OAuth app
+  - [x] Create GCP project (corky-490604)
+  - [ ] Enable Gmail API
+  - [ ] Configure OAuth consent screen
+  - [x] Create OAuth client credentials (in pass)
+  - [x] Draft privacy policy & terms of service
+  - [ ] Submit for Google verification
+- [ ] Phase 2: Built-in default credentials in corky
+- [ ] Phase 3: `corky doctor` command
+- [ ] Phase 4: Self-serve documentation
+<!-- /agent:pending -->

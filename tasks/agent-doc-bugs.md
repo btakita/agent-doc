@@ -215,4 +215,24 @@ The skill now manages `<!-- agent:pending patch=replace -->` as a task queue:
 This is ready to use. Add `<!-- agent:pending patch=replace --><!-- /agent:pending -->` to any template document to enable it.
 
 What would happen with agent:pending patch=append or patch=prepend?
+
+### Re: pending with append or prepend
+
+**`patch=append`** — Each cycle's checked/unchecked list gets *appended* below the previous content. The pending component grows forever — completed items accumulate rather than being replaced. This creates an audit log of all tasks ever tracked, but the component becomes noisy fast. Not useful for a task queue.
+
+**`patch=prepend`** — Each cycle's list gets *prepended* above existing content. Same accumulation problem as append, just in reverse order. Newest items at top, oldest at bottom.
+
+**Why `patch=replace` is correct for pending:** The whole point is that the skill rewrites the complete task list each cycle — removing completed items, adding new ones, updating checkboxes. Replace gives the skill full control over the component's content. Append/prepend would mean the skill can only add, never clean up.
+
+**The pattern:** Components that represent *current state* (status, pending) use `patch=replace`. Components that represent *history* (exchange, findings) use `patch=append`. This maps cleanly to the semantics:
+
+| Component | Patch | Why |
+|-----------|-------|-----|
+| `status` | replace | Current state, not history |
+| `pending` | replace | Current task queue, auto-cleaned |
+| `exchange` | append | Conversation history, grows |
+| `findings` | append | Accumulated research, grows |
+| `output` | replace | Latest response only |
+
+Is the 2nd column the default patch value?
 <!-- /agent:exchange -->

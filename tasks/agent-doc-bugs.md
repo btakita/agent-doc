@@ -38,8 +38,23 @@ Add to SPEC
 All 395 tests pass. Release binary built. Committed and pushed. Ready to release as v0.17.21 when you want.
 
 Release
+
+### v0.17.21 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.21
+- **PyPI:** agent-doc 0.17.21
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.21
+
+**What's in v0.17.21:**
+- Component parser skips fenced code blocks (indented fence fix)
+- `agent:pending` scaffolded by `agent-doc claim`
+- `patch=` inline attribute + standard component names table
+- 4 new fenced code block tests
+
+tasks/todo/corky-public-google-app.md has a fencing issue with the latest patch.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix component parser to skip fenced code blocks
+
 <!-- /agent:pending -->

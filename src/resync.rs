@@ -224,10 +224,14 @@ fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
             return Vec::new();
         }
     };
+    detect_issues_in_registry(tmux, &registry)
+}
 
+/// Detect issues in a given registry (testable without disk I/O).
+fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<Issue> {
     let mut issues = Vec::new();
 
-    for (key, entry) in &registry {
+    for (key, entry) in registry {
         if !tmux.pane_alive(&entry.pane) {
             continue; // Dead panes are handled by prune()
         }
@@ -320,6 +324,21 @@ fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
     let registry_path = sessions::registry_path();
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = sessions::load()?;
+    let fixed = apply_fixes_to_registry(tmux, issues, &mut registry);
+
+    if fixed > 0 {
+        sessions::save(&registry)?;
+    }
+    Ok(fixed)
+}
+
+/// Apply fixes to a mutable registry (testable without disk I/O).
+/// Returns number of issues fixed.
+fn apply_fixes_to_registry(
+    tmux: &Tmux,
+    issues: &[Issue],
+    registry: &mut sessions::SessionRegistry,
+) -> usize {
     let mut fixed = 0;
 
     for issue in issues {
@@ -343,10 +362,7 @@ fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
         }
     }
 
-    if fixed > 0 {
-        sessions::save(&registry)?;
-    }
-    Ok(fixed)
+    fixed
 }
 
 /// Verbose resync for the standalone `agent-doc resync` command.
@@ -410,4 +426,221 @@ pub fn run(fix: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+
+    /// Helper to create a registry entry for testing.
+    fn test_entry(pane: &str, file: &str) -> SessionEntry {
+        SessionEntry {
+            pane: pane.to_string(),
+            pid: std::process::id(),
+            cwd: "/tmp".to_string(),
+            started: "2026-01-01T00:00:00Z".to_string(),
+            file: file.to_string(),
+            window: String::new(),
+        }
+    }
+
+    #[test]
+    fn detect_dead_pane_not_flagged_as_issue() {
+        // Dead panes are handled by prune(), not detect_issues.
+        // detect_issues should skip dead panes entirely.
+        let iso = IsolatedTmux::new("resync-test-dead");
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("dead-session".to_string(), test_entry("%99999", "test.md"));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert!(
+            issues.is_empty(),
+            "dead panes should not generate issues (handled by prune), got: {:?}",
+            issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn detect_wrong_session_pane() {
+        // A pane in tmux session "wrong" but frontmatter expects "correct"
+        let iso = IsolatedTmux::new("resync-test-wrong-sess");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a pane in session "wrong" — must wait for shell to start
+        // so pane_current_command returns "zsh"/"bash" instead of "tmux"
+        let pane = iso.auto_start("wrong", &cwd).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Create a temp file with frontmatter specifying tmux_session: correct
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_path = tmp.path().join("test.md");
+        std::fs::write(
+            &doc_path,
+            "---\nsession: abc-123\ntmux_session: correct\n---\n# Test\n",
+        )
+        .unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "abc-123".to_string(),
+            test_entry(&pane, &doc_path.to_string_lossy()),
+        );
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert_eq!(issues.len(), 1, "should detect 1 wrong-session issue");
+        assert!(
+            matches!(&issues[0], Issue::WrongSession { expected_session, actual_session, .. }
+                if expected_session == "correct" && actual_session == "wrong"),
+            "issue should be WrongSession with correct vs wrong, got: {}",
+            &issues[0]
+        );
+    }
+
+    #[test]
+    fn detect_wrong_process_pane() {
+        // A pane running a non-agent-doc process (e.g., "sleep")
+        let iso = IsolatedTmux::new("resync-test-wrong-proc");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a pane running "sleep" (not agent-doc/claude/node/shell)
+        let output = iso
+            .cmd()
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                "test",
+                "-c",
+                &cwd.to_string_lossy(),
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "sleep",
+                "60",
+            ])
+            .output()
+            .unwrap();
+        let pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-1".to_string(), test_entry(&pane, "test.md"));
+
+        // Give tmux a moment to register the process
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert_eq!(issues.len(), 1, "should detect 1 wrong-process issue");
+        assert!(
+            matches!(&issues[0], Issue::WrongProcess { process, .. } if process == "sleep"),
+            "issue should be WrongProcess(sleep), got: {}",
+            &issues[0]
+        );
+    }
+
+    #[test]
+    fn fix_wrong_session_kills_pane_and_deregisters() {
+        let iso = IsolatedTmux::new("resync-test-fix-sess");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("wrong", &cwd).unwrap();
+        assert!(iso.pane_alive(&pane));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-fix".to_string(), test_entry(&pane, "test.md"));
+
+        let issues = vec![Issue::WrongSession {
+            key: "sess-fix".to_string(),
+            file: "test.md".to_string(),
+            pane: pane.clone(),
+            actual_session: "wrong".to_string(),
+            expected_session: "correct".to_string(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        assert_eq!(fixed, 1);
+        assert!(!registry.contains_key("sess-fix"), "entry should be removed from registry");
+        assert!(!iso.pane_alive(&pane), "pane should be killed");
+    }
+
+    #[test]
+    fn fix_wrong_process_deregisters_but_keeps_pane() {
+        let iso = IsolatedTmux::new("resync-test-fix-proc");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        assert!(iso.pane_alive(&pane));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-proc".to_string(), test_entry(&pane, "test.md"));
+
+        let issues = vec![Issue::WrongProcess {
+            key: "sess-proc".to_string(),
+            file: "test.md".to_string(),
+            pane: pane.clone(),
+            process: "corky".to_string(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        assert_eq!(fixed, 1);
+        assert!(!registry.contains_key("sess-proc"), "entry should be removed from registry");
+        assert!(iso.pane_alive(&pane), "pane should NOT be killed (foreign process)");
+    }
+
+    #[test]
+    fn no_fix_without_flag() {
+        // detect_issues returns issues but apply_fixes is only called with --fix.
+        // This test verifies the reporting path doesn't mutate anything.
+        let iso = IsolatedTmux::new("resync-test-no-fix");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("wrong", &cwd).unwrap();
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_path = tmp.path().join("test.md");
+        std::fs::write(
+            &doc_path,
+            "---\nsession: abc\ntmux_session: correct\n---\n",
+        )
+        .unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "abc".to_string(),
+            test_entry(&pane, &doc_path.to_string_lossy()),
+        );
+
+        // detect_issues finds the problem
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert!(!issues.is_empty(), "should detect issues");
+
+        // But without calling apply_fixes, nothing changes
+        assert!(registry.contains_key("abc"), "registry should be unchanged");
+        assert!(iso.pane_alive(&pane), "pane should still be alive");
+    }
+
+    #[test]
+    fn healthy_pane_has_no_issues() {
+        // A pane running a shell (idle) with no tmux_session mismatch should be clean.
+        let iso = IsolatedTmux::new("resync-test-healthy");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+
+        // Wait for the shell to fully start (otherwise pane_current_command
+        // may return "tmux" instead of "zsh"/"bash")
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // No file path means no frontmatter check; shell is in IDLE_SHELLS
+        let mut registry = SessionRegistry::new();
+        registry.insert("healthy-sess".to_string(), test_entry(&pane, ""));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert!(
+            issues.is_empty(),
+            "healthy idle shell should have no issues, got: {:?}",
+            issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
+        );
+    }
 }

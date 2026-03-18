@@ -20,33 +20,50 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: SPEC.md + pending component
+### Re: Composable dev skill
 
-**Created `.claude/skills/dev/SPEC.md`** — a project-agnostic specification for the dev skill. Another project can use this SPEC.md as a behavioral contract to build their own `/dev` skill.
+Yes — implemented a CLAUDE.md-style configuration hierarchy for the dev skill. Updated both SKILL.md and SPEC.md.
 
-**SPEC.md structure (10 sections):**
-1. **Overview** — thin orchestrator architecture, no CLI binary needed
-2. **Architecture** — invocation → skill → agent → toolchain → targets
-3. **Commands** — check, release, status, changelog (behavioral contracts)
-4. **Project Type Detection** — marker file → project type mapping (Cargo.toml, package.json, etc.)
-5. **Pre-Release Verification Checklist** — 9 mandatory checks including SPEC.md and drift detection
-6. **Release Workflows** — generic workflow + publication target table with verify commands
-7. **Secret Handling** — resolution protocol + path registry pattern
-8. **Meta-Cognition** — trigger → action table + update protocol
-9. **Workspace Integration** — cross-project updates + conventions
-10. **Customization** — three-layer model: SPEC.md (invariant) → SKILL.md (workspace config) → project CLAUDE.md (overrides)
+**Resolution chain (deepest wins):**
+```
+SPEC.md (invariant — behavioral contract)
+  ↓
+SKILL.md (workspace defaults)
+  ↓
+src/<project>/DEV.md (project overrides — checked in)
+  ↓
+src/<project>/DEV.local.md (private overrides — gitignored)
+```
 
-**Key design insight:** SPEC.md is the **invariant layer** (what the skill MUST do), SKILL.md is the **configuration layer** (workspace-specific tables, secret paths, dependency graphs). Any project can take the SPEC.md and write their own SKILL.md to match their workspace.
+**Per-project DEV.md** uses YAML frontmatter for structured overrides:
+- `project_type` — override auto-detection
+- `publication_targets` — custom list
+- `extra_checks` / `skip_checks` — add or suppress verification steps
+- `secret_paths` — per-target secret manager paths
+- `pre_release` / `post_release` — custom hooks
+- Free-form markdown below for human context
 
-**Pending component** — now active. Using it going forward.
+**Merge semantics** vary by field type:
+- **Last wins:** `project_type`, `publication_targets`
+- **Append:** `extra_checks`, `skip_checks`, `pre_release`, `post_release` (accumulate across layers)
+- **Deep merge:** `secret_paths` (per-target, deepest wins)
 
-**Truncated message:** Your message "I want " appears cut off again. Could you complete it?
+**Design parallel:**
+| Claude Code | Dev Skill |
+|------------|-----------|
+| `CLAUDE.md` (root) | `SKILL.md` (workspace) |
+| `CLAUDE.md` (subdir) | `DEV.md` (per-project) |
+| `CLAUDE.local.md` | `DEV.local.md` |
+| `AGENTS.overrides.md` | Future: `DEV.overrides.md` |
 
-Can we make the dev skill composable?
-Just like how AGENTS.md, CLAUDE.md, AGENTS.overrides.md, CLAUDE.local.md are composable...within subdirectories.
+**Backward compatible** — projects without DEV.md files fall back to auto-detection + SKILL.md defaults + CLAUDE.md. No migration needed.
 <!-- /agent:exchange -->
 
+<!-- agent:input -->
+I want the process to create a SPEC to be highly configurable. The human should drive the evolution of the dev SPEC with AI assistance. We should encourage people to "borrow" from other skill repos.
+<!-- /agent:input -->
+
 <!-- agent:pending patch=replace -->
-- [x] Add SPEC.md for the dev skill (portable spec for other projects)
+- [x] Make dev skill composable (CLAUDE.md-style hierarchy with subdirectory overrides)
 - [ ] Respond to truncated message: "I want " (awaiting completion)
 <!-- /agent:pending -->

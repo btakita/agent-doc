@@ -382,4 +382,23 @@ All 15 route tests pass. Binary installed.
 **JB plugin parsing bug:** I can't view the screenshot (`Pictures/agent-loop/2026-03-17_21-33.png`). Can you describe what happened? Did the plugin's hand-written JSON parser (`parsePatchJson`) fail to parse a patch with nested content (sublist)? If so, the likely issue is the `extractStringField` function not handling newlines or special characters in the JSON string values.
 
 ![2026-03-17_21-33.png](../../../../Pictures/agent-loop/2026-03-17_21-33.png)
+
+### Re: JB plugin parsing bug — numbered list in permission prompt
+
+**Root cause found:** `prompt.rs` `parse_option_line()` naively matches ANY line with pattern `N. label` as a permission prompt option. When the response content contains a markdown numbered list (like the 6-step "What happened" explanation), those lines get parsed as prompt options instead of content.
+
+**The chain:**
+1. Claude's response contains numbered markdown: `1. email.md's pane...`, `2. Route detected...`, etc.
+2. This content gets written to the tmux pane (visible in capture buffer)
+3. `parse_prompt()` scans the pane content for permission prompts
+4. `parse_option_line()` matches the markdown numbered list items as prompt options
+5. The UI renders them as selectable choices alongside the real Yes/No options
+
+**Fix:** `parse_option_line()` needs to distinguish between actual Claude Code permission prompt options (which use `[N]` bracket format like `[1] Yes`, `[2] No`) and markdown numbered lists (`1. item`). The parser should only match the bracket format `[N]` that Claude Code's TUI actually uses for permission prompts — not the markdown `N.` format.
+
+**Alternatively:** Add a boundary marker so the parser knows where the prompt options begin and end, ignoring any content above/below the actual permission prompt area.
+
+Want me to implement the fix in `prompt.rs`?
+
+Implement fix. Would the boundary marker be "reliable"...as in we can rely on it always being present?
 <!-- /agent:exchange -->

@@ -222,6 +222,19 @@ Brian Takita
 Review and edit — let me know when you want to send it, or if you want any changes.
 
 send it
+
+### Send Status
+
+Draft created at `mail/drafts/2026-03-18-re-rate-confirmation-brian-takita-front-end-engineer-with-so.md` but **corky can't send** — the `btak.dev` account (gmail-api provider) doesn't have `password` or `password_cmd` configured for sending.
+
+**Options:**
+1. **Add OAuth send capability** to the btak.dev account in `mail/.corky.toml` (needs `password_cmd` or Gmail API OAuth send scope)
+2. **Copy-paste from the draft** — open Gmail web, reply to Priya's thread, paste the content. The draft file has the formatted markdown ready.
+3. **Use a different account** that has send configured (e.g., proton-dev has `password_cmd`)
+
+The draft is ready at the path above — status set to `approved`. Which approach do you want?
+
+Configure OAuth please
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -82,8 +82,22 @@ Was the dev skill used in this session?
 **Dev skill:** No, the dev skill was not used in this session. All releases were done manually through the agent-doc workflow (bump version, make check, commit, push, tag, cargo publish, maturin publish, gh release). The `/dev` skill could have automated this — it's designed for release orchestration. Good reminder to use it going forward.
 
 go
+
+tasks/agent-loop.md is claude session is stuck:
+```
+/home/brian/.cargo/bin/agent-doc start tasks/agent-loop.md
+~/work/btakita/agent-loop main ⇡275 !15 ?4                                                                    13:31:41
+❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-loop.md
+Warning: agent-doc v0.17.24 is available (you have v0.17.16). Run `agent-doc upgrade` to update.
+Registered session be20dd6e → pane %82
+Starting claude...
+```
+
+### Re: VERSIONS.md updated
+
+**Done.** VERSIONS.md now has entries for all versions 0.17.0 through 0.17.28. Added the 4 missing entries (0.17.25-0.17.28). Committed and pushed.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Update VERSIONS.md with 0.17.5-0.17.28
+- [x] Update VERSIONS.md with 0.17.5-0.17.28
 <!-- /agent:pending -->

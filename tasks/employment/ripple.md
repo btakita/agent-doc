@@ -277,6 +277,26 @@ The draft is ready. Open Gmail, reply to Priya's thread, paste the content. You 
 Gmail API send support would be a corky feature request (needs `gmail.send` scope + API endpoint handler). That's a future improvement, not something we can do right now.
 
 Which path — App Password setup or copy-paste?
+
+### Re: App Passwords unavailable + YouTube videos
+
+**Sending options:** Since App Passwords aren't available for that Google account (likely a personal account without 2FA or a workspace account with it disabled), you'll need to **respond manually** for now. The draft content is ready — just:
+
+1. Open Gmail as btak.dev@gmail.com
+2. Open the thread with Priya ("RE: Rate Confirmation : Brian Takita...")
+3. Hit Reply
+4. Paste the HTML content from the draft (or type it fresh from the markdown version)
+
+The html tags are escaped. Is there a way to paste in raw html or craft a multipart message?
+Can I also configure imap for this gmail address using my real login + password?
+
+For future sends, we can add Gmail API send support to corky as a feature — that would use the existing OAuth token (no App Password needed). I'll track that as a corky task.
+
+---
+
+**YouTube videos:** I'd skip them for this response. The hiring manager asked three specific questions — adding YouTube links would make it feel like you're overcompensating rather than directly answering. Keep it tight and confident.
+
+**However**, if you get to the interview stage, YouTube demos of your tools would be excellent to show during the conversation ("let me show you how this works"). Save that card for when it has maximum impact — in a live demo, not buried in a recruiter email.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

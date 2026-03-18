@@ -76,17 +76,12 @@ claude_args: --dangerously-skip-permissions
 | v0.11.0-v0.11.2 | Append-friendly merge strategy, shared `merge.rs`, fixed duplicate headings. |
 | v0.12.0-v0.12.2 | `compact`, `convert`, lazy claim, exchange default, exchange append mode default. 218 tests. |
 | v0.13.0-v0.13.3 | `autoclaim` (SessionStart hook), git-based snapshot fallback, sync autoclaim, spare pane assignment (tmux-router v0.2.4). |
-| v0.14.0-v0.14.2 | Route focus fix, claim defaults to template, `mode` CLI, skill reload (`--reload compact/restart`). |
-| v0.14.3-v0.14.9 | Removed auto-prune, `commands` subcommand, plugin autocomplete (v0.2.0), bidirectional `convert`, code-range `strip_comments`, multi-backtick support. 235 tests. |
-| v0.15.0 | CRDT stream mode (`yrs`), chain-of-thought streaming, watch daemon stream support, cumulative flush fix. 293 tests. |
-| v0.15.1 | Claim defaults to stream mode, route.rs refactor (`send_command()`, `find_target_pane()`, `[route]` logging). |
-| v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
-| v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
-| v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. IPC write (`--ipc` + JetBrains PatchWatcher v0.2.1). tmux layout fix (`first_pane_join_flag`). 303 + 67 tests. |
-| v0.17.29-v0.17.30 | JNA FFI, `merge_frontmatter()`, `lib-path`, VS Code prepend, immutable session binding. 440 tests. |
+| v0.14.0-v0.14.9 | Route focus fix, `commands` subcommand, plugin autocomplete (v0.2.0), bidirectional `convert`, multi-backtick. 235 tests. |
+| v0.15.0-v0.16.1 | CRDT stream mode (yrs), chain-of-thought, reactive file-watching, truncation detection, native compact. 309 tests. |
+| v0.17.0-v0.17.30 | Format/write split, IPC write, JNA FFI (NativeLib.kt), VS Code prepend, immutable session binding, `lib-path`. 440 tests. |
 | v0.18.0-v0.18.1 | `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
 | v0.19.0 | ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7). 446 tests. |
-| v0.20.0 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. 451 tests. |
+| v0.20.0-v0.20.1 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. 451 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -115,23 +110,19 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:history -->
 **v0.5.5-v0.9.6:** Foundation — window-scoped routing, 2D sync, components, patch, watch daemon, tmux-router extraction, flock locking, atomic rename, stale snapshot recovery.
 
-**v0.9.7-v0.9.10:** `agent-doc write` command, template mode (phases 1-4), compaction recovery, `recover`, code-span parser fix.
+**v0.9.7-v0.12.2:** `agent-doc write`, template mode, compaction recovery, `recover`, `exchange` convention, append-friendly merge, `compact`/`convert`, lazy claim.
 
-**v0.10.0-v0.12.2:** Renamed `response_mode` → `agent_doc_mode`, `exchange` component convention, append-friendly merge, `compact`/`convert` commands, lazy claim, exchange defaults. CWD drift lessons.
-
-**v0.13.0-v0.13.3:** `autoclaim` (SessionStart hook), git-based snapshot fallback, sync autoclaim integration, spare pane assignment for sole-column files (tmux-router v0.2.4).
-
-**v0.14.0-v0.14.9:** Route focus fix, skill reload, removed auto-prune (was killing sessions), `commands` subcommand, plugin autocomplete (v0.2.0), bidirectional `convert`, code-range-aware `strip_comments`, multi-backtick CommonMark §6.1. 235 tests.
+**v0.13.0-v0.14.9:** `autoclaim`, git-based snapshot fallback, `commands`, plugin autocomplete (v0.2.0), bidirectional `convert`, code-range-aware `strip_comments`, multi-backtick.
 
 **v0.15.0-v0.16.1:** CRDT stream mode (yrs), chain-of-thought streaming, reactive file-watching, truncation detection, native compact. 309 tests.
 
-**v0.17.0-v0.17.30:** Format/write split. IPC write + JetBrains PatchWatcher. JNA FFI (NativeLib.kt). VS Code prepend. Immutable session binding. `lib-path` + `merge_frontmatter()` FFI export.
+**v0.17.0-v0.17.30:** Format/write split. IPC write + JetBrains PatchWatcher. JNA FFI (NativeLib.kt). VS Code prepend. Immutable `tmux_session` binding. `lib-path` + `merge_frontmatter()` FFI export.
 
-**v0.18.0-v0.18.1:** `undo` (pre-response restore), `extract` (exchange entries), `transfer` (component content). Pre-response snapshots. Gson revert, h2 scaffolding, SKILL.md canonical pattern. JB v0.2.6, VS Code v0.2.3.
+**v0.18.0-v0.18.1:** `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3.
 
-**v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7) — `select_pane()` uses batch.
+**v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7).
 
-**v0.20.0:** CRDT conservative dedup (#15). Frontmatter patches on disk write path (#16). Binary-vs-agent responsibility docs. VERSIONS.md updated. 451 tests.
+**v0.20.0-v0.20.1:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement. 451 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -428,6 +419,33 @@ The two proposed features have different complexity levels:
 Both are additive — the current model (1 session, 1 editor) continues to work. Added to pending for future planning.
 
 compact exchange
+
+**Session recap (v0.17.27 → v0.20.1):**
+
+**Features built:**
+- Library target with C FFI (6 exports) + `lib-path` + JNA bindings (NativeLib.kt) with Kotlin fallback
+- VS Code prepend mode fix, JetBrains Gson revert (ClassNotFoundException)
+- Immutable `tmux_session` binding (`--force` to override) + session affinity enforcement (bail on wrong-session)
+- Pre-response snapshots + `undo`, `extract`, `transfer` commands
+- ExecutionMode in `config.toml` (hybrid/parallel/sequential)
+- TmuxBatch (tmux-router v0.2.7) — `select_pane()` uses batch
+- CRDT conservative dedup (#15) + frontmatter patches on disk write path (#16)
+- Binary-vs-agent responsibility docs in CLAUDE.md
+- H2 headers before components (canonical pattern), claim scaffolding updated
+- VERSIONS.md updated through v0.20.1
+
+**Bugs fixed:**
+- Gson ClassNotFoundException in JB plugin (lesson #15)
+- Cross-session pane creation from `current_tmux_session()` fallback (lesson #16)
+- Session 1 pane bleedover — cleaned up misplaced panes
+
+**Test count:** 451 (157 lib + 273 bin + 21 int), up from 440.
+
+Are the following resolved? If yes, please close the issues:
+- https://github.com/btakita/agent-doc/issues/15
+- https://github.com/btakita/agent-doc/issues/16
+
+[//]: # (I need to find an easy onboarding experience.)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -229,6 +229,31 @@ implement:
 - `corky doctor gmail`
 - `corky doctor linkedin`
 - `corky doctor youtube`
+
+### Re: Doctor tests and provider-specific checks
+
+**All 11 tests pass.** `cargo test --test test_doctor` — green.
+
+**Enhanced `src/doctor.rs`:**
+- Refactored to testable architecture: `check()` returns `DoctorReport` struct (lines + ok status)
+- **`corky doctor gmail`**: Gmail filter auth token, Gmail API accounts, credential resolution
+- **`corky doctor linkedin`**: OAuth client credentials, profile URN presence, token validity
+- **`corky doctor youtube`**: OAuth client credentials, profile channel IDs, token validity
+- Helper functions: `check_email_accounts()`, `check_gmail_filters()`, `check_linkedin()`, `check_youtube()`
+
+**New `tests/test_doctor.rs`** (11 tests):
+- Missing/empty config doesn't panic
+- Gmail provider filtering (shows only gmail accounts)
+- Gmail-api account credential resolution + user info
+- LinkedIn with/without config, with/without profile URN
+- YouTube with/without config
+- Cross-provider isolation (filter skips unrelated)
+- Output format checkmark validation
+
+Ready to commit Phase 3.
+
+commit
+implement phase 4
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

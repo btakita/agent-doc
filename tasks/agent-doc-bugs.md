@@ -276,4 +276,23 @@ Be careful not to be overeager however.
 I may be running multiple editors with their own claiming tmux session.
 
 
+### Re: Self-healing tmux cleanup
+
+**Approach: `resync` with session validation.** The existing `agent-doc resync` prunes dead panes from `sessions.json`. We can extend it to also detect panes in wrong sessions and either:
+- **Move** them to the correct session (preferred — non-destructive)
+- **Kill** the wrong-session pane and deregister it (the next route will auto-start correctly)
+
+**Safety guard for multiple editors:** Each editor has its own `tmux_session` in frontmatter. A document with `tmux_session: '1'` is correctly in session 1. The cleanup should only flag panes where the frontmatter's `tmux_session` doesn't match the pane's actual session — not blindly force everything into one session.
+
+**When to run:**
+- At the start of `agent-doc sync` (already runs `resync::prune()`)
+- At the start of `agent-doc route` (already runs `resync::prune()`)
+- Could also be a standalone: `agent-doc resync --fix`
+
+**Your incomplete question** — "Can we have a way for active..." — want to finish it?
+
+This is a good feature for v0.17.17. Want me to implement the session-aware resync now?
+Can we have a way for active agent sessions using agent-doc claims to identify each other?
+
+I still see 
 <!-- /agent:exchange -->

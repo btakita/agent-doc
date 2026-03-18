@@ -25,16 +25,11 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Published app is an optional convenience for users who don't want to create their own GCP project
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
-- [ ] Phase 1: Register public Google OAuth app
-  - [x] Create GCP project (corky-490604)
-  - [x] Enable Gmail API
-  - [x] Configure OAuth consent screen (scopes added)
-  - [x] Create OAuth client credentials (in pass)
-  - [x] Draft privacy policy & terms of service
-  - [x] Push docs to corky repo (deploying via GitHub Pages)
-  - [x] Enter URLs + logo in consent screen
-  - [ ] Submit for Google verification
+- [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [ ] Phase 2: Built-in default credentials in corky
+  - [ ] Add default client_id/client_secret constants
+  - [ ] GmailConfig fallback to defaults
+  - [ ] Update `corky init --provider gmail-api`
 - [ ] Phase 3: `corky doctor` command
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:status -->
@@ -110,19 +105,38 @@ How do I submit for Google verification?
 Phase 1 is nearly complete — just this submission step left!
 I submitted. Phase 1 done.
 Continue to Phase 2
+
+### Phase 1 complete! Moving to Phase 2
+
+Verification submitted — Google review is in progress (2-6 weeks). Meanwhile, Phase 2 is not blocked.
+
+**Phase 2: Built-in default credentials**
+
+This is a code change in the corky submodule. The plan:
+
+1. **Add default constants** — `DEFAULT_GMAIL_CLIENT_ID` and `DEFAULT_GMAIL_CLIENT_SECRET` in a new `src/defaults.rs` or in `config/corky_config.rs`. These are the public app credentials from `pass corky/gcp/`. Since desktop app credentials are inherently public (per Google's docs), hardcoding them in source is the standard pattern.
+
+DEFAULT_GMAIL_CLIENT_ID should have a different name...because we are using other scopes such as YouTube. How about DEFAULT_GCP_CLIENT_ID/DEFAULT_GCP_CLIENT_SECRET?
+
+Is there a security issue with encoding the CLIENT_SECRET in the binary?
+
+2. **Modify `GmailConfig` resolution** — when `[gmail]` section exists but `client_id`/`client_secret` are empty or missing, fall back to the built-in defaults. Resolution order: user config > built-in defaults.
+
+You will also check `client_id_cmd`/`client_secret_cmd`
+
+3. **Update `corky init`** — when `--provider gmail-api` is used, don't require manual credential entry. Generate `.corky.toml` with `provider = "gmail-api"` but no `[gmail]` section (triggers default fallback).
+
+This is a focused code change — want me to implement it now? I'll work in the corky submodule.
+
+go
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Phase 1: Register public Google OAuth app
-  - [x] Create GCP project (corky-490604)
-  - [x] Enable Gmail API
-  - [x] Configure OAuth consent screen (scopes added)
-  - [x] Create OAuth client credentials (in pass)
-  - [x] Draft privacy policy & terms of service
-  - [x] Push docs to corky repo (deploying via GitHub Pages)
-  - [x] Enter URLs + logo in consent screen
-  - [ ] Submit for Google verification
+- [x] Phase 1: Register public Google OAuth app (submitted for verification)
 - [ ] Phase 2: Built-in default credentials in corky
+  - [ ] Add default client_id/client_secret constants
+  - [ ] GmailConfig fallback to defaults
+  - [ ] Update `corky init --provider gmail-api`
 - [ ] Phase 3: `corky doctor` command
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:pending -->

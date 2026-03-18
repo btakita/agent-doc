@@ -23,9 +23,21 @@ claude_args: "--dangerously-skip-permissions"
 
 **Bug to fix (v0.17.21):** `component.rs` parser should skip content inside fenced code blocks (triple backtick sections). This is a real limitation that will keep causing issues whenever responses contain code examples with component tags.
 
-Fix the bug
+Fix the bug.
+Add tests.
+Add to SPEC
+
+### Re: Fenced code block parser fix
+
+**Fixed.** `find_code_ranges()` in `component.rs` now tolerates leading whitespace before fence characters. Both ` ```markdown ` and `    ``` ` are detected as code fences. Component tags inside fenced code blocks are skipped.
+
+**Root cause:** The fence detection only matched backticks/tildes at column 0. Indented fences (common in markdown examples) were missed.
+
+**4 new tests:** indented fences, deeply indented fences, unclosed markers inside fences, indented fences inside components.
+
+All 395 tests pass. Release binary built. Committed and pushed. Ready to release as v0.17.21 when you want.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix component parser to skip fenced code blocks (v0.17.21)
+- [x] Fix component parser to skip fenced code blocks
 <!-- /agent:pending -->

@@ -369,8 +369,6 @@ Fix the issue.
 
 The JB plugin incorrectly parsed the claude question with a sublist.
 
-![2026-03-17_21-33.png](../../../../Pictures/agent-loop/2026-03-17_21-33.png)
-
 ### Re: join_pane fix + JB plugin parsing bug
 
 **join_pane fix implemented.** `auto_start_in_session` now uses `find_registered_pane_in_session()` instead of `tmux.active_pane()`:
@@ -382,4 +380,6 @@ The JB plugin incorrectly parsed the claude question with a sublist.
 All 15 route tests pass. Binary installed.
 
 **JB plugin parsing bug:** I can't view the screenshot (`Pictures/agent-loop/2026-03-17_21-33.png`). Can you describe what happened? Did the plugin's hand-written JSON parser (`parsePatchJson`) fail to parse a patch with nested content (sublist)? If so, the likely issue is the `extractStringField` function not handling newlines or special characters in the JSON string values.
+
+![2026-03-17_21-33.png](../../../../Pictures/agent-loop/2026-03-17_21-33.png)
 <!-- /agent:exchange -->

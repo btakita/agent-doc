@@ -104,6 +104,7 @@ claude_args: --dangerously-skip-permissions
 12. **Distinct patch prefix** — patch markers vs agent markers prevents confusion between response directives and document components
 13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice: component.rs (v0.9.10) and diff.rs (v0.14.8). Check all `<!--` parsers when adding new ones.
 14. **Immutable session binding** — `tmux_session` in frontmatter should never be silently overwritten by claim. This caused cross-session pane swapping when autoclaim or lazy-claim ran in a different session. Fix: refuse to overwrite unless `--force`. Track multi-step plans in `agent:pending` to survive context compaction.
+15. **No Gson in JetBrains plugin** — Gson causes `ClassNotFoundException` at runtime in some IntelliJ builds. Use hand-written JSON parsing. This bug was found and fixed twice (SlashCommandCompletionContributor Mar 11, PatchWatcher Mar 18) — check git history before introducing "bundled" dependencies.
 <!-- /agent:lessons -->
 
 ## Session History
@@ -169,6 +170,24 @@ Previously the scaffolding had bare components without headers. New claims will 
 Bug: The JB Plugin does not show the choice modal.
 Is this a regression?
 What happened?
+
+### Re: Gson Regression + Exchange Default
+
+**JetBrains plugin bug found and fixed.** Root cause: Gson `ClassNotFoundException` at runtime.
+
+This was already discovered and fixed on March 11 (commit 908b743) when it was removed from `SlashCommandCompletionContributor`. I re-introduced it in `PatchWatcher` on March 18 (commit f968386) without checking the prior removal. The `ClassNotFoundException` during `PatchWatcher` initialization silently broke the entire action chain, preventing the popup from appearing.
+
+**Fix:** Reverted `parsePatchJson()` back to the hand-written parser. Committed and pushed. Plugin v0.2.6 rebuilt (unsigned + signed zips).
+
+**Lesson: Gson is not reliably available at runtime in all IntelliJ builds.** The `build.gradle.kts` depends on `intellijIdeaCommunity` which may not bundle Gson in all configurations. Always use hand-written JSON parsing in the plugin.
+
+**Exchange default:** The `patch=append` attribute is already the default behavior via `components.toml`. Adding it to the inline tag is cosmetic but makes the intent explicit. The claim scaffolding already uses `patch=append` in the tag.
+
+Please reinstall the plugin from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.6.zip` and verify the popup appears.
+
+Should we release the crate package as well, or will this replace the distribution on the github packages page?
+
+btw, there are some agent-doc windows in tmux session 1. This should not have happened. Why were they moved to tmux session 1?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

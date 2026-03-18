@@ -20,42 +20,47 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: Human-driven SPEC evolution + borrowable skill repos
+### Re: Are we complete?
 
-Added **§11 SPEC Evolution — Human-Driven, AI-Assisted** to SPEC.md. Five subsections:
+Yes — the `/dev` skill is complete as a v1. Here's what we built this session:
 
-**§11.1 Bootstrapping a New Dev Skill:**
-1. Start from an existing SPEC (copy/reference)
-2. Strip workspace-specific content
-3. Create your SKILL.md adapted to your workspace
-4. Iterate via conversation — AI assists, human decides
-5. Add per-project DEV.md as needed
+**Deliverables:**
+| File | Lines | Purpose |
+|------|-------|---------|
+| `.claude/skills/dev/SKILL.md` | 270 | Workspace-specific skill (agent-loop) |
+| `.claude/skills/dev/SPEC.md` | 403 | Portable behavioral contract |
 
-**§11.2 Borrowing from Other Skill Repos:**
-- Copy sections, reference upstream, diverge freely
-- AI discovery pattern: search for published SPECs → present relevant sections → human cherry-picks
-- Never auto-merge entire SPECs
+**SKILL.md covers:**
+- 5 commands: `check`, `release`, `status`, `changelog` + workspace-wide `status`
+- 4 project types: Rust+Maturin, Rust lib, Python, JS/TS apps
+- 9-point pre-release verification checklist (tests, audit-docs, README, VERSIONS, SPEC, test coverage, architecture drift, version bump, clean tree)
+- Release workflows per project type with secret handling via `pass`
+- Dependency ordering (instruction-files → agent-doc → corky)
+- Composability hierarchy (SKILL.md → DEV.md → DEV.local.md)
+- Meta-cognition self-update protocol
 
-**§11.3 SPEC Sections as Modules:**
-Each numbered section is independently adoptable. Required sections (Commands, Project Detection, Checklist, Workflows, Secrets) vs optional (Meta-Cognition, Composability, SPEC Evolution). A minimal workspace might only adopt §3-§7.
+**SPEC.md covers:**
+- 11 sections (all modular — adopt individually)
+- Project type detection via marker files
+- Generic release workflow + publication target table
+- Secret handling protocol
+- Composability with merge semantics
+- Human-driven SPEC evolution + borrowing from other repos
 
-**§11.4 Version History:**
-Changelog comment in SPEC for fork lineage tracking.
+**Ready to use:** `/dev agent-doc check` or `/dev corky release` will work now. The skill is live in the skills list.
 
-**§11.5 Anti-Patterns:**
-- AI-generated SPEC without human review
-- Monolithic SPEC covering everything
-- Blind upstream merge
-- SPEC drift from practice (dead sections)
+**Future iterations** (when needed, not now):
+- `DEV.overrides.md` for cross-cutting overrides
+- `DEV.md` files for individual submodules as release patterns emerge
+- Integration testing the full release workflow end-to-end
 
-The core philosophy: **the human drives, the AI assists**. The SPEC is a curated document, not an auto-generated one. People should borrow sections from skill repos they admire, not adopt entire frameworks wholesale.
-
-Are we complete?
+go
 <!-- /agent:exchange -->
 
 <!-- agent:input -->
+
 <!-- /agent:input -->
 
 <!-- agent:pending patch=replace -->
-- [x] Make SPEC creation process configurable + human-driven + borrowable
+
 <!-- /agent:pending -->

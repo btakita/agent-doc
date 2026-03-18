@@ -521,6 +521,12 @@ agent_doc_write: crdt
 <!-- /agent:exchange -->
 ```
 
+The below patch was added in the fenced document above. Are we using the ast to determine where to apply a patch from the agent session?
+
+### Re: Claim scaffold missing pending
+
+**The source is correct** — `claim.rs` has pending + `patch=`. But `ripple.md` was claimed by an older binary. New claims will include `agent:pending` with `patch=` syntax.
+
 We should also have a agent:pending component.
 <!-- /agent:exchange -->
 

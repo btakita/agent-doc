@@ -390,9 +390,28 @@ Yes
 Committed and pushed. Ready to release as v0.17.25.
 
 release
+
+### v0.17.25 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.25
+- **PyPI:** agent-doc 0.17.25
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.25
+
+**What's in v0.17.25:**
+- `diff --wait` for truncation detection
+- Else-branch stash (empty registry + existing window)
+- 6 new tests
+
+**Session total: 10 releases** (v0.17.16-v0.17.25).
+
+tmux session 1 has 2 agent-doc windows now.
+All of this project's agent-doc tmux panes should be contained in the claiming tmux session...which is tmux session 0 in this case.
+
+Please review logs to diagnose why this issue occurred.
+Add tests to simulate the driving causes of this bug.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix else branch: stash when agent-doc window exists
-- [x] Implement agent-doc diff --wait for truncation detection
+
 <!-- /agent:pending -->

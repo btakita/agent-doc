@@ -418,4 +418,20 @@ Implement fix. Would the boundary marker be "reliable"...as in we can rely on it
 All 23 prompt-related tests pass. Release binary rebuilt.
 
 release
+
+The swapped `corky sync` window is still in the right pane of the tmux session
+The tmux session also has 10 windows.
+agent-doc should have a "self-healing" way to clean up the active tmux session.
+
+### v0.17.17 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.17
+- **PyPI:** agent-doc 0.17.17
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.17
+
+**What's in v0.17.17:**
+- `parse_option_line()` matches `[N]` bracket format only (fixes markdown numbered list false positives)
+- `find_registered_pane_in_session()` prevents non-agent-doc panes from being used as join targets
+- 2 new prompt parsing tests
 <!-- /agent:exchange -->

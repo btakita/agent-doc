@@ -91,4 +91,26 @@ Release
  - Binary installed locally (v0.17.0), submodule pointer updated
 
 backfill corky's VERSIONS.md to include all releases
+### Backfilled VERSIONS.md — all 39 releases (v0.1.0–v0.18.0)
+
+Added 14 missing version entries derived from git history between adjacent tags:
+
+| Version | Summary |
+|---------|---------|
+| 0.9.5 | Extract audit-docs to instruction-files crate |
+| 0.10.0 | Social media posting with LinkedIn (OAuth2, drafts, publish, profiles) |
+| 0.11.0 | Scheduling, topics management, draft YAML migration |
+| 0.11.2 | OAuth URL encoding fix, CWD-as-data-dir, dry-run for schedule/publish |
+| 0.11.3 | Watch Ctrl+C fix, 22 new tests (357 total), LinkedIn API testability |
+| 0.11.4 | BREAKING: `SPECS.md` → `SPEC.md`, gitignore `.agent-doc/` |
+| 0.11.5 | `corky label clear` bulk IMAP label removal |
+| 0.12.0 | `corky transcribe` (whisper-rs), `corky filter` (Gmail filter management) |
+| 0.15.1 | YouTube default public, `corky youtube edit` |
+| 0.15.2 | YouTube embeddable flag |
+| 0.15.3 | CUDA transcription build fix (whisper-rs 0.16) |
+| 0.16.0 | HTML email, inline images, clipboard attach, sync imports, let-chains refactor |
+| 0.17.0 | Gmail API sync provider (`provider = "gmail-api"`) |
+| 0.18.0 | Built-in GCP OAuth, `corky doctor`, self-hosted guide, privacy policy |
+
+Committed in corky submodule (`72d76f0`), pushed to GitHub, submodule pointer updated in agent-loop.
 <!-- /agent:exchange -->

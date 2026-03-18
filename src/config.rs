@@ -10,7 +10,7 @@ pub struct Config {
     #[serde(default)]
     pub agents: BTreeMap<String, AgentConfig>,
     /// Additional CLI arguments to pass to the `claude` process.
-    /// Space-separated string (e.g., "--dangerously-set-permissions").
+    /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default)]
     pub claude_args: Option<String>,
 }

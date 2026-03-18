@@ -167,7 +167,7 @@ pub struct Frontmatter {
     )]
     pub stream_config: Option<StreamConfig>,
     /// Additional CLI arguments to pass to the `claude` process.
-    /// Space-separated string (e.g., "--dangerously-set-permissions").
+    /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<String>,
 }

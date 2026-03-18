@@ -204,18 +204,18 @@ Pass additional CLI arguments to the `claude` process spawned by `agent-doc star
 ```yaml
 ---
 agent_doc_session: 05304d74-...
-claude_args: "--dangerously-set-permissions"
+claude_args: "--dangerously-skip-permissions"
 ---
 ```
 
 **2. Global config** (`~/.config/agent-doc/config.toml`):
 ```toml
-claude_args = "--dangerously-set-permissions"
+claude_args = "--dangerously-skip-permissions"
 ```
 
 **3. Environment variable**:
 ```sh
-export AGENT_DOC_CLAUDE_ARGS="--dangerously-set-permissions"
+export AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"
 ```
 
 Args are split on whitespace and prepended to the `claude` command before other flags.

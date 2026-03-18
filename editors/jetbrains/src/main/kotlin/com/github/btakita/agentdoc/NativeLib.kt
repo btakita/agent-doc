@@ -1,0 +1,160 @@
+package com.github.btakita.agentdoc
+
+import com.sun.jna.Library
+import com.sun.jna.Native
+import com.sun.jna.Pointer
+import com.sun.jna.Structure
+import java.io.File
+
+/**
+ * JNA bindings to libagent_doc shared library.
+ *
+ * Replaces duplicated Kotlin logic for component patching, frontmatter merge,
+ * and code block detection with FFI calls to the canonical Rust implementation.
+ */
+interface AgentDocLib : Library {
+
+    /** Result of [agent_doc_apply_patch]. */
+    @Structure.FieldOrder("text", "error")
+    class FfiPatchResult : Structure() {
+        @JvmField var text: Pointer? = null
+        @JvmField var error: Pointer? = null
+    }
+
+    /** Result of [agent_doc_parse_components]. */
+    @Structure.FieldOrder("json", "count")
+    class FfiComponentList : Structure() {
+        @JvmField var json: Pointer? = null
+        @JvmField var count: Long = 0
+    }
+
+    /**
+     * Apply a patch to a document component.
+     * Mode: "replace", "append", or "prepend".
+     */
+    fun agent_doc_apply_patch(
+        doc: String,
+        component_name: String,
+        content: String,
+        mode: String,
+    ): FfiPatchResult
+
+    /**
+     * Merge YAML key/value pairs into a document's frontmatter.
+     */
+    fun agent_doc_merge_frontmatter(
+        doc: String,
+        yaml_fields: String,
+    ): FfiPatchResult
+
+    /**
+     * Parse components from a document.
+     * Returns JSON array of component objects.
+     */
+    fun agent_doc_parse_components(doc: String): FfiComponentList
+
+    /** Free a string returned by any agent_doc_* function. */
+    fun agent_doc_free_string(ptr: Pointer?)
+
+    companion object {
+        private var instance: AgentDocLib? = null
+        private var loadError: String? = null
+
+        /**
+         * Get the loaded library instance, or null if unavailable.
+         * Logs the error once on first failure.
+         */
+        fun get(): AgentDocLib? {
+            if (instance != null) return instance
+            if (loadError != null) return null
+
+            try {
+                val libPath = resolveLibPath()
+                if (libPath == null) {
+                    loadError = "agent-doc binary not found; FFI unavailable"
+                    LOG.warn(loadError!!)
+                    return null
+                }
+                instance = Native.load(libPath, AgentDocLib::class.java)
+                LOG.info("[native] loaded libagent_doc from $libPath")
+            } catch (e: Exception) {
+                loadError = "Failed to load libagent_doc: ${e.message}"
+                LOG.warn(loadError!!)
+            }
+            return instance
+        }
+
+        /**
+         * Resolve the path to libagent_doc shared library.
+         * Strategy: run `agent-doc lib-path` to get the canonical location.
+         */
+        private fun resolveLibPath(): String? {
+            try {
+                val process = ProcessBuilder("agent-doc", "lib-path")
+                    .redirectErrorStream(false)
+                    .start()
+                val path = process.inputStream.bufferedReader().readLine()?.trim()
+                val exitCode = process.waitFor()
+                if (exitCode == 0 && path != null && File(path).exists()) {
+                    return path
+                }
+            } catch (e: Exception) {
+                LOG.debug("[native] agent-doc lib-path failed: ${e.message}")
+            }
+            return null
+        }
+
+        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(AgentDocLib::class.java)
+    }
+}
+
+/**
+ * Safe wrapper around FFI calls with automatic memory management.
+ */
+object NativePatching {
+    private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(NativePatching::class.java)
+
+    /**
+     * Apply a component patch using the native library.
+     * Returns the patched document, or null if FFI is unavailable/errors.
+     */
+    fun applyComponentPatch(doc: String, component: String, content: String, mode: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_apply_patch(doc, component, content, mode)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] apply_patch error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Merge frontmatter fields using the native library.
+     * Returns the updated document, or null if FFI is unavailable/errors.
+     */
+    fun mergeFrontmatter(doc: String, yamlFields: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_merge_frontmatter(doc, yamlFields)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] merge_frontmatter error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+}

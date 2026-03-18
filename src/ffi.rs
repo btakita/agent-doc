@@ -15,6 +15,7 @@ use std::ptr;
 
 use crate::component;
 use crate::crdt;
+use crate::frontmatter;
 use crate::template;
 
 /// Serialized component info returned by [`agent_doc_parse_components`].
@@ -233,6 +234,42 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
     }
 }
 
+/// Merge YAML key/value pairs into a document's frontmatter.
+///
+/// `yaml_fields` is a YAML string of fields to merge (additive — never removes keys).
+/// Returns the updated document content via [`FfiPatchResult`].
+///
+/// # Safety
+///
+/// All string pointers must be valid, NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_merge_frontmatter(
+    doc: *const c_char,
+    yaml_fields: *const c_char,
+) -> FfiPatchResult {
+    let make_err = |msg: &str| FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    };
+
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+    };
+    let fields_str = match unsafe { CStr::from_ptr(yaml_fields) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid yaml_fields UTF-8: {e}")),
+    };
+
+    match frontmatter::merge_fields(doc_str, fields_str) {
+        Ok(result) => FfiPatchResult {
+            text: CString::new(result).unwrap_or_default().into_raw(),
+            error: ptr::null_mut(),
+        },
+        Err(e) => make_err(&format!("{e}")),
+    }
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety
@@ -290,6 +327,24 @@ mod tests {
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
         assert!(text.contains("new content"));
         assert!(!text.contains("old"));
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn merge_frontmatter_adds_field() {
+        let doc = "---\nagent_doc_session: abc\n---\nBody\n";
+        let fields = "model: opus";
+        let c_doc = CString::new(doc).unwrap();
+        let c_fields = CString::new(fields).unwrap();
+        let result = unsafe {
+            agent_doc_merge_frontmatter(c_doc.as_ptr(), c_fields.as_ptr())
+        };
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert!(text.contains("model: opus"));
+        assert!(text.contains("agent_doc_session: abc"));
+        assert!(text.contains("Body"));
         unsafe { agent_doc_free_string(result.text) };
     }
 

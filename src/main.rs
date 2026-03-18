@@ -341,6 +341,8 @@ enum Commands {
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+    /// Print the path to the shared library (libagent_doc.so/dylib/dll)
+    LibPath,
     /// List all available commands as JSON (for editor plugin autocomplete)
     #[command(name = "commands")]
     #[allow(clippy::enum_variant_names)]
@@ -537,6 +539,27 @@ fn main() -> anyhow::Result<()> {
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
+        Commands::LibPath => {
+            // Print the path to the shared library built alongside this binary.
+            // The cdylib is in the same target directory as the binary.
+            let exe = std::env::current_exe()?;
+            let dir = exe.parent().unwrap();
+            #[cfg(target_os = "linux")]
+            let lib_name = "libagent_doc.so";
+            #[cfg(target_os = "macos")]
+            let lib_name = "libagent_doc.dylib";
+            #[cfg(target_os = "windows")]
+            let lib_name = "agent_doc.dll";
+            let lib_path = dir.join(lib_name);
+            if lib_path.exists() {
+                println!("{}", lib_path.display());
+            } else {
+                eprintln!("[lib-path] library not found at {}", lib_path.display());
+                eprintln!("[lib-path] build with: cargo build --release");
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Commands::ListCommands => commands::run(),
     }
 }

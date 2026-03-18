@@ -146,18 +146,19 @@ class PatchWatcher(private val project: Project) : Disposable {
 
             // Apply frontmatter patch first (before component patches)
             if (!patch.frontmatter.isNullOrBlank()) {
-                result = applyFrontmatterPatch(result, patch.frontmatter)
+                result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
+                    ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
             }
 
             for (p in patch.patches) {
-                result = applyComponentPatch(result, p.component, p.content)
+                result = applyComponentPatchNative(result, p.component, p.content)
             }
 
             // Apply unmatched content to exchange or output component
             if (patch.unmatched.isNotBlank()) {
-                result = applyComponentPatch(result, "exchange", patch.unmatched)
-                    ?: applyComponentPatch(result, "output", patch.unmatched)
-                    ?: result
+                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched)
+                result = if (exchangeResult != result) exchangeResult
+                    else applyComponentPatchNative(result, "output", patch.unmatched)
             }
 
             if (result != content) {
@@ -174,10 +175,40 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Merge YAML key/value pairs into the document's frontmatter.
+     * Apply a component patch, preferring native FFI with Kotlin fallback.
+     *
+     * The native library handles code block detection, attribute parsing,
+     * and mode resolution identically to the CLI — eliminating duplicated logic.
+     */
+    private fun applyComponentPatchNative(doc: String, component: String, content: String): String {
+        // Native: resolve mode from inline attributes + components.toml + defaults
+        // The FFI apply_patch requires an explicit mode, but the Kotlin fallback
+        // extracts mode from inline attributes. For the FFI path, we extract the
+        // mode from the document first, then call apply_patch.
+        val mode = extractComponentMode(doc, component)
+        return NativePatching.applyComponentPatch(doc, component, content, mode)
+            ?: applyComponentPatchKotlin(doc, component, content)
+    }
+
+    /**
+     * Extract the patch mode for a component from its inline attributes.
+     * Returns "replace" as default if not specified.
+     */
+    private fun extractComponentMode(doc: String, component: String): String {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val match = openPattern.find(doc) ?: return "replace"
+        val attrs = match.groupValues.getOrNull(1) ?: return "replace"
+        val patchMatch = Regex("""patch=(\w+)""").find(attrs)
+        val modeMatch = Regex("""mode=(\w+)""").find(attrs)
+        return patchMatch?.groupValues?.getOrNull(1)
+            ?: modeMatch?.groupValues?.getOrNull(1) ?: "replace"
+    }
+
+    /**
+     * Kotlin fallback: merge YAML key/value pairs into the document's frontmatter.
      * Parses the existing frontmatter, updates matching keys, preserves others.
      */
-    private fun applyFrontmatterPatch(doc: String, yamlFields: String): String {
+    private fun applyFrontmatterPatchKotlin(doc: String, yamlFields: String): String {
         if (!doc.startsWith("---\n")) return doc
 
         val endIdx = doc.indexOf("\n---\n", 4)
@@ -215,11 +246,10 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Replace content between `<!-- agent:name -->` (with optional attributes) and `<!-- /agent:name -->` markers.
-     * Supports inline attributes like `<!-- agent:name patch=append -->` (or `mode=append` as alias).
-     * Skips matches that fall inside fenced code blocks.
+     * Kotlin fallback: replace content between component markers.
+     * Used when native library is unavailable.
      */
-    private fun applyComponentPatch(doc: String, component: String, content: String): String {
+    private fun applyComponentPatchKotlin(doc: String, component: String, content: String): String {
         // Match open tag with optional attributes: <!-- agent:name ... -->
         val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:$component -->"

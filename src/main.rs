@@ -107,6 +107,9 @@ enum Commands {
     Diff {
         /// Path to the session document
         file: PathBuf,
+        /// Wait for stable content (truncation detection) before computing diff
+        #[arg(long)]
+        wait: bool,
     },
     /// Clear session ID and delete snapshot
     Reset {
@@ -396,7 +399,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Init { file, title, agent, mode } => {
             init::run(&file, title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
         }
-        Commands::Diff { file } => diff::run(&file),
+        Commands::Diff { file, wait } => diff::run(&file, wait),
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),

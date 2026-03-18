@@ -200,11 +200,36 @@ Validated 14 experience files (44 total accomplishments)
 - [ ] Integrate with `build.py` (call `agent-resume render` from Python build pipeline)
 - [ ] Add chronological sort option (current resume order)
 - [ ] Test profile-based filtering with a real job target
+
+### Re: Single TOML + resume website search
+
+**1. Single data.toml — done.**
+
+Created `resume/data.toml` — one file with all 14 experiences + 37 skills. Flattened the data types in agent-resume to match (no nested `[meta]`/`[tags]`/`[phrases]` — everything inline on `[[experience]]`).
+
+Validated:
+```
+14 experiences, 37 skills, 45 accomplishments
+```
+
+CLI updated: `agent-resume validate -d data.toml` / `agent-resume render -d data.toml`
+
+**2. Resume website search — design sketch:**
+
+The resume site is GitHub Pages (static). Plan:
+- `agent-resume` emits `search-index.json` alongside the PDF build
+- Lightweight search page (`search.html`) with vanilla JS — tag filtering, keyword search across accomplishments
+- Users type keywords → filter experiences by tag overlap, highlight matching accomplishments
+- Could also serve as an interactive "portfolio explorer" view
+
+This would be a new `search-index` subcommand in agent-resume that reads data.toml and outputs JSON for the browser. Want me to build this next, or focus on integrating with `build.py` first?
+
+Integrate with build.py first.
+How much of build.py does agent-resume replace?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create btakita/agent-resume GitHub repo + submodule
-- [x] Create experience TOML files from BrianTakita.md
-- [x] Add skills.toml taxonomy
-- [ ] Integrate with build.py
+- [x] Consolidate to single data.toml in resume repo
+- [ ] Resume website search feature
+- [ ] Integrate agent-resume with build.py
 <!-- /agent:pending -->

@@ -4,6 +4,41 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.20.0
+
+- **CRDT conservative dedup** (#15): Post-merge pass removes identical adjacent text blocks.
+- **CRDT frontmatter patches** (#16): `patch:frontmatter` now applied on disk write path (was IPC-only).
+- **Binary-vs-agent responsibility** documented in CLAUDE.md.
+
+## 0.19.0
+
+- **ExecutionMode in config.toml**: `execution_mode = "hybrid|parallel|sequential"` in global config.
+- **TmuxBatch**: Command batching in tmux-router v0.2.7 — reduces flicker via `\;` separator. `select_pane()` uses batch (2 → 1 invocation).
+
+## 0.18.1
+
+- **Revert Gson**: Hand-written JSON parser restored in JetBrains plugin (Gson causes ClassNotFoundException).
+- **H2 scaffolding**: `claim` scaffolds h2 headers before components for IDE code folding.
+- **SKILL.md**: Canonical pattern documented — h2 header before every component.
+
+## 0.18.0
+
+- **`agent-doc undo`**: Restore document to pre-response state (one-deep).
+- **`agent-doc extract`**: Move last exchange entry between documents.
+- **`agent-doc transfer`**: Move entire component content between documents.
+- **Pre-response snapshots**: Saved before every write for undo support.
+
+## 0.17.30
+
+- **Immutable session binding**: `claim` refuses to overwrite `tmux_session` unless `--force`. Prevents cross-session pane swapping.
+
+## 0.17.29
+
+- **JNA FFI integration**: `NativeLib.kt` JNA bindings for JetBrains plugin with Kotlin fallback.
+- **`agent_doc_merge_frontmatter()`**: New FFI export for frontmatter patching.
+- **`agent-doc lib-path`**: Print path to shared library for plugin discovery.
+- **VS Code prepend mode**: Fixed missing `prepend` case in `applyComponentPatch()`.
+
 ## 0.17.28
 
 - **Validate tmux_session before routing**: Guard against routing to a non-existent tmux session.

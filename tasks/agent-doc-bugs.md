@@ -3,7 +3,7 @@ agent_doc_session: 92fba2ac-9d1f-4a7a-8764-821a8a08ecd0
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
-claude_args: "--dangerously-set-permissions"
+claude_args: "--dangerously-skip-permissions"
 ---
 
 <!-- agent:status mode=replace -->
@@ -501,4 +501,24 @@ Please fix
 2. `resync --fix` — implemented, needs release
 
 Release.
+
+### v0.17.18 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.18
+- **PyPI:** agent-doc 0.17.18
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.18
+
+**What's in v0.17.18:**
+- `resync --fix` — detects/fixes wrong-session panes and wrong-process registrations
+- `--dangerously-set-permissions` → `--dangerously-skip-permissions` in all docs/examples
+
+**Note:** This document's frontmatter still has the old `claude_args: "--dangerously-set-permissions"`. The global config already uses the correct name. You can update the frontmatter to `--dangerously-skip-permissions` when ready.
+
+The tmux session got into a bad state. Window 0 had 3 panes.
+Now there are 4 windows.
+
+Please review logs.
+Add automated tests to simulate cause(s).
+Fix.
 <!-- /agent:exchange -->

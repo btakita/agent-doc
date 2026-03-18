@@ -20,51 +20,51 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-### Re: Development & Release Orchestration Skill
+### Re: Verification additions + SKILL.md draft
 
-Got it — **general development and release orchestration**. Given the GSD review and your existing skill patterns, here's my take:
+Good additions on the verification checklist — incorporated all four:
+- Audit docs (via `make precommit`)
+- README.md currency check
+- VERSIONS.md currency check
+- Test coverage for the change
 
-**Why home-grown makes sense:**
-- GSD's 37 commands / 41 workflows / 15 agents is massive overhead for your workspace. You'd be fighting its opinions more than using them.
-- Your agent-doc template mode already provides the state management (exchange/pending/status components) that GSD uses `.planning/` for.
-- Your submodule-heavy workspace (17+ repos) needs orchestration that understands cross-repo boundaries — GSD doesn't.
+Also verify that SPEC.md is up to date for the library or app.
+Please ensure there is no drift between the architecture and the documentation.
 
-**What a `dev` skill could look like:**
+**Created `/dev` skill** at `.claude/skills/dev/SKILL.md`. Here's what it covers:
 
-```
-/dev <submodule> [command]
-  check     — run make check (clippy + test), report failures
-  release   — version bump → build → publish (crates.io/PyPI/GitHub) → tag → update parent pointer
-  status    — show dirty submodules, unpushed commits, version drift
-  changelog — generate changelog from git log since last tag
-```
+**Commands:**
+- `/dev <submodule> check` — run checks (clippy, test, audit-docs)
+- `/dev <submodule> release` — full release orchestration with pre-release checklist
+- `/dev <submodule> status` — version, dirty state, unpushed commits, tag drift
+- `/dev status` — all submodules at once
+- `/dev <submodule> changelog` — draft VERSIONS.md entry from git log
 
-**Key design choices:**
-1. **Thin orchestrator** (borrowed from GSD) — the skill SKILL.md defines the workflow, Claude does the execution. No separate CLI binary needed initially.
-2. **Release checklist as workflow, not config** — each submodule's CLAUDE.md already documents release steps. The skill reads those and follows them.
-3. **Cross-repo awareness** — after publishing a submodule, automatically `git add <submodule> && git commit` in the parent.
-4. **Password-store integration** — `pass` for crates.io/PyPI tokens, never inline.
+**Release workflow** is the core — it's type-aware:
+| Type | Projects | Targets |
+|------|----------|---------|
+| Rust+Maturin | agent-doc, corky | crates.io + PyPI + GitHub Release + binary |
+| Rust lib | instruction-files, tmux-router, agent-kit, tagpath | crates.io |
+| Python | lazily-py | PyPI |
+| JS/TS apps | briantakita.me-dev, brookebrodack-dev, presence | Docker + VPS |
 
-**What to borrow from GSD:**
-- Verification step after each release target (did crates.io publish succeed? did the GitHub release create?)
-- Codebase mapping for unfamiliar submodules
-- The "thin orchestrator" principle — keep the skill definition declarative, let the agent handle execution
+**Pre-release checklist** (blocks release if any fail):
+1. Tests pass (`make check`)
+2. Audit docs pass (`make precommit`)
+3. README.md is current
+4. VERSIONS.md has new version entry
+5. Tests cover the change (regression test for bugfix, basic coverage for feature)
+6. Version bump done (Cargo.toml + pyproject.toml in sync)
+7. Clean working tree
 
-We need to add a few more verifications:
-- audit docs
-- Is README.md up to date?
-- Is VERSIONS.md up to date?
-- Were tests written for the feature or bug fix?
+**Also handles:**
+- Dependency ordering (instruction-files → agent-doc → corky)
+- `pass` integration for all secrets
+- Unpublished tag recovery (move tag forward)
+- Parent submodule pointer updates after release
+- Post-publish verification (cargo search, pip index, gh release view)
 
-**What to skip from GSD:**
-- Multi-runtime support (you're Claude Code only)
-- The `.planning/` state directory (agent-doc handles this)
-- Their 15 specialized agents (overkill — subagents on demand is cleaner)
+The skill is a thin orchestrator — no CLI binary, just a SKILL.md that Claude follows. Want to test-drive it on a submodule, or iterate on the design first?
 
-**Next steps — want me to:**
-1. Draft a `SKILL.md` for `/dev` based on this design?
-2. Start with just the `release` subcommand (highest value, most error-prone manually)?
-3. Something else?
-
-1 and 2.
-<!-- /agent:exchange -->
+The dev skill should also have meta cognition. It should update whenever relevant changes are made.
+ <!-- /agent:exchange -->

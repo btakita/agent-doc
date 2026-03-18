@@ -518,18 +518,6 @@ agent_doc_write: crdt
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
-
-### Re: Unaddressed prompts — apologies
-
-**Why "agent:pending component" wasn't addressed:** The prompt "We should also have a agent:pending component" appeared in the diff alongside the code block showing the claim scaffold output. I incorrectly treated it as part of the scaffold example rather than as a separate user request. This is the skill-side attention problem — I failed to parse distinct prompts from the diff.
-
-**The claim scaffold already includes agent:pending** in the source code (v0.17.26). But the document `tasks/employment/ripple.md` was claimed by a stale binary that didn't have the pending scaffold. The fix: reclaim the document with the current binary, or manually add the component.
-
-**Are we using the AST to apply patches?** No — `agent-doc write` uses string-based component matching (find the opening/closing tags, replace/append content between them). The pulldown-cmark AST is only used for code range detection (which regions to skip). Patch application is still tag-based string manipulation.
-
-**"This was not addressed" + "Please":** Your text was truncated at "Please" (incomplete line). The `diff --wait` detected it as truncated (recheck 1/25) and waited — but "Please" without punctuation passed `looks_truncated()` because single words are treated as commands (like "go", "release"). This is a gap in the heuristic — "Please" should be treated as truncated.
-
-**Fix:** Add "please" to the truncation exceptions (single words that are NOT commands should still be checked for completeness).
 <!-- /agent:exchange -->
 ```
 
@@ -545,6 +533,21 @@ We should also have a agent:pending component.
 
 This was not addressed as well.
 Why not?
+
+### Re: Unaddressed prompts — apologies
+
+**Why "agent:pending component" wasn't addressed:** The prompt "We should also have a agent:pending component" appeared in the diff alongside the code block showing the claim scaffold output. I incorrectly treated it as part of the scaffold example rather than as a separate user request. This is the skill-side attention problem — I failed to parse distinct prompts from the diff.
+
+**The claim scaffold already includes agent:pending** in the source code (v0.17.26). But the document `tasks/employment/ripple.md` was claimed by a stale binary that didn't have the pending scaffold. The fix: reclaim the document with the current binary, or manually add the component.
+
+**Are we using the AST to apply patches?** No — `agent-doc write` uses string-based component matching (find the opening/closing tags, replace/append content between them). The pulldown-cmark AST is only used for code range detection (which regions to skip). Patch application is still tag-based string manipulation.
+
+**"This was not addressed" + "Please":** Your text was truncated at "Please" (incomplete line). The `diff --wait` detected it as truncated (recheck 1/25) and waited — but "Please" without punctuation passed `looks_truncated()` because single words are treated as commands (like "go", "release"). This is a gap in the heuristic — "Please" should be treated as truncated.
+
+**Fix:** Add "please" to the truncation exceptions (single words that are NOT commands should still be checked for completeness).
+
+Please use the markdown ast to determine where to place the patch from the agent session.
+
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

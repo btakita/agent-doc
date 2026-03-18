@@ -601,6 +601,17 @@ Want me to fix the JB plugin now?
 Committed and pushed. The plugin ZIPs need to be rebuilt and the VSCode extension republished for users to get the fix. But for your local dev, the source is updated.
 
 Ready to release v0.17.27 with this fix + the regression test.
+
+### v0.17.27 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.27
+- **PyPI:** agent-doc 0.17.27
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.27
+- **JB plugin:** 0.2.4 (code-block fix)
+- **VSCode extension:** 0.2.2 (code-block fix)
+
+**Session total: 12 releases** (v0.17.16-v0.17.27).
 <!-- /agent:exchange -->
 ```
 
@@ -644,9 +655,9 @@ Why not?
 **Fix:** Add "please" to the truncation exceptions (single words that are NOT commands should still be checked for completeness).
 
 Please use the markdown ast to determine where to place the patch from the agent session.
-
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix JB plugin applyPatch to skip code-block tags
+
 <!-- /agent:pending -->

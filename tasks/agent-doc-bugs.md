@@ -54,9 +54,25 @@ Add to SPEC.md
 Also fixed `tasks/agent-doc.md`: its `tmux_session: '23'` was the specific trigger.
 
 release
+
+> release
+
+When I called run on this, the claim tmux session was moved to tmux window 1. And a new claude session was started in tmux window 0.
+
+### v0.17.28 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.28
+- **PyPI:** agent-doc 0.17.28
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.28
+
+**What's in v0.17.28:**
+- tmux_session validation (warns + falls back for non-existent sessions)
+- 2 new route tests
+
+**Session total: 13 releases** (v0.17.16-v0.17.28).
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Add tests for non-existent tmux_session routing
-- [x] Add validation to SPEC.md
+
 <!-- /agent:pending -->

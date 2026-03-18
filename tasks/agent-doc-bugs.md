@@ -277,4 +277,15 @@ The inline `patch=` attribute or `components.toml` can override any of these. Th
 Committed and pushed. All tests pass.
 
 Add `agent:pending` so I can see what's happening. Have `agent:pending` below `agent:exchange` so both can be viewed.
+
+Should the skill automatically add agent:exchange to all documents?
+
+### Re: Adding agent:pending component
+
+Adding `<!-- agent:pending -->` below `<!-- agent:exchange -->` now. This will be visible in the editor so you can see the task queue in action.
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+- [x] Add agent:pending component to this document
+- [ ] Should the skill automatically add agent:pending/agent:exchange to all documents?
+<!-- /agent:pending -->

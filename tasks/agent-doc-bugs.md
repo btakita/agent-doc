@@ -147,4 +147,47 @@ What if we treat the document as the "memory".
 Would the skill be sufficient to manage checking the boxes and ensuring the pending component content is consistent?
 The document would be the source of truth.
 If there are dependencies between tasks, we can have a graph language that we can use to track the task dependencies and their status.
+
+### Re: Document as memory + task graph
+
+**Yes, the skill alone is sufficient.** The document IS the memory — no Rust-side pending tracking needed. Here's why:
+
+1. **The skill reads `agent:pending` as a replace-mode component** — it gets the full list of items each cycle
+2. **The skill processes unchecked items**, writes responses to `exchange`, and writes back an updated `patch:pending` with checkboxes updated
+3. **The snapshot diff catches any new items** the user added between cycles
+4. **No Rust changes needed** — the existing component/patch infrastructure already handles replace-mode components perfectly
+
+**Addressing your earlier point** ("I thought we were using rust for at least some"): You're right that Rust could validate consistency (e.g., `agent-doc write` could warn if pending items exist but weren't addressed). But the core logic — reading items, deciding what to process, checking boxes — is inherently non-deterministic (it requires LLM judgment), so it belongs in the skill.
+
+**Task dependency graph:** Great idea. A lightweight syntax within the pending component:
+
+```markdown
+<!-- agent:pending patch=replace -->
+- [ ] Implement auth middleware
+- [ ] Add rate limiting (depends: auth middleware)
+- [ ] Write integration tests (depends: auth middleware, rate limiting)
+<!-- /agent:pending -->
+```
+
+The skill parses `(depends: ...)` annotations and only processes items whose dependencies are `[x]`. This is purely skill-side — just text parsing in the SKILL.md instructions. No graph library needed.
+
+**Or** if dependencies get complex, a DAG notation:
+
+```markdown
+<!-- agent:pending patch=replace -->
+auth -> rate_limiting -> integration_tests
+auth -> logging
+
+- [ ] auth: Implement auth middleware
+- [ ] rate_limiting: Add rate limiting
+- [ ] logging: Add structured logging
+- [ ] integration_tests: Write integration tests
+<!-- /agent:pending -->
+```
+
+The first lines define the DAG; the checkbox items are the work. Skill processes only items with all upstream dependencies checked.
+
+**Next step:** Implement the pending tracking in SKILL.md. Want me to do it now, or save for a fresh session? This session has been very productive — we shipped v0.17.16 through v0.17.19 plus the `patch=` rename.
+
+go
 <!-- /agent:exchange -->

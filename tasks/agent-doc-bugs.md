@@ -26,8 +26,24 @@ claude_args: "--dangerously-skip-permissions"
 I calling `Run Agent Doc` on tasks/agent-doc.md
 It starts a new claude session everytime. It should reuse the claiming tmux pane instead.
 Why?
+
+### Re: New session every time — found it
+
+**Root cause:** `tasks/agent-doc.md` has `tmux_session: '23'` in frontmatter. Session 23 doesn't exist (only 0, 1, 5 exist). Route reads this, can't find session 23, and creates a new session/window each time.
+
+**The `tmux_session: '23'` is wrong** — it should be `'0'` like the other documents. This was likely set incorrectly during a claim or manual edit.
+
+**Fix:** Change `tmux_session: '23'` to `tmux_session: '0'` in `tasks/agent-doc.md` frontmatter.
+
+**Deeper issue:** Route should warn when the target tmux session doesn't exist instead of silently creating new sessions. And `agent-doc claim` should validate that the tmux session exists before writing it to frontmatter.
+
+Cleaned up: 7 extra windows killed, back to 2 windows.
+
+Add tests for this condition.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
+- [x] Diagnose why Run Agent Doc starts new session
+- [ ] Fix tmux_session in tasks/agent-doc.md
+- [ ] Add validation: warn when target tmux session doesn't exist
 <!-- /agent:pending -->

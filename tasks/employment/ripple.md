@@ -250,6 +250,10 @@ After investigating corky's codebase, **corky doesn't support sending via Gmail 
    - Create an app password for "Mail"
    - Store it: `pass insert email/btak.dev/app-password`
 
+> The setting you are looking for is not available for your account.
+
+Is there an alternate way or do I need to respond manually?
+
 2. Add SMTP config to `mail/.corky.toml`:
    ```toml
    [accounts."btak.dev"]

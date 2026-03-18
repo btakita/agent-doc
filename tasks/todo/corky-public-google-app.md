@@ -26,10 +26,10 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
-- [ ] Phase 2: Built-in default credentials in corky
+- [x] Phase 2: Built-in default credentials in corky (ready to commit)
   - [x] Add default client_id/client_secret constants
   - [x] GmailConfig fallback to defaults
-  - [ ] Update `corky init --provider gmail-api`
+  - [x] Update `corky init --provider gmail-api`
 - [ ] Phase 3: `corky doctor` command
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:status -->
@@ -161,14 +161,39 @@ Implementing now...
 `cargo check` passes. Changes not committed yet — review them in the corky submodule, then we can commit.
 
 continue
+
+### Re: .corky.toml.example and `corky init` update
+
+**`.corky.toml.example`:** Correct — there's no `[gmail]` section in the example. That's intentional now — the built-in defaults mean users don't need to configure Gmail OAuth credentials at all. The example shows `provider = "gmail"` (IMAP), which is a different flow. A spurious whitespace change was reverted.
+
+**`corky init --provider gmail-api` updated:**
+
+Changes in `src/cli.rs`:
+- Added `"gmail-api"` to the provider value parser
+
+Changes in `src/init.rs`:
+- Gmail API provider shows: "Built-in OAuth credentials will be used automatically"
+- Next steps for `gmail-api`: just "Run: corky sync" (browser opens for auth on first sync)
+- No credential editing needed — zero-config path
+
+`cargo check` passes. All Phase 2 code changes are ready for review and commit:
+- `src/filter/gmail_auth.rs` — default credentials + fallback chain
+- `src/cli.rs` — `gmail-api` as valid init provider
+- `src/init.rs` — provider-specific guidance for gmail-api
+- `README.md` — Gmail API sync documentation
+
+Phase 2 is complete. Ready to commit in the corky submodule when you approve.
+
+commit
+implement phase 3
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Phase 1: Register public Google OAuth app (submitted for verification)
-- [ ] Phase 2: Built-in default credentials in corky
+- [x] Phase 2: Built-in default credentials in corky (ready to commit)
   - [x] Add default client_id/client_secret constants
   - [x] GmailConfig fallback to defaults
-  - [ ] Update `corky init --provider gmail-api`
+  - [x] Update `corky init --provider gmail-api`
 - [ ] Phase 3: `corky doctor` command
 - [ ] Phase 4: Self-serve documentation
 <!-- /agent:pending -->

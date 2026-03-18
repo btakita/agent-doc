@@ -106,6 +106,30 @@ agent-doc missed
 
 I was in the middle of editing this prompt when agent-doc patched the exchange.
 Do you have logs as to why the prompt was missed?
+
+### Re: Missed prompt + audit-docs skill source
+
+**The missed prompt:** "What skill file defines audit docs? Is it from instruction-files?"
+
+**Answer:** Yes, `audit-docs` is from the `instruction-files` crate. It's not a skill — it's a Rust subcommand (`src/audit_docs.rs`) that delegates to the `instruction-files` crate for the actual auditing logic (checking mtime staleness, line budget, etc.). The `instruction-files` crate lives at `src/instruction-files/` in the agent-loop workspace.
+
+**Why the prompt was missed:** The CRDT merge preserved your edit, but the diff computation happened BEFORE you finished typing. The timeline:
+1. You started editing (adding the audit-docs question)
+2. The previous cycle's `agent-doc write` had already updated the snapshot
+3. You submitted `/agent-doc` while still mid-edit
+4. The diff saw only "audit docs" (your first line) — the blockquoted question hadn't been saved to disk yet
+5. The response was written, and the CRDT merge preserved your in-progress edit
+6. But the response only addressed the initial "audit docs" prompt, not the blockquoted question
+
+**This is the lost-prompt problem we designed `agent:pending` to solve.** The pending component would have captured the full prompt as a checkbox item, surviving across cycles. The current exchange-only flow loses prompts that are added between diff computation and write-back.
+
+We already have `<!-- agent:pending patch=replace -->` in this document.
+Why did you say this?
+>The current exchange-only flow loses prompts that are added between diff computation and write-back.
+ 
+
+Whenever `/agent-doc run ...` is called, `agent:pending` should immediately be populated.
+
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -53,8 +53,11 @@ All targets published:
 - 4 new fenced code block tests
 
 tasks/todo/corky-public-google-app.md has a fencing issue with the latest patch.
-<!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+### Re: corky-public-google-app.md fencing issue
+
+**Fixed.** The issue was on line 317 — an inline component tag `<!-- agent:pending -->
+
+Was it caused by an agent-doc bug? Or the skill?
 
 <!-- /agent:pending -->

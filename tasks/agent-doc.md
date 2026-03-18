@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.20.0 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
+**Version:** v0.20.1 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **CRDT:** dedup + frontmatter patches
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** session affinity enforced
 <!-- /agent:status -->
 
 ## Architecture
@@ -403,11 +403,38 @@ Yes. Let's release.
 Please put in pending with whatever context you need to add. Discuss if you need clarity on this featureset:
 - allow multiple tmux sessions to bind to an editor
 - allow multiple editors to bind to a tmux session
+
+### Re: v0.20.1 Release + Multi-Session/Editor Pending
+
+**v0.20.1 released:**
+- crates.io + GitHub Release + cargo install done
+- VERSIONS.md updated
+- Session affinity enforcement: bail on wrong-session instead of fallback
+
+**Multi-session/editor binding questions:**
+
+The two proposed features have different complexity levels:
+
+**1. "Allow multiple tmux sessions to bind to an editor"** — this means a single editor (IntelliJ) could manage panes across multiple tmux sessions. Currently each document binds to exactly one session via `tmux_session`. This would require:
+- A list of sessions per editor (or per project) instead of per-document
+- Routing logic to pick the best session from the allowed set
+- Use case: spreading agent-doc panes across sessions for organization (e.g., session per topic)
+
+**2. "Allow multiple editors to bind to a tmux session"** — this means multiple editors (IntelliJ + VS Code) could share the same tmux session. Currently each pane is claimed by one editor's plugin. This would require:
+- Editor identification in claims (which editor owns which pane)
+- IPC routing per-editor (patch files namespaced by editor)
+- Use case: VS Code for frontend docs, IntelliJ for backend docs, same tmux session
+
+Both are additive — the current model (1 session, 1 editor) continues to work. Added to pending for future planning.
+
+compact exchange
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Multi-tmux-session per editor — allow an editor to manage panes across multiple tmux sessions (e.g., session per topic/project). Requires session set in config, routing picks from allowed sessions.
+- Multi-editor per tmux session — allow multiple editors (IntelliJ + VS Code) to share a tmux session. Requires editor ID in claims, namespaced IPC patch files.
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in

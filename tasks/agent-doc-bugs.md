@@ -27,5 +27,26 @@ These need updating to document `resync --fix`, the `split-window` auto_start be
 
 yes
 
-It seems that pers
+It seems that human prompts sometimes are lost...when human has multiple prompts...especially when rerunning the document.
+
+agent-doc should track the prompts list.
+What would be a good way of doing this?
+- agent:pending component
+- lazily-rs to track current state
+  - ideally this state would be mapped to the document
+  - we should avoid having hidden ephemeral state as much as possible
+  - we should also be careful to not have "memory leaks"...caused by tracked state being orphaned due to editing the document
+- any other suggestions
+
+### Re: Docs updated + incomplete prompt
+
+**All 4 stale docs updated and pushed:**
+- **CLAUDE.md:** Updated `resync.rs` description in module layout
+- **README.md:** Added Resync section (dry-run + --fix), split-window note in routing
+- **SPEC.md:** Full resync specification (detection, allowlist, --fix behavior), auto_start algorithm (5-step cascade)
+- **SKILL.md:** Touched mtime only (resync is CLI-only, not a skill)
+
+`agent-doc audit-docs` passes clean.
+
+Your message was cut off: "It seems that person prompts sometimes" — want to finish that thought?
 <!-- /agent:exchange -->

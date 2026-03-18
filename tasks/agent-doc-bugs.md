@@ -542,4 +542,41 @@ Want me to implement the deeper fix to `auto_start_in_session` so it creates pan
 Yes.
 Also, fix any issues with `resync --fix` that we encountered.
 Add ample automated tests for all of the issues.
+
+### Re: auto_start fix + resync tests
+
+**All three tasks done.**
+
+**1. `auto_start_in_session` fixed (route.rs):**
+- Now uses `tmux split-window` directly in the existing window instead of create-window + join-pane
+- `find_registered_pane_in_session()` finds an alive registered pane in the target session
+- If found: splits directly in that pane's window (no orphaned windows)
+- If not found: falls back to creating a new window (only happens on first document)
+- This eliminates the root cause of orphaned windows
+
+**2. `resync --fix` refactored for testability (resync.rs):**
+- Extracted `detect_issues_in_registry()` and `apply_fixes_to_registry()` as pure functions
+- These work on in-memory registries, testable without disk I/O
+- The public `run()` function wraps them with registry loading/saving
+
+**3. 11 automated tests added:**
+
+Route tests (4):
+- `auto_start_splits_in_existing_window` — verifies split creates pane in SAME window
+- `auto_start_creates_new_window_when_no_registered_panes` — verifies fallback
+- `find_registered_pane_filters_by_session` — verifies session filtering
+- `split_window_respects_working_directory` — verifies split creates 2 panes in same window
+
+Resync tests (7):
+- `detect_dead_pane_not_flagged_as_issue` — dead panes handled by prune, not detect_issues
+- `detect_wrong_session_pane` — pane in wrong session vs frontmatter
+- `detect_wrong_process_pane` — pane running non-agent-doc process
+- `fix_wrong_session_kills_pane_and_deregisters` — --fix kills + removes
+- `fix_wrong_process_deregisters_but_keeps_pane` — --fix removes but keeps foreign process
+- `no_fix_without_flag` — without --fix, nothing mutated
+- `healthy_pane_has_no_issues` — idle shell with no mismatch is clean
+
+All tests pass. Release binary installed. Ready to release when you want.
+
+Release
 <!-- /agent:exchange -->

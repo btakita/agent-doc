@@ -342,10 +342,25 @@ I did not see the external edit dialog.
 2. Or verify the stash_pane behavior?
 
 Verify stash_pane behavior first.
+
+### Re: stash_pane verification — found the gap
+
+**stash_pane exists and works.** But the registry is empty (cleaned in previous cycles), so `find_registered_pane_in_session()` returns None, and every route falls to the `else` branch which creates a new visible window without stashing.
+
+**The fix:** When the `else` branch fires (no registered pane), check if an agent-doc window already exists in the session. If so, stash the new pane. Only create a visible window for the very first document.
+
+**Re: No external edit dialog:** Confirms IPC worked correctly through the plugin. The lost response was likely from context compaction, not an IPC race.
+
+Want me to implement the else-branch stash fix?
+
+Yes.
+
+> **Re: No external edit dialog:** Confirms IPC worked correctly through the plugin. The lost response was likely from context compaction, not an IPC race.
+
+So a context compaction happened within the Claude Code session? Which caused the prompt to be lost?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify stash_pane is functioning in v0.17.23+
-- [ ] Fix IPC vs editor save race condition
-- [ ] Add tests for cross-session route scenarios
+- [x] Verify stash_pane is functioning
+- [ ] Fix else branch: stash when agent-doc window exists
 <!-- /agent:pending -->

@@ -101,35 +101,46 @@ pub(crate) fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     let mut pos = 0;
 
     while pos < len {
-        // Fenced code blocks: line starting with ``` or ~~~
-        if (pos == 0 || bytes[pos - 1] == b'\n') && pos + 3 <= len {
-            let fence_char = bytes[pos];
-            if (fence_char == b'`' || fence_char == b'~')
-                && bytes[pos + 1] == fence_char
-                && bytes[pos + 2] == fence_char
-            {
-                let block_start = pos;
-                // Skip past the opening fence line
-                pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
-                // Find closing fence
-                loop {
-                    if pos >= len {
-                        ranges.push((block_start, len));
-                        break;
-                    }
-                    if pos + 3 <= len
-                        && bytes[pos] == fence_char
-                        && bytes[pos + 1] == fence_char
-                        && bytes[pos + 2] == fence_char
-                    {
-                        let end = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
-                        ranges.push((block_start, end));
-                        pos = end;
-                        break;
-                    }
+        // Fenced code blocks: line starting with optional whitespace + ``` or ~~~
+        if pos == 0 || bytes[pos - 1] == b'\n' {
+            // Skip leading whitespace on this line
+            let mut fence_pos = pos;
+            while fence_pos < len && bytes[fence_pos] == b' ' {
+                fence_pos += 1;
+            }
+            if fence_pos + 3 <= len {
+                let fence_char = bytes[fence_pos];
+                if (fence_char == b'`' || fence_char == b'~')
+                    && bytes[fence_pos + 1] == fence_char
+                    && bytes[fence_pos + 2] == fence_char
+                {
+                    let block_start = pos;
+                    // Skip past the opening fence line
                     pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
+                    // Find closing fence (also allowing leading whitespace)
+                    loop {
+                        if pos >= len {
+                            ranges.push((block_start, len));
+                            break;
+                        }
+                        let mut close_fence_pos = pos;
+                        while close_fence_pos < len && bytes[close_fence_pos] == b' ' {
+                            close_fence_pos += 1;
+                        }
+                        if close_fence_pos + 3 <= len
+                            && bytes[close_fence_pos] == fence_char
+                            && bytes[close_fence_pos + 1] == fence_char
+                            && bytes[close_fence_pos + 2] == fence_char
+                        {
+                            let end = memchr_byte(b'\n', bytes, close_fence_pos).map_or(len, |p| p + 1);
+                            ranges.push((block_start, end));
+                            pos = end;
+                            break;
+                        }
+                        pos = memchr_byte(b'\n', bytes, pos).map_or(len, |p| p + 1);
+                    }
+                    continue;
                 }
-                continue;
             }
         }
 
@@ -511,6 +522,69 @@ example
         let ranges = parse(doc).unwrap();
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].name, "x");
+    }
+
+    #[test]
+    fn markers_in_indented_fenced_code_block_ignored() {
+        // CommonMark allows up to 3 spaces before fence opener
+        let doc = "\
+<!-- agent:exchange -->
+Content here.
+<!-- /agent:exchange -->
+
+  ```markdown
+  <!-- agent:fake -->
+  demo without closing tag
+  ```
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "exchange");
+    }
+
+    #[test]
+    fn indented_fence_inside_component_ignored() {
+        // Indented code block inside a component should not cause mismatched errors
+        let doc = "\
+<!-- agent:exchange -->
+Here's how to set up:
+
+   ```markdown
+   <!-- agent:status -->
+   Your status here
+   ```
+
+Done explaining.
+<!-- /agent:exchange -->
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "exchange");
+    }
+
+    #[test]
+    fn deeply_indented_fence_ignored() {
+        // Tabs and many spaces should still be detected as a fence
+        let doc = "\
+<!-- agent:x -->
+ok
+<!-- /agent:x -->
+      ```
+      <!-- agent:y -->
+      inside fence
+      ```
+";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "x");
+    }
+
+    #[test]
+    fn indented_fence_code_ranges_detected() {
+        let doc = "before\n  ```\n  code\n  ```\nafter\n";
+        let ranges = find_code_ranges(doc);
+        assert_eq!(ranges.len(), 1);
+        assert!(doc[ranges[0].0..ranges[0].1].contains("code"));
     }
 
     #[test]

@@ -247,8 +247,8 @@ Phase 1 requires GCP Console access (`gcloud` CLI not installed). Here are the e
 
 **Step 1: Create GCP Project**
 1. Go to console.cloud.google.com → Create Project
-2. Project name: "corky-mail" (or your preferred name)
-3. Note the project ID
+2. Project name: "corky" (or your preferred name): corky
+3. Note the project ID: corky-490604
 
 **Step 2: Enable Gmail API**
 1. APIs & Services → Library → Search "Gmail API" → Enable
@@ -259,14 +259,19 @@ Phase 1 requires GCP Console access (`gcloud` CLI not installed). Here are the e
 3. App name: **Corky**
 4. User support email: your email
 5. Developer contact: your email
-6. Scopes: Add `https://www.googleapis.com/auth/gmail.readonly`
-7. Privacy policy URL + Terms of service URL (see below)
+6. Scopes: Add `https://www.googleapis.com/auth/gmail.readonly`: This app will write to filters and send emails.
+7. Privacy policy URL + Terms of service URL (see below): We should add a no liability clause. I'm concerned about sending emails and overwriting filters. Need to be explicit about destructive actions.
+
+Can a project settings be subsumed by another project? So can someone subsume corky into their own personal app?
 
 **Step 4: Create OAuth Client**
 1. Credentials → Create Credentials → OAuth client ID
 2. Application type: **Desktop app**
 3. Name: "Corky Desktop"
 4. Save `client_id` and `client_secret` (store in `pass` for safekeeping)
+
+`pass corky/gcp/client_id`
+`pass corky/gcp/client_secret`
 
 **Step 5: Privacy Policy & Terms of Service**
 I can draft these for the corky repo right now. They'd live at:
@@ -304,7 +309,7 @@ These need a public URL for the OAuth consent screen. Options:
 2. **Raw GitHub URL** (works but not pretty)
 3. **Custom domain** if you have one
 
-The GitHub repo URL in the contact section uses `nicegoodwork/corky` — update this to the actual repo path.
+The GitHub repo URL in the contact section uses `btakita/corky` — update this to the actual repo path.
 
 ### Re: `agent:pending` component
 
@@ -316,4 +321,23 @@ The document doesn't have an `<!-- agent:pending -->` component yet. To use it, 
 ```
 
 Then write pending items as checkbox lists there. I'll process them sequentially in future cycles.
+
+### Re: Does `corky-mail` capture social media, video, chat?
+
+Good catch — **"corky-mail" is too narrow.** Corky already has LinkedIn, YouTube, Slack, and Telegram support (`src/social/`, `src/sync/telegram_import.rs`, `src/sync/slack_import.rs`).
+
+The GCP project would host OAuth for at least:
+- **Gmail API** (email)
+- **YouTube Data API** (video — also Google)
+
+LinkedIn and Slack have their own developer portals (not GCP). Telegram uses Bot API (no OAuth needed).
+
+**Better GCP project names:**
+- **"corky"** — simple, matches the app
+- **"corky-app"** — if "corky" is taken as a project ID
+- **"corky-kit"** — echoes "correspondence kit"
+
+Since Gmail and YouTube are both Google APIs, they share one GCP project. One OAuth consent screen covers both. The privacy policy should mention YouTube scope too if you plan to request it.
+
+**Recommendation:** Use **"corky"** as the project name/ID. Update the privacy policy to cover YouTube Data API access if you'll request that scope alongside `gmail.readonly`.
 <!-- /agent:exchange -->

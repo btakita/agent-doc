@@ -215,4 +215,26 @@ The `claude_args` config only applies when `agent-doc start` spawns a **new** Cl
 Option 2 is fastest for right now.
 
 release
+
+### v0.17.16 Released
+
+All targets confirmed published:
+- **crates.io:** agent-doc 0.17.16 (already published)
+- **PyPI:** agent-doc 0.17.16 (already published)
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.16 (binary updated)
+
+**What's in v0.17.16:**
+- `claude_args` support (frontmatter > config.toml > env var)
+- `tmux_session` routing fix (reads from frontmatter, not hardcoded)
+- Cursor support in plugin install
+- VSCode extension on Open VSX (btakita.agent-doc v0.2.1)
+- JB plugin v0.2.3 with inline attribute regex fix
+- Plugin assets on GitHub Releases
+
+There are a bunch of agent-doc tmux windows spread across the 2 tmux sessions I was switching between.
+It seems that our last attempt to fix the bug did not work.
+
+Please review the logs.
+Add any missing logs that would have diagnosed the "smoking gun" with this issue.
+Add automated tests to simulate this issue.
 <!-- /agent:exchange -->

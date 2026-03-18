@@ -378,6 +378,31 @@ search.html:198 Uncaught TypeError: Cannot read properties of null (reading 'exp
 renderResults	@	search.html:198
 (anonymous)	@	search.html:261
 ```
+
+### Re: search.html null error fix
+
+**Fixed.** The bug was a race condition — the search input event handler fired before `loadData()` completed, so `DATA` was null. Added null guards to both `renderResults()` and `renderTags()`:
+
+```js
+function renderResults() {
+  if (!DATA) return;  // guard against pre-load input events
+  ...
+}
+function renderTags() {
+  if (!DATA) return;
+  ...
+}
+```
+
+Try again with `python -m http.server` in the resume dir.
+
+Please test this with LightPanda
+
+Another error
+```
+Uncaught (in promise) SyntaxError: Unexpected token 'F', "    Finished `"... is not valid JSON
+favicon.ico:1  GET http://localhost:8000/favicon.ico 404 (File not found)
+```
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

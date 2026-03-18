@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.18.1 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
+**Version:** v0.19.0 | **Tests:** 446 (152 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** undo, extract, transfer
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Config:** ExecutionMode (hybrid/parallel/sequential)
 <!-- /agent:status -->
 
 ## Architecture
@@ -279,13 +279,28 @@ batch.execute()?;
 **Tests:** tmux-router 58 tests (2 new), agent-doc 446 tests. All passing, clippy clean.
 
 release
+
+### Re: v0.19.0 Release
+
+**Both crates released:**
+
+| Crate | Version | Published |
+|-------|---------|-----------|
+| tmux-router | v0.2.7 | crates.io ✓ |
+| agent-doc | v0.19.0 | crates.io ✓ + GitHub Release ✓ |
+
+- `cargo install`: updated to v0.19.0
+- Includes: ExecutionMode in config.toml, TmuxBatch command batching
+
+Implement:
+- Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
+- CRDT conservative dedup ([#15](https://github.com/btakita/agent-doc/issues/15)) — post-merge pass for identical adjacent blocks
+- CRDT frontmatter patches ([#16](https://github.com/btakita/agent-doc/issues/16)) — `patch:frontmatter` target for YAML updates
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Execution mode in `config.toml` — read hybrid/parallel/sequential from global config
-- [x] `TmuxBatch` — command batching to reduce flicker (tmux-router)
 - Document binary-vs-agent responsibility split in README/CLAUDE.md (and AGENTS.md)
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)

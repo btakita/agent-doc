@@ -46,7 +46,7 @@ src/
   outline.rs        # Markdown section structure + token counts
   prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md (install/check)
-  resync.rs         # Validate sessions.json, remove dead panes
+  resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix)
   history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   plugin.rs         # Editor plugin install/update/list via GitHub Releases

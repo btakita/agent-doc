@@ -154,7 +154,14 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 3. Look up pane in `sessions.json`
 4. If pane alive → send `/agent-doc <FILE>` via `send_keys`, then Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), focus pane
 5. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`), register, send command, auto-sync layout for all files in the same window. Unregistered files skip lazy-claim entirely.
-6. If no active pane available → auto-start cascade (create session/window, start Claude, register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command)
+6. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
+
+**Auto-start algorithm (`auto_start_in_session`):**
+1. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
+2. Search `sessions.json` for a registered pane that is alive and in the target tmux session
+3. If found → `tmux split-window -dh` alongside that pane (creates the new pane in the same window, avoiding throwaway windows and join failures from minimum pane size)
+4. If split-window fails → fall back to creating a new window
+5. If no registered pane found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
 
 ### 7.9 claim
 
@@ -209,12 +216,24 @@ Exits with error if the pane is dead or no session is registered.
 
 ### 7.12 resync
 
-`agent-doc resync` — validate sessions.json against live tmux panes.
+`agent-doc resync [--fix]` — validate sessions.json against live tmux panes.
 
-1. Load `sessions.json`
-2. For each entry, check if the pane is alive via `tmux has-session`
-3. Remove entries with dead panes
-4. Report removed entries and remaining active sessions
+**Always (dry-run and --fix):**
+1. Load `sessions.json`, prune entries with dead panes (delegates to `tmux_router::prune()`)
+2. Purge idle stash windows: kill `stash`-named windows where all panes run idle shells (`zsh`, `bash`, `sh`, `fish`) and last activity was >30s ago
+3. Log orphaned `claude`/`stash` windows (all panes unregistered) for diagnostics
+
+**Issue detection (alive panes only):**
+4. **Wrong-process:** Pane is running a process not in the allowlist (`agent-doc`, `claude`, `node`) and not an idle shell (`zsh`, `bash`, `sh`, `fish`)
+5. **Wrong-session:** Pane is in a different tmux session than the document's `tmux_session` frontmatter field. Skipped if no `file` path or no `tmux_session` in frontmatter. Wrong-process panes are not also checked for wrong-session.
+
+**Without `--fix`:** Reports issues to stderr with "run with --fix to resolve".
+
+**With `--fix`:**
+- Wrong-session panes: kills the pane via `tmux kill-pane`, removes registry entry. Next `route` auto-starts in the correct session.
+- Wrong-process panes: removes registry entry only (does not kill the foreign process). Next `route` auto-starts a new pane.
+
+**Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations.
 
 ### 7.13 prompt
 

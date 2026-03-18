@@ -42,7 +42,7 @@ agent_doc_write: crdt
 - **Calendly notes:** Honest framing — Rails ↔ Django mapping, no Django overclaim, "days not weeks" framework pickup
 - **Revised notes sent:** Presence AI pipeline, FastAPI/Flask/Graphene/SQLAlchemy, 10+ years Rails as Django equivalent
 
-<!-- agent:exchange -->
+<!-- agent:exchange patch=append -->
 
 ### Re: Title correction & Rust crate question
 
@@ -91,6 +91,13 @@ technical = "Reactive signal graph, WebRTC streaming, sub-100ms latency"
 ```
 
 Ready to proceed with implementation. Which direction: Python-first or Rust crate?
+
+Rust crate. agent-resume is available. Any other good names you want to present?
+
+The following are taken:
+- resume
+- resume-builder
+- resume-generator
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

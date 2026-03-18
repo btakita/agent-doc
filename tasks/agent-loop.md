@@ -20,51 +20,25 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-### Re: Verification additions + SKILL.md draft
+### Re: SPEC.md verification + Meta-cognition
 
-Good additions on the verification checklist — incorporated all four:
-- Audit docs (via `make precommit`)
-- README.md currency check
-- VERSIONS.md currency check
-- Test coverage for the change
+**SPEC.md added to pre-release checklist.** Two new rows in the verification table:
+- **SPEC.md is current** — if one exists, verify it reflects current architecture. Flag drift.
+- **No architecture-docs drift** — cross-check CLAUDE.md, README.md, and SPEC.md against actual code structure. Flag inconsistencies.
 
-Also verify that SPEC.md is up to date for the library or app.
-Please ensure there is no drift between the architecture and the documentation.
+**Meta-cognition section added.** New `## Meta-Cognition — Self-Update` section in SKILL.md defines:
 
-**Created `/dev` skill** at `.claude/skills/dev/SKILL.md`. Here's what it covers:
+**When the skill self-updates:**
+- Release fails due to missing step → add it
+- New submodule added → update project tables + dependency ordering
+- New publication target → add workflow section
+- Pre-release check catches something new → add to checklist
+- Secret path changes → update secret handling
+- User corrects behavior → encode as rule
 
-**Commands:**
-- `/dev <submodule> check` — run checks (clippy, test, audit-docs)
-- `/dev <submodule> release` — full release orchestration with pre-release checklist
-- `/dev <submodule> status` — version, dirty state, unpushed commits, tag drift
-- `/dev status` — all submodules at once
-- `/dev <submodule> changelog` — draft VERSIONS.md entry from git log
+**Architecture-documentation drift detection** is now baked into both `/dev check` and `/dev release` — it compares CLAUDE.md, SPEC.md, and README.md against actual implementation and flags mismatches before proceeding.
 
-**Release workflow** is the core — it's type-aware:
-| Type | Projects | Targets |
-|------|----------|---------|
-| Rust+Maturin | agent-doc, corky | crates.io + PyPI + GitHub Release + binary |
-| Rust lib | instruction-files, tmux-router, agent-kit, tagpath | crates.io |
-| Python | lazily-py | PyPI |
-| JS/TS apps | briantakita.me-dev, brookebrodack-dev, presence | Docker + VPS |
+The key insight: the skill accumulates operational knowledge over time. Each release teaches it something, and those lessons persist in the SKILL.md for the next session.
 
-**Pre-release checklist** (blocks release if any fail):
-1. Tests pass (`make check`)
-2. Audit docs pass (`make precommit`)
-3. README.md is current
-4. VERSIONS.md has new version entry
-5. Tests cover the change (regression test for bugfix, basic coverage for feature)
-6. Version bump done (Cargo.toml + pyproject.toml in sync)
-7. Clean working tree
-
-**Also handles:**
-- Dependency ordering (instruction-files → agent-doc → corky)
-- `pass` integration for all secrets
-- Unpublished tag recovery (move tag forward)
-- Parent submodule pointer updates after release
-- Post-publish verification (cargo search, pip index, gh release view)
-
-The skill is a thin orchestrator — no CLI binary, just a SKILL.md that Claude follows. Want to test-drive it on a submodule, or iterate on the design first?
-
-The dev skill should also have meta cognition. It should update whenever relevant changes are made.
- <!-- /agent:exchange -->
+Updated SKILL.md is at `.claude/skills/dev/SKILL.md` — ready for a test drive or further iteration.
+<!-- /agent:exchange -->

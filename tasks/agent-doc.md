@@ -107,6 +107,7 @@ claude_args: --dangerously-skip-permissions
 13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice: component.rs (v0.9.10) and diff.rs (v0.14.8). Check all `<!--` parsers when adding new ones.
 14. **Immutable session binding** — `tmux_session` in frontmatter should never be silently overwritten by claim. This caused cross-session pane swapping when autoclaim or lazy-claim ran in a different session. Fix: refuse to overwrite unless `--force`. Track multi-step plans in `agent:pending` to survive context compaction.
 15. **No Gson in JetBrains plugin** — Gson causes `ClassNotFoundException` at runtime in some IntelliJ builds. Use hand-written JSON parsing. This bug was found and fixed twice (SlashCommandCompletionContributor Mar 11, PatchWatcher Mar 18) — check git history before introducing "bundled" dependencies.
+16. **Never fall back to current_tmux_session() when tmux_session is set** — `display-message #{session_name}` returns whichever session the user's terminal is viewing. If the user switches to session 1, all routes using `current_tmux_session()` as fallback will create panes in session 1. Fix: bail with error instead of fallback. Only use `current_tmux_session()` for first-claim (no frontmatter binding yet).
 <!-- /agent:lessons -->
 
 ## Session History
@@ -352,6 +353,32 @@ BUGS:
 Find root cause.
 Add tests for root causes.
 Fix root causes.
+
+### Re: Extra Tmux Windows Root Cause + Fix
+
+**Root cause found:** `current_tmux_session()` fallback in `route.rs` and `auto_start()`.
+
+When a document has `tmux_session: '0'` but session `'0'` exists (it does), the code should use `'0'`. However, if the route/auto_start was called from a context where `session_exists()` returned `true` but the `auto_start_in_session` code path created a new window via `split_window` or `new_window` — and the `current_tmux_session()` returned `'1'` because the user was viewing session 1 — the new pane landed in session 1.
+
+The deeper issue: `current_tmux_session()` uses `display-message -p #{session_name}` which returns whichever session the **current terminal client** is attached to. If the user switches to session 1 in their terminal, all subsequent routes/auto-starts that fall back to `current_tmux_session()` will target session 1.
+
+**Fix applied:**
+- `route()` — when `tmux_session` is set in frontmatter but the session doesn't exist, **bail with error** instead of falling back to the wrong session
+- `auto_start()` — same change: refuse to start in wrong session
+- `current_tmux_session()` is now **only used when no `tmux_session` is set** in frontmatter (first claim scenario)
+
+This ensures documents with an explicit `tmux_session` binding are never routed to the wrong session.
+
+We need to understand that only tmux session 0 is a legitimate session to add panes to.
+tmux session 1 is not legitimate.
+
+Note that another editor may use another tmux session(s). Only those session(s) will have affinity to that editor.
+
+**Cleanup done:**
+- Killed 3 misplaced agent-doc panes in session 1 (%86, %87, %89)
+- Killed 4 orphaned windows in session 0 (@323, @315, @324, @325)
+
+**Tests:** 451 passing, clippy clean.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

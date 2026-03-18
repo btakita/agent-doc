@@ -51,13 +51,11 @@ agent_doc_mode: template
 - **HTML email sending** — `corky draft push --send` should convert markdown body to HTML (`pulldown-cmark`), send as `multipart/alternative` (HTML + plain text fallback). Currently sends raw markdown as plain text, causing `**bold**` to appear as literal asterisks. Default behavior, no flag needed. Files: `src/draft/mod.rs` (`compose_email()`), `Cargo.toml`.
 
 <!-- agent:status mode=replace -->
-- [x] HTML email sending (multipart/alternative)
-- [x] `collapsible_if` refactor (61 instances across 26 files)
-- [x] `corky schedule run` (already complete)
-- [x] `corky sync imports` config dispatcher
-- [x] Attachment phases 2-3 (inline images, clipboard)
-- [x] v0.16.0 released (crates.io, PyPI, GitHub)
-- [x] Binary installed, submodule pointer updated
+- [x] HTML email sending (multipart/alternative) — v0.16.0
+- [x] `collapsible_if` refactor — v0.16.0
+- [x] `corky sync imports` config dispatcher — v0.16.0
+- [x] Attachment phases 2-3 — v0.16.0
+- [x] Gmail API sync provider — v0.17.0
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -78,4 +76,17 @@ Published: [crates.io](https://crates.io/crates/corky/0.16.0) | [PyPI](https://p
 **Noted:** `corky schedule run` was already complete (732 lines, 26 tests). `corky doc upload` deferred (needs Google Drive OAuth design).
 
 Release
+
+### Released v0.17.0 — Gmail API Sync
+
+- `e603a4e` — Gmail API sync provider (705 new lines)
+  - `src/sync/gmail_api_sync.rs` — full Gmail REST API sync (messages.list, messages.get, historyId incremental)
+  - `gmail_auth.rs` extended with scope-aware OAuth + login_hint
+  - `sync/mod.rs` + `watch.rs` dispatch on `provider = "gmail-api"`
+  - `GmailLabelState` for historyId-based incremental sync
+  - `base64 = "0.22"` dependency
+  - Fixed 15 collapsible_if warnings in new code + too_many_arguments lint
+- `14b005c` — Version bump to 0.17.0
+- Published: [crates.io](https://crates.io/crates/corky/0.17.0) | [PyPI](https://pypi.org/project/corky/0.17.0/) | [GitHub](https://github.com/btakita/corky/releases/tag/v0.17.0)
+- Binary installed locally (v0.17.0), submodule pointer updated
 <!-- /agent:exchange -->

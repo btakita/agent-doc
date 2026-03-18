@@ -820,4 +820,36 @@ ln -sf .../rappstack-dev/lib/ui--browser--blog \
 **Re: large `data-dehydrated_post_meta_a1`:** This is the serialized post metadata (all 51 posts with title, slug, description, tags) for client-side Fuse.js search. It's expected to be large. Could be optimized by trimming unnecessary fields or lazy-loading, but it's not causing the hydration issue.
 
 release ctx-core, rappstack, and briantakita.me
+### Re: Release plan
+
+**Release order** (deps flow upward):
+
+**1. ctx-core-dev** — Clean, ready. Latest commits include rebuildjs@0.71.1 with `watch_dirs` + `ts_resolve_node_modules_plugin_`. No pending changes.
+
+**2. rappstack-dev** — Has uncommitted change in `lib/ui--browser--blog`:
+- `search/blog_search__div.ts` — your `h-full` + `w-full` class additions
+- Submodule HEAD is detached
+- Need to: commit in submodule → update parent pointer → bump version → publish
+
+**3. briantakita.me-dev** — Has uncommitted changes:
+- `app/briantakita.me/build.ts` — ts_resolve_plugin_, watch_dirs config
+- `app/briantakita.me/app/index.css.ts` — `@source` absolute path for rappstack-dev, removed CSS safelist
+- `bin/link-rappstack.sh` — new symlink script
+- `.yalc/` and `yalc.lock` — local test artifacts (should clean up)
+- Need to: remove symlinks, clean yalc artifacts, commit, regenerate lockfile, push to CI
+
+**Steps to execute:**
+
+1. **rappstack-dev/lib/ui--browser--blog**: commit `blog_search__div.ts` change, push, bump to 0.1.1
+2. **rappstack-dev**: `npm publish` for `@rappstack/ui--browser--blog@0.1.1`
+3. **briantakita.me-dev**: remove symlinks, clean yalc, update `@rappstack/ui--browser--blog` to 0.1.1, commit all changes, push to CI
+4. **briantakita.me-dev**: verify CI passes, confirm deploy to Cloudflare Pages
+
+**Note on build.ts:** The `source_map` has been removed — the `ts_resolve_plugin_()` now only uses `Bun.resolveSync` (for npm packages). The `watch_dirs` config + `bin/link-rappstack.sh` symlinks are for local dev only — they don't affect CI/production builds.
+
+**Note on `@source` absolute path in index.css.ts:** This only works on your local machine. For CI, Tailwind scans `../../lib/**/*.ts` and `../app/**/*.ts` — the rappstack classes will be found via `node_modules` if the npm packages contain `.ts` files. However, CI uses `--frozen-lockfile` so classes should be picked up.
+
+Shall I proceed with the release sequence?
+
+proceed
 <!-- /agent:exchange -->

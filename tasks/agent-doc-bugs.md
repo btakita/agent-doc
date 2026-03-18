@@ -36,6 +36,8 @@ Add to SPEC
 **4 new tests:** indented fences, deeply indented fences, unclosed markers inside fences, indented fences inside components.
 
 All 395 tests pass. Release binary built. Committed and pushed. Ready to release as v0.17.21 when you want.
+
+Release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

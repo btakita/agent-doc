@@ -113,6 +113,8 @@ The `agent-doc start` command spawns Claude sessions using the `~/.cargo/bin/` b
 **Fixed:** Ran `cargo install --path .` to update `~/.cargo/bin/agent-doc` to v0.17.28. Both binaries now match.
 
 **This explains the persistent window proliferation** — the tmux-spawned sessions used the old binary without stash, session validation, or split-window fixes.
+
+Everytime we release a package, we need to install it with the latest release version.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -21,6 +21,7 @@ const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
 
 /// A problem detected during resync --fix analysis.
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 enum Issue {
     /// Pane is in a different tmux session than the document's frontmatter expects.
     WrongSession {
@@ -36,6 +37,13 @@ enum Issue {
         file: String,
         pane: String,
         process: String,
+    },
+    /// Panes for the same session are in different windows (excluding stash windows).
+    WrongWindow {
+        file: String,
+        pane: String,
+        actual_window: String,
+        expected_window: String,
     },
 }
 
@@ -62,6 +70,17 @@ impl std::fmt::Display for Issue {
                 f,
                 "{} (pane {}) running '{}', expected agent-doc/claude",
                 file, pane, process
+            ),
+            Issue::WrongWindow {
+                file,
+                pane,
+                actual_window,
+                expected_window,
+                ..
+            } => write!(
+                f,
+                "{} (pane {}) in window '{}', expected '{}'",
+                file, pane, actual_window, expected_window
             ),
         }
     }
@@ -227,9 +246,21 @@ fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
     detect_issues_in_registry(tmux, &registry)
 }
 
+/// Info about an alive pane for cross-entry analysis.
+struct PaneInfo {
+    label: String,
+    pane: String,
+    tmux_session: String,
+    window_id: String,
+    window_name: String,
+}
+
 /// Detect issues in a given registry (testable without disk I/O).
 fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<Issue> {
     let mut issues = Vec::new();
+
+    // Collect alive panes with their window info for cross-entry analysis
+    let mut alive_panes: Vec<PaneInfo> = Vec::new();
 
     for (key, entry) in registry {
         if !tmux.pane_alive(&entry.pane) {
@@ -290,9 +321,85 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
                 _ => {} // Matches expected session — no issue
             }
         }
+
+        // Collect window info for wrong-window detection
+        alive_panes.push(PaneInfo {
+            label: label.to_string(),
+            pane: entry.pane.clone(),
+            tmux_session: tmux.pane_session(&entry.pane).unwrap_or_default(),
+            window_id: tmux.pane_window(&entry.pane).unwrap_or_default(),
+            window_name: pane_window_name(tmux, &entry.pane).unwrap_or_default(),
+        });
+    }
+
+    // Check 3: Detect panes for the same tmux session in different non-stash windows.
+    // Group alive panes by tmux session, then check for window scatter.
+    let mut by_session: std::collections::HashMap<String, Vec<&PaneInfo>> =
+        std::collections::HashMap::new();
+    for info in &alive_panes {
+        if is_stash_window_name(&info.window_name) {
+            continue;
+        }
+        by_session
+            .entry(info.tmux_session.clone())
+            .or_default()
+            .push(info);
+    }
+
+    for panes in by_session.values() {
+        if panes.len() < 2 {
+            continue;
+        }
+        // Find the majority window (most panes) — that's the "expected" window
+        let mut window_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for p in panes {
+            *window_counts.entry(&p.window_id).or_insert(0) += 1;
+        }
+        let expected_window = window_counts
+            .iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(w, _)| *w)
+            .unwrap_or("");
+
+        for p in panes {
+            if p.window_id != expected_window {
+                issues.push(Issue::WrongWindow {
+                    file: p.label.clone(),
+                    pane: p.pane.clone(),
+                    actual_window: p.window_id.clone(),
+                    expected_window: expected_window.to_string(),
+                });
+            }
+        }
     }
 
     issues
+}
+
+/// Get the window name for a pane.
+fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
+    let output = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-p",
+            "#{window_name}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// Check if a window name is a stash window (e.g., "stash", "stash-1", "stash-2").
+fn is_stash_window_name(name: &str) -> bool {
+    name == "stash" || name.starts_with("stash-")
 }
 
 /// Get the current command running in a tmux pane.
@@ -356,6 +463,19 @@ fn apply_fixes_to_registry(
             Issue::WrongProcess { key, .. } => {
                 // Just deregister — don't kill the foreign process
                 registry.remove(key);
+                eprintln!("  fixed: {}", issue);
+                fixed += 1;
+            }
+            Issue::WrongWindow { pane, .. } => {
+                // Move the pane to the stash window to consolidate.
+                // Determine the tmux session for this pane.
+                let session_name = tmux
+                    .pane_session(pane)
+                    .unwrap_or_else(|_| "claude".to_string());
+                if let Err(e) = tmux.stash_pane(pane, &session_name) {
+                    eprintln!("  resync: failed to stash pane {}: {}", pane, e);
+                    continue;
+                }
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
             }
@@ -642,5 +762,147 @@ mod tests {
             "healthy idle shell should have no issues, got: {:?}",
             issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn detect_wrong_window_panes_in_different_windows() {
+        // Two panes in the same tmux session but different non-stash windows
+        // should trigger WrongWindow.
+        let iso = IsolatedTmux::new("resync-test-wrong-win");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create two panes in separate windows in the same session
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.auto_start("test", &cwd).unwrap(); // creates new window
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let w1 = iso.pane_window(&pane1).unwrap();
+        let w2 = iso.pane_window(&pane2).unwrap();
+        assert_ne!(w1, w2, "panes should be in different windows");
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
+        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        let wrong_window_count = issues
+            .iter()
+            .filter(|i| matches!(i, Issue::WrongWindow { .. }))
+            .count();
+        assert_eq!(
+            wrong_window_count, 1,
+            "should detect 1 wrong-window issue (minority pane), got issues: {:?}",
+            issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn no_wrong_window_when_panes_in_same_window() {
+        // Two panes in the same window should NOT trigger WrongWindow.
+        let iso = IsolatedTmux::new("resync-test-same-win");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let w1 = iso.pane_window(&pane1).unwrap();
+        let w2 = iso.pane_window(&pane2).unwrap();
+        assert_eq!(w1, w2, "panes should be in the same window");
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
+        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        let wrong_window_count = issues
+            .iter()
+            .filter(|i| matches!(i, Issue::WrongWindow { .. }))
+            .count();
+        assert_eq!(
+            wrong_window_count, 0,
+            "should not detect wrong-window when panes are in same window, got: {:?}",
+            issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn no_wrong_window_for_stash_panes() {
+        // A pane in a stash window should NOT trigger WrongWindow.
+        let iso = IsolatedTmux::new("resync-test-stash-excl");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.auto_start("test", &cwd).unwrap();
+
+        // Move pane2 to a stash window
+        iso.stash_pane(&pane2, "test").unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
+        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        let wrong_window_count = issues
+            .iter()
+            .filter(|i| matches!(i, Issue::WrongWindow { .. }))
+            .count();
+        assert_eq!(
+            wrong_window_count, 0,
+            "stash panes should be excluded from wrong-window detection, got: {:?}",
+            issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fix_wrong_window_stashes_pane() {
+        // --fix for WrongWindow should move the pane to stash.
+        let iso = IsolatedTmux::new("resync-test-fix-win");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.auto_start("test", &cwd).unwrap();
+        let w1 = iso.pane_window(&pane1).unwrap();
+        let w2_before = iso.pane_window(&pane2).unwrap();
+        assert_ne!(w1, w2_before, "panes should start in different windows");
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
+        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+
+        let issues = vec![Issue::WrongWindow {
+            file: "b.md".to_string(),
+            pane: pane2.clone(),
+            actual_window: w2_before.clone(),
+            expected_window: w1.clone(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        assert_eq!(fixed, 1);
+        assert!(iso.pane_alive(&pane2), "pane should still be alive (moved, not killed)");
+
+        // Verify pane2 is now in the stash window
+        let stash_win = iso.find_stash_window("test");
+        assert!(stash_win.is_some(), "stash window should exist");
+        let w2_after = iso.pane_window(&pane2).unwrap();
+        assert_eq!(
+            w2_after,
+            stash_win.unwrap(),
+            "pane should have been moved to stash window"
+        );
+    }
+
+    #[test]
+    fn is_stash_window_name_matches() {
+        assert!(is_stash_window_name("stash"));
+        assert!(is_stash_window_name("stash-1"));
+        assert!(is_stash_window_name("stash-42"));
+        assert!(!is_stash_window_name("claude"));
+        assert!(!is_stash_window_name(""));
+        assert!(!is_stash_window_name("stashed"));
     }
 }

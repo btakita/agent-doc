@@ -252,10 +252,21 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
             }
             Err(e) => {
                 eprintln!(
-                    "[route] warning: split-window failed alongside {} ({}), falling back to new window",
+                    "[route] warning: split-window failed alongside {} ({}), stashing in stash window",
                     target, e
                 );
-                tmux.auto_start(session_name, &cwd)?
+                // Create in a new window, then immediately stash it so it
+                // doesn't appear as a visible "claude" window.
+                let pane = tmux.auto_start(session_name, &cwd)?;
+                if let Err(stash_err) = tmux.stash_pane(&pane, session_name) {
+                    eprintln!(
+                        "[route] warning: stash failed ({}), pane {} remains in new window",
+                        stash_err, pane
+                    );
+                } else {
+                    eprintln!("[route] split failed, stashed pane in stash window");
+                }
+                pane
             }
         }
     } else {
@@ -816,5 +827,38 @@ mod tests {
         // Verify the window now has 2 panes
         let panes = iso.list_window_panes(&w1).unwrap();
         assert_eq!(panes.len(), 2, "window should have exactly 2 panes after split");
+    }
+
+    #[test]
+    fn stash_pane_on_split_failure() {
+        // When split_window fails, the fallback should auto_start then stash
+        // the pane so it doesn't create a visible new window.
+        let iso = IsolatedTmux::new("route-test-stash-fallback");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a pane then simulate the fallback path:
+        // auto_start creates a new window, then stash_pane moves it.
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        let fallback_pane = iso.auto_start(session, &cwd).unwrap();
+
+        // Before stash: pane and fallback_pane are in different windows
+        let w1 = iso.pane_window(&pane).unwrap();
+        let w_fb_before = iso.pane_window(&fallback_pane).unwrap();
+        assert_ne!(w1, w_fb_before, "fallback should be in a new window initially");
+
+        // Stash the fallback pane (simulating what the route.rs fallback does)
+        iso.stash_pane(&fallback_pane, session).unwrap();
+
+        // After stash: fallback_pane should be in the stash window
+        assert!(iso.pane_alive(&fallback_pane), "pane should still be alive");
+        let stash_win = iso.find_stash_window(session);
+        assert!(stash_win.is_some(), "stash window should have been created");
+        let w_fb_after = iso.pane_window(&fallback_pane).unwrap();
+        assert_eq!(
+            w_fb_after,
+            stash_win.unwrap(),
+            "fallback pane should be in the stash window"
+        );
     }
 }

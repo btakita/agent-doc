@@ -20,46 +20,51 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange -->
 
-### GSD Review
+### Re: Development & Release Orchestration Skill
 
-**get-shit-done** (34k stars, MIT) is a meta-prompting / context engineering framework for Claude Code (and other AI coding agents). Key observations:
+Got it — **general development and release orchestration**. Given the GSD review and your existing skill patterns, here's my take:
 
-**What it does well:**
-- **Context rot mitigation** — its core thesis is sound: spawn fresh subagents with clean context windows instead of accumulating conversation history. This is the same principle behind our subagent strategy in CLAUDE.md.
-- **Spec-driven pipeline** — requirements → research → plans → execution → verification. Structured `.planning/` directory with markdown + JSON state files.
-- **Multi-agent orchestration** — 15 specialized agents (debugger, verifier, planner, UI auditor, etc.) spawned by thin orchestrator workflows (41 workflows, 37 commands).
-- **File-based state** — no database, everything is human-readable markdown in `.planning/`. Survives `/clear` and context resets.
-- **Multi-runtime** — supports Claude Code, Gemini CLI, OpenCode, Codex, Copilot, Antigravity.
+**Why home-grown makes sense:**
+- GSD's 37 commands / 41 workflows / 15 agents is massive overhead for your workspace. You'd be fighting its opinions more than using them.
+- Your agent-doc template mode already provides the state management (exchange/pending/status components) that GSD uses `.planning/` for.
+- Your submodule-heavy workspace (17+ repos) needs orchestration that understands cross-repo boundaries — GSD doesn't.
 
-**Architecture:**
+**What a `dev` skill could look like:**
+
 ```
-Commands (slash commands) → Workflows (orchestration) → Agents (fresh context)
-                                                           ↓
-                                                     CLI Tools (gsd-tools.cjs)
-                                                           ↓
-                                                     .planning/ (file state)
+/dev <submodule> [command]
+  check     — run make check (clippy + test), report failures
+  release   — version bump → build → publish (crates.io/PyPI/GitHub) → tag → update parent pointer
+  status    — show dirty submodules, unpushed commits, version drift
+  changelog — generate changelog from git log since last tag
 ```
 
-**Comparison with our setup:**
-| Aspect | GSD | agent-loop |
-|--------|-----|------------|
-| State management | `.planning/` dir with templates | `tasks/` docs + agent-doc snapshots |
-| Agent orchestration | Markdown-defined agents spawned per-task | Claude Code subagents + skills |
-| Context engineering | Fresh context per agent spawn | agent-doc template mode (exchange/pending) |
-| Verification | Dedicated verifier agent + plan-checker | `make check` + manual review |
-| Scope | General project management framework | Workspace-specific tooling |
+**Key design choices:**
+1. **Thin orchestrator** (borrowed from GSD) — the skill SKILL.md defines the workflow, Claude does the execution. No separate CLI binary needed initially.
+2. **Release checklist as workflow, not config** — each submodule's CLAUDE.md already documents release steps. The skill reads those and follows them.
+3. **Cross-repo awareness** — after publishing a submodule, automatically `git add <submodule> && git commit` in the parent.
+4. **Password-store integration** — `pass` for crates.io/PyPI tokens, never inline.
 
-**Takeaways:**
-- GSD is opinionated and heavy (37 commands, 41 workflows, 15 agents). Good for greenfield projects where you want a full lifecycle framework.
-- Our agent-doc approach is lighter — the document IS the interface, no separate `.planning/` state dir.
-- Worth borrowing: their verification patterns (dedicated verifier agent), codebase mapping agent, and the "thin orchestrator" pattern for workflows.
+**What to borrow from GSD:**
+- Verification step after each release target (did crates.io publish succeed? did the GitHub release create?)
+- Codebase mapping for unfamiliar submodules
+- The "thin orchestrator" principle — keep the skill definition declarative, let the agent handle execution
 
----
+We need to add a few more verifications:
+- audit docs
+- Is README.md up to date?
+- Is VERSIONS.md up to date?
+- Were tests written for the feature or bug fix?
 
-**Re: your skill idea** — your message appears truncated: *"I want to have a skill for general development and r"*. Could you complete the thought? I'm guessing something like "general development and research" or "general development and refactoring"?
+**What to skip from GSD:**
+- Multi-runtime support (you're Claude Code only)
+- The `.planning/` state directory (agent-doc handles this)
+- Their 15 specialized agents (overkill — subagents on demand is cleaner)
 
-> I want to have a skill for general development and release orchestration.
-> I may end up using a completely custom home-grows skill.
-> But review get-shit-done first.
+**Next steps — want me to:**
+1. Draft a `SKILL.md` for `/dev` based on this design?
+2. Start with just the `release` subcommand (highest value, most error-prone manually)?
+3. Something else?
 
+1 and 2.
 <!-- /agent:exchange -->

@@ -712,6 +712,70 @@ new content here\n\
         assert_eq!(components[0].patch_mode(), None);
     }
 
+    // --- Inline backtick code span exclusion tests ---
+
+    #[test]
+    fn single_backtick_component_tag_ignored() {
+        // A component tag wrapped in single backticks should not be parsed
+        let doc = "\
+Use `<!-- agent:pending patch=replace -->` to mark pending sections.
+<!-- agent:real -->
+content
+<!-- /agent:real -->
+";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "real");
+    }
+
+    #[test]
+    fn double_backtick_component_tag_ignored() {
+        // A component tag wrapped in double backticks should not be parsed
+        let doc = "\
+Use ``<!-- agent:pending patch=replace -->`` to mark pending sections.
+<!-- agent:real -->
+content
+<!-- /agent:real -->
+";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "real");
+    }
+
+    #[test]
+    fn component_tags_not_in_backticks_still_work() {
+        // Tags outside of any backticks are parsed normally
+        let doc = "\
+<!-- agent:a -->
+alpha
+<!-- /agent:a -->
+<!-- agent:b patch=append -->
+beta
+<!-- /agent:b -->
+";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0].name, "a");
+        assert_eq!(components[1].name, "b");
+        assert_eq!(components[1].patch_mode(), Some("append"));
+    }
+
+    #[test]
+    fn mixed_backtick_and_real_tags() {
+        // Some tags in backticks (ignored), some not (parsed)
+        let doc = "\
+Here is an example: `<!-- agent:fake -->` and ``<!-- /agent:fake -->``.
+<!-- agent:real -->
+real content
+<!-- /agent:real -->
+Another example: `<!-- agent:also-fake patch=replace -->` is just documentation.
+";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "real");
+        assert_eq!(components[0].content(doc), "real content\n");
+    }
+
     #[test]
     fn parse_attrs_unit() {
         let attrs = parse_attrs("mode=append");

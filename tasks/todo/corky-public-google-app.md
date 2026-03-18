@@ -383,7 +383,7 @@ Will the embedding work while the app is under review by Google?
 **Scopes are project-level, not per-client.** "Corky Desktop" is one OAuth client under the GCP project. You can add multiple clients (Desktop, Web) — they all share the same consent screen and scopes.
 
 **How to add scopes:**
-1. GCP Console → APIs & Services → OAuth consent screen → Edit App
+1. GCP Console → APIs & Services → OAuth consent screen → Edit App: OAuth consent screen does not have Edit App
 2. "Add or Remove Scopes" → add `gmail.send`, `gmail.settings.basic`, etc.
 3. Save
 
@@ -404,4 +404,22 @@ Yes — anyone can see your consent screen's scopes during the OAuth flow and re
 - Your consent screen is a reference, not a transferable asset
 
 This is actually the intended self-serve workflow: corky docs list the required scopes, users copy them into their own consent screen. No security concern — it's how the ecosystem works.
+
+### Re: Will embedding work while the app is under review?
+
+**Yes — the credentials work immediately.** The `client_id` and `client_secret` are functional as soon as you create them. Embedding in the binary works regardless of verification status.
+
+**The limitation during review is user experience, not functionality:**
+- **Test users** (manually added in consent screen, max 100): seamless auth, no warnings
+- **Non-test-users**: see "This app isn't verified" warning → "Advanced" → "Go to Corky (unsafe)" — works but scary
+- Once verified: clean consent screen for all users, no warning
+
+**Practical approach:**
+1. Embed credentials now (Phase 2) — they work
+2. Document the "unverified app" warning in README for early adopters
+3. Once Google approves (weeks later), the experience improves automatically — zero code change
+
+So Phase 2 is not blocked by verification. You can ship it immediately.
+
+Add `agent:pending` component below `agent:exchange`.
 <!-- /agent:exchange -->

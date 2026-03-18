@@ -449,8 +449,37 @@ Good idea. Let's add that.
 Which approach do you prefer?
 
 I also want to enable agent:input to be used with agent:exchange to avoid CRDT unintentionally overwriting current progress.
+
+### Re: PLUGIN-SPEC + agent:input + tip
+
+**1. PLUGIN-SPEC.md:** Will update with recent features (patch= rename, pending component, stash behavior, diff --wait). Noted that you plan to move plugin logic to a shared FFI library — that's a good architectural direction, keeps the JB/VSCode plugins thin.
+
+**2. Tip in scaffold:** Adding a note. "Not necessary" noted — skipping the IDE tooltip approach. "Good idea" confirmed — adding to the document scaffold.
+
+**3. agent:input + agent:exchange to avoid CRDT overwriting:**
+
+This is a key design question. Currently the exchange component holds both user prompts AND agent responses. CRDT merge works but can get confused when both sides edit the same region.
+
+**Proposed design:**
+- `agent:input` — user writes prompts here (replace mode). The agent NEVER writes to input.
+- `agent:exchange` — agent responses only (append mode). The user NEVER writes here directly.
+- The skill reads `agent:input`, processes it, clears input, and appends the response + original prompt to exchange.
+
+**Benefits:**
+- Clean separation: user writes in one place, agent writes in another
+- No CRDT conflicts on the exchange — only the agent appends
+- Input is always fresh — cleared after each cycle
+- The exchange becomes a pure append-only log
+
+**Trade-off:** The user can't annotate/edit responses inline (which is a feature of the current exchange-as-conversation model). But with `agent:pending` handling task tracking, inline annotations may be less needed.
+
+Want me to implement this input/exchange separation?
+
+Yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Add diff --wait call to SKILL.md workflow
+- [ ] Update PLUGIN-SPEC.md with recent features
+- [x] Add truncation tip to scaffold/docs
+- [ ] Design agent:input + agent:exchange separation
 <!-- /agent:pending -->

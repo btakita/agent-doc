@@ -25,6 +25,10 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Published app is an optional convenience for users who don't want to create their own GCP project
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
+- [ ] Phase 1: Register public Google OAuth app
+- [ ] Phase 2: Built-in default credentials in corky
+- [ ] Phase 3: `corky doctor` command
+- [ ] Phase 4: Self-serve documentation
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -192,4 +196,42 @@ Noun-first (`corky gmail ...`) makes sense if you accumulate many provider-speci
 **Start with `corky doctor gmail`. Alias `corky gmail doctor` later if the namespace grows.**
 
 go
+
+### Re: Action plan
+
+Explored corky codebase. Good foundations already exist:
+
+- **`init` command** exists (mailbox setup) — provider OAuth setup would be a new `init` variant or separate command
+- **`GmailConfig`** already has `client_id`/`client_secret` fields
+- **`filter/gmail_auth.rs`** has working OAuth flow
+- **No `doctor` command** — clean slate
+- CLI is verb-first clap derive — `doctor` slots in naturally
+
+**Phase 1: Public Google App Registration** (manual, starts now)
+1. Create GCP project "corky-mail"
+2. Enable Gmail API
+3. Configure OAuth consent screen (external, `gmail.readonly`)
+4. Create OAuth client (Desktop app type)
+5. Draft privacy policy + terms of service
+6. Submit for Google verification review
+
+**Phase 2: Built-in credentials** (corky code)
+1. Add `DEFAULT_GMAIL_CLIENT_ID` / `DEFAULT_GMAIL_CLIENT_SECRET` constants
+2. `GmailConfig` resolution: user config → built-in fallback
+3. Update `corky init --provider gmail-api` to work without manual credentials
+
+**Phase 3: `corky doctor`** (new command)
+1. Add `Doctor` to `Commands` enum in `cli.rs`
+2. Create `src/doctor/mod.rs` with per-provider checks
+3. Gmail: valid client_id, token exists, not expired, scopes match
+4. Generic: config parseable, mail dir exists, account reachable
+
+**Phase 4: Self-serve docs**
+1. Step-by-step GCP project creation guide
+2. Config template with comments
+3. `corky doctor gmail` validates setup end-to-end
+
+Ready to start on any phase. Phase 1 requires GCP Console access. Phases 2-4 are code — want me to start implementing?
+
+Implement phase 1
 <!-- /agent:exchange -->

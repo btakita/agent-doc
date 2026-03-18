@@ -446,6 +446,15 @@ Are the following resolved? If yes, please close the issues:
 - https://github.com/btakita/agent-doc/issues/16
 
 [//]: # (I need to find an easy onboarding experience.)
+
+### Re: GitHub Issues Closed
+
+Both issues closed with resolution comments:
+
+- **#15** (CRDT conservative dedup) — closed. Resolved in v0.20.0 with `dedup_adjacent_blocks()`.
+- **#16** (CRDT frontmatter patches) — closed. Resolved in v0.20.0 with `patch:frontmatter` on disk write path.
+
+Create github issues for all items in agent:pending. Link to github issues
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

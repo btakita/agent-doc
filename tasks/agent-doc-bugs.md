@@ -434,4 +434,8 @@ All targets published:
 - `parse_option_line()` matches `[N]` bracket format only (fixes markdown numbered list false positives)
 - `find_registered_pane_in_session()` prevents non-agent-doc panes from being used as join targets
 - 2 new prompt parsing tests
+
+Let's fix the current issues in the tmux session:
+- 10 windows...there should be 2
+- right pane was swapped with tmux session 1. We now have the `corky watch` pane, which belongs in tmux session 1. tmux session 1 has `agent-doc` which belongs in out tmux session 0.
 <!-- /agent:exchange -->

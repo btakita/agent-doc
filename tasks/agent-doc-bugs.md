@@ -374,9 +374,23 @@ Would the pending workflow fix this particular issue? Can we capture the diff be
 Want me to proceed with both implementations?
 
 Yes
+
+### Re: Pending vs compaction + both fixes implemented
+
+**Would pending fix compaction loss?** Partially. The pending-first workflow captures the user's prompts on disk before response generation. If compaction kills the response mid-generation, the prompts survive in `agent:pending` for the next cycle. But the response itself is lost and must be regenerated. The diff is captured in the pending items, so nothing the user typed is lost.
+
+**Can we re-evaluate after compaction?** Yes — `agent-doc recover` already checks for pending responses. We could enhance it to also check if `agent:pending` has unchecked items and flag them for re-processing. This is already the design: unchecked items survive across cycles.
+
+**Both fixes implemented:**
+
+1. **Else-branch stash:** When no registered pane exists but an "agent-doc" window is already present in the session, new panes are stashed instead of creating visible windows. 3 new tests.
+
+2. **`agent-doc diff --wait`:** Added `--wait` flag that calls `wait_for_stable_content()` before diffing. The skill can use `agent-doc diff --wait <FILE>` to get truncation-safe content. 3 new tests.
+
+Committed and pushed. Ready to release as v0.17.25.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix else branch: stash when agent-doc window exists
-- [ ] Implement agent-doc diff --wait for truncation detection
+- [x] Fix else branch: stash when agent-doc window exists
+- [x] Implement agent-doc diff --wait for truncation detection
 <!-- /agent:pending -->

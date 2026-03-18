@@ -355,28 +355,100 @@ data class ComponentPatch(
 )
 
 /**
- * Parse IPC patch JSON using Gson (bundled with IntelliJ Platform).
- * Replaces the hand-written parser from v0.2.4.
+ * Hand-written JSON parser for IPC patch files.
+ * Avoids Gson dependency — Gson causes ClassNotFoundException at runtime
+ * in some IntelliJ builds (see SlashCommandCompletionContributor removal).
  */
 fun parsePatchJson(json: String): IpcPatch? {
-    return try {
-        val gson = com.google.gson.Gson()
-        val obj = gson.fromJson(json, com.google.gson.JsonObject::class.java) ?: return null
-        val file = obj.get("file")?.asString ?: return null
-        val unmatched = obj.get("unmatched")?.asString ?: ""
-        val frontmatter = obj.get("frontmatter")?.asString
-        val fullContent = obj.get("fullContent")?.asString
+    try {
+        val file = extractStringField(json, "file") ?: return null
+        val unmatched = extractStringField(json, "unmatched") ?: ""
+        val frontmatter = extractStringField(json, "frontmatter")
+        val fullContent = extractStringField(json, "fullContent")
 
-        val patchesArray = obj.getAsJsonArray("patches") ?: return null
-        val patches = patchesArray.mapNotNull { element ->
-            val patchObj = element.asJsonObject
-            val component = patchObj.get("component")?.asString ?: return@mapNotNull null
-            val content = patchObj.get("content")?.asString ?: return@mapNotNull null
-            ComponentPatch(component, content)
+        // Parse patches array
+        val patchesStart = json.indexOf("\"patches\"")
+        if (patchesStart < 0) return null
+        val arrayStart = json.indexOf('[', patchesStart)
+        if (arrayStart < 0) return null
+        val arrayEnd = findMatchingBracket(json, arrayStart) ?: return null
+        val patchesJson = json.substring(arrayStart + 1, arrayEnd)
+
+        val patches = mutableListOf<ComponentPatch>()
+        var pos = 0
+        while (pos < patchesJson.length) {
+            val objStart = patchesJson.indexOf('{', pos)
+            if (objStart < 0) break
+            val objEnd = findMatchingBrace(patchesJson, objStart) ?: break
+            val objJson = patchesJson.substring(objStart, objEnd + 1)
+
+            val component = extractStringField(objJson, "component")
+            val content = extractStringField(objJson, "content")
+            if (component != null && content != null) {
+                patches.add(ComponentPatch(component, content))
+            }
+            pos = objEnd + 1
         }
 
-        IpcPatch(file, patches, unmatched, frontmatter, fullContent)
+        return IpcPatch(file, patches, unmatched, frontmatter, fullContent)
     } catch (e: Exception) {
-        null
+        return null
     }
+}
+
+private fun extractStringField(json: String, field: String): String? {
+    val key = "\"$field\""
+    val keyIdx = json.indexOf(key)
+    if (keyIdx < 0) return null
+    val colonIdx = json.indexOf(':', keyIdx + key.length)
+    if (colonIdx < 0) return null
+    val valueStart = json.indexOf('"', colonIdx + 1)
+    if (valueStart < 0) return null
+    val valueEnd = findUnescapedQuote(json, valueStart + 1) ?: return null
+    return json.substring(valueStart + 1, valueEnd)
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+private fun findUnescapedQuote(s: String, start: Int): Int? {
+    var i = start
+    while (i < s.length) {
+        if (s[i] == '"' && (i == 0 || s[i - 1] != '\\')) return i
+        i++
+    }
+    return null
+}
+
+private fun findMatchingBracket(s: String, start: Int): Int? {
+    var depth = 0
+    var inString = false
+    var i = start
+    while (i < s.length) {
+        val c = s[i]
+        if (c == '"' && (i == 0 || s[i - 1] != '\\')) inString = !inString
+        if (!inString) {
+            if (c == '[') depth++
+            if (c == ']') { depth--; if (depth == 0) return i }
+        }
+        i++
+    }
+    return null
+}
+
+private fun findMatchingBrace(s: String, start: Int): Int? {
+    var depth = 0
+    var inString = false
+    var i = start
+    while (i < s.length) {
+        val c = s[i]
+        if (c == '"' && (i == 0 || s[i - 1] != '\\')) inString = !inString
+        if (!inString) {
+            if (c == '{') depth++
+            if (c == '}') { depth--; if (depth == 0) return i }
+        }
+        i++
+    }
+    return null
 }

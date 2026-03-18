@@ -257,4 +257,24 @@ So the built-in defaults are:
 | Everything else | replace | Generic default |
 
 The inline `patch=` attribute or `components.toml` can override any of these. The precedence chain is: inline `patch=` > `components.toml` > built-in defaults.
+
+### Re: Document component defaults in README
+
+**Done.** Added standard component names table to both README.md and SPEC.md:
+
+| Component | Default `patch` | Description |
+|-----------|----------------|-------------|
+| `exchange` | append | Conversation history |
+| `findings` | append | Accumulated research data |
+| `status` | replace | Current state |
+| `pending` | replace | Task queue, auto-cleaned |
+| `output` | replace | Latest agent response |
+| `input` | replace | User prompt area |
+| (custom) | replace | All others default to replace |
+
+`pending` already defaults to `replace` (it's not `exchange` or `findings`, so it gets the generic default). No Rust changes needed — just documentation.
+
+Committed and pushed. All tests pass.
+
+Add `agent:pending` so I can see what's happening. Have `agent:pending` below `agent:exchange` so both can be viewed.
 <!-- /agent:exchange -->

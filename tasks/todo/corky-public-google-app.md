@@ -295,7 +295,22 @@ Confirm the version and I'll:
 3. Push to remote
 4. Tag + publish (crates.io, PyPI, GitHub Release)
 
-release
+-release
+
+### Release v0.18.0 — blocked by GitHub secret scanning
+
+Version bumped to `0.18.0`, `make check` passes, commit ready. But `git push` is blocked — GitHub's secret scanning detected the GCP OAuth credentials in `src/filter/gmail_auth.rs`.
+
+**Action needed:** Visit these two URLs and click "Allow secret":
+1. Client ID: `https://github.com/btakita/corky/security/secret-scanning/unblock-secret/3B6qbKoAKJRjlDLHGU5Ctw38uwm`
+2. Client Secret: `https://github.com/btakita/corky/security/secret-scanning/unblock-secret/3B6qbJSSznD3Z47O7q72Kxv7aCV`
+
+Should we hard code or use a env variable during build time?
+Also, I'm still hesitant to provide a client secret.
+Can this be abused in some way?
+Is this against Google Security Policy?
+
+These are intentionally public desktop OAuth credentials — standard pattern (Thunderbird, gcloud CLI all do this). Once unblocked, I'll push, tag, and publish.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

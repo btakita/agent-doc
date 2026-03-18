@@ -12,9 +12,10 @@ const COMPONENTS_FILENAME: &str = ".agent-doc/components.toml";
 /// Component configuration from `.agent-doc/components.toml`.
 #[derive(Debug, Deserialize, Default)]
 struct ComponentConfig {
-    /// Patch mode: "replace" (default), "append", "prepend"
-    #[serde(default = "default_mode")]
-    mode: String,
+    /// Patch mode: "replace" (default), "append", "prepend".
+    /// `patch` is the primary key; `mode` is a backward-compatible alias.
+    #[serde(default = "default_mode", alias = "mode")]
+    patch: String,
     /// Merge strategy: "append-friendly" (default) or "strict".
     /// "append-friendly" auto-resolves conflicts where both sides only appended.
     /// "strict" preserves all conflict markers for manual resolution.
@@ -119,8 +120,8 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
     }
 
     // Apply mode: inline attr > components.toml > default ("replace")
-    let mode = comp.attrs.get("mode").map(|s| s.as_str())
-        .or_else(|| config.map(|c| c.mode.as_str()))
+    let mode = comp.patch_mode()
+        .or_else(|| config.map(|c| c.patch.as_str()))
         .unwrap_or("replace");
     let timestamp = config.is_some_and(|c| c.timestamp);
     let max_entries = config.map(|c| c.max_entries).unwrap_or(0);

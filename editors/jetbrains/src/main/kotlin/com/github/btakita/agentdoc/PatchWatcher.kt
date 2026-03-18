@@ -216,7 +216,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * Replace content between `<!-- agent:name -->` (with optional attributes) and `<!-- /agent:name -->` markers.
-     * Supports inline attributes like `<!-- agent:name mode=append -->`.
+     * Supports inline attributes like `<!-- agent:name patch=append -->` (or `mode=append` as alias).
      */
     private fun applyComponentPatch(doc: String, component: String, content: String): String {
         // Match open tag with optional attributes: <!-- agent:name ... -->
@@ -228,10 +228,12 @@ class PatchWatcher(private val project: Project) : Disposable {
         val closeIdx = doc.indexOf(closeTag, contentStart)
         if (closeIdx < 0) return doc
 
-        // Check mode from inline attributes (e.g., mode=append)
+        // Check mode from inline attributes: patch= takes precedence, mode= as fallback
         val attrs = openMatch.groupValues.getOrNull(1) ?: ""
+        val patchMatch = Regex("""patch=(\w+)""").find(attrs)
         val modeMatch = Regex("""mode=(\w+)""").find(attrs)
-        val mode = modeMatch?.groupValues?.getOrNull(1) ?: "replace"
+        val mode = patchMatch?.groupValues?.getOrNull(1)
+            ?: modeMatch?.groupValues?.getOrNull(1) ?: "replace"
 
         val before = doc.substring(0, contentStart)
         val existingContent = doc.substring(contentStart, closeIdx)

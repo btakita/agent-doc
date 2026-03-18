@@ -118,7 +118,7 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             .unwrap_or(false);
         if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
             let scaffolded = format!(
-                "{}\n<!-- agent:status mode=replace -->\n<!-- /agent:status -->\n\n<!-- agent:exchange mode=append -->\n<!-- /agent:exchange -->\n",
+                "{}\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
                 content.trim_end()
             );
             std::fs::write(file, &scaffolded)

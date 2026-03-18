@@ -15,7 +15,7 @@ Interactive document sessions with AI agents.
 - Use `anyhow` for application errors
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **All deterministic behavior in the binary** — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator (reads diff, generates response, decides what to write). Never implement deterministic document logic in the skill or ad-hoc scripts.
-- **Inline component attributes:** `<!-- agent:name mode=append -->` — mode is configurable on the tag itself. Precedence: inline attr > `components.toml` > built-in defaults.
+- **Inline component attributes:** `<!-- agent:name patch=append -->` — patch mode is configurable on the tag itself. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. Precedence: inline attr > `components.toml` > built-in defaults.
 - **`agent_doc_format: inline`** is the canonical name for the old "append" format (`append` accepted as backward-compat alias). Template mode uses components; inline mode uses User/Assistant blocks.
 
 ## Module Layout

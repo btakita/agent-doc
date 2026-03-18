@@ -89,6 +89,17 @@ All targets published:
 **Session total: 8 releases** (v0.17.16–v0.17.23).
 
 audit docs
+
+What skill file defines audit docs? Is it from instruction-files?
+
+### Re: Audit docs — all clean
+
+4 stale docs updated and pushed:
+- **README.md** — Resync section: WrongWindow detection, stash overflow, stash naming
+- **SPEC.md** — Resync spec: WrongWindow issue type, stash consolidation, auto-start overflow
+- **CLAUDE.md** + **SKILL.md** — mtime touched (content already current)
+
+`agent-doc audit-docs` passes clean.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -11,7 +11,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
 
-use crate::{merge, recover, snapshot, template};
+use crate::{component, merge, recover, snapshot, template};
 use crate::snapshot::find_project_root;
 
 /// Run the write command: append assistant response to document.
@@ -111,8 +111,11 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (patches, unmatched) = template::parse_patches(&response)
+    let (mut patches, unmatched) = template::parse_patches(&response)
         .context("failed to parse patch blocks from response")?;
+
+    // Sanitize component tags in patch content to prevent parser corruption
+    sanitize_patches(&mut patches);
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -188,8 +191,11 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (patches, unmatched) = template::parse_patches(&response)
+    let (mut patches, unmatched) = template::parse_patches(&response)
         .context("failed to parse patch blocks from response")?;
+
+    // Sanitize component tags in patch content to prevent parser corruption
+    sanitize_patches(&mut patches);
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -341,8 +347,11 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (patches, unmatched) = template::parse_patches(&response)
+    let (mut patches, unmatched) = template::parse_patches(&response)
         .context("failed to parse patch blocks from response")?;
+
+    // Sanitize component tags in patch content to prevent parser corruption
+    sanitize_patches(&mut patches);
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -465,8 +474,11 @@ pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let (patches, unmatched) = template::parse_patches(response)
+    let (mut patches, unmatched) = template::parse_patches(response)
         .context("failed to parse patch blocks from response")?;
+
+    // Sanitize component tags in patch content to prevent parser corruption
+    sanitize_patches(&mut patches);
 
     let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
@@ -536,8 +548,11 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let (patches, unmatched) = template::parse_patches(response)
+    let (mut patches, unmatched) = template::parse_patches(response)
         .context("failed to parse patch blocks from response")?;
+
+    // Sanitize component tags in patch content to prevent parser corruption
+    sanitize_patches(&mut patches);
 
     let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
@@ -700,6 +715,81 @@ fn write_ipc_and_poll(
 // ---------------------------------------------------------------------------
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
+
+/// Sanitize component tags in patch block content to prevent parser corruption.
+///
+/// When an agent response mentions component tags like `<!-- agent:NAME -->` in its
+/// text, those raw HTML comments would be matched as real markers on subsequent
+/// operations (compact, write). This escapes them to `&lt;!-- agent:NAME --&gt;`
+/// so the component parser won't match them.
+///
+/// Only sanitizes `<!-- agent:NAME -->` and `<!-- /agent:NAME -->` patterns where
+/// NAME is a valid component name (`[a-zA-Z0-9][a-zA-Z0-9-]*`).
+pub fn sanitize_component_tags(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len);
+    let mut pos = 0;
+
+    while pos + 4 <= len {
+        if &bytes[pos..pos + 4] != b"<!--" {
+            result.push(bytes[pos] as char);
+            pos += 1;
+            continue;
+        }
+
+        // Find closing -->
+        let close = match find_comment_close(bytes, pos + 4) {
+            Some(c) => c, // position after -->
+            None => {
+                result.push_str("<!--");
+                pos += 4;
+                continue;
+            }
+        };
+
+        let inner = &content[pos + 4..close - 3];
+        let trimmed = inner.trim();
+
+        if component::is_agent_marker(trimmed) {
+            // Escape the entire comment: <!-- ... --> -> &lt;!-- ... --&gt;
+            let original = &content[pos..close];
+            result.push_str(&original.replace('<', "&lt;").replace('>', "&gt;"));
+        } else {
+            // Not an agent marker — keep as-is
+            result.push_str(&content[pos..close]);
+        }
+        pos = close;
+    }
+
+    // Append remaining bytes
+    while pos < len {
+        result.push(bytes[pos] as char);
+        pos += 1;
+    }
+
+    result
+}
+
+/// Find the end of an HTML comment (position after `-->`), starting search from `start`.
+fn find_comment_close(bytes: &[u8], start: usize) -> Option<usize> {
+    let len = bytes.len();
+    let mut i = start;
+    while i + 3 <= len {
+        if &bytes[i..i + 3] == b"-->" {
+            return Some(i + 3);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Sanitize the content of each patch block in-place.
+fn sanitize_patches(patches: &mut [template::PatchBlock]) {
+    for patch in patches.iter_mut() {
+        patch.content = sanitize_component_tags(&patch.content);
+    }
+}
 
 /// Strip leading `## Assistant` and trailing `## User` headings from response text.
 ///
@@ -1053,5 +1143,51 @@ mod tests {
 
         let result = try_ipc_full_content(&doc, "new content").unwrap();
         assert!(!result, "should return false when patches dir doesn't exist");
+    }
+
+    // --- sanitize_component_tags tests ---
+
+    #[test]
+    fn sanitize_escapes_open_agent_tag() {
+        let input = "Here is an example: <!-- agent:exchange --> marker.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "open agent tag should be escaped, got: {}",
+            result
+        );
+        assert!(
+            !result.contains("<!-- agent:exchange -->"),
+            "raw open agent tag should not remain"
+        );
+    }
+
+    #[test]
+    fn sanitize_escapes_close_agent_tag() {
+        let input = "End marker: <!-- /agent:pending --> done.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("&lt;!-- /agent:pending --&gt;"),
+            "close agent tag should be escaped, got: {}",
+            result
+        );
+        assert!(
+            !result.contains("<!-- /agent:pending -->"),
+            "raw close agent tag should not remain"
+        );
+    }
+
+    #[test]
+    fn sanitize_does_not_escape_patch_markers() {
+        let input = "<!-- patch:exchange -->\nsome content\n<!-- /patch:exchange -->\n";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "patch markers must not be escaped");
+    }
+
+    #[test]
+    fn sanitize_passes_normal_content_through() {
+        let input = "Just some normal markdown content.\n\nWith paragraphs and **bold**.";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "normal content should pass through unchanged");
     }
 }

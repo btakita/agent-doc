@@ -114,8 +114,23 @@ The `Ã¢` pattern (`0xC3 0xA2 0xE2 0x80`) is characteristic of UTF-8 data being
 Want me to add the test and track down the encoding bug?
 
 yes
+
+### v0.17.22 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.22
+- **PyPI:** agent-doc 0.17.22
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.22
+
+**Root cause found and fixed:** `sanitize_component_tags()` used `bytes[pos] as char` which casts individual UTF-8 bytes to chars. For em dash (3 bytes: `0xE2 0x80 0x94`), each byte became a separate char (`U+00E2` = `a-circumflex`, etc.) -- classic Latin-1 mojibake.
+
+**Fix:** Now uses `utf8_char_len()` helper to advance by full UTF-8 characters and str slices instead of byte-to-char casts. 4 new UTF-8 tests + 4 sanitization tests.
+
+**Session total: 7 releases** (v0.17.16 through v0.17.22).
+
+Will this fix cleanup tasks/todo/corky-public-google-app.md? Or will it just prevent it from happening in the first place?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Investigate and fix UTF-8 encoding corruption in write pipeline
+- [x] Investigate and fix UTF-8 encoding corruption in write pipeline
 <!-- /agent:pending -->

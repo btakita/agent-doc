@@ -18,7 +18,7 @@ Operational task document for agent-loop workspace management.
 - `.sync-state.json` gitignore for corky/mail
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
-<!-- agent:exchange patch= -->
+<!-- agent:exchange patch=append -->
 
 ### Re: SPEC.md + pending component
 
@@ -41,6 +41,9 @@ Operational task document for agent-loop workspace management.
 **Pending component** — now active. Using it going forward.
 
 **Truncated message:** Your message "I want " appears cut off again. Could you complete it?
+
+Can we make the dev skill composable?
+Just like how AGENTS.md, CLAUDE.md, AGENTS.overrides.md, CLAUDE.local.md are composable...within subdirectories.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

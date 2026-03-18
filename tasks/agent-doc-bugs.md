@@ -291,6 +291,17 @@ This was logic in agent-doc run I believe. Could you look into the git history t
 Want me to check which case applies to the specific truncation in `tasks/agent-loop.md`?
 
 Yes
+
+Please patch the response into this exchange.
+
+I switched between agent documents and it seems that the step to patch exchange was lost.
+I see the response in the claude session but not in this agent doc.
+
+I also see multiple agent-doc windows in the tmux session.
+And I see an agent-doc window in tmux session 1...another tmux session.
+
+Please diagnose what happened.
+Add tests.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

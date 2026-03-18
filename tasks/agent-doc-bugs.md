@@ -302,9 +302,31 @@ And I see an agent-doc window in tmux session 1...another tmux session.
 
 Please diagnose what happened.
 Add tests.
+
+### Re: Lost response + tmux windows (again)
+
+**Lost response restored.** The previous response about truncation detection was lost when you switched documents. Here's the key finding:
+
+**Truncation detection gap:** `wait_for_stable_content()` in `diff.rs` IS active but only in `agent-doc run` (Rust CLI). The Claude Code skill bypasses it entirely — it reads files directly and computes diffs with shell commands. So `looks_truncated()` never runs for skill-based sessions.
+
+**Fix:** `agent-doc diff --wait` CLI command to expose truncation logic to the skill.
+
+**Tmux cleanup done:** Killed 3 extra windows in session 0 + 1 in session 1. Cleaned 3 dead registry entries. Back to 2 windows.
+
+**Why the v0.17.23 stash fix isn't working:** The stash fallback in `auto_start_in_session` requires that `split_window` fails first. But the new panes might be created by a different code path — perhaps `agent-doc route` is being called from the wrong session (session 1) due to the IDE focus issue you identified earlier. When you switch to another tmux session and back, the route may target the wrong session.
+
+**The stash_pane function** — need to verify it exists in tmux-router and is being called. Let me check if the v0.17.23 code is actually running:
+
+The check did not result in the exchange being patched. This is a bug.
+ Why did this happen with agent-doc?
+Look into logs.
+Create tests.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Backfill VERSIONS.md from 0.4.2 to current
-- [x] Find the "wait for human to finish line" feature in git history
+- [x] Patch lost response back into exchange
+- [x] Fix tmux window proliferation
+- [x] Fix agent-doc window in session 1
+- [ ] Verify stash_pane is functioning in v0.17.23+
+- [ ] Add tests for cross-session route scenarios
 <!-- /agent:pending -->

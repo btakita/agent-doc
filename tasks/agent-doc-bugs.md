@@ -358,9 +358,25 @@ Yes.
 > **Re: No external edit dialog:** Confirms IPC worked correctly through the plugin. The lost response was likely from context compaction, not an IPC race.
 
 So a context compaction happened within the Claude Code session? Which caused the prompt to be lost?
+
+### Re: Context compaction losing prompts
+
+**Yes, that's the most likely cause.** When Claude Code's context window fills up, it compacts (summarizes) older messages. If the `/agent-doc` skill was mid-execution when compaction triggered, the response it was generating would be lost — the skill output never reached `agent-doc write`.
+
+**The `agent-doc recover` mechanism** is supposed to handle this: when a response is interrupted by compaction, the recover command checks for a pending response file and writes it to the document. But it only works if the response was saved to disk before the interruption. If the skill was still generating (hadn't flushed yet), there's nothing to recover.
+
+**This is exactly why the pending-first workflow matters:** by flushing the pending items to disk before generating ANY response, at least the user's prompts are preserved. The response can be regenerated, but the prompts can't.
+
+Would the pending workflow fix this particular issue? Can we capture the diff before compaction? If compaction happens, can we re-evaluate the diff to ensure nothing was lost?
+
+**Also confirming:** Yes, implement the else-branch stash fix. And I'll also implement the `agent-doc diff --wait` command to expose truncation detection to the skill. Both for the next release.
+
+Want me to proceed with both implementations?
+
+Yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Verify stash_pane is functioning
 - [ ] Fix else branch: stash when agent-doc window exists
+- [ ] Implement agent-doc diff --wait for truncation detection
 <!-- /agent:pending -->

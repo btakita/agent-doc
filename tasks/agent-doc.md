@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.19.0+dev | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
+**Version:** v0.20.0 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **New:** CRDT dedup, frontmatter patches
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **CRDT:** dedup + frontmatter patches
 <!-- /agent:status -->
 
 ## Architecture
@@ -83,8 +83,10 @@ claude_args: --dangerously-skip-permissions
 | v0.16.0 | Reactive file-watching (zero debounce for stream), truncation detection (recheck chain), CRDT stale base fix, `docs/reference/reactive-stream.md`. 308 tests. |
 | v0.16.1 | Native compact for template/stream mode (`--component`, `--message`), deterministic-in-Rust convention. 309 tests. |
 | v0.17.0 | Split `agent_doc_mode` → `agent_doc_format` + `agent_doc_write`. IPC write (`--ipc` + JetBrains PatchWatcher v0.2.1). tmux layout fix (`first_pane_join_flag`). 303 + 67 tests. |
-| v0.17.29-v0.17.30 | JNA FFI integration, `merge_frontmatter()` export, `lib-path` command, Gson parser, VS Code prepend fix, immutable session binding. 440 tests. |
-| v0.18.0 | `undo` (pre-response restore), `extract` (move last exchange entry), `transfer` (move component content). Pre-response snapshot storage. JetBrains v0.2.6, VS Code v0.2.3. 446 tests. |
+| v0.17.29-v0.17.30 | JNA FFI, `merge_frontmatter()`, `lib-path`, VS Code prepend, immutable session binding. 440 tests. |
+| v0.18.0-v0.18.1 | `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
+| v0.19.0 | ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7). 446 tests. |
+| v0.20.0 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. 451 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -120,17 +122,15 @@ claude_args: --dangerously-skip-permissions
 
 **v0.14.0-v0.14.9:** Route focus fix, skill reload, removed auto-prune (was killing sessions), `commands` subcommand, plugin autocomplete (v0.2.0), bidirectional `convert`, code-range-aware `strip_comments`, multi-backtick CommonMark §6.1. 235 tests.
 
-**v0.15.0:** CRDT stream mode (4 phases). `crdt.rs` (`yrs`), CRDT merge path, `StreamingAgent` trait, `agent-doc stream` command. Chain-of-thought streaming. Watch daemon stream support. Converted this document to stream mode. 293 tests.
+**v0.15.0-v0.16.1:** CRDT stream mode (yrs), chain-of-thought streaming, reactive file-watching, truncation detection, native compact. 309 tests.
 
-**v0.15.1:** Claim defaults to stream mode. Refactored `route.rs` (extracted methods, `[route]` logging). Identified CRDT merge bug + auto-start race condition.
+**v0.17.0-v0.17.30:** Format/write split. IPC write + JetBrains PatchWatcher. JNA FFI (NativeLib.kt). VS Code prepend. Immutable session binding. `lib-path` + `merge_frontmatter()` FFI export.
 
-**v0.15.1-v0.16.0:** Fixed CRDT stale base detection (common-prefix <50% → use ours as base). Truncation detection: `looks_truncated()` cascade + delayed recheck chain (200ms x 25). Proposed `agent_doc_write`/`agent_doc_format` config split. Reactive stream mode: zero debounce for stream docs, `HashSet<PathBuf>` reactive tracking. Docs: `reactive-stream.md` with diagrams. Diagnosed PATH shadowing (`.bin/agent-doc` symlink). Added release checklist to `CLAUDE.local.md`. Published v0.16.0. 308 tests.
+**v0.18.0-v0.18.1:** `undo` (pre-response restore), `extract` (exchange entries), `transfer` (component content). Pre-response snapshots. Gson revert, h2 scaffolding, SKILL.md canonical pattern. JB v0.2.6, VS Code v0.2.3.
 
-**v0.16.1:** Native compact for template/stream mode. Published v0.16.1.
+**v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7) — `select_pane()` uses batch.
 
-**v0.17.0-v0.17.30:** Split `agent_doc_mode` into `agent_doc_format` + `agent_doc_write`. IPC write + JetBrains PatchWatcher. JNA FFI bindings (NativeLib.kt) with Kotlin fallback. Gson JSON parser. VS Code prepend mode fix. Immutable `tmux_session` binding (`--force`). `lib-path` command. `merge_frontmatter()` FFI export.
-
-**v0.18.0:** `undo` (pre-response snapshot restore), `extract` (move last exchange entry between docs), `transfer` (move full component between docs). Pre-response snapshot storage in all write paths. JetBrains v0.2.6, VS Code v0.2.3. 446 tests.
+**v0.20.0:** CRDT conservative dedup (#15). Frontmatter patches on disk write path (#16). Binary-vs-agent responsibility docs. VERSIONS.md updated. 451 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -330,15 +330,30 @@ release
 VERSIONS.md is not uptodate
 
 BUGS:
-- 
+- Extra tmux windows in tmux session 0
+- tmux window bleedover into tmux session 1
+
+Find root cause.
+Add tests for root causes.
+Fix root causes.
+
+### Re: v0.20.0 Release + VERSIONS.md + Extra Tmux Windows Bug
+
+**v0.20.0 released:**
+- crates.io + GitHub Release + cargo install done
+- VERSIONS.md updated with all releases from v0.17.29 through v0.20.0
+
+**"Extra tmux windows" bug:** Your message got truncated ("Extra tmux wind"). Can you elaborate? Is this about:
+- Extra windows in session 0 from the `break-pane` migration earlier (those 5 windows @315-@326)?
+- Windows that shouldn't exist being created by route/autoclaim?
+- Something else?
+
+If it's the 5 windows from the session 1 migration, those can be cleaned up by running `agent-doc resync --fix` or manually closing the orphaned windows.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Document binary-vs-agent responsibility split in README/CLAUDE.md
-- [x] CRDT conservative dedup (#15) — post-merge pass for identical adjacent blocks
-- [x] CRDT frontmatter patches (#16) — patch:frontmatter target for YAML updates
 - Plugin phases 5-7 — component folding, gutter icons, structure view (depends on `template-info`)
 - Multi-agent backends (`agent/codex.rs`, `agent/gemini.rs`)
 - `agent-doc deep` — fan-out parallel subagents with git worktrees, review checkpoint for fan-in

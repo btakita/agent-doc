@@ -112,6 +112,8 @@ The `Ã¢` pattern (`0xC3 0xA2 0xE2 0x80`) is characteristic of UTF-8 data being
 **Next steps:** Add a UTF-8 validation test to the write pipeline â write content with em dashes, read it back, verify bytes match. This will pinpoint where the corruption occurs.
 
 Want me to add the test and track down the encoding bug?
+
+yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

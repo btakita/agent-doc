@@ -146,6 +146,8 @@ Components are bounded, named regions in a document that can be updated independ
 
 Inline attributes on the tag override `components.toml` and built-in defaults. Precedence: inline attr > `components.toml` > built-in defaults.
 
+Component marker detection uses [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) for CommonMark-compliant parsing: tags inside inline code spans or fenced code blocks are ignored and never treated as component boundaries.
+
 ### Standard component names
 
 | Component | Default `patch` | Description |

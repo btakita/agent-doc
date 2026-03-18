@@ -272,10 +272,28 @@ Option 1 is the cleanest — the JB/VSCode plugins should debounce file saves be
 I looks like VERSIONS.md has not been updated since 0.4.2. Please backfill VERSIONS.md
 I recall that we solved waiting for the human to finish with the current line.
 This was logic in agent-doc run I believe. Could you look into the git history to find the feature?
+
+### Re: VERSIONS.md backfilled + wait-for-human feature found
+
+**VERSIONS.md:** Backfilled 82 entries (v0.4.3 through v0.17.24). Not committed yet — review and commit when ready.
+
+**Wait-for-human feature — FOUND, still active:**
+
+1. **Truncation detection** (`diff.rs`, v0.16.0): `wait_for_stable_content()` checks if the last added line looks incomplete. Uses `looks_truncated()` heuristic — lines ending without terminal punctuation are considered truncated. Waits 200ms and rechecks, up to 25 retries (5s total). Returns once the line appears complete or content stabilizes.
+
+2. **Enter retry** (`route.rs`, v0.17.15): `send_command()` polls after sending `/agent-doc` to verify the command was accepted. Retries Enter if the command text is still visible in the pane.
+
+**So the truncation detection IS active** — the user's truncated prompt should have been caught by `looks_truncated()`. If it wasn't, either:
+- The truncated text ended with terminal punctuation (`.`, `!`, `?`, etc.)
+- The 5-second timeout elapsed and it proceeded anyway
+- The file was read between saves (editor hadn't flushed yet)
+
+Want me to check which case applies to the specific truncation in `tasks/agent-loop.md`?
+
+Yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Investigate truncated prompt in tasks/agent-loop.md
-- [x] Check logs for polling during incomplete prompt
-- [x] Propose fix for prompt truncation
+- [x] Backfill VERSIONS.md from 0.4.2 to current
+- [x] Find the "wait for human to finish line" feature in git history
 <!-- /agent:pending -->

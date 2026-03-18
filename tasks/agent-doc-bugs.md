@@ -52,6 +52,8 @@ Add to SPEC.md
 **2 new tests** + SPEC.md updated. Committed and pushed. Ready to release as v0.17.28.
 
 Also fixed `tasks/agent-doc.md`: its `tmux_session: '23'` was the specific trigger.
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

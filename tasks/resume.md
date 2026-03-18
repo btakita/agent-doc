@@ -13,7 +13,7 @@ agent_doc_write: crdt
 **PDF**: auto-generated via GitHub Action, deployed to [btakita.github.io/resume](https://btakita.github.io/resume/)
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
-**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — full resume assembly working, build/render/validate commands, docs added
+**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — full pipeline working: data.toml → agent-resume → pandoc → weasyprint → PDF
 <!-- /agent:status -->
 
 ## Completed
@@ -301,11 +301,42 @@ agent-resume build -d data.toml -p profiles/default.toml  # With phrase/skill bo
 **Next:** Slim down `build.py` to just pandoc+weasyprint, calling `agent-resume build` for content.
 
 continue
+
+### Re: build.py slimmed down
+
+**Done.** `build.py` now calls `agent-resume build` for content assembly. Went from 280 lines → 125 lines.
+
+**Removed from build.py:**
+- `load_profile()` — agent-resume handles it
+- `read_template()` — data.toml is the source
+- `split_sections()`, `split_experience_entries()`, `filter_experience()` — all in Rust now
+- `bold_phrases()`, `bold_skills()`, `apply_profile()` — all in Rust now
+
+**What remains in build.py:**
+- `build_markdown()` — calls `agent-resume build -d data.toml -p profiles/X.toml`
+- `build_html()` — pandoc markdown → HTML
+- `build_pdf()` — weasyprint HTML → PDF (with Playwright fallback)
+- CLI argument parsing
+
+**Tested:** `python build.py -p default` → `BrianTakita.pdf` (34KB) built successfully.
+
+**Full pipeline:**
+```
+data.toml + profiles/default.toml
+    → agent-resume build (Rust: content assembly, phrase bolding)
+    → pandoc (markdown → HTML)
+    → weasyprint (HTML → PDF)
+    → BrianTakita.pdf
+```
+
+You can view it at: file:///home/brian/work/btakita/agent-loop/resume/BrianTakita.pdf
+
+continue
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Implement full resume assembly in agent-resume
 - [x] Add README.md, CLAUDE.md, AGENTS.md to agent-resume
-- [ ] Slim down build.py to pandoc+weasyprint only
+- [x] Slim down build.py to pandoc+weasyprint only
 - [ ] Resume website search feature
 <!-- /agent:pending -->

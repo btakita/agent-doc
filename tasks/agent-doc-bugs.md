@@ -480,5 +480,7 @@ The extra 7 panes from earlier were already cleaned up by the IDE's "Sync Tmux L
 
 **`resync --fix` is implemented** and committed — ready for next release. It would have caught the wrong-session and wrong-process issues automatically.
 
-Your message was cut off at "Pl" — was there more you wanted to say?
+There are currently 10 tmux windows in the tmux session.
+Did the logs catch why?
+Please fix
 <!-- /agent:exchange -->

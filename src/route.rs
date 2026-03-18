@@ -46,17 +46,18 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
         if tmux.session_exists(requested) {
             requested.clone()
         } else {
-            // Requested session doesn't exist — fall back to current or default
-            let fallback = current_tmux_session(tmux)
-                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-            eprintln!(
-                "[route] warning: tmux_session '{}' does not exist, falling back to '{}'",
-                requested, fallback
+            // Requested session doesn't exist — refuse to route to wrong session.
+            // The user must create the session or update tmux_session in frontmatter.
+            anyhow::bail!(
+                "[route] tmux_session '{}' does not exist. \
+                 Create it with `tmux new-session -ds {}` or update frontmatter.",
+                requested, requested
             );
-            fallback
         }
     } else {
-        TMUX_SESSION_NAME.to_string()
+        // No tmux_session in frontmatter — use current session (first claim sets it)
+        current_tmux_session(tmux)
+            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
     };
     eprintln!("[route] target tmux session: {}", target_session);
 
@@ -271,16 +272,17 @@ pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -
             if tmux.session_exists(name) {
                 name.clone()
             } else {
-                let fallback = current_tmux_session(tmux)
-                    .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-                eprintln!(
-                    "[auto_start] warning: tmux_session '{}' does not exist, falling back to '{}'",
-                    name, fallback
+                // Refuse to start in wrong session — bail instead of fallback
+                anyhow::bail!(
+                    "[auto_start] tmux_session '{}' does not exist. \
+                     Create it with `tmux new-session -ds {}` or update frontmatter.",
+                    name, name
                 );
-                fallback
             }
         } else {
-            TMUX_SESSION_NAME.to_string()
+            // No tmux_session set — use current session (first claim sets it)
+            current_tmux_session(tmux)
+                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
         }
     } else {
         TMUX_SESSION_NAME.to_string()

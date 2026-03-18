@@ -26,10 +26,10 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - Google security review for `gmail.readonly` can take weeks
 <!-- agent:status mode=replace -->
 - [ ] Phase 1: Register public Google OAuth app
-  - [ ] Create GCP project
+  - [x] Create GCP project (corky-490604)
   - [ ] Enable Gmail API
   - [ ] Configure OAuth consent screen
-  - [ ] Create OAuth client credentials
+  - [x] Create OAuth client credentials (in pass)
   - [x] Draft privacy policy & terms of service
   - [ ] Submit for Google verification
 - [ ] Phase 2: Built-in default credentials in corky
@@ -340,4 +340,39 @@ LinkedIn and Slack have their own developer portals (not GCP). Telegram uses Bot
 Since Gmail and YouTube are both Google APIs, they share one GCP project. One OAuth consent screen covers both. The privacy policy should mention YouTube scope too if you plan to request it.
 
 **Recommendation:** Use **"corky"** as the project name/ID. Update the privacy policy to cover YouTube Data API access if you'll request that scope alongside `gmail.readonly`.
+
+### Re: Broader scopes, liability, project subsumption, and credentials stored
+
+**Progress noted:** GCP project "corky" created (ID: corky-490604), credentials stored in `pass corky/gcp/`.
+
+**Broader scopes:** Since corky writes filters and sends emails, you need these scopes:
+- `gmail.readonly` — read messages/metadata
+- `gmail.send` — send emails (corky saves as drafts first)
+- `gmail.settings.basic` — manage filters/labels
+- (optional) `youtube.readonly` — YouTube channel data
+
+Is this just for Corky Desktop? How do I add scopes?
+I renamed my private app to agent-loop. agent-loop has web oauth permissions.
+Is the web oauth only necessary because it is a private app with test users?
+
+All are "restricted" scopes requiring Google security review. They can be submitted together.
+
+**Liability clauses:** Updated both docs:
+- **Privacy policy** — now lists all four scopes with descriptions
+- **Terms of service** — added "Destructive Actions Warning" section covering:
+  - Sent emails cannot be unsent
+  - Filter push can overwrite existing filters
+  - User is solely responsible for reviewing/confirming all destructive actions
+  - No liability for emails sent or filters overwritten
+
+**Project subsumption:** No — GCP projects cannot be subsumed or merged by another project. Each is an isolated resource container. A user cannot take over your project. What they *can* do:
+- Use your public `client_id` (inherently public for desktop apps)
+- Create their own GCP project with their own credentials (self-serve track)
+- If you explicitly add them as IAM members, they'd have access — but you control this
+
+Your OAuth `client_id` authenticates users against *your* app. Their tokens are private to their machines. The project stays under your GCP account.
+
+What I mean by subsume is to use Corky as a template and copy over the permission scopes into their app.
+
+**`pass` paths:** Good — `pass corky/gcp/client_id` and `pass corky/gcp/client_secret` are stored. These will be referenced in Phase 2 when embedding in the build.
 <!-- /agent:exchange -->

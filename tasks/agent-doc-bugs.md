@@ -538,4 +538,8 @@ window 1 is 1 pane. window 0 is 2 panes.
 **For now:** The workaround is running `resync --fix` or manual cleanup after routing new documents. The self-healing resync detects these orphaned windows.
 
 Want me to implement the deeper fix to `auto_start_in_session` so it creates panes directly in the target window instead of creating new windows?
+
+Yes.
+Also, fix any issues with `resync --fix` that we encountered.
+Add ample automated tests for all of the issues.
 <!-- /agent:exchange -->

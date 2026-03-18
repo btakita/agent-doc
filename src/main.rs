@@ -171,6 +171,9 @@ enum Commands {
         /// Scope pane resolution to this tmux window (e.g. @1)
         #[arg(long)]
         window: Option<String>,
+        /// Force overwrite tmux_session even if already set to a different session
+        #[arg(long)]
+        force: bool,
     },
     /// Focus the tmux pane for a session document
     Focus {
@@ -420,7 +423,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => git::commit(&file),
-        Commands::Claim { file, position, pane, window } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref()),
+        Commands::Claim { file, position, pane, window, force } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force),
         Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
         Commands::Layout { files, split, pane, window } => {
             let split = match split.as_str() {

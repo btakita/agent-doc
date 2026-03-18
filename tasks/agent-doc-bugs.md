@@ -536,8 +536,31 @@ agent_doc_write: crdt
 This would replace the tag-finding logic in `component.rs` `parse()` and the content replacement in `template.rs` `apply_patches()`. The component parser already uses pulldown-cmark for code ranges — extending it to also provide component positions is natural.
 
 Want me to implement this? It's a deeper refactor of the write pipeline.
+
+### Re: Patch went to wrong place — confirmed
+
+**Exactly the bug.** The document has TWO sets of exchange tags:
+- Line 13: the real `agent:exchange` component
+- Line 520: inside the claim scaffold code block (example output)
+
+The string-based matcher in `template.rs` found the one inside the code block first (or matched the wrong one). The pulldown-cmark AST fix would skip the code-block instance and only match the real top-level component.
+
+Implementing the AST-based patch placement now.
+
+### Re: Patch placement — Rust code was already correct
+
+**Surprise:** `template.rs` `apply_patches_with_overrides()` already uses `component::parse()` (pulldown-cmark AST) for patch placement. It does NOT use string search. The regression test I added confirms: patches target the real component, not code-block tags.
+
+**So why did the patch go to the wrong place?** The misplacement happened at the **IPC/plugin level**, not in the Rust pipeline. The JB plugin receives the patch JSON and applies it via Document API — the plugin's `applyPatch` function does its OWN component matching (a regex search on the document text). The plugin's regex doesn't use pulldown-cmark AST — it matches the first component tag it finds, which may be inside a code block.
+
+**The real fix:** Update the JB plugin's `PatchWatcher.kt` `applyPatch` function to skip component tags inside code blocks. The Rust side is fine; the plugin side has the naive string matching bug.
+
+Want me to fix the JB plugin?
 <!-- /agent:exchange -->
 ```
+
+Is it necessary for the plugin do component matching?
+Should we begin the FFI so we have the same rust logic for the component matching?
 
 The patch response above went to the incorrect place.
 Add tests and fix.
@@ -572,5 +595,6 @@ Please use the markdown ast to determine where to place the patch from the agent
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Use pulldown-cmark AST for patch placement (not just code range detection)
+- [x] Implement AST-based patch placement — already correct in Rust
+- [ ] Fix JB plugin applyPatch to skip code-block component tags
 <!-- /agent:pending -->

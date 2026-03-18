@@ -57,8 +57,7 @@ Your message was cut off: "It seems that person prompts sometimes" — want to f
 **Analysis of your options:**
 
 **1. `<!-- agent:pending -->
-- [x] Update claim.rs to scaffold agent:pending
-- [ ] User's incomplete thought: "While it is useful to see pe..."
+- [x] Treat free-text additions to agent:pending as exchange prompts
 <!-- /agent:pending -->
 ```
 
@@ -309,6 +308,23 @@ The `claim.rs` scaffold would become:
 <!-- /agent:status -->
 
 <!-- agent:exchange patch=append -->
+
+### Re: Pending additions → exchange prompts
+
+**Agreed.** Any free-text additions to `agent:pending` should be treated as prompts for `agent:exchange`, not as pending items. The pending component should only contain checkbox items managed by the skill.
+
+**Updated rule for the skill:**
+- If the diff shows new text in `agent:pending` that is NOT a checkbox item (`- [ ]` / `- [x]`), move it to the exchange as a user prompt and respond to it there
+- Only `- [ ]` items in pending are treated as task queue entries
+- This prevents accidental prompt loss when the user types below the exchange
+
+**Practical example:** If the user accidentally types "fix the bug" inside `agent:pending`, the skill should:
+1. Extract "fix the bug" from pending
+2. Add it to exchange as a user prompt
+3. Respond to it in exchange
+4. Write `patch:pending` without the free text (only checkboxes remain)
+
+I'll update the SKILL.md pending tracking section with this rule.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -328,4 +344,5 @@ We should assume additions to `agent:pending` were meant for `agent:exchange`.
 <!-- agent:pending patch=replace -->
 - [x] Add agent:pending component to this document
 - [ ] Should the skill automatically add agent:pending/agent:exchange to all documents?
+yes
 <!-- /agent:pending -->

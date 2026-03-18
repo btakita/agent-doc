@@ -134,31 +134,41 @@ claude_args: --dangerously-skip-permissions
 
 ## Exchange
 
-<!-- agent:exchange -->
+<!-- agent:exchange patch=append -->
 
-### Re: v0.18.0 Release + Compact
+### Re: H2 Headers Before Components (Canonical Pattern)
 
-**v0.18.0 released:**
-- crates.io: published
-- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.18.0
-- cargo install: updated to v0.18.0
-- JetBrains plugin: v0.2.6 (built, not published to marketplace)
-- VS Code extension: v0.2.3 (built, not published to marketplace)
+Done. Updated two places:
 
-**Session recap (v0.17.27 → v0.18.0):**
-- Library target with C FFI (6 exports) + `lib-path` command
-- JetBrains JNA bindings (NativeLib.kt) with Kotlin fallback
-- Gson JSON parser replacing 90-line hand-written parser
-- VS Code prepend mode fix
-- Immutable tmux_session binding (`--force` to override)
-- Pre-response snapshot storage + `undo` command
-- `extract` and `transfer` commands for content movement between documents
-- 446 tests (up from 440)
+**1. SKILL.md** — added canonical pattern documentation in the "Template document conventions" section:
+```markdown
+**Canonical pattern: h2 header before each component.** Every component 
+should be preceded by an `##` heading. This enables IDE code folding — 
+users can collapse sections to focus on the active area.
+```
 
-agent-doc templates should always have a header (h2) in front of a component...like in this document.
-It works as code folding.
-This should be the canonical pattern.
-Please add to agent-doc SKILL.md and binary where applicable.
+**2. `claim.rs` scaffolding** — default components now include h2 headers:
+```markdown
+## Status
+&lt;!-- agent:status patch=replace --&gt;
+&lt;!-- /agent:status --&gt;
+
+## Exchange
+&lt;!-- agent:exchange patch=append --&gt;
+&lt;!-- /agent:exchange --&gt;
+
+## Pending / Not Built
+&lt;!-- agent:pending patch=replace --&gt;
+&lt;!-- /agent:pending --&gt;
+```
+
+Previously the scaffolding had bare components without headers. New claims will get the h2 headers automatically.
+
+`agent:exchange` should use `patch=append` by default.
+
+Bug: The JB Plugin does not show the choice modal.
+Is this a regression?
+What happened?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

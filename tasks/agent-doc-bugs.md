@@ -80,8 +80,24 @@ Diagnose the cause, add tests, and fix.
 Want me to implement the write-side sanitization now?
 
 yes
+
+### Re: Write-side sanitization implemented
+
+**Done.** `agent-doc write` now HTML-escapes component tags in response content before applying patches. This prevents the recurring bug where raw `&lt;!-- agent:NAME --&gt;` tags in skill responses corrupt document structure.
+
+**What it does:**
+- Scans each patch block's content for `&lt;!-- agent:NAME --&gt;` and `&lt;!-- /agent:NAME --&gt;` patterns
+- Escapes them to `&lt;!-- agent:NAME --&gt;`
+- `<!-- patch:NAME -->` markers are NOT escaped (they're needed for the patch parser)
+- Applied in all 5 write paths (template, stream, IPC, recover-stream, recover-template)
+
+**4 new tests.** Committed and pushed. Release binary built. Ready to release as v0.17.22 when you want.
+
+tasks/todo/corky-public-google-app.md has malformed characters from latest patch.
+
+add tests 
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement write-side sanitization of component tags in response text
+- [x] Implement write-side sanitization of component tags in response text
 <!-- /agent:pending -->

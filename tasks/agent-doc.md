@@ -9,9 +9,10 @@ claude_args: "--dangerously-skip-permissions"
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.17.0 | **Tests:** 303 + 67 tmux-router passing | **Dependencies:** tmux-router v0.2.5-dev, instruction-files v0.1
+**Version:** v0.17.27 | **Tests:** 440 (151 lib + 268 bin + 21 int) | **Dependencies:** tmux-router v0.2.6, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✗ (auth) | PyPI ✗ (auth)
 **Plugins:** JetBrains v0.2.1 (IPC patch watcher) + VS Code v0.2.0
+**Library:** `libagent_doc.so` (1.5M) — 5 FFI exports (parse, patch, merge, free)
 <!-- /agent:status -->
 
 ## Architecture
@@ -19,7 +20,9 @@ claude_args: "--dangerously-skip-permissions"
 <!-- agent:architecture -->
 **tmux-router v0.2.4**: Standalone Rust crate (library + CLI). `Tmux` struct, `Registry`, `reconcile()` (2D sync), `IsolatedTmux` (test infra), `FileResolution` callback, `prune()`, `acquire_or_skip()`. 56 tests. Published to crates.io + GitHub Releases.
 
-**Core:** diff → agent → merge-safe write → snapshot → git. Components (`<!-- agent:name -->`), template mode, stream mode (CRDT), `agent-doc patch` (hooks), `agent-doc watch` (debounced + reactive), `agent-doc write --stream` (CRDT merge), `agent-doc recover`, `agent-doc plugin install`. Comment stripping, auto-resync, stale snapshot recovery, diagnostic logging.
+**Core:** diff → agent → merge-safe write → snapshot → git. Components (`&lt;!-- agent:name --&gt;`), template mode, stream mode (CRDT), `agent-doc patch` (hooks), `agent-doc watch` (debounced + reactive), `agent-doc write --stream` (CRDT merge), `agent-doc recover`, `agent-doc plugin install`. Comment stripping, auto-resync, stale snapshot recovery, diagnostic logging.
+
+**Library target (`libagent_doc`):** `[lib]` with `crate-type = ["cdylib", "lib"]`. Exports `component`, `crdt`, `ffi`, `frontmatter`, `merge`, `template` modules. C ABI via `ffi.rs` (5 functions). Binary modules use `pub(crate) use agent_doc::*` re-exports.
 
 **Concurrency:** `SnapshotLock` + `RegistryLock` (flock), atomic rename (tempfile + persist), doc advisory lock, `pub(crate)` load/save.
 
@@ -151,94 +154,38 @@ claude_args: "--dangerously-skip-permissions"
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: Plugin shared object + CRDT review
+### Re: Phase 1 — Library target + FFI exports
 
-**Reviewed `tasks/agent-doc-bugs.md`:** Session compacted — recap shows 12 releases (v0.17.16–v0.17.27) covering all the fixes. Key CRDT-related bugs were:
+**Done.** The crate now produces both a binary and a shared library (`libagent_doc.so` / `.dylib` / `.dll`).
 
-1. **IPC false ACK** (v0.2.2) — regex didn't match inline attributes → patch consumed but not applied
-2. **Code block tag corruption** (v0.2.3/v0.2.4) — both plugins now skip component markers inside fenced code blocks
-3. **"Externally modified" dialog** — root cause: when IPC fails or isn't available, `--force-disk` triggers editor reload prompts. This is what occurred in `tasks/employment/ripple.md`. The IPC mechanism exists specifically to avoid this, but bugs 1–2 caused IPC to silently fail, falling back to disk writes.
+**Changes:**
 
-All three are fixed in current plugin versions (JB v0.2.4, VSCode v0.2.2).
+1. **`Cargo.toml`** — added `[lib]` section (`crate-type = ["cdylib", "lib"]`) and explicit `[[bin]]` section
+2. **`src/lib.rs`** (new) — re-exports 5 modules: `component`, `crdt`, `ffi`, `frontmatter`, `merge`, `template`
+3. **`src/ffi.rs`** (new) — C ABI exports with 5 functions:
+   - `agent_doc_parse_components()` → JSON array of components
+   - `agent_doc_apply_patch()` → patched document text (supports replace/append/prepend)
+   - `agent_doc_crdt_merge()` → conflict-free 3-way merge + CRDT state bytes
+   - `agent_doc_free_string()` / `agent_doc_free_state()` — memory cleanup
+4. **`src/main.rs`** — removed `mod` declarations for library modules, added `pub(crate) use agent_doc::{component, crdt, frontmatter, merge, template}` so binary modules keep `crate::` paths
+5. **`src/component.rs`** — promoted `find_code_ranges()` from `pub(crate)` to `pub`; rewrote test that referenced binary-only `diff` module
 
----
+**Build output:**
+- `agent-doc` binary: 6.5M
+- `libagent_doc.so`: 1.5M (all 5 `agent_doc_*` symbols exported)
 
-**Plugin shared object plan — `libagent_doc`**
+**Tests:** 440 pass (151 lib + 268 bin + 21 integration), clippy clean.
 
-Both plugins currently duplicate identical logic in Kotlin and TypeScript:
-- Component tag regex: `<!-- agent:name(\s[^>]*)? -->`
-- Code block range detection (`findCodeBlockRanges`)
-- Patch mode parsing (`patch=` > `mode=` > default)
-- Three modes: replace / append / prepend
-- Frontmatter YAML merge
+**Design decisions:**
+- Included `frontmatter` in the lib (it was needed by `template.rs` and has zero intra-crate deps)
+- FFI returns JSON for component lists (simplest for JNI/napi consumers — no complex C struct marshaling)
+- `apply_patch` takes explicit mode string + uses mode overrides (no config file dependency from FFI)
+- CRDT merge returns both merged text AND encoded state bytes (callers can persist for next merge)
 
-**Proposed architecture:**
+**Next: Phase 2** — JetBrains JNI wrapper. Replace duplicated Kotlin logic in `PatchWatcher.kt` with native calls to `libagent_doc.so`.
 
-```
-src/agent-doc/
-├── Cargo.toml            # add [lib] with crate-type = ["cdylib", "lib"]
-├── src/
-│   ├── lib.rs            # pub mod exports
-│   ├── ffi.rs            # C ABI exports (new)
-│   ├── component.rs      # already has pub fns
-│   ├── crdt.rs           # already uses yrs
-│   ├── template.rs       # patch parsing/application
-│   └── merge.rs          # 3-way merge
-└── editors/
-    ├── PLUGIN-SPEC.md
-    ├── jetbrains/        # JNI wrapper → libagent_doc.so
-    └── vscode/           # napi-rs → libagent_doc.node
-```
-
-**FFI surface (minimal):**
-
-```rust
-// ffi.rs — C ABI exports
-
-/// Parse components from document text
-#[no_mangle]
-pub extern "C" fn agent_doc_parse_components(doc: *const c_char) -> *mut ComponentList;
-
-/// Apply a patch to a document
-#[no_mangle]
-pub extern "C" fn agent_doc_apply_patch(
-    doc: *const c_char,
-    component: *const c_char,
-    content: *const c_char,
-    mode: *const c_char,  // "replace" | "append" | "prepend"
-) -> *mut c_char;
-
-/// CRDT merge (3-way)
-#[no_mangle]
-pub extern "C" fn agent_doc_crdt_merge(
-    base_state: *const u8, base_len: usize,
-    ours: *const c_char,
-    theirs: *const c_char,
-) -> *mut MergeResult;
-
-/// Free returned strings/structs
-#[no_mangle]
-pub extern "C" fn agent_doc_free_string(ptr: *mut c_char);
-```
-
-**Plugin integration:**
-- **JetBrains:** JNI via `System.loadLibrary("agent_doc")` — replace `applyComponentPatch()` in PatchWatcher.kt with native call
-- **VSCode:** napi-rs generates `.node` binding — replace `applyComponentPatch()` in extension.ts with native call
-- **Fallback:** Keep current pure Kotlin/TS implementations as fallback when native lib isn't available
-
-**Build pipeline:**
-1. `cargo build --release` produces `libagent_doc.so` / `.dylib` / `.dll`
-2. JetBrains plugin bundles the `.so` in `lib/` directory
-3. VSCode extension bundles via napi-rs prebuild (platform-specific)
-
-**Phasing:**
-- **Phase 1:** Extract library target from existing crate (add `[lib]` + `ffi.rs`, make modules `pub`)
-- **Phase 2:** JetBrains JNI wrapper — replace duplicated Kotlin logic
-- **Phase 3:** VSCode napi-rs wrapper — replace duplicated TypeScript logic
-- **Phase 4:** CRDT merge in plugin (real-time conflict resolution without CLI subprocess)
-
-Ready to start Phase 1 — adding the library target and FFI exports to the existing crate.
 go
+Are we using PLUGIN-SPEC.md to drive the feature set?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

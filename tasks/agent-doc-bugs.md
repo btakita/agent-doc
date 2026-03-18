@@ -228,10 +228,31 @@ update SPEC.md
 Please clarify and I'll implement.
 
 release. I will address the skill in tasks/agent-loop.md
+
+### v0.17.24 Released
+
+All targets published:
+- **crates.io:** agent-doc 0.17.24
+- **PyPI:** agent-doc 0.17.24
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.17.24
+
+**What's in v0.17.24:**
+- pulldown-cmark for CommonMark-compliant component parsing
+- Inline backtick code span tests
+- Docs updated for pulldown-cmark
+
+**Session total: 9 releases** (v0.17.16–v0.17.24). Library skill deferred to tasks/agent-loop.md.
+
+Look at tasks/agent-loop.md
+
+It seems that the prompt was truncated.
+Please look at the logs to see why this happened.
+Do the logs show polling while a prompt line is incomplete?
+What can we do to fix this?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Audit docs
 - [x] Update SPEC.md
-- [ ] Add a skill for library (awaiting clarification)
+- [x] Release v0.17.24
 <!-- /agent:pending -->

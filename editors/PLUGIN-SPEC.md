@@ -40,6 +40,8 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - Open tag regex: `<!-- agent:NAME(\s[^>]*)? -->`  (supports inline attributes)
 - Close tag: `<!-- /agent:NAME -->`
 - Content region is everything between the open tag's end and the close tag's start.
+- **Tag sanitization:** The write pipeline sanitizes component names before emitting tags — stripping or replacing characters that would produce malformed HTML comments (e.g., `--` sequences, leading/trailing whitespace). Plugins may receive sanitized names that differ slightly from what the user typed; this is expected and not an error.
+- **Code range detection:** The CLI binary uses `pulldown-cmark` to detect fenced code block boundaries before applying patches. This prevents a patch from accidentally splitting a code block. Plugins do not parse markdown; they rely on the pre-processed patch content already respecting code boundaries.
 
 **Mode resolution:**
 - Parse `patch=<value>` (or `mode=<value>` as backward-compatible alias) from the open tag's inline attributes (the `(\s[^>]*)` capture group). `patch=` takes precedence if both are present.
@@ -77,6 +79,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
   3. Show inline hint on success, persistent error notification on failure.
   4. Register the file for prompt polling (Section 2.6).
 - **Concurrency guard:** Use an atomic boolean to prevent rapid double-invocation. Subsequent calls while a route is in-flight are silently skipped with a hint.
+- **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
 
 ### 2.4 Layout Sync
 
@@ -210,6 +213,17 @@ Three states must be reconciled:
 - **Content hash verification** (optional): Compare document content hash before and after patch application to detect race conditions with concurrent edits.
 - **Graceful degradation:** If a component marker is not found during patch application, skip that patch entry and log a warning. Do not abort the entire patch.
 
+### 2.11 Stash Window Behavior
+
+When the editor has more open `.md` panes than tmux columns can accommodate, the overflow panes are **stashed**:
+
+- The CLI assigns stash slots named `stash-1`, `stash-2`, … in overflow order.
+- Stashed panes are hidden from the active tmux layout but remain claimed and tracked in `sessions.json`.
+- The plugin must still report stashed panes during layout sync (Section 2.4) so the CLI can maintain their session state.
+- When a stash slot is promoted (user brings it into view), the next layout sync removes the `stash-N` name and assigns a real column position.
+
+Plugins do not need to implement stash logic — the CLI manages stash assignments entirely. Plugins only need to accurately report which files are visible vs. hidden during sync.
+
 ## 6. Testing Requirements
 
 Each plugin implementation should have tests (or manual test procedures) covering:
@@ -225,3 +239,5 @@ Each plugin implementation should have tests (or manual test procedures) coverin
 9. **ACK protocol:** Patch file is deleted only after successful application; left in place on failure.
 10. **Concurrent edit safety:** Patch application while user is typing does not corrupt the document or lose user edits.
 11. **Double-invocation guard:** Rapid submit/claim calls do not produce duplicate CLI invocations.
+12. **`agent:pending` component:** A patch targeting `agent:pending` applies in replace mode, overwriting the checkbox list rather than appending to it.
+13. **Tag sanitization:** Component names with special characters are sanitized before tag emission; the plugin correctly matches sanitized tags.

@@ -375,4 +375,33 @@ Your OAuth `client_id` authenticates users against *your* app. Their tokens are 
 What I mean by subsume is to use Corky as a template and copy over the permission scopes into their app.
 
 **`pass` paths:** Good — `pass corky/gcp/client_id` and `pass corky/gcp/client_secret` are stored. These will be referenced in Phase 2 when embedding in the build.
+
+Will the embedding work while the app is under review by Google?
+
+### Re: Scopes, app types, web OAuth, and scope templating
+
+**Scopes are project-level, not per-client.** "Corky Desktop" is one OAuth client under the GCP project. You can add multiple clients (Desktop, Web) — they all share the same consent screen and scopes.
+
+**How to add scopes:**
+1. GCP Console → APIs & Services → OAuth consent screen → Edit App
+2. "Add or Remove Scopes" → add `gmail.send`, `gmail.settings.basic`, etc.
+3. Save
+
+**Web OAuth vs Desktop OAuth:**
+- **Desktop** uses `localhost` redirect — app opens browser, user consents, redirects to `localhost:PORT`
+- **Web** uses a registered URL redirect (e.g., `https://domain.com/callback`)
+- **Test-user restriction** applies to both client types equally — it's a property of the consent screen being unverified, not the OAuth flow type
+- Your "agent-loop" private app uses Web OAuth because you configured it that way, not because testing requires it. Desktop OAuth works fine for test users too.
+
+Once the app is verified (public), both flows work for any Google user.
+
+**On "subsume" (using Corky as a scope template):**
+
+Yes — anyone can see your consent screen's scopes during the OAuth flow and request the same ones in their own GCP project. This is by design:
+
+- Scopes are publicly documented Google API permissions
+- Each project goes through its own verification independently
+- Your consent screen is a reference, not a transferable asset
+
+This is actually the intended self-serve workflow: corky docs list the required scopes, users copy them into their own consent screen. No security concern — it's how the ecosystem works.
 <!-- /agent:exchange -->

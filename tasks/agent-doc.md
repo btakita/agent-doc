@@ -227,7 +227,25 @@ release
 - cargo install: updated to v0.18.1
 - Includes: Gson revert, h2 scaffolding, SKILL.md canonical pattern, pre-response snapshots
 
-Move the agent-doc tmux panes in tmux session 1 into tmux session 0 stash(es). 
+Move the agent-doc tmux panes in tmux session 1 into tmux session 0 stash(es).
+
+### Re: Move Panes to Session 0
+
+Done. Used `tmux break-pane -s <pane> -t "0:"` to move all 5 panes from session 1 to session 0:
+
+| Pane | File | Before | After |
+|------|------|--------|-------|
+| %86 | corky-public-google-app.md | session 1 | session 0, window @326 |
+| %71 | ripple.md | session 1 | session 0, window @323 |
+| %24 | agent-doc-bugs.md | session 1 | session 0, window @315 |
+| %84 | agent-loop.md | session 1 | session 0, window @324 |
+| %85 | corky.md | session 1 | session 0, window @325 |
+
+Each pane kept its original window — they're now in session 0 in individual windows (not joined to stash, because `join-pane` fails with "pane too small" when too many panes are stacked). The next `/agent-doc` route for each will handle layout sync.
+
+Implement:
+-  Execution mode in `config.toml` (currently only in SKILL.md frontmatter)
+- `TmuxBatch` — command batching to reduce flicker: Would this be in tmux-router?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

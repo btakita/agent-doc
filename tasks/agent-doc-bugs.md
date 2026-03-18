@@ -590,8 +590,21 @@ Want me to implement Option B?
 2. **Next release cycle:** Begin FFI shared library (Option C)
 
 Want me to fix the JB plugin now?
+
+### Re: JB + VSCode plugin fix
+
+**Done.** Both plugins now skip component tags inside fenced code blocks:
+
+- **JB (PatchWatcher.kt):** Added `findCodeBlockRanges()` + filter in `applyComponentPatch`
+- **VSCode (extension.ts):** Same algorithm, rejects matches within code block ranges
+
+Committed and pushed. The plugin ZIPs need to be rebuilt and the VSCode extension republished for users to get the fix. But for your local dev, the source is updated.
+
+Ready to release v0.17.27 with this fix + the regression test.
 <!-- /agent:exchange -->
 ```
+
+Yes. And bump the plugin version
 
 Yes
 
@@ -635,5 +648,5 @@ Please use the markdown ast to determine where to place the patch from the agent
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix JB plugin applyPatch to skip code-block tags (Option A)
+- [x] Fix JB plugin applyPatch to skip code-block tags
 <!-- /agent:pending -->

@@ -39,10 +39,25 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()>
     }
 
     // Use tmux_session from frontmatter if available, otherwise default
-    let target_session = frontmatter::parse(&updated_content)
+    let frontmatter_session = frontmatter::parse(&updated_content)
         .ok()
-        .and_then(|(fm, _)| fm.tmux_session)
-        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+        .and_then(|(fm, _)| fm.tmux_session);
+    let target_session = if let Some(ref requested) = frontmatter_session {
+        if tmux.session_exists(requested) {
+            requested.clone()
+        } else {
+            // Requested session doesn't exist — fall back to current or default
+            let fallback = current_tmux_session(tmux)
+                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+            eprintln!(
+                "[route] warning: tmux_session '{}' does not exist, falling back to '{}'",
+                requested, fallback
+            );
+            fallback
+        }
+    } else {
+        TMUX_SESSION_NAME.to_string()
+    };
     eprintln!("[route] target tmux session: {}", target_session);
 
     let file_path = file.to_string_lossy();
@@ -172,6 +187,23 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Get the current tmux session name (the session the caller is attached to).
+fn current_tmux_session(tmux: &Tmux) -> Option<String> {
+    // If we're inside tmux, query the current session name
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
 /// Find an active target pane for lazy claiming.
 fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str) -> Option<String> {
     let target = explicit_pane
@@ -230,12 +262,26 @@ fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane
 /// Auto-start a new Claude session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Result<()> {
-    // Read tmux_session from frontmatter, fall back to TMUX_SESSION_NAME
+    // Read tmux_session from frontmatter, validate it exists, fall back if not
     let session_name = if let Ok(content) = std::fs::read_to_string(file) {
-        frontmatter::parse(&content)
+        let requested = frontmatter::parse(&content)
             .ok()
-            .and_then(|(fm, _)| fm.tmux_session)
-            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
+            .and_then(|(fm, _)| fm.tmux_session);
+        if let Some(ref name) = requested {
+            if tmux.session_exists(name) {
+                name.clone()
+            } else {
+                let fallback = current_tmux_session(tmux)
+                    .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+                eprintln!(
+                    "[auto_start] warning: tmux_session '{}' does not exist, falling back to '{}'",
+                    name, fallback
+                );
+                fallback
+            }
+        } else {
+            TMUX_SESSION_NAME.to_string()
+        }
     } else {
         TMUX_SESSION_NAME.to_string()
     };
@@ -974,6 +1020,94 @@ mod tests {
             new_win_after,
             stash_win.unwrap(),
             "new pane should be in stash window"
+        );
+    }
+
+    // --- tmux_session validation tests ---
+
+    #[test]
+    fn route_warns_on_nonexistent_tmux_session() {
+        // When frontmatter specifies a tmux_session that doesn't exist,
+        // run_with_tmux should log a warning and NOT create that session.
+        let iso = IsolatedTmux::new("route-test-warn-nonexist");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a fallback session so there's somewhere to land
+        let _fallback_pane = iso.auto_start("claude", &cwd).unwrap();
+
+        // Write a temp file with a nonexistent tmux_session in frontmatter
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: test-uuid-1234\ntmux_session: ghost-session\n---\n## User\nHello\n",
+        )
+        .unwrap();
+
+        // The nonexistent session should NOT exist before or after
+        assert!(
+            !iso.session_exists("ghost-session"),
+            "ghost-session should not exist before route"
+        );
+
+        // Run route — it will fail at auto-start (AGENT_DOC_NO_AUTOSTART),
+        // but we can verify the session was never created
+        // SAFETY: test is single-threaded; env var is removed immediately after use
+        unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
+        let result = run_with_tmux(&file, &iso, None);
+        unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
+
+        // The ghost session should still not exist (route fell back, didn't create it)
+        assert!(
+            !iso.session_exists("ghost-session"),
+            "ghost-session should NOT have been created by route"
+        );
+
+        // Route should have bailed due to AGENT_DOC_NO_AUTOSTART (no active pane)
+        assert!(result.is_err(), "should error with no autostart");
+    }
+
+    #[test]
+    fn route_falls_back_to_existing_session() {
+        // When frontmatter requests a nonexistent session, route should
+        // fall back to an existing session and create panes there.
+        let iso = IsolatedTmux::new("route-test-fallback-sess");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create the fallback session "claude"
+        let fallback_pane = iso.auto_start("claude", &cwd).unwrap();
+        let fallback_session = iso.pane_session(&fallback_pane).unwrap();
+        assert_eq!(fallback_session, "claude");
+
+        // Verify ghost-session does NOT exist
+        assert!(!iso.session_exists("ghost-session"));
+
+        // Write a temp file with a nonexistent tmux_session
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: fallback-uuid-5678\ntmux_session: ghost-session\n---\n## User\nHello\n",
+        )
+        .unwrap();
+
+        // Set AGENT_DOC_NO_AUTOSTART so we don't actually spawn Claude,
+        // but we can inspect the validation behavior
+        // SAFETY: test is single-threaded; env var is removed immediately after use
+        unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
+        let _result = run_with_tmux(&file, &iso, None);
+        unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
+
+        // The ghost session should NOT have been created
+        assert!(
+            !iso.session_exists("ghost-session"),
+            "nonexistent session should never be created by route"
+        );
+
+        // The fallback "claude" session should still exist
+        assert!(
+            iso.session_exists("claude"),
+            "fallback session should still be alive"
         );
     }
 }

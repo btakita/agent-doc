@@ -353,7 +353,12 @@ I've saved the HTML to a file. Do this:
 
 Let me create the file now.
 
-P
+
+### Re: file:// protocol + "Please"
+
+Good feedback — noted for future. The HTML file is at: `file:///tmp/ripple-reply.html`
+
+Where is this context saved? Which file?
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

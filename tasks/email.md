@@ -683,4 +683,30 @@ The `brian.takita@gmail.com` account worked earlier because it was already liste
 
 Should I consider adding a google app for corky so other people can quickly get started?
 And/Or should there be instructions for users to setup their own app?
+### Re: Test users location
+
+The new Google Cloud Console has moved things around. Try:
+- `https://console.cloud.google.com/auth/clients` → click on the OAuth client → "Audience" tab → Test users
+- Or: `https://console.cloud.google.com/apis/credentials/consent?project=unop-d3871` (old-style URL)
+- The "Audience" section should have "Test users" where you can add `btak.dev@gmail.com`
+
+Done.
+
+### Re: Published app vs self-hosted
+
+**Two approaches, not mutually exclusive:**
+
+1. **Published corky OAuth app** — You publish/verify the app with Google. Users just run `corky sync` and authorize against your app. Pros: zero setup for users. Cons: Google verification process is involved (privacy policy, domain verification, security review for sensitive scopes like `gmail.readonly`). Also, you'd be hosting the client credentials — users trust your app with their Gmail access.
+
+2. **Self-hosted app (current model)** — Each user creates their own OAuth credentials in Google Cloud Console. Pros: no trust dependency, no verification needed. Cons: setup friction (create project, enable Gmail API, create credentials, add to `.corky.toml`).
+
+**Recommendation:** Both. Ship self-hosted as the default (it's the current model, already works). Add a published corky app as an optional convenience — users who trust corky can use it instead of creating their own. The published app needs `gmail.readonly` scope which requires Google's security review.
+
+For now, add setup instructions to the README for self-hosted credentials. The published app is a separate project that can happen later.
+
+Let's have a tasks/todo directory. Add corky-public-google-app.md has a todo task.
+
+Want me to draft the README section for Gmail API setup?
+
+Yes.
 <!-- /agent:output -->

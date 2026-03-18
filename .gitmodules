@@ -88,3 +88,6 @@
 [submodule "src/lazily-rs"]
 	path = src/lazily-rs
 	url = git@github.com:btakita/lazily-rs.git
+[submodule "src/agent-resume"]
+	path = src/agent-resume
+	url = git@github.com:btakita/agent-resume.git

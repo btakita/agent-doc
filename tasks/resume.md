@@ -13,7 +13,7 @@ agent_doc_write: crdt
 **PDF**: auto-generated via GitHub Action, deployed to [btakita.github.io/resume](https://btakita.github.io/resume/)
 **LinkedIn**: [linkedin.com/in/briantakita](https://www.linkedin.com/in/briantakita/)
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
-**agent-resume**: `src/agent-resume/` — Rust crate scaffolded, compiles, render + validate working
+**agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — 14 experiences, 35+ skills, render + validate working
 <!-- /agent:status -->
 
 ## Completed
@@ -165,11 +165,46 @@ Create a btakita/agent-resume github project.
 Make a git submodule in agent-loop.
 
 Continue with Next steps
+
+### Re: GitHub repo + submodule + experience data
+
+**GitHub repo created:** [btakita/agent-resume](https://github.com/btakita/agent-resume) (public)
+**Submodule added:** `src/agent-resume` in agent-loop
+
+Now creating experience TOML files from BrianTakita.md...
+
+I want the toml file (there should only be 1), to be in the btakita/resume repo...resume directory.
+
+It would also be interesting to have a search feature on the resume website. So people can look up different experiences.
+
+### Re: GitHub repo + submodule + experience data (completed)
+
+**Done:**
+
+1. **GitHub repo:** [btakita/agent-resume](https://github.com/btakita/agent-resume) — public, pushed
+2. **Submodule:** `src/agent-resume` added to agent-loop
+3. **14 experience TOML files** created from BrianTakita.md:
+   - presence-ai, open-source, freelance, censible, socialchorus
+   - neo-innovation, crystalcommerce, rundavoo, milyoni
+   - truecar, pivotal-labs, peer-to-patent, naspp, flextronics
+4. **skills.toml** — 35+ skills with categories, tags, years
+
+**Validation:**
+```
+Validated 14 experience files (44 total accomplishments)
+```
+
+**Render test** — all entries produce correct markdown. Currently renders alphabetically (no profile scoring applied). With a profile `match_tags`, entries sort by relevance.
+
+**Remaining:**
+- [ ] Integrate with `build.py` (call `agent-resume render` from Python build pipeline)
+- [ ] Add chronological sort option (current resume order)
+- [ ] Test profile-based filtering with a real job target
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Pick crate name and scaffold Rust project
-- [ ] Create experience TOML files from BrianTakita.md
-- [ ] Add skills.toml taxonomy
+- [x] Create btakita/agent-resume GitHub repo + submodule
+- [x] Create experience TOML files from BrianTakita.md
+- [x] Add skills.toml taxonomy
 - [ ] Integrate with build.py
 <!-- /agent:pending -->

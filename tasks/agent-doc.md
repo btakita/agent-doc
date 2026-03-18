@@ -154,38 +154,34 @@ claude_args: "--dangerously-skip-permissions"
 ## Exchange
 
 <!-- agent:exchange -->
-### Re: Phase 1 — Library target + FFI exports
+### Re: PLUGIN-SPEC.md and Phase 2 Planning
 
-**Done.** The crate now produces both a binary and a shared library (`libagent_doc.so` / `.dylib` / `.dll`).
+**Yes, `editors/PLUGIN-SPEC.md` is the authoritative spec.** The architecture section notes "9/9 SPEC parity" — both plugins implement all Phase 1 features (2.1–2.11). The spec codifies what was built.
 
-**Changes:**
+Phase 2 (CRDT-via-FFI) is defined in spec sections 3.1–3.2. The library target from Phase 1 is the foundation.
 
-1. **`Cargo.toml`** — added `[lib]` section (`crate-type = ["cdylib", "lib"]`) and explicit `[[bin]]` section
-2. **`src/lib.rs`** (new) — re-exports 5 modules: `component`, `crdt`, `ffi`, `frontmatter`, `merge`, `template`
-3. **`src/ffi.rs`** (new) — C ABI exports with 5 functions:
-   - `agent_doc_parse_components()` → JSON array of components
-   - `agent_doc_apply_patch()` → patched document text (supports replace/append/prepend)
-   - `agent_doc_crdt_merge()` → conflict-free 3-way merge + CRDT state bytes
-   - `agent_doc_free_string()` / `agent_doc_free_state()` — memory cleanup
-4. **`src/main.rs`** — removed `mod` declarations for library modules, added `pub(crate) use agent_doc::{component, crdt, frontmatter, merge, template}` so binary modules keep `crate::` paths
-5. **`src/component.rs`** — promoted `find_code_ranges()` from `pub(crate)` to `pub`; rewrote test that referenced binary-only `diff` module
+**Duplicated logic the FFI eliminates:**
 
-**Build output:**
-- `agent-doc` binary: 6.5M
-- `libagent_doc.so`: 1.5M (all 5 `agent_doc_*` symbols exported)
+| Duplicated Logic | JetBrains | VS Code | FFI Replacement |
+|---|---|---|---|
+| Component matching + mode | `applyComponentPatch()` | `applyComponentPatch()` | `agent_doc_apply_patch()` |
+| Code block detection | `findCodeBlockRanges()` | `findCodeBlockRanges()` | Built into `parse_components()` |
+| Frontmatter merge | `applyFrontmatterPatch()` | `applyFrontmatterPatch()` | Not yet exported (needs FFI add) |
+| JSON parsing | 90-line hand-rolled parser | `JSON.parse()` (native) | N/A (JB-only issue) |
 
-**Tests:** 440 pass (151 lib + 268 bin + 21 integration), clippy clean.
+**VS Code gap found:** Missing `prepend` mode — falls through to `replace`. Auto-fixed when N-API replaces inline logic.
 
-**Design decisions:**
-- Included `frontmatter` in the lib (it was needed by `template.rs` and has zero intra-crate deps)
-- FFI returns JSON for component lists (simplest for JNI/napi consumers — no complex C struct marshaling)
-- `apply_patch` takes explicit mode string + uses mode overrides (no config file dependency from FFI)
-- CRDT merge returns both merged text AND encoded state bytes (callers can persist for next merge)
+**Phase 2 plan — JNI wrapper:**
+1. Add `agent_doc_merge_frontmatter()` to `ffi.rs`
+2. Create JNI bindings in `editors/jetbrains/` to `libagent_doc.so`
+3. Replace `applyComponentPatch`, `findCodeBlockRanges`, `parsePatchJson`, `applyFrontmatterPatch` with FFI calls
+4. Keep plugin-side: VFS lookup, `WriteCommandAction`, NIO watcher, ACK, retry
 
-**Next: Phase 2** — JetBrains JNI wrapper. Replace duplicated Kotlin logic in `PatchWatcher.kt` with native calls to `libagent_doc.so`.
+Awaiting direction: proceed with Phase 2 JNI, or fix VS Code prepend gap first?
 
-go
-Are we using PLUGIN-SPEC.md to drive the feature set?
+proceed with phase 2
+
+Continue
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

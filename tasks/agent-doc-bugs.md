@@ -424,10 +424,16 @@ Add tests to simulate the driving causes of this bug.
 This needs a deeper audit of all tmux operations in route.rs to ensure they ALL use the target session from frontmatter, not the active client session. Want me to audit and fix?
 
 Let's have agent:exchange component use patch=append by default.
-T
+The human can always compact the exchange.
+Perhaps we can provide a tip somewhere.
+
+### Re: exchange patch=append default
+
+**Already the case.** `exchange` defaults to `patch=append` in the Rust code (hardcoded in `template.rs`). The inline `patch=append` attribute on this document's exchange tag is redundant but harmless — it just makes the behavior explicit.
+
+Your text was truncated ("exchang" instead of "exchange"). This is the truncation bug — the skill doesn't yet call `agent-doc diff --wait` before reading. I should add that to the SKILL.md workflow now.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Diagnose agent-doc windows in tmux session 1
-- [ ] Audit route.rs for active-session vs target-session usage
+- [ ] Add diff --wait call to SKILL.md workflow
 <!-- /agent:pending -->

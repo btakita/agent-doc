@@ -517,6 +517,24 @@ You just said Option 3 was "fragile" in the previous run:
 > Feasible as a post-merge heuristic in `crdt.rs` — detect agent `### Re:` content and user's new text, reorder so agent response comes first, user prompt last. But fragile.
 
 Is Option 3 more robust (less fragile) than Option 1 & 2?
+
+### Re: Fragility Comparison — Corrected
+
+Good catch. I contradicted myself. Honest comparison:
+
+| Option | Robustness | Fragility |
+|--------|-----------|-----------|
+| 1. Client ID tie-breaking | Low — Yrs uses Lamport timestamps too, not just client_id | May silently mis-order |
+| **2. Post-merge attribution** | **High** — Yrs tracks per-character attribution definitively | Complex to implement (~40 lines) but no heuristics |
+| 3. Content-level `### Re:` | Medium — works when agent always uses `### Re:` | Breaks if format changes, user writes `### Re:`, or response has no header |
+
+**Option 2 is the most robust.** The attribution data is authoritative. No pattern matching, no conventions to maintain. The CRDT already has the data.
+
+Option 3 was correctly called "fragile" the first time. I overrode that because it's simpler to implement, but simpler != more robust.
+
+**Revised recommendation:** Option 2 for the long term. Option 3 as a short-term fix if you want something today.
+
+Let's do Option 2.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

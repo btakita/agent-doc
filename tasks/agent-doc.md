@@ -490,6 +490,33 @@ Can we make the above approach more robust? Are we able to understand what the o
 **Cleanest approach:** Add `agent:input` to this document. User types there, responses go to `agent:exchange`. Zero ordering ambiguity — input and output never compete for the same append position.
 
 Want me to add `agent:input` to this document? No thanks.
+
+### Re: CRDT Source Attribution
+
+**Yes, we can distinguish agent vs human edits.** The Yrs CRDT uses client IDs:
+
+```rust
+let ours_doc = Doc::with_client_id(1);   // agent
+let theirs_doc = Doc::with_client_id(2); // human
+```
+
+After merge, Yrs tracks which characters came from which client.
+
+**Ordering approaches (from CRDT-native to pragmatic):**
+
+1. **Client ID tie-breaking** — Yrs uses client_id + Lamport timestamps for concurrent-insert ordering. Already set up (agent=1, human=2), but Yrs ordering isn't always "lower ID first" in all edge cases.
+
+2. **Post-merge attribution walk** — Use Yrs `Text::diff()` API to identify per-character client_id ranges. If human content appears before agent content at the append boundary, swap them. CRDT-native but complex.
+
+3. **Content-level reorder (recommended)** — After CRDT merge, detect `### Re:` (agent response marker). If user's new text appears before it at the append boundary, move it after. Content-level, not CRDT-level, but reliable and simple.
+
+Option 3 is the most pragmatic — the CRDT handles conflict-free merge correctly, we just enforce "agent first, user last" as a post-merge pass. It's ~20 lines in `crdt.rs` and doesn't require understanding Yrs internals.
+
+You just said Option 3 was "fragile" in the previous run:
+
+> Feasible as a post-merge heuristic in `crdt.rs` — detect agent `### Re:` content and user's new text, reorder so agent response comes first, user prompt last. But fragile.
+
+Is Option 3 more robust (less fragile) than Option 1 & 2?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

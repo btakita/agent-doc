@@ -1443,7 +1443,7 @@ Added `add_head_marker()` to `git.rs`. On the next commit cycle:
 
 **Working tree version (what you see in the editor):**
 ```
-### Re: Selective Commit Behavior Clarification (HEAD)
+### Re: Selective Commit Behavior Clarification
 ```
 
 **Git gutter result:**
@@ -1454,6 +1454,30 @@ Added `add_head_marker()` to `git.rs`. On the next commit cycle:
 The `add_head_marker()` function finds the last `### Re:` heading in the snapshot, appends ` (HEAD)`, and stages that version. The working tree stays clean. Idempotent — won't double-add if `(HEAD)` is already present.
 
 Release binary built. This will take effect on the next `/agent-doc` cycle when `agent-doc commit` runs.
+
+Test run did not work with tasks/laura-klask.md. The entire uncommitted area should have been committed except:
+
+> ### Current drafts — full summary
+
+Where this would be in the commit:
+
+> ### Current drafts — full summary (HEAD)
+
+![img_2.png](img_2.png)
+
+As I made an inline correction to:
+
+> Test run did not work with tasks/laura-klask.md. The entire uncommitted area should have been committed except:
+
+### Re: HEAD Marker Fixed — Now Matches Any `### ` Heading
+
+The issue: `add_head_marker()` only matched `### Re:` headings, but `tasks/laura-klask.md` uses `### Current drafts — full summary` as the agent response heading.
+
+**Fixed:** Changed `rfind("\
+### Re:")` → `rfind("\
+### ")` to match any h3 heading. Agent responses can use any `### ` heading format across documents — the marker always targets the **last** one in the snapshot. (HEAD)
+
+Release binary rebuilt. Will take effect on the next commit cycle for all documents.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

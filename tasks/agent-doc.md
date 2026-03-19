@@ -1314,7 +1314,45 @@ I'm asking for a selective commit.
 Ideally, the commit will be whatever diff was sent to the agent for processing.
 Any edits that occurred after sending the diff should be uncommitted.
 
+Can we use something like `git commit -p` to only include what was actually sent to the agent?
+Is there a non-interactive alternative to `git commit -p`?
 
+### Re: Selective Commit — Implemented
+
+You're right — the snapshot-based approach would cause external file edits (IDE detects the write). Instead: stage the snapshot content directly into git's index without touching the working tree.
+
+**How it works:**
+
+```
+agent-doc commit <FILE>:
+  1. Load snapshot (= document after agent-doc write, before user edits)
+  2. git hash-object -w --stdin  →  write snapshot to git object db, get blob hash
+  3. git update-index --add --cacheinfo 100644,<hash>,<file>  →  stage snapshot version
+  4. git commit (stages only the snapshot content)
+  5. Working tree file is UNTOUCHED — user edits remain uncommitted
+```
+
+**Result in the editor:**
+
+| Content | Git status | Gutter |
+|---------|-----------|--------|
+| Previous exchange history | Committed | No gutter |
+| Agent response (this cycle) | **Committed** | No gutter |
+| User's new input (typed after response) | **Uncommitted** | Green gutter |
+
+The green gutter now shows exactly where the user's new input starts — a clear visual boundary and navigation point.
+
+**Fallback:** If no snapshot exists or `hash-object` fails, falls back to the original `git add -f` behavior (commits everything).
+
+**Files changed:** `git.rs` — replaced `git add -f` with `hash_object()` + `git update-index --cacheinfo`. Added `hash_object()` and `git_add_force()` helpers.
+
+**Tests:** 466 (all passing). The change is transparent to existing tests since the commit behavior only differs when a snapshot exists AND the user has edited after the response.
+
+This will take effect on the **next cycle** — when I run `agent-doc commit` at the start of the next `/agent-doc` invocation, it will stage the snapshot version and leave your current edits uncommitted.
+
+So you built the binary and we are now testing the upcoming release?
+
+Please verify.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

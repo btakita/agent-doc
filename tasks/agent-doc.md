@@ -581,14 +581,6 @@ Adding `--no-worktree` is ~10 lines: skip `worktree::create`, set CWD to project
 
 Yes...add `--no-worktree`.
 
-Rename `deep.rs` to `parallel.rs`
-
-> Cleaned up 3 orphan panes:
-> - Session 0: killed %99 (idle shell in window @348)
-> - Session 1: killed %98, %97 (idle shells in windows @345, @344)
-
-What was the root cause of the orphan panes?
-
 ### Re: `--no-worktree` Added
 
 Added `--no-worktree` flag to `agent-doc deep`:
@@ -607,6 +599,14 @@ agent-doc deep plan.md \
 - CLI: `--no-worktree` flag in `Deep` variant
 
 Tests: 460 passing, compiles clean.
+
+Rename `deep.rs` to `parallel.rs`
+
+> Cleaned up 3 orphan panes:
+> - Session 0: killed %99 (idle shell in window @348)
+> - Session 1: killed %98, %97 (idle shells in windows @345, @344)
+
+What was the root cause of the orphan panes?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

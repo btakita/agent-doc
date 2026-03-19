@@ -186,6 +186,43 @@ This signals respect (not going behind her back), frames it as professional, and
 ### Gmail re-synced
 
 `corky filter push` — filters updated with `kklask@pacbell.net` now included in the correspondence filter alongside `*@amulettechnologies.com`.
+
+Please transcribe https://youtu.be/dvhV7zpC7RU?si=O6WmwpTvSk9rur63
+
+Create and add transcription to leverage-business topic.
+
+I want to add this to context for this discussion.
+My family typically wants me to do the "safe thing" and get a job where I commute.
+The absolute riskiest decision with the lowest payoff in this economy.
+
+Help me communicate my aspirations as being more effective, lower risk, and having a higher payoff.
+### Transcription & leverage-business topic
+
+**Video:** [Ex-Google: 3,700 Applications. 0 Offers.](https://youtu.be/dvhV7zpC7RU)
+**Transcript saved:** `tmp/topics/leverage-business.md` (structured summary with key lessons)
+
+**Core thesis:** You cannot build a career through the front door with the masses. Hard work doesn't determine value — control determines value. Specialists get invited in; generalists compete.
+
+**The "safe" job your family wants IS the risky move:**
+
+| | Traditional Job | Independent/Specialist |
+|---|---|---|
+| Concentration risk | 100% — one client (employer) | Distributed across multiple clients |
+| Control | Zero — laid off tomorrow (Presence AI proved this) | You own the relationships and IP |
+| Leverage | None — priced as a role filler | Positioning determines your rate |
+| Upside | Capped at salary | Uncapped — scales with clients + products |
+
+**Your position through this lens:**
+- You're NOT the 3,700-applications guy. You're already past that trap.
+- **Specific expertise:** agentic AI orchestration tools (agent-doc, corky, tagpath)
+- **Moment of need you solve:** businesses drowning in expensive SaaS that AI agents can replace
+- **Proof of concept:** Judith Krug engagement replacing $18K/yr vendor
+- **Market collapsing naturally:** IoT+AI (Ken/Amulet), mortgage automation (Judith), enterprise AI factories (BCG)
+
+**For Laura — the simplest version:**
+> "Getting a traditional job right now is actually the riskiest thing I could do — it's putting all my eggs in one basket with a company that could lay me off tomorrow, like what just happened at Presence AI. What I'm building instead is a business where I have multiple clients, I own the work, and I'm positioned as a specialist in something the market desperately needs. I just need enough runway to land the next 2-3 clients."
+
+**Key quote (Edward Deming):** "Every system is perfectly designed to get the results that it gets." If the job application system isn't working, the answer isn't to apply harder — it's to redesign the system.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

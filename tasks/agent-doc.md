@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.22.0 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.22.1 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.7 (cursor-aware FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 7 FFI exports | **Routing:** numeric session fix (colon suffix)
+**Plugins:** JetBrains v0.2.7 (cursor-aware FFI + VCS refresh) + VS Code v0.2.3 (prepend fix)
+**Library:** `libagent_doc.so` — 7 FFI exports | **Routing:** numeric session fix (colon suffix)
 <!-- /agent:status -->
 
 ## Architecture
@@ -241,6 +241,22 @@ Added `LocalFileSystem.getInstance().refresh(true)` before `markEverythingDirty(
 
 **Note:** The plugin still needs to be reinstalled for these changes to take effect. Current plugin: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
 I still saw the full green gutter. The full green gutter went away after I made an edit.
+
+
+### Re: v0.22.1 Released (HEAD)
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.22.1` |
+| GitHub Release | [v0.22.1](https://github.com/btakita/agent-doc/releases/tag/v0.22.1) |
+| cargo install | updated (replaced v0.22.0) |
+| JetBrains plugin | v0.2.7 (rebuilt with VCS refresh) |
+
+**What's new in v0.22.1:**
+- Any-level `(HEAD)` markers (not just `###`)
+- Multi-heading markers (all root headings in multi-section responses)
+- VCS refresh signal (`vcs-refresh.signal` → plugin triggers `markEverythingDirty()` + VFS refresh)
+Do we need another agent-doc release for these changes?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

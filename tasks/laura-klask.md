@@ -348,7 +348,7 @@ Good call. Asking for advice is stronger than pitching. It's humbler, invites Ke
 Ready to send via corky when you approve.
 I sent the response to Laura. Let's get the email read to send to Ken. I don't want to frame it for his customers. I want to keep it open. Ask for his advice on what to do with what I have and where I'm trying to go.
 
-### Re: Ken emails reviewed — updated draft (HEAD)
+### Re: Ken emails reviewed — updated draft
 
 Found 7 email threads spanning 2006–2014. The most relevant is from **October 2013** — you asked Ken for this exact same kind of guidance:
 

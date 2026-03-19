@@ -75,6 +75,8 @@ src/
     mod.rs          # Agent trait
     claude.rs       # Claude backend (Agent + StreamingAgent)
     streaming.rs    # StreamingAgent trait + stream-json parser
+  parallel.rs       # Parallel fan-out with git worktrees
+  worktree.rs       # Git worktree management for parallel sessions
   audit_docs.rs     # Audit instruction files (via instruction-files crate)
 editors/
   jetbrains/        # IntelliJ plugin (Kotlin/Gradle)

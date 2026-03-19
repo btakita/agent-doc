@@ -223,8 +223,31 @@ Each email is a brief follow-up: "Please use this updated resume — I corrected
 
 Create a contact for Janaki Bhoi <janaki@enfycon.com>
 Note the email correspondence.
+
+### Re: Janaki Bhoi contact created
+
+**Contact created:** `mail/contacts/janaki-bhoi/CLAUDE.md`
+
+| Field | Value |
+|-------|-------|
+| **Name** | Janaki Bhoi |
+| **Company** | Enfycon Inc. (Sr. Talent Acquisition Specialist) |
+| **Email** | janaki@enfycon.com |
+| **Phone** | +1 201-243-4968 |
+| **Client** | Odyssey Technology / Southwest Airlines |
+| **Role** | Python/Java Developer — AWS, SQL-to-DynamoDB Migration |
+| **Contract** | 1099, 12 months |
+| **Location** | Remote (EST/CST) |
+| **Rate** | $105/hr on 1099 |
+| **Skills** | 15+ yrs, Java→Python, AWS, Terraform, DynamoDB, API |
+| **Focus** | Refactor Java→Python, SQL→DynamoDB migration (AWS DMS), GitLab, AI (Amazon Q) |
+| **Status** | Rate confirmation + RTR sent (2026-03-18), awaiting response |
+
+2 email threads found. Strong rate ($105/hr 1099). Java→Python migration fits your background. AWS DMS/DynamoDB migration is a specialized area — you have AWS experience but not specific DMS migration.
+
+Transcribe and diarize janaki-bhoi/recordings
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Send correction emails to all 3 recruiters
+- [x] Create contact for Janaki Bhoi
 <!-- /agent:pending -->

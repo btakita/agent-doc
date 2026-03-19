@@ -301,7 +301,7 @@ Please tell me what happened.
 An agent:exchange component with a patch attribute should default to patch=append.
 
 
-### Re: Exchange Default Mode Fix (HEAD)
+### Re: Exchange Default Mode Fix
 
 Found it. The **plugin's** `extractComponentMode()` was returning `"replace"` as the default when no `patch=` attribute was present. The Rust binary correctly defaults `exchange` → `append` via `default_mode()`, but the plugin didn't have this logic.
 

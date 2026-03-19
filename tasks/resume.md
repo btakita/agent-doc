@@ -665,8 +665,35 @@ send email
 
 Open Gmail → Drafts → review → send.
 compact this file
+
+### Exchange Summary (compacted)
+
+**agent-resume Rust crate** — hybrid architecture: Rust CLI for content assembly, Python for pandoc+weasyprint PDF pipeline. Commands: `build`, `render`, `validate`, `search-index`. Single `resume/data.toml` (14 experiences, 37 skills, 45 accomplishments). Profile-driven phrase/skill bolding. `build.py` 280→125 lines. Search feature: `search.html` + `search-index.json`. 12 pytest tests (LightPanda DOM).
+
+**Deepak Rana / Apex Systems — CVS Health**
+- Contact context: `mail/contacts/deepak-rana/CLAUDE.md` — recruiter at Apex Systems, found on Dice
+- 6 phone calls transcribed (2026-03-17 to 2026-03-18) via ffmpeg + Whisper
+- Role: Full Stack Developer (Python + React + GCP), W2 CTH, 100% remote, $70/hr max
+- Custom profile: `profiles/apex-cvs.toml` — Python/React/GCP emphasis, 8 of 14 experiences
+- GCP bullet added to data.toml: OAuth2 + Gmail API correspondence kit + private GCP apps
+- PDF: `BrianTakita-apex-cvs.pdf`
+- Email drafted and pushed to Gmail Drafts via Gmail API
+
+**Corky v0.18.1 released** — Gmail API email sending
+- `provider = "gmail-api"` accounts use Gmail API for draft push (`drafts.create`) and send (`messages.send`)
+- Scope: `gmail.compose` (covers both drafts and sending; `gmail.send` alone was insufficient)
+- Dedicated OAuth token key (`gmail:<account>:send`) avoids scope collision with sync tokens
+- Published: crates.io, GitHub Release, cargo install
+- Scope fix committed and tag moved forward
+
+**Key decisions:**
+- `gmail.compose` not `gmail.send` — the latter doesn't cover `drafts.create`
+- App Passwords unavailable for btak.dev (no 2FA); OAuth2 via Gmail API is the only path
+- Attachment paths in drafts must be absolute (tilde not expanded for attachments)
+
+Create a contact for Diksha Jaiswal.a
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Review and send email to Deepak
+
 <!-- /agent:pending -->

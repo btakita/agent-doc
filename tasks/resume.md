@@ -881,8 +881,23 @@ Are there instructions to install agent-resume in resume/README.md? I don't see 
 - **GitHub Action** — notes agent-resume install step
 
 commit and push resume
+
+### Re: Resume committed and pushed
+
+**Committed and pushed** to [btakita/resume](https://github.com/btakita/resume):
+
+13 files changed, 2733 insertions, 192 deletions:
+- `data.toml`, `build.py`, `Makefile`, `README.md`
+- `profiles/apex-cvs.toml`, `profiles/deloitte-nodejs.toml`
+- `search.html`, `search-index.json`
+- `BrianTakita.pdf`, `BrianTakita-apex-cvs.pdf`, `BrianTakita-deloitte-nodejs.pdf`
+- `tests/test_search.py`, `.mise.toml`
+
+GitHub Action will rebuild and deploy the PDF to [btakita.github.io/resume](https://btakita.github.io/resume/).
+
+compact this file
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Update resume/README.md with agent-resume install instructions
+- [x] Commit and push resume
 <!-- /agent:pending -->

@@ -320,6 +320,38 @@ Now `&lt;!-- agent:exchange --&gt;` (without explicit `patch=append`) correctly 
 
 Plugin v0.2.7 rebuilt. This fix is included alongside all the other v0.2.7 changes (cursor-aware ordering, VCS refresh signal, any-level HEAD markers).
 So `<!-- agent:exchange -->` should default to the same behavior as `<!-- agent:exchange patch=append -->`.
+
+Please review the current commit + uncommitted state of tasks/judith-krug.md
+
+First, my completed prompt is after the response. The response should **only** come after the patch response when the human has edited the prompt after the agent receives the diff for the request-> response.
+
+Also, the entire patch response seems to be uncommitted. The patch response should be committed save the top level headers.
+
+There are background tasks still running, so I'm not sure if that affects the behavior.
+
+### Re: judith-krug.md Commit + Ordering Issues (HEAD)
+
+**Two separate issues:**
+
+**1. Entire response uncommitted:**
+
+The `judith-krug.md` session was run by a **different Claude session** using the old SKILL.md (which doesn't call `agent-doc commit` after write). Only this session (`tasks/agent-doc.md`) has the immediate-commit behavior because I'm following the updated workflow manually.
+
+**Fix:** The SKILL.md needs to be updated to include `agent-doc commit <FILE>` after `agent-doc write`. Once we update SKILL.md and run `agent-doc skill install`, all sessions will commit immediately. Currently the SKILL.md still says "Do NOT commit after writing the response" (step 5).
+
+**2. User prompt appears after response:**
+
+The user's prompts were part of the exchange BEFORE the response was sent. Looking at the diff:
+- User prompts: "Please use corky to transcribe...", "Robert had some comments...", etc.
+- Response: `#### Re: Judith's Response`, `#### Re: Robert Ward Recording Transcriptions`, etc.
+
+The prompts appear below the response because the **plugin applied the append patch at the end of existing content** (the old behavior without cursor-aware ordering). The plugin hasn't been reinstalled yet with v0.2.7.
+
+**Both issues resolve with:**
+1. Install plugin v0.2.7 → cursor-aware ordering + VCS refresh
+2. Update SKILL.md → immediate commit after write
+
+Want me to update SKILL.md now? This will affect ALL future sessions after `/compact`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

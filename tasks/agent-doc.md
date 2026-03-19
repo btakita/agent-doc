@@ -580,6 +580,33 @@ Could also be automatic based on task verbs ("implement/fix/add" → worktree, "
 Adding `--no-worktree` is ~10 lines: skip `worktree::create`, set CWD to project root, skip `worktree::diff`. Want me to add it?
 
 Yes...add `--no-worktree`.
+
+Rename `deep.rs` to `parallel.rs`
+
+> Cleaned up 3 orphan panes:
+> - Session 0: killed %99 (idle shell in window @348)
+> - Session 1: killed %98, %97 (idle shells in windows @345, @344)
+
+What was the root cause of the orphan panes?
+
+### Re: `--no-worktree` Added
+
+Added `--no-worktree` flag to `agent-doc deep`:
+
+```bash
+agent-doc deep plan.md \
+  --task "Analyze auth module for vulnerabilities" \
+  --task "Find all usages of deprecated API" \
+  --no-worktree
+```
+
+**Changes:**
+- `DeepConfig.no_worktree: bool` — new field
+- When `--no-worktree`: tasks run in project root (shared CWD), no `worktree::create`, no `worktree::diff` in collection
+- When worktrees enabled (default): unchanged behavior
+- CLI: `--no-worktree` flag in `Deep` variant
+
+Tests: 460 passing, compiles clean.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

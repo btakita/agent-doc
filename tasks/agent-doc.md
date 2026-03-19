@@ -1469,15 +1469,61 @@ As I made an inline correction to:
 
 > Test run did not work with tasks/laura-klask.md. The entire uncommitted area should have been committed except:
 
+The previous uncommitted hunk became committed. But the entire region after the change remain uncommitted.
+
+![img_3.png](img_3.png)
+
+Also the CRDT placed the patch update below where I was currently typing prompting. The patch agent edit should have been placed above wher I was currently prompting.
+
+You can see the current placement.
+
 ### Re: HEAD Marker Fixed — Now Matches Any `### ` Heading
 
 The issue: `add_head_marker()` only matched `### Re:` headings, but `tasks/laura-klask.md` uses `### Current drafts — full summary` as the agent response heading.
 
 **Fixed:** Changed `rfind("\
 ### Re:")` → `rfind("\
-### ")` to match any h3 heading. Agent responses can use any `### ` heading format across documents — the marker always targets the **last** one in the snapshot. (HEAD)
+### ")` to match any h3 heading. Agent responses can use any `### ` heading format across documents — the marker always targets the **last** one in the snapshot.
 
 Release binary rebuilt. Will take effect on the next commit cycle for all documents.
+
+I don't necessarily want to key in on the h3 element. Instead key in on the leading header for the agent response patch.
+
+### Re: HEAD Marker Targeting + CRDT Ordering
+
+**Three issues addressed:**
+
+**1. "Previous uncommitted hunk became committed"**
+
+This is correct behavior — the snapshot includes your prompt that triggered the response. Since that prompt was "sent to the agent" for processing, it gets committed along with the response. Only edits typed AFTER the response stay uncommitted. The boundary is: everything in the snapshot = committed, everything after = uncommitted.
+
+**2. CRDT placed patch below typing**
+
+The cursor-aware ordering fix is in the plugin but the **plugin hasn't been reinstalled yet**. You need to:
+1. IDEA → Settings → Plugins → gear → "Install Plugin from Disk..."
+2. Select `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+3. Restart IDEA
+
+The native FFI `agent_doc_apply_patch_with_caret` and the Kotlin fallback `applyComponentPatchWithCaret` are both in the new plugin build.
+
+**3. Key on leading header of agent response patch, not last `### `**
+
+You're right — the current `rfind("\
+### ")` finds the last h3 in the ENTIRE document, which could be a user-written heading. The marker should target the **first line of the agent's appended content**. (HEAD)
+
+**Better approach:** Compare the snapshot against git HEAD to find exactly what content was appended by the agent. The first heading in that diff is the target.
+
+```rust
+fn add_head_marker(content: &str, file: &Path) -> String {
+    // 1. Get git HEAD content for this file
+    // 2. Find the first new "### " heading in content that isn't in HEAD
+    // 3. Add (HEAD) to that heading
+}
+```
+
+This targets the correct heading regardless of document structure — it's the first heading in the agent's appended content, not the last heading overall.
+
+Want me to implement this improved targeting?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

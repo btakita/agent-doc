@@ -1160,6 +1160,53 @@ FileEditorManager → TextEditor → caretModel.offset
 
 Can this logic be moved to the shared library FFI part of the plugin?
 So it can work across all editor plugins?
+
+### Re: First-Submit Fix Verified + FFI for Cursor-Aware Ordering
+
+**First-submit fix works.** Verified with a test: committed file with no snapshot now produces the full file as the diff. Log changes from `recovering from git` to `git matches current — treating as first submit`.
+
+```
+$ agent-doc diff test.md
+[snapshot] No snapshot file, git matches current — treating as first submit
+[diff] doc_len=146 snap_len=0
+[diff] changes detected, computing unified diff
++---
++agent_doc_session: test-123
+...entire file as diff...
+```
+
+**On moving cursor-aware logic to FFI — yes, absolutely.**
+
+**New FFI function** (avoids breaking existing callers):
+
+```rust
+// ffi.rs
+pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
+    doc: *const c_char,
+    component_name: *const c_char,
+    content: *const c_char,
+    mode: *const c_char,
+    caret_offset: i32,  // -1 = no caret info (normal append)
+) -> FfiPatchResult
+```
+
+When `mode == "append"` and `caret_offset >= 0` and the caret is inside the component: insert content at the line boundary before the caret. Otherwise: normal behavior.
+
+**Implementation plan:**
+1. `component.rs` — `apply_patch_with_caret()` (pure Rust, testable)
+2. `ffi.rs` — `agent_doc_apply_patch_with_caret()` (C ABI)
+3. `NativeLib.kt` — JNA binding for the new FFI function
+4. `PatchWatcher.kt` — call native when caret is known, keep Kotlin as fallback
+5. VS Code — same pattern in TypeScript bindings
+
+The Kotlin `applyComponentPatchWithCaret()` stays as fallback when native is unavailable, but the real logic lives in Rust once.
+
+Want me to implement?
+
+yes. Why is this not added to agent:pending?
+
+Why did you miss the following inline prompt?
+> agent-doc should process the entire file. The diff should essentially be the entire file in this case.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

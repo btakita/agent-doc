@@ -174,7 +174,7 @@ I added kklask@pacbell.net as well.
 `corky filter push` — 3 filters pushed to Gmail.
 
 The correspondence filter now includes `*@amulettechnologies.com`. Any emails from/to Amulet Technologies addresses will be labeled "correspondence" and marked important. Ken's email will be captured automatically when it comes through.
-### Re: mention Ken to Laura? (HEAD)
+### Re: mention Ken to Laura?
 
 **Yes — mention it, but lightly.** You're reaching out to Ken directly, so Laura doesn't need to broker anything. But telling her avoids the awkwardness of Ken bringing it up first.
 
@@ -223,6 +223,39 @@ Help me communicate my aspirations as being more effective, lower risk, and havi
 > "Getting a traditional job right now is actually the riskiest thing I could do — it's putting all my eggs in one basket with a company that could lay me off tomorrow, like what just happened at Presence AI. What I'm building instead is a business where I have multiple clients, I own the work, and I'm positioned as a specialist in something the market desperately needs. I just need enough runway to land the next 2-3 clients."
 
 **Key quote (Edward Deming):** "Every system is perfectly designed to get the results that it gets." If the job application system isn't working, the answer isn't to apply harder — it's to redesign the system.
+
+Show me the current draft
+### Current drafts — full summary (HEAD)
+
+**Already sent (LinkedIn message to Laura):**
+> Hi Laura! How are you? Just wanted to say hi. I'm unemployed since Presence AI suddenly went out of business.
+>
+> Been doing some interesting things with Agentic AI loops. There's some interesting changes going on in software development. I'm finding that the coding I used to do is essentially the new assembly language with new sophisticated compilers coming out. But that reorients the problem & opportunity space to a much bigger place.
+>
+> It would be good to catch up whenever you are free. Would love to hear how you are. How things are going @ Amulet.
+
+**Draft email to Ken (not yet sent):**
+> Subject: AI + embedded displays — potential collaboration
+>
+> Hi Ken,
+>
+> Hope you and Laura are doing well.
+>
+> I've been building agent orchestration tools — systems that let AI agents interact with real-world interfaces through structured documents. I'm curious whether any of Amulet's customers have been asking about AI-driven control for their LCD-based products.
+>
+> The pattern I've built (agent-doc) lets agents read and write to structured interfaces, which could map well to embedded display workflows — think natural language commands driving device state through your controllers.
+>
+> Would love to have a quick call to explore whether there's something here. No pressure — just family brainstorming.
+>
+> Brian
+
+**Prepared talking points for follow-up with Laura (when she responds):**
+1. "Getting a traditional job is actually the riskiest thing I could do — one employer, one basket, and they can lay me off tomorrow like Presence AI did."
+2. "I'm building a specialist business with multiple clients. I just need runway to land the next 2-3."
+3. "I'm also going to reach out to Ken about some potential overlap between what I'm building and Amulet's work — just exploring ideas."
+4. Referral pitch Laura can use: "My brother automates business workflows with AI agents. His first client replaced an $18K/year software vendor."
+
+**Next action:** Wait for Laura's response, then follow up using these talking points.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

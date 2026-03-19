@@ -691,9 +691,33 @@ compact this file
 - App Passwords unavailable for btak.dev (no 2FA); OAuth2 via Gmail API is the only path
 - Attachment paths in drafts must be absolute (tilde not expanded for attachments)
 
-Create a contact for Diksha Jaiswal.a
+Create a contact for Diksha Jaiswal.
+Email address is diksha@bitsoft.com
+
+### Re: Diksha Jaiswal contact created
+
+**Contact created:** `mail/contacts/diksha-jaiswal/CLAUDE.md`
+
+| Field | Value |
+|-------|-------|
+| **Name** | Diksha Jaiswal |
+| **Company** | Bitsoft International (Sr. Technical Recruiter) |
+| **Email** | diksha@bitsoft.com |
+| **Phone** | 630-592-2103 |
+| **Client** | Deloitte |
+| **Role** | NodeJS Backend Engineer (DLTJP00053765) |
+| **Contract** | W2 without benefits, 6+ months |
+| **Location** | 100% remote |
+| **Rate** | $60/hr W2 (agreed from $80-100 ask) |
+| **Skills** | NodeJS (6-9 yrs), AWS (ECS, DocDB, IAM), Kafka, NoSQL |
+| **Focus** | CDC/streaming ingestion pipelines, AWS microservices |
+| **Status** | Interest confirmed, rate agreed, RTR/confirmation emails exchanged (Mar 17-18) |
+
+5 email threads found in `mail/conversations/` covering initial outreach, rate negotiation, and RTR confirmation.
+
+transcribe + diarize diksha-jaiswal/recordings 
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-
+- [x] Create contact for Diksha Jaiswal
 <!-- /agent:pending -->

@@ -628,6 +628,25 @@ Given that v0.20.2 was released earlier this session and the orphans appeared af
 
 Investigate if there's a code path.
 It may also be leftover tmux panes created before v0.20.2 was developed a few hours ago.
+
+audit docs
+
+### Re: Orphan Investigation — No Wrong-Session Code Path Found
+
+**Thorough audit result:** All pane creation paths properly handle session names. No code path creates panes in the wrong session post-v0.20.2.
+
+| Creation function | Colon suffix | Risk |
+|-------------------|-------------|------|
+| `new_window()` | YES (auto) | None |
+| `new_session()` | N/A (creates session) | None |
+| `split_window()` | Uses pane ID (not session name) | None |
+| `ensure_stash_window()` | YES (auto) | None |
+
+**Plugin check:** Both JetBrains and VS Code plugins delegate to the CLI (`agent-doc route`, `agent-doc claim`, `agent-doc sync`). No direct tmux commands that create panes.
+
+**Conclusion: The orphans predated v0.20.2.** The colon suffix fix was developed and released during this session. Panes created before the fix (by `new_window("-t", "0")` without colon) could land in session 1 when the user was viewing session 1. Those orphans lingered until we killed them manually.
+
+**No further code changes needed.** The v0.20.2 fix covers all creation paths. If orphans reappear after this point, it would indicate a new bug — but the audit shows no remaining vulnerability.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.22.1 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.22.2 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.7 (cursor-aware FFI + VCS refresh) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` — 7 FFI exports | **Routing:** numeric session fix (colon suffix)
+**Plugins:** JetBrains v0.2.7 (cursor-aware FFI + VCS refresh + default modes) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 7 FFI exports | **SKILL.md:** immediate commit after write
 <!-- /agent:status -->
 
 ## Architecture
@@ -352,6 +352,28 @@ The prompts appear below the response because the **plugin applied the append pa
 2. Update SKILL.md → immediate commit after write
 
 Want me to update SKILL.md now? This will affect ALL future sessions after `/compact`.
+
+Is this skill part of the current agent-doc package? Was it installed when agent-doc was upgraded?
+
+### Re: SKILL.md Bundled + v0.22.2 Released (HEAD)
+
+**Yes, SKILL.md is bundled with the binary** via `include_str!`. When you run `agent-doc skill install`, it writes the bundled version to `.claude/skills/agent-doc/SKILL.md`. But the v0.22.0/v0.22.1 binary still had the old "Do NOT commit after writing" instruction.
+
+**Fixed in v0.22.2:** Updated the bundled SKILL.md to say "Commit immediately after writing the response." Now when any session runs the pre-flight version check and calls `agent-doc skill install`, it gets the new behavior.
+
+**v0.22.2 released and installed:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.22.2` |
+| GitHub Release | [v0.22.2](https://github.com/btakita/agent-doc/releases/tag/v0.22.2) |
+| cargo install | updated |
+| Skill installed | `.claude/skills/agent-doc/SKILL.md` updated |
+
+**For other sessions to pick up the change:** They need to either:
+1. Run `/compact` (reloads SKILL.md from disk)
+2. Start a new session (loads fresh SKILL.md)
+3. The pre-flight auto-update check will detect the version mismatch and install automatically
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

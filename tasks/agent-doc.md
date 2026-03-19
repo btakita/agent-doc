@@ -1257,6 +1257,64 @@ Let's also have a single link of uncommited text. Here is what I propose:
 This will make it easier to see where the HEAD response starts using the git uncommitted indicator at the beginning of the agent patch.
 
 Any inline human prompting will be uncommitted. So agent-doc can easily send it via diff for prompting.
+
+### Re: Pending Reliability + Selective Commit Strategy
+
+**1. Pending behavior reliability**
+
+This is **entirely SKILL.md behavior** — no binary changes needed. The binary has no concept of pending items; it just stores/retrieves component content. The skill (me) is responsible for:
+- Detecting action items in the diff ("yes", "implement", explicit task descriptions)
+- Populating pending before responding
+- Flushing to disk before generating
+
+The fix is behavioral: I need to treat affirmative responses ("yes", "do it", approval of a plan) as pending items and flush them before starting work. This is a SKILL.md protocol issue, not a code issue.
+
+**2. Selective commit strategy — design**
+
+Currently `agent-doc commit` does `git add -f <file> && git commit`. The entire file (agent response + user edits) gets committed. Your proposal creates two visual zones in the git gutter:
+
+| Zone | Git status | Purpose |
+|------|-----------|---------|
+| Agent response | **Committed** (no gutter) | Clean baseline from last cycle |
+| User's new input | **Uncommitted** (green gutter) | Shows what will be sent as the next prompt |
+
+**This requires binary changes.** The approach:
+
+1. **`agent-doc write`** saves the response content boundaries (byte offsets) alongside the snapshot
+2. **`agent-doc commit`** reads those boundaries and uses `git add --patch` (or equivalent) to stage only the agent response portion
+3. User edits outside the response boundaries stay unstaged
+
+**Simpler alternative using snapshots:**
+
+Instead of selective `git add`, we can:
+1. After `agent-doc write` completes, save the document state as the "committed baseline"
+2. On `agent-doc commit`, write the baseline to the file, `git add && commit`, then restore the current file (with user edits)
+
+This is effectively: commit the snapshot (which has the response but not the user's subsequent edits), then restore the live file.
+
+```
+agent-doc commit <FILE>:
+  1. Read snapshot (= document after last agent-doc write)
+  2. Write snapshot content to FILE
+  3. git add -f FILE && git commit
+  4. Write current content back to FILE (restoring user edits)
+```
+
+The snapshot already captures exactly the right state — document + agent response, before any user edits.
+
+**On the `### Re:` marker:** Adding `(HEAD)` or similar to the heading is a nice UX touch but not strictly necessary for the selective commit to work. The snapshot-based approach doesn't need content markers. But if you want the visual indicator in the document, we can add it.
+
+I want a visual boundary indicator and navigation point in the document for UX.
+The uncommitted line will provide that.
+
+Which approach do you prefer? I'd recommend the snapshot-based method — it's simpler and uses existing infrastructure.
+
+Will the snapshot cause external edits? External edits cannot happen.
+I'm asking for a selective commit.
+Ideally, the commit will be whatever diff was sent to the agent for processing.
+Any edits that occurred after sending the diff should be uncommitted.
+
+
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

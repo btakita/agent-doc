@@ -512,6 +512,44 @@ We have more problems with the tmux panes. Same set of issues.
 
 I thought we just added a feature to have a 1-to-1 binding between the tmux session and the agent-doc project.
 Why are these issues still happening?
+
+### Re: Persistent Tmux Pane Issues — Deeper Root Cause
+
+The v0.20.1 session affinity fix prevents the *fallback* from targeting the wrong session. But the panes are still being created in session 1 through a different path.
+
+**Finding:** `sessions.json` is empty (`{}`). All registered panes were pruned as dead. With an empty registry, every route creates a brand new pane via `auto_start_in_session()`.
+
+**The real problem is `auto_start_in_session` line 312:**
+```rust
+let existing_pane = find_registered_pane_in_session(tmux, session_name, "");
+```
+When `find_registered_pane_in_session` returns `None` (empty registry), the code falls to line 350:
+```rust
+let pane = tmux.auto_start(session_name, &cwd)?;
+```
+This calls `tmux.new_window("0", &cwd)` which runs `tmux new-window -a -t 0 ...`. This SHOULD create the window in session `0`.
+
+**But there are 5 agent-doc windows in session 1.** This means either:
+1. `tmux new-window -t 0` is somehow creating windows in session 1 (unlikely)
+2. The panes are being **moved** after creation by the `sync` or `layout` code
+3. The `stash_pane` logic is moving panes to the wrong session's stash
+
+I need to investigate `stash_pane` and `sync` more deeply. The window accumulation pattern suggests that each route:
+1. Creates a new pane (because registry is empty)
+2. Stashes it (or fails to stash)
+3. The pane ends up in a new window instead of the existing stash
+
+This is a window proliferation bug, not a session affinity bug. The fix needs to be in `auto_start_in_session` — it should detect existing agent-doc windows and join them, not create new ones.
+
+Want me to dig deeper into `stash_pane` and the sync code to find the exact path creating windows in session 1?
+
+yes
+
+There are also 26 bashes in the current claude session. Calling the following 26 times:
+
+```
+cat .agent-doc/claims.log 2>/dev/null; > .agent-doc/claims.log 2>/dev/null; echo "(claims log… (running)
+```
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -316,7 +316,7 @@ Should I say a bit more or is this all that needs to be said?
 If the follow-up also gets silence, that's your answer — and you can still build the Ken relationship independently.
 I sent the message on 2/27...20 days ago. Laura has not responded. She read the message but did not respond.
 
-### Re: Ken email — ask for advice, not pitch (HEAD)
+### Re: Ken email — ask for advice, not pitch
 
 Good call. Asking for advice is stronger than pitching. It's humbler, invites Ken in as a mentor, and lets him connect the dots himself. If there's an opportunity, he'll see it.
 

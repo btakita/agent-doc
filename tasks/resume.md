@@ -581,12 +581,62 @@ I have the username and password for the gmail account. Is the only way to login
 **Alternative:** `corky draft push <file>` (without `--send`) saves to Gmail Drafts via IMAP, then you send from the Gmail web UI. This is the safer default per corky's CLAUDE.md rules.
 
 **Note:** The Gmail API *could* theoretically be extended to support sending (it has a `messages.send` endpoint), but corky hasn't implemented that path yet. The SMTP + App Password approach works today.
+
+Implement this path
+
+### Re: GCP update, SMTP question, and Gmail API sending
+
+**1. data.toml updated + PDF rebuilt.** Added GCP accomplishment under Open Source experience:
+> "Built and deployed Google Cloud Platform applications including a public correspondence kit with OAuth2 + Gmail API integration and private data management tools"
+
+PDF rebuilt: file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-apex-cvs.pdf
+
+**2. SMTP with regular password — no, Google blocks it.**
+
+Google disabled "Less Secure Apps" access entirely in 2022. Regular username+password cannot authenticate to `smtp.gmail.com` anymore. The only options are:
+- App Passwords (which aren't available for your account — likely because it doesn't have 2FA enabled, and Google now requires 2FA to generate App Passwords)
+- OAuth2
+
+Since App Passwords aren't available, the right path is **Gmail API via OAuth2** — which is exactly what your `btak.dev` account already uses for sync.
+
+**3. Gmail API sending — implemented.**
+
+Added Gmail API send and draft-push to corky. Changes in `src/corky/`:
+
+| File | Change |
+|------|--------|
+| `src/filter/gmail_auth.rs` | Added `GMAIL_SEND_SCOPE`, `scoped_token_key()`, `get_send_access_token()` |
+| `src/draft/mod.rs` | Added `send_via_gmail_api()`, `push_to_drafts_via_gmail_api()`, provider branching in `run()` |
+
+**How it works:**
+- Accounts with `provider = "gmail-api"` (like `btak.dev`) automatically use Gmail API for both draft push and send
+- Uses a dedicated OAuth token key (`gmail:btak.dev:send`) to avoid scope collision with the sync token
+- First use will open browser for OAuth consent (one-time — grants `gmail.send` scope)
+- After that, token is cached and auto-refreshes — no browser needed
+
+**All 217 tests pass.** No new dependencies required (`ureq`, `base64`, `serde_json` already in Cargo.toml).
+
+**To push the Deepak email as a Gmail draft:**
+```bash
+cd mail && corky draft push drafts/2026-03-19-re-rtr-right-to-represent-full-stack-developer-apex-cvs.md
+```
+
+This will trigger a one-time OAuth consent in the browser (granting `gmail.send` scope), then push the draft to your Gmail Drafts folder via the API. After that, you can review and send from Gmail web UI.
+
+Or to send directly:
+```bash
+cd mail && corky draft push drafts/2026-03-19-re-rtr-right-to-represent-full-stack-developer-apex-cvs.md --send
+```
+(Requires draft status to be `review`, `approved`, or `scheduled` first.)
+
+release
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Create deepak-rana contact context
 - [x] Transcribe 6 phone call recordings
 - [x] Create custom Apex Systems resume profile
-- [ ] Update data.toml with GCP accomplishments and rebuild PDF
+- [x] Update data.toml with GCP accomplishments and rebuild PDF
+- [x] Implement Gmail API sending in corky
 - [ ] Review and send email to Deepak
 <!-- /agent:pending -->

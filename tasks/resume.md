@@ -869,8 +869,20 @@ Note: It created a new thread rather than replying to Diksha's original thread b
 
 Are there instructions to install agent-resume in resume/README.md? I don't see it. Please update
 
+### Re: README updated with agent-resume install instructions
+
+**Updated `resume/README.md`** with:
+
+- **Prerequisites section** — lists agent-resume, pandoc, weasyprint, Python 3.11+
+- **Installing agent-resume** — `cargo install agent-resume` + build-from-source option
+- **Updated pipeline diagram** — shows `data.toml` → `agent-resume build` → pandoc → weasyprint (replaces old `BrianTakita.md` direct pipeline)
+- **Search section** — links to search.html + `search-index` regeneration command
+- **Testing section** — `make test` (12 tests)
+- **GitHub Action** — notes agent-resume install step
+
+commit and push resume
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-
+- [x] Update resume/README.md with agent-resume install instructions
 <!-- /agent:pending -->

@@ -10,10 +10,9 @@ agent_doc_write: crdt
 <!-- agent:status patch=replace -->
 - [x] Contact created: `mail/contacts/laura-klask/CLAUDE.md`
 - [x] Contact created: `mail/contacts/ken-klask/CLAUDE.md`
-- [x] Gmail filters synced — `*@amulettechnologies.com` added to correspondence
-- [ ] LinkedIn message read but no response (20 days, sent 2/27)
-- [ ] Decision: send follow-up nudge to Laura?
-- [ ] Decision: send Ken email independently?
+- [x] Gmail filters synced
+- [x] Follow-up nudge sent to Laura
+- [ ] Ken email drafted — awaiting approval to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -315,7 +314,38 @@ Should I say a bit more or is this all that needs to be said?
 **Recommendation:** Do both #1 and #2. The follow-up gives Laura one more chance with zero pressure. Emailing Ken shows you're taking action, not waiting for permission. Laura's non-response shouldn't block the Amulet collaboration.
 
 If the follow-up also gets silence, that's your answer — and you can still build the Ken relationship independently.
-I sent the message on 2/27...20 days ago. Laura has not responded. She read the message but did not respond. 
+I sent the message on 2/27...20 days ago. Laura has not responded. She read the message but did not respond.
+
+### Re: Ken email — ask for advice, not pitch (HEAD)
+
+Good call. Asking for advice is stronger than pitching. It's humbler, invites Ken in as a mentor, and lets him connect the dots himself. If there's an opportunity, he'll see it.
+
+**Revised email to Ken:**
+
+> Subject: Catching up — could use your perspective
+>
+> Hi Ken,
+>
+> Hope you and Laura are doing well.
+>
+> I've been building agent orchestration tools — systems that let AI agents interact with real-world interfaces through structured documents. I'm at a point where the tooling works and I have a client engagement in progress, but I'm figuring out where to focus next.
+>
+> You've been building Amulet for 25+ years and I really respect what you've done with GEMstudio and the HMI space. I'd love to get your perspective — given what I'm building, where do you think the biggest opportunities are? What would you do if you were in my shoes?
+>
+> Would be great to catch up over a quick call whenever you have time. No agenda — just looking for honest advice from someone I trust.
+>
+> Brian
+
+**Why this works better:**
+- Leads with respect for his experience, not your product
+- "Where do you think the biggest opportunities are?" — makes him the expert
+- "What would you do in my shoes?" — people love answering this question
+- No pitch, no customer framing — just a family conversation
+- If he sees a fit with Amulet, he'll bring it up himself
+- "Someone I trust" — invokes the family bond without being heavy
+
+Ready to send via corky when you approve.
+I sent the response to Laura. Let's get the email read to send to Ken. I don't want to frame it for his customers. I want to keep it open. Ask for his advice on what to do with what I have and where I'm trying to go.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

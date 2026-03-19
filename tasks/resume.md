@@ -246,8 +246,28 @@ Note the email correspondence.
 2 email threads found. Strong rate ($105/hr 1099). Java→Python migration fits your background. AWS DMS/DynamoDB migration is a specialized area — you have AWS experience but not specific DMS migration.
 
 Transcribe and diarize janaki-bhoi/recordings
+
+### Re: Janaki Bhoi recordings transcribed
+
+**3 calls transcribed** via ffmpeg + Whisper:
+
+| Call | Date | Duration | Summary |
+|------|------|----------|---------|
+| 1 | Mar 18 2:41 PM | 8 min | Initial call — role details, confirmed Python/AWS/DynamoDB, $105/hr agreed |
+| 2 | Mar 18 3:20 PM | 3 min | Follow-up — confirmed Terraform, clarified DynamoDB target |
+| 3 | Mar 18 5:52 PM | 1 min | Check-in — waiting for resume |
+
+**Key details from calls:**
+- Brian confirmed: 20+ years Python, 10-15 years AWS, DynamoDB, Terraform
+- Rate: $105/hr (1099/W2/C2C options)
+- SQL→DynamoDB migration using AWS DMS
+- End client: Southwest Airlines via Odyssey Technology
+
+Contact file updated with call history. Resume + RTR still pending — want me to create a profile and draft a response?
+
+Yes
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create contact for Janaki Bhoi
+- [x] Transcribe janaki-bhoi recordings
 <!-- /agent:pending -->

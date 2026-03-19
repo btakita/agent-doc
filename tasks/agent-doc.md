@@ -1207,11 +1207,62 @@ yes. Why is this not added to agent:pending?
 
 Why did you miss the following inline prompt?
 > agent-doc should process the entire file. The diff should essentially be the entire file in this case.
+
+### Re: Pending Management + Missed Prompt + FFI Implementation
+
+**On `agent:pending`:** You're right — when you said "yes" to "Want me to implement?", I should have added the task to pending before starting work. I've now flushed `- [ ] Move cursor-aware patch logic to shared library FFI` to pending. I'll follow the pending protocol going forward: populate → flush → process → mark done.
+
+How can we ensure that this behavior will work in the future?
+Does anything need to be implemented in the agent-doc binary? Or is this entirely optimizing the SKILL.md?
+
+
+
+**On the missed blockquote prompt:** The blockquote `> agent-doc should process the entire file` was inline feedback confirming the expected behavior of the first-submit fix. I treated it as context for the fix rather than a separate action item. You're right that it deserved explicit acknowledgment — the fix does exactly this: when no snapshot exists and git content matches the current file, `snapshot::resolve()` returns `None`, so the entire file becomes the diff.
+
+
+---
+
+**Cursor-aware FFI — Implemented**
+
+Moved the logic to the shared library as requested:
+
+**`component.rs`** — new method `Component::append_with_caret()`:
+- Takes optional `caret_offset: Option<usize>`
+- If caret is inside the component: inserts content at the line boundary before the caret
+- If caret is outside or `None`: normal append
+- Pure Rust, testable, no dependencies on editor APIs
+
+**`ffi.rs`** — new export `agent_doc_apply_patch_with_caret()`:
+- Same signature as `agent_doc_apply_patch` + `caret_offset: i32` (-1 = normal)
+- When `mode == "append"` and `caret_offset >= 0`: parses components, finds the target, delegates to `append_with_caret()`
+- Otherwise: falls through to normal `apply_patches_with_overrides`
+
+**`NativeLib.kt`** — JNA binding + `NativePatching.applyComponentPatchWithCaret()`:
+- Calls the new FFI function with the caret offset
+- Automatic memory management (free returned strings)
+
+**`PatchWatcher.kt`** — updated flow:
+1. Try native FFI `applyComponentPatchWithCaret()` (Rust)
+2. Kotlin fallback `applyComponentPatchWithCaret()` if native unavailable
+3. Normal apply if neither applies
+
+**Tests:** 466 Rust (all passing). Kotlin compiles + builds clean.
+
+I think we need to only commit the agent patch edit.
+Let's leave any user input an uncommitted.
+Let's also have a single link of uncommited text. Here is what I propose:
+- `### Re: Pending Management + Missed Prompt + FFI Implementation (HEAD)` should be committed. We can use a different value from `(HEAD)`.
+- `### Re: Pending Management + Missed Prompt + FFI Implementation` should be uncommitted.
+
+This will make it easier to see where the HEAD response starts using the git uncommitted indicator at the beginning of the agent patch.
+
+Any inline human prompting will be uncommitted. So agent-doc can easily send it via diff for prompting.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] Move cursor-aware patch logic to shared library FFI (`agent_doc_apply_patch_with_caret`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))

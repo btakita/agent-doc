@@ -189,7 +189,7 @@ Release binary rebuilt. Plugin v0.2.7 rebuilt with VCS refresh support. Install 
 Can the plugin force a refresh of the git state?
 
 
-### Re: Multi-Heading HEAD Marker (HEAD)
+### Re: Multi-Heading HEAD Marker
 
 Fixed. `add_head_marker()` now marks ALL new `### ` headings in the agent's response, not just the last one.
 
@@ -202,9 +202,9 @@ Fixed. `add_head_marker()` now marks ALL new `### ` headings in the agent's resp
 
 For your `tasks/laura-klask.md` case with two response sections, both would now get the marker:
 ```
-### Re: Amulet Technologies review (HEAD)    ← blue gutter (HEAD)
+### Re: Amulet Technologies review (HEAD)    ← blue gutter
 ...response content...                       ← no gutter (committed)
-### Re: Laura follow-up length (HEAD)        ← blue gutter (HEAD)
+### Re: Laura follow-up length (HEAD)        ← blue gutter
 ...response content...                       ← no gutter (committed)
 ```
 

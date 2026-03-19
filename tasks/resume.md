@@ -851,8 +851,26 @@ Draft status updated to `sent`.
 Yes — corky can send directly via Gmail API for `gmail-api` provider accounts. `corky draft push <file> --send` sends immediately (requires status = `approved`, `review`, or `scheduled`). Without `--send`, it pushes to Gmail Drafts for manual review.
 
 I don't see the Deloitte response in the btak.dev@gmail.com account.
+
+### Re: Verifying Diksha email delivery
+
+**The email was sent successfully.** Verified via Gmail API:
+
+- **Message ID:** `19d04a58185c3ebc`
+- **Labels:** `SENT`
+- **From:** btak.dev@gmail.com
+- **To:** diksha@bitsoft.com
+- **Subject:** Re: Deloitte NodeJS Backend Engineer DLTJP00053765 - Remote - Rate Confirmation
+- **Date:** Wed, 18 Mar 2026 22:50:48 -0700
+
+It's in your **Sent** folder, not Inbox. Check Gmail → Sent (or search `to:diksha@bitsoft.com`).
+
+Note: It created a new thread rather than replying to Diksha's original thread because we didn't set `in_reply_to` with her original Message-ID. The email content is correct though — Diksha will see it as a new message with the matching subject line, which Gmail may still thread together on her end.
+
+Are there instructions to install agent-resume in resume/README.md? I don't see it. Please update
+
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Draft and send reply to Diksha
+
 <!-- /agent:pending -->

@@ -367,6 +367,60 @@ agent-doc deep plan.md \
 **Tests:** 460 total (9 new worktree tests + 451 existing). All passing, compiles clean.
 
 Show me an example of using markdown agent doc to trigger agent-doc deep
+
+### Re: Document-Triggered `agent-doc deep`
+
+The user writes a `deep:` directive in the exchange. The skill parses it, calls `agent-doc deep`, and writes results back.
+
+**User writes:**
+```markdown
+deep:
+- Implement JWT auth middleware in src/auth.rs
+- Write integration tests for the auth middleware
+- Add auth documentation to README.md
+```
+
+**Skill runs:**
+```bash
+agent-doc deep plan.md \
+  --task "Implement JWT auth middleware in src/auth.rs" \
+  --task "Write integration tests for the auth middleware" \
+  --task "Add auth documentation to README.md"
+```
+
+**Results appear in the exchange** as collapsible sections with agent output + git diffs per task.
+
+**Full template document example:**
+```markdown
+---
+agent_doc_session: abc123
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
+---
+# My Project
+
+## Status
+<！-- agent:status patch=replace -->
+Idle
+<！-- /agent:status -->
+
+## Exchange
+<！-- agent:exchange patch=append -->
+
+deep:
+- Implement JWT auth middleware
+- Write integration tests
+- Add auth documentation
+
+<！-- /agent:exchange -->
+```
+
+The `deep:` prefix is the trigger. The skill extracts tasks (bullet items), calls `agent-doc deep`, captures stdout (formatted markdown results with diffs), and writes it back to the exchange via `agent-doc write --stream`.
+
+**Note:** The `deep:` convention is skill-level (SKILL.md), not binary-level. The binary just accepts `--task` flags. The skill bridges document syntax → CLI.
+
+Add instructions for both the cli and agent-doc markdown in the README.md
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

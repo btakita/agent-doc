@@ -227,9 +227,9 @@ However the section title uncommited response only applied to the last section. 
 `add_head_marker()` now matches ANY markdown heading level (`#` through `######`). Only the **root-level** (shallowest) headings in the new content get marked:
 
 ```
-## Summary (HEAD)           ← root level, marked (HEAD)
+## Summary (HEAD)           ← root level, marked
 ### Details                 ← sub-heading, NOT marked
-## Recommendations (HEAD)   ← root level, marked (HEAD)
+## Recommendations (HEAD)   ← root level, marked
 ### Item 1                  ← sub-heading, NOT marked
 ```
 

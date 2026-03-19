@@ -297,6 +297,29 @@ The fix is already built in `agent-doc-jetbrains-0.2.7.zip`. Once installed:
 
 This will fix the prompt-splitting issue for all future responses.
 Please tell me what happened.
+
+An agent:exchange component with a patch attribute should default to patch=append.
+
+
+### Re: Exchange Default Mode Fix (HEAD)
+
+Found it. The **plugin's** `extractComponentMode()` was returning `"replace"` as the default when no `patch=` attribute was present. The Rust binary correctly defaults `exchange` → `append` via `default_mode()`, but the plugin didn't have this logic.
+
+**Fix:** Added `defaultMode(component)` to `PatchWatcher.kt`:
+
+```kotlin
+private fun defaultMode(component: String): String {
+    return when (component) {
+        "exchange", "findings" -> "append"
+        else -> "replace"
+    }
+}
+```
+
+Now `&lt;!-- agent:exchange --&gt;` (without explicit `patch=append`) correctly defaults to append mode in the plugin, matching the Rust binary behavior.
+
+Plugin v0.2.7 rebuilt. This fix is included alongside all the other v0.2.7 changes (cursor-aware ordering, VCS refresh signal, any-level HEAD markers).
+So `<!-- agent:exchange -->` should default to the same behavior as `<!-- agent:exchange patch=append -->`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

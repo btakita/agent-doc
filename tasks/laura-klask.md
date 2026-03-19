@@ -132,7 +132,7 @@ I should reach out to him via email.
 Please add my work and an opening for collaboration opportunities.
 One of their clients may want to control their iot devices using claude code or Nemo Claw.
 I can help with the controlled orchestration and rapid development.
-### Re: Amulet Technologies collaboration (HEAD)
+### Re: Amulet Technologies collaboration
 
 **Contacts updated:**
 - `mail/contacts/laura-klask/CLAUDE.md` — added Amulet details, Ken as husband, collaboration section
@@ -161,6 +161,8 @@ I can help with the controlled orchestration and rapid development.
 >
 > Brian
 
+Should I mention reaching out to her husband Ken (Klask)?
+
 **Notes:** Professional but warm. Leads with curiosity ("have your customers been asking?") rather than a pitch. Frames it as mutual exploration, not a sales call.
 
 Please sync my gmail correspondence filters.
@@ -172,6 +174,18 @@ I added kklask@pacbell.net as well.
 `corky filter push` — 3 filters pushed to Gmail.
 
 The correspondence filter now includes `*@amulettechnologies.com`. Any emails from/to Amulet Technologies addresses will be labeled "correspondence" and marked important. Ken's email will be captured automatically when it comes through.
+### Re: mention Ken to Laura? (HEAD)
+
+**Yes — mention it, but lightly.** You're reaching out to Ken directly, so Laura doesn't need to broker anything. But telling her avoids the awkwardness of Ken bringing it up first.
+
+One line is enough:
+> "I'm also going to reach out to Ken about some potential overlap between what I'm building and Amulet's work — just exploring ideas."
+
+This signals respect (not going behind her back), frames it as professional, and keeps *her* conversation focused on reconnecting personally.
+
+### Gmail re-synced
+
+`corky filter push` — filters updated with `kklask@pacbell.net` now included in the correspondence filter alongside `*@amulettechnologies.com`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

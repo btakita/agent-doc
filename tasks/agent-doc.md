@@ -438,6 +438,28 @@ The deep section is placed before the Resync section, maintaining the logical fl
 From the markdown perspective, deep seems somewhat ambiguous. I'm reconsidering whether we should use a different term.
 
 Also, as I'm typing and the agent patches the file. Let's have the patch be applied above where I'm typing.
+
+### Re: Naming Reconsideration + Patch Positioning
+
+**On `deep` ambiguity in markdown:**
+
+The CLI name (`agent-doc deep`) works because `--help` explains it. But the **document directive** (`deep:`) lacks context — "deep analysis?" "go deeper?"
+
+The CLI name and document directive don't have to match:
+- CLI: `agent-doc deep` (short, memorable)
+- Document: `parallel:` (self-documenting — "run these in parallel")
+
+Or just keep both as `deep` if the convention is documented clearly in SKILL.md.
+
+What about `agent-doc parallel`? Is that a potential conflict with other agent-doc features?
+
+**On patch positioning:**
+
+`patch=append` with CRDT merge already handles this correctly — new content appends to the end of existing exchange content, and your concurrent edits at the cursor are preserved by the CRDT merge. The patch content appears above where you're typing because it's inserted at the end of the *existing* content (before your new edits).
+
+Is there a specific case where the positioning is wrong?
+
+I'm seeing the patch content apply below where I'm typing. I manually moved my prompt to the bottom of the exchange.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

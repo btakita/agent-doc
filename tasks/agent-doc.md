@@ -329,7 +329,7 @@ Also, the entire patch response seems to be uncommitted. The patch response shou
 
 There are background tasks still running, so I'm not sure if that affects the behavior.
 
-### Re: judith-krug.md Commit + Ordering Issues (HEAD)
+### Re: judith-krug.md Commit + Ordering Issues
 
 **Two separate issues:**
 

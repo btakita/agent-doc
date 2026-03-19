@@ -1,10 +1,11 @@
 ---
 agent_doc_session: 9c8a9b79-2d92-4000-8104-23c0606086a8
-tmux_session: '0'
-agent_doc_format: template
-agent_doc_write: crdt
-claude_args: --dangerously-skip-permissions
+tmux_session: '23'
+agent_doc_mode: template
 ---
+
+
+
 
 # Dave Franklin — BCG AI Factory Builder
 
@@ -236,7 +237,7 @@ Please draft a text to send to Tony confirming that I reached out to Anil on Lin
 
 Tony has not replied. Please draft a follow up sms with Tony. I want to know how his meeting went.
 
-### Follow-up SMS to Tony Tomai
+### Follow-up SMS to Tony Tomai (HEAD)
 
 > Hey Tony, just checking in — how did the call with BCG go yesterday? Curious if there's any movement on my candidacy. Let me know when you get a chance.
 

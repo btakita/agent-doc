@@ -630,6 +630,26 @@ cd mail && corky draft push drafts/2026-03-19-re-rtr-right-to-represent-full-sta
 (Requires draft status to be `review`, `approved`, or `scheduled` first.)
 
 release
+
+### Re: Corky v0.18.1 released
+
+**Released corky v0.18.1** — Gmail API email sending.
+
+| Target | Status |
+|--------|--------|
+| **Git** | Committed, tagged `v0.18.1`, pushed |
+| **crates.io** | Published |
+| **GitHub Release** | [v0.18.1](https://github.com/btakita/corky/releases/tag/v0.18.1) with binary |
+| **cargo install** | Updated (`~/.cargo/bin/corky` → v0.18.1) |
+| **Release build** | `target/release/corky` built |
+
+**To push the Deepak email draft now:**
+```bash
+cd mail && corky draft push drafts/2026-03-19-re-rtr-right-to-represent-full-stack-developer-apex-cvs.md
+```
+First run will open browser for OAuth consent (one-time).
+
+send response
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -638,5 +658,6 @@ release
 - [x] Create custom Apex Systems resume profile
 - [x] Update data.toml with GCP accomplishments and rebuild PDF
 - [x] Implement Gmail API sending in corky
+- [x] Release corky v0.18.1
 - [ ] Review and send email to Deepak
 <!-- /agent:pending -->

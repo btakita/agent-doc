@@ -773,6 +773,56 @@ The `{tmux_command}` placeholder keeps the terminal command generic — the user
 Want me to implement this?
 
 Yes. Add documentation. Add to SPEC.md. Add tests.
+
+### Re: `agent-doc terminal` — Implemented
+
+Implemented with your key requirements:
+
+**Safety-first: no duplicate terminals.**
+1. Checks if tmux session already has an attached client → skips entirely (no-op)
+2. If session exists but detached → opens terminal to attach
+3. If session doesn't exist → opens terminal to create and attach
+4. Uses `tmux new-session -A` which is itself idempotent (attach-or-create)
+
+**Config-first terminal detection (no hard-coded list):**
+```toml
+# ~/.config/agent-doc/config.toml
+[terminal]
+command = "wezterm start -- {tmux_command}"
+```
+Fallback chain: `[terminal] command` > `$TERMINAL` env var > error with setup instructions.
+
+**Session name resolution:** `--session` flag > `tmux_session` from document frontmatter > default `"0"`.
+
+**Files changed:**
+- `terminal.rs` — new module (130 lines): `run()`, `resolve_session_name()`, `is_session_attached()`, `resolve_terminal_command()`, `spawn_terminal()`
+- `config.rs` — added `TerminalConfig { command: Option<String> }`
+- `main.rs` — wired `Terminal` command variant
+- `SPEC.md` — section 7.24 (terminal spec)
+- `CLAUDE.md` — added `terminal.rs` to module layout
+
+**Tests:** 465 total (158 lib + 286 bin + 21 CLI), 4 new terminal tests. All passing.
+
+I want to make sure that this is a fallback.
+I don't want many terminal instances to be created due to not identifying existing tmux sessions.
+
+Pay attention to the tmux_session edge cases.
+The tmux_session maybe stale.
+Make sure that a stale tmux_session results in checking for the active tmux session bound to the agent-doc project.
+If there is an active tmux session bound to the agent-doc project use that.
+If there is not an active tmux session bound to the agent-doc project, then launch a new terminal.
+
+Please review the logic for correctness.
+Please ensure that we don't launch excessive terminal instances.
+There should only be 1 active terminal session, running 1 tmux session bound to the agent-doc project at any time.
+
+Ensure this logic is composed and modular. Not pending features:
+- Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
+- Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
+
+Implementing these feature should be seamless with our approach.
+
+As I was typing, the previous run's response was i
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

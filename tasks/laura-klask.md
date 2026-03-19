@@ -68,6 +68,34 @@ With AI and what I have been building for the past 10+ years, I now have the opp
 But I do need support and it would be great if family can step up to support their family members.
 
 Times are getting very difficult for some people. It would be nice to have the family circle the wagons a bit and support each other.
+### Re: family situation & support
+
+Contact updated with additional context (daughter, mother's hospitalization, financial situation).
+
+**What lands with family:**
+- The daughter makes it real and urgent — this isn't abstract ambition, it's providing for a child
+- "I can't visit mom" — that's the emotional core. Laura will feel that.
+- The 10-year arc shows this isn't a whim. You've been building toward this for a long time.
+
+**What to be careful with:**
+- Lead with connection, not the ask. The LinkedIn message already did this well.
+- "No positive support from family" is true but can trigger defensiveness if said directly. Frame it as "I haven't asked before, and I'm asking now" — forward-looking, not accusatory.
+- Be specific about what support looks like when the time comes. "Circle the wagons" is a great opener, but Laura will need to know what she can actually *do*.
+
+Ready to help draft a follow-up when Laura responds, or prep talking points for a call.
+
+I don't want "emergency help". I really want us to support each other with our personal + professional goals.
+
+I have over 20 years software development experience.
+I want my business to be thriving and to have enough of a runway to serve a niche that serves the market and where I can maximize my productivity.
+I am working on innovative solutions that are at the forefront of Agentic loops.
+However, I need clients to sustain my work.
+I have a pending client with Judith Krug. But the onboarding is taking weeks now.
+
+I'm looking for more clients.
+I'm also looking for part-time and full-time work. However, full-time work is the most risky, because it's putting all of my eggs in 1 basket...and I would be dividing my efforts from my work of build agent tools.
+
+Specifically, holistic agent tools that serve all of my needs...which I believe will translate to other peoples' needs. These are comprehensive systems...Like Nvidia's NemoClaw + OpenClaw. Brining utility, safety, more explicit control over the agent loops.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

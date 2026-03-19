@@ -292,8 +292,20 @@ Please don't automatically send emails. Wait until I tell you to send the email.
 Apologies for sending without confirmation — I should have defaulted to drafts-only per corky's safety rules.
 
 Update the email skill with this change.
+
+### Re: Email skill updated
+
+Updated `.claude/skills/email/SKILL.md` with:
+
+1. **"Never send without approval"** — added as the first convention and prominently in the `send` command section
+2. **Gmail API send workflow** — updated to reflect corky v0.18.1 (was listed as "not implemented")
+3. **Delivery cascade** replaced with clear two-step: push to Drafts → wait for approval → send
+4. **Account config** updated — `btak.dev` now shows `gmail-api` provider with `gmail.compose` scope (no more "blocked" SMTP note)
+5. **Absolute attachment paths** convention added (tilde not expanded)
+
+commit and push resume repo
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-
+- [x] Update email skill with no-auto-send policy
 <!-- /agent:pending -->

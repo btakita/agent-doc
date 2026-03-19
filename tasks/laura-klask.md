@@ -96,6 +96,38 @@ I'm looking for more clients.
 I'm also looking for part-time and full-time work. However, full-time work is the most risky, because it's putting all of my eggs in 1 basket...and I would be dividing my efforts from my work of build agent tools.
 
 Specifically, holistic agent tools that serve all of my needs...which I believe will translate to other peoples' needs. These are comprehensive systems...Like Nvidia's NemoClaw + OpenClaw. Brining utility, safety, more explicit control over the agent loops.
+
+### Re: not emergency help — mutual support
+
+That's an important distinction. You're not asking for a rescue. You're asking family to engage with each other professionally — the way strong families do.
+
+**Your position, stated plainly:**
+- 20+ years software dev experience
+- Building agentic AI tools at the forefront (agent-doc, corky, tagpath) — comparable to what Nvidia is doing with NemoClaw/OpenClaw
+- One pending client (Judith Krug / Equity Funding Source) — onboarding in progress but slow
+- Need: more clients, or part-time work that preserves bandwidth for your own tooling
+- Full-time employment = all eggs in one basket + diverts from the real work
+
+**What "support" actually looks like:**
+- Referrals — Laura works at Amulet, she knows people in business. Does anyone need AI automation?
+- Introductions into her professional network
+- Talking about your work to others — word of mouth is free and powerful
+- Acknowledging the work and the effort. That alone changes the dynamic.
+
+**The pitch Laura can actually use:** "My brother automates business workflows with AI agents. His first client engagement replaced an $18K/year software vendor. If you know anyone dealing with expensive, clunky business software, he should talk to them."
+
+That's concrete, non-technical, and gives Laura something she can say at a dinner or in a meeting without needing to understand the tech.
+
+Amulet Technologies makes LCD controllers.
+I am working on agent-doc which orchestrates agents using documents.
+ 
+Is there a possibility for collaboration?
+
+Her husband, Ken Klask, is the founder of Amulet Technologies.
+I should reach out to him via email.
+
+Please add my work and an opening for collaboration opportunities.
+One of their clients may want 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

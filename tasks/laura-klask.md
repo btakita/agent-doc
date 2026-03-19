@@ -299,7 +299,7 @@ The original email was good but can be sharpened now. Instead of "LCD controller
 
 **What changed:** References GEMstudio by name (shows you did homework), positions agent-doc as complementary to their existing platform (not competing), and the "AI layer on top of GEMstudio" framing is concrete enough for Ken to immediately picture the integration.
 
-### Re: Laura follow-up length (HEAD)
+### Re: Laura follow-up length
 
 **Keep it short — the one-liner is exactly right.** She already has all the context from your first message. More words = more pressure = more reason to avoid responding. The follow-up's only job is to signal "the door is still open."
 

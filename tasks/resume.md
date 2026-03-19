@@ -208,8 +208,23 @@ This title is actually better for all three recruiter submissions — "Lead Back
 
 I already sent may emails. Should I resend with corrections?
 If yes, please draft and resend all correction emails.
+
+### Re: Correction emails sent to all 3 recruiters
+
+All 3 correction emails sent via Gmail API with updated resumes attached:
+
+| Recruiter | Company | Updated PDF | Status |
+|-----------|---------|-------------|--------|
+| Arunprakash S | ObjectWin (WBD) | `BrianTakita-wbd-rust.pdf` | Sent |
+| Diksha Jaiswal | Bitsoft (Deloitte) | `BrianTakita-deloitte-nodejs.pdf` | Sent |
+| Deepak Rana | Apex Systems (CVS) | `BrianTakita-apex-cvs.pdf` | Sent |
+
+Each email is a brief follow-up: "Please use this updated resume — I corrected my Presence AI title to better reflect my technical role (Lead Backend AI Engineer)."
+
+Create a contact for Janaki Bhoi <janaki@enfycon.com>
+Note the email correspondence.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Update Presence AI title
+- [x] Send correction emails to all 3 recruiters
 <!-- /agent:pending -->

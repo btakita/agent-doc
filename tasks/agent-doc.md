@@ -1497,6 +1497,12 @@ I don't necessarily want to key in on the h3 element. Instead key in on the lead
 
 This is correct behavior — the snapshot includes your prompt that triggered the response. Since that prompt was "sent to the agent" for processing, it gets committed along with the response. Only edits typed AFTER the response stay uncommitted. The boundary is: everything in the snapshot = committed, everything after = uncommitted.
 
+This is not correct behavior.
+Everything coming back from the agent should be committed.
+The green bar in the screenshot should only be my prompted text.
+
+![img_4.png](img_4.png)
+
 **2. CRDT placed patch below typing**
 
 The cursor-aware ordering fix is in the plugin but the **plugin hasn't been reinstalled yet**. You need to:
@@ -1504,12 +1510,14 @@ The cursor-aware ordering fix is in the plugin but the **plugin hasn't been rein
 2. Select `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
 3. Restart IDEA
 
+agent-doc-jetbrains-0.1.0.zip is an old version. Last installed version was agent-doc-jetbrains-0.2.6g.zip
+
 The native FFI `agent_doc_apply_patch_with_caret` and the Kotlin fallback `applyComponentPatchWithCaret` are both in the new plugin build.
 
 **3. Key on leading header of agent response patch, not last `### `**
 
 You're right — the current `rfind("\
-### ")` finds the last h3 in the ENTIRE document, which could be a user-written heading. The marker should target the **first line of the agent's appended content**. (HEAD)
+### ")` finds the last h3 in the ENTIRE document, which could be a user-written heading. The marker should target the **first line of the agent's appended content**.
 
 **Better approach:** Compare the snapshot against git HEAD to find exactly what content was appended by the agent. The first heading in that diff is the target.
 
@@ -1524,6 +1532,16 @@ fn add_head_marker(content: &str, file: &Path) -> String {
 This targets the correct heading regardless of document structure — it's the first heading in the agent's appended content, not the last heading overall.
 
 Want me to implement this improved targeting?
+
+Maybe. See my comment above. The current git HEAD is incorrect.
+
+### Re: Fixing the Commit Timing + Plugin Version (HEAD)
+
+**Root cause of green gutter on agent response:** The selective commit runs at the START of the next cycle (step 0b), but the agent response is written NOW. Between write and next commit, the response shows as uncommitted (green gutter). The user sees this as a bug.
+
+**Fix:** Commit immediately after writing the response, not at the start of the next cycle. Calling `agent-doc commit` right after `agent-doc write` stages the snapshot (which now includes the response) and commits it. User's subsequent edits remain uncommitted.
+
+I'll commit this response right now to demonstrate:
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -554,6 +554,18 @@ This is the robust approach — uses authoritative Yrs attribution data, no heur
 
 Tmux session 1 has 2 agent-doc windows. This should not happen as this agent-doc project is bound to tmux session 0.
 Also tmux session 0 has 3 windows. It should only have 2.
+
+### Re: Tmux Orphan Windows (Again)
+
+Cleaned up 3 orphan panes:
+- Session 0: killed %99 (idle shell in window @348)
+- Session 1: killed %98, %97 (idle shells in windows @345, @344)
+
+**Current state:** Session 0 clean (2 windows: @0 main + @20 stash). Session 1 has no agent-doc windows.
+
+**Also fixed:** `deep.rs` was double-appending colon to session name (`"0:"` passed to `auto_start` which calls `new_window` which adds `:` again → `"0::"`). Removed the extra colon — `auto_start` now receives the raw session name.
+
+Does `agent-doc parallel` **always** create worktrees?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

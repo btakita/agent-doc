@@ -334,6 +334,39 @@ struct DeepTask {
 **Limits:** Default `--parallel 3`. Failed tasks preserve worktree for inspection/retry.
 
 Implement
+
+### Re: `agent-doc deep` — Implemented
+
+Two new modules added:
+
+**`worktree.rs`** — git worktree lifecycle management:
+- `create(project_root, session_id, index)` → `WorktreeInfo { path, branch }`
+- `diff(worktree_path)` → unified diff string
+- `remove()`, `cleanup_session()`, `list_session()` — lifecycle helpers
+- 9 unit tests (all passing)
+
+**`deep.rs`** — orchestration pipeline:
+1. Finds project root, reads frontmatter for tmux/session config
+2. Creates worktree per `--task` flag via `worktree::create`
+3. Writes prompt to `.agent-doc-prompt.txt` in each worktree
+4. Spawns `claude -p --output-format json` in stashed tmux panes (one per worktree)
+5. Polls for pane death every 2s with configurable `--timeout`
+6. Collects `.agent-doc-result.json` + `worktree::diff()` from each worktree
+7. Formats results as markdown with collapsible diffs and stderr logs
+
+**CLI:**
+```bash
+agent-doc deep plan.md \
+  --task "Implement auth" \
+  --task "Write tests" \
+  --model opus \
+  --timeout 600 \
+  --dry-run
+```
+
+**Tests:** 460 total (9 new worktree tests + 451 existing). All passing, compiles clean.
+
+Show me an example of using markdown agent doc to trigger agent-doc deep
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

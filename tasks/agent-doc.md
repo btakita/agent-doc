@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.20.2 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.20.3 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
 **Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** numeric session fix (colon suffix)
@@ -81,7 +81,7 @@ claude_args: --dangerously-skip-permissions
 | v0.17.0-v0.17.30 | Format/write split, IPC write, JNA FFI (NativeLib.kt), VS Code prepend, immutable session binding, `lib-path`. 440 tests. |
 | v0.18.0-v0.18.1 | `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
 | v0.19.0 | ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7). 446 tests. |
-| v0.20.0-v0.20.1 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. 451 tests. |
+| v0.20.0-v0.20.3 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. Numeric session fix (colon suffix). `claims` subcommand. 451 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -620,6 +620,28 @@ Tests: 451 passing (21 integration), clippy clean. Ready for the next release.
 Update VERSIONS.md
 audit docs
 release
+
+### Re: v0.20.3 Release
+
+**v0.20.3 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.20.3` ✓ |
+| GitHub Release | [v0.20.3](https://github.com/btakita/agent-doc/releases/tag/v0.20.3) ✓ |
+| cargo install | `~/.cargo/bin/agent-doc` updated ✓ |
+| PyPI | pending (no maturin publish) |
+
+**What's new:**
+- `agent-doc claims` subcommand — read, print, and truncate `.agent-doc/claims.log` in a single binary call
+
+**VERSIONS.md** updated with v0.20.3 entry.
+
+**Audit-docs:** 5 pre-existing issues (stale docs vs `src/main.rs`). Not release-blocking — documentation drift from earlier releases.
+
+**Tests:** 451 passed, clippy clean.
+
+Tmux session 0 has 3 windows. Does agent-doc have a way to clear the extra window?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

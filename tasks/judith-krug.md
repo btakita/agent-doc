@@ -181,7 +181,7 @@ Year 1 savings vs MA: ~$2.8K. Real win is year 2+: ~$5.8K/yr savings. With TMO r
 - Corky calendar integration moved to `tasks/corky.md`.
 
 <!-- agent:exchange mode=append -->
-### Exchange Archive (March 9 – March 17, 2026) (HEAD)
+### Exchange Archive (March 9 – March 17, 2026)
 
 ---
 

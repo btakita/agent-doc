@@ -1106,6 +1106,60 @@ There was no snapshot file. Please fix this initial case.
 ● No changes detected in tasks/laura-klask.md since the last commit. Edit the document and run /agent-doc
   tasks/laura-klask.md again when ready.
 ```
+
+### Re: Cursor-Aware IPC + First-Submit Snapshot Bug
+
+**Two fixes implemented:**
+
+---
+
+**1. First-submit snapshot bug — Fixed**
+
+**Root cause:** `agent-doc commit` (step 0b) commits the file before `diff` runs. When no snapshot exists, `snapshot::resolve()` falls back to `git show HEAD`, which returns the just-committed content — identical to the current file. Diff sees no changes.
+
+**Fix in `snapshot.rs`:** When git recovery returns content identical to the current file, treat it as a first submit (return `None`). This is always correct: if git matches the file, either (a) first submit after commit, or (b) no user edits since last commit — both cases have no meaningful diff.
+
+agent-doc should process the entire file. The diff should essentially be the entire file in this case.
+
+```rust
+// Before: always used git content as baseline
+// After: compare git content to current file
+if git_content == current {
+    eprintln!("[snapshot] No snapshot file, git matches current — treating as first submit");
+    Ok(None)
+}
+```
+
+---
+
+**2. Cursor-aware IPC ordering — Implemented in JetBrains plugin**
+
+**New method `applyComponentPatchWithCaret()`** in `PatchWatcher.kt`:
+
+1. Captures caret offset from the active `TextEditor` before `WriteCommandAction`
+2. For append-mode components: checks if caret is inside the target component
+3. If yes: inserts patch content at the line boundary **before** the caret position
+4. If no (caret elsewhere or not in component): falls back to normal append
+
+This means agent responses always appear **above** where the user is typing, without requiring any changes to the IPC JSON format or the Rust CLI.
+
+**Flow:**
+```
+FileEditorManager → TextEditor → caretModel.offset
+  → applyComponentPatchNative(doc, component, content, caretOffset)
+    → if mode == "append" && caret inside component:
+        applyComponentPatchWithCaret() → insert before caret line
+    → else: normal FFI/Kotlin append
+```
+
+**Files changed:**
+- `snapshot.rs` — git recovery skips identical content
+- `PatchWatcher.kt` — cursor-aware append ordering (+40 lines)
+
+**Tests:** 466 Rust (all passing). Kotlin compiles + builds clean.
+
+Can this logic be moved to the shared library FFI part of the plugin?
+So it can work across all editor plugins?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

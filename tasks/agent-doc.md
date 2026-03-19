@@ -163,7 +163,7 @@ The green gutter still takes up the entire response...until I refresh the file.
 Then the commit is registered.
 It seems the document + git view is stuck in a cached state.
 
-### Re: VCS Refresh Signal (HEAD)
+### Re: VCS Refresh Signal
 
 The issue: `agent-doc commit` runs externally (CLI), but IntelliJ caches git state. The gutter stays green until the user manually refreshes.
 
@@ -187,6 +187,34 @@ Release binary rebuilt. Plugin v0.2.7 rebuilt with VCS refresh support. Install 
 
 **Plugin path:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
 Can the plugin force a refresh of the git state?
+
+
+### Re: Multi-Heading HEAD Marker (HEAD)
+
+Fixed. `add_head_marker()` now marks ALL new `### ` headings in the agent's response, not just the last one.
+
+**How it works:**
+1. Gets git HEAD content for the file
+2. Finds all `### ` headings in the snapshot
+3. Filters to only headings that are NOT in git HEAD (= new, added by the agent)
+4. Appends ` (HEAD)` to each new heading
+5. Fallback: if git HEAD unavailable, marks the last heading only
+
+For your `tasks/laura-klask.md` case with two response sections, both would now get the marker:
+```
+### Re: Amulet Technologies review (HEAD)    ← blue gutter (HEAD)
+...response content...                       ← no gutter (committed)
+### Re: Laura follow-up length (HEAD)        ← blue gutter (HEAD)
+...response content...                       ← no gutter (committed)
+```
+
+Release binary rebuilt.
+In tasks/laura-klask.md, I received a multi-section patch response from the agent.
+However the section title uncommited response only applied to the last section. It should have applied to all sections in the patch response:
+- ### Re: Amulet Technologies review
+  - Unsuccessfully applied
+- ### Re: Laura follow-up length
+  - Successfully applied
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

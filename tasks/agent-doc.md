@@ -1383,6 +1383,50 @@ The plugin zip was already built earlier (`./gradlew buildPlugin`). To install:
 The selective commit feature is purely binary-side (no plugin changes needed for that). The cursor-aware ordering requires the plugin update.
 
 Want me to do a full release (v0.22.0) with all today's changes?
+
+The behavior did not work as expected.
+![img_1.png](img_1.png)
+
+The agent patch response should be committed.
+The committed h3 should be
+> ### Re: Selective Commit Verification (HEAD)
+
+The uncommitted h3 should be:
+> ### Re: Selective Commit Verification
+
+Please note that I meant the uncommitted h3 should be:
+> ### Re: Selective Commit Verification
+
+Any human prompting not already sent to the agent should be uncommitted.
+
+### Re: Selective Commit Behavior Clarification
+
+Looking at your screenshot and the diff output, the selective commit IS working — commit `08a06bd` staged only the snapshot (agent response), and your new edits are uncommitted.
+
+But I now understand your full vision. You want **two distinct markers**:
+
+1. **Committed version** of the `### Re:` heading: `### Re: Foo (HEAD)`
+2. **Working tree version** of the same heading: `### Re: Foo` (no marker)
+
+This creates a **single modified line** (blue/yellow gutter) at the response heading — a visual anchor point. Everything above: committed (no gutter). The heading: modified (gutter). Everything below (new user input): added (green gutter).
+
+**Implementation:**
+
+In `agent-doc commit`, after staging the snapshot via `hash-object`:
+1. Read the snapshot content
+2. Find the last `### Re:` heading
+3. Append ` (HEAD)` to that heading in the staged version
+4. Stage the modified content (not the raw snapshot)
+5. The working tree file keeps the heading WITHOUT `(HEAD)`
+
+The `(HEAD)` marker serves as:
+- A visual boundary (blue gutter on that one line)
+- A navigation point (search for `(HEAD)` to find the latest response)
+- Clear delineation: above = committed history, below = user's draft
+
+On the NEXT commit cycle, the old `(HEAD)` marker gets committed as-is (it's in the snapshot from the previous write), and the new response gets a fresh `(HEAD)`.
+
+Want me to implement this? Or should we discuss the `(HEAD)` marker format first — alternatives like `[committed]`, a timestamp, or just `✓`?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

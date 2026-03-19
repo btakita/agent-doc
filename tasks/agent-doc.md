@@ -404,6 +404,34 @@ Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 **Remaining audit warnings (non-blocking):**
 - CLAUDE.md large table (informational)
 - SKILL.md/CLAUDE.md "older than git.rs" (timestamps, not content gaps)
+
+In tasks/corky.md, the patch response to the prompt was merged above the prompt.
+
+> VERSIONS.md is complete (47 entries, v0.1.0–v0.18.1, no gaps).
+>Are the recent updates in SPEC.md, VERSIONS.md, README.md?
+
+Should be above:
+
+
+### Re: Corky Response Ordering (HEAD)
+
+This is the same IPC ordering issue. The `tasks/corky.md` session used the old plugin (without cursor-aware ordering). The response was appended at the end of existing content, but the user typed "Are the recent updates..." at the same position concurrently. The result: response landed between the two user prompts.
+
+**With plugin v0.2.7 installed**, the cursor-aware ordering would detect the caret position and insert the response above where the user is typing — keeping their prompt below. This would give the correct order:
+
+```
+audit docs                              ← user prompt (sent)
+### Audit Docs Results                   ← response (HEAD)
+...response content...
+VERSIONS.md is complete...
+Are the recent updates in SPEC.md...?   ← user prompt (typed after response)
+```
+
+**All three ordering issues this session (agent-doc.md, laura-klask.md, corky.md) have the same root cause:** the old plugin doesn't have cursor-aware ordering. Plugin v0.2.7 fixes all of them.
+
+Has the plugin been installed yet? If not, the path is:
+`src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
+> ### Audit Docs Results
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

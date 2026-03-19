@@ -918,6 +918,33 @@ compact this file
 **Resume repo** — committed and pushed to [btakita/resume](https://github.com/btakita/resume). README updated with agent-resume install instructions.
 
 compact exchange
+
+### Session Summary
+
+**agent-resume Rust crate** ([btakita/agent-resume](https://github.com/btakita/agent-resume))
+- Hybrid architecture: Rust CLI (`build`, `render`, `validate`, `search-index`) assembles content from `data.toml`; Python handles pandoc+weasyprint PDF
+- `build.py` refactored from 280→125 lines
+- Search: `search.html` + `search-index.json` for GitHub Pages
+- 12 pytest tests (search index validation + LightPanda DOM)
+- data.toml: 14 experiences, 37+ skills, 45+ accomplishments
+
+**Contacts created:**
+- `mail/contacts/deepak-rana/CLAUDE.md` — Apex Systems recruiter, CVS Health role. 6 calls transcribed.
+- `mail/contacts/diksha-jaiswal/CLAUDE.md` — Bitsoft International recruiter, Deloitte role. 4 calls transcribed.
+
+**Resume profiles:**
+- `profiles/apex-cvs.toml` — CVS Health Full Stack Developer (Python + React + GCP), $70/hr W2
+- `profiles/deloitte-nodejs.toml` — Deloitte NodeJS Backend Engineer, $60/hr W2
+
+**Emails sent via Gmail API:**
+- Deepak Rana: RTR + resume for CVS Health (pushed to Gmail Drafts)
+- Diksha Jaiswal: Rate confirmation + RTR + resume for Deloitte (sent directly)
+
+**Corky v0.18.1** — Gmail API email sending (`gmail.compose` scope). Published to crates.io + GitHub Release.
+
+**Resume repo** — committed and pushed to [btakita/resume](https://github.com/btakita/resume). README updated with agent-resume install instructions.
+
+compact agent:exchange. it is currently ~900 lines
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

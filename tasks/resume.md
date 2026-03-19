@@ -191,8 +191,25 @@ The Holochain project (cogov/protocol.love, started Feb 2020, 26 commits) is too
 - **Highlights:** 5 years Rust, WB domain (Milyoni), event-driven/ZeroMQ, AWS 10+ years, real-time media
 
 Please update my Presence.AI title to be Lead Backend AI Engineer. I did have a director level position, but my role was constrained to the Realtime Backend RTC, Build Pipeline, and Inference AI processes.
+
+### Re: Presence AI title updated
+
+**Title changed** in `data.toml`: "Director of Engineering" → "Lead Backend AI Engineer"
+
+Better reflects the actual scope: Realtime Backend RTC, Build Pipeline, and Inference AI processes.
+
+**All 4 PDFs rebuilt:**
+- `BrianTakita-wbd-rust.pdf` — now shows "Lead Backend AI Engineer" (stronger for backend roles)
+- `BrianTakita-apex-cvs.pdf`
+- `BrianTakita-deloitte-nodejs.pdf`
+- `BrianTakita.pdf` (default)
+
+This title is actually better for all three recruiter submissions — "Lead Backend AI Engineer" signals backend depth more clearly than "Director of Engineering" which sounds management-heavy.
+
+I already sent may emails. Should I resend with corrections?
+If yes, please draft and resend all correction emails.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Send resume to Arunprakash
+- [x] Update Presence AI title
 <!-- /agent:pending -->

@@ -460,6 +460,18 @@ What about `agent-doc parallel`? Is that a potential conflict with other agent-d
 Is there a specific case where the positioning is wrong?
 
 I'm seeing the patch content apply below where I'm typing. I manually moved my prompt to the bottom of the exchange.
+
+### Re: `agent-doc parallel` + Patch Positioning
+
+**On `agent-doc parallel`:** No significant conflict. The existing `execution_mode = "parallel"` in config.toml is an internal scheduling concern (skill concurrency), not a user-facing command. Different layer — one is a command, the other is a config setting.
+
+What is `execution_mode = "parallel"`? Is it effectively the same thing as the proposed `agent-doc parallel`? 
+
+`agent-doc parallel` is clearer than `deep` and self-documenting as a document directive (`parallel:`). Strong choice.
+
+**On patch appearing below typing:** This is a known CRDT limitation — when both user and patch append to the same position, ordering is unpredictable. The cleanest solution: use `agent:input` for typing, `agent:exchange` for responses. Separating input from output avoids the concurrent-append conflict entirely. This document doesn't have `agent:input` — the user types directly in `agent:exchange`, which creates the overlap.
+
+Can we have a heuristic where the human prompt is nudged below the agent patch content?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -118,7 +118,7 @@ When installing corky, can we detect if gpu support is available on the machine?
 If there is a gpu available, please attempt to install support for `corky transcribe --gpu`.
 If there is a failure on installing the gpu support, continue.
 
-### GPU Auto-Detection for `corky transcribe` (HEAD)
+### GPU Auto-Detection for `corky transcribe`
 
 Implemented auto-detection in both install paths. Changes in corky submodule:
 

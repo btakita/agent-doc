@@ -823,9 +823,22 @@ Please review again. Any gaps to address?
 
 Which do you prefer? Or should I just rebuild and send as-is?
 rebuild
+
+### Re: Menu.com folded into Freelance + PDF rebuilt
+
+**Done.** Menu.com added to Freelance section in data.toml:
+> "Menu.com: Administered .NET API instances on AWS ECS with IAM for food ordering platform"
+
+Also added Freelance to the Deloitte experience filter and "ECS"/"IAM" to highlight phrases.
+
+**PDF rebuilt:** file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-deloitte-nodejs.pdf (32 KB)
+
+Review the PDF. When ready, I can draft the reply email to Diksha with the resume attached.
+
+Send it. Can you send the email directly?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Update data.toml with Node.js/AWS/Kafka details
-- [ ] Finalize and send Deloitte resume (pending Menu.com decision)
+- [x] Finalize Deloitte resume
+- [ ] Draft and send reply to Diksha
 <!-- /agent:pending -->

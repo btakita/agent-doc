@@ -270,7 +270,7 @@ So my prompt was split.
 > I'm also running low on funds. Need to get something going soon. So I have a client but have not closed on a deal yet. And have not begun work to be paid. And I need to find more work immediately after that.
 
 
-### Re: Prompt Split Analysis (HEAD)
+### Re: Prompt Split Analysis
 
 I can see exactly what happened in the `laura-klask.md` git diff:
 

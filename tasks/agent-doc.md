@@ -566,6 +566,20 @@ Cleaned up 3 orphan panes:
 **Also fixed:** `deep.rs` was double-appending colon to session name (`"0:"` passed to `auto_start` which calls `new_window` which adds `:` again → `"0::"`). Removed the extra colon — `auto_start` now receives the raw session name.
 
 Does `agent-doc parallel` **always** create worktrees?
+
+### Re: Does `agent-doc parallel` Always Create Worktrees?
+
+Currently yes, but it shouldn't always. Two modes:
+
+**With worktrees (default):** For tasks that modify files — each gets isolated codebase, `git diff` collected.
+
+**Without worktrees (`--no-worktree`):** For read-only tasks (research, analysis, review) — runs in project root, collects only agent output. Cheaper, faster, no cleanup.
+
+Could also be automatic based on task verbs ("implement/fix/add" → worktree, "analyze/review/find" → no worktree). But explicit `--no-worktree` flag is simpler and more predictable.
+
+Adding `--no-worktree` is ~10 lines: skip `worktree::create`, set CWD to project root, skip `worktree::diff`. Want me to add it?
+
+Yes...add `--no-worktree`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

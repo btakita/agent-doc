@@ -421,6 +421,23 @@ The `deep:` prefix is the trigger. The skill extracts tasks (bullet items), call
 **Note:** The `deep:` convention is skill-level (SKILL.md), not binary-level. The binary just accepts `--task` flags. The skill bridges document syntax → CLI.
 
 Add instructions for both the cli and agent-doc markdown in the README.md
+
+### Re: README.md Updated with `agent-doc deep` Documentation
+
+Added three sections to `src/agent-doc/README.md`:
+
+1. **Quick Start** — added `agent-doc deep` one-liner
+2. **"Deep — Parallel Fan-Out" section** — full documentation with:
+   - CLI flags table (`--task`, `--model`, `--timeout`, `--no-git`, `--dry-run`)
+   - How-it-works flow (worktrees → spawn → poll → collect → format)
+   - Document session usage (`deep:` directive with bullet tasks)
+3. **CLI Reference** — added `agent-doc deep` line
+
+The deep section is placed before the Resync section, maintaining the logical flow: routing → deep (parallel work) → resync (cleanup).
+
+From the markdown perspective, deep seems somewhat ambiguous. I'm reconsidering whether we should use a different term.
+
+Also, as I'm typing and the agent patches the file. Let's have the patch be applied above where I'm typing.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

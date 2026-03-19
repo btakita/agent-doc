@@ -257,6 +257,46 @@ I still saw the full green gutter. The full green gutter went away after I made 
 - Multi-heading markers (all root headings in multi-section responses)
 - VCS refresh signal (`vcs-refresh.signal` → plugin triggers `markEverythingDirty()` + VFS refresh)
 Do we need another agent-doc release for these changes?
+
+Look at tasks/laura-klask.md
+In the last response, the end portion of my prompt was added after the patch agent response.
+So my prompt was split.
+
+> My engagement with Judith Krug has not started yet. We will be meeting mid next week. But it keeps on slipping.
+> I should confirm the date and time of the call next week.
+
+... patch response ...
+
+> I'm also running low on funds. Need to get something going soon. So I have a client but have not closed on a deal yet. And have not begun work to be paid. And I need to find more work immediately after that.
+
+
+### Re: Prompt Split Analysis (HEAD)
+
+I can see exactly what happened in the `laura-klask.md` git diff:
+
+```
++My engagement with Judith Krug...           ← user's text (part 1)
++I should confirm the date and time...
++
++### Re: Judith status & financial urgency    ← agent response landed HERE
++...response content...
++
++I'm also running low on funds...             ← user's text (part 2)
+```
+
+**Root cause:** The plugin applied the append patch at the end of the exchange component content. But the user was actively typing at the same position. The plugin's `document.setText()` preserved the caret, so the user's subsequent keystrokes went after the response insertion point.
+
+**This is the cursor-aware ordering bug.** The fix (`applyComponentPatchWithCaret`) inserts the patch ABOVE the caret position, keeping user typing below. But the **plugin hasn't been reinstalled yet** — the current running plugin doesn't have this code.
+
+The fix is already built in `agent-doc-jetbrains-0.2.7.zip`. Once installed:
+1. Plugin captures caret offset before `WriteCommandAction`
+2. For append-mode components, if caret is inside the component, inserts patch content at the line boundary ABOVE the caret
+3. User's typing stays below the response
+
+**To install:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip` → Restart IDEA.
+
+This will fix the prompt-splitting issue for all future responses.
+Please tell me what happened.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

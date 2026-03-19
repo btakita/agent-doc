@@ -836,9 +836,23 @@ Also added Freelance to the Deloitte experience filter and "ECS"/"IAM" to highli
 Review the PDF. When ready, I can draft the reply email to Diksha with the resume attached.
 
 Send it. Can you send the email directly?
+
+### Re: Email sent to Diksha
+
+**Email sent directly** via Gmail API (`messages.send`).
+
+- **To:** diksha@bitsoft.com
+- **Subject:** Re: Deloitte NodeJS Backend Engineer DLTJP00053765 - Remote - Rate Confirmation
+- **Attachment:** BrianTakita-deloitte-nodejs.pdf
+- **Content:** Rate confirmation ($60/hr W2), RTR authorization (per-job), apology for delay, resume with added Node.js/event-driven/AWS/MongoDB detail
+
+Draft status updated to `sent`.
+
+Yes — corky can send directly via Gmail API for `gmail-api` provider accounts. `corky draft push <file> --send` sends immediately (requires status = `approved`, `review`, or `scheduled`). Without `--send`, it pushes to Gmail Drafts for manual review.
+
+I don't see the Deloitte response in the btak.dev@gmail.com account.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Finalize Deloitte resume
-- [ ] Draft and send reply to Diksha
+- [x] Draft and send reply to Diksha
 <!-- /agent:pending -->

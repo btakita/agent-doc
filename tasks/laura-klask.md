@@ -9,7 +9,9 @@ agent_doc_write: crdt
 
 <!-- agent:status patch=replace -->
 - [x] Contact created: `mail/contacts/laura-klask/CLAUDE.md`
+- [x] Contact created: `mail/contacts/ken-klask/CLAUDE.md`
 - [ ] Awaiting Laura's response to LinkedIn message
+- [ ] Draft email to Ken ready — needs review before sending
 <!-- /agent:status -->
 
 ## Exchange
@@ -127,7 +129,38 @@ Her husband, Ken Klask, is the founder of Amulet Technologies.
 I should reach out to him via email.
 
 Please add my work and an opening for collaboration opportunities.
-One of their clients may want 
+One of their clients may want to control their iot devices using claude code or Nemo Claw.
+I can help with the controlled orchestration and rapid development.
+### Re: Amulet Technologies collaboration
+
+**Contacts updated:**
+- `mail/contacts/laura-klask/CLAUDE.md` — added Amulet details, Ken as husband, collaboration section
+- `mail/contacts/ken-klask/CLAUDE.md` — new contact (founder, Amulet Technologies)
+
+**The collaboration angle is real.** Amulet makes LCD controllers for embedded/IoT devices. Their customers build products with displays — vending machines, medical devices, industrial controls, kiosks. Those same customers are increasingly being asked: *"can I control this with AI?"*
+
+**Where agent-doc fits:**
+- agent-doc orchestrates agents through documents — structured interfaces that drive actions
+- For IoT: a document-driven command layer that translates natural language or structured prompts into device actions via Amulet's display controllers
+- This extends Amulet's value proposition — they're not just selling displays, they're selling AI-controllable interfaces
+
+**Draft email to Ken:**
+
+> Subject: AI + embedded displays — potential collaboration
+>
+> Hi Ken,
+>
+> Hope you and Laura are doing well.
+>
+> I've been building agent orchestration tools — systems that let AI agents interact with real-world interfaces through structured documents. I'm curious whether any of Amulet's customers have been asking about AI-driven control for their LCD-based products.
+>
+> The pattern I've built (agent-doc) lets agents read and write to structured interfaces, which could map well to embedded display workflows — think natural language commands driving device state through your controllers.
+>
+> Would love to have a quick call to explore whether there's something here. No pressure — just family brainstorming.
+>
+> Brian
+
+**Notes:** Professional but warm. Leads with curiosity ("have your customers been asking?") rather than a pitch. Frames it as mutual exploration, not a sales call.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -374,6 +374,36 @@ Is this skill part of the current agent-doc package? Was it installed when agent
 1. Run `/compact` (reloads SKILL.md from disk)
 2. Start a new session (loads fresh SKILL.md)
 3. The pre-flight auto-update check will detect the version mismatch and install automatically
+
+audit docs
+
+Are the recent updates in SPEC.md, VERSIONS.md, README.md?
+
+### Re: Audit Docs + Documentation Updates (HEAD)
+
+**Audit results:** 5 issues → 3 after updates. SPEC.md and README.md no longer flagged as stale.
+
+**Updates made:**
+
+**SPEC.md section 7.14 (commit):** Expanded from 1 line to full spec:
+- Selective staging via `hash-object` + `update-index`
+- `(HEAD)` marker on new root-level headings (any level)
+- VCS refresh signal after successful commit
+- Fallback to `git add -f` when no snapshot exists
+
+**README.md CLI Reference:**
+- Added `agent-doc terminal <file> [--session S]`
+- Updated `commit` description to "selective commit (snapshot only, user edits stay uncommitted)"
+- Removed duplicate `history` entries
+
+**Already documented:**
+- CLAUDE.md: `terminal.rs` already in module layout
+- VERSIONS.md: all v0.22.0/v0.22.1/v0.22.2 entries present
+- SPEC.md 7.24: `terminal` command already fully specified
+
+**Remaining audit warnings (non-blocking):**
+- CLAUDE.md large table (informational)
+- SKILL.md/CLAUDE.md "older than git.rs" (timestamps, not content gaps)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

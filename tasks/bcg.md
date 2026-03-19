@@ -1,7 +1,9 @@
 ---
 agent_doc_session: 9c8a9b79-2d92-4000-8104-23c0606086a8
-tmux_session: '23'
-agent_doc_mode: template
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 # Dave Franklin — BCG AI Factory Builder

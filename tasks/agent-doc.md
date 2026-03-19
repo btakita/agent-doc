@@ -536,9 +536,6 @@ Option 3 was correctly called "fragile" the first time. I overrode that because 
 
 Let's do Option 2.
 
-Tmux session 1 has 2 agent-doc windows. This should not happen as this agent-doc project is bound to tmux session 0.
-Also tmux session 0 has 3 windows. It should only have 2.
-
 ### Re: Option 2 Implemented — Post-Merge Attribution Reorder
 
 Added `reorder_agent_before_human(doc: &Doc) -> String` to `crdt.rs`:
@@ -554,6 +551,9 @@ Called in `merge()` instead of raw `text.get_string(&txn)`.
 **Tests:** 35 total in crdt.rs (1 new: `reorder_agent_before_human_at_append_boundary`). All passing.
 
 This is the robust approach — uses authoritative Yrs attribution data, no heuristics or pattern matching.
+
+Tmux session 1 has 2 agent-doc windows. This should not happen as this agent-doc project is bound to tmux session 0.
+Also tmux session 0 has 3 windows. It should only have 2.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

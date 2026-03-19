@@ -715,9 +715,31 @@ Email address is diksha@bitsoft.com
 
 5 email threads found in `mail/conversations/` covering initial outreach, rate negotiation, and RTR confirmation.
 
-transcribe + diarize diksha-jaiswal/recordings 
+transcribe + diarize diksha-jaiswal/recordings
+
+### Re: Diksha Jaiswal recordings transcribed
+
+**4 calls transcribed** via ffmpeg + Whisper (turbo model). Transcripts saved next to originals.
+
+| Call | Date | Duration | Summary |
+|------|------|----------|---------|
+| 1 | Mar 17 1:25 PM | 7s | Missed connection |
+| 2 | Mar 17 4:00 PM | 2:16 | Rate/RTR confirmation; asks for more Node.js content on resume |
+| 3 | Mar 17 4:44 PM | 2:00 | Follow-up — waiting for acknowledgement |
+| 4 | Mar 18 1:04 PM | 1:45 | Final follow-up; RTR is per-job only; Brian commits to respond |
+
+**Key action items from calls:**
+1. Add more Node.js-specific content to resume
+2. Acknowledge rate confirmation email
+3. Acknowledge RTR (Right to Represent) email
+4. RTR scope: per-job only, not per-company
+
+Contact file updated with call history.
+
+From the correspondence, please craft a resume for deloitte.
+Notify me if more information is needed for any of my experience.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create contact for Diksha Jaiswal
+- [x] Transcribe diksha-jaiswal recordings
 <!-- /agent:pending -->

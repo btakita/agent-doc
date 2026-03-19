@@ -122,7 +122,7 @@ claude_args: --dangerously-skip-permissions
 
 **v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7).
 
-**v0.20.0-v0.20.1:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement. 451 tests.
+**v0.20.0-v0.20.3:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement, numeric session fix (colon suffix), `agent-doc claims` subcommand. 451 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -652,6 +652,37 @@ The extra window @342 had pane %81 (an idle shell from `todo.md`). Killed it dir
 **Current state:** Session 0 is clean — @0 (agent-doc, 2 panes) + @20 (stash, 4 panes).
 
 **Gap:** `resync --fix` should kill orphaned idle-shell panes when they can't be joined to the stash, rather than leaving them in separate windows. This would be a good improvement for a future release.
+
+compact exchange
+
+**Session recap (v0.18.0 → v0.20.3):**
+
+**Features built:**
+- Library target with C FFI (6 exports) + `lib-path` + JNA bindings (NativeLib.kt) with Kotlin fallback
+- VS Code prepend mode fix, JetBrains Gson revert (ClassNotFoundException)
+- Immutable `tmux_session` binding + session affinity enforcement (bail on wrong-session)
+- Pre-response snapshots + `undo`, `extract`, `transfer` commands
+- ExecutionMode in `config.toml` (hybrid/parallel/sequential)
+- TmuxBatch (tmux-router v0.2.7) — `select_pane()` uses batch
+- CRDT conservative dedup (#15) + frontmatter patches on disk write path (#16)
+- Binary-vs-agent responsibility docs in CLAUDE.md
+- H2 headers before components (canonical pattern), claim scaffolding updated
+- Numeric session name ambiguity fix (colon suffix in tmux-router v0.2.8)
+- `agent-doc claims` subcommand (replaces shell one-liner, prevents zombie processes)
+- Sub-profiles design proposal (#23)
+- 13 GitHub issues created for pending roadmap items (#17-#29)
+
+**Bugs fixed:**
+- Gson ClassNotFoundException in JB plugin (lesson #15)
+- Cross-session pane creation from `current_tmux_session()` fallback (lesson #16)
+- Numeric session name ambiguity in `new_window()` (lesson #6 extended)
+- Session 1 pane bleedover — cleaned up misplaced panes
+- `resync --fix` gap: can't join to full stash (manual kill needed)
+- 26 zombie bash processes from claims log check (solved with `agent-doc claims`)
+
+**Issues closed:** #15 (CRDT dedup), #16 (frontmatter patches)
+
+**Test count:** 451 (157 lib + 273 bin + 21 int), up from 440.
 
 compact exchange
 <!-- /agent:exchange -->

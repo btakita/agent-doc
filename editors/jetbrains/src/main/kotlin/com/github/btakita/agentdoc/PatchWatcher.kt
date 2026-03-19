@@ -224,12 +224,20 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     private fun extractComponentMode(doc: String, component: String): String {
         val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
-        val match = openPattern.find(doc) ?: return "replace"
-        val attrs = match.groupValues.getOrNull(1) ?: return "replace"
+        val match = openPattern.find(doc) ?: return defaultMode(component)
+        val attrs = match.groupValues.getOrNull(1) ?: return defaultMode(component)
         val patchMatch = Regex("""patch=(\w+)""").find(attrs)
         val modeMatch = Regex("""mode=(\w+)""").find(attrs)
         return patchMatch?.groupValues?.getOrNull(1)
-            ?: modeMatch?.groupValues?.getOrNull(1) ?: "replace"
+            ?: modeMatch?.groupValues?.getOrNull(1) ?: defaultMode(component)
+    }
+
+    /** Built-in default modes matching the Rust binary's `default_mode()`. */
+    private fun defaultMode(component: String): String {
+        return when (component) {
+            "exchange", "findings" -> "append"
+            else -> "replace"
+        }
     }
 
     /**

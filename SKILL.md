@@ -160,11 +160,13 @@ Then pass it as `--baseline-file` so the 3-way merge can detect user edits accur
 
 ### 5. Git integration
 
-**Do NOT commit after writing the response.** The response stays uncommitted so the green git gutter bar delineates exactly what the agent wrote. The commit happens at the *start* of the next cycle (step 0b).
+**Commit immediately after writing the response.** After `agent-doc write` completes, run `agent-doc commit <FILE>`. The selective commit stages only the snapshot content (agent response), leaving user edits in the working tree as uncommitted. This gives the user:
+- Agent response → committed (no gutter)
+- Heading with `(HEAD)` marker → modified (blue gutter, visual boundary)
+- User's new input → uncommitted (green gutter)
 
 - **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- The previous response is committed in step 0b, before the next diff computation
-- This gives the user green gutter visibility between cycles, with automatic cleanup on the next submit
+- Step 0b also calls `agent-doc commit` as a safety net (no-op if already committed)
 
 ## Document Format
 

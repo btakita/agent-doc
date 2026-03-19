@@ -132,7 +132,7 @@ I should reach out to him via email.
 Please add my work and an opening for collaboration opportunities.
 One of their clients may want to control their iot devices using claude code or Nemo Claw.
 I can help with the controlled orchestration and rapid development.
-### Re: Amulet Technologies collaboration
+### Re: Amulet Technologies collaboration (HEAD)
 
 **Contacts updated:**
 - `mail/contacts/laura-klask/CLAUDE.md` — added Amulet details, Ken as husband, collaboration section

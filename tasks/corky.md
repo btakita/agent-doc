@@ -113,4 +113,29 @@ Added 14 missing version entries derived from git history between adjacent tags:
 | 0.18.0 | Built-in GCP OAuth, `corky doctor`, self-hosted guide, privacy policy |
 
 Committed in corky submodule (`72d76f0`), pushed to GitHub, submodule pointer updated in agent-loop.
+
+When installing corky, can we detect if gpu support is available on the machine?
+If there is a gpu available, please attempt to install support for `corky transcribe --gpu`.
+If there is a failure on installing the gpu support, continue.
+
+### GPU Auto-Detection for `corky transcribe` (HEAD)
+
+Implemented auto-detection in both install paths. Changes in corky submodule:
+
+**Makefile** — `make install` now checks `nvidia-smi`:
+- GPU detected → tries `cargo install --path . --features transcribe-cuda`
+- Build fails (missing CUDA toolkit, driver mismatch) → falls back to CPU-only
+- No GPU → standard `cargo install --path .`
+
+**install.sh** — prebuilt binary installer:
+- GPU detected → tries downloading `corky-<target>-cuda.tar.gz` variant
+- Binary not available for release → falls back to standard `corky-<target>.tar.gz`
+- No GPU → standard binary
+
+**SPEC.md** § 5.30 — added "GPU auto-detection" subsection documenting both paths.
+
+All three files changed (54 insertions, 9 deletions). No CLI `--gpu` flag needed — GPU is compile-time via `whisper-rs/cuda`. The detection is purely at install time with graceful fallback.
+
+Ready to commit in corky submodule when you approve.
+Add to SPEC.md
 <!-- /agent:exchange -->

@@ -138,4 +138,31 @@ All three files changed (54 insertions, 9 deletions). No CLI `--gpu` flag needed
 
 Ready to commit in corky submodule when you approve.
 Add to SPEC.md
+
+audit docs
+
+### Audit Docs Results (HEAD)
+
+Ran `corky audit-docs` — initially flagged AGENTS.md and README.md as stale vs `src/filter/gmail_auth.rs`.
+
+**Root cause:** v0.18.0 added built-in GCP OAuth credentials (`DEFAULT_GCP_CLIENT_ID`/`DEFAULT_GCP_CLIENT_SECRET` injected at compile time) but docs still showed manual-only GCP setup.
+
+**Fixes applied (4 files, 68 insertions):**
+
+| File | Change |
+|------|--------|
+| **SPEC.md** § 5.25 | Documented credential resolution order: config → CLI flags → env vars → built-in defaults |
+| **SPEC.md** § 5.30 | GPU auto-detection subsection (already added previous cycle) |
+| **README.md** | Gmail API section simplified — built-in credentials are now the default, manual GCP setup shown as optional override. Removed step 1 (Cloud Console setup), renumbered steps |
+| **README.md** | Transcription section updated — GPU auto-detection noted for `make install` and `install.sh` |
+| **Makefile** | GPU auto-detection in `make install` (already added previous cycle) |
+| **install.sh** | GPU binary variant download (already added previous cycle) |
+
+**Re-ran `corky audit-docs` — all clean:**
+```
+No issues found ✓
+```
+
+VERSIONS.md is complete (47 entries, v0.1.0–v0.18.1, no gaps).
+Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 <!-- /agent:exchange -->

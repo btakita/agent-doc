@@ -103,8 +103,74 @@ Analyze correspondence and recordings.
 Create a resume.
 
 Discuss any gaps in the resume.
+
+### Re: WBD Rust Backend Developer — transcription, analysis, resume
+
+**1. Recordings transcribed** (2 calls):
+
+| Call | Date | Duration | Summary |
+|------|------|----------|---------|
+| 1 | Mar 18 2:23 PM | 13 min | Role details, rate agreed $75/hr, resume requested urgently |
+| 2 | Mar 18 5:02 PM | 1.5 min | Follow-up — needs resume with Rust highlighted ASAP |
+
+**2. Analysis — 9/10 fit:**
+
+**Strongest signals:**
+- **Rust primary** — 5 years production Rust (corky, agent-doc, agent-kit, tmux-router, tagpath): Add Holochain experience. Developing the Holochain prototype for protocol.love. Which is a collaborative governance platform. This will be under my Freelance consulting job. See cogov-dev for more context. It is at https://github.com/cogov/protocol.love. Please evaluate as to whether or not this should be included in the resume. It is very basic but it is my first experience with Rust. And Holochain is a sophisticated crypto platform.
+- **Milyoni/Warner Bros** — direct WBD domain experience (social entertainment platform for WB, Lions Gate, Universal  Music)
+- **Event-driven architecture** — 15-year lineage (ZeroMQ at Presence AI, reactive frameworks, event-driven at Milyoni/TrueCar)
+- **AWS** — 10 years (ECS, IAM, EC2, cloud infra)
+- **Media/content systems** — Presence AI real-time video pipeline, Milyoni streaming platform
+
+**3. Resume profile created:** `profiles/wbd-rust.toml`
+**PDF built:** file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-wbd-rust.pdf
+
+Experiences: Presence AI, Open Source (Rust), Freelance (AWS ECS), Milyoni (WB), TrueCar (MongoDB), Censible (reactive), Pivotal Labs (architecture)
+
+**4. Gaps to be aware of (conversational, not resume-blockers):**
+
+| Gap | Severity | Mitigation |
+|-----|----------|-----------|
+| **Temporal** (workflow engine) | Low — "preferred" not required | Agent-doc/tmux-router are workflow orchestration; event-driven patterns transfer |
+| **Step Functions/Argo/Jenkins** | Low — preferred | 15-year CI/CD history, infrastructure automation |
+I have extensive CI/CD experience. At:
+- Pivotal Labs
+- Honk/TrueCar
+- Freelancing
+  - Rundavoo
+- Censible/Martin Investments
+- PresenceAI
+| **Container pipeline deployment** | Low | Docker 8 yrs, AWS ECS admin, Heroku deployments |
+Experience covered by:
+- Pivotal Labs (Heroku)
+- Honk/TrueCar (Heroku)
+- Freelancing (Docker)
+  - Rundavoo
+  - Menu.com
+- Censible/Martin Investments (Heroku, Docker)
+- PresenceAI (Docker)
+| **Observability** | Low | Sub-100ms latency tuning at Presence AI implies monitoring |
+- PresenceAI
+- Censible/Martin Investments
+- Honk/TrueCar
+- Menu.com
+- Rundavoo
+- Pivotal Labs
+| **Jira** | Trivial | Standard tool, not a skill gap |
+- Pivotal Labs
+- TrueCar
+
+**No critical gaps.** The role requires Rust + cloud + event-driven — all Brian's strongest areas. The Milyoni/Warner Bros connection is a unique differentiator no other candidate likely has.
+
+**Resume needs to go out ASAP** — Arunprakash followed up twice. Want me to draft and send the email with the resume attached?
+
+Draft Response + Update Resume
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create contact for arun.s@objectwin.com
+- [x] Transcribe arunprakash-s recordings
+- [x] Analyze correspondence and recordings
+- [x] Create WBD Rust resume profile
+- [x] Discuss resume gaps
+- [ ] Send resume to Arunprakash (pending approval)
 <!-- /agent:pending -->

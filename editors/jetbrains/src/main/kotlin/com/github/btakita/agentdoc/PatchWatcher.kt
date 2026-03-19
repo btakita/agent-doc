@@ -4,6 +4,8 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
@@ -130,6 +132,15 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
+        // Capture caret offset before write action (for cursor-aware append ordering)
+        val caretOffset: Int? = try {
+            val editors = FileEditorManager.getInstance(project).getAllEditors(targetFile)
+            val textEditor = editors.firstOrNull { it is TextEditor } as? TextEditor
+            textEditor?.editor?.caretModel?.offset
+        } catch (_: Exception) {
+            null
+        }
+
         WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
             val content = document.text
 
@@ -151,14 +162,14 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             for (p in patch.patches) {
-                result = applyComponentPatchNative(result, p.component, p.content)
+                result = applyComponentPatchNative(result, p.component, p.content, caretOffset)
             }
 
             // Apply unmatched content to exchange or output component
             if (patch.unmatched.isNotBlank()) {
-                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched)
+                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
                 result = if (exchangeResult != result) exchangeResult
-                    else applyComponentPatchNative(result, "output", patch.unmatched)
+                    else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
             }
 
             if (result != content) {
@@ -180,12 +191,22 @@ class PatchWatcher(private val project: Project) : Disposable {
      * The native library handles code block detection, attribute parsing,
      * and mode resolution identically to the CLI — eliminating duplicated logic.
      */
-    private fun applyComponentPatchNative(doc: String, component: String, content: String): String {
+    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null): String {
         // Native: resolve mode from inline attributes + components.toml + defaults
         // The FFI apply_patch requires an explicit mode, but the Kotlin fallback
         // extracts mode from inline attributes. For the FFI path, we extract the
         // mode from the document first, then call apply_patch.
         val mode = extractComponentMode(doc, component)
+
+        // For append mode with cursor info, use cursor-aware FFI (Kotlin fallback if native unavailable)
+        if (mode == "append" && caretOffset != null) {
+            val nativeResult = NativePatching.applyComponentPatchWithCaret(doc, component, content, mode, caretOffset)
+            if (nativeResult != null) return nativeResult
+            // Kotlin fallback for cursor-aware append
+            val kotlinResult = applyComponentPatchWithCaret(doc, component, content, caretOffset)
+            if (kotlinResult != null) return kotlinResult
+        }
+
         return NativePatching.applyComponentPatch(doc, component, content, mode)
             ?: applyComponentPatchKotlin(doc, component, content)
     }
@@ -243,6 +264,47 @@ class PatchWatcher(private val project: Project) : Disposable {
         // Rebuild frontmatter
         val newYaml = existing.entries.joinToString("\n") { "${it.key}: ${it.value}" }
         return "---\n$newYaml\n---\n$body"
+    }
+
+    /**
+     * Cursor-aware append: insert patch content before the caret position
+     * when the caret is inside the target component. This ensures agent
+     * responses appear above where the user is typing.
+     *
+     * Returns null if the caret is NOT inside the component (fall back to normal append).
+     */
+    private fun applyComponentPatchWithCaret(doc: String, component: String, content: String, caretOffset: Int): String? {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:$component -->"
+
+        val codeRanges = findCodeBlockRanges(doc)
+
+        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+        } ?: return null
+
+        val contentStart = openMatch.range.last + 1
+
+        var searchFrom = contentStart
+        var closeIdx: Int
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom)
+            if (closeIdx < 0) return null
+            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+            searchFrom = closeIdx + closeTag.length
+        }
+
+        // Check if caret is inside this component
+        if (caretOffset < contentStart || caretOffset > closeIdx) return null
+
+        // Insert patch content at the line boundary before the caret
+        val insertAt = doc.lastIndexOf('\n', caretOffset - 1).let {
+            if (it >= contentStart) it + 1 else contentStart
+        }
+
+        val before = doc.substring(0, insertAt)
+        val after = doc.substring(insertAt)
+        return before + content.trimEnd() + "\n" + after
     }
 
     /**

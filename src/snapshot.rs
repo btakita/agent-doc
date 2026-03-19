@@ -153,12 +153,23 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
         return load(doc);
     }
 
-    // No snapshot file — try git as recovery fallback
+    // No snapshot file — try git as recovery fallback.
+    // Only useful when git HEAD differs from current file (real recovery).
+    // If they match, the file was likely just committed (step 0b) before the
+    // first diff — no useful baseline exists.
     let git_mtime = crate::git::last_commit_mtime(doc).unwrap_or(None);
     if git_mtime.is_some() {
-        eprintln!("[snapshot] No snapshot file, recovering from git");
         match crate::git::show_head(doc)? {
-            Some(content) => Ok(Some(content)),
+            Some(git_content) => {
+                let current = std::fs::read_to_string(doc).unwrap_or_default();
+                if git_content == current {
+                    eprintln!("[snapshot] No snapshot file, git matches current — treating as first submit");
+                    Ok(None)
+                } else {
+                    eprintln!("[snapshot] No snapshot file, recovering from git");
+                    Ok(Some(git_content))
+                }
+            }
             None => Ok(None),
         }
     } else {

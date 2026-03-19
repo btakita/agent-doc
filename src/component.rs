@@ -45,6 +45,46 @@ impl Component {
         result.push_str(&doc[self.close_start..]);
         result
     }
+
+    /// Append content into this component, inserting before the caret position
+    /// if the caret is inside the component. Falls back to normal append if the
+    /// caret is outside the component.
+    ///
+    /// `caret_offset`: byte offset of the caret in the document. Pass `None` for
+    /// normal append behavior.
+    pub fn append_with_caret(&self, doc: &str, content: &str, caret_offset: Option<usize>) -> String {
+        let existing = &doc[self.open_end..self.close_start];
+
+        if let Some(caret) = caret_offset {
+            // Check if caret is inside this component
+            if caret > self.open_end && caret <= self.close_start {
+                // Find the line boundary before the caret
+                let insert_at = doc[..caret].rfind('\n')
+                    .map(|i| i + 1)
+                    .unwrap_or(self.open_end);
+
+                // Clamp to component bounds
+                let insert_at = insert_at.max(self.open_end);
+
+                let mut result = String::with_capacity(doc.len() + content.len() + 1);
+                result.push_str(&doc[..insert_at]);
+                result.push_str(content.trim_end());
+                result.push('\n');
+                result.push_str(&doc[insert_at..]);
+                return result;
+            }
+        }
+
+        // Normal append: add after existing content
+        let mut result = String::with_capacity(doc.len() + content.len() + 1);
+        result.push_str(&doc[..self.open_end]);
+        result.push_str(existing.trim_end());
+        result.push('\n');
+        result.push_str(content.trim_end());
+        result.push('\n');
+        result.push_str(&doc[self.close_start..]);
+        result
+    }
 }
 
 /// Valid name: `[a-zA-Z0-9][a-zA-Z0-9-]*`

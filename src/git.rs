@@ -73,12 +73,39 @@ pub fn commit(file: &Path) -> Result<()> {
         .unwrap_or("unknown");
     let msg = format!("agent-doc({}): {}", doc_name, timestamp);
 
-    let status = Command::new("git")
-        .current_dir(&git_root)
-        .args(["add", "-f", &resolved.to_string_lossy()])
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("git add failed");
+    // Selective commit: stage only the snapshot content (agent response),
+    // leaving user edits in the working tree as uncommitted.
+    //
+    // If a snapshot exists, use git hash-object + update-index to stage the
+    // snapshot version without touching the working tree file. This means:
+    // - Agent response → committed (no git gutter)
+    // - User's subsequent edits → uncommitted (green git gutter)
+    let snapshot_content = crate::snapshot::load(file)?;
+    if let Some(ref snap) = snapshot_content {
+        // Add (HEAD) marker to the last ### Re: heading in the snapshot.
+        // The working tree keeps the heading WITHOUT the marker, creating
+        // a single modified line (blue gutter) as a visual boundary.
+        let staged_content = add_head_marker(snap);
+
+        let rel_path = resolved.strip_prefix(&git_root)
+            .unwrap_or(&resolved);
+
+        if let Ok(hash) = hash_object(&git_root, &staged_content) {
+            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
+            let status = Command::new("git")
+                .current_dir(&git_root)
+                .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
+                .status()?;
+            if !status.success() {
+                eprintln!("[commit] update-index failed, falling back to git add");
+                git_add_force(&git_root, &resolved)?;
+            }
+        } else {
+            git_add_force(&git_root, &resolved)?;
+        }
+    } else {
+        // No snapshot — fall back to staging the entire file
+        git_add_force(&git_root, &resolved)?;
     }
 
     // Commit — ignore failure (nothing to commit is fine)
@@ -86,6 +113,71 @@ pub fn commit(file: &Path) -> Result<()> {
         .current_dir(&git_root)
         .args(["commit", "-m", &msg, "--no-verify"])
         .status();
+    Ok(())
+}
+
+/// Add ` (HEAD)` suffix to the last `### ` heading in the content.
+///
+/// This creates a single modified line in the git diff between the committed
+/// version (with marker) and the working tree (without marker), serving as
+/// a visual boundary in the editor's git gutter.
+///
+/// Matches any `### ` heading (not just `### Re:`) since agent responses
+/// may use different heading formats across documents.
+fn add_head_marker(content: &str) -> String {
+    // Find the last "### " heading (any h3)
+    if let Some(last_pos) = content.rfind("\n### ") {
+        let line_start = last_pos + 1; // skip the newline
+        let line_end = content[line_start..].find('\n')
+            .map(|i| line_start + i)
+            .unwrap_or(content.len());
+        let heading = &content[line_start..line_end];
+
+        // Don't double-add the marker
+        if heading.ends_with(" (HEAD)") {
+            return content.to_string();
+        }
+
+        let mut result = String::with_capacity(content.len() + 7);
+        result.push_str(&content[..line_end]);
+        result.push_str(" (HEAD)");
+        result.push_str(&content[line_end..]);
+        result
+    } else {
+        content.to_string()
+    }
+}
+
+/// Write content to git's object database and return the blob hash.
+fn hash_object(git_root: &Path, content: &str) -> Result<String> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(content.as_bytes())?;
+            }
+            child.wait_with_output()
+        })?;
+    if !output.status.success() {
+        anyhow::bail!("git hash-object failed");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Force-add a file to the index (fallback path).
+fn git_add_force(git_root: &Path, resolved: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .current_dir(git_root)
+        .args(["add", "-f", &resolved.to_string_lossy()])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("git add failed");
+    }
     Ok(())
 }
 

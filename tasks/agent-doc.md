@@ -472,6 +472,24 @@ What is `execution_mode = "parallel"`? Is it effectively the same thing as the p
 **On patch appearing below typing:** This is a known CRDT limitation — when both user and patch append to the same position, ordering is unpredictable. The cleanest solution: use `agent:input` for typing, `agent:exchange` for responses. Separating input from output avoids the concurrent-append conflict entirely. This document doesn't have `agent:input` — the user types directly in `agent:exchange`, which creates the overlap.
 
 Can we have a heuristic where the human prompt is nudged below the agent patch content?
+
+### Re: `execution_mode` vs `agent-doc parallel` + CRDT Ordering
+
+Should we use worktrees instead of parallel? If we did use `parallel`, would a worktree always be created? If yes, then it seems like we should use `agent-doc worktree` or `agent-doc worktrees` instead.
+
+**`execution_mode`** controls **skill concurrency** — how many concurrent `/agent-doc` sessions run simultaneously (hybrid/parallel/sequential). It has nothing to do with task fan-out.
+
+`agent-doc parallel` (the proposed command) is about **task decomposition** — splitting one task into independent worktree-isolated subtasks. Completely different layer. No conflict.
+
+**On nudging human prompt below agent patch:**
+
+Feasible as a post-merge heuristic in `crdt.rs` — detect agent `### Re:` content and user's new text, reorder so agent response comes first, user prompt last. But fragile.
+
+Can we make the above approach more robust? Are we able to understand what the origin of each CRDT source is? Can we tell if the CRDT source is the agent patch vs the human writer?
+
+**Cleanest approach:** Add `agent:input` to this document. User types there, responses go to `agent:exchange`. Zero ordering ambiguity — input and output never compete for the same append position.
+
+Want me to add `agent:input` to this document? No thanks.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

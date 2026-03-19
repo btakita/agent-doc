@@ -193,6 +193,9 @@ Can the plugin force a refresh of the git state?
 
 Fixed. `add_head_marker()` now marks ALL new `### ` headings in the agent's response, not just the last one.
 
+Do responses always use `### `. Is it possible for a response to have a `## ` or `# ` or `#### ` or `##### ` or `###### `? If yes, can we make this rule apply to **any** root section title in the patch response.
+So only the top level roots of the response...even if it's not a h3 tag.
+
 **How it works:**
 1. Gets git HEAD content for the file
 2. Finds all `### ` headings in the snapshot
@@ -215,6 +218,29 @@ However the section title uncommited response only applied to the last section. 
   - Unsuccessfully applied
 - ### Re: Laura follow-up length
   - Successfully applied
+
+
+### Re: Any-Level Heading Markers + VFS Refresh
+
+**1. Heading level flexibility — Fixed**
+
+`add_head_marker()` now matches ANY markdown heading level (`#` through `######`). Only the **root-level** (shallowest) headings in the new content get marked:
+
+```
+## Summary (HEAD)           ← root level, marked (HEAD)
+### Details                 ← sub-heading, NOT marked
+## Recommendations (HEAD)   ← root level, marked (HEAD)
+### Item 1                  ← sub-heading, NOT marked
+```
+
+This works regardless of whether the response uses `###`, `##`, or any other level.
+
+**2. VFS refresh — Fixed**
+
+Added `LocalFileSystem.getInstance().refresh(true)` before `markEverythingDirty()`. The VFS refresh ensures IntelliJ re-reads the git state from disk before recomputing gutter annotations. Without VFS refresh, the dirty scope manager works against stale cached data.
+
+**Note:** The plugin still needs to be reinstalled for these changes to take effect. Current plugin: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
+I still saw the full green gutter. The full green gutter went away after I made an edit.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

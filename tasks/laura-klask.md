@@ -13,7 +13,9 @@ agent_doc_write: crdt
 - [x] Gmail filters synced
 - [x] Follow-up nudge sent to Laura
 - [x] Ken email history reviewed (7 threads, 2006–2014)
-- [ ] Ken email drafted with history context — awaiting approval to send
+- [x] Ken email pushed to Gmail drafts — review and send
+- [ ] Awaiting Ken's response
+- [ ] Awaiting Laura's response to follow-up
 <!-- /agent:status -->
 
 ## Exchange
@@ -384,6 +386,17 @@ This is a **continuation of that 2013 conversation**, 13 years later. Now the to
 
 Contact updated: `mail/contacts/ken-klask/CLAUDE.md` — full correspondence history added.
 I just did a corky sync. Some emails with Ken Klask are now in the system. Please review for updated context. Update the email draft accordingly.
+
+### Email to Ken — pushed to Gmail drafts (HEAD)
+
+`corky draft push` — email created in Gmail drafts.
+
+- **To:** kenklask@amulettechnologies.com
+- **Subject:** Catching up — picking up where we left off
+- **Draft file:** `mail/drafts/2026-03-19-catching-up-picking-up-where-we-left-off.md`
+
+Open Gmail drafts to review and hit send.
+Send the email to Ken's amulet technologies email address.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

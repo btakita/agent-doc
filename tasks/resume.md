@@ -281,8 +281,19 @@ Yes
 Experiences included: Presence AI, Open Source (Rust/Python), Freelance (AWS ECS), Censible (8yr Python), TrueCar (MongoDB/infra), Milyoni (Node.js/AWS), Pivotal Labs
 
 Please don't automatically send emails. Wait until I tell you to send the email.
+
+### Re: Email sending policy
+
+**Understood.** From now on I will:
+1. Draft the email and show you the contents
+2. Push to Gmail Drafts (not send directly)
+3. Wait for your explicit "send" before using `--send`
+
+Apologies for sending without confirmation — I should have defaulted to drafts-only per corky's safety rules.
+
+Update the email skill with this change.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create SW Airlines profile + send email to Janaki
+
 <!-- /agent:pending -->

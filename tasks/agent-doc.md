@@ -822,7 +822,290 @@ Ensure this logic is composed and modular. Not pending features:
 
 Implementing these feature should be seamless with our approach.
 
-As I was typing, the previous run's response was i
+As I was typing, the previous run's response was inserted below where I was typing.
+We recently added a feature to nudge the CRDT to insert the agent patch above where the user is typing.
+Why did this not work with my previous prompt?
+
+### Re: Terminal Logic Review + CRDT Reorder Issue
+
+**Two topics addressed:**
+
+---
+
+**1. `terminal.rs` — Refactored for stale session safety**
+
+Rewrote the core logic with a `SessionTarget` enum and multi-step resolution:
+
+```
+resolve_target_session():
+  1. tmux not running? → Create(name)
+  2. --session flag? → classify as Attached/Detached
+  3. Frontmatter tmux_session exists in tmux? → classify
+  4. Frontmatter session STALE? → scan sessions.json for live panes
+  5. Found live pane in ANY session? → attach that session
+  6. Nothing found? → Create(default)
+```
+
+**Key improvements:**
+- **Stale frontmatter handling:** If `tmux_session: "0"` in frontmatter but session "0" doesn't exist, scans `sessions.json` for any live pane in the project and uses its parent session instead
+- **`find_active_project_session()`** — walks the registry, checks `pane_alive()`, then `display-message #{session_name}` to find the session name
+- **`classify_session()`** — separates Attached (has terminal client, no-op) from Detached (needs terminal opened to attach)
+- **Modular:** Each step is a separate function. Multi-session (#17) and multi-editor (#18) can extend `find_active_project_session()` to return multiple candidates instead of first-match
+
+**Tests:** 466 total (287 bin, +1 new `classify_session_target`). All passing.
+
+---
+
+**2. CRDT reorder didn't work — Root Cause**
+
+The CRDT reorder (`reorder_agent_before_human`) only fires on the **disk write path** when both the agent and user edited concurrently. But in your case, **IPC succeeded** — the JetBrains plugin applied the patch directly via Document API.
+
+The IPC path (`try_ipc()` in `write.rs`) bypasses CRDT merge entirely. The plugin patches the component and writes the file — no `merge()` call, no reorder.
+
+**Fix options:**
+
+| Option | Where | Complexity |
+|--------|-------|-----------|
+| A. Plugin-side reorder | JetBrains/VS Code Kotlin/TS | High — duplicates logic |
+| B. Post-IPC disk reorder | `write.rs` after IPC success | Medium — read file, detect, rewrite |
+| C. **IPC sends ordering hint** | Patch JSON includes "insert before cursor" | Low — plugin already knows cursor position |
+
+**Option C is cleanest:** The patch JSON already has `component` and `content`. Add an `"ordering": "before_cursor"` field. The plugin checks if the cursor is inside the target component and inserts the patch content above the cursor position instead of at the component boundary. This is a ~10 line change in `PatchWatcher.kt`.
+
+Want me to implement Option C in the JetBrains plugin?
+Yes
+
+`Run Agent Doc` on tasks/laura-klask.md resulted in No changes detected.
+There was no snapshot file. Please fix this initial case.
+
+```
+ ▐▛███▜▌   Claude Code v2.1.79
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  SessionStart:startup says: [agent-loop] recent context, 2026-03-19 11:38am EDT
+     ────────────────────────────────────────────────────────────
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+
+     Context Economics
+       Loading: 50 observations (16,330 tokens to read)
+       Work investment: 221,514 tokens spent on research, building, and decisions
+       Your savings: 93% reduction from reuse
+
+     Mar 19, 2026
+
+     mail/contacts/arunprakash-s/recordings
+       #7387  2:27 AM  🔵  Two phone call recordings found for Arunprakash S contact
+
+     tasks/resume.md
+       #7388           ✅  Formalized pending tasks for WBD opportunity into checklist
+
+     ../../tmp/phone_20260318-142322_8382807886.wav
+       #7389           ✅  First phone recording converted to WAV format for transcription
+
+     ../../tmp/phone_20260318-170251_8382807886.wav
+       #7390  2:28 AM  ✅  Second phone recording converted to WAV format
+
+     tasks/resume.md
+       #7391  2:40 AM  ✅  Resume task documentation committed to version control
+       #7392           ✅  WBD Rust resume profile enhanced with detailed experience mappings
+
+     resume/data.toml
+       #7393  2:42 AM  ✅  Presence AI experience enhanced with CI/CD and observability capabilities
+       #7394  2:43 AM  ✅  Freelance experience enhanced with Docker skill
+       #7395           ✅  Rundavoo experience enhanced with Docker and CI/CD skills
+       #7396           ✅  Menu.com accomplishment tagged with Docker for AWS ECS work
+       #7397           ✅  Censible ESG platform experience enhanced with deployment and observability skills
+       #7398  2:44 AM  ✅  TrueCar/honk.com experience enhanced with deployment infrastructure skills
+
+     tasks/agent-doc.md
+       #7399  2:49 AM  ✅  Agent-doc response committed to git
+
+     tasks/resume.md
+       #7400  2:52 AM  ✅  Resume task work committed to version control
+
+     tasks/agent-doc.md
+       #7401  2:56 AM  ⚖️  CRDT Source Attribution and Edit Ordering Strategy
+
+     tasks/resume.md
+       #7402  2:57 AM  ✅  Presence AI job title updated in resume data
+
+     tasks/agent-doc.md
+       #7403  2:59 AM  ⚖️  CRDT Attribution Strategy for Message Ordering
+
+     General
+       #7404  3:00 AM  🔵  Yrs API Surface for Character-Level Attribution
+
+     src/agent-doc/src/crdt.rs
+       #7405  3:03 AM  🟣  Started implementing CRDT attribution feature with YChange imports
+       #7406  3:04 AM  🟣  Implemented CRDT attribution-based message reordering
+       #7407           🟣  Integrated attribution-based reordering into CRDT merge workflow
+       #7408           🟣  Added test for CRDT attribution-based message reordering
+
+     tasks/agent-doc.md
+       #7409  3:05 AM  ✅  Documentation updates committed for agent-doc workflow
+
+     General
+       #7410  3:06 AM  🔴  Cleaned up orphan tmux panes with misleading agent-doc window names
+
+     tasks/agent-doc.md
+       #7411  3:08 AM  ✅  Documentation committed to tasks/agent-doc.md
+       #7412  3:10 AM  ⚖️  Worktree Usage Strategy for agent-doc parallel
+       #7413  3:11 AM  ✅  Committed worktree design decision to version control
+       #7414  3:12 AM  ⚖️  Approved implementation of --no-worktree flag
+       #7415  3:14 AM  ✅  Committed agent-doc task documentation updates
+
+     README.md
+       #7416  3:18 AM  🔄  Renamed "deep" command to "parallel"
+
+     src/parallel.rs
+       #7417  3:19 AM  🔄  Comprehensive rename across Rust codebase and CLI
+
+     .agent-doc/sessions.json
+       #7418           🔵  Orphan tmux pane root cause identified
+
+     #S2137 Execute agent-doc skill on tasks/agent-doc.md file (Mar 19, 3:20 AM)
+
+     #S2138 Document Janaki Bhoi recruiter contact in resume task tracking system (Mar 19, 3:22 AM)
+
+     tasks/agent-doc.md
+       #7419  3:23 AM  ✅  Agent-doc response committed to version control
+       #7420           ✅  Task items added to agent-doc exchange section
+
+     mail/contacts/janaki-bhoi/CLAUDE.md
+       #7421  3:24 AM  🟣  Contact context system for recruitment communications
+
+     src/agent-doc/Cargo.toml
+       #7422           🔵  Agent-doc project structure and current version identified
+
+     tasks/resume.md
+       #7423           ✅  Resume task tracking updated with Janaki Bhoi contact completion
+
+     src/agent-doc/pyproject.toml
+       #7424           🔵  Agent-doc dual-published to Rust and Python ecosystems
+
+     #S2139 Process candidate documentation and recordings for Janaki Bhoi from tasks/resume.md (Mar 19, 3:25 AM)
+
+     src/agent-doc/Cargo.toml
+       #7425  3:25 AM  ✅  Version bump to 0.21.0 in Cargo.toml
+
+     src/agent-doc/pyproject.toml
+       #7426           ✅  Version sync completed with pyproject.toml update to 0.21.0
+
+     tasks/resume.md
+       #7427           ✅  Committed resume task tracking updates to version control
+
+     #S2140 Complete recruiter submissions for Southwest Airlines and finalize all pending job applications (Mar 19,
+     3:27 AM)
+
+     tasks/resume.md
+       #7428  3:27 AM  ✅  Agent-doc response committed to version control
+       #7429  3:28 AM  🔵  Integrated job search workflow system with resume automation and recruiter management
+
+     resume/profiles/default.toml
+       #7430  3:29 AM  🔵  Resume profile configuration system with phrase highlighting and skill emphasis
+
+     #S2141 Run agent-doc on tasks/resume.md file (Mar 19, 3:31 AM)
+
+     #S2142 Generate agent documentation for tasks/resume.md (Mar 19, 3:32 AM)
+
+     tasks/resume.md
+       #7431  3:32 AM  ✅  Committed agent-doc updates to resume task documentation
+       #7432  3:33 AM  🔵  Resume task document tracks job application workflow and tooling
+
+     #S2143 Documentation check for rappstack tasks file (Mar 19, 3:35 AM)
+
+     #S2144 Document rebuildjs refactor Phase 1 completion and architecture specification (Mar 19, 11:14 AM)
+
+     tasks/rebuildjs-refactor.md
+       #7433  11:14 AM  ✅  Rebuildjs Architecture Specification Documented
+
+     #S2145 Design documentation for cross-platform terminal launch functionality in agent-doc editor plugin (Mar 19,
+     11:14 AM)
+
+     tasks/agent-doc.md
+       #7434  11:30 AM  ⚖️  Cross-Platform Terminal Launch Design for Editor Plugin
+
+     #S2146 Revise agent documentation for terminal configuration design (Mar 19, 11:36 AM)
+
+     tasks/agent-doc.md
+       #7435  11:36 AM  ✅  Agent documentation committed to version control
+       #7436  11:37 AM  🟣  Parallel task fan-out feature implemented with git worktrees
+
+
+     Access 222k tokens of past research & decisions for just 16,330t. Use the claude-mem skill to access memories by
+     ID.
+
+     View Observations Live @ http://localhost:37777
+
+❯ /agent-doc tasks/bcg.md
+
+● Bash(agent-doc --version 2>/dev/null || echo "not installed")
+  ⎿  agent-doc 0.21.0
+
+● Bash(agent-doc recover tasks/bcg.md 2>&1)
+  ⎿  [recover] No pending response found for tasks/bcg.md
+
+● Bash(agent-doc claims 2>&1)
+  ⎿  (No output)
+
+● Bash(agent-doc commit tasks/bcg.md 2>&1)
+  ⎿  [main 91de808] agent-doc(bcg): 2026-03-19 11:38:47
+      1 file changed, 4 insertions(+), 2 deletions(-)
+
+● Bash(agent-doc diff --wait tasks/bcg.md 2>&1)
+  ⎿  [diff] Last line may be truncated (recheck 1/25): "claude_args: --dangerously-skip-permissions"
+     [diff] Content stable after recheck
+     [diff --wait] content is stable
+     … +118 lines (ctrl+o to expand)
+
+  Read 1 file (ctrl+o to expand)
+
+● Now let me check the snapshot to see the actual diff (what the user changed since last submit).
+
+● Bash(canonical=$(realpath tasks/bcg.md) && hash=$(echo -n "$canonical" | sha256sum | cut -d' ' -f1) && echo "$hash")
+  ⎿  2b4b60869633d5ae8f24880e1c5db2d83f639a48e9c12d820759b7ecc327f007
+
+  Read 1 file (ctrl+o to expand)
+
+● The diff is only frontmatter metadata changes (tmux_session, agent_doc_format rename, added agent_doc_write and
+  claude_args). No content changes in the document body — nothing to respond to.
+
+✻ Cogitated for 41s
+
+❯ /agent-doc tasks/laura-klask.md
+
+● Bash(agent-doc recover tasks/laura-klask.md 2>&1)
+  ⎿  [recover] No pending response found for tasks/laura-klask.md
+
+● Bash(agent-doc claims 2>&1)
+  ⎿  Claimed /home/brian/work/btakita/agent-loop/tasks/laura-klask.md for pane %7
+
+● Bash(agent-doc commit tasks/laura-klask.md 2>&1)
+  ⎿  [main 51b8cf6] agent-doc(laura-klask): 2026-03-19 11:48:59
+      1 file changed, 38 insertions(+)
+      create mode 100644 tasks/laura-klask.md
+
+● Bash(agent-doc diff --wait tasks/laura-klask.md 2>&1)
+  ⎿  [snapshot] No snapshot file, recovering from git
+     [diff --wait] content is stable
+     [snapshot] No snapshot file, recovering from git
+     … +5 lines (ctrl+o to expand)
+
+● No changes detected in tasks/laura-klask.md since the last commit. Edit the document and run /agent-doc
+  tasks/laura-klask.md again when ready.
+```
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

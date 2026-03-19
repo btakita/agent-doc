@@ -387,7 +387,7 @@ This is a **continuation of that 2013 conversation**, 13 years later. Now the to
 Contact updated: `mail/contacts/ken-klask/CLAUDE.md` — full correspondence history added.
 I just did a corky sync. Some emails with Ken Klask are now in the system. Please review for updated context. Update the email draft accordingly.
 
-### Email to Ken — pushed to Gmail drafts (HEAD)
+### Email to Ken — pushed to Gmail drafts
 
 `corky draft push` — email created in Gmail drafts.
 

@@ -243,7 +243,7 @@ Added `LocalFileSystem.getInstance().refresh(true)` before `markEverythingDirty(
 I still saw the full green gutter. The full green gutter went away after I made an edit.
 
 
-### Re: v0.22.1 Released (HEAD)
+### Re: v0.22.1 Released
 
 | Target | Status |
 |--------|--------|

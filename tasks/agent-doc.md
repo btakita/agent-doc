@@ -262,6 +262,24 @@ Runner-up `explore` has the same overloading risk ("explore the codebase" = sing
 **Recommendation: keep `agent-doc deep`.**
 
 Compare with spawn. Is spawn also applicable to other potential features?
+
+### Re: `spawn` vs `deep` — Overloading Risk
+
+Yes, `spawn` is also applicable to other features:
+- `agent-doc start` already spawns a Claude session — `spawn` could describe that
+- Single background task — "spawn a worker" (no worktree, no fan-out)
+- Watch daemon spawns a background process
+- Any future subprocess creation
+
+| Name | Specificity | Overloading risk |
+|------|------------|-----------------|
+| `spawn` | Low — any subprocess | High |
+| `dispatch` | Medium — task routing | Medium |
+| `deep` | High — only this feature | Low |
+
+`deep` remains strongest because it's specific enough that no other feature would claim it. The slight ambiguity covers all use cases (parallel research, implementation, investigation) under one evocative name.
+
+Describe the `agent-doc deep` feature. How would it be implemented and used?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

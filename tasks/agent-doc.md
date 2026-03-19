@@ -240,6 +240,28 @@ Revisiting with that lens:
 `dispatch` describes what happens: send tasks to isolated workers, collect results. `deep` describes why: intensive multi-angle analysis. Both are valid — depends on which mental model you want users to have.
 
 Could dispatch be used for other functionality that is not related to this pattern?
+
+### Re: Could `dispatch` Be Overloaded?
+
+Yes. `dispatch` could apply to:
+- Sending a single task to a background agent (no worktree, no fan-out)
+- Routing a document to a specific agent backend
+- Event/message dispatch patterns
+
+It's generic enough to be claimed by future features, which dilutes specificity for the parallel-worktree pattern.
+
+**This argues for `deep` after all:**
+- Specific — no other agent-doc feature would naturally claim it
+- Short and memorable
+- Intent-clear: "go deep on this problem with multiple parallel workers"
+- Not overloaded by any existing concept
+- The mechanism (worktrees, parallel agents) is an implementation detail — the user cares about "intensive multi-angle work"
+
+Runner-up `explore` has the same overloading risk ("explore the codebase" = single agent).
+
+**Recommendation: keep `agent-doc deep`.**
+
+Compare with spawn. Is spawn also applicable to other potential features?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -595,6 +595,31 @@ agent-doc claims
 Want me to implement it?
 
 yes!
+
+### Re: `agent-doc claims` Implemented
+
+Added the `claims` subcommand to `agent-doc`. Usage:
+
+```bash
+agent-doc claims
+```
+
+**What it does:**
+1. Finds project root (walks up from CWD looking for `.agent-doc/`)
+2. Reads `.agent-doc/claims.log`
+3. Prints each line to stdout
+4. Truncates the file
+5. Exits silently if the file doesn't exist or is empty
+
+**SKILL.md updated** — the pre-flight check now uses `agent-doc claims` instead of the shell one-liner `cat .agent-doc/claims.log 2>/dev/null; > .agent-doc/claims.log`.
+
+**Why this is better:** The binary call is deterministic, always terminates, and can't be accidentally backgrounded by the Bash tool. No more zombie processes.
+
+Tests: 451 passing (21 integration), clippy clean. Ready for the next release.
+
+Update VERSIONS.md
+audit docs
+release
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

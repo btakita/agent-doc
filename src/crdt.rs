@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use yrs::types::text::{ChangeKind, YChange};
 use yrs::updates::decoder::Decode;
 use yrs::{Doc, GetString, ReadTxn, Text, TextRef, Transact, Update};
 
@@ -57,6 +58,107 @@ impl CrdtDoc {
         drop(txn);
         Ok(CrdtDoc { doc })
     }
+}
+
+/// Reorder agent content (client_id=1) before human content (client_id=2)
+/// at the append boundary after a CRDT merge.
+///
+/// After merging, when both sides append to the same position, the CRDT may
+/// place human content before agent content. This function detects that case
+/// and swaps the groups so agent content appears first at the boundary.
+fn reorder_agent_before_human(doc: &Doc) -> String {
+    let text = doc.get_or_insert_text(TEXT_KEY);
+    let txn = doc.transact();
+    let chunks = text.diff(&txn, YChange::identity);
+
+    if chunks.is_empty() {
+        return text.get_string(&txn);
+    }
+
+    // Extract text content from each chunk along with its attribution
+    #[derive(Debug)]
+    struct Chunk {
+        text: String,
+        is_added: bool,
+        client: u64,
+    }
+
+    let mut parts: Vec<Chunk> = Vec::new();
+    for chunk in &chunks {
+        let s = chunk.insert.clone().to_string(&txn);
+        let (is_added, client) = match &chunk.ychange {
+            Some(yc) if yc.kind == ChangeKind::Added => (true, yc.id.client),
+            _ => (false, 0),
+        };
+        parts.push(Chunk {
+            text: s,
+            is_added,
+            client,
+        });
+    }
+
+    // Find the append boundary: contiguous Added chunks at the end
+    let boundary_start = {
+        let mut i = parts.len();
+        while i > 0 && parts[i - 1].is_added {
+            i -= 1;
+        }
+        i
+    };
+
+    // If no boundary or only one chunk in the boundary, nothing to reorder
+    if boundary_start >= parts.len() || (parts.len() - boundary_start) < 2 {
+        return text.get_string(&txn);
+    }
+
+    let boundary = &parts[boundary_start..];
+
+    // Check if there's a human chunk (client=2) before an agent chunk (client=1)
+    // within the boundary. If so, we need to reorder.
+    let mut found_human_before_agent = false;
+    let mut seen_human = false;
+    for chunk in boundary {
+        if chunk.client == 2 {
+            seen_human = true;
+        } else if chunk.client == 1 && seen_human {
+            found_human_before_agent = true;
+            break;
+        }
+    }
+
+    if !found_human_before_agent {
+        return text.get_string(&txn);
+    }
+
+    // Separate boundary chunks into agent group and human group
+    let mut agent_text = String::new();
+    let mut human_text = String::new();
+    for chunk in boundary {
+        if chunk.client == 1 {
+            agent_text.push_str(&chunk.text);
+        } else if chunk.client == 2 {
+            human_text.push_str(&chunk.text);
+        } else {
+            // Other clients — append to human group as a fallback
+            human_text.push_str(&chunk.text);
+        }
+    }
+
+    eprintln!(
+        "[crdt] reorder: moving agent content ({} bytes) before human content ({} bytes) at append boundary",
+        agent_text.len(),
+        human_text.len()
+    );
+
+    // Reconstruct: prefix + agent + human
+    let mut result = String::new();
+    for chunk in &parts[..boundary_start] {
+        result.push_str(&chunk.text);
+    }
+    result.push_str(&agent_text);
+    result.push_str(&human_text);
+
+    result
 }
 
 /// Merge two concurrent text versions against a common base using CRDT.
@@ -211,10 +313,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
             .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
     }
 
-    // Read merged result
-    let text = ours_doc.get_or_insert_text(TEXT_KEY);
-    let txn = ours_doc.transact();
-    let merged = text.get_string(&txn);
+    // Read merged result with agent-before-human reordering at append boundary
+    let merged = reorder_agent_before_human(&ours_doc);
 
     // Post-merge dedup: remove identical adjacent blocks (#15)
     Ok(dedup_adjacent_blocks(&merged))
@@ -886,6 +986,36 @@ commit and push all rappstack packages.
         assert!(
             !merged.contains("CompleteUser") && !merged.contains("Complete\nUser"),
             "Character interleaving detected. Got:\n{}", merged
+        );
+    }
+
+    /// Test: agent content appears before human content when both append
+    /// to the same position.
+    #[test]
+    fn reorder_agent_before_human_at_append_boundary() {
+        let base = "# Document\n\nBase content.\n";
+        let base_doc = CrdtDoc::from_text(base);
+        let base_state = base_doc.encode_state();
+
+        // Agent appends response
+        let ours = format!("{base}### Agent Response\n\nAgent wrote this.\n");
+        // Human appends their own text
+        let theirs = format!("{base}User added this line.\n");
+
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        // Both should be present
+        assert!(merged.contains("Agent wrote this."), "missing agent text");
+        assert!(merged.contains("User added this line."), "missing user text");
+        assert!(merged.contains("Base content."), "missing base text");
+
+        // Agent content should appear before human content
+        let agent_pos = merged.find("Agent wrote this.").unwrap();
+        let human_pos = merged.find("User added this line.").unwrap();
+        assert!(
+            agent_pos < human_pos,
+            "Agent content should appear before human content.\nAgent pos: {}, Human pos: {}\nMerged:\n{}",
+            agent_pos, human_pos, merged
         );
     }
 

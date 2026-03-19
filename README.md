@@ -42,6 +42,7 @@ agent-doc outline session.md             # section structure + token counts
 agent-doc outline session.md --json      # JSON output for tooling
 agent-doc patch dashboard.md status "new content"  # update a component
 agent-doc watch                          # auto-submit on file change
+agent-doc parallel session.md --task "task 1" --task "task 2"  # parallel fan-out
 agent-doc resync                         # validate sessions, prune dead panes
 agent-doc resync --fix                   # also fix wrong-session/wrong-process panes
 agent-doc commit session.md              # git add + commit with timestamp
@@ -277,6 +278,51 @@ agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
 6. If no active pane is available, auto-starts a new Claude session in tmux: first tries `split-window` in an existing window that has a registered agent-doc pane (avoids creating throwaway windows), falls back to creating a new window if no registered panes exist (30s startup timeout with `❯` prompt detection)
 7. `sync` auto-starts Claude sessions for files with session UUIDs but no alive panes before arranging the layout
 
+## Parallel — Fan-Out
+
+Decompose a complex task into independent subtasks, each running in its own git worktree with a separate Claude session.
+
+### CLI
+
+```sh
+agent-doc parallel plan.md \
+  --task "Implement auth middleware in src/auth.rs" \
+  --task "Write integration tests for auth" \
+  --task "Update API docs for auth endpoints" \
+  --model opus \
+  --timeout 600
+```
+
+| Flag | Description |
+|------|-------------|
+| `--task "..."` | Subtask description (repeatable, at least 1) |
+| `--model <model>` | Model override for subtask agents |
+| `--timeout <secs>` | Per-task timeout (default: 600) |
+| `--no-git` | Skip git commits in worktrees |
+| `--dry-run` | Print plan without executing |
+
+### How it works
+
+1. Creates a git worktree per task (`.agent-doc/worktrees/<session>-<n>`)
+2. Writes task prompt to each worktree
+3. Spawns `claude -p` in stashed tmux panes (one per worktree)
+4. Polls for completion every 2 seconds
+5. Collects results: agent JSON output + `git diff HEAD` per worktree
+6. Prints formatted markdown with collapsible diffs
+
+### From a document session
+
+In a template-mode document, write a `deep:` directive in the exchange:
+
+```markdown
+deep:
+- Implement auth middleware
+- Write integration tests
+- Update API docs
+```
+
+The SKILL.md skill parses the `deep:` prefix, extracts bullet tasks, and calls `agent-doc parallel --task "..." --task "..."`. Results are written back to the exchange.
+
 ## Resync
 
 Validate `sessions.json` against live tmux state and fix inconsistencies.
@@ -334,6 +380,7 @@ agent-doc claim <file> [--window W] [--pane P]  # claim file for a tmux pane
 agent-doc focus <file> [--pane P]              # focus tmux pane for a session
 agent-doc layout <files> --split h [--window W] # arrange panes (window-scoped)
 agent-doc outline <file> [--json]    # section structure + token counts
+agent-doc parallel <file> --task "..." [--model M] [--timeout S] [--dry-run]  # parallel fan-out
 agent-doc resync                    # validate sessions, prune dead panes, report issues
 agent-doc resync --fix              # also kill wrong-session panes, deregister wrong-process panes
 agent-doc prompt <file> [--all]     # detect permission prompts → JSON

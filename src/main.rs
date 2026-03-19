@@ -7,6 +7,7 @@ mod commands;
 mod compact;
 mod config;
 mod convert;
+mod parallel;
 mod diff;
 mod extract;
 mod focus;
@@ -33,6 +34,7 @@ mod sync;
 mod undo;
 mod upgrade;
 mod watch;
+mod worktree;
 mod write;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths
@@ -344,6 +346,29 @@ enum Commands {
     },
     /// Print and clear the claims log (.agent-doc/claims.log)
     Claims,
+    /// Fan-out: decompose task into parallel worktree-isolated subagents
+    Parallel {
+        /// Path to the session document
+        file: PathBuf,
+        /// Explicit subtask descriptions (repeatable)
+        #[arg(long = "task")]
+        tasks_explicit: Vec<String>,
+        /// Model override for subtask agents
+        #[arg(long)]
+        model: Option<String>,
+        /// Skip git commits in worktrees
+        #[arg(long)]
+        no_git: bool,
+        /// Run without worktrees (read-only tasks, shared CWD)
+        #[arg(long)]
+        no_worktree: bool,
+        /// Per-task timeout in seconds
+        #[arg(long, default_value = "600")]
+        timeout: u64,
+        /// Show plan without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
@@ -583,6 +608,16 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+        Commands::Parallel { file, tasks_explicit, model, no_git, no_worktree, timeout, dry_run } => {
+            parallel::run(&file, parallel::ParallelConfig {
+                tasks: tasks_explicit,
+                model,
+                no_git,
+                no_worktree,
+                timeout_secs: timeout,
+                dry_run,
+            })
         }
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),

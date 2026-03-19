@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.21.0 | **Tests:** 461 (158 lib + 282 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.22.0 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** numeric session fix (colon suffix)
+**Plugins:** JetBrains v0.2.7 (cursor-aware FFI) + VS Code v0.2.3 (prepend fix)
+**Library:** `libagent_doc.so` (1.7M) — 7 FFI exports | **Routing:** numeric session fix (colon suffix)
 <!-- /agent:status -->
 
 ## Architecture
@@ -1535,18 +1535,45 @@ Want me to implement this improved targeting?
 
 Maybe. See my comment above. The current git HEAD is incorrect.
 
-### Re: Fixing the Commit Timing + Plugin Version (HEAD)
+### Re: Fixing the Commit Timing + Plugin Version
 
 **Root cause of green gutter on agent response:** The selective commit runs at the START of the next cycle (step 0b), but the agent response is written NOW. Between write and next commit, the response shows as uncommitted (green gutter). The user sees this as a bug.
 
 **Fix:** Commit immediately after writing the response, not at the start of the next cycle. Calling `agent-doc commit` right after `agent-doc write` stages the snapshot (which now includes the response) and commits it. User's subsequent edits remain uncommitted.
 
 I'll commit this response right now to demonstrate:
+
+That worked
+
+Release
+
+### Re: v0.22.0 Released (HEAD)
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.22.0` |
+| GitHub Release | [v0.22.0](https://github.com/btakita/agent-doc/releases/tag/v0.22.0) |
+| cargo install | updated (replaced v0.20.3) |
+| JetBrains plugin | v0.2.7 built |
+| PyPI | pending |
+
+**What's new in v0.22.0:**
+- `agent-doc terminal` — cross-platform terminal launch from editor plugins
+- Selective commit — stages only snapshot via `git hash-object` + `git update-index`
+- `(HEAD)` marker — visual boundary on the last `### ` heading
+- First-submit snapshot fix — no more "no changes detected" on new files
+- Cursor-aware FFI — `agent_doc_apply_patch_with_caret()` in shared library
+- JetBrains plugin v0.2.7 — cursor-aware append ordering
+
+**Tests:** 466 (158 lib + 287 bin + 21 CLI). Clippy clean (3 warnings, non-blocking).
+
+**Plugin install:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] Release v0.22.0
 - [x] Move cursor-aware patch logic to shared library FFI (`agent_doc_apply_patch_with_caret`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))

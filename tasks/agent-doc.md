@@ -570,6 +570,31 @@ The fix: append `:` to force session-name interpretation: `-t "0:"` instead of `
 - Cleaned up 5 session 1 windows + 1 extra session 0 window
 - Session 0: @0 (agent-doc, 2p) + @20 (stash, 5p) — clean
 - Session 1: no agent-doc windows — clean
+
+### Re: Zombie Bash Processes
+
+The 26 zombie `cat .agent-doc/claims.log` processes are NOT from agent-doc itself — they're from the **Claude Code Bash tool** auto-backgrounding what should be foreground calls. The claims log check is a simple `cat + truncate` that takes <1ms, but the tool sometimes dispatches it as a background task that never gets collected.
+
+**Can it be an agent-doc command?** Yes — we could add `agent-doc claims <FILE>` that:
+1. Reads `.agent-doc/claims.log`
+2. Prints each line to stdout
+3. Truncates the file
+4. Exits immediately
+
+This would replace the shell one-liner with a deterministic binary call that can't be backgrounded incorrectly. The binary always terminates.
+
+**Should we implement this?** It's a one-file change (add to `main.rs`, ~10 lines). The SKILL.md would change from:
+```bash
+cat .agent-doc/claims.log 2>/dev/null; > .agent-doc/claims.log 2>/dev/null
+```
+to:
+```bash
+agent-doc claims
+```
+
+Want me to implement it?
+
+yes!
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -250,6 +250,9 @@ Show me the current draft
 >
 > Brian
 
+Please review https://www.amulettechnologies.com/
+For added context with my message to Ken.
+
 **Prepared talking points for follow-up with Laura (when she responds):**
 1. "Getting a traditional job is actually the riskiest thing I could do — one employer, one basket, and they can lay me off tomorrow like Presence AI did."
 2. "I'm building a specialist business with multiple clients. I just need runway to land the next 2-3."
@@ -258,7 +261,7 @@ Show me the current draft
 
 **Next action:** Wait for Laura's response, then follow up using these talking points.
 
-### Re: 20 days, read but no response (HEAD)
+### Re: 20 days, read but no response
 
 That's a meaningful signal. She saw it and chose silence — that's a decision, even if it's not a rejection. Could be avoidance, discomfort, busy, or not knowing what to say to "I'm unemployed."
 
@@ -266,6 +269,44 @@ That's a meaningful signal. She saw it and chose silence — that's a decision, 
 
 1. **Brief follow-up** — low-pressure nudge, no repeat of the situation:
    > "Hey Laura, no pressure on my earlier message — just wanted to make sure it came through. Hope you're doing well."
+
+### Re: Amulet Technologies review
+
+Reviewed [amulettechnologies.com](https://www.amulettechnologies.com/). They're more than LCD controllers:
+
+**Amulet Technologies — HMI company (25+ years)**
+- **GEMstudio** — drag-and-drop GUI builder for embedded displays. Design, customize, test, and deploy rich UIs without extensive coding.
+- **Standard display modules** — smart displays, simple displays, controller boards, chip solutions
+- **Product design services** — full end-to-end from concept to production, human-centered design
+- **Target customers:** embedded systems manufacturers needing HMI solutions
+
+**Revised collaboration angle for Ken:**
+The original email was good but can be sharpened now. Instead of "LCD controllers," reference GEMstudio specifically:
+
+> Subject: AI + GEMstudio — potential collaboration idea
+>
+> Hi Ken,
+>
+> Hope you and Laura are doing well.
+>
+> I've been building agent orchestration tools — systems that let AI agents interact with structured interfaces through documents. Looking at what Amulet's doing with GEMstudio, I'm curious: are any of your customers asking about AI-driven interactions with their embedded displays?
+>
+> The pattern I've built (agent-doc) orchestrates agents through structured documents — read, write, and act on interface state. It could sit as an AI layer on top of GEMstudio-designed UIs, letting end users control embedded products through natural language or automated workflows.
+>
+> Would love to have a quick call to explore whether there's something here. No pressure — just family brainstorming.
+>
+> Brian
+
+**What changed:** References GEMstudio by name (shows you did homework), positions agent-doc as complementary to their existing platform (not competing), and the "AI layer on top of GEMstudio" framing is concrete enough for Ken to immediately picture the integration.
+
+### Re: Laura follow-up length (HEAD)
+
+**Keep it short — the one-liner is exactly right.** She already has all the context from your first message. More words = more pressure = more reason to avoid responding. The follow-up's only job is to signal "the door is still open."
+
+> "Hey Laura, no pressure on my earlier message — just wanted to make sure it came through. Hope you're doing well."
+
+That's it. Don't add context, don't re-explain, don't hint at what you need. If she wants to engage, she will. If she doesn't respond to this either, you have your answer — and you move forward with Ken independently.
+Should I say a bit more or is this all that needs to be said?
 
 2. **Email Ken directly** — don't wait for Laura to broker it. The Ken email stands on its own professionally.
 

@@ -11,8 +11,9 @@ agent_doc_write: crdt
 - [x] Contact created: `mail/contacts/laura-klask/CLAUDE.md`
 - [x] Contact created: `mail/contacts/ken-klask/CLAUDE.md`
 - [x] Gmail filters synced — `*@amulettechnologies.com` added to correspondence
-- [ ] Awaiting Laura's response to LinkedIn message
-- [ ] Draft email to Ken ready — needs review before sending
+- [ ] LinkedIn message read but no response (20 days, sent 2/27)
+- [ ] Decision: send follow-up nudge to Laura?
+- [ ] Decision: send Ken email independently?
 <!-- /agent:status -->
 
 ## Exchange
@@ -225,7 +226,7 @@ Help me communicate my aspirations as being more effective, lower risk, and havi
 **Key quote (Edward Deming):** "Every system is perfectly designed to get the results that it gets." If the job application system isn't working, the answer isn't to apply harder — it's to redesign the system.
 
 Show me the current draft
-### Current drafts — full summary (HEAD)
+### Current drafts — full summary
 
 **Already sent (LinkedIn message to Laura):**
 > Hi Laura! How are you? Just wanted to say hi. I'm unemployed since Presence AI suddenly went out of business.
@@ -256,6 +257,24 @@ Show me the current draft
 4. Referral pitch Laura can use: "My brother automates business workflows with AI agents. His first client replaced an $18K/year software vendor."
 
 **Next action:** Wait for Laura's response, then follow up using these talking points.
+
+### Re: 20 days, read but no response (HEAD)
+
+That's a meaningful signal. She saw it and chose silence — that's a decision, even if it's not a rejection. Could be avoidance, discomfort, busy, or not knowing what to say to "I'm unemployed."
+
+**Options:**
+
+1. **Brief follow-up** — low-pressure nudge, no repeat of the situation:
+   > "Hey Laura, no pressure on my earlier message — just wanted to make sure it came through. Hope you're doing well."
+
+2. **Email Ken directly** — don't wait for Laura to broker it. The Ken email stands on its own professionally.
+
+3. **Accept the signal and move on** — she knows how to reach you.
+
+**Recommendation:** Do both #1 and #2. The follow-up gives Laura one more chance with zero pressure. Emailing Ken shows you're taking action, not waiting for permission. Laura's non-response shouldn't block the Amulet collaboration.
+
+If the follow-up also gets silence, that's your answer — and you can still build the Ken relationship independently.
+I sent the message on 2/27...20 days ago. Laura has not responded. She read the message but did not respond. 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

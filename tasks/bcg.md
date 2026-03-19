@@ -1,11 +1,10 @@
 ---
 agent_doc_session: 9c8a9b79-2d92-4000-8104-23c0606086a8
-tmux_session: '23'
-agent_doc_mode: template
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
-
-
-
 
 # Dave Franklin — BCG AI Factory Builder
 
@@ -79,175 +78,32 @@ Please fill in tony-tomai contact with context.
 Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
 
 <!-- agent:exchange -->
-### Actions completed
+### Draft SMS response to Dave Franklin (HEAD)
 
-**1. Tony Tomai contact created** — `mail/contacts/tony-tomai/CLAUDE.md`
-- Relationship: BCG AI Factory opportunity pipeline
-- Related contacts: Dave Franklin, Steve Edison, Eric Rose, Anil Podduturi
-- Recording: `recordings/phone_20260310-tony-tomai.amr`
+Dave's messages (from `dave_franklin_sms.txt`):
+> "Hi Brian, this is Dave Franklin with Inspyrsolutions. I tried calling and your voicemail is not working. Anyway, still waiting on next steps from BCG. There have been several team members out on spring break returning this week."
 
-**2. Transcription in progress** — Whisper diarized transcription of the call recording is processing. Will update with transcript when complete.
+> "Hi Brian, this is Dave Franklin with Inspyrsolutions. Still waiting on BCG to advise on next steps with interviews, offers, etc. Since several team members have been out on spring break with families, still in a holding pattern. However, wanted to keep you in the loop. If I hear anything today or tomorrow, will advise."
 
-**3. Call notes (Anil conversation) captured:**
-- BCG Project Helix
-- Looking for "true engineer builders" — people who are not "green"
-- Interview framework: What is it? How did you build it? Why did you build it?
-- Brian in consideration for Project Helix
-- Ask: Can Anil put in a word / does he know anyone?
+**Draft reply:**
 
-**New contacts from this session:**
-| Name | Org | Role |
-|------|-----|------|
-| Steve Edison | BCG | Director of Engineering or Product (pending - see transcript) |
-| Tony Tomai | Inspyr Solutions | Account Manager for BCG recruiting (pending — transcription will clarify) |
-| Eric Rose | BCG pipeline | (pending — transcription will clarify) |
-
-**Pending:** Transcription of Tony Tomai call — will update CLAUDE.md with specific context once complete.
-
-### Contact corrections applied
-
-Updated `mail/contacts/tony-tomai/CLAUDE.md`:
-- Tony Tomai: **Inspyr Solutions Account Manager** (BCG recruiting)
-- Steve Edison: **BCG** — Director of Engineering or Product
-
-Transcription still processing (~90s in). Will update when complete.
-
-### Transcription complete — Tony Tomai call summary
-
-Transcript saved to `mail/contacts/tony-tomai/recordings/phone_20260310-tony-tomai.txt`
-Contact updated: `mail/contacts/tony-tomai/CLAUDE.md`
-
-**Project Helix** — BCG's AI Factory:
-- Pre-built AI agent/bot solutions (70-80% complete), customized per end client
-- 3-5 year project, hiring 15-20 engineers in batches
-- Primarily using **Claude/Anthropic**
-- Inspyr Solutions is BCG's #1 supplier (replaced ProServe who underperformed)
-
-**Critical discovery — Anil Podduturi:**
-- CPO for Enterprise AI at BCG
-- Tony suspects Anil may **own** Project Helix
-- Brian worked directly with Anil at Neo Innovation (2015, ~3-4 months)
-- Tony: "I didn't realize he was this high level. He might even be involved... it's probably his project."
-
-**Org chart (Project Helix):**
-| Person | Role | Relationship |
-|--------|------|-------------|
-| Anil Podduturi | BCG CPO, Enterprise AI | Brian's former manager at Neo Innovation |
-| Steve Edison | BCG lead below CPO | Tony's direct contact on the project |
-| Tony Tomai | Inspyr Solutions Account Manager | BCG relationship manager |
-| Dave Franklin | Inspyr Solutions Recruiter | Initial contact |
-| Eric Rose | Inspyr Solutions | Mention when talking to BCG |
-
-**Brian's pitch points (from call):**
-1. agent-doc — document-as-interface (directly evolved from Tenfore/Neo work with Anil)
-2. Presence AI — real-time multimodal avatar pipeline
-3. Domain-driven design ontology — alignment tooling
-4. Mortgage broker automation — practical agentic AI application
-
-**Tony's assessment:** "I don't have anyone that has your background... the avatar, AI avatars, and the agentic stuff"
-
-**Interview process:** Usually 2x 30-min interviews, but strong candidates get hired off one.
-
-**Action items:**
-- [ ] **URGENT:** Reach out to Anil on LinkedIn — "I'm in consideration for Project Helix. Do you know anyone on the project? Could you put in a word?"
-- [ ] Tony pitching Brian on his 4pm BCG call today
-- [ ] Tony coordinating with Steve Edison
-- [ ] When talking to BCG, mention working with Eric Rose at Inspyr
-
-Please draft a LinkedIn message for me to send to Anil.
-
-### Draft LinkedIn message to Anil Podduturi
-
-> Hi Anil,
-> 
-> Hope you're doing well! It's been a while since our Neo Innovation days — the Tenfore project.
-> 
-> I'm in consideration for an AI factory initiative at BCG called Project Helix, through Inspyr Solutions. Given your role there, I imagine you're familiar with it.
-> 
-> 
-> If you have a moment, would you be willing to put in a word for me? I've been building AI agents and developer tooling full-time — actually evolved that interactive document interface we built at Tenfore into an agentic system. Would love to catch up regardless.
-> 
-> Brian
-
-**Notes on the draft:**
-- Warm, personal — references shared history (Tenfore project)
-- Mentions Project Helix by name (Tony said Anil would know it)
-- Doesn't name-drop Steve Edison or Tony (per Tony's guidance)
-- The Tenfore→agent-doc connection is the strongest hook — Anil managed that exact project
-- Keeps the ask simple: "put in a word"
-- "Would love to catch up regardless" — leaves door open even if he can't help directly
-
-Should I also mention how Corky is used...how I'm using it with Judith at Equity Funding Source to save her money and streamline her Commercial Real Estate lending systems? See tasks/judith-krug.md
-
-
-### Don't add Judith/Corky to the LinkedIn message
-
-**No** — keep the Anil message short and focused. Here's why:
-
-1. **LinkedIn messages should be 3-5 sentences.** Anil is CPO-level; he'll skim.
-2. **Tenfore→agent-doc is already your strongest hook** — it's personal to Anil. Adding more dilutes it.
-3. **Different audiences:** Anil needs to remember you and do a favor. BCG interviewers need client cases.
-
-**Save Judith/Corky for the BCG interview instead.** It's your perfect "what, how, why" answer:
-- **What:** Agentic automation for a private mortgage brokerage (Equity Funding Source)
-- **How:** Custom AI workflows replacing an $18K/year SaaS vendor, using corky for correspondence management
-- **Why:** Client needed a system specific to their niche (non-conforming, equity-based loans in CA) — the vendor solutions were generic and overpriced. Custom AI automation cost less from year one onward.
-
-Tony specifically loved the mortgage broker example on the call. That's the story BCG wants to hear.
-
-I did not specifically evolve the actual Tenfore product. But I evolved the interaction for agent loops.
-
-I just want to remove any potential issues or misunderstanding re: IP.
-### IP clarification — LinkedIn message revised
-
-Good point — the distinction matters. You didn't fork or evolve the Tenfore codebase. You took the **interaction pattern** — document-as-interface — and applied it to a new domain (agent loops). That's inspiration and pattern evolution, not product lineage.
-
-**Revised line for the LinkedIn message:**
-
-> I've been building AI agents and developer tooling full-time — the document-as-interface pattern from our Tenfore work actually inspired the agent harness I'm building now. Would love to catch up regardless.
-
-**Why this wording is better:**
-- **"inspired"** instead of "evolved" — no product lineage implied
-- **"pattern from our Tenfore work"** — credits the shared experience without claiming the product
-- No IP ambiguity — it's clearly a new system informed by past experience
-
-**Full revised message:**
-
-> Hi Anil,
-> 
-> Hope you're doing well! It's been a while since our Neo Innovation days — the Tenfore project.
-> 
-> I'm in consideration for an AI factory initiative at BCG called Project Helix, through Inspyr Solutions. Given your role there, I imagine you're familiar with it.
-> 
-> If you have a moment, would you be willing to put in a word for me? I've been building AI agents and developer tooling full-time — the document-as-interface pattern from our Tenfore work actually inspired the agent harness I'm building now. Would love to catch up regardless.
-> 
-> Brian
- 
-Please draft a text to send to Tony confirming that I reached out to Anil on LinkedIn.
-### Draft text to Tony Tomai
-
-> Hey Tony, just wanted to let you know I reached out to Anil on LinkedIn. Mentioned Project Helix and that I'm in consideration through Inspyr. Kept it brief — referenced our shared work at Neo Innovation. Ball's in his court now. Let me know how your 4pm call goes!
-
-**Why this works:**
-- Confirms the action Tony specifically asked for (reach out to Anil before Tony's 4pm call)
-- "Kept it brief" — signals professionalism, reassures Tony you didn't overshare
-- Doesn't reveal specifics of what you said (Tony doesn't need to know)
-- "Let me know how your 4pm call goes" — keeps the loop open, shows you're engaged
-- Casual, direct tone — matches how Tony communicates
-
-Tony has not replied. Please draft a follow up sms with Tony. I want to know how his meeting went.
-
-### Follow-up SMS to Tony Tomai
-
-> Hey Tony, just checking in — how did the call with BCG go yesterday? Curious if there's any movement on my candidacy. Let me know when you get a chance.
+> Hey Dave, appreciate the update. No rush — totally understand the spring break timing. I'm available whenever they're ready to move forward. In the meantime I've been shipping steadily, happy to share anything that would help position me.
 
 **Tone notes:**
-- One day is reasonable for a follow-up — not pushy
-- "Yesterday" anchors the specific call he mentioned
-- "Movement on my candidacy" is direct but professional
-- No re-explanation needed — Tony knows the context
+- Warm but not anxious — mirrors Dave's matter-of-fact style
+- "No rush" signals patience (you're not desperate)
+- "Shipping steadily" is a subtle signal of continued momentum without listing specifics
+- "Happy to share anything" opens the door without pushing content on him
+- Short — matches SMS format and Dave's communication style
 
-Should I say thank you at the end or no need?
+### Keep it simple — skip the LinkedIn posts/videos (HEAD)
 
-**No — skip the "thank you."** Tony is your recruiter; getting you placed is how he earns. This is a status check, not a favor request. "Let me know when you get a chance" already closes it warmly without being deferential. Save thanks for when he delivers something (interview booked, feedback relayed, etc.).
+**No** — don't mention them. Here's why:
+
+1. **Dave already has your resume.** He knows what you build. Sending LinkedIn content feels like campaigning.
+2. **He's a recruiter, not the decision-maker.** Extra content doesn't help him get your resume in front of BCG — it's noise.
+3. **"Shipping steadily" is the right signal.** Active and productive without making him click links.
+4. **Save content for BCG interviews.** That's when you demo agent-doc, show livestreams, etc.
+
+**Exception:** If Dave specifically asks "what have you been working on?" — then share 1-2 LinkedIn posts as proof points. Don't volunteer it on a status update.
 <!-- /agent:exchange -->

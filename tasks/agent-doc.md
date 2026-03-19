@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.20.3 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.21.0 | **Tests:** 461 (158 lib + 282 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
 **Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** numeric session fix (colon suffix)
@@ -82,6 +82,7 @@ claude_args: --dangerously-skip-permissions
 | v0.18.0-v0.18.1 | `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
 | v0.19.0 | ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7). 446 tests. |
 | v0.20.0-v0.20.3 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. Numeric session fix (colon suffix). `claims` subcommand. 451 tests. |
+| v0.21.0 | `agent-doc parallel` (fan-out with worktrees, `--no-worktree`). CRDT post-merge reorder (Yrs attribution). 461 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -123,6 +124,8 @@ claude_args: --dangerously-skip-permissions
 **v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7).
 
 **v0.20.0-v0.20.3:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement, numeric session fix (colon suffix), `agent-doc claims` subcommand. 451 tests.
+
+**v0.21.0:** `agent-doc parallel` — fan-out with git worktrees (`--no-worktree` for read-only). CRDT post-merge reorder via Yrs attribution. 461 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -648,6 +651,29 @@ It may also be leftover tmux panes created before v0.20.2 was developed a few ho
 
 audit docs
 release
+
+### Re: v0.21.0 Released
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.21.0` |
+| GitHub Release | [v0.21.0](https://github.com/btakita/agent-doc/releases/tag/v0.21.0) |
+| cargo install | updated |
+| PyPI | pending |
+
+**What's new:**
+- `agent-doc parallel` — fan-out with git worktrees + `--no-worktree` for read-only tasks
+- CRDT post-merge reorder via Yrs attribution (agent before human at append boundary)
+- README parallel documentation section
+- CLAUDE.md module layout updated (`parallel.rs`, `worktree.rs`)
+- VERSIONS.md updated
+
+**Tests:** 461 (158 lib + 282 bin + 21 CLI). Clippy clean. Audit-docs: 5 informational warnings (non-blocking).
+
+If someone calls any of the agent-doc commands using the editor plugin...could we have a cross platform solution to open a terminal with tmux and configure the tmux session to the correct layout? JB Plugin commands include:
+- Run Agent Doc
+- Claim for Tmux Pane
+- Sync Tmux Layout
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

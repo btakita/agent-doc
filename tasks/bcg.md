@@ -237,7 +237,7 @@ Please draft a text to send to Tony confirming that I reached out to Anil on Lin
 
 Tony has not replied. Please draft a follow up sms with Tony. I want to know how his meeting went.
 
-### Follow-up SMS to Tony Tomai (HEAD)
+### Follow-up SMS to Tony Tomai
 
 > Hey Tony, just checking in — how did the call with BCG go yesterday? Curious if there's any movement on my candidacy. Let me know when you get a chance.
 

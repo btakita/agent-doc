@@ -173,6 +173,45 @@ Consider different command names. Some possibilities:
 - `agent-doc offload`
 
 Are there other alternatives that would be a better command name?
+
+### Re: `agent-doc deep` — Feature Exploration + Command Naming
+
+**What this feature does:**
+
+When a document session encounters a complex task that can be decomposed into independent subtasks, this command would:
+
+1. **Fan-out:** Spawn N parallel Claude sessions, each in its own git worktree. Each subtask gets an isolated copy of the repo — no merge conflicts during concurrent work.
+2. **Execute:** Each subagent works independently on its assigned subtask (e.g., "implement auth middleware", "write tests for X", "research API design").
+3. **Checkpoint:** Results from each subagent are collected — diffs, outputs, findings.
+4. **Fan-in:** Present all results back in the parent document for user review before merging. The user reviews diffs, approves/rejects, and the approved changes are merged from worktrees into the main branch.
+
+**Use cases:**
+- Research multiple approaches to a design problem simultaneously
+- Implement independent features in parallel (auth + tests + docs)
+- Investigate multiple files/modules concurrently for a bug hunt
+- Generate multiple candidate implementations for comparison
+
+**Command name analysis:**
+
+| Name | Pros | Cons |
+|------|------|------|
+| `deep` | Short, evocative of "deep work" | Ambiguous — could mean "deep analysis" |
+| `worktrees` | Technically precise | Implementation detail, not user intent |
+| `fan-out` | Describes the pattern | Hyphenated, jargon-y |
+| `parallel` | Clear intent | Generic, clashes with ExecutionMode |
+| `background` | Familiar concept | Implies single task, not fan-out |
+| `offload` | Delegation metaphor | Implies fire-and-forget, no review |
+| `spawn` | Clean verb, implies creating child processes | Could confuse with process spawning |
+| `swarm` | Multiple agents working in concert | Trendy but clear |
+| `branch` | Git metaphor, each subtask gets a branch | Overloaded with git branch concept |
+| **`fork`** | Process/git metaphor, parallel divergence then merge | Short, Unix-familiar, no collisions |
+| `split` | Divide work into parts | Already used for tmux splits |
+
+**Recommendation: `agent-doc fork`** — clear "diverge then converge" lifecycle. Pairs naturally with review/merge phase. Git-native concept (worktrees are conceptually forks). No naming collisions with existing agent-doc concepts.
+
+Runner-up: `agent-doc spawn` — also clean, but `fork` better captures the full lifecycle.
+
+Would fork be misleading? We are not forking the process. Are we actually forking the context?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

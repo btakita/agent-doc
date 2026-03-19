@@ -788,10 +788,44 @@ MongoDB with Honk + TrueCar. I implemented a Car Buyer social media experience l
 
 Since 2012 onward.
 
+Used Node.js at:
+- Milyoni
+- CrystalCommerce
+- Menu.com
+- Censible/Martin Investments
+- Social Chorus
+- PresenceAI
+
 Adding concrete answers to any of these will significantly strengthen the resume for Deloitte submission.
+
+Please review again. Any gaps to address?
+
+### Re: data.toml updated with Node.js/AWS/event-driven details
+
+**data.toml updated and PDF rebuilt.** file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-deloitte-nodejs.pdf
+
+**Experience updates:**
+| Experience | Added |
+|-----------|-------|
+| **Presence AI** | ZeroMQ event-driven messaging architecture |
+| **Milyoni** | Event-driven architecture + AWS IAM |
+| **TrueCar/honk** | MongoDB Car Buyer social media logging system |
+| **Pivotal Labs** | AWS IAM + functional reactive programming |
+| **Censible** | Reactive programming tag |
+| **Open Source** | Event-driven tag on lazily projects |
+
+**Skills added:** ZeroMQ (2 yrs), MongoDB (3 yrs), Node.js updated to 14 years
+
+**Note:** Menu.com doesn't exist as a separate experience entry in data.toml. The AWS ECS + IAM work there wasn't added. Options:
+1. Add a Menu.com experience entry
+2. Fold it into the Freelance section: Fold it into freelance. I want to avoid too many overlapping jobs
+3. Skip it (the other entries already cover AWS IAM)
+
+Which do you prefer? Or should I just rebuild and send as-is?
+rebuild
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Create Deloitte NodeJS resume profile
-- [ ] Update data.toml with Node.js/AWS/Kafka details (pending user input)
+- [x] Update data.toml with Node.js/AWS/Kafka details
+- [ ] Finalize and send Deloitte resume (pending Menu.com decision)
 <!-- /agent:pending -->

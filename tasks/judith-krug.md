@@ -230,4 +230,80 @@ Drafted text to Judith re: scheduling a call. Brian available until 12:30 PT, th
 #### Re: Corky HTML Email (2026-03-17)
 - Email sent as plain text — `**bold**` shows as literal asterisks
 - Feature request added to `tasks/corky.md`: markdown-to-HTML via `pulldown-cmark`, `multipart/alternative`
+
+Did you get Judith's response?
+> I am out of town on a life transformed coaches retreat so I can’t do anything this week. Please let’s reconvene about middle of next week to discuss everything more. Thank you for your time and efforts.
+
+Robert Ward had some comments about this email.
+
+
+#### Re: Judith's Response (2026-03-17) (HEAD)
+
+Judith replied to the kickoff email:
+> I am out of town on a life transformed coaches retreat so I can't do anything this week. Please let's reconvene about middle of next week to discuss everything more. Thank you for your time and efforts.
+
+**Analysis:** Positive signal — she replied promptly, confirmed interest, and set a concrete timeline (mid-next week = ~Mar 24-26). The retreat aligns with her pattern of spiritual/coaching events that Robert Ward described.
+
+#### Re: Robert Ward Recording Transcriptions (HEAD)
+
+**Completed transcriptions:**
+- `phone_20260317-144243` — ring only (23s, no answer)
+- `phone_20260317-164000` — 3:45 pre-email call. Robert coaching Brian not to push Judith, will call her himself
+- `phone_20260317-165018` — 18:56 post-email callback. KEY: Robert's specific email tone feedback (see below)
+- `phone_20260314-035658` — 5:12 check-in. Robert confirming Judith is "done deal"
+- `phone_20260314-221922` — 5:11 coaching call. "Remind her politely, don't bother her"
+- `phone_20260315-114203` — 0:02 (empty)
+- `phone_20260315-225612` — 6:30 MA contract research call
+- `phone_20260316-014818` — 9:15 post-Judith call. "She likes you, thinks you're intelligent"
+
+**Still transcribing (background):** Mar 7-9 (5 files), Mar 18 (3 files)
+
+Note: Diarize feature not compiled in corky — transcripts lack speaker labels. Used `--speakers` flag for metadata only.
+
+#### Re: Robert Ward's Email Tone Feedback — Summary (HEAD)
+
+From phone_20260317-165018 (the callback after Robert read the kickoff email):
+
+1. **Email was too long** — Robert confirmed: "Yeah, my email was a little long. I agree. It was too long." Keep future emails to 3-5 sentences max.
+2. **60-minute call was a mistake** — From the earlier proposal email. Robert: "I think it's not good to have an emotional woman believe that she has to dial into a 60 minute phone call." Never specify duration — just say "a quick call."
+3. **Not pushy, but serious** — Robert's exact words for the right tone. Show competence and eagerness without creating pressure.
+4. **Don't jump the gun** — When Brian said he'd have the website ready by next week, Robert pushed back: "I think that is jumping into the gun." Don't promise deliverables before scope is confirmed.
+5. **Don't come across as needy** — Despite financial pressure, keep communications professional.
+6. **Let Robert be the intermediary** — Brian preferred Robert deliver the "I'm getting started" message rather than emailing Judith directly during her retreat.
+7. **She needs reminding, not pushing** — She overbooks and lets things go. Gentle, polite reminders work. Pressure doesn't.
+8. **Trust is already established** — She called Brian a "genius," told Robert she's "100% in." Don't re-sell.
+
+**Applied to `mail/contacts/judith-krug/CLAUDE.md`** — updated the Tone section with Robert's coaching points for all future email drafts.
+
+#### Re: Draft Response to Judith (HEAD)
+
+Applying Robert's feedback — short, warm, no pressure, no time commitments:
+
+---
+
+**Draft:** `mail/drafts/20260319-judith-retreat-reply.md`
+
+> Hi Judith,
+>
+> Enjoy the retreat — sounds like a great reset. I'll be here whenever you're ready next week. Looking forward to it.
+>
+> Brian
+
+---
+
+**Why this works:**
+- 2 sentences (Robert said keep it short)
+- No call duration mentioned
+- No deliverable promises (no jumping the gun)
+- Warm and supportive, not pushy
+- Acknowledges her retreat positively (empowerment > instruction)
+- Ball in her court for timing
+
+Want me to create the draft file and send via corky?
+Please use corky to transcribe and diarize all of my conversations with Robert Ward
+/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings
+
+Robert had some comments about the tone of the emails. Please summarize the comments. And let's apply the suggestions to our communication AGENTS.md with Judith.
+
+Please help me with a draft response.
 <!-- /agent:exchange -->

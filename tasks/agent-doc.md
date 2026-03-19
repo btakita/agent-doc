@@ -607,6 +607,27 @@ Rename `deep.rs` to `parallel.rs`
 > - Session 1: killed %98, %97 (idle shells in windows @345, @344)
 
 What was the root cause of the orphan panes?
+
+### Re: Rename + Orphan Root Cause
+
+**Renamed:** `deep.rs` → `parallel.rs`, `DeepConfig` → `ParallelConfig`, CLI `Deep` → `Parallel`, log prefix `[deep]` → `[parallel]`. README updated. All 460 tests pass.
+
+**Orphan root cause:** The sessions registry is empty (`{}`). The cycle:
+1. All registered panes get pruned as dead (Claude process exited)
+2. Next route: empty registry → `auto_start_in_session` creates a new pane
+3. If the Claude process exits quickly (error, permission denied), the pane stays as an idle shell
+4. Next prune: dead pane removed from registry
+5. Repeat → orphan windows accumulate
+
+Are you talking about the orphaned window in tmux session 1?
+Or the single orphaned window in tmux session 0? 
+
+The fix is in the **session 1 part**: even with the colon suffix fix in v0.20.2, the orphans ended up in session 1. This suggests either: (a) these panes predate v0.20.2, or (b) there's another code path creating panes without the colon suffix.
+
+Given that v0.20.2 was released earlier this session and the orphans appeared after, there may be a code path in the JetBrains plugin or autoclaim that doesn't go through `tmux-router::new_window()`. Need to investigate the plugin's tmux interactions.
+
+Investigate if there's a code path.
+It may also be leftover tmux panes created before v0.20.2 was developed a few hours ago.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

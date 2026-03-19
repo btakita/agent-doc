@@ -379,7 +379,7 @@ audit docs
 
 Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 
-### Re: Audit Docs + Documentation Updates (HEAD)
+### Re: Audit Docs + Documentation Updates
 
 **Audit results:** 5 issues → 3 after updates. SPEC.md and README.md no longer flagged as stale.
 

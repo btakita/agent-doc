@@ -132,7 +132,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 
-### Re: Exchange Compacted (HEAD)
+### Re: Exchange Compacted
 
 Archived 1439 lines to `.agent-doc/archives/`. Use `agent-doc history tasks/agent-doc.md` to browse past exchanges or `--restore <commit>` to recover content.
 
@@ -157,6 +157,36 @@ Archived 1439 lines to `.agent-doc/archives/`. Use `agent-doc history tasks/agen
 - Immediate commit after write (no green gutter gap between cycles)
 - Pending protocol: flush to disk before responding
 Compacted. Content archived.
+
+The JB plugin does not register the commit.
+The green gutter still takes up the entire response...until I refresh the file.
+Then the commit is registered.
+It seems the document + git view is stuck in a cached state.
+
+### Re: VCS Refresh Signal (HEAD)
+
+The issue: `agent-doc commit` runs externally (CLI), but IntelliJ caches git state. The gutter stays green until the user manually refreshes.
+
+**Fix: IPC signal for VCS refresh.**
+
+**Rust side (`git.rs`):** After a successful commit, writes `.agent-doc/patches/vcs-refresh.signal`.
+
+**Plugin side (`PatchWatcher.kt`):** Already watches `.agent-doc/patches/`. When it sees `vcs-refresh.signal`:
+1. Deletes the signal file
+2. Calls `VcsDirtyScopeManager.getInstance(project).markEverythingDirty()` on the EDT
+3. IntelliJ refreshes all git gutter annotations
+
+**Flow:**
+```
+agent-doc commit → git commit succeeds → writes vcs-refresh.signal
+PatchWatcher → detects signal → VcsDirtyScopeManager.markEverythingDirty()
+IntelliJ → re-reads git state → gutter updates immediately
+```
+
+Release binary rebuilt. Plugin v0.2.7 rebuilt with VCS refresh support. Install the new plugin zip to get automatic gutter updates after commits.
+
+**Plugin path:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
+Can the plugin force a refresh of the git state?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

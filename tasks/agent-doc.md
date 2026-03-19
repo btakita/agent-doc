@@ -280,6 +280,60 @@ Yes, `spawn` is also applicable to other features:
 `deep` remains strongest because it's specific enough that no other feature would claim it. The slight ambiguity covers all use cases (parallel research, implementation, investigation) under one evocative name.
 
 Describe the `agent-doc deep` feature. How would it be implemented and used?
+
+### Re: `agent-doc deep` — Implementation Design
+
+**Usage:**
+```bash
+# Explicit tasks
+agent-doc deep plan.md \
+  --task "Implement auth middleware" \
+  --task "Write tests for auth" \
+  --task "Update API docs"
+
+# Or auto-decompose (agent splits the prompt)
+agent-doc deep plan.md --tasks 3
+```
+
+**In-document usage:** Write `deep:` followed by bullet tasks in the exchange. The skill parses and calls `agent-doc deep`.
+
+**Architecture:**
+
+```
+agent-doc deep <FILE> [--task "..."]* [--tasks N] [--parallel 3]
+    │
+    ├── 1. Parse tasks from FILE or --task flags
+    ├── 2. Create git worktree per task:
+    │     git worktree add .agent-doc/worktrees/<hash>-<n> -b deep/<session>/<n> HEAD
+    ├── 3. Spawn Claude in each worktree (stashed tmux panes)
+    ├── 4. Monitor completion (exit codes, output capture)
+    ├── 5. Collect: git diff HEAD per worktree + agent output
+    └── 6. Write results to parent doc for review
+```
+
+**Key data structure:**
+```rust
+struct DeepTask {
+    id: usize,
+    prompt: String,
+    worktree_path: PathBuf,
+    branch_name: String,     // deep/<session>/<n>
+    pane_id: Option<String>,
+    status: TaskStatus,      // Pending | Running | Done | Failed
+    diff: Option<String>,
+    output: Option<String>,
+}
+```
+
+**Review UX:** Results presented in parent document with collapsible diffs, agent output, and approve/reject controls. Approved changes cherry-picked from worktree branches.
+
+**Integration:** tmux-router (stashed panes, TmuxBatch), registry (deep: prefix), CRDT (result write-back), compact (post-merge cleanup).
+
+**Files:** `deep.rs` (orchestration), `worktree.rs` (git worktree lifecycle), `deep_review.rs` (result presentation + merge).
+
+**Limits:** Default `--parallel 3`. Failed tasks preserve worktree for inspection/retry.
+
+Implement
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

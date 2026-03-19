@@ -72,8 +72,39 @@ agent_doc_write: crdt
 **Resume repo** — committed and pushed to [btakita/resume](https://github.com/btakita/resume). README updated with agent-resume install instructions.
 
 Create a contact for arun.s@objectwin.com with the email correspondence
+
+### Re: Arunprakash S contact created
+
+**Contact created:** `mail/contacts/arunprakash-s/CLAUDE.md`
+
+| Field | Value |
+|-------|-------|
+| **Name** | Arunprakash S |
+| **Company** | ObjectWin Technology Inc (Senior Recruiter) |
+| **Email** | arun.s@objectwin.com |
+| **Phone** | (838) 280-7886 |
+| **Client** | Warner Bros Discovery (WBD) |
+| **Role** | Back-End Developer (Rust) #30365-1 |
+| **Contract** | W2, 12+ months (extension/conversion possible) |
+| **Location** | Remote (EST preference) |
+| **Rate** | $75/hr W2 all inclusive |
+| **Skills** | 5+ yrs Rust, Node.js/Python/C#, cloud, SQL + document DBs, containers |
+| **Team** | Media Technology & Operations (Live Sports, CNN, Cartoon Network, Adult Swim) |
+| **Status** | RTR agreed (2026-03-18), resume submitted |
+
+Strong fit — Rust-primary role with event-driven architecture (preferred), 12+ month contract at WBD.
+
+3 email threads found in `mail/conversations/`.
+
+Transcribe and diarize the recordings that I just added to arunprakash-s/recordings
+
+Analyze correspondence and recordings.
+
+Create a resume.
+
+Discuss any gaps in the resume.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-
+- [x] Create contact for arun.s@objectwin.com
 <!-- /agent:pending -->

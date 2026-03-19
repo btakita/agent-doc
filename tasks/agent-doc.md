@@ -642,6 +642,18 @@ release
 **Tests:** 451 passed, clippy clean.
 
 Tmux session 0 has 3 windows. Does agent-doc have a way to clear the extra window?
+
+### Re: Extra Tmux Windows
+
+**`agent-doc resync --fix`** is the intended tool — it detects wrong-session and wrong-window panes and tries to move them. However, in this case it couldn't join pane %81 into the stash because the stash window was at capacity ("pane too small" — stash already had 4 panes with one at 1 row height).
+
+The extra window @342 had pane %81 (an idle shell from `todo.md`). Killed it directly — window auto-deleted.
+
+**Current state:** Session 0 is clean — @0 (agent-doc, 2 panes) + @20 (stash, 4 panes).
+
+**Gap:** `resync --fix` should kill orphaned idle-shell panes when they can't be joined to the stash, rather than leaving them in separate windows. This would be a good improvement for a future release.
+
+compact exchange
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

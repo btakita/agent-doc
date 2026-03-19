@@ -545,11 +545,48 @@ Corky has a public GCP app under review. I'm also using private GCP apps for my 
 Draft an email for a reply.
 
 Is there any way that I can send the email over the api without having 2fa auth?
+
+### Re: GCP additions, email draft, and API sending
+
+**1. GCP additions for resume** — good context. I'll add a bullet to `data.toml` under your Open Source/Freelance work:
+> "Built and deployed Google Cloud Platform applications including a public correspondence kit (OAuth2 + Gmail API integration) and private data management tools"
+
+This gives concrete GCP evidence beyond just listing it as a skill. Want me to update `data.toml` and rebuild the Apex CVS PDF now?
+
+Yes
+
+**2. Email draft created:** `mail/drafts/2026-03-19-re-rtr-right-to-represent-full-stack-developer-apex-cvs.md`
+
+Contents:
+- Confirms interest and authorizes Apex to represent you
+- Highlights Python/React full-stack, GCP projects, AI/ML engineering
+- Attached: `BrianTakita-apex-cvs.pdf`
+- Ready for review — edit the draft, then `corky draft push <file>` to save to Gmail Drafts
+
+**3. Sending email via API without 2FA:**
+
+**Short answer: Yes, via Gmail App Password + SMTP.**
+
+Corky uses SMTP (not Gmail API) for sending. The Gmail API integration is read-only (sync). To send without browser-based 2FA:
+
+1. **Generate a Gmail App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+2. Store it in `pass`: `pass insert corky/btak.dev/smtp-password`
+3. Configure `.corky.toml` with `password_cmd = "pass corky/btak.dev/smtp-password"`
+4. Then `corky draft push <file>` sends via SMTP with the app password — no browser interaction needed
+
+https://myaccount.google.com/apppasswords for btak.dev@gmail.com has `The setting you are looking for is not available for your account.`
+
+I have the username and password for the gmail account. Is the only way to login to webmail? Can I use smtp with the username and password?
+
+**Alternative:** `corky draft push <file>` (without `--send`) saves to Gmail Drafts via IMAP, then you send from the Gmail web UI. This is the safer default per corky's CLAUDE.md rules.
+
+**Note:** The Gmail API *could* theoretically be extended to support sending (it has a `messages.send` endpoint), but corky hasn't implemented that path yet. The SMTP + App Password approach works today.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Create deepak-rana contact context
 - [x] Transcribe 6 phone call recordings
 - [x] Create custom Apex Systems resume profile
-- [ ] Review and finalize resume for submission
+- [ ] Update data.toml with GCP accomplishments and rebuild PDF
+- [ ] Review and send email to Deepak
 <!-- /agent:pending -->

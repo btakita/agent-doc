@@ -40,6 +40,19 @@ interface AgentDocLib : Library {
     ): FfiPatchResult
 
     /**
+     * Apply a patch with cursor-aware ordering for append mode.
+     * When mode is "append" and caretOffset >= 0, inserts content before the caret.
+     * Pass caretOffset = -1 for normal behavior.
+     */
+    fun agent_doc_apply_patch_with_caret(
+        doc: String,
+        component_name: String,
+        content: String,
+        mode: String,
+        caret_offset: Int,
+    ): FfiPatchResult
+
+    /**
      * Merge YAML key/value pairs into a document's frontmatter.
      */
     fun agent_doc_merge_frontmatter(
@@ -125,6 +138,29 @@ object NativePatching {
             if (result.error != null) {
                 val error = result.error!!.getString(0)
                 LOG.warn("[native] apply_patch error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Apply a component patch with cursor-aware ordering.
+     * When mode is "append" and caretOffset >= 0, inserts before the caret.
+     * Returns the patched document, or null if FFI is unavailable/errors.
+     */
+    fun applyComponentPatchWithCaret(doc: String, component: String, content: String, mode: String, caretOffset: Int): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_apply_patch_with_caret(doc, component, content, mode, caretOffset)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] apply_patch_with_caret error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }

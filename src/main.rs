@@ -31,6 +31,7 @@ mod start;
 mod stream;
 mod submit;
 mod sync;
+mod terminal;
 mod undo;
 mod upgrade;
 mod watch;
@@ -397,6 +398,14 @@ enum Commands {
         /// Component name to transfer
         component: String,
     },
+    /// Open an external terminal with tmux attached to the session
+    Terminal {
+        /// Path to the session document
+        file: PathBuf,
+        /// Tmux session name (overrides frontmatter tmux_session)
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
     /// List all available commands as JSON (for editor plugin autocomplete)
@@ -619,6 +628,7 @@ fn main() -> anyhow::Result<()> {
                 dry_run,
             })
         }
+        Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
         Commands::LibPath => {

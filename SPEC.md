@@ -396,6 +396,31 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 2. Prepend the old exchange content into the current document's exchange component
 3. The restored content appears above the current exchange, preserving both
 
+### 7.24 terminal
+
+`agent-doc terminal <FILE> [--session NAME]` — open an external terminal with tmux attached to the session.
+
+Intended as a fallback for editor plugin commands when no terminal with tmux is open. Prevents duplicate terminal instances by checking for existing attached clients.
+
+1. Resolve tmux session name: `--session` flag > `tmux_session` in document frontmatter > default `"0"`
+2. Check if session exists and has an attached client — if so, print message and exit (no-op)
+3. If session exists but is detached, open terminal to attach
+4. If session does not exist, open terminal which creates and attaches
+5. Build tmux command: `tmux new-session -A -s <session>` (attach-or-create)
+6. Resolve terminal command (priority order):
+   a. `[terminal] command` in `~/.config/agent-doc/config.toml` — template with `{tmux_command}` placeholder
+   b. `$TERMINAL` env var — used as `$TERMINAL -e {tmux_command}`
+   c. Error with configuration instructions
+7. Spawn terminal process (detached)
+
+**Config example:**
+```toml
+[terminal]
+command = "wezterm start -- {tmux_command}"
+```
+
+**Safety:** The `{tmux_command}` uses `tmux new-session -A` which attaches to an existing session if it exists, or creates a new one. This means multiple calls to `agent-doc terminal` are idempotent — they either no-op (client already attached) or attach to the existing session.
+
 ## 8. Session Routing
 
 ### 8.1 Registry

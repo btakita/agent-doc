@@ -40,6 +40,17 @@ pub struct Config {
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]
     pub execution_mode: Option<ExecutionMode>,
+    /// Terminal emulator configuration for `agent-doc terminal`.
+    #[serde(default)]
+    pub terminal: Option<TerminalConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TerminalConfig {
+    /// Command template to launch a terminal.
+    /// `{tmux_command}` is replaced with the tmux attach/create command.
+    /// Example: `wezterm start -- {tmux_command}`
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

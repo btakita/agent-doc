@@ -1427,6 +1427,33 @@ The `(HEAD)` marker serves as:
 On the NEXT commit cycle, the old `(HEAD)` marker gets committed as-is (it's in the snapshot from the previous write), and the new response gets a fresh `(HEAD)`.
 
 Want me to implement this? Or should we discuss the `(HEAD)` marker format first — alternatives like `[committed]`, a timestamp, or just `✓`?
+
+The rest of the agent patch should be committed. So there should not be a solid blue or green indicator...since the agent response patch should be committed already.
+
+Except for the title, which has the ` (HEAD)` suffix committed removing the ` (HEAD)` suffix uncommitted.
+
+### Re: HEAD Marker Implemented
+
+Added `add_head_marker()` to `git.rs`. On the next commit cycle:
+
+**Committed version (in git HEAD):**
+```
+### Re: Selective Commit Behavior Clarification (HEAD)
+```
+
+**Working tree version (what you see in the editor):**
+```
+### Re: Selective Commit Behavior Clarification (HEAD)
+```
+
+**Git gutter result:**
+- Agent response body → no gutter (committed)
+- `### Re:` heading → **blue/yellow gutter** (modified — `(HEAD)` suffix differs)
+- User's new input below → **green gutter** (uncommitted additions)
+
+The `add_head_marker()` function finds the last `### Re:` heading in the snapshot, appends ` (HEAD)`, and stages that version. The working tree stays clean. Idempotent — won't double-add if `(HEAD)` is already present.
+
+Release binary built. This will take effect on the next `/agent-doc` cycle when `agent-doc commit` runs.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.20.3
+
+- **`agent-doc claims` subcommand**: Read, print, and truncate `.agent-doc/claims.log` in a single binary call. Replaces the shell one-liner (`cat + truncate`) that was prone to zombie process accumulation when the Bash tool auto-backgrounded it.
+
 ## 0.20.2
 
 - **Fix: numeric session name ambiguity** (tmux-router v0.2.8): `new_window()` now appends `:` to session name (`-t "0:"` instead of `-t "0"`). Without the colon, tmux interprets numeric names as window indices, creating windows in the wrong session. Root cause of persistent session 1 bleedover bug.

@@ -342,6 +342,8 @@ enum Commands {
         #[arg(long)]
         set: Option<String>,
     },
+    /// Print and clear the claims log (.agent-doc/claims.log)
+    Claims,
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
@@ -569,6 +571,19 @@ fn main() -> anyhow::Result<()> {
         Commands::Undo { file } => undo::run(&file),
         Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
         Commands::Transfer { source, target, component } => extract::transfer(&source, &target, &component),
+        Commands::Claims => {
+            let cwd = std::env::current_dir()?;
+            if let Some(root) = snapshot::find_project_root(&cwd) {
+                let log_path = root.join(".agent-doc/claims.log");
+                if let Ok(contents) = std::fs::read_to_string(&log_path)
+                    && !contents.is_empty()
+                {
+                    print!("{}", contents);
+                    std::fs::write(&log_path, "")?;
+                }
+            }
+            Ok(())
+        }
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
         Commands::LibPath => {

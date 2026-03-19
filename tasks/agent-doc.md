@@ -212,6 +212,34 @@ When a document session encounters a complex task that can be decomposed into in
 Runner-up: `agent-doc spawn` — also clean, but `fork` better captures the full lifecycle.
 
 Would fork be misleading? We are not forking the process. Are we actually forking the context?
+
+### Re: Fork Naming Concern
+
+You're right. `fork` in Unix means "duplicate the current process" — but here we're not duplicating a process. We're:
+
+1. **Forking the codebase** (git worktree = a branch of the repo) — accurate
+2. **Spawning new agents** with distinct tasks (not clones of the parent) — not a fork
+3. **Merging results back** — fork doesn't imply this
+
+"Fork" is partially accurate (worktrees) but misleading about what's being forked. Users might expect the agent session context to be duplicated.
+
+**What we're actually doing:** Dispatching work to parallel workers with isolated codebases.
+
+Revisiting with that lens:
+
+| Name | Fit |
+|------|-----|
+| **`dispatch`** | Sending tasks to workers. Clear, no overloaded meaning. Implies results collection. |
+| `delegate` | Assigning work to subordinates. Natural language but passive. |
+| `scatter` | Scatter-gather pattern. Technical but accurate. |
+| **`deep`** | "Go deeper" — intensive parallel exploration. Memorable but doesn't describe mechanism. |
+| `fan` | Short for fan-out. Minimal, technical. |
+
+**Choice is between mechanism clarity (`dispatch`) and intent clarity (`deep`).**
+
+`dispatch` describes what happens: send tasks to isolated workers, collect results. `deep` describes why: intensive multi-angle analysis. Both are valid — depends on which mental model you want users to have.
+
+Could dispatch be used for other functionality that is not related to this pattern?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

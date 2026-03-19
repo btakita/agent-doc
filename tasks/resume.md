@@ -738,8 +738,60 @@ Contact file updated with call history.
 
 From the correspondence, please craft a resume for deloitte.
 Notify me if more information is needed for any of my experience.
+
+Can the corky api fully send the response email? Or will it only go to draft?
+
+### Re: Deloitte NodeJS Backend Engineer resume
+
+**Profile created:** `resume/profiles/deloitte-nodejs.toml`
+**PDF built:** file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-deloitte-nodejs.pdf
+
+**Skills emphasized:** Node.js, TypeScript, AWS, Kafka, Docker, PostgreSQL, React, Firebase, Python, CI/CD
+
+**Experiences included:** Presence AI, Open Source, Censible, Milyoni (Node.js + Backbone.js + Rails), CrystalCommerce (Node.js + Browserify), Rundavoo, TrueCar, Pivotal Labs
+
+**Gaps I need your input on — Deloitte requires these but they're thin or missing in data.toml:**
+
+1. **Kafka / message queues** — Must-have for this role. Do you have experience with Kafka, RabbitMQ, Redis Pub/Sub, or any event streaming? Even adjacent experience (reactive event streams at Presence AI?) counts.
+
+Redis:
+- PresenceAI
+- Milyoni
+- Pivotal Labs
+- Honk/TrueCar
+- Menu.com
+
+I also did functional reactive programming at:
+- Pivotal Labs
+- Menu.com
+- Milyoni
+- Honk/TrueCar
+- Censible/Martin Investments
+- PresenceAI
+
+I have used ZeroMQ at PresenceAI.
+
+My lazily projects are also event driven.
+
+2. **CDC (Change Data Capture)** — The role is specifically about CDC/streaming ingestion pipelines. Have you worked with database change streams, binlog replication, or Debezium-style patterns?
+
+3. **AWS specifics** — They want ECS, DocDB, IAM. Your resume says "AWS" and "EC2" but not these specific services. Which AWS services have you actually used?
+
+I used IAM at Menu.com, Milyoni, Pivotal Labs.
+ECS at Menu.com to administer .net api instances.
+
+4. **NoSQL** — Firebase and Redis are in your data but not framed as NoSQL expertise. Any DynamoDB, MongoDB, or DocumentDB experience?
+
+MongoDB with Honk + TrueCar. I implemented a Car Buyer social media experience logging.
+
+5. **Node.js years** — Role asks for 6-9 years. Your Milyoni (2012) and CrystalCommerce (2013-2014) entries show early Node.js use. Can you quantify total Node.js years across roles?
+
+Since 2012 onward.
+
+Adding concrete answers to any of these will significantly strengthen the resume for Deloitte submission.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Transcribe diksha-jaiswal recordings
+- [x] Create Deloitte NodeJS resume profile
+- [ ] Update data.toml with Node.js/AWS/Kafka details (pending user input)
 <!-- /agent:pending -->

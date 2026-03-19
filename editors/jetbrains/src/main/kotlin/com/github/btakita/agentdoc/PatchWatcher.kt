@@ -7,6 +7,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
 import java.nio.file.FileSystems
@@ -68,7 +69,13 @@ class PatchWatcher(private val project: Project) : Disposable {
             val key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
             for (event in key.pollEvents()) {
                 val filename = event.context() as? Path ?: continue
-                if (filename.toString().endsWith(".json")) {
+                if (filename.toString() == "vcs-refresh.signal") {
+                    val signalFile = dir.resolve(filename).toFile()
+                    if (signalFile.exists()) {
+                        signalFile.delete()
+                        refreshVcs()
+                    }
+                } else if (filename.toString().endsWith(".json")) {
                     val patchFile = dir.resolve(filename).toFile()
                     if (patchFile.exists()) {
                         processPatchFile(patchFile)
@@ -378,6 +385,24 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         return ranges
+    }
+
+    /**
+     * Trigger a VCS refresh so git gutter updates after an external commit.
+     * Called when `agent-doc commit` writes a `vcs-refresh.signal` file.
+     */
+    private fun refreshVcs() {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                // Refresh VFS first so IntelliJ sees the new git state on disk
+                LocalFileSystem.getInstance().refresh(true)
+                // Then mark VCS dirty to re-compute git gutter annotations
+                VcsDirtyScopeManager.getInstance(project).markEverythingDirty()
+                LOG.info("[vcs] Triggered VFS + VCS refresh after external commit")
+            } catch (e: Exception) {
+                LOG.warn("[vcs] Failed to refresh VCS state", e)
+            }
+        }
     }
 
     override fun dispose() {

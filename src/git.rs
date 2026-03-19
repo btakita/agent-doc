@@ -85,7 +85,7 @@ pub fn commit(file: &Path) -> Result<()> {
         // Add (HEAD) marker to the last ### Re: heading in the snapshot.
         // The working tree keeps the heading WITHOUT the marker, creating
         // a single modified line (blue gutter) as a visual boundary.
-        let staged_content = add_head_marker(snap);
+        let staged_content = add_head_marker(snap, file);
 
         let rel_path = resolved.strip_prefix(&git_root)
             .unwrap_or(&resolved);
@@ -109,43 +109,95 @@ pub fn commit(file: &Path) -> Result<()> {
     }
 
     // Commit — ignore failure (nothing to commit is fine)
-    let _ = Command::new("git")
+    let commit_status = Command::new("git")
         .current_dir(&git_root)
         .args(["commit", "-m", &msg, "--no-verify"])
         .status();
+
+    // Signal the IDE plugin to refresh VCS state (git gutter update)
+    if let Ok(ref s) = commit_status {
+        if s.success() {
+            signal_vcs_refresh(file);
+        }
+    }
+
     Ok(())
 }
 
-/// Add ` (HEAD)` suffix to the last `### ` heading in the content.
-///
-/// This creates a single modified line in the git diff between the committed
-/// version (with marker) and the working tree (without marker), serving as
-/// a visual boundary in the editor's git gutter.
-///
-/// Matches any `### ` heading (not just `### Re:`) since agent responses
-/// may use different heading formats across documents.
-fn add_head_marker(content: &str) -> String {
-    // Find the last "### " heading (any h3)
-    if let Some(last_pos) = content.rfind("\n### ") {
-        let line_start = last_pos + 1; // skip the newline
-        let line_end = content[line_start..].find('\n')
-            .map(|i| line_start + i)
-            .unwrap_or(content.len());
-        let heading = &content[line_start..line_end];
-
-        // Don't double-add the marker
-        if heading.ends_with(" (HEAD)") {
-            return content.to_string();
+/// Write a signal file to `.agent-doc/patches/` that tells the IDE plugin
+/// to refresh its VCS state after an external commit. The plugin's PatchWatcher
+/// watches this directory and triggers `VcsDirtyScopeManager.markEverythingDirty()`
+/// when it sees `vcs-refresh.signal`.
+fn signal_vcs_refresh(file: &Path) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Some(root) = crate::snapshot::find_project_root(&canonical) {
+        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
+        if signal.parent().map(|p| p.exists()).unwrap_or(false) {
+            let _ = std::fs::write(&signal, "refresh");
         }
-
-        let mut result = String::with_capacity(content.len() + 7);
-        result.push_str(&content[..line_end]);
-        result.push_str(" (HEAD)");
-        result.push_str(&content[line_end..]);
-        result
-    } else {
-        content.to_string()
     }
+}
+
+/// Add ` (HEAD)` suffix to ALL new markdown headings in the agent's appended content.
+///
+/// Matches any heading level (`#` through `######`). Compares the snapshot
+/// against git HEAD to find which headings are new (added by the agent).
+/// Only the top-level (shallowest) headings in the new content get marked —
+/// sub-headings within a response section are left unmarked.
+///
+/// When git HEAD is unavailable, falls back to marking the last heading only.
+fn add_head_marker(content: &str, file: &Path) -> String {
+    let head_content = show_head(file).ok().flatten();
+
+    // Collect all markdown heading positions (any level: # through ######)
+    let mut heading_positions: Vec<(usize, usize, usize)> = Vec::new(); // (line_start, line_end, level)
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
+                if !trimmed.ends_with(" (HEAD)") {
+                    // Calculate byte offset
+                    let line_start = content.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
+                    let line_end = line_start + line.len();
+                    heading_positions.push((line_start, line_end, level));
+                }
+            }
+        }
+    }
+
+    if heading_positions.is_empty() {
+        return content.to_string();
+    }
+
+    // Filter to only new headings (not in git HEAD)
+    let new_headings: Vec<(usize, usize, usize)> = if let Some(ref head) = head_content {
+        heading_positions.into_iter().filter(|(start, end, _)| {
+            let heading_text = &content[*start..*end];
+            !head.contains(heading_text)
+        }).collect()
+    } else {
+        vec![*heading_positions.last().unwrap()]
+    };
+
+    if new_headings.is_empty() {
+        return content.to_string();
+    }
+
+    // Find the shallowest (root) level among new headings
+    let min_level = new_headings.iter().map(|(_, _, level)| *level).min().unwrap();
+
+    // Only mark root-level headings (shallowest in the new content)
+    let root_headings: Vec<&(usize, usize, usize)> = new_headings.iter()
+        .filter(|(_, _, level)| *level == min_level)
+        .collect();
+
+    // Build result with (HEAD) markers — reverse order to preserve offsets
+    let mut result = content.to_string();
+    for (_, line_end, _) in root_headings.iter().rev() {
+        result.insert_str(*line_end, " (HEAD)");
+    }
+    result
 }
 
 /// Write content to git's object database and return the blob hash.

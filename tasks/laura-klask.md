@@ -161,6 +161,9 @@ I can help with the controlled orchestration and rapid development.
 > Brian
 
 **Notes:** Professional but warm. Leads with curiosity ("have your customers been asking?") rather than a pitch. Frames it as mutual exploration, not a sales call.
+
+Please sync my gmail correspondence filters.
+Note I added "*@amulettechnologies.com". Ken Klask's email will come with the sync.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

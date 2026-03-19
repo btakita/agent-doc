@@ -674,6 +674,67 @@ If someone calls any of the agent-doc commands using the editor plugin...could w
 - Run Agent Doc
 - Claim for Tmux Pane
 - Sync Tmux Layout
+
+### Re: Cross-Platform Terminal Launch from Editor Plugin
+
+Good question. The current flow assumes tmux is already running — but for a seamless experience, the plugin should be able to bootstrap the entire environment.
+
+**The problem has two parts:**
+
+1. **Open a terminal** (cross-platform — each OS has different terminal emulators)
+2. **Ensure tmux session exists with correct layout** (already solved by `agent-doc sync`)
+
+**Proposed solution: `agent-doc terminal` CLI command**
+
+```bash
+agent-doc terminal [--session <name>] [--file <doc>]
+```
+
+This command:
+1. Detects available terminal emulators (ordered by preference)
+2. Opens one with `tmux new-session -A -s <session>` (attach-or-create)
+3. Runs `agent-doc sync` to configure the layout
+
+**Terminal detection by platform:**
+
+| Platform | Detection order |
+|----------|----------------|
+| **macOS** | iTerm2 (`osascript`), WezTerm, Kitty, Alacritty, Terminal.app |
+| **Linux** | WezTerm, Kitty, Alacritty, gnome-terminal, konsole, xterm |
+| **Windows/WSL** | Windows Terminal (`wt.exe`), cmd with WSL |
+
+The detection should be based on the user's preferred terminal...not a hard-coded list.
+
+**Config override** in `~/.config/agent-doc/config.toml`:
+```toml
+[terminal]
+command = "wezterm start -- tmux new-session -A -s {session}"
+```
+
+**Plugin integration:** Each plugin command would call `agent-doc terminal` first if tmux isn't reachable:
+
+```kotlin
+// JetBrains plugin pseudocode
+fun runAgentDoc(file: VirtualFile) {
+    if (!isTmuxReachable()) {
+        // Launch terminal with tmux
+        ProcessBuilder("agent-doc", "terminal", "--file", file.path).start()
+        // Wait for tmux to be reachable (poll tmux has-session)
+    }
+    // Then proceed with route/claim/sync as usual
+    ProcessBuilder("agent-doc", "route", file.path).start()
+}
+```
+
+**Alternative: Use JetBrains' built-in terminal.**
+IntelliJ has `TerminalView.createNewSession()` API. The plugin could open a tmux session inside the IDE's terminal tab instead of an external terminal. Pros: no external terminal detection. Cons: IDE terminal has quirks with tmux (rendering, mouse support).
+
+**Third option: `open` / `xdg-open` a `.command` / `.desktop` file.**
+Generate a launcher script and open it with the OS default handler. Simple but feels hacky.
+
+**Recommendation:** `agent-doc terminal` CLI command with configurable terminal + sensible defaults. The plugin calls it as a pre-flight step. Users who already have tmux running skip it automatically (detect `tmux has-session`).
+
+Want me to implement it, or should we discuss the design further?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

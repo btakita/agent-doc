@@ -1352,7 +1352,37 @@ This will take effect on the **next cycle** — when I run `agent-doc commit` at
 
 So you built the binary and we are now testing the upcoming release?
 
+Does the plugin need to be updated?
+
 Please verify.
+
+### Re: Selective Commit Verification
+
+**The selective commit is working.** Just verified:
+
+```
+$ git diff -- tasks/agent-doc.md
++So you built the binary and we are now testing the upcoming release?
++Does the plugin need to be updated?
++Please verify.
+```
+
+Your edits remain uncommitted (green gutter), while the agent response was committed. The `hash-object` + `update-index` approach is the non-interactive alternative — no `git commit -p` needed.
+
+**Yes, we're testing with the new binary.** I built `cargo build` (debug) during development and just built `cargo build --release` to update the release binary that the `.bin/agent-doc` symlink points to.
+
+**Plugin update:** The JetBrains plugin needs to be rebuilt and reinstalled to get:
+1. Cursor-aware append ordering (`applyComponentPatchWithCaret` + native FFI)
+2. The new `agent_doc_apply_patch_with_caret` JNA binding
+
+The plugin zip was already built earlier (`./gradlew buildPlugin`). To install:
+1. IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..."
+2. Select `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+3. Restart IDEA
+
+The selective commit feature is purely binary-side (no plugin changes needed for that). The cursor-aware ordering requires the plugin update.
+
+Want me to do a full release (v0.22.0) with all today's changes?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

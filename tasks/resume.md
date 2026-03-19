@@ -15,6 +15,7 @@ agent_doc_write: crdt
 **Profile Statements**: `resume/profile-statements.md` — LinkedIn headlines, tagline, summary
 **agent-resume**: [btakita/agent-resume](https://github.com/btakita/agent-resume) — complete: build, render, validate, search-index commands; search.html for GitHub Pages
 **Tests**: `make test` — 12 tests (search index validation + LightPanda DOM tests)
+**Apex CVS**: `profiles/apex-cvs.toml` — custom profile for CVS Health via Deepak Rana (Apex Systems). PDF: `BrianTakita-apex-cvs.pdf`
 <!-- /agent:status -->
 
 ## Completed
@@ -491,7 +492,7 @@ compact exchange
 
 Create the context for deepak-rana contact.
 
-Transcribe phone calls:
+Transcribe with diarization phone calls:
 [phone_20260318-140543_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-140543_7324225948.amr)
 [phone_20260318-122359_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-122359_7324225948.amr)
 [phone_20260318-120421_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260318-120421_7324225948.amr)
@@ -499,9 +500,56 @@ Transcribe phone calls:
 [phone_20260317-174403_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260317-174403_7324225948.amr)
 [phone_20260317-163830_7324225948.amr](../mail/contacts/deepak-rana/recordings/phone_20260317-163830_7324225948.amr)
 
-Create a custom resume for Apex Systems: Deepak Rana: Guide me through any miss
+Read email correspondence with Deepak.Rana@tekfortune.com
+
+Create a custom resume for Apex Systems: Deepak Rana: Guide me through any info, skills, or experience that I should add for the resume
+
+### Re: Deepak Rana contact + transcriptions + Apex CVS resume
+
+**1. Contact context created:** `mail/contacts/deepak-rana/CLAUDE.md`
+
+Deepak Rana, recruiter at Apex Systems. Found Brian on Dice. 6 phone calls transcribed (2026-03-17 to 2026-03-18). Key details:
+
+| Field | Value |
+|-------|-------|
+| **Client** | CVS Health |
+| **Role** | Full Stack Developer (Python + React + GCP) |
+| **Contract** | W2 contract-to-hire (6 months) |
+| **Location** | 100% remote, ET/CT timezone |
+| **Rate** | $70/hr max |
+| **Process** | Resume → submission → coding test (Python + React) → manager interview |
+| **Status** | Deepak holding interview slot, awaiting resume + email confirmation |
+
+**2. All 6 phone calls transcribed** via ffmpeg + Whisper (turbo model). Full transcripts saved. Call summary in CLAUDE.md.
+
+**3. Custom resume profile created:** `resume/profiles/apex-cvs.toml`
+
+- **Bolded skills:** Python, React, Google Cloud, TypeScript, FastAPI, Flask, Docker, AWS, PostgreSQL, GraphQL, Node.js
+- **Experience filter:** Presence AI, Open Source, Freelance, Censible, SocialChorus, CrystalCommerce, TrueCar, Pivotal Labs (8 of 14 — dropped less-relevant entries)
+- **Phrase emphasis:** Python/React/GCP stack, full-stack signals, AI differentiators
+
+**PDF built:** file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-apex-cvs.pdf
+
+**Questions for you before sending:**
+
+1. **Summary text** — current summary leads with AI avatar pipeline (Presence AI). For CVS Health, should I rewrite to lead with Python/React full-stack experience instead? The AI angle is a differentiator but CVS may care more about traditional full-stack.
+
+2. **GCP specifics** — the transcripts mention GCP is a "must." Your data.toml has Google Cloud as a skill but no specific GCP accomplishments. Should I add a bullet about GCP usage (e.g., the library publishing you mentioned on the call)? What GCP services have you used?
+
+Corky has a public GCP app under review. I'm also using private GCP apps for my own data.
+
+3. **Rate** — $70/hr is ~$145K annualized. Below your Presence AI comp ($230K) but in range for contract work. No action needed, just noting.
+
+4. **Career Highlights** — currently showing all 8. Want to trim to the most relevant for a healthcare/pharma client?
+
+Draft an email for a reply.
+
+Is there any way that I can send the email over the api without having 2fa auth?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-
+- [x] Create deepak-rana contact context
+- [x] Transcribe 6 phone call recordings
+- [x] Create custom Apex Systems resume profile
+- [ ] Review and finalize resume for submission
 <!-- /agent:pending -->

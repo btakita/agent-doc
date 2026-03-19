@@ -355,7 +355,7 @@ Want me to update SKILL.md now? This will affect ALL future sessions after `/com
 
 Is this skill part of the current agent-doc package? Was it installed when agent-doc was upgraded?
 
-### Re: SKILL.md Bundled + v0.22.2 Released (HEAD)
+### Re: SKILL.md Bundled + v0.22.2 Released
 
 **Yes, SKILL.md is bundled with the binary** via `include_str!`. When you run `agent-doc skill install`, it writes the bundled version to `.claude/skills/agent-doc/SKILL.md`. But the v0.22.0/v0.22.1 binary still had the old "Do NOT commit after writing" instruction.
 

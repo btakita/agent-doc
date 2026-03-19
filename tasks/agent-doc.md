@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.20.1 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.7, instruction-files v0.1
+**Version:** v0.20.2 | **Tests:** 451 (157 lib + 273 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.6 (hand-written JSON + JNA FFI) + VS Code v0.2.3 (prepend fix)
-**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** session affinity enforced
+**Library:** `libagent_doc.so` (1.7M) — 6 FFI exports | **Routing:** numeric session fix (colon suffix)
 <!-- /agent:status -->
 
 ## Architecture
@@ -92,7 +92,7 @@ claude_args: --dangerously-skip-permissions
 3. **ATTACH before DETACH** — join new panes first, then stash unwanted
 4. **Log every tmux command** — essential for debugging
 5. **Dual-layer test coverage** — algorithm tests in tmux-router, integration tests in agent-doc
-6. **Stash window numeric sessions** — append `:` to session target to avoid index ambiguity
+6. **Stash window numeric sessions** — append `:` to session target to avoid index ambiguity. This applies to ALL tmux `-t` targeting, not just stash. `new_window("-t", "0")` interprets "0" as window index; `new_window("-t", "0:")` forces session name. Root cause of persistent session bleedover bug fixed in v0.2.8.
 7. **Stash window size** — resize to 200 rows before join to prevent "pane too small"
 8. **YAGNI for speculative code** — `with_snapshot` was added speculatively, then deleted (no production callers)
 9. **Subagents are expensive (~7x)** — use filesystem locking instead when possible; subagents only for true parallelism
@@ -550,6 +550,26 @@ There are also 26 bashes in the current claude session. Calling the following 26
 ```
 cat .agent-doc/claims.log 2>/dev/null; > .agent-doc/claims.log 2>/dev/null; echo "(claims log… (running)
 ```
+
+### Re: Root Cause Found — Numeric Session Name Ambiguity
+
+**The actual root cause was in `tmux-router::new_window()`.** When called with `-t "0"`, tmux interprets `"0"` as **window index 0** (in the current session) instead of **session name "0"**. This is why panes kept appearing in session 1.
+
+The fix: append `:` to force session-name interpretation: `-t "0:"` instead of `-t "0"`.
+
+`ensure_stash_window()` already did this correctly (lesson #6: "append `:` to session target to avoid index ambiguity"). But `new_window()` didn't — this was the gap.
+
+**Also: 26 zombie bash processes.** These are from the claims log check being dispatched as background tasks by the Bash tool. The SKILL.md says "never use `run_in_background`" for this check, but the tool sometimes auto-backgrounds it. This is a tool-level issue, not an agent-doc bug.
+
+- The script should not stick around forever. It should terminate at some point.
+  - What does the script do? Can it be an agent-doc command instead?
+
+**v0.20.2 released:**
+- tmux-router v0.2.8 + agent-doc v0.20.2
+- crates.io + GitHub Release + cargo install done****
+- Cleaned up 5 session 1 windows + 1 extra session 0 window
+- Session 0: @0 (agent-doc, 2p) + @20 (stash, 5p) — clean
+- Session 1: no agent-doc windows — clean
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

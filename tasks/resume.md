@@ -896,8 +896,30 @@ commit and push resume
 GitHub Action will rebuild and deploy the PDF to [btakita.github.io/resume](https://btakita.github.io/resume/).
 
 compact this file
+
+### Exchange Summary (compacted)
+
+**agent-resume Rust crate** — hybrid architecture: Rust CLI (`build`, `render`, `validate`, `search-index`) for content assembly from `data.toml`, Python for pandoc+weasyprint PDF. `build.py` 280→125 lines. Search: `search.html` + `search-index.json`. 12 pytest tests.
+
+**Deepak Rana / Apex Systems — CVS Health**
+- Contact: `mail/contacts/deepak-rana/CLAUDE.md`. 6 calls transcribed.
+- Role: Full Stack Developer (Python + React + GCP), W2 CTH, remote, $70/hr
+- Profile: `profiles/apex-cvs.toml`. PDF built + GCP bullet added.
+- Email sent via Gmail API to Deepak (RTR + resume attached). Draft in Gmail Drafts.
+
+**Diksha Jaiswal / Bitsoft — Deloitte**
+- Contact: `mail/contacts/diksha-jaiswal/CLAUDE.md`. 4 calls transcribed.
+- Role: NodeJS Backend Engineer, W2, remote, $60/hr
+- Profile: `profiles/deloitte-nodejs.toml`. data.toml updated with event-driven/ZeroMQ/MongoDB/AWS ECS+IAM/Menu.com. Node.js 14 years.
+- Email sent directly via Gmail API (rate confirmation + RTR + resume).
+
+**Corky v0.18.1** — Gmail API email sending (`gmail.compose` scope). `provider = "gmail-api"` accounts use API for both draft push and send. Published: crates.io, GitHub Release.
+
+**Resume repo** — committed and pushed to [btakita/resume](https://github.com/btakita/resume). README updated with agent-resume install instructions.
+
+compact exchange
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Commit and push resume
+
 <!-- /agent:pending -->

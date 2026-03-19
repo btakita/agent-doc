@@ -10,6 +10,7 @@ agent_doc_write: crdt
 <!-- agent:status patch=replace -->
 - [x] Contact created: `mail/contacts/laura-klask/CLAUDE.md`
 - [x] Contact created: `mail/contacts/ken-klask/CLAUDE.md`
+- [x] Gmail filters synced — `*@amulettechnologies.com` added to correspondence
 - [ ] Awaiting Laura's response to LinkedIn message
 - [ ] Draft email to Ken ready — needs review before sending
 <!-- /agent:status -->
@@ -164,6 +165,13 @@ I can help with the controlled orchestration and rapid development.
 
 Please sync my gmail correspondence filters.
 Note I added "*@amulettechnologies.com". Ken Klask's email will come with the sync.
+
+I added kklask@pacbell.net as well.
+### Gmail filters synced
+
+`corky filter push` — 3 filters pushed to Gmail.
+
+The correspondence filter now includes `*@amulettechnologies.com`. Any emails from/to Amulet Technologies addresses will be labeled "correspondence" and marked important. Ken's email will be captured automatically when it comes through.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

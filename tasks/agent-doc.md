@@ -711,6 +711,8 @@ The detection should be based on the user's preferred terminal...not a hard-code
 command = "wezterm start -- tmux new-session -A -s {session}"
 ```
 
+This is good.
+
 **Plugin integration:** Each plugin command would call `agent-doc terminal` first if tmux isn't reachable:
 
 ```kotlin
@@ -735,6 +737,42 @@ Generate a launcher script and open it with the OS default handler. Simple but f
 **Recommendation:** `agent-doc terminal` CLI command with configurable terminal + sensible defaults. The plugin calls it as a pre-flight step. Users who already have tmux running skip it automatically (detect `tmux has-session`).
 
 Want me to implement it, or should we discuss the design further?
+
+### Re: Terminal Detection — User-Preferred, Not Hard-Coded
+
+You're right. A hard-coded detection list is the wrong approach — it's fragile, grows endlessly, and ignores user preferences.
+
+**Revised design: config-first, detect-never.**
+
+The `agent-doc terminal` command should:
+
+1. **Read `[terminal]` config** from `~/.config/agent-doc/config.toml` — the user sets their terminal command once
+2. **If no config exists**, prompt the user on first run:
+   ```
+   No terminal configured. What terminal emulator do you use?
+   > wezterm
+   Saved: [terminal] command = "wezterm start -- {tmux_command}"
+   ```
+3. **If `$TERMINAL` env var is set** (standard on many Linux desktops), use that as fallback before prompting
+
+This means:
+- Zero hard-coded terminal lists
+- Works with any terminal emulator, including ones that don't exist yet
+- User controls the exact command (flags, args, etc.)
+- One-time interactive setup, persisted forever
+
+**Config format:**
+```toml
+[terminal]
+# {tmux_command} is replaced with: tmux new-session -A -s <session>
+command = "wezterm start -- {tmux_command}"
+```
+
+The `{tmux_command}` placeholder keeps the terminal command generic — the user doesn't need to know the tmux incantation.
+
+Want me to implement this?
+
+Yes. Add documentation. Add to SPEC.md. Add tests.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -9,10 +9,11 @@ agent_doc_write: crdt
 
 <!-- agent:status patch=replace -->
 - [x] Contact created: `mail/contacts/laura-klask/CLAUDE.md`
-- [x] Contact created: `mail/contacts/ken-klask/CLAUDE.md`
+- [x] Contact created + updated: `mail/contacts/ken-klask/CLAUDE.md`
 - [x] Gmail filters synced
 - [x] Follow-up nudge sent to Laura
-- [ ] Ken email drafted — awaiting approval to send
+- [x] Ken email history reviewed (7 threads, 2006–2014)
+- [ ] Ken email drafted with history context — awaiting approval to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -346,6 +347,43 @@ Good call. Asking for advice is stronger than pitching. It's humbler, invites Ke
 
 Ready to send via corky when you approve.
 I sent the response to Laura. Let's get the email read to send to Ken. I don't want to frame it for his customers. I want to keep it open. Ask for his advice on what to do with what I have and where I'm trying to go.
+
+### Re: Ken emails reviewed — updated draft (HEAD)
+
+Found 7 email threads spanning 2006–2014. The most relevant is from **October 2013** — you asked Ken for this exact same kind of guidance:
+
+> "I'm at an interesting pivot point in my career... I want to have some sort of ownership in a company... Bitcoin, the 'internet of things', services, gamification, and 3d printing seem interesting to me. I remember that you have been talking about the 'internet of things' for almost 2 decades."
+>
+> "I figure you are smack dab in this space and you have always had great insight into opportunities."
+
+This is a **continuation of that 2013 conversation**, 13 years later. Now the tools are AI agents instead of node.js for IoT. The relationship history is warm — Ken reached out to you for contacts (2006), you helped his UOP team (2006), you shared Git resources (2009), you had in-person discussions about philosophy and permaculture (2014).
+
+**Updated email to Ken:**
+
+> Subject: Catching up — picking up where we left off
+>
+> Hi Ken,
+>
+> Hope you and Laura are doing well.
+>
+> Remember back in 2013 when I asked you about the "internet of things" and where you saw things heading? You were talking about connected devices before most people even had the vocabulary for it. I've been thinking about that conversation a lot lately.
+>
+> I've been building agent orchestration tools — systems that let AI agents interact with real-world interfaces through structured documents. I have a client engagement in progress and the tooling is working, but I'm at another pivot point — figuring out where to focus next.
+>
+> You've been building Amulet for 25+ years now. I'd love to get your perspective again — given what I'm building, where do you think the biggest opportunities are? What would you do if you were in my shoes?
+>
+> Would be great to catch up over a quick call whenever you have time.
+>
+> Brian
+
+**What's better:**
+- References the 2013 conversation directly — this isn't cold outreach, it's picking up a thread
+- "You were talking about connected devices before most people had the vocabulary" — genuine respect, true statement
+- Same ask-for-advice framing, but now grounded in shared history
+- Ken will remember that conversation
+
+Contact updated: `mail/contacts/ken-klask/CLAUDE.md` — full correspondence history added.
+I just did a corky sync. Some emails with Ken Klask are now in the system. Please review for updated context. Update the email draft accordingly.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

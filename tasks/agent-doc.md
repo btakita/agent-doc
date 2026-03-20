@@ -413,7 +413,7 @@ In tasks/corky.md, the patch response to the prompt was merged above the prompt.
 Should be above:
 
 
-### Re: Corky Response Ordering (HEAD)
+### Re: Corky Response Ordering
 
 This is the same IPC ordering issue. The `tasks/corky.md` session used the old plugin (without cursor-aware ordering). The response was appended at the end of existing content, but the user typed "Are the recent updates..." at the same position concurrently. The result: response landed between the two user prompts.
 
@@ -421,7 +421,7 @@ This is the same IPC ordering issue. The `tasks/corky.md` session used the old p
 
 ```
 audit docs                              ← user prompt (sent)
-### Audit Docs Results                   ← response (HEAD)
+### Audit Docs Results                   ← response
 ...response content...
 VERSIONS.md is complete...
 Are the recent updates in SPEC.md...?   ← user prompt (typed after response)

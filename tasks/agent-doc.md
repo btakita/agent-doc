@@ -520,7 +520,28 @@ The trade-off:
 - **Pro:** Cleaner semantics, self-documenting (XML-style self-closing)
 - **Con:** More complexity, current syntax already works, existing markers in documents would need migration or dual-parsing
 
+Support both. So `<!-- agent:boundary:UUID / -->` should be the explicit self-closing tag. And `<!-- agent:boundary:UUID -->` is self-closing by default.
+
+Explicit self-closing tags would allow a placeholder `<!-- agent:exchange / -->`.
+
 My recommendation: keep current syntax. It works, is simple, and the explicit parser skip prevents any confusion. The self-closing convention adds visual clarity but no functional benefit.
+
+Issue with this session.
+`### Re: Boundary Parser + Self-Closing Syntax (HEAD)` should have a uncommited change to `### Re: Boundary Parser + Self-Closing Syntax`
+
+### Re: (HEAD) Marker Accumulation Bug — Fixed (HEAD)
+
+**Root cause:** `add_head_marker()` adds `(HEAD)` to new headings in the staged content, but never strips old `(HEAD)` markers from previous commits. Over multiple cycles, they accumulate. The committed content ends up with ALL response headings having `(HEAD)`, not just the latest.
+
+**Fix:** `add_head_marker()` now:
+1. Strips all existing ` (HEAD)` suffixes from the content before analysis
+2. Also strips `(HEAD)` from git HEAD content for accurate heading comparison
+3. Recalculates which headings are new against the cleaned versions
+4. Only adds `(HEAD)` to genuinely new root-level headings
+
+**Result:** After the next `agent-doc commit`, only the LATEST response headings will have `(HEAD)` markers. Previous response headings will be clean.
+
+454 tests pass. Release binary rebuilt and installed. This fix will take effect on the next commit cycle.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

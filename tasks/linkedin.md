@@ -180,4 +180,24 @@ Don't mention existence-lang or other projects here. Dan's comment is about *his
 This resonates — the ability to test ideas at the speed of thought completely changes which ones you pursue. Before, you had to bet big on one idea and commit. Now you can prototype five, kill three, and double down on the two that show traction.
 
 Would love to see what you're building. Following!
+
+
+From David Bethune
+
+> It's funny how that, after decades of programming where no one questions your chops (shipped products, right?), if we use AI now suddenly we have abdicated all conscious thought and understanding of coding. How would that happen? Did farmers forget about basic agriculture because farming equipment made ag faster and easier. I think not! Ag got bigger and fed more people with tools. There was no retraction or regress.
+
+People are addicted to labels & titles...because symbols are a proxy for thought.
+What many people don't realize is AI is a cognitive enhancement...not a replacement.
+
+A tool to be mastered...just like any other too
+
+**Re: David Bethune reply**
+
+Your notes are strong raw material. Here's a polished draft that weaves them together:
+
+**Draft reply to David Bethune:**
+
+Exactly. People are addicted to labels and titles because symbols are a proxy for thought. "AI-generated code" vs "hand-written code" is the new version of that — as if the person directing the work somehow forgot everything they know.
+
+AI is a cognitive enhancement, not a replacement. The understanding doesn't go away — it compounds. You just get to apply it at a different resolution.
 <!-- /agent:exchange -->

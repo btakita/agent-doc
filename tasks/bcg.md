@@ -172,4 +172,27 @@ This lets Anil connect the dots himself. If he's involved in Project Helix hirin
 1. Dave Franklin SMS (the draft above) — recruiter check-in + scheduling urgency
 2. Anil Podduturi LinkedIn message — warm reconnection, separate from recruiter channel
 3. Skip Tony for now
+
+I already sent Anil a message. He has not read it. Tony asked me to mention that I'm going through the recruiter.
+
+Should I edit this or send a followup?
+### Anil follow-up: send a new message, don't edit (HEAD)
+
+**Send a follow-up.** Don't edit the original. Reasons:
+
+1. **Editing may not re-notify** — LinkedIn doesn't always push notifications for edited messages. A new message gets a fresh notification.
+2. **Two messages > one** — it looks like you thought of something after the fact, which is natural and human.
+3. **The original message stands on its own** — a warm reconnection. The follow-up adds the recruiter context Tony asked for.
+
+**Draft follow-up:**
+
+> By the way — I'm also going through Inspyr Solutions for a BCG opportunity (Project Helix). Tony Tomai suggested I mention that. Would be great if our paths crossed on it.
+
+**Why this works:**
+- "By the way" makes it feel like an afterthought, not a calculated move
+- Names Tony directly (as Tony requested)
+- "Our paths crossed" is softer than "can you put in a word for me"
+- Keeps it short — one message, one ask
+
+**Timing:** Send it right after the Dave SMS. Both messages go out tonight.
 <!-- /agent:exchange -->

@@ -202,6 +202,13 @@ pub fn apply_patches_with_overrides(
             .or_else(|| comp.patch_mode())
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
             .unwrap_or_else(|| default_mode(&patch.name));
+        // For append mode, use boundary-aware insertion when a marker exists
+        if mode == "append" {
+            if let Some(bid) = find_boundary_in_component(&result, comp) {
+                result = comp.append_with_boundary(&result, &patch.content, &bid);
+                continue;
+            }
+        }
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
         result = comp.replace_content(&result, &new_content);
     }
@@ -918,6 +925,42 @@ real status content
         assert!(
             !result.contains("test-uuid-123"),
             "boundary marker should be consumed after insertion"
+        );
+    }
+
+    #[test]
+    fn explicit_patch_uses_boundary_marker() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "User prompt here.\n",
+            "<!-- agent:boundary:patch-uuid-456 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        // Explicit patch block targeting exchange
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: Response\n\nResponse content.\n".to_string(),
+        }];
+
+        let result = apply_patches(doc, &patches, "", &file).unwrap();
+
+        // Response should be after prompt (boundary consumed)
+        let prompt_pos = result.find("User prompt here.").unwrap();
+        let response_pos = result.find("### Re: Response").unwrap();
+        assert!(
+            response_pos > prompt_pos,
+            "response should appear after user prompt"
+        );
+
+        // Boundary marker should be consumed
+        assert!(
+            !result.contains("patch-uuid-456"),
+            "boundary marker should be consumed by explicit patch"
         );
     }
 }

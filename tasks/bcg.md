@@ -195,4 +195,20 @@ Should I edit this or send a followup?
 - Keeps it short — one message, one ask
 
 **Timing:** Send it right after the Dave SMS. Both messages go out tonight.
+
+Please read my message at /home/brian/work/btakita/agent-loop/mail/contacts/anil-podduturi/20260320-linkedin-anil-podduturi.txt
+
+And draft a followup if recommended.
+### Review of Anil message + follow-up recommendation (HEAD)
+
+**Your March 10 message is solid.** It already mentions Inspyr Solutions, Project Helix, the Tenfore connection, and asks directly. Tony's request is already fulfilled in the original.
+
+**No follow-up to Anil right now.** He hasn't read it — a second message just stacks two unread messages. It doesn't increase open rate and can feel pushy.
+
+**Better moves:**
+1. **Send a connection request** if you're not already connected — connection requests get more prominent notifications than messages (especially if the message landed in his "Other" inbox)
+2. **Ask Tony to mention you to Anil directly** — an internal ping from someone Anil works with at BCG is worth 10 LinkedIn messages
+3. **Wait for Dave's response** — if BCG is actively moving on Helix, Anil may surface through the interview process naturally
+
+**Action for tonight:** Just the Dave SMS. Revisit Anil Monday if Dave confirms movement.
 <!-- /agent:exchange -->

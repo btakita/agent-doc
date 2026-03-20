@@ -40,7 +40,7 @@ Brian
 Short, signals LLC readiness, gives enough stack info to match. Want to tweak or send?
 
 I mention Rust. But I'm really interested in agent loop harness engineering.
-### Re: Agent Loop Focus (HEAD)
+### Re: Agent Loop Focus
 
 Good call — leads with your unique angle instead of a stack list:
 

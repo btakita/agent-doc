@@ -235,8 +235,6 @@ This logs to stderr whenever stale markers are found, giving visibility into int
 **Why this wasn't caught earlier:** The `remove()` and `remove_all()` functions existed but were only used in unit tests — no production code path called them. The happy path (response written successfully) replaces the marker via `append_with_boundary()`, so cleanup was only needed for the interrupted path.
 Can we add a way to recover from orphaned agent:boundary tags?
 
-The claude session thought the changes were submitted to the age
-
 ### Re: Boundary Recovery (HEAD)
 
 **Already handled by the fix above.** The `insert()` function now calls `remove_all()` before inserting a new marker. So the next time any session runs `agent-doc boundary <FILE>` (step 1b of the SKILL workflow), stale markers are automatically cleaned up. No manual intervention needed.
@@ -253,7 +251,136 @@ The claude session thought the changes were submitted to the age
 
 If you want an explicit `agent-doc clean-boundaries <FILE>` command (removes all markers without inserting a new one), I can add that. But the auto-cleanup on insert should cover the normal workflow.
 
-I got an external file change. Why? Please fi
+I got an external file change in this file. Why? Please fix.
+
+The claude session thought the changes were submitted to tasks/kevin-volk.md. Why?
+How can we recover the session response to patch the agent document?
+
+```
+● Bash(corky sync full --help 2>&1)
+  ⎿  Full IMAP resync (ignore saved state)
+
+     Usage: corky sync full [OPTIONS]
+     … +4 lines (ctrl+o to expand)
+
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● The email from CopilotKit/Cham Espanola likely came from a @copilotkit.ai address which isn't in the correspondence
+  filter — it wouldn't be auto-synced. Let me search for it more broadly.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Bash(corky unanswered --help 2>&1)
+  ⎿  Find threads awaiting a reply
+
+     Usage: corky unanswered [OPTIONS] [SCOPE]
+     … +8 lines (ctrl+o to expand)
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Found the calendar invite from Jordan Ritter (the CTO directly, not Cham Espanola). But the user asked about a
+  specific email with a different subject. Let me search further.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Bash(find /home/brian/work/btakita/agent-loop/mail/conversations -name '*.md' -newer
+      /home/brian/work/btakita/agent-loop/mail/conversations/kevin-volk-staffing-scien…)
+  ⎿  -rw-r--r-- 1 brian brian   1191 Mar 20 14:14 /home/brian/work/btakita/agent-loop/mail/conversations/higher-lo
+     gic-thank-you-for-your-interest-in-the-senior-front.md
+     -rw-r--r-- 1 brian brian  35476 Mar 20 10:01 /home/brian/work/btakita/agent-loop/mail/conversations/synergist
+     … +25 lines (ctrl+o to expand)
+
+● The email with that exact subject hasn't been synced yet. It might be in brian.takita@gmail.com under a label not
+  being synced, or it could be from btak.dev@gmail.com but not in INBOX. I found the calendar invite from Jordan Ritter
+   (jordan@copilotkit.ai) for Mon Mar 23, 2pm PDT, but the "Interview Prep + Confirmation" email itself isn't in the
+  synced conversations.
+
+  The email might be from Kevin Volk (staffingscience.io) which would go to the correspondence label on the personal
+  account. Let me do a full sync on personal.
+
+● Bash(corky sync account personal 2>&1 | tail -15)
+  ⎿  === Account: personal (brian.takita@gmail.com) ===
+     Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+     Syncing label: correspondence
+     … +8 lines (ctrl+o to expand)
+
+● Bash(corky mailbox --help 2>&1)
+  ⎿  Mailbox commands
+
+     Usage: corky mailbox [OPTIONS] <COMMAND>
+     … +15 lines (ctrl+o to expand)
+
+● The email with subject "CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT" hasn't been
+  synced by corky. It's likely from Kevin Volk but landed outside the synced labels, or it's a very recent email that
+  Gmail hasn't indexed into the correspondence label yet.
+
+  However, I did find the calendar invite: Jordan Ritter (jordan@copilotkit.ai) sent a calendar invite directly to
+  btak.dev@gmail.com (CC: kevin@staffingscience.io) for Mon Mar 23, 2pm-2:30pm PDT.
+
+  This is significant — the CTO is interviewing you directly for Round 1, not a founding engineer as Kevin originally
+  described. Let me write the response.
+
+  Session 9 — Mar 20, 2026: Interview Scheduled
+
+  Calendar invite found in synced conversations:
+  - From: Jordan Ritter (jordan@copilotkit.ai) — the CTO himself
+  - To: btak.dev@gmail.com, CC: kevin@staffingscience.io
+  - When: Mon Mar 23, 2026, 2:00-2:30 PM PDT
+  - Subject: Interview: Brian Takita
+
+  The "Interview Prep + Confirmation" email with that exact subject was NOT found in synced conversations. It may be in
+   a Gmail label that corky doesn't sync, or it might have arrived very recently. You may need to check Gmail directly
+  for that email — it could contain prep instructions from Kevin or Cham Espanola.
+
+  Key observation: Jordan Ritter is doing Round 1 himself (not a founding engineer as Kevin described). This changes
+  the prep — you're talking directly to the CTO you have history with from CloudCrowd 2010.
+
+  Next steps:
+  - Check Gmail directly for the "Interview Prep + Confirmation" email
+  - Reply to Kevin confirming the interview is locked in
+  - Prep for Jordan Ritter specifically (CloudCrowd history, CTO-level conversation)
+  - Review agent-doc, corky, lazily as talking points for AI-native workflow
+
+● Bash(cat <<'RESPONSE' | agent-doc write /home/brian/work/btakita/agent-loop/tasks/kevin-volk.md --baseline-file
+      /tmp/agent-doc-baseline-531473.md --stream
+      ### Sessio…) (HEAD)
+  ⎿  [snapshot] saved pre-response snapshot for /home/brian/work/btakita/agent-loop/tasks/kevin-volk.md
+     [write] IPC patch written to /home/brian/work/btakita/agent-loop/.agent-doc/patches/235d84826e3bbef427f3770e5
+     63acd2d1e9012af364c8376352e285b78bc5df0.json (0 components)
+     [write] IPC patch consumed by plugin — snapshot updated
+
+● Bash(agent-doc commit /home/brian/work/btakita/agent-loop/tasks/kevin-volk.md 2>&1)
+  ⎿  [main 2096b49] agent-doc(kevin-volk): 2026-03-20 14:21:55
+      1 file changed, 31 insertions(+)
+
+● Response written and committed. The interview is with Jordan Ritter (CTO) on Mon Mar 23 at 2pm PDT. I couldn't find
+  the "Interview Prep + Confirmation" email in the synced mail — you'll need to check Gmail directly for that one. It
+  may contain specific prep instructions or an AI workflow exercise description. Want me to help prep for the Jordan
+  Ritter conversation?
+
+✻ Churned for 2m 10s
+```
+
+I want to recover the data in the orphaned agent:boundary.
+
+### Re: External File Change + Kevin-Volk Session (HEAD)
+
+**Three separate issues here:**
+
+**1. "External file change" — my fault.** When I verified the boundary fix, I ran `agent-doc boundary tasks/kevin-volk.md` from this session. That modified kevin-volk.md on disk while you had it open in the IDE, triggering IntelliJ's "external file change" dialog. I should not have modified a file that another session was actively using. Apologies.
+
+**2. The kevin-volk session DID write correctly.** Looking at your pasted output:
+- `agent-doc write` succeeded: `[write] IPC patch consumed by plugin — snapshot updated`
+- `agent-doc commit` succeeded: `[main 2096b49] agent-doc(kevin-volk): 2026-03-20 14:21:55`
+- The response is in kevin-volk.md. No recovery needed.
+
+**3. "I don't necessarily want to clean up the orphaned..."** — Your message got truncated. Two possible directions:
+
+**Option A: Keep auto-cleanup but add `--no-clean` flag.** `agent-doc boundary <FILE>` cleans stale markers by default, but `--no-clean` preserves them. This way the SKILL workflow auto-cleans, but you can opt out for debugging.
+
+**Option B: Don't auto-clean — only clean on explicit command.** Add `agent-doc boundary --clean <FILE>` for manual cleanup. The `insert()` function just adds a new marker without removing old ones (reverting the fix). Downside: markers accumulate silently in interrupted sessions.
+
+Which direction were you going? Your message was cut off at "I don't necessarily want to clean up the orphaned".
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -753,7 +753,7 @@ Received signal, shutting down...
 ^Z
 [1]  + 507048 suspended  corky watch
 ```
-### Analysis: Three Bugs in corky watch (HEAD)
+### Analysis: Three Bugs in corky watch
 
 Thanks for the full output. I found **three real bugs** and one design issue:
 

@@ -20,7 +20,7 @@ https://www.linkedin.com/in/benjamin-becker-3a9a4665/
 See /home/brian/work/btakita/agent-loop/mail/contacts/benjamin-becker/20260320-linkedin-benjamin-becker.txt
 
 Please draft a reply.
-### Re: Contact File + Draft Reply (HEAD)
+### Re: Contact File + Draft Reply
 
 Created `mail/contacts/benjamin-becker/CLAUDE.md` (with `AGENTS.md` symlink).
 

@@ -515,7 +515,22 @@ Would it make sense to insert a "marker" at the current end of the agent:exchang
 **Flow:**
 1. When the SKILL workflow reads the document (step 1), it inserts a boundary marker at the end of the exchange component content:
    ```
-   <!-- agent:boundary:UUID -->
+
+### Re: Claim Auto-Start Fix (HEAD)
+
+**Root cause:** `agent-doc start` requires running inside tmux — it calls `sessions::current_pane()` and `sessions::in_tmux()`. The ClaimAction was running it from the IDE's JVM process via `ProcessBuilder`, which fails with "not running inside tmux."
+
+**Fix:** Instead of `ProcessBuilder("agent-doc", "start", file)`, use `tmux send-keys` to type the command into the claimed pane:
+
+```kotlin
+val sendCmd = listOf("tmux", "send-keys", "-t", paneId, "agent-doc start $relativePath", "Enter")
+```
+
+This sends the `agent-doc start` command directly into the terminal pane, where it runs inside tmux and can detect the pane correctly.
+
+**Plugin rebuilt** at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.8.zip` — install to get the fixed auto-start behavior.
+
+Note: The terminal output you showed (`/agent-doc tasks/finance.md` → `zsh: no such file or directory`) is a separate issue — that's the user manually typing `/agent-doc` with a leading `/`, which zsh interprets as an absolute filesystem path. The slash command `/agent-doc` only works inside a Claude Code session, not in a regular shell.
    ```
 2. User keeps typing below the marker (their new text appears after it in the document)
 3. Agent generates response
@@ -627,6 +642,23 @@ yes
 Want me to proceed with updating SKILL.md and releasing?
 
 yes
+
+In `agent_doc_session: 5495a843-2f9d-43df-a938-c7feae7cba2a` + `tmux_session: '1'`
+
+There is no active claude session.
+It seems that starting the claude session & tmux is not working.
+
+The path is /home/brian/work/quant-science/tasks/finance.md
+
+```
+~                                                                                                                                                                                                                                      10:01:17
+❯ cd work/quant-science/
+~/work/quant-science main ⇡4 +2 !5 ?4                                                                                                                                                                                           3.13  10:01:40
+❯ /agent-doc tasks/finance.md
+zsh: no such file or directory: /agent-doc
+~/work/quant-science main ⇡4 +3 !6 ?4                                                                                                                                                                                           3.13  10:33:38
+❯
+```
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -251,4 +251,10 @@ Your reply is good but could be tighter. Here's a polished version:
 **Draft reply to Azizul Rabby Chowdhury:**
 
 Indeed. All those intentions that were always in your head — now they can become working software. The shift isn't just speed, it's reach.
+
+How about including 3D printed creations as well.
+
+**Updated draft reply to Azizul Rabby Chowdhury:**
+
+Indeed. All those intentions that were always in your head — now they can become working software, or even physical creations off a 3D printer. The shift isn't just speed, it's reach.
 <!-- /agent:exchange -->

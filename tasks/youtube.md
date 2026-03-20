@@ -161,7 +161,7 @@ The implementation would be:
 corky linkedin comment <POST_FILE_OR_URN> "comment text"
 ```
 
-### Re: Implement LinkedIn Comment (HEAD)
+### Re: Implement LinkedIn Comment
 
 Done! `corky linkedin comment` is implemented and working.
 

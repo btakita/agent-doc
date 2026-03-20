@@ -650,7 +650,6 @@ Fix the bug. Add tests verifying the fix.
 **Re: Corky boundary issue (a):** You confirmed the next `/agent-doc` invocation didn't pick up "audit docs" and "Update README.md, SPEC.md". This means the snapshot update from `agent-doc boundary` included the content typed BEFORE the boundary but the diff computation didn't detect the content typed AFTER. I need to investigate the snapshot timing — the boundary insertion updates the snapshot, so content typed after should appear as a diff in the next cycle. Let me check the corky session's snapshot state to find why.
 
 What is the result of your investigation into corky session's snapshot state?
-<!-- agent:boundary:46f64260-6594-4d0d-9134-2eef7975ef0f -->
 
 ### Re: Corky Boundary Bug — Root Cause + Fix
 
@@ -675,6 +674,23 @@ The current file includes content the user typed AFTER the boundary marker (whil
 6. "audit docs" is NOT in the snapshot → appears as diff in next `/agent-doc` invocation
 
 457 tests pass. Binary rebuilt and installed.
+
+Add tests to validate behavior. Add to SPEC.md
+<!-- agent:boundary:b2818cdb-fb4a-4c49-b167-2975dbcfd6e2 -->
+
+### Re: Tests + SPEC.md Updated (HEAD)
+
+**Test added:** `try_ipc_snapshot_saves_content_ours`
+- Creates template doc with exchange component + boundary marker
+- Writes user edits to working tree (simulating concurrent typing)
+- Spawns consumer thread to simulate plugin
+- Calls `try_ipc()` with `content_ours`
+- Verifies: snapshot = `content_ours`, NOT the working tree file
+- 458 tests pass (161 lib + 297 bin)
+
+**SPEC.md updated:**
+- **7.14 (commit):** Post-commit `(HEAD)` marker cleanup from snapshot + working tree
+- **7.21 (write):** IPC snapshot invariant (`content_ours`), boundary marker cleanup on insert, boundary-aware insertion for unmatched content
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

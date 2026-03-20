@@ -167,8 +167,6 @@ VERSIONS.md is complete (47 entries, v0.1.0–v0.18.1, no gaps).
 Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 
-When this document was autoclaimed, the 
-
 ### Verification: SPEC.md, VERSIONS.md, README.md
 
 **VERSIONS.md** — Complete. All 47 entries (v0.1.0–v0.18.1), no gaps. Every version from the backfill is present.
@@ -182,5 +180,239 @@ When this document was autoclaimed, the
 - ❌ v0.18.0 features — `corky doctor`, self-hosted guide, privacy policy not documented in SPEC.md
 
 **Recommendation:** Add SPEC.md §6.2 for Gmail API sync and §19 (or similar) for `corky doctor` + self-hosted deployment. Want me to draft those sections?
-`````
+
+Yes
+
+When this document was autoclaimed, there was `/agent-doc tasks/agent-doc.md` left in the input.
+
+```
+ ▐▛███▜▌   Claude Code v2.1.80
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  SessionStart:startup says: [agent-loop] recent context, 2026-03-20 9:20am EDT
+     ────────────────────────────────────────────────────────────
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+
+     Context Economics
+       Loading: 50 observations (15,939 tokens to read)
+       Work investment: 116,519 tokens spent on research, building, and decisions
+       Your savings: 86% reduction from reuse
+
+     Mar 19, 2026
+
+     src/agent-doc/src/git.rs
+       #7493  3:27 PM  🟣  Added VCS refresh signal to agent-doc commit command
+       #7494  3:34 PM  🔴  Multi-section HEAD markers for all new headings
+
+     tasks/agent-doc.md
+       #7495  3:39 PM  🔵  Heading marker limited to h3 tags, needs support for any root-level heading
+
+     src/agent-doc/src/git.rs
+       #7496           🟣  Heading marker now supports any markdown heading level with root-level detection
+
+     src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt
+       #7497  3:40 PM  🔴  Fixed VCS gutter not updating by refreshing VFS before marking VCS dirty
+
+     General
+       #7498           ✅  Built release binaries with flexible heading markers and VFS refresh fix
+
+     src/agent-doc/Cargo.toml
+       #7499  3:50 PM  ✅  Version bump to 0.22.1
+
+     src/agent-doc/VERSIONS.md
+       #7500           ✅  Added v0.22.1 changelog entry
+
+     General
+       #7501           ✅  Built agent-doc v0.22.1 release binary
+
+     src/agent-doc/Cargo.toml
+       #7502  3:51 PM  ✅  Released and published v0.22.1 to git repository
+
+     General
+       #7503           ✅  Published agent-doc v0.22.1 to crates.io
+       #7504           ✅  Installed v0.22.1 locally and created GitHub Release
+
+     tasks/laura-klask.md
+       #7505  3:52 PM  ✅  Amulet Technologies research and collaboration strategy documented
+       #7506  3:54 PM  ✅  Task documentation committed for laura-klask
+       #7507  3:55 PM  ✅  Minor follow-up edit to laura-klask task document
+       #7508           🔵  Complete laura-klask task workflow revealed through diff
+       #7509  4:04 PM  🟣  Email workflow automation with Gmail integration
+
+     tasks/judith-krug.md
+       #7510  4:17 PM  ✅  Judith Krug project update - client response and advisor feedback captured
+
+     tasks/agent-doc.md
+       #7511  4:32 PM  🔴  Cursor-aware ordering bug fixed in agent-doc JetBrains plugin
+
+     mail/contacts/robert-ward/recordings/phone_20260317-144243_3109684542.txt
+       #7512  4:35 PM  🔵  Phone call transcript processing workflow detected
+
+     mail/contacts/robert-ward/recordings/phone_20260317-165018_3109684542.txt
+       #7513           ⚖️  Judith Krug mortgage website architecture and build approach decided
+
+     mail/contacts/judith-krug/CLAUDE.md
+       #7514  4:36 PM  🔵  Judith Krug contact context and project requirements documented
+
+     #S2181 Agent documentation for Judith Krug task - email response analysis with communication coaching feedback (Mar
+      19, 4:37 PM)
+
+     #S2182 Generated documentation for Judith Krug task - transcription processing initiated (Mar 19, 4:39 PM)
+
+     #S2183 Fixed agent-doc JetBrains plugin to default exchange and findings components to append mode (Mar 19, 4:52
+     PM)
+
+     General
+       #7515  4:52 PM  ✅  First transcription process completed for Judith Krug task
+
+     mail/contacts/robert-ward/recordings/phone_20260318-024757_3109684542.txt
+       #7516           🟣  Phone recording transcription completed using Whisper AI
+
+     tasks/ken-klask.md
+       #7517  4:54 PM  ✅  Agent documentation committed to repository
+
+     #S2184 Generate documentation for Judith Krug task and prepare draft reply (Mar 19, 4:55 PM)
+
+     tasks/agent-doc.md
+       #7518  4:55 PM  ✅  Task file claimed for active work in pane
+       #7519           ✅  Agent response committed to task documentation
+       #7520           🔵  Agent-doc workflow state issues identified
+
+     #S2185 Diagnosed agent-doc issues with file operations and cursor-aware ordering across Claude sessions (Mar 19,
+     4:56 PM)
+
+     tasks/judith-krug.md
+       #7521  4:56 PM  ✅  Documentation committed for Judith Krug task
+       #7522  4:57 PM  ✅  Comprehensive documentation update for Judith Krug sales engagement
+
+     mail/drafts/20260319-judith-retreat-reply.md
+       #7523  4:58 PM  ✅  Draft email reply created for Judith Krug retreat response
+
+     src/corky/Cargo.toml
+       #7524           🔵  GPU transcription support exists via transcribe-cuda feature flag
+
+     mail/drafts/20260319-judith-retreat-reply.md
+       #7525  4:59 PM  ✅  Email sent to Judith Krug acknowledging retreat availability
+
+     General
+       #7526  5:00 PM  🔵  NVIDIA GPU confirmed available with CUDA 13.2
+
+     #S2186 Send reply to Judith and enable GPU-accelerated transcription in Corky (Mar 19, 5:00 PM)
+
+     src/corky/CLAUDE.local.md
+       #7527  5:00 PM  ✅  Local configuration created for GPU-accelerated corky builds
+
+     src/agent-doc/SKILL.md
+       #7528  5:01 PM  🔵  Found "Do NOT commit after writing" instruction in bundled SKILL.md files
+       #7529           ✅  Updated SKILL.md to commit immediately after writing agent responses
+
+     src/agent-doc/Cargo.toml
+       #7530           ✅  Bumped agent-doc version to 0.22.2
+
+     src/agent-doc/VERSIONS.md
+       #7531  5:02 PM  ✅  Added version 0.22.2 changelog entry
+
+     #S2187 Document agent-doc v0.22.2 release fixing SKILL.md commit instruction bug (Mar 19, 5:02 PM)
+
+     General
+       #7532  5:02 PM  ✅  Built and tested agent-doc v0.22.2 release binary
+
+     src/agent-doc/SKILL.md
+       #7533           ✅  Released and deployed agent-doc v0.22.2 to GitHub
+
+     General
+       #7534  5:03 PM  ✅  Published agent-doc v0.22.2 to crates.io and created GitHub release
+
+     .claude/skills/agent-doc/SKILL.md
+       #7535           ✅  Installed updated SKILL.md v0.22.2 to local project
+
+     tasks/agent-doc.md
+       #7536  5:25 PM  🔴  agent-doc v0.22.2 fixes SKILL.md commit instruction
+
+     #S2188 Process Ken-Klask task and draft communication response (Mar 19, 5:25 PM)
+
+     #S2189 Document GPU auto-detection implementation for corky installation process (Mar 19, 5:28 PM)
+
+     tasks/ken-klask.md
+       #7537  5:28 PM  ✅  Committed agent-doc response for Ken-Klask task
+
+     tasks/corky.md
+       #7538  5:30 PM  ✅  Agent documentation committed to corky task tracking
+       #7539  5:31 PM  🔵  Corky project task tracking reveals comprehensive release history and current GPU work
+
+     General
+       #7540           🔵  Corky compilation requires GCP OAuth credentials at build time
+
+     AGENTS.md
+       #7541  5:32 PM  🔵  Documentation audit reveals stale files after gmail_auth.rs changes
+
+     tasks/agent-doc.md
+       #7542  5:35 PM  ✅  Agent documentation updated in task file
+
+     #S2190 Generate and commit agent documentation for tasks/agent-doc.md (Mar 19, 5:35 PM)
+
+     Investigated: The agent-doc tool processed tasks/agent-doc.md and updated project documentation files including
+     SPEC.md and README.md. A documentation audit was performed to identify completeness issues.
+
+     Learned: The agent-doc tool performs comprehensive documentation updates across multiple files and includes audit
+     functionality to detect documentation gaps or inconsistencies. It can add structured specification sections and
+     update command references.
+
+     Completed: SPEC.md now includes section 7.14 with the full selective commit specification. README.md updated with
+     terminal command documentation and corrected commit description. Documentation audit completed, reducing issues
+     from 5 to 3 non-blocking items. All changes committed to git with 30 lines added to tasks/agent-doc.md.
+
+     Next Steps: Documentation update cycle complete. The 3 remaining non-blocking audit issues are identified but not
+     critical for current functionality.
+
+
+     Access 117k tokens of past research & decisions for just 15,939t. Use the claude-mem skill to access memories by
+     ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /agent-doc tasks/agent-doc.md
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+```
+
+### Drafted SPEC.md Sections (HEAD)
+
+Added three new sections to SPEC.md (94 lines):
+
+**§6.8 Gmail API Sync** — Full spec for the `provider = "gmail-api"` sync path:
+- Config format (`[[accounts]]` with provider/user/labels/sync_days)
+- OAuth2 authentication with credential resolution per §5.25
+- `GmailLabelState` with `last_history_id` for incremental sync
+- historyId-based incremental flow with fallback to full sync
+- Message parsing, label resolution, multi-label routing
+- Account verification, shutdown handling
+- References §6.4/§6.5 for merge and orphan cleanup (shared with IMAP)
+
+**§6.9 Doctor** — Spec for `corky doctor [PROVIDER]`:
+- Always-run checks (config + mail directory)
+- Per-provider check table (gmail-api, imap, gmail filters, linkedin, youtube)
+- Output format (✓/✗ markers, 2-space indent, sections)
+- Exit codes (0 pass, 1 fail)
+
+**§18 Self-Hosted Deployment** — New top-level section:
+- §18.1 Credential modes (built-in defaults vs self-hosted GCP)
+- §18.2 Privacy model (local-only, no telemetry, scope list, revocation)
+- References `docs/guide/self-hosted-gmail.md` and `docs/reference/privacy-policy.md`
+
+Changes are in the corky submodule working tree (not committed). Ready to commit when you approve. Want me to also run `corky audit-docs` to verify consistency?
+When `❯ /agent-doc tasks/agent-doc.md` is left in the input, another gets append. Resulting with `❯ /agent-doc tasks/agent-doc.md/agent-doc tasks/corky.md`
 <!-- /agent:exchange -->

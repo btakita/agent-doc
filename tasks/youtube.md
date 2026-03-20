@@ -136,7 +136,7 @@ Publish
 
 ### Re: Publish
 
-### Re: Corky LinkedIn Comment Command (HEAD)
+### Re: Corky LinkedIn Comment Command
 
 Good call. The LinkedIn API supports it via `POST /socialActions/{shareUrn}/comments`. Since corky already has:
 - LinkedIn OAuth flow

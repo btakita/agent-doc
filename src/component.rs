@@ -94,10 +94,26 @@ impl Component {
     pub fn append_with_boundary(&self, doc: &str, content: &str, boundary_id: &str) -> String {
         let boundary_marker = format!("<!-- agent:boundary:{} -->", boundary_id);
         let content_region = &doc[self.open_end..self.close_start];
+        let code_ranges = find_code_ranges(doc);
 
-        if let Some(rel_pos) = content_region.find(&boundary_marker) {
-            let abs_pos = self.open_end + rel_pos;
+        // Search for boundary marker, skipping matches inside code blocks
+        let mut search_from = 0;
+        let found_pos = loop {
+            match content_region[search_from..].find(&boundary_marker) {
+                Some(rel_pos) => {
+                    let abs_pos = self.open_end + search_from + rel_pos;
+                    if code_ranges.iter().any(|&(cs, ce)| abs_pos >= cs && abs_pos < ce) {
+                        // Inside a code block — skip and keep searching
+                        search_from += rel_pos + boundary_marker.len();
+                        continue;
+                    }
+                    break Some(abs_pos);
+                }
+                None => break None,
+            }
+        };
 
+        if let Some(abs_pos) = found_pos {
             // Find start of the line containing the marker
             let line_start = doc[..abs_pos]
                 .rfind('\n')
@@ -824,5 +840,54 @@ actual content
         let attrs = parse_attrs("mode=append broken novalue=");
         assert_eq!(attrs.len(), 1);
         assert_eq!(attrs.get("mode").map(|s| s.as_str()), Some("append"));
+    }
+
+    #[test]
+    fn append_with_boundary_skips_code_block() {
+        // Boundary marker inside a code block should be ignored;
+        // the real marker outside should be used.
+        let boundary_id = "real-uuid";
+        let doc = format!(
+            "<!-- agent:exchange patch=append -->\n\
+             user prompt\n\
+             ```\n\
+             <!-- agent:boundary:{boundary_id} -->\n\
+             ```\n\
+             more user text\n\
+             <!-- agent:boundary:{boundary_id} -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let components = parse(&doc).unwrap();
+        let comp = &components[0];
+        let result = comp.append_with_boundary(&doc, "### Re: Response\n\nContent here.", boundary_id);
+
+        // Response should replace the REAL marker (outside code block),
+        // not the one inside the code block.
+        assert!(result.contains("### Re: Response"));
+        assert!(result.contains("more user text"));
+        // The code block example should be preserved
+        assert!(result.contains(&format!("<!-- agent:boundary:{boundary_id} -->\n```")));
+        // The real marker should be replaced
+        assert!(!result.contains(&format!("more user text\n<!-- agent:boundary:{boundary_id} -->\n<!-- /agent:exchange -->")));
+    }
+
+    #[test]
+    fn append_with_boundary_no_code_block() {
+        // Normal case: boundary marker not in a code block
+        let boundary_id = "simple-uuid";
+        let doc = format!(
+            "<!-- agent:exchange patch=append -->\n\
+             user prompt\n\
+             <!-- agent:boundary:{boundary_id} -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let components = parse(&doc).unwrap();
+        let comp = &components[0];
+        let result = comp.append_with_boundary(&doc, "### Re: Answer\n\nDone.", boundary_id);
+
+        assert!(result.contains("### Re: Answer"));
+        assert!(result.contains("user prompt"));
+        // Marker should be replaced
+        assert!(!result.contains("agent:boundary:"));
     }
 }

@@ -5,13 +5,13 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-## Status (HEAD)
+## Status
 
 <!-- agent:status patch=replace -->
 Draft YouTube comment response — 3 options provided. Awaiting your pick or edits.
 <!-- /agent:status -->
 
-## Exchange (HEAD)
+## Exchange
 
 <!-- agent:exchange patch=append -->
 Help me craft a response to a YouTube comment for https://www.youtube.com/watch?v=hVNmbmY4vgo&lc=UgxaYY1MmrZC2DJasG54AaABAg
@@ -55,7 +55,7 @@ Please help me make this post more inspiring. That it opens up possibilities.
 For example, some of these ideas have been sitting on the back-burner for over 10 years. But I'm doing it now thanks to agent loops.
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

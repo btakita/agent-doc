@@ -268,7 +268,19 @@ Exits with error if the pane is dead or no session is registered.
 
 ### 7.14 commit
 
-`agent-doc commit <FILE>` — git add + commit with auto-generated timestamp.
+`agent-doc commit <FILE>` — selective commit with auto-generated timestamp.
+
+1. Load the snapshot for the file (the document state after the last `agent-doc write`)
+2. If snapshot exists:
+   a. Add `(HEAD)` suffix to all new markdown headings (any level `#`–`######`) not present in git HEAD
+   b. Write the modified snapshot to git's object database via `git hash-object -w --stdin`
+   c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>` — working tree is NOT modified
+   d. Result: snapshot content (agent response) is committed; user edits in the working tree stay uncommitted
+3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
+4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
+5. On successful commit: write `vcs-refresh.signal` to `.agent-doc/patches/` — the IDE plugin watches this and triggers `VcsDirtyScopeManager.markEverythingDirty()` + VFS refresh so git gutter updates immediately
+
+**HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. The working tree does not. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
 
 ### 7.15 skill
 

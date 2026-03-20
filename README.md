@@ -385,7 +385,8 @@ agent-doc resync                    # validate sessions, prune dead panes, repor
 agent-doc resync --fix              # also kill wrong-session panes, deregister wrong-process panes
 agent-doc prompt <file> [--all]     # detect permission prompts → JSON
 agent-doc prompt --answer N <file>  # answer prompt option N
-agent-doc commit <file>             # git add + commit with timestamp
+agent-doc commit <file>             # selective commit (snapshot only, user edits stay uncommitted)
+agent-doc terminal <file> [--session S]  # launch terminal with tmux for editor plugins
 agent-doc skill install             # install Claude Code skill definition
 agent-doc skill check               # check if installed skill is up to date
 agent-doc patch <file> <component> [content]  # update component (stdin if no content)
@@ -394,8 +395,6 @@ agent-doc write <file> --force-disk  # bypass IPC, write directly to disk
 agent-doc history <file>            # list exchange versions from git
 agent-doc history <file> --restore <commit>  # prepend old exchange content
 agent-doc audit-docs                # audit instruction files for staleness
-agent-doc history session.md         # list exchange versions from git
-agent-doc history session.md --restore <commit>  # prepend old exchange content
 agent-doc upgrade                   # upgrade to latest version
 agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
 agent-doc plugin update <editor>    # update editor plugin to latest

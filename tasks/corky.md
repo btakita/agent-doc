@@ -825,7 +825,7 @@ Update README.md, SPEC.md
 Please add tests
 audit docs
 Update README.md, SPEC.md
-### Tests Added, Docs Updated, Audit Clean (HEAD)
+### Tests Added, Docs Updated, Audit Clean
 
 **Tests** (4 new, 221 total passing):
 - `scoped_route_returns_for_matching_account` — `personal:for-lucas` returns route for `personal`

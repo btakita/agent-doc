@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Conversation reviewed. Reply sent — minor schedule framing feedback noted.
+Offer timing strategy discussed. Screening call pending — pace with other interviews.
 <!-- /agent:status -->
 
 ## Exchange
@@ -156,6 +156,27 @@ Two minor issues:
 - Asking about submittal process shows professionalism
 
 **Overall:** The conversation is totally fine. The schedule openness is a minor tell, not a dealbreaker. Lucas is a staffing recruiter filling volume — he's motivated to place you, so the power dynamic matters less here than with a direct employer.
+
+Well, I also have some interviews coming up. So I want all of my offers to occur at the same time.
+<!-- agent:boundary:cf0bfaa4-604a-4ab8-8a8c-524b0d02bfb9 -->
+### Re: Timing Offers (HEAD)
+
+Smart strategy. Having competing offers is the strongest negotiating position you can be in. A few things to keep in mind with Lucas/NextEra specifically:
+
+**Pacing this one:**
+- Lucas wants a 10-20 min screening call, then submittal, then a 30-min intro with the team. That's at least 2-3 steps before an offer lands.
+- If your other interviews are further along, you may want to accelerate Lucas (take the call soon) so the timelines converge.
+- If the others are early-stage too, you have room to pace naturally.
+
+**What NOT to tell Lucas:**
+- Don't mention specific competing companies or timelines — just that you're "exploring a few opportunities" if pressed.
+- Don't say "I need all offers at the same time" — that sounds like you're playing games. Instead: *"I'm in conversations with a couple other teams, so I'd love to keep things moving on a similar timeline."*
+
+**What TO tell Lucas (when relevant):**
+- That you're actively interviewing — this increases urgency on his side
+- That you're interested but want to be thoughtful — this is professional, not a red flag
+
+For now, your conversation with Lucas is in good shape. He's waiting for you to schedule the screening call. No urgency to change anything you've already said — just be mindful of pacing as your other processes advance.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

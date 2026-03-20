@@ -374,7 +374,7 @@ I want to recover the data in the orphaned agent:boundary.
 - `agent-doc commit` succeeded: `[main 2096b49] agent-doc(kevin-volk): 2026-03-20 14:21:55`
 - The response is in kevin-volk.md. No recovery needed.
 
-You seem to think it recovered correctly. But the document did not rec
+You seem to think it recovered correctly. But the document did not receive the patches.
 
 **3. "I don't necessarily want to clean up the orphaned..."** — Your message got truncated. Two possible directions:
 
@@ -392,9 +392,7 @@ I want to recover the patch response in the orphaned agent:boundary.
 
 ```
 He sent me message.
-<!-- agent:boundary:47887af5 -->
 Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
-<!-- agent:boundary:e3be6c49 -->
 &lt;!-- /agent:exchange --&gt;
 ```
 
@@ -409,6 +407,28 @@ Did you read the email with subject **CopilotKit 1st Round Interview Prep + Conf
 **Your current kevin-volk.md** (after my cleanup) still has the response content and user prompts — only the invisible boundary markers were removed. No data was lost.
 
 Want me to investigate why the write path produced `0 components` instead of using the boundary?
+
+### Re: Kevin-Volk Patch Placement Bug (HEAD)
+
+**I was wrong — the response IS in the document but in the wrong position.** Looking at the current kevin-volk.md:
+
+```
+line 181: - [ ] Review interview prep for Round 1 (AI workflow exercise)
+line 182: ### Session 9 — Mar 20, 2026: Interview Scheduled   <-- response HERE
+...
+line 205: - [ ] Prepare for Jordan Ritter CTO conversation
+line 206: He sent me message.                                  <-- user prompt
+line 207: Did you read the email with subject **CopilotKit...** <-- user prompt
+line 208: <!-- agent:boundary:1b8c6a90 -->                     <-- stale boundary
+```
+
+**The response was placed ABOVE the user prompts instead of at the boundary marker.** This is exactly the ordering bug that boundary markers were designed to fix — but it didn't work because `0 components` was logged, meaning the write path didn't use the boundary-aware component patch.
+
+**Root cause: `0 components` in IPC output.** The response was written via `try_ipc_full_content()` (full document replacement) instead of `try_ipc()` (component-targeted patch with boundary). This happens when the `agent-doc write` command doesn't detect template-mode components in the response — likely because the kevin-volk session sent a raw response without `<!-- patch:exchange -->` wrapper blocks.
+
+**To fix kevin-volk.md now:** I can reorder the content so the prompts appear before the response. Want me to do that?
+
+**To prevent recurrence:** The `agent-doc write --stream` command needs to always use the component-targeted IPC path when a boundary marker exists, even when the response isn't wrapped in patch blocks. I'll investigate the write path to find where it falls through.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

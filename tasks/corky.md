@@ -800,7 +800,7 @@ The \`[routing]\` entry \`for-lucas = ["mailboxes/lucas"]\` adds \`for-lucas\` a
 Want me to implement fixes for all three bugs?
 
 yes
-### All Three Bugs Fixed (HEAD)
+### All Three Bugs Fixed
 
 Implemented in corky submodule. Build passes, 8 tests pass.
 

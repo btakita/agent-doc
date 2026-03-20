@@ -1358,6 +1358,87 @@ mod tests {
     }
 
     #[test]
+    fn try_ipc_snapshot_saves_content_ours() {
+        // Verify that after IPC succeeds, the snapshot contains content_ours
+        // (baseline + response), NOT whatever is currently in the working tree file.
+        // This is critical: if we snapshot the file on disk, user edits typed after
+        // the boundary would be absorbed and lost to the next diff.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock {
+            name: "exchange".to_string(),
+            content: "agent response content".to_string(),
+        };
+
+        // content_ours = baseline with patches applied (what the snapshot should contain)
+        let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
+
+        // Simulate user editing the file AFTER write began (working tree differs from content_ours)
+        let user_edited = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\nuser typed something new\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, user_edited).unwrap();
+
+        // Spawn "plugin" thread that watches for and deletes patch files
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),     // baseline
+            Some(content_ours), // content_ours — what snapshot should save
+        )
+        .unwrap();
+        assert!(result, "IPC should succeed when plugin consumes patch");
+
+        // KEY ASSERTION: snapshot must contain content_ours, not the working tree file
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("agent response content"),
+            "snapshot must contain content_ours (agent response), got: {}",
+            snap
+        );
+        assert!(
+            !snap.contains("user typed something new"),
+            "snapshot must NOT contain working tree edits — \
+             it should save content_ours, not the current file"
+        );
+        assert_eq!(
+            snap, content_ours,
+            "snapshot must exactly match content_ours"
+        );
+
+        // Working tree file should still have the user's edits (untouched by IPC snapshot)
+        let on_disk = fs::read_to_string(&doc).unwrap();
+        assert!(
+            on_disk.contains("user typed something new"),
+            "working tree file should still contain user edits"
+        );
+    }
+
+    #[test]
     fn ipc_json_preserves_utf8_em_dash() {
         // Verify that serde_json serialization preserves em dashes in IPC payloads
         let content = "Response with \u{2014} em dash.";

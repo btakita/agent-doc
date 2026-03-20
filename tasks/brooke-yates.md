@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact file created. Draft follow-up ready for review.
+Revised draft ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,7 @@ Created `mail/contacts/brooke-yates/CLAUDE.md` (with `AGENTS.md` symlink).
 >
 > To give you more specifics on the customer-facing / SaaS side:
 >
-> **Presence AI** (Lead Backend Engineer, 2024–2026) — Built the production-facing real-time AI avatar platform. This is an external SaaS product where end users interact with AI avatars through a Next.js/React frontend delivered over WebRTC. I architected the full video pipeline (lip-sync, facial landmarks, frame sequencing on NVIDIA H100 GPUs) and the GraphQL API layer that serves the frontend.
+> **Presence AI** (Lead Backend Engineer, 2024–2026) — Built the production-facing real-time AI avatar platform. This is an external B2C SaaS product where end users interact with AI avatars through a Next.js/React frontend delivered over WebRTC. I architected the full video pipeline (lip-sync, facial landmarks, frame sequencing on NVIDIA H100 GPUs) and the GraphQL API layer that serves the frontend.
 >
 > **Censible** (Lead Product Developer, 2016–2024) — 8-year SaaS platform for ESG analytics. Built the investor-facing portfolio rebalancing tool (esg.censible.co/rebalance) and the Martin Investments analyst portal with ESG rating algorithms. External users — financial advisors and analysts — used these daily.
 >
@@ -45,7 +45,34 @@ Created `mail/contacts/brooke-yates/CLAUDE.md` (with `AGENTS.md` symlink).
 > Best,
 > Brian
 
+Unfortunately, I did not have daily users with Censible. We had our initial product targeting Millenial Investors.
+Then we switched to ESG screening and portfolio rebalancing.
+It did not have daily usage.
+
+Milyoni can be used but it was a long time ago.
+Menu.com can be used but it has been rebuilt.
+
 Left Menu.com out — the other examples are stronger. Want to add it, adjust anything, or send?
+### Re: Revised Draft (HEAD)
+
+Dropped daily usage claim for Censible, added Menu.com as a brief mention alongside Milyoni:
+
+> Hi Brooke,
+>
+> To give you more specifics on the customer-facing / SaaS side:
+>
+> **Presence AI** (Lead Backend Engineer, 2024–2026) — Built the production-facing real-time AI avatar platform. This is an external B2C SaaS product where end users interact with AI avatars through a Next.js/React frontend delivered over WebRTC. I architected the full video pipeline (lip-sync, facial landmarks, frame sequencing on NVIDIA H100 GPUs) and the GraphQL API layer that serves the frontend.
+>
+> **Censible** (Lead Product Developer, 2016–2024) — Built an ESG analytics SaaS platform including an investor-facing portfolio rebalancing tool and the Martin Investments analyst portal with ESG rating algorithms.
+>
+> I've also built external-facing products at Menu.com (restaurant platform, since rebuilt), Milyoni (social entertainment platform used by Warner Brothers, Paramount, Universal Music Group), and TrueCar/honk.com (vehicle review platform white-labeled for USAA and Wall Street Journal).
+>
+> Happy to dive deeper on any of these Tuesday at 1 PM as proposed.
+>
+> Best,
+> Brian
+
+Ready to send, or further tweaks?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

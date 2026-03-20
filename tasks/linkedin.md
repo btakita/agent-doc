@@ -218,7 +218,24 @@ Your notes are poetic. Here's a draft that keeps that energy while staying conve
 
 Same here — time was always the bottleneck. You know what to build, you know how to build it, but the gap between intention and implementation ate all the hours.
 
-Now that gap is collapsing. Making software from intention turns development into a true art form — where the expression *is* the utility. I think we're going to see a wave of new businesses from people who always had the ideas but never had the time.
+Now that gap is collapsing. Making software from intention turns development into a true art form — where the expression is the utility. I think we're going to see a wave of new collaborations and businesses from people who always had the ideas but never had the time.
 
 Looking forward to seeing what you release.
+
+From Andrei Trandafira: rate my response
+> Good direction, but agent loops are not yet the compiler era of AI engineering; they are the relay-circuit era—enough to prove the paradigm, not enough yet to guarantee robust abstraction. So yes we're at a new turn of the spiral of abstraction, but we are very early
+
+Andrei Trandafira They are yet another tool. The Agent Harness is important. And making software for deterministic operations...making context for the model. Every tool has it's place. Being early is the best place to be.
+
+**Re: Andrei Trandafira reply**
+
+Your substance is right but the phrasing is fragmented. Here's a polished version:
+
+**Draft reply to Andrei Trandafira:**
+
+Fair point — we're early. But every paradigm starts with relay circuits before compilers arrive. The key is what you build *during* that era.
+
+What I've found matters most right now: the agent harness, deterministic tooling for operations that shouldn't be probabilistic, and structured context (SKILL.md) that gives the model the right abstraction surface. These aren't compiler-era polish — they're the foundations that make the compiler era possible.
+
+Being early is exactly where you want to be.
 <!-- /agent:exchange -->

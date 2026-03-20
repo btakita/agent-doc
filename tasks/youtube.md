@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-LinkedIn strategy finalized — post body clean, YouTube link in first comment. Ready to post.
+LinkedIn draft created at mail/social/20260320-094603-linkedin.md. Awaiting publish approval.
 <!-- /agent:status -->
 
 ## Exchange
@@ -93,6 +93,7 @@ Is this interaction worth posting about on LinkedIn?
 > You can resist it, or you can build with it.
 
 Want me to flesh this out more once you finish your thought about the vibe coding debate?
+Should I include the YouTube link or not?
 
 ### Re: YouTube Link in LinkedIn Post
 
@@ -115,7 +116,22 @@ So the LinkedIn post body stays link-free:
 > You can resist it, or you can build with it.
 
 Then first comment: `Video: https://www.youtube.com/watch?v=hVNmbmY4vgo`
-Should I include the YouTube link or not? 
+
+### Re: LinkedIn Post via Corky (HEAD)
+
+**Draft created:** `mail/social/20260320-094603-linkedin.md`
+
+The draft is ready for review. To publish:
+```
+cd mail && corky linkedin publish social/20260320-094603-linkedin.md
+```
+
+**First comment with link:** Corky doesn't have a `linkedin comment` subcommand yet, so the YouTube link comment will need to be added manually in the LinkedIn web UI after publishing. Post first, then immediately comment:
+
+> Video: https://www.youtube.com/watch?v=hVNmbmY4vgo
+
+Want me to publish the draft now, or do you want to review/edit it first?
+Please use corky to post this to LinkedIn. Please use corky to make the first comment with the link.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

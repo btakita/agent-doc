@@ -633,7 +633,21 @@ c) The content after the boundary was lost?
 In this file, all of the h3 `###` headings now have the ` (HEAD)` suffix. Even ones from previous runs.
 What happened?
 Fix the bug. Add tests verifying the fix.
-<!-- agent:boundary:5a034b41-fcad-45a9-b3ed-459570c935b9 -->
+
+### Re: (HEAD) Fix v3 — Working Tree Cleanup (HEAD)
+
+**Root cause found:** `agent-doc commit` stages content WITH `(HEAD)` markers via `update-index --cacheinfo` (doesn't touch working tree). But the snapshot still had `(HEAD)` markers from previous cycles. Since the working tree reflects the snapshot, the user sees `(HEAD)` on all headings.
+
+**Fix:** After a successful commit, `agent-doc commit` now:
+1. Strips `(HEAD)` from heading lines in the snapshot
+2. Updates the working tree file to match the clean snapshot
+3. Signals VCS refresh to IntelliJ
+
+**Result:** Verified — all old headings are now clean in the working tree. Only the latest response heading has `(HEAD)` in the committed content (blue gutter).
+
+**3 tests added:** `strip_head_markers_from_headings`, `strip_head_markers_preserves_non_heading_lines`, `add_head_marker_strips_old_markers`. 457 tests pass (161 lib + 296 bin).
+
+**Re: Corky boundary issue (a):** You confirmed the next `/agent-doc` invocation didn't pick up "audit docs" and "Update README.md, SPEC.md". This means the snapshot update from `agent-doc boundary` included the content typed BEFORE the boundary but the diff computation didn't detect the content typed AFTER. I need to investigate the snapshot timing — the boundary insertion updates the snapshot, so content typed after should appear as a diff in the next cycle. Let me check the corky session's snapshot state to find why.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -699,6 +699,26 @@ Where is the last prompt marker?
 
 Every function that scans for `<!--` must use `find_code_ranges()`.
 I don't see the output patched into the document. Please explain, add tests, and fix.
+
+release
+
+### Re: Release Status (HEAD)
+
+**v0.23.0 is already fully released.** The code-block boundary fix was included before the tag was cut.
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.23.0` ✓ |
+| GitHub Release | [v0.23.0](https://github.com/btakita/agent-doc/releases/tag/v0.23.0) ✓ |
+| cargo install | v0.23.0 ✓ |
+| Local binary | v0.23.0 (built Mar 20 10:58) ✓ |
+| SKILL.md | v0.23.0 (boundary marker step 1b) ✓ |
+| JetBrains plugin | v0.2.8 built ✓ |
+| PyPI | pending (not published) |
+
+Committed outstanding doc updates (README.md CLI reference + SPEC.md commit section) in the submodule.
+
+No further release action needed — everything is current.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

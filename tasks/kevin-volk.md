@@ -163,7 +163,7 @@ Note my open source work, YouTube videos, and ability to manage Rust and TypeScr
 **Status:** Waiting on CopilotKit to schedule first interview. Watch for direct scheduling invites (may not CC Kevin).
 
 Please sync corky with btak.dev@gmail.com
-### Session 8 — Mar 20, 2026: Corky sync + Kevin's interview update (HEAD)
+### Session 8 — Mar 20, 2026: Corky sync + Kevin's interview update
 
 **Corky sync:** `btak.dev` account synced — inbox clean (0 new messages).
 

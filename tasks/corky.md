@@ -462,7 +462,7 @@ Syncing label: INBOX
   No prior state — doing full sync
   Fetching 1853399 message(s)
 ```
-### Investigating: INBOX Full Sync for brian.takita@gmail.com (HEAD)
+### Investigating: INBOX Full Sync for brian.takita@gmail.com
 
 Analyzed the config and code. Here's what I found:
 

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft with Rundavoo ready for review.
+Final draft ready. Edit the 10:44 AM LinkedIn message.
 <!-- /agent:status -->
 
 ## Exchange
@@ -98,6 +98,32 @@ Updated draft with Rundavoo:
 > Brian
 
 Ready to send, or further tweaks?
+
+Brooke has not read my message yet. Should I edit my previous message?
+### Re: Edit vs. New Message (HEAD)
+
+**Yes, edit the previous message.** Since Brooke hasn't read it yet, LinkedIn lets you edit sent messages (three dots → Edit) — the recipient sees only the final version. Cleaner than a follow-up correction.
+
+**How:** Open the LinkedIn conversation → find your 10:44 AM message → three dots → Edit → replace entire text with the draft above.
+
+Note: LinkedIn messages don't support markdown bold. You may want to strip the `**` markers or leave them as-is (they'll show as literal asterisks). Plain text version without bold formatting:
+
+---
+
+Hi Brooke,
+
+To give you more specifics on the customer-facing / SaaS side:
+
+Presence AI (Lead Backend Engineer, 2024–2026) — Built the production-facing real-time AI avatar platform. This is an external B2C SaaS product where end users interact with AI avatars through a Next.js/React frontend delivered over WebRTC. I architected the full video pipeline (lip-sync, facial landmarks, frame sequencing on NVIDIA H100 GPUs) and the GraphQL API layer that serves the frontend.
+
+Censible (Lead Product Developer, 2016–2024) — Built an ESG analytics SaaS platform including an investor-facing portfolio rebalancing tool and the Martin Investments analyst portal with ESG rating algorithms.
+
+I've also built external-facing products at Rundavoo (social gathering app, Google top 75 app in 2014 — led front-end across desktop, tablet, and mobile), Menu.com (restaurant platform, since rebuilt), Milyoni (social entertainment platform used by Warner Brothers, Paramount, Universal Music Group), and TrueCar/honk.com (vehicle review platform white-labeled for USAA and Wall Street Journal).
+
+Happy to dive deeper on any of these Tuesday at 1 PM as proposed.
+
+Best,
+Brian
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

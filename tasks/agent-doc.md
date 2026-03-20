@@ -531,8 +531,8 @@ This sends the `agent-doc start` command directly into the terminal pane, where 
 **Plugin rebuilt** at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.8.zip` — install to get the fixed auto-start behavior.
 
 Note: The terminal output you showed (`/agent-doc tasks/finance.md` → `zsh: no such file or directory`) is a separate issue — that's the user manually typing `/agent-doc` with a leading `/`, which zsh interprets as an absolute filesystem path. The slash command `/agent-doc` only works inside a Claude Code session, not in a regular shell.
-   ```
-2. User keeps typing below the marker (their new text appears after it in the document)
+
+3. User keeps typing below the marker (their new text appears after it in the document)
 3. Agent generates response
 4. `agent-doc write` includes the boundary UUID in the patch metadata
 5. Plugin finds the marker in the current document → inserts response AT that position (replacing the marker)
@@ -555,7 +555,23 @@ Note: The terminal output you showed (`/agent-doc tasks/finance.md` → `zsh: no
 - **SKILL.md:** After reading the document (step 1), write the boundary marker via `agent-doc boundary <FILE>` (new CLI subcommand)
 - **Rust (`boundary.rs`):** New subcommand that finds the exchange component's close tag and inserts the marker just before it
 - **Rust (`write.rs`):** Include the boundary UUID in the patch JSON
-- **Plugin (`PatchWatcher.kt`):** When patch has a `boundary_id`, find `<!-- agent:boundary:UUID -->` in the document and insert there instead of using caret-aware logic
+
+### Re: Response Placed Inside Code Block — Bug Found (HEAD)
+
+**The response IS in the document** — at line 519. But it was inserted inside a fenced code block in the boundary marker discussion, breaking the document flow.
+
+**What happened:**
+1. The `agent-doc boundary` command inserted `<!-- agent:boundary:UUID -->` at the end of the exchange component
+2. The exchange component contains a code block example showing `<!-- agent:boundary:UUID -->`
+3. When `find_boundary_id()` in write.rs searched for the marker, it found the one INSIDE the code block first (simple string search, no code-range exclusion)
+4. The plugin inserted the response at that position — inside the code block
+
+**Root cause:** `find_boundary_id()` doesn't use `find_code_ranges()` to skip code blocks. This is exactly lesson #13 from this document: *"Skip code spans in ALL parsers — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice."* And now a third time.
+
+**Fix needed:** `find_boundary_id()` in write.rs (and `find_in_component()` / `append_with_boundary()` in component.rs) must use `find_code_ranges()` to exclude matches inside fenced code blocks and inline code spans.
+
+Want me to fix this now? It's a targeted change — add code-range filtering to the boundary search functions.
+` in the document and insert there instead of using caret-aware logic
 - **FFI:** New `agent_doc_apply_patch_with_boundary()` export
 
 Want me to implement this? It's a clean, focused change — ~4 files touched in the Rust binary, 1 in the plugin.
@@ -659,6 +675,9 @@ zsh: no such file or directory: /agent-doc
 ~/work/quant-science main ⇡4 +3 !6 ?4                                                                                                                                                                                           3.13  10:33:38
 ❯
 ```
+
+Please print the response again.
+Where is the last prompt marker?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

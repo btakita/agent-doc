@@ -56,6 +56,7 @@ agent_doc_mode: template
 - [x] `corky sync imports` config dispatcher — v0.16.0
 - [x] Attachment phases 2-3 — v0.16.0
 - [x] Gmail API sync provider — v0.17.0
+- [x] Watch bug fixes (routing scope, 404 resilience, IMAP shutdown) — v0.19.1
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -849,4 +850,18 @@ Refactored: extracted `build_label_routes_from_routing()` (testable, takes routi
 **Audit:** `corky audit-docs` — No issues found. 188 instruction lines (budget: 1000).
 
 All changes are in corky submodule working tree (uncommitted). Ready to commit and prepare for release.
+
+release
+### Released v0.19.1 (HEAD)
+
+**Commit:** `ba9d712` — watch bug fixes (routing scope, 404 resilience, IMAP shutdown)
+
+**Published:**
+- [crates.io](https://crates.io/crates/corky/0.19.1)
+- [PyPI](https://pypi.org/project/corky/0.19.1/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.19.1) (with binary)
+
+**Installed:** `corky 0.19.1` locally via `cargo install`
+
+**VERSIONS.md** updated with changelog entry covering all three bug fixes + GPU auto-detection.
 <!-- /agent:exchange -->

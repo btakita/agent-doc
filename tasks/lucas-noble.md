@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft reply ready for review.
+Revised draft ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,7 +53,30 @@ yes
 > Best,
 > Brian
 
+I also have deep experience with Python.
+I would rather ask more about the company and what the job is about.
+
 This keeps it concise, shows interest without over-committing, and qualifies the opportunity. Want me to adjust the tone, add/remove questions, or send it via corky?
+### Re: Revised Draft (HEAD)
+
+Good catches. Revised — Python claimed as a strength, questions shifted to role/company substance:
+
+> Hi Lucas,
+>
+> Thanks for reaching out — the role sounds interesting. I have deep experience with Python, TypeScript, and AWS, so the stack is right in my wheelhouse.
+>
+> I'd love to learn more:
+>
+> 1. Can you share more about the company and what they're building?
+> 2. What does the day-to-day look like for this role?
+> 3. What problems is the team trying to solve right now?
+>
+> Happy to hop on a quick call if it sounds like a good fit.
+>
+> Best,
+> Brian
+
+Ready to send, or want further tweaks?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised draft with agent loop focus ready for review.
+Draft corrected (1099, corp in progress). Ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -47,6 +47,27 @@ Good call — leads with your unique angle instead of a stack list:
 Hi Benjamin,
 
 Yes, I'm open to C2C contract work — I already have an LLC set up.
+
+I'm most interested in agent loop harness engineering — building the infrastructure that makes AI agents reliable in production. I've been shipping Rust tooling for agent sessions (document-as-interface, tmux routing, git-native correspondence) and recently architected a real-time multimodal AI pipeline on NVIDIA H100 GPUs.
+
+Full-stack across Rust, Python, TypeScript, and AWS.
+
+What kinds of roles are you sourcing?
+
+Best,
+Brian
+
+Ready to send, or further tweaks?
+
+I don't have a Corporation at the moment. So I would be a 1099.
+But I am in the process of setting up a Corporation.
+### Re: 1099 Correction (HEAD)
+
+Updated — removed LLC claim, positioned as 1099 with corporation in progress:
+
+Hi Benjamin,
+
+Yes, I'm open to contract work. I'd be 1099 for now — I'm in the process of setting up a corporation for C2C.
 
 I'm most interested in agent loop harness engineering — building the infrastructure that makes AI agents reliable in production. I've been shipping Rust tooling for agent sessions (document-as-interface, tmux routing, git-native correspondence) and recently architected a real-time multimodal AI pipeline on NVIDIA H100 GPUs.
 

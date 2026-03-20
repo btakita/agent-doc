@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.22.2 | **Tests:** 466 (158 lib + 287 bin + 21 int) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.23.0 | **Tests:** 450 (158 lib + 292 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.7 (cursor-aware FFI + VCS refresh + default modes) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 7 FFI exports | **SKILL.md:** immediate commit after write
+**Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
 <!-- /agent:status -->
 
 ## Architecture
@@ -550,6 +550,9 @@ implement
 
 I ran `Claim for Tmux Pane` on another agent-doc project. Targeting tmux session 2.
 
+The agent session was not started.
+![2026-03-20_10-05.png](../../../../Pictures/agent-loop/2026-03-20_10-05.png)
+
 ### Re: Claim vs Start — Separate Actions (HEAD)
 
 **"Claim for Tmux Pane" only registers the file→pane mapping.** It doesn't start a Claude session. This is by design — claiming is the IDE plugin telling the routing system "this file belongs to this pane." Starting a session is a separate step.
@@ -568,6 +571,8 @@ I ran `Claim for Tmux Pane` on another agent-doc project. Targeting tmux session
 Option 2 seems most user-friendly. After `agent-doc claim` succeeds, run `agent-doc start <FILE>` in the background. The start command already handles: creating the tmux pane, starting Claude with the right args, and registering the session.
 
 Want me to implement auto-start on claim?
+
+yes
 
 ### Re: Boundary Marker — Implemented (HEAD)
 
@@ -588,12 +593,40 @@ Want me to implement auto-start on claim?
 
 **Still needed:**
 1. Update SKILL.md to call `agent-doc boundary <FILE>` after reading the document (step 1)
+
+### Re: v0.23.0 Released — Boundary Markers + Claim Auto-Start (HEAD)
+
+**Both features implemented and released:**
+
+**1. Claim auto-start** — `ClaimAction.kt` now chains `agent-doc start <FILE>` after a successful claim. When you run "Claim for Tmux Pane" from the IDE, it claims the pane AND starts the Claude session automatically.
+
+**2. Full release:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.23.0` |
+| GitHub Release | [v0.23.0](https://github.com/btakita/agent-doc/releases/tag/v0.23.0) |
+| cargo install | updated (replaced v0.22.2) |
+| SKILL.md | installed (v0.23.0 with boundary marker step 1b) |
+| JetBrains plugin | v0.2.8 built (`agent-doc-jetbrains-0.2.8.zip`) |
+
+**What's new in v0.23.0:**
+- `agent-doc boundary <FILE>` command
+- Boundary-aware response ordering (FFI + plugin)
+- Component parser skips boundary markers
+- IPC `boundary_id` in patch JSON
+- SKILL.md step 1b: boundary marker insertion
+- Claim auto-start in JetBrains plugin
+
+**To activate:**
+1. Install plugin v0.2.8: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.8.zip`
+2. Run `/compact` in other sessions to reload the SKILL.md
 2. Build release binary + rebuild plugin zip
 3. Release + install
 
 Want me to proceed with updating SKILL.md and releasing?
-The agent session was not started.
-![2026-03-20_10-05.png](../../../../Pictures/agent-loop/2026-03-20_10-05.png)
+
+yes
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.23.1 | **Tests:** 454 (161 lib + 293 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.23.2 | **Tests:** 459 (162 lib + 297 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
@@ -708,6 +708,34 @@ If this is an issue, identify root cause, write test, fix.
 1. Unmatched content → boundary-aware (fixed earlier)
 2. Explicit patches → boundary-aware (fixed now)
 3. Both paths now consume the boundary marker on write
+
+audit docs
+release
+
+### Re: Audit + v0.23.2 Released (HEAD)
+
+**Audit results:** 5 warnings (all timestamp-based, no content gaps). Updated:
+- **CLAUDE.md:** IPC section updated with `try_ipc()` new `content_ours` parameter and synthesized boundary patch behavior
+- **VERSIONS.md:** v0.23.1 entry added (6 changes: boundary-aware insertion, IPC snapshot fix, stale marker cleanup, HEAD marker cleanup, post-commit cleanup, `find_boundary_id_in_component`)
+- **README.md:** No changes needed (all fixes are internal)
+
+**v0.23.2 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.23.2` ✓ |
+| GitHub Release | [v0.23.2](https://github.com/btakita/agent-doc/releases/tag/v0.23.2) ✓ |
+| cargo install | v0.23.2 ✓ |
+| SKILL.md | v0.23.2 ✓ |
+
+**v0.23.2 changelog (since v0.23.0):**
+- Stale boundary marker cleanup on insert
+- Boundary-aware insertion for unmatched content (0 components bug)
+- Boundary-aware insertion for explicit patches in append mode
+- IPC snapshot saves `content_ours` (preserves post-boundary user edits for next diff)
+- `(HEAD)` marker accumulation fix (strip from heading lines only, post-commit cleanup)
+- `try_ipc()` synthesizes exchange patch when only unmatched content + boundary exists
+- 459 tests (162 lib + 297 bin)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

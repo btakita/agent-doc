@@ -238,4 +238,17 @@ Fair point — we're early. But every paradigm starts with relay circuits before
 What I've found matters most right now: the agent harness, deterministic tooling for operations that shouldn't be probabilistic, and structured context (SKILL.md) that gives the model the right abstraction surface. These aren't compiler-era polish — they're the foundations that make the compiler era possible.
 
 Being early is exactly where you want to be.
+
+From Azizul Rabby Chowdhury
+> Feels like the real shift is just being able to finally build things that were always out of reach before.
+
+Indeed it is. All of those intentions can now be software and in some cases physical creations.
+
+**Re: Azizul Rabby Chowdhury reply**
+
+Your reply is good but could be tighter. Here's a polished version:
+
+**Draft reply to Azizul Rabby Chowdhury:**
+
+Indeed. All those intentions that were always in your head — now they can become working software. The shift isn't just speed, it's reach.
 <!-- /agent:exchange -->

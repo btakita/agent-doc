@@ -822,4 +822,31 @@ Ready to commit in corky submodule. Want me to commit, run `make check`, and pre
 Please add tests
 audit docs
 Update README.md, SPEC.md
+Please add tests
+audit docs
+Update README.md, SPEC.md
+### Tests Added, Docs Updated, Audit Clean (HEAD)
+
+**Tests** (4 new, 221 total passing):
+- `scoped_route_returns_for_matching_account` — `personal:for-lucas` returns route for `personal`
+- `scoped_route_returns_empty_for_other_account` — `personal:for-lucas` returns empty for `proton-dev`
+- `unscoped_route_returns_for_all_accounts` — unscoped keys match all accounts
+- `shutdown_signal_is_observable` — AtomicBool signal detection smoke test
+- Bug 2 (404 skip) skipped — `fetch_message` makes direct HTTP calls, no mock layer; integration testing more appropriate
+
+Refactored: extracted `build_label_routes_from_routing()` (testable, takes routing map as param) from `build_label_routes()` (reads config from disk).
+
+**SPEC.md updates:**
+- §3.3 — `account:label` routing example
+- §4.5 — note on scoped routing syntax
+- §6.8 — 404 resilience paragraph (skip deleted messages)
+- §9.2 — shutdown signal covers both IMAP and Gmail API paths
+
+**README.md updates:**
+- Watch daemon section — Ctrl+C interrupts both sync paths
+- Gmail API sync — 404 resilience bullet
+
+**Audit:** `corky audit-docs` — No issues found. 188 instruction lines (budget: 1000).
+
+All changes are in corky submodule working tree (uncommitted). Ready to commit and prepare for release.
 <!-- /agent:exchange -->

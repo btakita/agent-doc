@@ -270,4 +270,27 @@ Your leverage point is strong. Here's a polished version:
 **Draft reply to Richard Lee Abraham:**
 
 Exactly — and the difference this time is the magnitude of leverage. Previous tech shifts gave you 2x, maybe 10x. This one is giving individual builders leverage that used to require entire teams. The game keeps changing; the people who benefit most are the ones who pick up the new tools first.
+
+> benefit most are the ones who pick up the new tools first
+
+I think those who are prepared.
+
+Please update the bookmarklet to include the date of the message.
+
+**Re: Richard Lee Abraham — updated ending**
+
+Updated draft:
+Exactly — and the difference this time is the magnitude of leverage. Previous tech shifts gave you 2x, maybe 10x. This one is giving individual builders leverage that used to require entire teams. The game keeps changing; the people who benefit most are the ones who are prepared when the shift arrives.
+
+**Re: Bookmarklet date update**
+
+Updated the bookmarklet to extract the `datetime` attribute from `<time>` elements (which has full ISO dates) and format as `YYYY-MM-DD HH:MM`. Falls back to the displayed text for messages without a datetime attribute. See the updated code in the static section above — edit the bookmarklet there directly since it's outside the exchange component.
+
+Updated bookmarklet (replace the one in ## LinkedIn Conversation Export Bookmarklet):
+
+```
+javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';let time='';if(timeEl){const te=timeEl.querySelector('time[datetime]');if(te){const dt=new Date(te.getAttribute('datetime'));time=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0')}else{time=timeEl.textContent.trim()}}const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\n').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
+```
+
+Copy this into the static bookmarklet section to replace the old one. The exchange component can't edit static sections directly.
 <!-- /agent:exchange -->

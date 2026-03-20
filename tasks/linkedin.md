@@ -189,7 +189,7 @@ From David Bethune
 People are addicted to labels & titles...because symbols are a proxy for thought.
 What many people don't realize is AI is a cognitive enhancement...not a replacement.
 
-A tool to be mastered...just like any other too
+A tool to be mastered...just like any other tool.
 
 **Re: David Bethune reply**
 
@@ -200,4 +200,25 @@ Your notes are strong raw material. Here's a polished draft that weaves them tog
 Exactly. People are addicted to labels and titles because symbols are a proxy for thought. "AI-generated code" vs "hand-written code" is the new version of that — as if the person directing the work somehow forgot everything they know.
 
 AI is a cognitive enhancement, not a replacement. The understanding doesn't go away — it compounds. You just get to apply it at a different resolution.
+
+From Cody Sheridan
+> My biggest limitation in software development has always been time. I know what I want to build and how I want to build it, I just haven’t had the time outside of full-time employment to actually get it done. LLMs and Agents are changing that.
+
+I resonate with this. I'm looking forward to see what you are releasing.
+
+Making software from intention makes development a true art form.
+Where the expression is the utility.
+I predict many new businesses will start from this technological wave.
+
+**Re: Cody Sheridan reply**
+
+Your notes are poetic. Here's a draft that keeps that energy while staying conversational:
+
+**Draft reply to Cody Sheridan:**
+
+Same here — time was always the bottleneck. You know what to build, you know how to build it, but the gap between intention and implementation ate all the hours.
+
+Now that gap is collapsing. Making software from intention turns development into a true art form — where the expression *is* the utility. I think we're going to see a wave of new businesses from people who always had the ideas but never had the time.
+
+Looking forward to seeing what you release.
 <!-- /agent:exchange -->

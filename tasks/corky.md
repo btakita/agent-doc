@@ -414,7 +414,7 @@ Added three new sections to SPEC.md (94 lines):
 - References `docs/guide/self-hosted-gmail.md` and `docs/reference/privacy-policy.md`
 
 Changes are in the corky submodule working tree (not committed). Ready to commit when you approve. Want me to also run `corky audit-docs` to verify consistency?
-### SPEC.md Sections Drafted (HEAD)
+### SPEC.md Sections Drafted
 
 Two items to address from this cycle:
 

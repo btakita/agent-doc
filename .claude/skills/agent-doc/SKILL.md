@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.14.10"
+agent-doc-version: "0.23.0"
 ---
 
 # agent-doc submit
@@ -55,6 +55,18 @@ If there are no uncommitted changes, this is a no-op.
 - Read `<FILE>` to get current content
 - Read the snapshot at `.agent-doc/snapshots/<hash>.md` where `<hash>` is SHA256 of the canonical file path
   - If no snapshot exists, treat this as the first submit (entire document is new)
+
+### 1b. Insert boundary marker
+
+After reading the document, insert a boundary marker at the end of the exchange component. This marker acts as a physical anchor for response ordering — responses are inserted at the marker position, ensuring they appear after the prompt that triggered them and before any text the user types while waiting.
+
+```bash
+agent-doc boundary <FILE>
+```
+
+This generates a UUID, inserts `<!-- agent:boundary:UUID -->` at the end of the exchange component, and updates the snapshot. The marker is an HTML comment, so it's invisible in rendered markdown and ignored by comment stripping during diff comparison.
+
+If the document has no exchange component, this is a no-op (skip silently).
 
 ### 2. Compute the diff
 
@@ -160,11 +172,13 @@ Then pass it as `--baseline-file` so the 3-way merge can detect user edits accur
 
 ### 5. Git integration
 
-**Do NOT commit after writing the response.** The response stays uncommitted so the green git gutter bar delineates exactly what the agent wrote. The commit happens at the *start* of the next cycle (step 0b).
+**Commit immediately after writing the response.** After `agent-doc write` completes, run `agent-doc commit <FILE>`. The selective commit stages only the snapshot content (agent response), leaving user edits in the working tree as uncommitted. This gives the user:
+- Agent response → committed (no gutter)
+- Heading with `(HEAD)` marker → modified (blue gutter, visual boundary)
+- User's new input → uncommitted (green gutter)
 
 - **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- The previous response is committed in step 0b, before the next diff computation
-- This gives the user green gutter visibility between cycles, with automatic cleanup on the next submit
+- Step 0b also calls `agent-doc commit` as a safety net (no-op if already committed)
 
 ## Document Format
 

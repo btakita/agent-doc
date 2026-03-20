@@ -77,7 +77,7 @@ Eric Rose
 Please fill in tony-tomai contact with context.
 Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
 
-<!-- agent:exchange -->
+<!-- agent:exchange patch=append -->
 ### Draft SMS response to Dave Franklin
 
 Dave's messages (from `dave_franklin_sms.txt`):
@@ -106,4 +106,34 @@ Dave's messages (from `dave_franklin_sms.txt`):
 4. **Save content for BCG interviews.** That's when you demo agent-doc, show livestreams, etc.
 
 **Exception:** If Dave specifically asks "what have you been working on?" — then share 1-2 LinkedIn posts as proof points. Don't volunteer it on a status update.
+
+> If I hear anything today or tomorrow, will advise.
+
+Should I follow up with Dave. He mentioned that he expected an answer by yesterday or today.
+Should I mention that I will be having interviews next week?
+### Follow-up strategy (HEAD)
+
+**Yes, follow up today.** Dave set the expectation himself — "if I hear anything today or tomorrow, will advise." That window has passed, so a brief check-in is natural and expected:
+
+**Draft SMS:**
+
+> Hey Dave, hope you had a good week. Just checking in — any update from BCG on next steps?
+
+That's it. Short, warm, no pressure. He gave you the opening by setting the timeline himself.
+
+**Mention interviews — yes, but frame it right.** Don't use it as leverage or an ultimatum. Position it as a scheduling heads-up:
+
+> Also wanted to give you a heads-up that I have some conversations happening next week, so if BCG wants to schedule anything it'd be good to get on the calendar soon.
+
+**Why this works:**
+- "Conversations" is softer than "interviews" — doesn't sound like a threat
+- "Heads-up" frames it as courtesy, not pressure
+- "Get on the calendar" gives Dave something actionable to relay to BCG
+- Creates real urgency without burning the relationship
+
+**Combined draft:**
+
+> Hey Dave, hope you had a good week. Just checking in — any update from BCG on next steps? Also wanted to give you a heads-up that I have some conversations happening next week, so if BCG wants to schedule anything it'd be good to get on the calendar soon.
+
+**Timing:** Send it today (Thursday) so Dave has Friday to relay it before the weekend.
 <!-- /agent:exchange -->

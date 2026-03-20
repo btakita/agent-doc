@@ -137,4 +137,30 @@ I agree with your other points
 **Re: repos are public**
 
 You're right — my mistake. Both are published on crates.io. I should have known that. Recommendation still stands though: skip the links in this reply for the algorithm/narrative reasons. Post the draft as-is.
+
+Help me reply to Ernest Franklin Spicer:
+
+> Funny... Open to Work so maybe in 20 years you didnt advance much because of falling to hype.
+
+My current response:
+
+So you are not Open to Work? Not willing to take on new clients?
+
+Anyways, My previous employer went out of business...we were primarily hand coding with some AI augmentation. Not using agent loops though until the very very end...but it was too late.
+
+**Re: Ernest Franklin Spicer reply**
+
+Your draft is solid. Here are options:
+
+**Option A (your draft, polished):**
+So you're not Open to Work? Not taking on new clients?
+My previous employer went out of business — we were primarily hand-coding with some AI augmentation. Not using agent loops until the very end... but by then it was too late.
+
+**Option B (shorter, more confident):**
+My previous employer shut down — that's why I'm open to work. Building these tools is what I did next. Happy to compare notes on what "advancing" looks like after 20 years.
+
+**Option C (don't engage):**
+This reads like a troll comment. Engaging gives it algorithm visibility. Your strongest play might be to ignore it — anyone reading will see it reflects more on Ernest than on you.
+
+Recommendation: **C** (ignore) or **A** if you want to respond.
 <!-- /agent:exchange -->

@@ -136,4 +136,20 @@ That's it. Short, warm, no pressure. He gave you the opening by setting the time
 > Hey Dave, hope you had a good week. Just checking in — any update from BCG on next steps? Also wanted to give you a heads-up that I have some conversations happening next week, so if BCG wants to schedule anything it'd be good to get on the calendar soon.
 
 **Timing:** Send it today (Thursday) so Dave has Friday to relay it before the weekend.
+
+It is friday, 17:30 Eastern. So it's already end of day for some.
+Should we wait until Monday?
+### Timing: Send now, not Monday (HEAD)
+
+**Send it tonight.** Friday 5:30 PM is fine for SMS — it's asynchronous, no expectation of immediate response. Advantages:
+
+- **Top of inbox Monday morning** if Dave doesn't check tonight
+- **Natural follow-up window** — his "today or tomorrow" was earlier this week. By Monday, the connection to his timeline fades
+- **Recruiters work weekends** — Dave is hustling placements, he's not off the grid
+
+**Adjusted draft (for Friday evening):**
+
+> Hey Dave, just checking in — any update from BCG on next steps? Also wanted to give you a heads-up that I have some conversations happening next week, so if BCG wants to schedule anything it'd be good to get on the calendar soon.
+
+Dropped "hope you had a good week" since the week isn't over yet. Otherwise same message — it reads fine for a Friday evening text.
 <!-- /agent:exchange -->

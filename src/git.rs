@@ -192,10 +192,45 @@ fn add_head_marker(content: &str, file: &Path) -> String {
         .filter(|(_, _, level)| *level == min_level)
         .collect();
 
+    // Strip any existing (HEAD) markers from previous commits before adding new ones.
+    // Without this, (HEAD) markers accumulate across commit cycles.
+    let cleaned = content.replace(" (HEAD)", "");
+
+    // Also strip (HEAD) from the head_content for comparison
+    let head_cleaned = head_content.as_ref().map(|h| h.replace(" (HEAD)", ""));
+
+    // Recalculate new heading positions after stripping
+    let mut new_root_ends: Vec<usize> = Vec::new();
+    let mut offset = 0usize;
+    for line in cleaned.lines() {
+        let trimmed = line.trim_start();
+        let line_end = offset + line.len();
+        if trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if level <= 6 && level == min_level && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
+                let is_new = if let Some(ref hc) = head_cleaned {
+                    !hc.contains(line)
+                } else {
+                    true // no HEAD → treat all as new, but we'll only mark the last
+                };
+                if is_new {
+                    new_root_ends.push(line_end);
+                }
+            }
+        }
+        offset = line_end + 1; // +1 for newline
+    }
+
+    // When git HEAD is unavailable, only mark the last heading
+    if head_content.is_none() && new_root_ends.len() > 1 {
+        let last = *new_root_ends.last().unwrap();
+        new_root_ends = vec![last];
+    }
+
     // Build result with (HEAD) markers — reverse order to preserve offsets
-    let mut result = content.to_string();
-    for (_, line_end, _) in root_headings.iter().rev() {
-        result.insert_str(*line_end, " (HEAD)");
+    let mut result = cleaned;
+    for pos in new_root_ends.iter().rev() {
+        result.insert_str(*pos, " (HEAD)");
     }
     result
 }

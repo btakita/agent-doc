@@ -469,6 +469,8 @@ Then the plugin's insertion logic becomes:
 3. Insert the response at `component_start + baseline_content_end` (clamped to component bounds)
 4. This places it after the prompt the agent saw, before any new user typing
 
+Is baseline_content_end fragile if the human edits the content before `component_start + baseline_content_end`?
+
 **Scenarios:**
 
 | Case | baseline_content_end | Effect |
@@ -490,6 +492,59 @@ So in the following scenarios:
 - Human is still typing a prompt while the response to a previous prompt is being generated
   - agent response patch should be below the part of the prompt that the agent received and generated the answer
   - agent response patch should be above the prompt that was being edited
+
+Let's do a deeper dive into the scenarios. Specifically the robustness of the offset tracking.
+If we use a hash approach, we can tell if the content were modified.
+
+Would it make sense to insert a "marker" at the current end of the agent:exchange?
+
+### Re: Marker Approach — Best of Three Options (HEAD)
+
+**Yes, `baseline_content_end` is fragile.** If the user edits text ABOVE the offset (deleting a line, fixing a typo in a previous prompt), the byte offset shifts and the insertion point is wrong. The offset is a static number — it doesn't move with edits.
+
+**Three approaches compared:**
+
+| Approach | Robustness | Complexity |
+|----------|-----------|------------|
+| **A. Boundary marker in document** | High — moves with edits naturally | Low |
+| **B. Content hash in patch metadata** | Medium — survives edits elsewhere, breaks if prompt tail is edited | Medium |
+| **C. Byte offset in patch metadata** | Low — breaks on any edit above the offset | Low |
+
+**The marker approach wins.** Here's the concrete design:
+
+**Flow:**
+1. When the SKILL workflow reads the document (step 1), it inserts a boundary marker at the end of the exchange component content:
+   ```
+   <!-- agent:boundary:UUID -->
+   ```
+2. User keeps typing below the marker (their new text appears after it in the document)
+3. Agent generates response
+4. `agent-doc write` includes the boundary UUID in the patch metadata
+5. Plugin finds the marker in the current document → inserts response AT that position (replacing the marker)
+6. Result: response is after the prompt, before any new user typing
+
+**Why this works:**
+- The marker is a **physical anchor** in the document — it moves with edits (insertions/deletions above it shift it naturally)
+- HTML comments are invisible to the user in rendered markdown
+- Comment stripping already ignores `<!-- ... -->` for diff purposes, so the marker doesn't trigger false diffs
+- The plugin has a clear, unambiguous insertion point
+- No offset arithmetic, no hash matching
+
+**Edge cases:**
+- User deletes the marker → falls back to normal append (safe default)
+- User types above the marker → marker shifts, insertion point is still correct
+- User types below the marker → marker stays in place, new text preserved below response
+- Multiple concurrent sessions → each gets a unique UUID, no collision
+
+**Implementation scope:**
+- **SKILL.md:** After reading the document (step 1), write the boundary marker via `agent-doc boundary <FILE>` (new CLI subcommand)
+- **Rust (`boundary.rs`):** New subcommand that finds the exchange component's close tag and inserts the marker just before it
+- **Rust (`write.rs`):** Include the boundary UUID in the patch JSON
+- **Plugin (`PatchWatcher.kt`):** When patch has a `boundary_id`, find `<!-- agent:boundary:UUID -->` in the document and insert there instead of using caret-aware logic
+- **FFI:** New `agent_doc_apply_patch_with_boundary()` export
+
+Want me to implement this? It's a clean, focused change — ~4 files touched in the Rust binary, 1 in the plugin.
+This marker can help with determining what was an input prompt and what the human added after the agent session run began. 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -79,7 +79,7 @@ Good catches. Revised — Python claimed as a strength, questions shifted to rol
 Ready to send, or want further tweaks?
 
 Send via corky...if corky can reply to LinkedIn messages.
-### Re: Sending via Corky (HEAD)
+### Re: Sending via Corky
 
 Corky can't send LinkedIn messages — the Messaging API requires partner-level access that personal OAuth tokens don't have (same restriction as the `socialActions` endpoint we hit earlier).
 

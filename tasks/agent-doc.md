@@ -550,6 +550,25 @@ implement
 
 I ran `Claim for Tmux Pane` on another agent-doc project. Targeting tmux session 2.
 
+### Re: Claim vs Start — Separate Actions (HEAD)
+
+**"Claim for Tmux Pane" only registers the file→pane mapping.** It doesn't start a Claude session. This is by design — claiming is the IDE plugin telling the routing system "this file belongs to this pane." Starting a session is a separate step.
+
+**Current flow:**
+1. `Claim for Tmux Pane` → `agent-doc claim <FILE>` → writes to sessions.json
+2. User must separately start the session (either `/agent-doc <FILE>` in Claude, or `agent-doc start <FILE>` in the terminal)
+
+**The gap:** There's no IDE action to start a session. The user has to switch to the terminal and type a command.
+
+**Options to fix:**
+1. **Add "Start Agent Session" IDE action** — runs `agent-doc start <FILE>` after claiming
+2. **Make claim auto-start** — `ClaimAction` chains: claim → start (if no session running)
+3. **Rename claim** — "Claim Tmux Pane (route only)" to clarify intent
+
+Option 2 seems most user-friendly. After `agent-doc claim` succeeds, run `agent-doc start <FILE>` in the background. The start command already handles: creating the tmux pane, starting Claude with the right args, and registering the session.
+
+Want me to implement auto-start on claim?
+
 ### Re: Boundary Marker — Implemented (HEAD)
 
 **Implemented across 6 files:**

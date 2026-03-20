@@ -139,7 +139,7 @@ That's it. Short, warm, no pressure. He gave you the opening by setting the time
 
 It is friday, 17:30 Eastern. So it's already end of day for some.
 Should we wait until Monday?
-### Timing: Send now, not Monday (HEAD)
+### Timing: Send now, not Monday
 
 **Send it tonight.** Friday 5:30 PM is fine for SMS — it's asynchronous, no expectation of immediate response. Advantages:
 

@@ -165,4 +165,22 @@ No issues found ✓
 
 VERSIONS.md is complete (47 entries, v0.1.0–v0.18.1, no gaps).
 Are the recent updates in SPEC.md, VERSIONS.md, README.md?
+Are the recent updates in SPEC.md, VERSIONS.md, README.md?
+
+When this document was autoclaimed, the 
+
+### Verification: SPEC.md, VERSIONS.md, README.md (HEAD)
+
+**VERSIONS.md** — Complete. All 47 entries (v0.1.0–v0.18.1), no gaps. Every version from the backfill is present.
+
+**README.md** — Updated. Gmail API section shows built-in credentials as default, manual GCP setup as optional override. GPU auto-detection documented in transcription section. Links to VERSIONS.md for release history.
+
+**SPEC.md** — Partially updated:
+- ✅ § 5.25 — credential resolution order (config → CLI → env → built-in defaults)
+- ✅ § 5.30 — GPU auto-detection (Makefile + install.sh paths)
+- ❌ Gmail API sync provider — no standalone section (only IMAP sync in §6). `provider = "gmail-api"` dispatch exists in code but isn't spec'd
+- ❌ v0.18.0 features — `corky doctor`, self-hosted guide, privacy policy not documented in SPEC.md
+
+**Recommendation:** Add SPEC.md §6.2 for Gmail API sync and §19 (or similar) for `corky doctor` + self-hosted deployment. Want me to draft those sections?
+`````
 <!-- /agent:exchange -->

@@ -72,7 +72,7 @@ One suggestion: the "...as in" parenthetical breaks the flow mid-sentence. Here'
 The meaning is identical to your version — just flows as one thought instead of a parenthetical aside. Your call on which reads better to you.
 
 Is this interaction worth posting about on LinkedIn?
-### Re: Layout + LinkedIn (HEAD)
+### Re: Layout + LinkedIn
 
 **Layout note:** Acknowledged — agent response patches should appear below the user's prompt, not interleaved above. I'll keep that ordering going forward.
 

@@ -544,7 +544,37 @@ Would it make sense to insert a "marker" at the current end of the agent:exchang
 - **FFI:** New `agent_doc_apply_patch_with_boundary()` export
 
 Want me to implement this? It's a clean, focused change — ~4 files touched in the Rust binary, 1 in the plugin.
-This marker can help with determining what was an input prompt and what the human added after the agent session run began. 
+This marker can help with determining what was an input prompt and what the human added after the agent session run began.
+
+implement
+
+I ran `Claim for Tmux Pane` on another agent-doc project. Targeting tmux session 2.
+
+### Re: Boundary Marker — Implemented (HEAD)
+
+**Implemented across 6 files:**
+
+**Rust binary (4 files):**
+- `boundary.rs` — New module: `insert()`, `find_in_component()`, `remove()`, `remove_all()`, `format_marker()`, `extract_id()`. CLI subcommand `agent-doc boundary <FILE> [--component NAME]` generates UUID, inserts marker, updates snapshot, prints UUID.
+- `component.rs` — Added `append_with_boundary()` method: finds `<!-- agent:boundary:ID -->` inside component, replaces marker line with response content. Falls back to normal append if not found. Also: parser now skips `agent:boundary:*` comments (prevents "invalid component name" error).
+- `ffi.rs` — New FFI export `agent_doc_apply_patch_with_boundary()`: C ABI entry point for boundary-aware patching. Accepts `boundary_id` string, delegates to `append_with_boundary()`.
+- `write.rs` — All 3 IPC patch construction sites (`try_ipc`, `run_ipc`, `run_stream` timeout fallback) now scan the current document for boundary markers and include `boundary_id` in the patch JSON when found.
+- `main.rs` — Wired `Boundary` command variant to `boundary::run()`.
+
+**JetBrains plugin (2 files):**
+- `PatchWatcher.kt` — `ComponentPatch` now has `boundaryId` field. `parsePatchJson()` extracts `boundary_id` from JSON. `applyComponentPatchNative()` tries boundary insertion first (priority over caret offset), with Kotlin fallback `applyComponentPatchWithBoundary()`.
+- `NativeLib.kt` — JNA binding for `agent_doc_apply_patch_with_boundary()` + `NativePatching.applyComponentPatchWithBoundary()` wrapper.
+
+**Tests:** 450 pass (158 lib + 292 bin), including 5 new boundary tests. Plugin builds successfully.
+
+**Still needed:**
+1. Update SKILL.md to call `agent-doc boundary <FILE>` after reading the document (step 1)
+2. Build release binary + rebuild plugin zip
+3. Release + install
+
+Want me to proceed with updating SKILL.md and releasing?
+The agent session was not started.
+![2026-03-20_10-05.png](../../../../Pictures/agent-loop/2026-03-20_10-05.png)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -552,6 +582,7 @@ This marker can help with determining what was an input prompt and what the huma
 <!-- agent:pending -->
 - [x] Release v0.22.0
 - [x] Move cursor-aware patch logic to shared library FFI (`agent_doc_apply_patch_with_caret`)
+- [x] Boundary marker for response ordering (`agent-doc boundary`, FFI, plugin support)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))

@@ -542,6 +542,8 @@ Issue with this session.
 **Result:** After the next `agent-doc commit`, only the LATEST response headings will have `(HEAD)` markers. Previous response headings will be clean.
 
 454 tests pass. Release binary rebuilt and installed. This fix will take effect on the next commit cycle.
+
+**Follow-up:** The stripping works, but all `### Re:` headings are still getting `(HEAD)` because `show_head()` compares against git HEAD which is many commits behind in this rapid-fire session. The function sees ALL response headings as "new." This is a deeper issue — `show_head()` should compare against the PREVIOUS commit (not the first commit in the session). Will investigate in the next cycle.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

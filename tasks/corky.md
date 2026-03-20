@@ -169,7 +169,7 @@ Are the recent updates in SPEC.md, VERSIONS.md, README.md?
 
 When this document was autoclaimed, the 
 
-### Verification: SPEC.md, VERSIONS.md, README.md (HEAD)
+### Verification: SPEC.md, VERSIONS.md, README.md
 
 **VERSIONS.md** — Complete. All 47 entries (v0.1.0–v0.18.1), no gaps. Every version from the backfill is present.
 

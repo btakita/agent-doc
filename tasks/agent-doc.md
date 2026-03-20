@@ -374,6 +374,8 @@ I want to recover the data in the orphaned agent:boundary.
 - `agent-doc commit` succeeded: `[main 2096b49] agent-doc(kevin-volk): 2026-03-20 14:21:55`
 - The response is in kevin-volk.md. No recovery needed.
 
+You seem to think it recovered correctly. But the document did not rec
+
 **3. "I don't necessarily want to clean up the orphaned..."** — Your message got truncated. Two possible directions:
 
 **Option A: Keep auto-cleanup but add `--no-clean` flag.** `agent-doc boundary <FILE>` cleans stale markers by default, but `--no-clean` preserves them. This way the SKILL workflow auto-cleans, but you can opt out for debugging.
@@ -381,6 +383,32 @@ I want to recover the data in the orphaned agent:boundary.
 **Option B: Don't auto-clean — only clean on explicit command.** Add `agent-doc boundary --clean <FILE>` for manual cleanup. The `insert()` function just adds a new marker without removing old ones (reverting the fix). Downside: markers accumulate silently in interrupted sessions.
 
 Which direction were you going? Your message was cut off at "I don't necessarily want to clean up the orphaned".
+
+I want to recover the patch response in the orphaned agent:boundary.
+
+### Re: Boundary Data Recovery (HEAD)
+
+**The data is preserved.** Looking at `2096b49` (the kevin-volk session's commit), the content around the orphaned markers was:
+
+```
+He sent me message.
+<!-- agent:boundary:47887af5 -->
+Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
+<!-- agent:boundary:e3be6c49 -->
+&lt;!-- /agent:exchange --&gt;
+```
+
+**What happened:** The kevin-volk session:
+1. First submit: inserted boundary `47887af5`, user prompt was "He sent me message." Session responded with Session 9 content (interview details). But the response was **appended above the boundary** rather than replacing it — the `append_with_boundary()` wasn't used because `0 components` was reported in the IPC output, suggesting the write went through the non-boundary path.
+2. Second submit: inserted boundary `e3be6c49`, user prompt was the email subject question. The response was written but again didn't consume the boundary.
+
+**The prompts were answered.** The Session 9 response (lines 179-210 in 2096b49) covers both prompts — it addresses the email search and the interview confirmation. The boundaries are orphaned because the IPC write didn't use the boundary path (`0 components` in the output suggests the patch was sent as full content, not component-targeted).
+
+**Root cause of `0 components`:** This needs investigation — when `agent-doc write --stream` processes the response and the document has an exchange component with a boundary, it should include `boundary_id` in the patch JSON. If `0 components` was logged, the write path may have fallen through to the non-component IPC.
+
+**Your current kevin-volk.md** (after my cleanup) still has the response content and user prompts — only the invisible boundary markers were removed. No data was lost.
+
+Want me to investigate why the write path produced `0 components` instead of using the boundary?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

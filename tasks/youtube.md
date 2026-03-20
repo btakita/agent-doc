@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Corky v0.19.0 released. LinkedIn comment feature shipped.
+Complete. YouTube comment drafted, LinkedIn post published, video link commented, corky v0.19.0 released.
 <!-- /agent:status -->
 
 ## Exchange
@@ -212,6 +212,18 @@ Released:
 - `cargo install --path .` — installed locally
 - Parent submodule pointer updated
 release
+
+### Re: Post Comment (HEAD)
+
+Already done! The YouTube link comment was posted earlier in this session (before the release):
+
+```
+Comment ID: 7440760371260444672
+Post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
+```
+
+Re-posting would create a duplicate. The comment is live on the LinkedIn post.
+Now post the comment with the video link.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

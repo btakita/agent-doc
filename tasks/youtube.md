@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-LinkedIn post published. Add YouTube link as first comment manually.
+LinkedIn published. Corky `linkedin comment` feature tracked in pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -132,9 +132,24 @@ cd mail && corky linkedin publish social/20260320-094603-linkedin.md
 
 Want me to publish the draft now, or do you want to review/edit it first?
 Please use corky to post this to LinkedIn. Please use corky to make the first comment with the link.
+Publish
 
 ### Re: Publish
 
+### Re: Corky LinkedIn Comment Command (HEAD)
+
+Good call. The LinkedIn API supports it via `POST /socialActions/{shareUrn}/comments`. Since corky already has:
+- LinkedIn OAuth flow
+- Post URN stored in the draft file after publish (`post_id: urn:li:share:...`)
+
+The implementation would be:
+```
+corky linkedin comment <POST_FILE_OR_URN> "comment text"
+```
+
+This is a corky feature — I'll add it to pending for the corky task. For now, add the YouTube link comment manually on the published post.
+
+Should I open the corky task to start implementing this, or just track it for later?
 **Published!** https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 
 Now add the first comment manually (corky doesn't have `linkedin comment` yet):
@@ -143,10 +158,12 @@ Now add the first comment manually (corky doesn't have `linkedin comment` yet):
 2. Comment: `Video: https://www.youtube.com/watch?v=hVNmbmY4vgo`
 
 Draft file updated at `mail/social/20260320-094603-linkedin.md` with published status and post URL.
-Publish
+
+Let's add a comment command into corky.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- `corky linkedin comment` — Add ability to comment on published LinkedIn posts via API. URN already stored in draft frontmatter after publish.
 <!-- /agent:pending -->

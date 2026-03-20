@@ -14,6 +14,29 @@ use std::path::Path;
 use crate::{component, merge, recover, snapshot, template};
 use crate::snapshot::find_project_root;
 
+/// Helper: extract boundary_id for a named component from the document.
+///
+/// Searches for `<!-- agent:boundary:UUID -->` inside the component's content.
+fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
+    let components = component::parse(doc).ok()?;
+    let comp = components.iter().find(|c| c.name == component_name)?;
+    let content = &doc[comp.open_end..comp.close_start];
+
+    // Scan for boundary marker in component content
+    let prefix = "<!-- agent:boundary:";
+    let suffix = " -->";
+    if let Some(start) = content.find(prefix) {
+        let id_start = start + prefix.len();
+        if let Some(end) = content[id_start..].find(suffix) {
+            let id = &content[id_start..id_start + end];
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -234,14 +257,21 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let hash = snapshot::doc_hash(file)?;
             let patch_file = patches_dir.join(format!("{}.json", hash));
 
+            // Read current document to scan for boundary markers
+            let current_doc_for_boundary = std::fs::read_to_string(file).unwrap_or_default();
+
             let ipc_patches: Vec<serde_json::Value> = patches
                 .iter()
                 .filter(|p| p.name != "frontmatter")
                 .map(|p| {
-                    serde_json::json!({
+                    let mut patch_json = serde_json::json!({
                         "component": p.name,
                         "content": p.content,
-                    })
+                    });
+                    if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
+                        patch_json["boundary_id"] = serde_json::Value::String(bid);
+                    }
+                    patch_json
                 })
                 .collect();
 
@@ -385,6 +415,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
+    // Read current document to scan for boundary markers
+    let current_doc_for_boundary = std::fs::read_to_string(file).unwrap_or_default();
+
     // Separate frontmatter patch from component patches
     let mut frontmatter_yaml: Option<String> = None;
     let ipc_patches: Vec<serde_json::Value> = patches
@@ -394,10 +427,14 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
                 frontmatter_yaml = Some(p.content.trim().to_string());
                 None
             } else {
-                Some(serde_json::json!({
+                let mut patch_json = serde_json::json!({
                     "component": p.name,
                     "content": p.content,
-                }))
+                });
+                if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
+                    patch_json["boundary_id"] = serde_json::Value::String(bid);
+                }
+                Some(patch_json)
             }
         })
         .collect();
@@ -624,15 +661,22 @@ pub fn try_ipc(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
+    // Read current document to scan for boundary markers
+    let current_doc = std::fs::read_to_string(file).unwrap_or_default();
+
     // Separate frontmatter patch from component patches
     let ipc_patches: Vec<serde_json::Value> = patches
         .iter()
         .filter(|p| p.name != "frontmatter")
         .map(|p| {
-            serde_json::json!({
+            let mut patch_json = serde_json::json!({
                 "component": p.name,
                 "content": p.content,
-            })
+            });
+            if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
+                patch_json["boundary_id"] = serde_json::Value::String(bid);
+            }
+            patch_json
         })
         .collect();
 

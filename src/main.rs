@@ -1,6 +1,7 @@
 mod agent;
 mod audit_docs;
 mod autoclaim;
+mod boundary;
 mod claim;
 mod clean;
 mod commands;
@@ -406,6 +407,14 @@ enum Commands {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Insert a boundary marker at the end of a component for response ordering
+    Boundary {
+        /// Path to the session document
+        file: PathBuf,
+        /// Component name (default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+    },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
     /// List all available commands as JSON (for editor plugin autocomplete)
@@ -628,6 +637,7 @@ fn main() -> anyhow::Result<()> {
                 dry_run,
             })
         }
+        Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),

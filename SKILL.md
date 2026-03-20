@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.14.10"
+agent-doc-version: "0.23.0"
 ---
 
 # agent-doc submit
@@ -55,6 +55,18 @@ If there are no uncommitted changes, this is a no-op.
 - Read `<FILE>` to get current content
 - Read the snapshot at `.agent-doc/snapshots/<hash>.md` where `<hash>` is SHA256 of the canonical file path
   - If no snapshot exists, treat this as the first submit (entire document is new)
+
+### 1b. Insert boundary marker
+
+After reading the document, insert a boundary marker at the end of the exchange component. This marker acts as a physical anchor for response ordering — responses are inserted at the marker position, ensuring they appear after the prompt that triggered them and before any text the user types while waiting.
+
+```bash
+agent-doc boundary <FILE>
+```
+
+This generates a UUID, inserts `<!-- agent:boundary:UUID -->` at the end of the exchange component, and updates the snapshot. The marker is an HTML comment, so it's invisible in rendered markdown and ignored by comment stripping during diff comparison.
+
+If the document has no exchange component, this is a no-op (skip silently).
 
 ### 2. Compute the diff
 

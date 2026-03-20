@@ -85,6 +85,49 @@ impl Component {
         result.push_str(&doc[self.close_start..]);
         result
     }
+
+    /// Append content into this component at the boundary marker position.
+    ///
+    /// Finds `<!-- agent:boundary:ID -->` inside the component. If found,
+    /// inserts content at the line start of the boundary marker (replacing
+    /// the marker). Falls back to normal append if the boundary is not found.
+    pub fn append_with_boundary(&self, doc: &str, content: &str, boundary_id: &str) -> String {
+        let boundary_marker = format!("<!-- agent:boundary:{} -->", boundary_id);
+        let content_region = &doc[self.open_end..self.close_start];
+
+        if let Some(rel_pos) = content_region.find(&boundary_marker) {
+            let abs_pos = self.open_end + rel_pos;
+
+            // Find start of the line containing the marker
+            let line_start = doc[..abs_pos]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(self.open_end)
+                .max(self.open_end);
+
+            // Find end of the marker line (including trailing newline)
+            let marker_end = abs_pos + boundary_marker.len();
+            let line_end = if marker_end < self.close_start
+                && doc.as_bytes().get(marker_end) == Some(&b'\n')
+            {
+                marker_end + 1
+            } else {
+                marker_end
+            };
+            let line_end = line_end.min(self.close_start);
+
+            // Replace the boundary marker line with the response content
+            let mut result = String::with_capacity(doc.len() + content.len());
+            result.push_str(&doc[..line_start]);
+            result.push_str(content.trim_end());
+            result.push('\n');
+            result.push_str(&doc[line_end..]);
+            return result;
+        }
+
+        // Boundary not found — fall back to normal append
+        self.append_with_caret(doc, content, None)
+    }
 }
 
 /// Valid name: `[a-zA-Z0-9][a-zA-Z0-9-]*`
@@ -240,6 +283,11 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 None => bail!("closing marker <!-- /agent:{} --> without matching open", name),
             }
         } else if let Some(rest) = trimmed.strip_prefix("agent:") {
+            // Skip boundary markers — these are not component markers
+            if rest.starts_with("boundary:") {
+                pos = close;
+                continue;
+            }
             // Opening marker — may have attributes: `agent:NAME key=value`
             let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
             let name = parts.next().unwrap_or("");

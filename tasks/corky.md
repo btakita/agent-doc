@@ -798,4 +798,28 @@ The \`[routing]\` entry \`for-lucas = ["mailboxes/lucas"]\` adds \`for-lucas\` a
 **Immediate action needed:** The suspended corky watch process (PID 507048) is still alive. Kill it with \`kill %1\` or \`kill 507048\`.
 
 Want me to implement fixes for all three bugs?
+
+yes
+### All Three Bugs Fixed (HEAD)
+
+Implemented in corky submodule. Build passes, 8 tests pass.
+
+**Bug 1 fix — Routing scope** (config only):
+- Changed `mail/.corky.toml` routing from `for-lucas` to `"personal:for-lucas"` — scopes the route to only the `personal` account, preventing label leak to proton-dev/btak.dev
+- The config race condition (rare) deferred to follow-up
+
+**Bug 2 fix — Gmail API 404 skip** (`src/sync/gmail_api_sync.rs`):
+- `fetch_message` now returns `Result<Option<GmailMessage>>` — returns `Ok(None)` on 404, all other errors still propagate
+- Message fetch loop skips `None` with a warning print instead of aborting the account sync
+
+**Bug 3 fix — IMAP shutdown signal** (3 files):
+- `imap_sync.rs`: Added `shutdown: Option<&Arc<AtomicBool>>` to `sync_account` and `sync_label`. Checks signal between labels and between message fetches
+- `mod.rs`: Passes `None` for CLI `corky sync` path
+- `watch.rs`: Passes `Some(&shutdown)` for watch mode — Ctrl+C now interrupts IMAP syncs
+
+Ready to commit in corky submodule. Want me to commit, run `make check`, and prepare for release?
+
+Please add tests
+audit docs
+Update README.md, SPEC.md
 <!-- /agent:exchange -->

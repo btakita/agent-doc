@@ -179,6 +179,10 @@ Please sync corky with btak.dev@gmail.com
 - [ ] Watch for email from Cham Espanola to schedule first interview
 - [ ] Reply to Kevin confirming receipt and that you'll keep him posted
 - [ ] Review interview prep for Round 1 (AI workflow exercise)
+
+He sent me message.
+Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
+
 ### Session 9 — Mar 20, 2026: Interview Scheduled with Jordan Ritter
 
 **Calendar invite found** (synced via corky):
@@ -203,9 +207,23 @@ Please sync corky with btak.dev@gmail.com
 - [ ] Find the "Interview Prep + Confirmation" email in Gmail (may have prep instructions)
 - [ ] Reply to Kevin confirming the interview is locked in for Mon 3/23 2pm PT
 - [ ] Prepare for Jordan Ritter CTO conversation (Round 1 + AI workflow exercise)
-He sent me message.
-Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
-<!-- agent:boundary:1b8c6a90-a9b4-4c01-8134-a4c3e2fef94e -->
+
+Please read **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT** from kevin volk.
+Is it synced via corky?
+**No, the "CopilotKit 1st Round Interview Prep + Confirmation" email is NOT synced via corky.**
+
+I searched all synced conversations thoroughly — it's not there. Here's what I found and tried:
+
+- **btak.dev** (Gmail API, syncs INBOX): Only the calendar invite from Jordan Ritter is there. If Kevin's prep email went to btak.dev, it may have been auto-archived or isn't in INBOX.
+- **personal** (IMAP, syncs correspondence/for-lucas/voice-sms): Kevin's `@staffingscience.io` address IS in the correspondence filter, so emails from him should be labeled. But this email isn't showing up — it may be a new thread that Gmail's filter hasn't processed, or it was sent to btak.dev instead.
+- Full INBOX sync on personal is impractical (1.8M messages).
+
+**To get this email synced, you can either:**
+1. **Forward the email** to a synced address/label so corky picks it up
+2. **Copy/paste the email content** into this document so I can read it and help prep
+3. **Add a label in Gmail** (e.g., apply "correspondence" to that thread manually, then re-sync)
+
+Which approach works best? Or paste the email content here and I'll work with it directly.
 <!-- /agent:exchange -->
 
 ## Pending

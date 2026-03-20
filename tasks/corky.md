@@ -485,4 +485,317 @@ The message `"Syncing label: INBOX"` + `"No prior state"` + `"Fetching 1853399 m
 3. Is `corky watch` running from a different directory that might pick up a different `.corky.toml`?
 
 If the account header shows `btak.dev`, then the issue is the **history API failing** and falling back to full sync with the wrong `sync_days` (it would use 30, not 3650, so 1.8M messages wouldn't match). If it shows `personal`, something is injecting INBOX into the label set outside of what I can see in the code.
+
+I have the process suspended because Ctrl+C did not stop the sync. You can see my attempts in the output:
+```
+❯ cd work/btakita/agent-loop
+~/work/btakita/agent-loop main ⇡28 !36 ?5                                                                                                                                                                                           3s 14:04:02
+❯ corky watch
+corky watch: polling every 300s (Ctrl-C to stop)
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+Access token expired, refreshing...
+  Label: INBOX
+    16 messages to process
+  Error syncing btak.dev: Gmail API error (HTTP 404): {
+  "error": {
+    "code": 404,
+    "message": "Requested entity was not found.",
+    "errors": [
+      {
+        "message": "Requested entity was not found.",
+        "domain": "global",
+        "reason": "notFound"
+      }
+    ],
+    "status": "NOT_FOUND"
+  }
+}
+
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  Fetching 1 message(s)
+  Wrote: synergisticit-and-others-are-hiring-for-jr-data-scientist-ja.md
+  Wrote: synergisticit-and-others-are-hiring-for-jr-data-scientist-ja.md
+Syncing label: voice-sms
+  No new messages
+
+1 label(s) with new messages
+Syncing lucas...
+  Pushed changes
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  Fetching 1 message(s)
+  Wrote: higher-logic-thank-you-for-your-interest-in-the-senior-front.md
+  Wrote: higher-logic-thank-you-for-your-interest-in-the-senior-front.md
+Syncing label: voice-sms
+  No new messages
+
+1 label(s) with new messages
+Syncing lucas...
+  Pushed changes
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+No new messages
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+No new messages
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+No new messages
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+No new messages
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+Syncing label: for-lucas
+  Label "for-lucas" not found — skipping
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    0 messages to process
+
+No new messages
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+  Label: INBOX
+    2 messages to process
+  Wrote: your-new-privacy-settings-on-play.md
+  Wrote: brian-finish-setting-up-your-galaxy-s25-ultra-device-with-go.md
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  No new messages
+Syncing label: voice-sms
+  No new messages
+Syncing label: INBOX
+  No prior state — doing full sync
+  Fetching 1853399 message(s)
+  Wrote: re-sveltejs-svelte-structured-code-generation-3539.md
+  Wrote: re-lightningnetwork-lnd-lncli-incoming-and-outgoing-peer-ali.md
+  Wrote: re-thinking-about-going-back-to-source-hut-mailing-list.md
+  Wrote: journalism-is-in-dire-straits-we-re-beating-the-odds.md
+  Wrote: hi-brian-your-score-didn-t-change.md
+  Wrote: re-atom-atom-uncaught-error-pane-has-been-destroyed-20026.md
+  Wrote: re-lightningnetwork-lnd-htlcswitch-routerrpc-support-unencry.md
+  Wrote: re-publiclab-plots2-fix-main-image-select-field-not-function.md
+  Wrote: if-cnn-didn-t-hate-trump-before-it-will-soon.md
+  Wrote: re-sveltejs-svelte-fix-ensure-batch-exists-when-resetting-a-.md
+  Wrote: re-neo4j-neo4j-respect-dbms-allow-upgrade-concerning-logentr.md
+  Wrote: successfully-published-ctx-core-version-app-5-0-2.md
+  Wrote: the-open-food-network-turns-10.md
+  Wrote: new-post-free-signed-paperbacks-pay-only-shipping.md
+  Wrote: art-of-living-flipkart-deal-of-the-day-rodid-solid-mens.md
+  Wrote: take-a-chill-pill-it-s-time-to-relax-this-weekend.md
+  Wrote: re-lightningnetwork-lnd-htlcswitch-implement-strict-forwardi.md
+  Wrote: re-mrdoob-three-js-nodebuilder-fix-missing-linearencoding-22.md
+  Wrote: the-new-champion-from-wrestlemania.md
+  Wrote: re-atom-atom-uncaught-error-enoent-no-such-file-or-directory.md
+  Wrote: re-holochain-holochain-rust-conductor-config-sanitizing-1335.md
+^C
+Received signal, shutting down...
+  Wrote: christian-actress-sacked-blacklisted-after-refusing-to-renou.md
+  Wrote: re-sveltejs-svelte-reorder-the-type-parameters-of-derived-is.md
+  Wrote: re-lightningnetwork-lnd-funding-htlcswitch-enforce-min-fee-r.md
+  Wrote: re-benchmark-of-rfind-vs-regex-3-bloodbath.md
+  Wrote: publiclab-plots2-testing-fixes-792-846.md
+^C^C^C^C^C^C^C  Wrote: re-ray-project-ray-pubsub-replace-obod-long-polling-to-the-p.md
+  Wrote: sveltejs-sapper-how-install-tailwindcss-with-sapper-750.md
+  Wrote: re-twbs-bootstrap-sass-deprecation-warning-using-for-divisio.md
+^Z
+[1]  + 507048 suspended  corky watch
+```
+### Analysis: Three Bugs in corky watch (HEAD)
+
+Thanks for the full output. I found **three real bugs** and one design issue:
+
+---
+
+**Bug 1: INBOX appearing for personal (the original report)**
+
+INBOX appears at line 719 as a 4th label for personal — but only in ONE poll cycle out of ~8. The config has never had INBOX for personal (verified git history and uncommitted changes). The code doesn't inject it.
+
+**Most likely cause:** The routing merge at \`imap_sync.rs:300\` chains \`routes.keys()\` into every account's label set. If \`build_label_routes\` transiently returned an \`"INBOX"\` key (due to a config hot-reload race or a file read during an incomplete write), it would appear for ALL accounts. This is a race condition — \`poll_once\` calls \`load_accounts\` and \`build_label_routes\` separately, reading the config file twice, with no locking.
+
+**Fix:** Load the config once per poll cycle and pass it through, instead of re-reading it in both \`load_accounts\` and \`build_label_routes\`. Also: scope \`[routing]\` entries to their intended account using the \`account:label\` syntax (change \`for-lucas\` to \`personal:for-lucas\` in .corky.toml) to prevent routing keys from leaking to all accounts.
+
+---
+
+**Bug 2: btak.dev 404 error (line 508-521)**
+
+\`\`\`
+Error syncing btak.dev: Gmail API error (HTTP 404): Requested entity was not found.
+\`\`\`
+
+This happens during the first poll when the access token was just refreshed. A 404 on \`messages.get\` means a message listed by \`messages.list\` was deleted before it could be fetched. The gmail_api_sync code treats this as a fatal error instead of skipping the deleted message.
+
+**Fix:** Catch 404 on individual message fetches and skip (log warning), don't abort the entire account sync.
+
+---
+
+**Bug 3: Ctrl+C not stopping sync (lines 743-753)**
+
+The user hit Ctrl+C 7+ times and had to Ctrl+Z to suspend. The IMAP sync path doesn't check the shutdown signal — only gmail_api_sync has \`shutdown: Option<&Arc<AtomicBool>>\`. Once the IMAP sync is inside a \`session.uid_fetch()\` call downloading 1.8M messages, Ctrl+C can't interrupt it.
+
+**Fix:** Pass the shutdown signal to \`imap_sync::sync_account\` and check it between message fetches (like gmail_api_sync does at line 362).
+
+---
+
+**Design issue: \`for-lucas\` routing leaks to all accounts**
+
+The \`[routing]\` entry \`for-lucas = ["mailboxes/lucas"]\` adds \`for-lucas\` as a sync label for ALL accounts (proton-dev shows "Label not found — skipping" each cycle). Use \`personal:for-lucas\` to scope it.
+
+---
+
+**Immediate action needed:** The suspended corky watch process (PID 507048) is still alive. Kill it with \`kill %1\` or \`kill 507048\`.
+
+Want me to implement fixes for all three bugs?
 <!-- /agent:exchange -->

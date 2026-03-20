@@ -78,7 +78,7 @@ Please fill in tony-tomai contact with context.
 Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
 
 <!-- agent:exchange -->
-### Draft SMS response to Dave Franklin (HEAD)
+### Draft SMS response to Dave Franklin
 
 Dave's messages (from `dave_franklin_sms.txt`):
 > "Hi Brian, this is Dave Franklin with Inspyrsolutions. I tried calling and your voicemail is not working. Anyway, still waiting on next steps from BCG. There have been several team members out on spring break returning this week."
@@ -96,7 +96,7 @@ Dave's messages (from `dave_franklin_sms.txt`):
 - "Happy to share anything" opens the door without pushing content on him
 - Short — matches SMS format and Dave's communication style
 
-### Keep it simple — skip the LinkedIn posts/videos (HEAD)
+### Keep it simple — skip the LinkedIn posts/videos
 
 **No** — don't mention them. Here's why:
 

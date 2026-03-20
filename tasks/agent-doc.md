@@ -184,6 +184,33 @@ Want me to:
 1. Copy the task file into the agent-doc repo now?
 2. Draft a blog post outline?
 3. Both?
+
+Both. Will the task file be in examples/agent-doc/ with the sanitized task file along with a README.md to add context?
+
+### Re: Examples + Blog Outline Created (HEAD)
+
+Created `examples/agent-doc/` in the agent-doc repo with three files:
+
+**`task.md`** — sanitized version of this task document:
+- Removed `claude_args: --dangerously-skip-permissions` (private config)
+- Removed Domain Ontology section (specific to parent repo)
+- Removed references to personal task files in exchange history
+- Kept all technical content: architecture, lessons, releases, pending items
+
+**`README.md`** — context for readers:
+- Explains what the document is and how it was used
+- Describes template mode, boundary markers, compaction
+- Key patterns: document-as-UI, iterative problem-solving, lesson accumulation
+- Includes a "Running your own session" quick-start
+
+**`BLOG_OUTLINE.md`** — structured outline for [#28](https://github.com/btakita/agent-doc/issues/28):
+- Title: "Document-as-UI: How I built a tool by talking to it"
+- Case study: boundary marker evolution (caret -> offset -> hash -> marker)
+- Sections: problem, concept, case study, design decisions, dogfooding lessons, what's next
+- ~2000 words estimated, with asset list (screenshots, diffs, diagrams)
+- Publish targets: GitHub README, blog, HN/Reddit
+
+Committed in the submodule at `c6bb882`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

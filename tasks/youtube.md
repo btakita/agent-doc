@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Complete. YouTube comment drafted, LinkedIn post published, video link commented, corky v0.19.0 released.
+Session complete. Exchange compacted.
 <!-- /agent:status -->
 
 ## Exchange
@@ -224,6 +224,35 @@ Post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 
 Re-posting would create a duplicate. The comment is live on the LinkedIn post.
 Now post the comment with the video link.
+
+### Re: Compact Exchange (HEAD)
+
+Done. Here's the compacted session summary:
+
+---
+
+**Session Summary — YouTube Comment + LinkedIn Post**
+
+**Origin:** YouTube comment on https://www.youtube.com/watch?v=hVNmbmY4vgo — "gross vibe coding sub human"
+
+**YouTube Reply (Option A — finalized):**
+
+> The Zig code I made & reviewed is 100% hand coded. I've been professionally programming for over 20 years.
+> 
+> But here's what's actually exciting about "vibe coding" — ideas I've had sitting on the back-burner for over 10 years are finally getting built. Not because I couldn't code them, but because I had to earn a living and didn't have the time or money to tackle the scope alone. Agent loops changed that equation entirely.
+> 
+> This is the path of abstraction — the same path that gave us compilers, high-level languages, and frameworks. Every generation pushes the leverage higher. And now, people who could never program before can build real things. That's not "sub human" — that's democratization.
+> 
+> You can resist it, or you can build with it.
+
+**LinkedIn Post:** https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
+- Draft: `mail/social/20260320-094603-linkedin.md`
+- First comment (YouTube link): Comment ID `7440760371260444672`
+
+**Feature shipped:** `corky linkedin comment` — v0.19.0 released
+- crates.io, GitHub Release, cargo install all done
+- API: v2 path (`/v2/socialActions/{urn}/comments`) — versioned `/rest/` needs partner perms
+compact exchange
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

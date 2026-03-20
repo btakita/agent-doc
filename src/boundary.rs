@@ -57,9 +57,22 @@ pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &s
 
 /// Insert a boundary marker at the end of an append-mode component's content.
 ///
+/// Any existing boundary markers in the component are removed first to prevent
+/// orphaned markers from accumulating (e.g., after interrupted sessions).
+///
 /// Returns the generated boundary UUID and the updated document content.
 pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
-    let components = component::parse(doc)?;
+    // First, remove any stale boundary markers from the document
+    let cleaned = remove_all(doc);
+    let stale_count = doc.matches(BOUNDARY_PREFIX).count();
+    if stale_count > 0 {
+        eprintln!(
+            "[boundary] removed {} stale boundary marker(s) before inserting new one",
+            stale_count
+        );
+    }
+
+    let components = component::parse(&cleaned)?;
     let comp = components
         .iter()
         .find(|c| c.name == component_name)
@@ -69,15 +82,15 @@ pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
     let marker = format_marker(&id);
 
     // Insert marker at the end of component content, just before the close tag
-    let mut result = String::with_capacity(doc.len() + marker.len() + 2);
-    let content = &doc[comp.open_end..comp.close_start];
+    let mut result = String::with_capacity(cleaned.len() + marker.len() + 2);
+    let content = &cleaned[comp.open_end..comp.close_start];
 
-    result.push_str(&doc[..comp.open_end]);
+    result.push_str(&cleaned[..comp.open_end]);
     result.push_str(content.trim_end());
     result.push('\n');
     result.push_str(&marker);
     result.push('\n');
-    result.push_str(&doc[comp.close_start..]);
+    result.push_str(&cleaned[comp.close_start..]);
 
     Ok((id, result))
 }
@@ -184,5 +197,35 @@ mod tests {
         let doc = "line1\n<!-- agent:boundary:aaa -->\nline2\n<!-- agent:boundary:bbb -->\nline3\n";
         let cleaned = remove_all(doc);
         assert_eq!(cleaned, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn insert_cleans_stale_markers() {
+        // Simulate two orphaned boundary markers (from interrupted sessions)
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "some content\n",
+            "<!-- agent:boundary:stale-1 -->\n",
+            "more content\n",
+            "<!-- agent:boundary:stale-2 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (new_id, result) = insert(doc, "exchange").unwrap();
+
+        // Stale markers should be gone
+        assert!(!result.contains("stale-1"), "stale marker 1 should be removed");
+        assert!(!result.contains("stale-2"), "stale marker 2 should be removed");
+
+        // New marker should be present
+        let new_marker = format_marker(&new_id);
+        assert!(result.contains(&new_marker), "new marker should be present");
+
+        // Content should be preserved
+        assert!(result.contains("some content"));
+        assert!(result.contains("more content"));
+
+        // Only one boundary marker should remain
+        let marker_count = result.matches(BOUNDARY_PREFIX).count();
+        assert_eq!(marker_count, 1, "should have exactly one boundary marker");
     }
 }

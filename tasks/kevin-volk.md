@@ -161,4 +161,24 @@ Note my open source work, YouTube videos, and ability to manage Rust and TypeScr
 > Sounds great — thanks for getting it over to them. I'll keep an eye out for any direct scheduling from CopilotKit and will loop you in right away if they reach out.
 
 **Status:** Waiting on CopilotKit to schedule first interview. Watch for direct scheduling invites (may not CC Kevin).
+
+Please sync corky with btak.dev@gmail.com
+### Session 8 — Mar 20, 2026: Corky sync + Kevin's interview update (HEAD)
+
+**Corky sync:** `btak.dev` account synced — inbox clean (0 new messages).
+
+**Kevin's latest message (Mar 19, 4:41 PM PDT):**
+
+> Got some good news that Copilotkit wants to move forward with an initial interview! Their internal recruiter - Cham Espanola should be reaching out to schedule and please let me know when you get it locked in.
+
+**Status:** CopilotKit is moving forward with an initial interview. Watch for scheduling from **Cham Espanola** (CopilotKit internal recruiter). Kevin wants to be looped in once it's locked in.
+
+**Interview Round 1 (per call transcript):** Founding engineer + AI workflow exercise.
+
+**Next steps:**
+- [ ] Watch for email from Cham Espanola to schedule first interview
+- [ ] Reply to Kevin confirming receipt and that you'll keep him posted
+- [ ] Review interview prep for Round 1 (AI workflow exercise)
+He sent me message.
+<!-- agent:boundary:47887af5-671d-49af-95ad-6390da243a90 -->
 <!-- /agent:exchange -->

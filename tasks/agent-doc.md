@@ -648,6 +648,33 @@ Fix the bug. Add tests verifying the fix.
 **3 tests added:** `strip_head_markers_from_headings`, `strip_head_markers_preserves_non_heading_lines`, `add_head_marker_strips_old_markers`. 457 tests pass (161 lib + 296 bin).
 
 **Re: Corky boundary issue (a):** You confirmed the next `/agent-doc` invocation didn't pick up "audit docs" and "Update README.md, SPEC.md". This means the snapshot update from `agent-doc boundary` included the content typed BEFORE the boundary but the diff computation didn't detect the content typed AFTER. I need to investigate the snapshot timing — the boundary insertion updates the snapshot, so content typed after should appear as a diff in the next cycle. Let me check the corky session's snapshot state to find why.
+
+What is the result of your investigation into corky session's snapshot state?
+<!-- agent:boundary:46f64260-6594-4d0d-9134-2eef7975ef0f -->
+
+### Re: Corky Boundary Bug — Root Cause + Fix (HEAD)
+
+**Root cause found in `write_ipc_and_poll()` (line 805).**
+
+After the plugin consumes the IPC patch, the snapshot was saved by reading the **current file from disk**:
+```rust
+let content = std::fs::read_to_string(doc_file)?;
+snapshot::save(doc_file, &content)?;
+```
+
+The current file includes content the user typed AFTER the boundary marker (while waiting for the response). This content gets absorbed into the snapshot, so the next diff shows no changes — the prompts are silently lost.
+
+**Fix:** The snapshot now saves `content_ours` (baseline + response patches applied) instead of the current file. This matches the disk write path behavior (line 365 already did this correctly). User's post-boundary edits remain as uncommitted diff for the next cycle.
+
+**The flow now:**
+1. User types "Please add tests" → boundary inserted → snapshot updated
+2. User types "audit docs" while waiting (after boundary)
+3. Response generated, IPC patch sent to plugin
+4. Plugin applies patch, deletes patch file
+5. Snapshot saved as `content_ours` (baseline + response) — NOT the current file
+6. "audit docs" is NOT in the snapshot → appears as diff in next `/agent-doc` invocation
+
+457 tests pass. Binary rebuilt and installed.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

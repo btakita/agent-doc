@@ -694,7 +694,7 @@ Add tests to validate behavior. Add to SPEC.md
 Seems like `<!-- agent:boundary:b2818cdb-fb4a-4c49-b167-2975dbcfd6e2 -->` was left in this file. Why?
 If this is an issue, identify root cause, write test, fix.
 
-### Re: Orphaned Boundary in apply_mode — Fixed (HEAD)
+### Re: Orphaned Boundary in apply_mode — Fixed
 
 **Root cause:** `apply_mode("append", existing, new_content)` does `format!("{}{}", existing, new_content)` — simple concatenation that ignores boundary markers. When a response has explicit `<!-- patch:exchange -->` wrappers, the patch goes through `apply_mode()`, not `append_with_boundary()`. The boundary marker is never consumed, so it accumulates as an orphan.
 

@@ -133,7 +133,7 @@ cd mail && corky linkedin publish social/20260320-094603-linkedin.md
 Want me to publish the draft now, or do you want to review/edit it first?
 Please use corky to post this to LinkedIn. Please use corky to make the first comment with the link.
 
-### Re: Publish (HEAD)
+### Re: Publish
 
 **Published!** https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 

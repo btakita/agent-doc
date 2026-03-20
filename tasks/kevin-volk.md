@@ -179,6 +179,37 @@ Please sync corky with btak.dev@gmail.com
 - [ ] Watch for email from Cham Espanola to schedule first interview
 - [ ] Reply to Kevin confirming receipt and that you'll keep him posted
 - [ ] Review interview prep for Round 1 (AI workflow exercise)
+### Session 9 — Mar 20, 2026: Interview Scheduled with Jordan Ritter
+
+**Calendar invite found** (synced via corky):
+- **From:** Jordan Ritter (jordan@copilotkit.ai) — the CTO
+- **To:** btak.dev@gmail.com, CC: kevin@staffingscience.io
+- **When:** Mon Mar 23, 2026, 2:00-2:30 PM PDT
+- **Thread:** `invitation-from-an-unknown-sender-interview-brian-takita-mon.md`
+
+**"CopilotKit 1st Round Interview Prep + Confirmation" email:** NOT found in synced conversations. Corky syncs `INBOX` for btak.dev and `correspondence`/`for-lucas`/`voice-sms` for personal. The email may be under a different Gmail label or in a non-synced folder. Check Gmail directly.
+
+**Key observation:** Jordan Ritter is doing Round 1 himself — not a founding engineer as Kevin originally described. This changes the prep dynamic: you're talking to the CTO you have history with from CloudCrowd (2010).
+
+**Prep priorities for Jordan:**
+- Your CloudCrowd history (2010 offer, declined for Honk/TrueCar loyalty)
+- agent-doc as an agent runtime — directly relevant to CopilotKit's agent/user interaction layer
+- AI-native workflow: Claude Code + agent-doc is exactly "pilots not mechanics"
+- lazily cross-language signals (TS + Rust + Python) — SDK design expertise
+- corky agentic workflows — demonstrates production agent tooling
+- LangChain integration potential (CopilotKit partners with LangChain)
+
+**Next steps:**
+- [ ] Find the "Interview Prep + Confirmation" email in Gmail (may have prep instructions)
+- [ ] Reply to Kevin confirming the interview is locked in for Mon 3/23 2pm PT
+- [ ] Prepare for Jordan Ritter CTO conversation (Round 1 + AI workflow exercise)
 He sent me message.
 <!-- agent:boundary:47887af5-671d-49af-95ad-6390da243a90 -->
+Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
+<!-- agent:boundary:e3be6c49-5cf1-4a2f-81bb-2fcff3ae7227 -->
 <!-- /agent:exchange -->
+
+## Pending (HEAD)
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

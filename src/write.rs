@@ -16,23 +16,33 @@ use crate::snapshot::find_project_root;
 
 /// Helper: extract boundary_id for a named component from the document.
 ///
-/// Searches for `<!-- agent:boundary:UUID -->` inside the component's content.
+/// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
+/// skipping matches inside fenced code blocks and inline code spans.
 fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
     let components = component::parse(doc).ok()?;
     let comp = components.iter().find(|c| c.name == component_name)?;
     let content = &doc[comp.open_end..comp.close_start];
+    let code_ranges = component::find_code_ranges(doc);
 
-    // Scan for boundary marker in component content
+    // Scan for boundary marker in component content, skipping code blocks
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
-    if let Some(start) = content.find(prefix) {
-        let id_start = start + prefix.len();
+    let mut search_from = 0;
+    while let Some(start) = content[search_from..].find(prefix) {
+        let abs_start = comp.open_end + search_from + start;
+        // Skip if inside a code block
+        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+            search_from += start + prefix.len();
+            continue;
+        }
+        let id_start = search_from + start + prefix.len();
         if let Some(end) = content[id_start..].find(suffix) {
             let id = &content[id_start..id_start + end];
             if !id.is_empty() {
                 return Some(id.to_string());
             }
         }
+        break;
     }
     None
 }

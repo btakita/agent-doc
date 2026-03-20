@@ -634,7 +634,7 @@ In this file, all of the h3 `###` headings now have the ` (HEAD)` suffix. Even o
 What happened?
 Fix the bug. Add tests verifying the fix.
 
-### Re: (HEAD) Fix v3 — Working Tree Cleanup (HEAD)
+### Re: (HEAD) Fix v3 — Working Tree Cleanup
 
 **Root cause found:** `agent-doc commit` stages content WITH `(HEAD)` markers via `update-index --cacheinfo` (doesn't touch working tree). But the snapshot still had `(HEAD)` markers from previous cycles. Since the working tree reflects the snapshot, the user sees `(HEAD)` on all headings.
 

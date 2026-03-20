@@ -100,7 +100,7 @@ claude_args: --dangerously-skip-permissions
 10. **Stale snapshots from context compaction** — solved with `is_stale_snapshot()` auto-recovery in `diff.rs`
 11. **Durable pending store** — save response before write, clear after success; survives compaction and crashes
 12. **Distinct patch prefix** — patch markers vs agent markers prevents confusion between response directives and document components
-13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed twice: component.rs (v0.9.10) and diff.rs (v0.14.8). Check all `<!--` parsers when adding new ones.
+13. **Skip code spans in ALL parsers** — any function scanning for `<!--` in user documents must use `find_code_ranges()`. Same fix needed THREE times: component.rs (v0.9.10), diff.rs (v0.14.8), boundary search in component.rs + write.rs (v0.23.0). Check all `<!--` parsers when adding new ones.
 14. **Immutable session binding** — `tmux_session` in frontmatter should never be silently overwritten by claim. This caused cross-session pane swapping when autoclaim or lazy-claim ran in a different session. Fix: refuse to overwrite unless `--force`. Track multi-step plans in `agent:pending` to survive context compaction.
 15. **No Gson in JetBrains plugin** — Gson causes `ClassNotFoundException` at runtime in some IntelliJ builds. Use hand-written JSON parsing. This bug was found and fixed twice (SlashCommandCompletionContributor Mar 11, PatchWatcher Mar 18) — check git history before introducing "bundled" dependencies.
 16. **Never fall back to current_tmux_session() when tmux_session is set** — `display-message #{session_name}` returns whichever session the user's terminal is viewing. If the user switches to session 1, all routes using `current_tmux_session()` as fallback will create panes in session 1. Fix: bail with error instead of fallback. Only use `current_tmux_session()` for first-claim (no frontmatter binding yet).
@@ -678,6 +678,27 @@ zsh: no such file or directory: /agent-doc
 
 Please print the response again.
 Where is the last prompt marker?
+
+
+### Re: Boundary Code-Block Bug — Fixed + Tested (HEAD)
+
+**Bug:** `find_boundary_id()` (write.rs) and `append_with_boundary()` (component.rs) used a simple `content.find()` string search that matched the boundary marker inside a fenced code block. This document's exchange component has a code example showing `<!-- agent:boundary:UUID -->`, which was matched first — causing the response to be inserted inside the code block.
+
+**Fix:** Both functions now call `find_code_ranges(doc)` and skip any match whose byte offset falls within a code range. If the first match is inside a code block, the search continues to find the real marker.
+
+**Tests added:**
+1. `append_with_boundary_skips_code_block` — boundary marker in code block is skipped, real marker outside is used
+2. `append_with_boundary_no_code_block` — normal case still works
+
+**452 tests pass** (160 lib + 292 bin). Release binary rebuilt and installed.
+
+**Lesson #13 updated context:** This is the THIRD time this pattern caused a bug:
+- v0.9.10: component.rs
+- v0.14.8: diff.rs
+- v0.23.0: boundary.rs / write.rs
+
+Every function that scans for `<!--` must use `find_code_ranges()`.
+I don't see the output patched into the document. Please explain, add tests, and fix.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

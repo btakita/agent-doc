@@ -180,7 +180,7 @@ corky linkedin comment social/20260320-094603-linkedin.md "Video: https://www.yo
 Comment ID: `7440760371260444672`
 Implement
 
-### Re: Release Corky (HEAD)
+### Re: Release Corky
 
 `make check` passes (clippy + all tests). Current version: `0.18.1`.
 

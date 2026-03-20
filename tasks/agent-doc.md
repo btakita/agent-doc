@@ -503,6 +503,8 @@ I do like agent:boundary not having a close tag btw. Do we seed special syntax t
 
 **1. External edit from boundary insertion:** The `agent-doc boundary` command writes directly to the file via atomic rename (tempfile + rename), not through the CRDT path. This triggers IntelliJ's external file change detection. The CRDT path (`agent-doc write --stream`) goes through IPC → plugin → Document API, which avoids the external change dialog. The boundary insertion should probably also use IPC when the plugin is present. I'll file this as a follow-up.
 
+Is this fixed?
+
 **2. Does the parser get confused?** No — the component parser already handles this. In `component.rs`, boundary markers are explicitly skipped:
 
 ```rust
@@ -624,9 +626,14 @@ The boundary marker separates "prompts the agent saw" from "prompts typed while 
 The response was correctly placed at the boundary position (after "Please add tests"). The content after the boundary ("audit docs", "Update README.md, SPEC.md") was preserved below the response via CRDT merge.
 
 **Is the issue that:**
-a) The next `/agent-doc` invocation didn't pick up "audit docs" and "Update README.md, SPEC.md"?
+a) The next `/agent-doc` invocation didn't pick up "audit docs" and "Update README.md, SPEC.md"?: Yes
 b) The response was placed in the wrong position?
 c) The content after the boundary was lost?
+
+In this file, all of the h3 `###` headings now have the ` (HEAD)` suffix. Even ones from previous runs.
+What happened?
+Fix the bug. Add tests verifying the fix.
+<!-- agent:boundary:5a034b41-fcad-45a9-b3ed-459570c935b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

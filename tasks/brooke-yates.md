@@ -76,7 +76,7 @@ Ready to send, or further tweaks?
 Rundavoo was a social friend group gathering app (is this a good name or is there something better) that won a 2014 Google Top 100 New Products Award.
 
 Please research Rundavoo for more info. Some of the info is in my resume.
-### Re: Adding Rundavoo (HEAD)
+### Re: Adding Rundavoo
 
 From your resume: Rundavoo was a **Google top 75 app in 2014** (not top 100 — resume says 75). You were Platform Architect / Lead Front End Developer for ~2 years. Responsive multi-platform consumer app (desktop, tablet, mobile via PhoneGap).
 

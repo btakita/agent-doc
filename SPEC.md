@@ -282,6 +282,8 @@ Exits with error if the pane is dead or no session is registered.
 
 **HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. The working tree does not. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
 
+**Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
+
 ### 7.15 skill
 
 `agent-doc skill install` — write the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md` in the current project. Idempotent (skips if content matches).
@@ -380,7 +382,11 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **`--force-disk` flag:** Bypasses IPC and writes directly to disk, even when `.agent-doc/patches/` exists (plugin installed).
 
-**IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot and CRDT state are updated from the file as written by the plugin.
+**IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot is saved from `content_ours` (baseline + response), NOT the current file on disk. This ensures user edits typed after the boundary marker are not absorbed into the snapshot and remain visible to the next diff. CRDT state is also saved from `content_ours`.
+
+**Snapshot invariant:** All write paths (inline, template, stream, IPC) save the snapshot as `content_ours` — the baseline with the agent response applied. The working tree file may differ (due to concurrent user edits merged in), but the snapshot always reflects only the agent's contribution. This is the foundation of correct diff detection.
+
+**Boundary marker cleanup:** On IPC write, stale boundary markers from prior responses are removed before inserting new content. When unmatched content exists and the target component has a boundary marker, a synthesized patch with `boundary_id` is sent to the plugin for boundary-aware insertion.
 
 ### 7.22 watch
 

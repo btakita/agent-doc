@@ -676,7 +676,6 @@ The current file includes content the user typed AFTER the boundary marker (whil
 457 tests pass. Binary rebuilt and installed.
 
 Add tests to validate behavior. Add to SPEC.md
-<!-- agent:boundary:b2818cdb-fb4a-4c49-b167-2975dbcfd6e2 -->
 
 ### Re: Tests + SPEC.md Updated
 
@@ -691,6 +690,24 @@ Add tests to validate behavior. Add to SPEC.md
 **SPEC.md updated:**
 - **7.14 (commit):** Post-commit `(HEAD)` marker cleanup from snapshot + working tree
 - **7.21 (write):** IPC snapshot invariant (`content_ours`), boundary marker cleanup on insert, boundary-aware insertion for unmatched content
+
+Seems like `<!-- agent:boundary:b2818cdb-fb4a-4c49-b167-2975dbcfd6e2 -->` was left in this file. Why?
+If this is an issue, identify root cause, write test, fix.
+
+### Re: Orphaned Boundary in apply_mode — Fixed (HEAD)
+
+**Root cause:** `apply_mode("append", existing, new_content)` does `format!("{}{}", existing, new_content)` — simple concatenation that ignores boundary markers. When a response has explicit `<!-- patch:exchange -->` wrappers, the patch goes through `apply_mode()`, not `append_with_boundary()`. The boundary marker is never consumed, so it accumulates as an orphan.
+
+**Fix:** `apply_patches_with_overrides()` now checks for boundary markers BEFORE calling `apply_mode()`. When mode is `"append"` and a boundary marker exists in the component, it calls `append_with_boundary()` instead — which replaces the marker with the response content.
+
+**Test:** `explicit_patch_uses_boundary_marker` — verifies an explicit `<!-- patch:exchange -->` patch consumes the boundary marker and places the response after the user prompt.
+
+459 tests pass (162 lib + 297 bin). Binary rebuilt and installed.
+
+**This was the last piece of the boundary puzzle:**
+1. Unmatched content → boundary-aware (fixed earlier)
+2. Explicit patches → boundary-aware (fixed now)
+3. Both paths now consume the boundary marker on write
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

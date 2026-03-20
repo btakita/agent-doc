@@ -678,7 +678,7 @@ The current file includes content the user typed AFTER the boundary marker (whil
 Add tests to validate behavior. Add to SPEC.md
 <!-- agent:boundary:b2818cdb-fb4a-4c49-b167-2975dbcfd6e2 -->
 
-### Re: Tests + SPEC.md Updated (HEAD)
+### Re: Tests + SPEC.md Updated
 
 **Test added:** `try_ipc_snapshot_saves_content_ours`
 - Creates template doc with exchange component + boundary marker

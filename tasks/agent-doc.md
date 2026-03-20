@@ -498,6 +498,29 @@ Btw, tasks/kevin-volk.md does have an open and close agent:exchange tag.
 Does the agent:boundary not having a close tag confuse the parser?
 I do like agent:boundary not having a close tag btw. Do we seed special syntax to support it though such as?
 `<!-- agent:boundary:7db33bcf-26eb-4448-9dba-ac1b75b40486 / -->`
+
+### Re: Boundary Parser + Self-Closing Syntax (HEAD)
+
+**1. External edit from boundary insertion:** The `agent-doc boundary` command writes directly to the file via atomic rename (tempfile + rename), not through the CRDT path. This triggers IntelliJ's external file change detection. The CRDT path (`agent-doc write --stream`) goes through IPC → plugin → Document API, which avoids the external change dialog. The boundary insertion should probably also use IPC when the plugin is present. I'll file this as a follow-up.
+
+**2. Does the parser get confused?** No — the component parser already handles this. In `component.rs`, boundary markers are explicitly skipped:
+
+```rust
+if rest.starts_with("boundary:") {
+    pos = close;
+    continue;
+}
+```
+
+So `<!-- agent:boundary:UUID -->` is never treated as a component open tag. The parser sees it as a regular HTML comment and skips it. No close tag needed, no confusion.
+
+**3. Self-closing syntax `<!-- agent:boundary:UUID / -->`:** Not needed from a parser perspective — the current syntax works because the parser explicitly skips `boundary:*` markers. But the `/` convention could be nice for readability (signals "this is intentionally unpaired"). It would require updating all the `BOUNDARY_PREFIX` / `BOUNDARY_SUFFIX` constants and search patterns.
+
+The trade-off:
+- **Pro:** Cleaner semantics, self-documenting (XML-style self-closing)
+- **Con:** More complexity, current syntax already works, existing markers in documents would need migration or dual-parsing
+
+My recommendation: keep current syntax. It works, is simple, and the explicit parser skip prevents any confusion. The self-closing convention adds visual clarity but no functional benefit.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

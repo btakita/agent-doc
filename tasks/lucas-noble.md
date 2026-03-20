@@ -107,7 +107,7 @@ Best,
 Brian
 
 Lucas Noble sent a response. Please evaluate and draft a reply.
-### Re: Lucas Noble's Response (HEAD)
+### Re: Lucas Noble's Response
 
 Lucas replied with solid info:
 

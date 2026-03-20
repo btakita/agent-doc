@@ -204,12 +204,11 @@ Please sync corky with btak.dev@gmail.com
 - [ ] Reply to Kevin confirming the interview is locked in for Mon 3/23 2pm PT
 - [ ] Prepare for Jordan Ritter CTO conversation (Round 1 + AI workflow exercise)
 He sent me message.
-<!-- agent:boundary:47887af5-671d-49af-95ad-6390da243a90 -->
 Did you read the email with subject **CopilotKit 1st Round Interview Prep + Confirmation: Monday, 3/23 at 2pm PT**
-<!-- agent:boundary:e3be6c49-5cf1-4a2f-81bb-2fcff3ae7227 -->
+<!-- agent:boundary:1b8c6a90-a9b4-4c01-8134-a4c3e2fef94e -->
 <!-- /agent:exchange -->
 
-## Pending (HEAD)
+## Pending
 
 <!-- agent:pending -->
 <!-- /agent:pending -->

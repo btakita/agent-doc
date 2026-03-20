@@ -141,7 +141,7 @@ Add to SPEC.md
 
 audit docs
 
-### Audit Docs Results (HEAD)
+### Audit Docs Results
 
 Ran `corky audit-docs` — initially flagged AGENTS.md and README.md as stale vs `src/filter/gmail_auth.rs`.
 

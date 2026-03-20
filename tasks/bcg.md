@@ -152,4 +152,24 @@ Should we wait until Monday?
 > Hey Dave, just checking in — any update from BCG on next steps? Also wanted to give you a heads-up that I have some conversations happening next week, so if BCG wants to schedule anything it'd be good to get on the calendar soon.
 
 Dropped "hope you had a good week" since the week isn't over yet. Otherwise same message — it reads fine for a Friday evening text.
+
+We also have Tony Tomai (account lead) and Anil Podduturi. Should I send messages to either of them?
+### Who to message (HEAD)
+
+**Dave Franklin — yes, send the SMS now** (the draft from above).
+
+**Tony Tomai — no, not now.** Tony and Dave are both at Inspyr. Messaging both about the same status check creates noise and signals anxiety. Dave is your primary contact — let him work the channel. Only escalate to Tony if Dave goes dark for 5+ business days.
+
+**Anil Podduturi — yes, but this is a separate play.** Anil is at BCG (not Inspyr). A LinkedIn message to Anil is a warm internal reference, not a recruiter follow-up. Tony specifically asked you to reach out to Anil before his March 10 BCG call — if you haven't done that, it's overdue.
+
+**Key rule:** The message to Anil should NOT mention Dave, Inspyr, or the recruiter pipeline. It's a genuine reconnection from a former colleague, not a job ask. Something like:
+
+> Hey Anil — it's been a while since the Neo Innovation/Tenfore days. I've been building some interesting AI tooling (document-as-interface agents, correspondence automation) and noticed you're leading AI products at BCG. Would love to catch up if you have a few minutes.
+
+This lets Anil connect the dots himself. If he's involved in Project Helix hiring, he'll make the connection. If you mention the recruiter pipeline, you bypass the internal referral effect.
+
+**Summary — send tonight:**
+1. Dave Franklin SMS (the draft above) — recruiter check-in + scheduling urgency
+2. Anil Podduturi LinkedIn message — warm reconnection, separate from recruiter channel
+3. Skip Tony for now
 <!-- /agent:exchange -->

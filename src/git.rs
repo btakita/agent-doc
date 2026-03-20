@@ -149,87 +149,84 @@ fn signal_vcs_refresh(file: &Path) {
 fn add_head_marker(content: &str, file: &Path) -> String {
     let head_content = show_head(file).ok().flatten();
 
-    // Collect all markdown heading positions (any level: # through ######)
-    let mut heading_positions: Vec<(usize, usize, usize)> = Vec::new(); // (line_start, line_end, level)
-    for (i, line) in content.lines().enumerate() {
+    // Step 1: Strip ALL existing (HEAD) markers from heading lines only.
+    // This prevents accumulation across commit cycles.
+    let mut cleaned_lines: Vec<String> = Vec::new();
+    for line in content.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            let level = trimmed.chars().take_while(|c| *c == '#').count();
-            if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
-                if !trimmed.ends_with(" (HEAD)") {
-                    // Calculate byte offset
-                    let line_start = content.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
-                    let line_end = line_start + line.len();
-                    heading_positions.push((line_start, line_end, level));
-                }
-            }
+        if trimmed.starts_with('#') && trimmed.ends_with(" (HEAD)") {
+            cleaned_lines.push(line[..line.len() - 7].to_string()); // strip " (HEAD)"
+        } else {
+            cleaned_lines.push(line.to_string());
         }
     }
-
-    if heading_positions.is_empty() {
-        return content.to_string();
-    }
-
-    // Filter to only new headings (not in git HEAD)
-    let new_headings: Vec<(usize, usize, usize)> = if let Some(ref head) = head_content {
-        heading_positions.into_iter().filter(|(start, end, _)| {
-            let heading_text = &content[*start..*end];
-            !head.contains(heading_text)
-        }).collect()
+    let cleaned = cleaned_lines.join("\n");
+    // Preserve trailing newline
+    let cleaned = if content.ends_with('\n') && !cleaned.ends_with('\n') {
+        format!("{}\n", cleaned)
     } else {
-        vec![*heading_positions.last().unwrap()]
+        cleaned
     };
 
-    if new_headings.is_empty() {
-        return content.to_string();
-    }
+    // Also strip (HEAD) from git HEAD content for accurate comparison
+    let head_cleaned = head_content.as_ref().map(|h| {
+        h.lines()
+            .map(|line| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with('#') && trimmed.ends_with(" (HEAD)") {
+                    &line[..line.len() - 7]
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<&str>>()
+            .join("\n")
+    });
 
-    // Find the shallowest (root) level among new headings
-    let min_level = new_headings.iter().map(|(_, _, level)| *level).min().unwrap();
-
-    // Only mark root-level headings (shallowest in the new content)
-    let root_headings: Vec<&(usize, usize, usize)> = new_headings.iter()
-        .filter(|(_, _, level)| *level == min_level)
-        .collect();
-
-    // Strip any existing (HEAD) markers from previous commits before adding new ones.
-    // Without this, (HEAD) markers accumulate across commit cycles.
-    let cleaned = content.replace(" (HEAD)", "");
-
-    // Also strip (HEAD) from the head_content for comparison
-    let head_cleaned = head_content.as_ref().map(|h| h.replace(" (HEAD)", ""));
-
-    // Recalculate new heading positions after stripping
-    let mut new_root_ends: Vec<usize> = Vec::new();
+    // Step 2: Collect all heading positions from cleaned content
+    let mut heading_positions: Vec<(usize, usize, usize)> = Vec::new();
     let mut offset = 0usize;
     for line in cleaned.lines() {
         let trimmed = line.trim_start();
         let line_end = offset + line.len();
         if trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|c| *c == '#').count();
-            if level <= 6 && level == min_level && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
-                let is_new = if let Some(ref hc) = head_cleaned {
-                    !hc.contains(line)
-                } else {
-                    true // no HEAD → treat all as new, but we'll only mark the last
-                };
-                if is_new {
-                    new_root_ends.push(line_end);
-                }
+            if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
+                heading_positions.push((offset, line_end, level));
             }
         }
-        offset = line_end + 1; // +1 for newline
+        offset = line_end + 1;
     }
 
-    // When git HEAD is unavailable, only mark the last heading
-    if head_content.is_none() && new_root_ends.len() > 1 {
-        let last = *new_root_ends.last().unwrap();
-        new_root_ends = vec![last];
+    if heading_positions.is_empty() {
+        return cleaned;
     }
 
-    // Build result with (HEAD) markers — reverse order to preserve offsets
+    // Step 3: Filter to headings NOT in git HEAD (= new headings from latest response)
+    let new_headings: Vec<(usize, usize, usize)> = if let Some(ref hc) = head_cleaned {
+        heading_positions.into_iter().filter(|(start, end, _)| {
+            let heading_text = &cleaned[*start..*end];
+            !hc.contains(heading_text)
+        }).collect()
+    } else {
+        // No HEAD available → mark last heading only
+        vec![*heading_positions.last().unwrap()]
+    };
+
+    if new_headings.is_empty() {
+        return cleaned;
+    }
+
+    // Step 4: Only mark root-level (shallowest) headings
+    let min_level = new_headings.iter().map(|(_, _, level)| *level).min().unwrap();
+    let root_ends: Vec<usize> = new_headings.iter()
+        .filter(|(_, _, level)| *level == min_level)
+        .map(|(_, end, _)| *end)
+        .collect();
+
+    // Step 5: Insert (HEAD) markers in reverse order to preserve offsets
     let mut result = cleaned;
-    for pos in new_root_ends.iter().rev() {
+    for pos in root_ends.iter().rev() {
         result.insert_str(*pos, " (HEAD)");
     }
     result

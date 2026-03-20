@@ -234,6 +234,26 @@ This logs to stderr whenever stale markers are found, giving visibility into int
 
 **Why this wasn't caught earlier:** The `remove()` and `remove_all()` functions existed but were only used in unit tests — no production code path called them. The happy path (response written successfully) replaces the marker via `append_with_boundary()`, so cleanup was only needed for the interrupted path.
 Can we add a way to recover from orphaned agent:boundary tags?
+
+The claude session thought the changes were submitted to the age
+
+### Re: Boundary Recovery (HEAD)
+
+**Already handled by the fix above.** The `insert()` function now calls `remove_all()` before inserting a new marker. So the next time any session runs `agent-doc boundary <FILE>` (step 1b of the SKILL workflow), stale markers are automatically cleaned up. No manual intervention needed.
+
+**Recovery paths that now exist:**
+
+| Scenario | Recovery |
+|----------|----------|
+| Session interrupted, then resumed | Next `agent-doc boundary` auto-cleans stale markers |
+| Session abandoned (no future submit) | Next session on the same file auto-cleans |
+| Manual cleanup needed | `agent-doc boundary <FILE>` (inserts new + cleans stale) |
+
+**Your truncated message** — "The claude session thought the" — got cut off. What were you going to say? Did the other session misinterpret something about the document state?
+
+If you want an explicit `agent-doc clean-boundaries <FILE>` command (removes all markers without inserting a new one), I can add that. But the auto-cleanup on insert should cover the normal workflow.
+
+I got an external file change. Why? Please fi
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

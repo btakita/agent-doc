@@ -652,7 +652,7 @@ Fix the bug. Add tests verifying the fix.
 What is the result of your investigation into corky session's snapshot state?
 <!-- agent:boundary:46f64260-6594-4d0d-9134-2eef7975ef0f -->
 
-### Re: Corky Boundary Bug — Root Cause + Fix (HEAD)
+### Re: Corky Boundary Bug — Root Cause + Fix
 
 **Root cause found in `write_ipc_and_poll()` (line 805).**
 

@@ -176,9 +176,10 @@ Implementation: `flush_to_document()` uses `template::apply_patches()`.
 
 All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
 
-- `try_ipc()` — component-level patches for template/stream documents
+- `try_ipc(file, patches, unmatched, frontmatter_yaml, baseline, content_ours)` — component-level patches for template/stream documents. `content_ours` (baseline + response, no user edits) is saved as the snapshot on IPC success; pass `None` to fall back to reading the current file.
 - `try_ipc_full_content()` — full document replacement for inline-mode documents
 - Both are safe to call unconditionally; they return `false` immediately if `.agent-doc/patches/` does not exist
+- When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically
 
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
 `agent/streaming.rs` (StreamingAgent trait + chunk parser), `agent/claude.rs` (streaming impl)

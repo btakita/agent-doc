@@ -111,7 +111,7 @@ Dave's messages (from `dave_franklin_sms.txt`):
 
 Should I follow up with Dave. He mentioned that he expected an answer by yesterday or today.
 Should I mention that I will be having interviews next week?
-### Follow-up strategy (HEAD)
+### Follow-up strategy
 
 **Yes, follow up today.** Dave set the expectation himself — "if I hear anything today or tomorrow, will advise." That window has passed, so a brief check-in is natural and expected:
 

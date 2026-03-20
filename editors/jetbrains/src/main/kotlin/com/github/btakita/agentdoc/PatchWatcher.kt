@@ -169,7 +169,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             for (p in patch.patches) {
-                result = applyComponentPatchNative(result, p.component, p.content, caretOffset)
+                result = applyComponentPatchNative(result, p.component, p.content, caretOffset, p.boundaryId)
             }
 
             // Apply unmatched content to exchange or output component
@@ -198,18 +198,22 @@ class PatchWatcher(private val project: Project) : Disposable {
      * The native library handles code block detection, attribute parsing,
      * and mode resolution identically to the CLI — eliminating duplicated logic.
      */
-    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null): String {
-        // Native: resolve mode from inline attributes + components.toml + defaults
-        // The FFI apply_patch requires an explicit mode, but the Kotlin fallback
-        // extracts mode from inline attributes. For the FFI path, we extract the
-        // mode from the document first, then call apply_patch.
+    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null): String {
         val mode = extractComponentMode(doc, component)
 
-        // For append mode with cursor info, use cursor-aware FFI (Kotlin fallback if native unavailable)
+        // Boundary marker takes precedence over caret offset for append mode
+        if (mode == "append" && !boundaryId.isNullOrBlank()) {
+            val nativeResult = NativePatching.applyComponentPatchWithBoundary(doc, component, content, mode, boundaryId)
+            if (nativeResult != null) return nativeResult
+            // Kotlin fallback for boundary-based append
+            val kotlinResult = applyComponentPatchWithBoundary(doc, component, content, boundaryId)
+            if (kotlinResult != null) return kotlinResult
+        }
+
+        // Fall back to caret-aware insertion
         if (mode == "append" && caretOffset != null) {
             val nativeResult = NativePatching.applyComponentPatchWithCaret(doc, component, content, mode, caretOffset)
             if (nativeResult != null) return nativeResult
-            // Kotlin fallback for cursor-aware append
             val kotlinResult = applyComponentPatchWithCaret(doc, component, content, caretOffset)
             if (kotlinResult != null) return kotlinResult
         }
@@ -319,6 +323,54 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         val before = doc.substring(0, insertAt)
         val after = doc.substring(insertAt)
+        return before + content.trimEnd() + "\n" + after
+    }
+
+    /**
+     * Kotlin fallback for boundary-aware append.
+     *
+     * Finds `<!-- agent:boundary:ID -->` inside the component and inserts
+     * response content at that position, replacing the marker.
+     * Returns null if boundary marker is not found.
+     */
+    private fun applyComponentPatchWithBoundary(doc: String, component: String, content: String, boundaryId: String): String? {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:$component -->"
+        val boundaryMarker = "<!-- agent:boundary:$boundaryId -->"
+
+        val codeRanges = findCodeBlockRanges(doc)
+
+        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+        } ?: return null
+
+        val contentStart = openMatch.range.last + 1
+
+        var searchFrom = contentStart
+        var closeIdx: Int
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom)
+            if (closeIdx < 0) return null
+            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+            searchFrom = closeIdx + closeTag.length
+        }
+
+        // Find boundary marker inside component
+        val boundaryIdx = doc.indexOf(boundaryMarker, contentStart)
+        if (boundaryIdx < 0 || boundaryIdx >= closeIdx) return null
+
+        // Find start of the boundary marker line
+        val lineStart = doc.lastIndexOf('\n', boundaryIdx - 1).let {
+            if (it >= contentStart) it + 1 else contentStart
+        }
+
+        // Find end of the boundary marker line (including trailing newline)
+        val markerEnd = boundaryIdx + boundaryMarker.length
+        val lineEnd = if (markerEnd < closeIdx && doc.getOrNull(markerEnd) == '\n') markerEnd + 1 else markerEnd
+
+        // Replace the boundary marker line with the response content
+        val before = doc.substring(0, lineStart)
+        val after = doc.substring(lineEnd.coerceAtMost(closeIdx))
         return before + content.trimEnd() + "\n" + after
     }
 
@@ -447,6 +499,7 @@ data class IpcPatch(
 data class ComponentPatch(
     val component: String,
     val content: String,
+    val boundaryId: String? = null,
 )
 
 /**
@@ -479,8 +532,9 @@ fun parsePatchJson(json: String): IpcPatch? {
 
             val component = extractStringField(objJson, "component")
             val content = extractStringField(objJson, "content")
+            val boundaryId = extractStringField(objJson, "boundary_id")
             if (component != null && content != null) {
-                patches.add(ComponentPatch(component, content))
+                patches.add(ComponentPatch(component, content, boundaryId))
             }
             pos = objEnd + 1
         }

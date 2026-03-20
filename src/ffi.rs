@@ -248,6 +248,84 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
     }
 }
 
+/// Apply a component patch using a boundary marker for insertion point.
+///
+/// When `mode` is `"append"` and `boundary_id` is provided, the content is
+/// inserted at the boundary marker position (replacing the marker). This ensures
+/// agent responses appear after the prompt that triggered them, even if the user
+/// has typed new text below.
+///
+/// Falls back to normal patch application if the boundary is not found.
+///
+/// # Safety
+///
+/// All pointers must be valid, non-null, NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
+    doc: *const c_char,
+    component_name: *const c_char,
+    content: *const c_char,
+    mode: *const c_char,
+    boundary_id: *const c_char,
+) -> FfiPatchResult {
+    let make_err = |msg: &str| FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    };
+
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+    };
+    let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid component name UTF-8: {e}")),
+    };
+    let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid content UTF-8: {e}")),
+    };
+    let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid mode UTF-8: {e}")),
+    };
+    let bid = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid boundary_id UTF-8: {e}")),
+    };
+
+    // Use boundary-aware insertion for append mode
+    if mode_str == "append" && !bid.is_empty() {
+        let components = match component::parse(doc_str) {
+            Ok(c) => c,
+            Err(e) => return make_err(&format!("{e}")),
+        };
+        if let Some(comp) = components.iter().find(|c| c.name == name) {
+            let result = comp.append_with_boundary(doc_str, patch_content, bid);
+            return FfiPatchResult {
+                text: CString::new(result).unwrap_or_default().into_raw(),
+                error: ptr::null_mut(),
+            };
+        }
+    }
+
+    // Fall back to normal apply_patch behavior
+    let patch = template::PatchBlock {
+        name: name.to_string(),
+        content: patch_content.to_string(),
+    };
+    let mut overrides = std::collections::HashMap::new();
+    overrides.insert(name.to_string(), mode_str.to_string());
+    let dummy_path = std::path::Path::new("/dev/null");
+    match template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides) {
+        Ok(result) => FfiPatchResult {
+            text: CString::new(result).unwrap_or_default().into_raw(),
+            error: ptr::null_mut(),
+        },
+        Err(e) => make_err(&format!("{e}")),
+    }
+}
+
 /// CRDT merge (3-way conflict-free).
 ///
 /// `base_state` may be null (first merge). `base_state_len` is ignored when null.

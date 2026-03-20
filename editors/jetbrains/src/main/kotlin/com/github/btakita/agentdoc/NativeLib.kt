@@ -53,6 +53,19 @@ interface AgentDocLib : Library {
     ): FfiPatchResult
 
     /**
+     * Apply a patch using a boundary marker for insertion point.
+     * When mode is "append" and boundary_id is found in the component,
+     * inserts content at the boundary marker position.
+     */
+    fun agent_doc_apply_patch_with_boundary(
+        doc: String,
+        component_name: String,
+        content: String,
+        mode: String,
+        boundary_id: String,
+    ): FfiPatchResult
+
+    /**
      * Merge YAML key/value pairs into a document's frontmatter.
      */
     fun agent_doc_merge_frontmatter(
@@ -161,6 +174,28 @@ object NativePatching {
             if (result.error != null) {
                 val error = result.error!!.getString(0)
                 LOG.warn("[native] apply_patch_with_caret error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Apply a component patch using a boundary marker for insertion point.
+     * Returns the patched document, or null if FFI is unavailable/errors.
+     */
+    fun applyComponentPatchWithBoundary(doc: String, component: String, content: String, mode: String, boundaryId: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_apply_patch_with_boundary(doc, component, content, mode, boundaryId)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] apply_patch_with_boundary error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }

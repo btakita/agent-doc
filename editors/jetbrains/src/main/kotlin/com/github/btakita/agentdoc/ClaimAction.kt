@@ -59,6 +59,24 @@ class ClaimAction : AnAction() {
                     TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath (pos=$position)" })
                     // Re-sync layout so the claimed pane joins the layout window
                     SyncLayoutAction.syncLayout(project, notify = false)
+                    // Auto-start agent session in the claimed pane
+                    try {
+                        val startCmd = listOf(agentDoc, "start", relativePath)
+                        LOG.debug("auto-start: ${startCmd.joinToString(" ")}")
+                        val startProcess = ProcessBuilder(startCmd)
+                            .directory(java.io.File(basePath))
+                            .redirectErrorStream(true)
+                            .start()
+                        val startOutput = startProcess.inputStream.bufferedReader().readText().trim()
+                        val startExit = startProcess.waitFor()
+                        if (startExit == 0) {
+                            LOG.info("auto-start succeeded for $relativePath")
+                        } else {
+                            LOG.warn("auto-start failed (exit $startExit): $startOutput")
+                        }
+                    } catch (startEx: Exception) {
+                        LOG.warn("auto-start exception: ${startEx.message}")
+                    }
                 } else {
                     TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
                 }

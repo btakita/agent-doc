@@ -198,7 +198,7 @@ Once confirmed I'll:
 0.19.0
 audit docs
 Ensure this feature is documented in README.md
-### Re: Release Corky v0.19.0 (HEAD)
+### Re: Release Corky v0.19.0
 
 Released:
 - `make check` — all tests pass

@@ -34,7 +34,7 @@ Created `mail/contacts/lucas-noble/CLAUDE.md` (with `AGENTS.md` symlink) capturi
 Want to draft a response to him?
 
 yes
-### Re: Draft Response (HEAD)
+### Re: Draft Response
 
 **Draft LinkedIn reply to Lucas Noble:**
 

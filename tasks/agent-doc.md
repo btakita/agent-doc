@@ -449,6 +449,26 @@ Did you read the email with subject...           <-- user prompt
 **The `0 components` bug** still needs investigation. The kevin-volk session's `agent-doc write --stream` produced `(0 components)` which means the response bypassed the boundary-aware component patch path and went through full-content IPC. This is why the boundary marker wasn't consumed and the response was placed in the wrong position.
 
 Want me to investigate the write path now to find where it falls through to `0 components`?
+
+investigate
+
+### Re: 0 Components Bug — Root Cause Found + Fixed (HEAD)
+
+**Root cause:** When the skill pipes a response without `<!-- patch:exchange -->` wrapper blocks, `template::parse_patches()` returns 0 patches. The unmatched content is then appended to the exchange component via `replace_content()` — which ignores boundary markers entirely. The IPC path also sends `patches: []` with the raw content as `unmatched`, and the plugin doesn't use boundary-aware insertion for unmatched content either.
+
+**Fix (3 files):**
+
+1. **`template.rs`** — `apply_patches_with_overrides()` now checks for boundary markers when routing unmatched content to exchange/output. If found, uses `append_with_boundary()` instead of `replace_content()`.
+
+2. **`write.rs`** — `try_ipc()` now synthesizes an exchange patch with `boundary_id` when no explicit patches exist but unmatched content targets a component with a boundary marker. This ensures the plugin gets proper boundary information.
+
+3. **`boundary.rs`** — Added `find_boundary_id_in_component()` for the library target (the existing functions were binary-only). Also added `find_boundary_in_component()` helper in template.rs for the same purpose.
+
+**Test:** `unmatched_content_uses_boundary_marker` — verifies that unmatched content (no patch blocks) is inserted at the boundary marker position, not appended above user prompts.
+
+**454 tests pass** (161 lib + 293 bin). Release binary rebuilt and installed.
+
+**This fixes the kevin-volk ordering bug.** The next time a session sends a response without explicit patch blocks, the boundary marker will be used for correct insertion ordering.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

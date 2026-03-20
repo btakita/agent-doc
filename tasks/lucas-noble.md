@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact file created. Awaiting next steps.
+Draft reply ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -32,6 +32,28 @@ Created `mail/contacts/lucas-noble/CLAUDE.md` (with `AGENTS.md` symlink) capturi
 - **Comp:** $200K–$315K
 
 Want to draft a response to him?
+
+yes
+### Re: Draft Response (HEAD)
+
+**Draft LinkedIn reply to Lucas Noble:**
+
+> Hi Lucas,
+>
+> Thanks for reaching out — the role sounds interesting. I have deep experience with TypeScript and AWS, and I'm comfortable with Python.
+>
+> A few quick questions before we hop on a call:
+>
+> 1. What's the expected contract duration?
+> 2. Is this W-2 or 1099?
+> 3. What's the team size and structure?
+>
+> Happy to chat if it's a good fit.
+>
+> Best,
+> Brian
+
+This keeps it concise, shows interest without over-committing, and qualifies the opportunity. Want me to adjust the tone, add/remove questions, or send it via corky?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

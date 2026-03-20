@@ -255,8 +255,19 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         let patches_dir = project_root.join(".agent-doc/patches");
 
         if patches_dir.exists() {
+            // Compute content_ours (baseline + patches) for snapshot saving.
+            // The IPC path sends patches to the plugin but we need a clean snapshot
+            // that represents baseline+response WITHOUT user's concurrent edits.
+            let content_at_start = std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let base = baseline.unwrap_or(&content_at_start);
+            let mode_overrides = std::collections::HashMap::new();
+            let content_ours = template::apply_patches_with_overrides(
+                base, &patches, &unmatched, file, &mode_overrides,
+            ).context("failed to apply patches for snapshot")?;
+
             // Plugin is installed — try IPC
-            if try_ipc(file, &patches, &unmatched, None, baseline)? {
+            if try_ipc(file, &patches, &unmatched, None, baseline, Some(&content_ours))? {
                 // IPC succeeded — plugin applied patches
                 recover::clear_pending(file)?;
                 return Ok(());
@@ -657,6 +668,7 @@ pub fn try_ipc(
     unmatched: &str,
     frontmatter_yaml: Option<&str>,
     baseline: Option<&str>,
+    content_ours: Option<&str>,
 ) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
@@ -723,7 +735,7 @@ pub fn try_ipc(
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
     }
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len())
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours)
 }
 
 /// Attempt to write full document content via IPC.
@@ -758,7 +770,7 @@ pub fn try_ipc_full_content(
         "fullContent": content,
     });
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0)
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0, Some(content))
 }
 
 /// Write an IPC patch file and poll for plugin ACK (file deletion).
@@ -769,6 +781,7 @@ fn write_ipc_and_poll(
     payload: &serde_json::Value,
     doc_file: &Path,
     patch_count: usize,
+    content_ours: Option<&str>,
 ) -> Result<bool> {
     // Atomic write of patch file
     atomic_write(
@@ -789,11 +802,18 @@ fn write_ipc_and_poll(
 
     while start.elapsed() < timeout {
         if !patch_file.exists() {
-            // Plugin consumed the patch — update snapshot from current file
-            let content = std::fs::read_to_string(doc_file)
-                .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?;
-            snapshot::save(doc_file, &content)?;
-            let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
+            // Plugin consumed the patch — update snapshot.
+            // Use content_ours (baseline + response) when available, NOT the current
+            // file. The current file may include user edits typed after the boundary,
+            // which would be absorbed into the snapshot and lost to the next diff.
+            let snap_content = if let Some(ours) = content_ours {
+                ours.to_string()
+            } else {
+                std::fs::read_to_string(doc_file)
+                    .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?
+            };
+            snapshot::save(doc_file, &snap_content)?;
+            let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
             snapshot::save_crdt(doc_file, &crdt_doc.encode_state())?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
             return Ok(true);
@@ -1170,7 +1190,7 @@ mod tests {
         fs::write(&doc, "content").unwrap();
 
         let patches: Vec<crate::template::PatchBlock> = vec![];
-        let result = try_ipc(&doc, &patches, "", None, None).unwrap();
+        let result = try_ipc(&doc, &patches, "", None, None, None).unwrap();
         assert!(!result, "should return false when patches dir doesn't exist");
     }
 
@@ -1192,7 +1212,7 @@ mod tests {
         };
 
         // This will timeout after 2s — patch file is written but never consumed
-        let result = try_ipc(&doc, &[patch], "", None, None).unwrap();
+        let result = try_ipc(&doc, &[patch], "", None, None, None).unwrap();
         assert!(!result, "should return false on timeout (no plugin)");
 
         // Patch file should be cleaned up after timeout
@@ -1238,7 +1258,7 @@ mod tests {
             }
         });
 
-        let result = try_ipc(&doc, &[patch], "", None, None).unwrap();
+        let result = try_ipc(&doc, &[patch], "", None, None, None).unwrap();
         assert!(result, "should return true when plugin consumes patch");
     }
 

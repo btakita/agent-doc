@@ -94,7 +94,7 @@ Is this interaction worth posting about on LinkedIn?
 
 Want me to flesh this out more once you finish your thought about the vibe coding debate?
 
-### Re: YouTube Link in LinkedIn Post (HEAD)
+### Re: YouTube Link in LinkedIn Post
 
 **Yes, include it** — but strategically:
 

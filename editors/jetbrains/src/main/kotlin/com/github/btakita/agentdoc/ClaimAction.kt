@@ -59,20 +59,29 @@ class ClaimAction : AnAction() {
                     TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath (pos=$position)" })
                     // Re-sync layout so the claimed pane joins the layout window
                     SyncLayoutAction.syncLayout(project, notify = false)
-                    // Auto-start agent session in the claimed pane
+                    // Auto-start: send `agent-doc start <file>` to the claimed tmux pane.
+                    // `agent-doc start` must run INSIDE tmux (it calls current_pane()),
+                    // so we use `tmux send-keys` to type the command into the pane.
                     try {
-                        val startCmd = listOf(agentDoc, "start", relativePath)
-                        LOG.debug("auto-start: ${startCmd.joinToString(" ")}")
-                        val startProcess = ProcessBuilder(startCmd)
-                            .directory(java.io.File(basePath))
-                            .redirectErrorStream(true)
-                            .start()
-                        val startOutput = startProcess.inputStream.bufferedReader().readText().trim()
-                        val startExit = startProcess.waitFor()
-                        if (startExit == 0) {
-                            LOG.info("auto-start succeeded for $relativePath")
+                        // Extract pane ID from claim output (format: "Claimed ... → pane %42")
+                        val paneMatch = Regex("""%\d+""").find(output)
+                        val paneId = paneMatch?.value
+                        if (paneId != null) {
+                            val sendCmd = listOf("tmux", "send-keys", "-t", paneId, "agent-doc start $relativePath", "Enter")
+                            LOG.debug("auto-start via send-keys: ${sendCmd.joinToString(" ")}")
+                            val sendProcess = ProcessBuilder(sendCmd)
+                                .directory(java.io.File(basePath))
+                                .redirectErrorStream(true)
+                                .start()
+                            val sendExit = sendProcess.waitFor()
+                            if (sendExit == 0) {
+                                LOG.info("auto-start sent to pane $paneId for $relativePath")
+                            } else {
+                                val sendOutput = sendProcess.inputStream.bufferedReader().readText().trim()
+                                LOG.warn("auto-start send-keys failed (exit $sendExit): $sendOutput")
+                            }
                         } else {
-                            LOG.warn("auto-start failed (exit $startExit): $startOutput")
+                            LOG.warn("auto-start: could not extract pane ID from claim output: $output")
                         }
                     } catch (startEx: Exception) {
                         LOG.warn("auto-start exception: ${startEx.message}")

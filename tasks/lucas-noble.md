@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised draft ready for review.
+Draft finalized. Copy-paste to LinkedIn (messaging API unavailable).
 <!-- /agent:status -->
 
 ## Exchange
@@ -77,6 +77,34 @@ Good catches. Revised — Python claimed as a strength, questions shifted to rol
 > Brian
 
 Ready to send, or want further tweaks?
+
+Send via corky...if corky can reply to LinkedIn messages.
+### Re: Sending via Corky (HEAD)
+
+Corky can't send LinkedIn messages — the Messaging API requires partner-level access that personal OAuth tokens don't have (same restriction as the `socialActions` endpoint we hit earlier).
+
+**Options:**
+1. **Copy-paste** — grab the text below and paste into the LinkedIn conversation
+2. **Build `corky linkedin message`** — needs LinkedIn partner approval (long process)
+
+Copy-paste is the practical move. Clean text ready to paste:
+
+---
+
+Hi Lucas,
+
+Thanks for reaching out — the role sounds interesting. I have deep experience with Python, TypeScript, and AWS, so the stack is right in my wheelhouse.
+
+I'd love to learn more:
+
+1. Can you share more about the company and what they're building?
+2. What does the day-to-day look like for this role?
+3. What problems is the team trying to solve right now?
+
+Happy to hop on a quick call if it sounds like a good fit.
+
+Best,
+Brian
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

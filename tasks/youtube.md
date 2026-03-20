@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-`corky linkedin comment` implemented and deployed. YouTube link comment posted on LinkedIn.
+Corky release pending — make check passes, awaiting version number.
 <!-- /agent:status -->
 
 ## Exchange
@@ -179,6 +179,21 @@ corky linkedin comment social/20260320-094603-linkedin.md "Video: https://www.yo
 ```
 Comment ID: `7440760371260444672`
 Implement
+
+### Re: Release Corky (HEAD)
+
+`make check` passes (clippy + all tests). Current version: `0.18.1`.
+
+New feature (`linkedin comment`) → suggest `0.19.0`. What version do you want?
+
+Once confirmed I'll:
+1. Bump `Cargo.toml` + `pyproject.toml`
+2. Update `VERSIONS.md`
+3. Build release binary
+4. Commit, tag, push
+5. `cargo publish` + `maturin publish` + GitHub Release
+6. `cargo install --path .`
+release corky
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

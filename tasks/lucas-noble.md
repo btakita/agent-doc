@@ -132,7 +132,7 @@ Brian
 Please read Lucas' response and my response afterwards.
 /home/brian/work/btakita/agent-loop/mail/contacts/lucas-noble/20260320-linkedin-lucas-noble.txt
 Please rate it. Am I being too open with my schedule?
-### Re: Conversation Review (HEAD)
+### Re: Conversation Review
 
 Read the full conversation. Here's my assessment:
 

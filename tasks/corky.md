@@ -389,7 +389,7 @@ When this document was autoclaimed, there was `/agent-doc tasks/agent-doc.md` le
   ⏵⏵ bypass permissions on (shift+tab to cycle)
 ```
 
-### Drafted SPEC.md Sections (HEAD)
+### Drafted SPEC.md Sections
 
 Added three new sections to SPEC.md (94 lines):
 
@@ -414,5 +414,43 @@ Added three new sections to SPEC.md (94 lines):
 - References `docs/guide/self-hosted-gmail.md` and `docs/reference/privacy-policy.md`
 
 Changes are in the corky submodule working tree (not committed). Ready to commit when you approve. Want me to also run `corky audit-docs` to verify consistency?
+### SPEC.md Sections Drafted (HEAD)
+
+Two items to address from this cycle:
+
+---
+
+**1. SPEC.md §6.8 + §18 — Ready to implement**
+
+Based on code analysis of `src/sync/gmail_api_sync.rs`, `src/sync/mod.rs`, and `src/doctor.rs`:
+
+**§6.8 Gmail API Sync Provider** (insert after §6.7 Contact Sync, line 951):
+- Provider config: `provider = "gmail-api"` in `[accounts.<name>]`
+- OAuth scope: `GMAIL_SYNC_SCOPE` via `gmail_auth::get_access_token_for_user()`
+- Incremental sync: `historyId`-based via Gmail History API, stored in `.sync-state.json` as `gmail_labels.<label>.last_history_id`
+- Fallback: History API failure → automatic full sync within `sync_days` window
+- Thread identity: Gmail's native `threadId` (not subject-based heuristic like IMAP)
+- Message parsing: `payload.headers` (case-insensitive), `base64url` body decode, `internalDate` epoch millis
+- Graceful shutdown support via `Arc<AtomicBool>` signal
+
+**§18 Doctor + Self-Hosted Deployment** (append after §17 YouTube):
+- CLI: `corky doctor [PROVIDER]` — optional filter: `gmail`, `gmail-api`, `imap`, `protonmail-bridge`, `linkedin`, `youtube`
+- Checks: config loaded, mail dir exists, per-account OAuth/IMAP credentials, token validity (valid/expired-with-refresh/expired/missing)
+- Exit codes: 0 = pass, 1 = any failure
+- Self-hosted: IMAP-only setups work with zero third-party API dependencies, tokens stored locally (`tokens.json`, 0600 perms)
+
+Want me to write these sections directly into `src/corky/SPEC.md` now?
+
+---
+
+**2. Autoclaim input buffer bug**
+
+You're describing a real UX issue: when the JetBrains plugin autoclaims `tasks/corky.md`, it leaves `/agent-doc tasks/agent-doc.md` in Claude Code's input buffer. The user's next `/agent-doc tasks/corky.md` invocation gets appended to that leftover text, producing the malformed argument `tasks/agent-doc.md/agent-doc tasks/corky.md`.
+
+This is an **agent-doc JetBrains plugin issue** — the claim command's output or the way it injects into the input buffer isn't being consumed/cleared properly. The fix would be in `PatchWatcher.kt` — the claim injection should either:
+1. Clear the input buffer before injecting, or
+2. Use a separate channel (not the input buffer) for claims
+
+I'll log this as a bug in `tasks/agent-doc-bugs.md`. Want me to investigate the plugin code for a fix?
 When `❯ /agent-doc tasks/agent-doc.md` is left in the input, another gets append. Resulting with `❯ /agent-doc tasks/agent-doc.md/agent-doc tasks/corky.md`
 <!-- /agent:exchange -->

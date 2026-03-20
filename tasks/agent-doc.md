@@ -429,6 +429,26 @@ line 208: <!-- agent:boundary:1b8c6a90 -->                     <-- stale boundar
 **To fix kevin-volk.md now:** I can reorder the content so the prompts appear before the response. Want me to do that?
 
 **To prevent recurrence:** The `agent-doc write --stream` command needs to always use the component-targeted IPC path when a boundary marker exists, even when the response isn't wrapped in patch blocks. I'll investigate the write path to find where it falls through.
+
+You removed the previous agent:boundary components. Should we re-add and attempt to recover the patch?
+
+### Re: Kevin-Volk Content Reordered (HEAD)
+
+**Re-adding boundaries won't help** — the response is already written, just misplaced. There's no pending patch to re-apply. The fix is a simple content reorder.
+
+**Done:** Moved the user prompts ("He sent me message." and the email subject question) above the Session 9 response in kevin-volk.md. The document now reads in correct order:
+
+```
+Next steps: (from Session 8)
+He sent me message.                              <-- user prompt
+Did you read the email with subject...           <-- user prompt
+### Session 9 — Interview Scheduled              <-- response (HEAD)
+...
+```
+
+**The `0 components` bug** still needs investigation. The kevin-volk session's `agent-doc write --stream` produced `(0 components)` which means the response bypassed the boundary-aware component patch path and went through full-content IPC. This is why the boundary marker wasn't consumed and the response was placed in the wrong position.
+
+Want me to investigate the write path now to find where it falls through to `0 components`?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -57,7 +57,7 @@ I also have deep experience with Python.
 I would rather ask more about the company and what the job is about.
 
 This keeps it concise, shows interest without over-committing, and qualifies the opportunity. Want me to adjust the tone, add/remove questions, or send it via corky?
-### Re: Revised Draft (HEAD)
+### Re: Revised Draft
 
 Good catches. Revised — Python claimed as a strength, questions shifted to role/company substance:
 

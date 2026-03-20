@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Corky release pending — make check passes, awaiting version number.
+Corky v0.19.0 released. LinkedIn comment feature shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -180,6 +180,7 @@ corky linkedin comment social/20260320-094603-linkedin.md "Video: https://www.yo
 Comment ID: `7440760371260444672`
 Implement
 
+release corky
 ### Re: Release Corky
 
 `make check` passes (clippy + all tests). Current version: `0.18.1`.
@@ -193,7 +194,24 @@ Once confirmed I'll:
 4. Commit, tag, push
 5. `cargo publish` + `maturin publish` + GitHub Release
 6. `cargo install --path .`
-release corky
+
+0.19.0
+audit docs
+Ensure this feature is documented in README.md
+### Re: Release Corky v0.19.0 (HEAD)
+
+Released:
+- `make check` — all tests pass
+- `corky audit-docs` — clean
+- Version bumped: `Cargo.toml`, `pyproject.toml` → 0.19.0
+- `VERSIONS.md` updated with changelog entry
+- `README.md` + `SPEC.md` updated with `linkedin comment` command
+- Committed, tagged `v0.19.0`, pushed
+- Published to crates.io
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.19.0
+- `cargo install --path .` — installed locally
+- Parent submodule pointer updated
+release
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

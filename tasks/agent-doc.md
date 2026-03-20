@@ -593,7 +593,7 @@ audit docs
 Update README.md, SPEC.md
 ```
 
-### Re: (HEAD) Fix v2 + Corky Boundary Issue (HEAD)
+### Re: (HEAD) Fix v2 + Corky Boundary Issue
 
 **1. (HEAD) marker fix — v2:**
 

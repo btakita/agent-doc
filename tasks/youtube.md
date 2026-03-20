@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-LinkedIn draft created at mail/social/20260320-094603-linkedin.md. Awaiting publish approval.
+LinkedIn post published. Add YouTube link as first comment manually.
 <!-- /agent:status -->
 
 ## Exchange
@@ -132,6 +132,18 @@ cd mail && corky linkedin publish social/20260320-094603-linkedin.md
 
 Want me to publish the draft now, or do you want to review/edit it first?
 Please use corky to post this to LinkedIn. Please use corky to make the first comment with the link.
+
+### Re: Publish (HEAD)
+
+**Published!** https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
+
+Now add the first comment manually (corky doesn't have `linkedin comment` yet):
+
+1. Open the post link above
+2. Comment: `Video: https://www.youtube.com/watch?v=hVNmbmY4vgo`
+
+Draft file updated at `mail/social/20260320-094603-linkedin.md` with published status and post URL.
+Publish
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

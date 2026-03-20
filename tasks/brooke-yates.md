@@ -24,7 +24,7 @@ Help me draft a follow up reply with more specifics about my external facing app
 Use my experience to draft a specific reply.
 - PresenceAI
 - Menu.com (this may not be something to add...but may be worth a mention)
-### Re: Contact File + Draft Follow-Up (HEAD)
+### Re: Contact File + Draft Follow-Up
 
 Created `mail/contacts/brooke-yates/CLAUDE.md` (with `AGENTS.md` symlink).
 

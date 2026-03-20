@@ -257,4 +257,17 @@ How about including 3D printed creations as well.
 **Updated draft reply to Azizul Rabby Chowdhury:**
 
 Indeed. All those intentions that were always in your head — now they can become working software, or even physical creations off a 3D printer. The shift isn't just speed, it's reach.
+
+From Richard Lee Abraham
+> That's the way it's always been. Tech evolves; new, more efficient ways of doing things become available. AI tools are the latest version of that.
+
+The game keeps on changing. Some people comparatively benefit more than others. It's ultimately leverage that people can use or not use.
+
+**Re: Richard Lee Abraham reply**
+
+Your leverage point is strong. Here's a polished version:
+
+**Draft reply to Richard Lee Abraham:**
+
+Exactly — and the difference this time is the magnitude of leverage. Previous tech shifts gave you 2x, maybe 10x. This one is giving individual builders leverage that used to require entire teams. The game keeps changing; the people who benefit most are the ones who pick up the new tools first.
 <!-- /agent:exchange -->

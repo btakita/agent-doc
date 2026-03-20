@@ -117,7 +117,7 @@ So the LinkedIn post body stays link-free:
 
 Then first comment: `Video: https://www.youtube.com/watch?v=hVNmbmY4vgo`
 
-### Re: LinkedIn Post via Corky (HEAD)
+### Re: LinkedIn Post via Corky
 
 **Draft created:** `mail/social/20260320-094603-linkedin.md`
 

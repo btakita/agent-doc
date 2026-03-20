@@ -154,7 +154,7 @@ Should we wait until Monday?
 Dropped "hope you had a good week" since the week isn't over yet. Otherwise same message — it reads fine for a Friday evening text.
 
 We also have Tony Tomai (account lead) and Anil Podduturi. Should I send messages to either of them?
-### Who to message (HEAD)
+### Who to message
 
 **Dave Franklin — yes, send the SMS now** (the draft from above).
 

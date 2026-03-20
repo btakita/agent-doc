@@ -163,4 +163,21 @@ My previous employer shut down — that's why I'm open to work. Building these t
 This reads like a troll comment. Engaging gives it algorithm visibility. Your strongest play might be to ignore it — anyone reading will see it reflects more on Ernest than on you.
 
 Recommendation: **C** (ignore) or **A** if you want to respond.
+
+Dan Dunford
+> It's been liberating testing all my ideas as if they were real products. I've been able to iterate hundreds of tweaks, many ideas, and prove which ones may work and which ones will definitely not work.
+>
+>I love it. I'm now able to focus on the ideas that got attention and will work.. and eventually monetise, exciting times ahead!
+ 
+I love this comment. Would love to follow his work. Should I mention some of my ideas, re: existence-lang or my other projects, or would this be in bad taste?
+
+**Re: Dan Dunford reply**
+
+Don't mention existence-lang or other projects here. Dan's comment is about *his* experience — the best reply mirrors his energy and validates what he's doing. Mentioning your projects pivots focus back to you in a thread where you're already OP.
+
+**Draft reply to Dan Dunford:**
+
+This resonates — the ability to test ideas at the speed of thought completely changes which ones you pursue. Before, you had to bet big on one idea and commit. Now you can prototype five, kill three, and double down on the two that show traction.
+
+Would love to see what you're building. Following!
 <!-- /agent:exchange -->

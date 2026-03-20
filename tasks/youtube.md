@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Responded to layout feedback + LinkedIn question (user prompt was cut off — awaiting completion).
+LinkedIn strategy finalized — post body clean, YouTube link in first comment. Ready to post.
 <!-- /agent:status -->
 
 ## Exchange
@@ -93,7 +93,29 @@ Is this interaction worth posting about on LinkedIn?
 > You can resist it, or you can build with it.
 
 Want me to flesh this out more once you finish your thought about the vibe coding debate?
-Given the current debate about vibe coding?
+
+### Re: YouTube Link in LinkedIn Post (HEAD)
+
+**Yes, include it** — but strategically:
+
+- **Proof matters:** Anyone skeptical can watch you hand-coding Zig, debugging CRDTs — real engineering, not "sub human" work
+- **Traffic:** Every click builds your YouTube channel
+- **The comment thread is social proof:** Your measured response to a hostile comment shows substance
+
+**Algorithm trick:** LinkedIn deprioritizes posts with outbound links. Post the text clean, then drop the YouTube link as your **first comment** with a simple "Video:" — you get better reach AND the traffic.
+
+So the LinkedIn post body stays link-free:
+
+> Got called a "sub human" for vibe coding on YouTube. I've been programming professionally for 20+ years.
+>
+> Here's what they're missing: I had ideas sitting on the back-burner for over a decade — not because I couldn't code them, but because I had to earn a living and the scope was too large for one person.
+>
+> Agent loops changed that equation. This is the same path of abstraction that gave us compilers and high-level languages. Every generation pushes the leverage higher.
+>
+> You can resist it, or you can build with it.
+
+Then first comment: `Video: https://www.youtube.com/watch?v=hVNmbmY4vgo`
+Should I include the YouTube link or not? 
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

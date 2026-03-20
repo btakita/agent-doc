@@ -20,7 +20,7 @@ https://www.linkedin.com/in/lucas-noble-62441b232/
 See /home/brian/work/btakita/agent-loop/mail/contacts/lucas-noble/20260320-linkedin-lucas-noble.txt
 
 Make a AGENTS.md/CLAUDE.md for him.
-### Re: Lucas Noble Contact File (HEAD)
+### Re: Lucas Noble Contact File
 
 Created `mail/contacts/lucas-noble/CLAUDE.md` (with `AGENTS.md` symlink) capturing:
 

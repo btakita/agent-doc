@@ -176,7 +176,7 @@ This lets Anil connect the dots himself. If he's involved in Project Helix hirin
 I already sent Anil a message. He has not read it. Tony asked me to mention that I'm going through the recruiter.
 
 Should I edit this or send a followup?
-### Anil follow-up: send a new message, don't edit (HEAD)
+### Anil follow-up: send a new message, don't edit
 
 **Send a follow-up.** Don't edit the original. Reasons:
 

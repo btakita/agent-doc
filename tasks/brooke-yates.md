@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised draft ready for review.
+Draft with Rundavoo ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -66,6 +66,31 @@ Dropped daily usage claim for Censible, added Menu.com as a brief mention alongs
 > **Censible** (Lead Product Developer, 2016–2024) — Built an ESG analytics SaaS platform including an investor-facing portfolio rebalancing tool and the Martin Investments analyst portal with ESG rating algorithms.
 >
 > I've also built external-facing products at Menu.com (restaurant platform, since rebuilt), Milyoni (social entertainment platform used by Warner Brothers, Paramount, Universal Music Group), and TrueCar/honk.com (vehicle review platform white-labeled for USAA and Wall Street Journal).
+>
+> Happy to dive deeper on any of these Tuesday at 1 PM as proposed.
+>
+> Best,
+> Brian
+
+Ready to send, or further tweaks?
+Rundavoo was a social friend group gathering app (is this a good name or is there something better) that won a 2014 Google Top 100 New Products Award.
+
+Please research Rundavoo for more info. Some of the info is in my resume.
+### Re: Adding Rundavoo (HEAD)
+
+From your resume: Rundavoo was a **Google top 75 app in 2014** (not top 100 — resume says 75). You were Platform Architect / Lead Front End Developer for ~2 years. Responsive multi-platform consumer app (desktop, tablet, mobile via PhoneGap).
+
+Updated draft with Rundavoo:
+
+> Hi Brooke,
+>
+> To give you more specifics on the customer-facing / SaaS side:
+>
+> **Presence AI** (Lead Backend Engineer, 2024–2026) — Built the production-facing real-time AI avatar platform. This is an external B2C SaaS product where end users interact with AI avatars through a Next.js/React frontend delivered over WebRTC. I architected the full video pipeline (lip-sync, facial landmarks, frame sequencing on NVIDIA H100 GPUs) and the GraphQL API layer that serves the frontend.
+>
+> **Censible** (Lead Product Developer, 2016–2024) — Built an ESG analytics SaaS platform including an investor-facing portfolio rebalancing tool and the Martin Investments analyst portal with ESG rating algorithms.
+>
+> I've also built external-facing products at Rundavoo (social gathering app, Google top 75 app in 2014 — led front-end across desktop, tablet, and mobile), Menu.com (restaurant platform, since rebuilt), Milyoni (social entertainment platform used by Warner Brothers, Paramount, Universal Music Group), and TrueCar/honk.com (vehicle review platform white-labeled for USAA and Wall Street Journal).
 >
 > Happy to dive deeper on any of these Tuesday at 1 PM as proposed.
 >

@@ -114,14 +114,46 @@ pub fn commit(file: &Path) -> Result<()> {
         .args(["commit", "-m", &msg, "--no-verify"])
         .status();
 
-    // Signal the IDE plugin to refresh VCS state (git gutter update)
+    // After commit, strip (HEAD) markers from the snapshot so the working tree
+    // is clean. The committed content has (HEAD) markers; the working tree should not.
+    // This creates the blue gutter diff the user sees.
     if let Ok(ref s) = commit_status {
         if s.success() {
+            // Strip (HEAD) from snapshot
+            if let Some(ref snap) = snapshot_content {
+                let clean_snap = strip_head_markers(snap);
+                if clean_snap != *snap {
+                    if let Err(e) = crate::snapshot::save(file, &clean_snap) {
+                        eprintln!("[commit] failed to clean snapshot: {}", e);
+                    }
+                    // Also update the working tree file to match the clean snapshot
+                    if let Err(e) = std::fs::write(file, &clean_snap) {
+                        eprintln!("[commit] failed to update working tree: {}", e);
+                    }
+                }
+            }
             signal_vcs_refresh(file);
         }
     }
 
     Ok(())
+}
+
+/// Strip ` (HEAD)` suffix from markdown heading lines only.
+fn strip_head_markers(content: &str) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        lines.push(line);
+    }
+    let result: String = lines.iter().map(|line| {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') && line.ends_with(" (HEAD)") {
+            &line[..line.len() - 7]
+        } else {
+            line
+        }
+    }).collect::<Vec<&str>>().join("\n");
+    if content.ends_with('\n') { format!("{}\n", result) } else { result }
 }
 
 /// Write a signal file to `.agent-doc/patches/` that tells the IDE plugin
@@ -417,5 +449,32 @@ fn chrono_timestamp() -> String {
     match output {
         Some(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         None => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_head_markers_from_headings() {
+        let input = "# Title\n### Re: Foo (HEAD)\nSome text with (HEAD) in it\n### Re: Bar (HEAD)\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "# Title\n### Re: Foo\nSome text with (HEAD) in it\n### Re: Bar\n");
+    }
+
+    #[test]
+    fn strip_head_markers_preserves_non_heading_lines() {
+        let input = "Normal line (HEAD)\n### Heading (HEAD)\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "Normal line (HEAD)\n### Heading\n");
+    }
+
+    #[test]
+    fn add_head_marker_strips_old_markers() {
+        let content = "### Re: Old (HEAD)\n### Re: New\n";
+        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
+        assert!(!result.contains("### Re: Old (HEAD)"), "old heading should not have (HEAD)");
+        assert!(result.contains("### Re: New (HEAD)") || result.contains("### Re: Old\n"), "old (HEAD) should be stripped");
     }
 }

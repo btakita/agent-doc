@@ -211,6 +211,29 @@ Created `examples/agent-doc/` in the agent-doc repo with three files:
 - Publish targets: GitHub README, blog, HN/Reddit
 
 Committed in the submodule at `c6bb882`.
+
+tasks/kevin-volk.md has an orphaned agent:boundary.
+Do we have enough logging to understand what happened? If not, add necessary logging.
+Add tests and fix.
+
+### Re: Orphaned Boundary Markers — Fixed (HEAD)
+
+**Root cause:** `boundary::insert()` adds a new marker but never cleans up existing ones. When a session is interrupted between boundary insertion (step 1b) and response write (step 4) — due to context compaction, user cancel, or crash — the marker is orphaned. `kevin-volk.md` had two orphaned markers from two interrupted sessions.
+
+**Fix:** `insert()` now calls `remove_all()` before inserting the new marker. Any stale markers are cleaned up automatically.
+
+**Logging added:**
+```
+[boundary] removed 2 stale boundary marker(s) before inserting new one
+```
+This logs to stderr whenever stale markers are found, giving visibility into interrupted sessions.
+
+**Test added:** `insert_cleans_stale_markers` — simulates two orphaned markers in an exchange component, verifies they're removed and only the new marker remains.
+
+**Verified:** Running `agent-doc boundary tasks/kevin-volk.md` cleaned up the 2 stale markers and inserted a fresh one. 453 tests pass (160 lib + 293 bin). Release binary rebuilt and installed.
+
+**Why this wasn't caught earlier:** The `remove()` and `remove_all()` functions existed but were only used in unit tests — no production code path called them. The happy path (response written successfully) replaces the marker via `append_with_boundary()`, so cleanup was only needed for the interrupted path.
+Can we add a way to recover from orphaned agent:boundary tags?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -123,10 +123,18 @@ Should I post links to corky + agent-doc?
 Skip the links for this reply:
 1. **Comment replies with links get deprioritized** by LinkedIn's algorithm and look self-promotional
 2. **The repos are likely private** — dead links are worse than no links
+The repos are public. You should know that.
+   https://crates.io/crates/corky
+   https://crates.io/crates/agent-doc
 3. **The narrative is stronger without them** — origin story > sales pitch in a comment thread
 4. **Save for follow-up** — if Michael asks "where can I see it?", share links naturally then
 
 You already name-drop "corky" and "agent-doc" in the reply text. Curious people will ask.
 
 **Ready to post as-is** — the unquoted draft above is good to go. Copy-paste into the LinkedIn comment box.
+I agree with your other points
+
+**Re: repos are public**
+
+You're right — my mistake. Both are published on crates.io. I should have known that. Recommendation still stands though: skip the links in this reply for the algorithm/narrative reasons. Post the draft as-is.
 <!-- /agent:exchange -->

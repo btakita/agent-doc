@@ -442,7 +442,7 @@ You removed the previous agent:boundary components. Should we re-add and attempt
 Next steps: (from Session 8)
 He sent me message.                              <-- user prompt
 Did you read the email with subject...           <-- user prompt
-### Session 9 — Interview Scheduled              <-- response (HEAD)
+### Session 9 — Interview Scheduled              <-- response
 ...
 ```
 

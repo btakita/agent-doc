@@ -55,6 +55,30 @@ pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &s
     }
 }
 
+/// Find any boundary ID within a pre-parsed component.
+///
+/// Scans the component's content for any `<!-- agent:boundary:UUID -->` marker,
+/// skipping matches inside code blocks. Returns the UUID if found.
+pub fn find_boundary_id_in_component(doc: &str, comp: &component::Component) -> Option<String> {
+    let content_region = &doc[comp.open_end..comp.close_start];
+    let code_ranges = component::find_code_ranges(doc);
+    let mut search_from = 0;
+    while let Some(start) = content_region[search_from..].find(BOUNDARY_PREFIX) {
+        let abs_start = comp.open_end + search_from + start;
+        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+            search_from += start + BOUNDARY_PREFIX.len();
+            continue;
+        }
+        let after_prefix = &content_region[search_from + start + BOUNDARY_PREFIX.len()..];
+        if let Some(end) = after_prefix.find(BOUNDARY_SUFFIX) {
+            let id = &after_prefix[..end];
+            return Some(id.trim().to_string());
+        }
+        break;
+    }
+    None
+}
+
 /// Insert a boundary marker at the end of an append-mode component's content.
 ///
 /// Any existing boundary markers in the component are removed first to prevent

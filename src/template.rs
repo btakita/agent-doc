@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::component;
+use crate::component::{self, Component};
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -226,14 +226,20 @@ pub fn apply_patches_with_overrides(
             .context("failed to re-parse components after patching")?;
 
         if let Some(output_comp) = components.iter().find(|c| c.name == "exchange" || c.name == "output") {
-            // Append to existing exchange/output component
-            let existing = output_comp.content(&result);
-            let new_content = if existing.trim().is_empty() {
-                format!("{}\n", unmatched)
+            // Try boundary-aware append first (preserves prompt ordering)
+            if let Some(bid) = find_boundary_in_component(&result, output_comp) {
+                eprintln!("[template] unmatched content: using boundary {} for insertion", &bid[..bid.len().min(8)]);
+                result = output_comp.append_with_boundary(&result, unmatched, &bid);
             } else {
-                format!("{}{}\n", existing, unmatched)
-            };
-            result = output_comp.replace_content(&result, &new_content);
+                // No boundary — plain append to exchange/output component
+                let existing = output_comp.content(&result);
+                let new_content = if existing.trim().is_empty() {
+                    format!("{}\n", unmatched)
+                } else {
+                    format!("{}{}\n", existing, unmatched)
+                };
+                result = output_comp.replace_content(&result, &new_content);
+            }
         } else {
             // Auto-create exchange component at the end
             if !result.ends_with('\n') {
@@ -246,6 +252,28 @@ pub fn apply_patches_with_overrides(
     }
 
     Ok(result)
+}
+
+/// Find a boundary marker ID inside a component's content, skipping code blocks.
+fn find_boundary_in_component(doc: &str, comp: &Component) -> Option<String> {
+    let prefix = "<!-- agent:boundary:";
+    let suffix = " -->";
+    let content_region = &doc[comp.open_end..comp.close_start];
+    let code_ranges = component::find_code_ranges(doc);
+    let mut search_from = 0;
+    while let Some(start) = content_region[search_from..].find(prefix) {
+        let abs_start = comp.open_end + search_from + start;
+        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+            search_from += start + prefix.len();
+            continue;
+        }
+        let after_prefix = &content_region[search_from + start + prefix.len()..];
+        if let Some(end) = after_prefix.find(suffix) {
+            return Some(after_prefix[..end].trim().to_string());
+        }
+        break;
+    }
+    None
 }
 
 /// Get template info for a document (for plugin rendering).
@@ -857,5 +885,39 @@ real status content
         assert!(result.contains("example scaffold content"), "code block content should be preserved");
         // The code block's markers should still be there
         assert!(result.contains("```markdown\n<!-- agent:status -->"), "code block markers should be preserved");
+    }
+
+    #[test]
+    fn unmatched_content_uses_boundary_marker() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "User prompt here.\n",
+            "<!-- agent:boundary:test-uuid-123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        // No patch blocks — only unmatched content (simulates skill not wrapping in patch blocks)
+        let patches = vec![];
+        let unmatched = "### Re: Response\n\nResponse content here.\n";
+
+        let result = apply_patches(doc, &patches, unmatched, &file).unwrap();
+
+        // Response should be inserted at the boundary marker position (after prompt)
+        let prompt_pos = result.find("User prompt here.").unwrap();
+        let response_pos = result.find("### Re: Response").unwrap();
+        assert!(
+            response_pos > prompt_pos,
+            "response should appear after the user prompt (boundary insertion)"
+        );
+
+        // Boundary marker should be consumed (replaced by response)
+        assert!(
+            !result.contains("test-uuid-123"),
+            "boundary marker should be consumed after insertion"
+        );
     }
 }

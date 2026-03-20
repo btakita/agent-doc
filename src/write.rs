@@ -675,7 +675,7 @@ pub fn try_ipc(
     let current_doc = std::fs::read_to_string(file).unwrap_or_default();
 
     // Separate frontmatter patch from component patches
-    let ipc_patches: Vec<serde_json::Value> = patches
+    let mut ipc_patches: Vec<serde_json::Value> = patches
         .iter()
         .filter(|p| p.name != "frontmatter")
         .map(|p| {
@@ -690,10 +690,32 @@ pub fn try_ipc(
         })
         .collect();
 
+    // When no explicit patches exist but unmatched content needs to go to exchange,
+    // synthesize an exchange patch so the plugin uses boundary-aware insertion.
+    let mut effective_unmatched = unmatched.trim().to_string();
+    if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
+        // Check if there's an exchange/output component with a boundary
+        for target in &["exchange", "output"] {
+            if let Some(bid) = find_boundary_id(&current_doc, target) {
+                eprintln!(
+                    "[write] synthesizing {} patch for unmatched content (boundary {})",
+                    target, &bid[..8.min(bid.len())]
+                );
+                ipc_patches.push(serde_json::json!({
+                    "component": target,
+                    "content": effective_unmatched,
+                    "boundary_id": bid,
+                }));
+                effective_unmatched = String::new();
+                break;
+            }
+        }
+    }
+
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
-        "unmatched": unmatched.trim(),
+        "unmatched": effective_unmatched,
         "baseline": baseline.unwrap_or(""),
     });
 

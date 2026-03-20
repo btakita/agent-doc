@@ -48,7 +48,7 @@ Here are a few options, building on your draft. Each keeps your authenticity whi
 
 I'd lean toward **Option A** — it's personal, addresses the criticism directly without being defensive, and ends with agency. The "10 years on the back-burner" detail is your strongest point because it shows this isn't laziness, it's unlocked ambition.
 
-### Re: Review of Option A Edits (HEAD)
+### Re: Review of Option A Edits
 
 Your two changes are solid:
 

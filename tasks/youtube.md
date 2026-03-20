@@ -213,7 +213,7 @@ Released:
 - Parent submodule pointer updated
 release
 
-### Re: Post Comment (HEAD)
+### Re: Post Comment
 
 Already done! The YouTube link comment was posted earlier in this session (before the release):
 

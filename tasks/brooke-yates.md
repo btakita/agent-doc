@@ -53,7 +53,7 @@ Milyoni can be used but it was a long time ago.
 Menu.com can be used but it has been rebuilt.
 
 Left Menu.com out — the other examples are stronger. Want to add it, adjust anything, or send?
-### Re: Revised Draft (HEAD)
+### Re: Revised Draft
 
 Dropped daily usage claim for Censible, added Menu.com as a brief mention alongside Milyoni:
 

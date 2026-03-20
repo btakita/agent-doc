@@ -343,7 +343,7 @@ How can we recover the session response to patch the agent document?
 
 ● Bash(cat <<'RESPONSE' | agent-doc write /home/brian/work/btakita/agent-loop/tasks/kevin-volk.md --baseline-file
       /tmp/agent-doc-baseline-531473.md --stream
-      ### Sessio…) (HEAD)
+      ### Sessio…)
   ⎿  [snapshot] saved pre-response snapshot for /home/brian/work/btakita/agent-loop/tasks/kevin-volk.md
      [write] IPC patch written to /home/brian/work/btakita/agent-loop/.agent-doc/patches/235d84826e3bbef427f3770e5
      63acd2d1e9012af364c8376352e285b78bc5df0.json (0 components)

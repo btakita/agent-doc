@@ -453,4 +453,36 @@ This is an **agent-doc JetBrains plugin issue** — the claim command's output o
 
 I'll log this as a bug in `tasks/agent-doc-bugs.md`. Want me to investigate the plugin code for a fix?
 When `❯ /agent-doc tasks/agent-doc.md` is left in the input, another gets append. Resulting with `❯ /agent-doc tasks/agent-doc.md/agent-doc tasks/corky.md`
+
+`corky watch` is incorrectly downloading the entire INBOX for brian.takita@gmail.com
+It should only be downloading the entire INBOX for btak.dev@gmail.com
+
+```
+Syncing label: INBOX
+  No prior state — doing full sync
+  Fetching 1853399 message(s)
+```
+### Investigating: INBOX Full Sync for brian.takita@gmail.com (HEAD)
+
+Analyzed the config and code. Here's what I found:
+
+**Config state** (mail/.corky.toml):
+- `accounts.personal` (brian.takita@gmail.com): `provider = "gmail"` (IMAP), `labels = ["correspondence", "for-lucas", "voice-sms"]` — **no INBOX**
+- `accounts.btak.dev` (btak.dev@gmail.com): `provider = "gmail-api"`, `labels = ["INBOX"]`, `sync_days = 30`
+
+**Sync state** (.sync-state.json):
+- `personal`: has state for correspondence/for-lucas/voice-sms only
+- `btak.dev`: has `gmail_labels.INBOX.last_history_id = 60936`
+
+**Code analysis:**
+The message `"Syncing label: INBOX"` + `"No prior state"` + `"Fetching 1853399 message(s)"` comes from `imap_sync.rs:356,379,407` — the **IMAP path**, not gmail-api. But the personal account doesn't have INBOX in its labels, and nothing in the code injects it.
+
+**Puzzle:** 1.8M messages is too many for btak.dev (sync_days=30), but brian.takita doesn't have INBOX configured.
+
+**Questions to resolve:**
+1. Can you paste the full watch output showing the account header (`=== Account: ... ===`) before the INBOX sync line? I need to confirm which account it's happening under.
+2. Is there a `corky sync --full` that might have run recently? (That resets all state but shouldn't add INBOX)
+3. Is `corky watch` running from a different directory that might pick up a different `.corky.toml`?
+
+If the account header shows `btak.dev`, then the issue is the **history API failing** and falling back to full sync with the wrong `sync_days` (it would use 30, not 3650, so 1.8M messages wouldn't match). If it shows `personal`, something is injecting INBOX into the label set outside of what I can see in the code.
 <!-- /agent:exchange -->

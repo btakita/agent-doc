@@ -5,4 +5,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-
+<!-- agent:exchange patch=append -->
+I want to delete controversial tweets from my x.com profile.
+Please help me filter and selectively delete.
+<!-- /agent:exchange -->

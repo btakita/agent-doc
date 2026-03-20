@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.23.0 | **Tests:** 450 (158 lib + 292 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.23.1 | **Tests:** 454 (161 lib + 293 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
@@ -469,6 +469,35 @@ investigate
 **454 tests pass** (161 lib + 293 bin). Release binary rebuilt and installed.
 
 **This fixes the kevin-volk ordering bug.** The next time a session sends a response without explicit patch blocks, the boundary marker will be used for correct insertion ordering.
+
+release
+
+
+### Re: v0.23.1 Released (HEAD)
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.23.1` ✓ |
+| GitHub Release | [v0.23.1](https://github.com/btakita/agent-doc/releases/tag/v0.23.1) ✓ |
+| cargo install | v0.23.1 ✓ |
+| SKILL.md | v0.23.1 installed ✓ |
+
+**What's new in v0.23.1:**
+- Stale boundary marker cleanup on insert (orphaned marker fix)
+- Boundary-aware insertion for unmatched content (0 components bug)
+- `find_boundary_id_in_component()` + `find_boundary_in_component()` helpers
+- `examples/agent-doc/` — sanitized task file + README + blog outline
+- pyproject.toml version synced (was stuck at 0.22.2)
+
+454 tests (161 lib + 293 bin).
+
+**Your truncated message** — "Btw, age" — got cut off again. What were you going to say?
+There was an external edit. The agent:boundary insertion does seem to be using the CRDT.
+
+Btw, tasks/kevin-volk.md does have an open and close agent:exchange tag.
+Does the agent:boundary not having a close tag confuse the parser?
+I do like agent:boundary not having a close tag btw. Do we seed special syntax to support it though such as?
+`<!-- agent:boundary:7db33bcf-26eb-4448-9dba-ac1b75b40486 / -->`
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

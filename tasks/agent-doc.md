@@ -157,6 +157,33 @@ Archived 591 lines to `.agent-doc/archives/`. Use `agent-doc history tasks/agent
 - Plugin exchange component defaulting to replace instead of append
 
 **Released:** v0.22.0 → v0.22.1 → v0.22.2 → v0.23.0. JetBrains plugin v0.2.7 → v0.2.8. 452 tests (160 lib + 292 bin).
+
+Should I move this tasks file into the agent-doc repo to demonstrate how it is developed?
+I would also like to make a post about this.
+
+### Re: Task File Migration + Blog Post (HEAD)
+
+**Moving the task file — yes, the compacted state is ideal.**
+
+The current document is a clean product summary without personal conversation artifacts. Suggested approach:
+
+1. **Copy to `src/agent-doc/docs/development-log.md`** (or `DEVELOPMENT.md` at root)
+2. The compacted exchange summaries read like release notes — good for public consumption
+3. The archived exchanges in `.agent-doc/archives/` stay in agent-loop (private) — they reference other task files with personal context
+
+**Privacy note:** The current document references `tasks/laura-klask.md`, `tasks/judith-krug.md`, etc. in the exchange history. The compacted summaries don't contain personal details, but the full archives do. Only the current document content should go public.
+
+**Blog post** — issue [#28](https://github.com/btakita/agent-doc/issues/28) already tracks this. This task file is a perfect case study:
+
+- **What:** document-as-UI for AI sessions (template mode, CRDT merge, boundary markers)
+- **How:** this task file demonstrates the full lifecycle — feature discussion → implementation → bug discovery → fix → release
+- **Story:** the boundary marker evolution (caret-based → offset → hash → marker) shows iterative problem-solving in a document session
+- **Artifacts:** the lessons list, architecture section, and release history are all maintained by the agent through the document
+
+Want me to:
+1. Copy the task file into the agent-doc repo now?
+2. Draft a blog post outline?
+3. Both?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-LinkedIn published. Corky `linkedin comment` feature tracked in pending.
+`corky linkedin comment` implemented and deployed. YouTube link comment posted on LinkedIn.
 <!-- /agent:status -->
 
 ## Exchange
@@ -136,17 +136,6 @@ Publish
 
 ### Re: Publish
 
-### Re: Corky LinkedIn Comment Command
-
-Good call. The LinkedIn API supports it via `POST /socialActions/{shareUrn}/comments`. Since corky already has:
-- LinkedIn OAuth flow
-- Post URN stored in the draft file after publish (`post_id: urn:li:share:...`)
-
-The implementation would be:
-```
-corky linkedin comment <POST_FILE_OR_URN> "comment text"
-```
-
 This is a corky feature — I'll add it to pending for the corky task. For now, add the YouTube link comment manually on the published post.
 
 Should I open the corky task to start implementing this, or just track it for later?
@@ -160,10 +149,40 @@ Now add the first comment manually (corky doesn't have `linkedin comment` yet):
 Draft file updated at `mail/social/20260320-094603-linkedin.md` with published status and post URL.
 
 Let's add a comment command into corky.
+
+### Re: Corky LinkedIn Comment Command
+
+Good call. The LinkedIn API supports it via `POST /socialActions/{shareUrn}/comments`. Since corky already has:
+- LinkedIn OAuth flow
+- Post URN stored in the draft file after publish (`post_id: urn:li:share:...`)
+
+The implementation would be:
+```
+corky linkedin comment <POST_FILE_OR_URN> "comment text"
+```
+
+### Re: Implement LinkedIn Comment (HEAD)
+
+Done! `corky linkedin comment` is implemented and working.
+
+**What was built:**
+- `linkedin.rs`: `create_comment()` / `create_comment_at()` — POST to `/v2/socialActions/{encodedUrn}/comments`
+- `cli.rs`: `Comment { file, body }` variant in `LinkedinCommands`
+- `mod.rs`: `run_comment()` orchestration (parse draft → resolve author → get token → post comment)
+- `main.rs`: dispatch wiring
+
+**API note:** The versioned `/rest/socialActions` endpoint requires partner-level permissions. Personal tokens with `w_member_social` scope use the v2 API path (`/v2/socialActions/`) instead.
+
+**YouTube link comment posted:**
+```
+corky linkedin comment social/20260320-094603-linkedin.md "Video: https://www.youtube.com/watch?v=hVNmbmY4vgo"
+```
+Comment ID: `7440760371260444672`
+Implement
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- `corky linkedin comment` — Add ability to comment on published LinkedIn posts via API. URN already stored in draft frontmatter after publish.
+(cleared — linkedin comment implemented)
 <!-- /agent:pending -->

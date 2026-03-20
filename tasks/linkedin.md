@@ -104,15 +104,29 @@ Agents make it easier to follow all of the practices that once took too much tim
 
 **Draft reply to Michael Darmousseh:**
 
-> I haven't used Karpathy's autoresearch technique specifically, but the journey that led me here rhymes with it.
->
-> I inherited a real-time video lipsync codebase from a colleague who left. After months of hand-coded + AI-augmented improvements — refactoring processes, performance, stability — the documentation was completely out of sync. I had Claude audit and reconcile it, and it did surprisingly well.
->
-> A week later the company shut down. Coming back to the job market, I was inspired by teams doing 100% spec-driven development — no one touches code directly. So I built corky (correspondence kit) to manage my outreach, and agent-doc grew out of that — influenced by interactive document workflows I'd built back in 2015 hooked into Salesforce.
->
-> From there it's been iterating on the practices: research loops, evolving SKILL.md for agentic context, building deterministic operations in Rust, continuous review. The key insight is that agents make it feasible to follow *all* the practices that used to get dropped under schedule pressure.
->
-> Would love to hear more about your autoresearch implementation — are you optimizing skills based on execution traces, or something else?
+I haven't used Karpathy's autoresearch technique specifically, but the journey that led me here rhymes with it.
+
+I inherited a real-time video lipsync codebase from a colleague who left. After months of hand-coded + AI-augmented improvements — refactoring processes, performance, stability — the documentation was completely out of sync. I had Claude audit and reconcile it, and it did surprisingly well.
+
+A week later the company shut down. Coming back to the job market, I was inspired by teams doing 100% spec-driven development — no one touches code directly. So I built corky (correspondence kit) to manage my outreach, and agent-doc grew out of that — influenced by interactive document workflows I'd built back in 2015 hooked into Salesforce.
+
+From there it's been iterating on the practices: research loops, evolving SKILL.md for agentic context, building deterministic operations in Rust, continuous review. The key insight is that agents make it feasible to follow *all* the practices that used to get dropped under schedule pressure.
+
+Would love to hear more about your autoresearch implementation — are you optimizing skills based on execution traces, or something else?
 
 Tightened your story into LinkedIn-appropriate length while keeping the authentic narrative arc. Closing question invites continued conversation. Adjust tone/length/emphasis as needed.
+
+Should I post links to corky + agent-doc?
+
+**Re: Should I post links?**
+
+Skip the links for this reply:
+1. **Comment replies with links get deprioritized** by LinkedIn's algorithm and look self-promotional
+2. **The repos are likely private** — dead links are worse than no links
+3. **The narrative is stronger without them** — origin story > sales pitch in a comment thread
+4. **Save for follow-up** — if Michael asks "where can I see it?", share links naturally then
+
+You already name-drop "corky" and "agent-doc" in the reply text. Curious people will ask.
+
+**Ready to post as-is** — the unquoted draft above is good to go. Copy-paste into the LinkedIn comment box.
 <!-- /agent:exchange -->

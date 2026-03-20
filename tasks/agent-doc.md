@@ -432,6 +432,64 @@ Are the recent updates in SPEC.md...?   ← user prompt (typed after response)
 Has the plugin been installed yet? If not, the path is:
 `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.7.zip`
 > ### Audit Docs Results
+
+In tasks/youtube.md, the agent response patch is still being placed above the prompt.
+The earlier feature to place the agent response patch to code being edited is overeager.
+
+
+### Re: Cursor-Aware Ordering is Inverted (HEAD)
+
+The problem is clear from the youtube.md git history. The current `append_with_caret()` logic:
+
+1. Finds the caret position (where user is typing)
+2. Inserts the response ABOVE the caret
+
+This means when the user types new text while waiting for a response, the response lands ABOVE their new text — but also ABOVE the original prompt. The response ends up interleaved between pre-existing content and the user's prompt.
+
+**The correct logic needs the baseline.** The plugin currently has no information about what the document looked like when the agent received the diff. Without that, it can't distinguish "old prompt" from "new typing."
+
+**Proposed fix — baseline offset in patch metadata:**
+
+When `agent-doc write` creates the patch file in `.agent-doc/patches/`, it already knows the baseline (passed via `--baseline-file`). Include the **byte offset of the end of the component content in the baseline** as metadata in the patch file:
+
+```json
+{
+  "component": "exchange",
+  "mode": "append",
+  "content": "### Re: ...\
+...",
+  "baseline_content_end": 2847
+}
+```
+
+Then the plugin's insertion logic becomes:
+
+1. Read `baseline_content_end` from the patch
+2. Find the component boundaries in the current document
+3. Insert the response at `component_start + baseline_content_end` (clamped to component bounds)
+4. This places it after the prompt the agent saw, before any new user typing
+
+**Scenarios:**
+
+| Case | baseline_content_end | Effect |
+|------|---------------------|--------|
+| User finished prompt, waiting | == current component end | Same as normal append |
+| User typed more after prompt | < current component end | Response goes between old prompt and new text |
+| User deleted text | > current component end | Clamped, same as normal append |
+
+This is a cleaner signal than caret position because it directly encodes "where the agent's view of the content ended."
+
+**Alternative (simpler but less precise):** Include the last N characters or a hash of the prompt tail in the patch metadata. The plugin finds that text in the document and inserts after it. Less robust but avoids offset tracking.
+
+Which approach do you prefer? I can implement either in the Rust binary + plugin.
+We need to place the agent response patch below the prompt used to generate the response.
+
+So in the following scenarios:
+- Human completely finishes the prompt
+  - agent response patch should be below the prompt
+- Human is still typing a prompt while the response to a previous prompt is being generated
+  - agent response patch should be below the part of the prompt that the agent received and generated the answer
+  - agent response patch should be above the prompt that was being edited
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

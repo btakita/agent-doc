@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.23.3 | **Tests:** 459 (162 lib + 297 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.24.0 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
 **Library:** \`libagent_doc.so\` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
@@ -86,6 +86,7 @@ claude_args: --dangerously-skip-permissions
 | v0.22.0-v0.23.0 | Boundary marker ordering, claim auto-start, VCS refresh, any-level HEAD markers, exchange default mode, SKILL.md immediate commit, code-block boundary fix. JB v0.2.8. 452 tests. |
 | v0.23.1-v0.23.2 | Stale boundary cleanup, boundary-aware insertion (unmatched + explicit patches), IPC snapshot \`content_ours\` fix, (HEAD) marker accumulation fix, examples/blog outline. 459 tests. |
 | v0.23.3 | Cross-platform sync pane guard (\`ps\` instead of \`/proc\`), pre-sync duplicate pane prevention, clippy fixes. 459 tests. |
+| v0.24.0 | \`agent-doc install\` (system setup), \`agent-doc init\` (project setup), lazy project init, SKILL.md content validation tests. 497 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -429,7 +430,9 @@ Or is the best validation dog-fooding agent-doc?
 
 **What we CAN add to automated tests:**
 - \`test_skill_md_contains_required_steps\` — parse SKILL.md, verify steps 0-5 are present
+yes
 - \`test_skill_md_references_valid_commands\` — extract all \`agent-doc <cmd>\` references, verify each is a valid subcommand
+Do this.
 - \`test_skill_md_version_matches_binary\` — already covered by \`test_cli_skill_check_after_install\`
 
 **\`agent-doc audit-docs\`** already does most of this. The audit checks SKILL.md, CLAUDE.md, and SPEC.md for stale references. Running \`make precommit\` (which includes audit-docs) before release catches structural drift.
@@ -437,6 +440,29 @@ Or is the best validation dog-fooding agent-doc?
 **Bottom line:** Dog-fooding is the primary validation for SKILL.md behavior. The audit + skill check tests catch structural issues. The gap is behavioral regression testing — which would require running Claude in CI (expensive, non-deterministic). For now, this document session IS the behavioral test suite.
 
 Want me to release v0.24.0 with the install/init commands and new tests?
+yes
+
+### Re: SKILL.md Content Tests + v0.24.0 Released (HEAD)
+
+**2 new SKILL.md content tests:**
+- \`test_skill_md_contains_required_steps\` — verifies all 8 workflow step headings (0, 0b, 1, 1b, 2, 3, 4, 5)
+- \`test_skill_md_references_valid_commands\` — extracts all \`agent-doc <cmd>\` references, validates against actual subcommand list from \`--help\`
+
+**v0.24.0 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | \`agent-doc v0.24.0\` ✓ |
+| GitHub Release | [v0.24.0](https://github.com/btakita/agent-doc/releases/tag/v0.24.0) ✓ |
+| cargo install | v0.24.0 ✓ |
+
+**v0.24.0 changelog (since v0.23.3):**
+- \`agent-doc install\` — system-level setup (prereqs, editor plugin auto-detect)
+- \`agent-doc init\` (no args) — project-level setup (.agent-doc/, SKILL.md, hooks)
+- \`agent-doc init <file>\` — lazy project init when .agent-doc/ missing
+- Cross-platform sync pane guard (\`ps\` instead of \`/proc\`)
+- 15 new CLI tests (install, init, skill content validation)
+- 497 tests (162 lib + 297 bin + 38 CLI)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -254,6 +254,27 @@ Yes
 - Committed in submodule: `c886689`
 
 Install via: IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select the zip. Structural class changes → uninstall first → restart → install → restart.
+
+I want agent:pending to be active as the run starts, is being processed, and ends.
+Make agent:pending update whenever there is state to update.
+Should we have a dedicated agent for `agent:pending`?
+### Re: Active agent:pending Management (HEAD)
+
+**No dedicated agent needed** — subagents are ~7x cost (lesson #9) and this is a checklist operation the primary agent should do as part of every response.
+
+**Recommendation:** Add to SKILL.md as a required step:
+
+> **Step 3b: Update pending.** Every response MUST include a `<!-- patch:pending -->` block reflecting current state. Mark completed items with `([done])`, add new items discovered during the response, reorder by priority. This is not optional — pending drift is the #1 cause of stale task lists.
+
+**What changes each cycle:**
+- Items completed during this response → mark `([done])` or remove
+- New items discovered → add with context
+- Reprioritize based on current work direction
+- Active work items → move to top
+
+**Implementation:** I'll update the SKILL.md to include this as a required step. No binary changes needed — it's a skill-level instruction.
+
+Want me to update SKILL.md with this step?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

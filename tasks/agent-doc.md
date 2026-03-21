@@ -203,7 +203,7 @@ The Yrs CRDT merge determines ordering via **causality** (timestamp + client ID)
 **Releases this session:** v0.24.2, v0.24.3, v0.24.4. JB plugin v0.2.10.
 Why was this document compacted? I did not explicitly request compaction.
 The response to my compaction prompt was placed before
-### Re: Compaction First-Principles (HEAD)
+### Re: Compaction First-Principles
 
 **Q: Is the entire document read into context, or only diffs?**
 

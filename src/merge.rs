@@ -16,7 +16,21 @@ pub fn merge_contents_crdt(
     ours: &str,
     theirs: &str,
 ) -> Result<(String, Vec<u8>)> {
-    let merged = crate::crdt::merge(base_state, ours, theirs)
+    merge_contents_crdt_opts(base_state, ours, theirs, false)
+}
+
+/// CRDT merge with optional reorder skip.
+///
+/// When `skip_reorder` is true, the post-merge agent-before-human reordering
+/// is disabled. Use this for boundary-aware writes where the boundary marker
+/// already determines correct ordering.
+pub fn merge_contents_crdt_opts(
+    base_state: Option<&[u8]>,
+    ours: &str,
+    theirs: &str,
+    skip_reorder: bool,
+) -> Result<(String, Vec<u8>)> {
+    let merged = crate::crdt::merge(base_state, ours, theirs, skip_reorder)
         .context("CRDT merge failed")?;
     // Build fresh CRDT state from the merged result
     let doc = crate::crdt::CrdtDoc::from_text(&merged);

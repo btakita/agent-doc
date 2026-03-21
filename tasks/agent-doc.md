@@ -202,12 +202,15 @@ The Yrs CRDT merge determines ordering via **causality** (timestamp + client ID)
 
 **Releases this session:** v0.24.2, v0.24.3, v0.24.4. JB plugin v0.2.10.
 Why was this document compacted? I did not explicitly request compaction.
-The response to my compaction prompt was placed before
 ### Re: Compaction First-Principles
 
 **Q: Is the entire document read into context, or only diffs?**
 
 The SKILL workflow reads the FULL document (step 1: `Read <FILE>`) and the full snapshot every cycle. So yes, the entire document is in the agent's context. The diff is computed by comparing them, but both full texts are loaded.
+
+I thought we were only sending diffs. Are we sending both the full document + the diffs? Or are we comparing the diff overlaid on the last git commit? I thought we used tooling to lookup the snapshot + the commit + the current document content.
+
+Your answer sounds like you place the entire before + after document content in the context. Do we ever purge any of the document version content?
 
 **Q: What does compacting achieve?**
 
@@ -216,6 +219,8 @@ For the CURRENT session: nothing. The previous document state is already in the 
 For FUTURE sessions (new Claude instance): compaction reduces context tokens. A new agent reading a 500-line exchange uses more context than reading a 50-line compacted summary + archived detail.
 
 So compaction is a **future-session optimization**, not a current-session benefit.
+
+How do we reconcile the 4 states of document & session compaction?
 
 **Q: Will the session reference the archived document?**
 
@@ -231,12 +236,40 @@ No. The archive is a plain file on disk. The agent does NOT automatically read i
 - When the user is still referencing inline content in the exchange
 
 **Bottom line:** Compaction should be a user-initiated action when they decide the exchange history is no longer needed in active context. Not an agent optimization.
-<!-- agent:boundary:5d005f51-1cef-4f5e-b464-6f85fdbca0ab -->
+
+I just had an external edit placing my current edit from below the agent:boundary to abore the agent:boundary.
+The response to my compaction prompt was placed before the first response patch after the compaction event.
+
+With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
+### Re: Context Loading + Boundary Still Broken (HEAD)
+
+**How context works in the SKILL workflow:**
+
+Each `/agent-doc` invocation triggers the SKILL which uses Claude's `Read` tool to load the document and snapshot into Claude's context window. These are full file reads — the entire text is added to the conversation. Claude's automatic context compression trims older messages as the conversation grows, but within a cycle, both full files are in context.
+
+The diff is computed by ME (the agent) by comparing the two texts — it's not computed by tooling. I read both, compare, and respond to the differences. There's no separate "diff" payload.
+
+**Do we purge document versions?** No. Each `Read` call adds the full content to Claude's context. Prior reads from earlier cycles are still in context until Claude's automatic compression removes them. There's no explicit purge.
+
+**Boundary ordering is STILL broken.** You're seeing the response placed after the boundary because the **JB plugin hasn't been updated yet**. The fix (`47dd457` — reload document from disk before applying patches) is in the built plugin zip but you haven't installed it:
+
+```
+editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.10.zip
+```
+
+Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → select the zip → restart IDE. Or use:
+```bash
+agent-doc plugin install jetbrains --local
+```
+
+Until the plugin is updated, the in-memory Document API won't have the boundary, and every IPC write falls back to plain append (wrong ordering).
+<!-- agent:boundary:f0c4aeb4-2ec5-449c-9531-4ce2d0323c5a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- **JB plugin install needed** — boundary refresh fix not active until v0.2.10+ installed
 - CRDT merge ordering — Yrs causality still reorders (needs boundary-aware CRDT or bypass)
 - SPEC.md boundary lifecycle documentation
 - `agent-doc submit` — combined binary command for deterministic workflow

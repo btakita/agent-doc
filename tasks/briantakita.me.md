@@ -473,6 +473,30 @@ The site is already deployed. Both CI runs completed successfully:
 - Blog post: should be at `briantakita.me/posts/agent-doc-tmux-crdt-live`
 
 The scroll-responsive header is live on production. Try `https://briantakita.me/about` — hard refresh if cached.
+
+compact exchange
+### Session Summary (compacted)
+
+**Completed this session:**
+
+1. **Scroll-responsive header** — Header, breadcrumbs, and sticky titles compact when user scrolls. JS scroll handler toggles `scrolled` class on `<html>`, CSS rules apply compact sizing.
+2. **Static size reductions** — Logo `w-16 h-10` → `w-12 h-7`, sticky offsets reduced across the board
+3. **Sticky alignment fixes** — Breadcrumb margin removed when scrolled, HR wrapper hidden, all sticky `top` values precisely calculated for flush stacking
+4. **Transition glitch fix** — Removed CSS transitions that caused visual jumps on arrow-key scrolling
+5. **Blog post added** — `2026-03-18-agent-doc-tmux-crdt-live.md` copied to app and registered in `post/index.ts`
+6. **All changes deployed** — Pushed to 4 submodules, CI passed, live on `briantakita.me`
+
+**Files changed:**
+- `app/briantakita.me/app/index.css.ts` — scroll-responsive CSS rules
+- `lib/ui--browser--briantakita/layout/hyop/index.ts` — scroll handler
+- `lib/ui--server--briantakita/header/briantakita__header.ts` — compact logo
+- `lib/ui--server--briantakita/sticky/index.ts` — reduced sticky offsets
+- `app/briantakita.me/post/content/2026-03-18-agent-doc-tmux-crdt-live.md` — blog post
+- `app/briantakita.me/post/index.ts` — post registration
+
+**Open items:**
+- Scroll-responsive behavior may not be working on production (user reported sizes not changing — could be browser cache)
+- `rappstack-dev` changes to `blog__header.ts` are separate from briantakita.me-dev changes (different repos)
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

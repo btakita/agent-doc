@@ -369,6 +369,19 @@ The screenshot shows the gap is eliminated. The sticky stack when scrolled:
 - **H2** (Crafting software since 2002) — directly below h1
 
 All elements are flush with no spacing gaps. The scroll-responsive compacting is working as intended. Is the sizing acceptable, or do you want any adjustments to the font sizes, padding, or spacing?
+
+The breadcrumbs are still too high. Need to be a bit lower.
+![2026-03-21_14-06.png](../../../../Pictures/agent-loop/2026-03-21_14-06.png)
+### Re: Breadcrumb pushed down 0.5rem (HEAD)
+
+The header's actual rendered height was taller than 2rem due to nav item padding (`sm:py-1`). Increased all scrolled `top` values by 0.5rem:
+
+- Breadcrumb: `2rem` → `2.5rem`
+- H1 (z-48): `3.25rem` → `3.75rem`
+- H2 (z-47): `5.25rem` → `5.75rem`
+- All deeper levels shifted accordingly
+
+Verified in compiled CSS (`J7PZPCBE`). Dev server running at localhost:4100/about.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

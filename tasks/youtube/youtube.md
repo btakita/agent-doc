@@ -72,7 +72,7 @@ Want me to generate chapter markers with timestamps for the YouTube description?
 
 Yes
 
-### Re: Chapter markers (HEAD)
+### Re: Chapter markers
 
 Here are YouTube chapter markers based on the transcript:
 

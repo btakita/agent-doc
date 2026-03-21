@@ -350,7 +350,7 @@ Meta: Prefer that deterministic operations be written in the agent-doc binary. W
 This keeps the boundary at the correct position (end of exchange) without polluting the middle of the document.
 
 **Tests:** 497 all pass. Ready to release v0.24.4?
-### Re: Deterministic Boundary Re-insertion (HEAD)
+### Re: Deterministic Boundary Re-insertion
 
 You're right — boundary re-insertion is deterministic and belongs in the binary, not the skill. The binary-vs-agent principle IS documented in CLAUDE.md:
 

@@ -137,7 +137,7 @@ Perhaps it can have a standalone background server that dispatches to/from diffe
 It should somehow be able to communicate with an agent-doc document.
 
 So if I were to ask to visit a url, perhaps agent-doc can route the request to the extension server, the extension server routes to the tab with the page open or a new tab, javascript can be executed on the dom to extract the text of the tweet, the text can be sent back to the agent-doc document.
-### Browser extension bridge — architecture sketch (HEAD)
+### Browser extension bridge — architecture sketch
 
 This is a strong idea. The core insight: **you already have an authenticated session in your browser** — the extension just exposes it to agent-doc. No credential passing, no OAuth reimplementation.
 

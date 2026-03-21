@@ -337,6 +337,26 @@ The `<hr>` was hidden but its wrapper `<div class="max-w-3xl mx-auto px-4">` sti
 ```
 
 Verified in compiled CSS (`ZXJ3JECB`). Dev server is running — test at localhost:4100/about.
+
+Make sure that the height of .nav-container is the same as top of #breadcrumb.
+Likewise, ensure that following .sticky elements are position directly below the element above it.
+### Re: Precise sticky element alignment when scrolled (HEAD)
+
+Added CSS overrides for all sticky element `top` values when scrolled. The chain is calculated from the compacted header height:
+
+**Scrolled header height:** `py-0.25rem` × 2 (0.5rem) + logo `h-1.5rem` = **2rem**
+
+| Element | Default `top` | Scrolled `top` | Calculation |
+|---------|--------------|----------------|-------------|
+| Breadcrumb | `2.75rem` | `2rem` | = header height |
+| H1 (z-48) | `4rem` | `3.25rem` | = 2 + 1.25 (breadcrumb) |
+| H2 (z-47) | `6rem` | `5.25rem` | = 3.25 + 2 (h1 min-h) |
+| H3 (z-46) | `8rem` | `7.25rem` | = 5.25 + 2 (h2 min-h) |
+| z-45 | `9.5rem` | `8.75rem` | = 7.25 + 1.5 |
+| z-44 | `11rem` | `10.25rem` | = 8.75 + 1.5 |
+| z-43 | `12.5rem` | `11.75rem` | = 10.25 + 1.5 |
+
+Used `[class*="z-[48]"]` attribute selectors to target each sticky level without modifying the component files. All rules verified in compiled CSS (`3VIBEZLX`). Dev server running at localhost:4100/about.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

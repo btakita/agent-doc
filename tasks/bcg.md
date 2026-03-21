@@ -211,4 +211,25 @@ And draft a followup if recommended.
 3. **Wait for Dave's response** — if BCG is actively moving on Helix, Anil may surface through the interview process naturally
 
 **Action for tonight:** Just the Dave SMS. Revisit Anil Monday if Dave confirms movement.
+
+I updated dave_franklin_sms.txt
+Please note his response
+### Dave's response — reading the signal (HEAD)
+
+Dave replied:
+> "Hi Brian, not yet on feedback from BCG. I wish you all the best on your interviews and will keep you posted when we do get something."
+
+**Reading between the lines:**
+- **"Not yet on feedback"** — BCG is still slow. Spring break excuse has expired, so this is just BCG's pace.
+- **"I wish you all the best on your interviews"** — Dave is acknowledging he might lose you. This is recruiter language for "I can't promise timing and I don't want to hold you back."
+- **"Will keep you posted when we do get something"** — Door is open but he's not chasing. "When" not "if" is mildly positive.
+
+**What this means:**
+- BCG is not dead but not urgent. They're moving at their own pace.
+- Dave understands you have other options and isn't trying to stall you.
+- The urgency play worked — he knows the clock is ticking.
+
+**Next move: no response needed.** Dave acknowledged your message, there's nothing to reply to. The ball is in BCG's court. Check back with Dave mid-next week (Wednesday/Thursday) only if you haven't heard anything.
+
+**Focus energy on the other interviews next week.** BCG will either come through or it won't — you've done everything right on this channel.
 <!-- /agent:exchange -->

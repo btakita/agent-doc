@@ -461,7 +461,7 @@ The scroll-responsive behavior should work at `localhost:4100/about`. Are you te
 If you're on localhost and it's not working, try a hard refresh (Ctrl+Shift+R) to clear the browser cache.
 
 deploy
-### Re: Deployed and live (HEAD)
+### Re: Deployed and live
 
 The site is already deployed. Both CI runs completed successfully:
 - `6ae3082` (transition fix) — completed at 18:46 UTC

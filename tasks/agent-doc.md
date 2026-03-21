@@ -328,6 +328,27 @@ You saw `[boundary] removed 2 stale boundary marker(s)` at the start of this cyc
 **Why not delete during write?** The boundary marker is the insertion point. After the response is placed there, the marker stays as a no-op HTML comment. Deleting it during write would require an additional file mutation after the CRDT merge, which could conflict with concurrent user edits. Cleaning up at the start of the next cycle is simpler and safer.
 
 **The user never sees them** in rendered markdown — they're HTML comments. They're only visible in raw editor text, which is expected behavior.
+
+compact exchange
+### Re: Exchange Compacted (HEAD)
+
+**Exchange compacted:** Archived 188 lines.
+
+**Session summary (v0.24.1 continued):**
+
+**Features:**
+- JB plugin v0.2.10 — `resync --fix` on startup (PluginLifecycleListener)
+- SKILL.md step 3b — mandatory `<!-- patch:pending -->` updates each cycle
+- `agent-doc plugin install --local` — install from local build directory (walks up CWD, prefers signed zip)
+
+**Bug investigations:**
+- Commit not registered after compaction → step 0b safety net confirmed working
+- Stale boundary markers → lifecycle explained: insert → use → cleanup next cycle
+- Missing `agent:pending` → patch becomes unmatched content (no spurious creation)
+- Wrong-session panes in tmux session 2 → `resync --fix` cleanup (7/11 fixed)
+
+**Commits:** `c886689` (JB v0.2.10), `eac3740` (SKILL.md step 3b), `ba874fa` (--local flag)
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

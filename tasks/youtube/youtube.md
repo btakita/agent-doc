@@ -192,7 +192,7 @@ To deploy, push changes in `src/briantakita.me-dev` and the Cloudflare Pages wor
 
 deploy
 
-### Re: deploy (HEAD)
+### Re: deploy
 
 Deployed.
 

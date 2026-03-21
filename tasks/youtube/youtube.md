@@ -189,6 +189,18 @@ Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-18-agen
 The post follows the style of your previous live session posts — honest about what went wrong, technically detailed, with the "vibe coding not a tutorial" framing. The tmux debugging section includes the "what I thought vs what it was" narrative arc from the transcript.
 
 To deploy, push changes in `src/briantakita.me-dev` and the Cloudflare Pages workflow will build and deploy.
+
+deploy
+
+### Re: deploy (HEAD)
+
+Deployed.
+
+1. **briantakita.me** — committed & pushed (`a5108c5`): blog post at `post/content/2026-03-18-agent-doc-tmux-crdt-live.md`
+2. **briantakita.me-dev** — committed & pushed (`308b1e8`): updated submodule pointer
+
+Cloudflare Pages deploy should trigger automatically from the push. The post will be live at:
+`https://briantakita.me/posts/agent-doc-tmux-crdt-live`
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

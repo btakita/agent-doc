@@ -177,7 +177,7 @@ This would bring the fixed top space from ~8.5rem down to ~6rem (~40% reduction)
 Want me to implement these changes, or do you want different sizing? I can also add scroll-responsive behavior (full-size → compact on scroll) if you prefer that over a permanently compact header.
 
 Let's try it. I'll run the local server after you are done to test.
-### Re: Implementing compact header (HEAD)
+### Re: Implementing compact header
 
 Done. Applied all changes across 3 files:
 

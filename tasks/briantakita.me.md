@@ -419,7 +419,7 @@ All styling changes and the blog post are committed. The `src/briantakita.me-dev
 **Not yet pushed** — want me to push all submodules + parent?
 
 yes
-### Re: All pushed (HEAD)
+### Re: All pushed
 
 Resolved merge conflicts (upstream had newer commits) and pushed everything:
 

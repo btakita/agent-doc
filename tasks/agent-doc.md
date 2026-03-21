@@ -217,7 +217,7 @@ You're right — "Release" (your prompt) appears at line 195, AFTER the "Re: v0.
 
 Option 1 is the right approach but requires investigation into the Yrs CRDT merge behavior. Want me to investigate?
 Yes. How can we ensure that the CRDT follows the correct merge order?
-### Re: CRDT Merge Ordering Investigation (HEAD)
+### Re: CRDT Merge Ordering Investigation
 
 **Key finding:** The `reorder_agent_before_human()` function in `crdt.rs` only handles contiguous "Added" chunks at the document end. It doesn't handle interleaved insertions near the boundary.
 

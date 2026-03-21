@@ -639,6 +639,18 @@ Since this is a behavioral change (adding `ENTRY_MODIFY` to an existing watcher 
 After restart, the VCS gutter should update automatically when `agent-doc commit` runs — no more manual Ctrl+Alt+Y.
 
 **To verify:** After reinstall, check that `.agent-doc/patches/vcs-refresh.signal` gets deleted after a commit.
+
+Does the plugin version need to be bumped?
+
+### Re: Plugin Version Bump (HEAD)
+
+**For local dev installs: no.** IntelliJ allows reinstalling the same version from disk. The bytecode gets replaced, and after restart the new behavior is active.
+
+**For publishing to JetBrains Marketplace: yes.** The Marketplace rejects uploads with the same version. But this plugin isn't on the Marketplace yet.
+
+**For `agent-doc plugin install`: depends.** The `plugin install` command downloads from GitHub Releases. If you want users to get this fix via `agent-doc plugin install`, you'd need to bump version, build, and create a new GitHub Release.
+
+**Recommendation:** Bump to v0.2.9 and publish to GitHub Releases so `agent-doc plugin install jetbrains` picks up the fix. Want me to do that?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

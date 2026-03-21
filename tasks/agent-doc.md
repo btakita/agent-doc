@@ -387,32 +387,64 @@ Please diagnose, write tests, fix, and do a local install of the binary + SKILL 
 **Root cause found:** The IPC ordering bug is NOT in the CRDT merge — it's in the **editor document caching**.
 
 1. `agent-doc boundary` writes boundary to disk (step 1b)
-2. Plugin's in-memory Document API still has the OLD content (without boundary)
+2. Plugin's in-memory Document API still has the OLD content (without boundary): Do you mean the shared object FFI plugin backend (written in Rust) or the plugin frontend implemented for the Editor's environment.
 3. `agent-doc write --stream` sends IPC patch with `boundary_id`
 4. Plugin searches for `boundary_id` in its cached document → NOT FOUND
 5. Falls back to plain append → wrong ordering
 
 **Fix (`47dd457`):**
-1. `boundary.rs` — writes `vcs-refresh.signal` after boundary insertion to trigger editor VFS refresh
+1. `boundary.rs` — writes `vcs-refresh.signal` after boundary insertion to trigger editor VFS refresh: Describe what `vcs-refresh.signal` is. I notice that the JB kotlin implementation has a 500ms poll for events...while the VSCode ts implementation uses `createFileSystemWatcher` which uses File Descriptors? Does both the JB + VSCode environment support FD watchers? If yes, would the change to the `vcs-refresh.signal` file be atomic?
 2. `PatchWatcher.kt` — reloads document from disk before applying patches (when no unsaved user changes)
 
 **Answers to your questions:**
 - **Step 1b** = the boundary insertion sub-step in the SKILL.md workflow (after reading document, before computing diff)
+Should **Step 1b** instead be part of the `agent-doc run` deterministic logic?
 - **Diff sending is blocked** = Yes, the diff (step 2) runs AFTER the boundary is placed (step 1b). The boundary position is finalized before the agent sees anything.
 - **CRDT reorder** = only used when file changes during response generation (`content_current != base`). With the IPC fix, most writes go through the plugin path (no CRDT at all).
 - **"Always work"** = the IPC fix + CRDT skip_reorder together should handle both paths correctly.
+So why did the CRDT path incorrectly order the human prompt?
 
 **Binary installed.** Plugin zip needs to be installed manually (uninstall → restart → install from disk → restart).
 
 **Plugin zip:** `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.10.zip`
-<!-- agent:boundary:24be6ed2-348e-44fc-bc54-849df0275ea7 -->
+### Re: Compacted + Answers to Questions (HEAD)
+
+**Compacted:** 256 lines archived.
+
+**Your inline questions answered:**
+
+**1. FFI backend vs plugin frontend (line 390):**
+The plugin frontend (JetBrains Kotlin `PatchWatcher`). The FFI backend (`NativeLib.kt` → `libagent_doc.so`) handles component parsing and patch application — it processes the content correctly. The issue is the plugin frontend's `Document API` which caches the file content in memory. When `agent-doc boundary` writes to disk, the Document API doesn't see the change until the file is reloaded.
+
+**2. `vcs-refresh.signal` (line 396):**
+A plain file written to `.agent-doc/patches/`. Both plugin watchers detect it:
+- **JB:** Java NIO `WatchService` with 500ms poll (`key = watchService.poll(500, MILLISECONDS)`)
+- **VS Code:** `createFileSystemWatcher` (OS-level: inotify on Linux, FSEvents on macOS)
+
+Both support file change detection. The write IS atomic for small files (`std::fs::write` = single syscall). Neither uses raw FD watchers — they use higher-level APIs. The 500ms JB poll means boundary refresh has up to 500ms latency before the patch arrives, which is acceptable since the agent takes seconds to respond.
+
+**3. Step 1b as `agent-doc run` (line 401):**
+Yes — `agent-doc boundary` IS deterministic binary logic. Making it part of a combined `agent-doc submit` binary command (diff + boundary + prompt-building) would eliminate the SKILL.md dependency. Currently the skill calls `agent-doc boundary` explicitly. A future `agent-doc submit` could do: read file → insert boundary → compute diff → build prompt → return prompt to agent. This keeps all deterministic operations in the binary.
+
+**4. Why CRDT path reorders (line 405):**
+The Yrs CRDT merge determines ordering via **causality** (timestamp + client ID). When both "ours" (agent) and "theirs" (user) insert content at the same position, Yrs picks order based on client ID (lower wins). `skip_reorder` prevents the POST-merge swap, but the Yrs merge itself already decided the order during merge. The real fix: avoid CRDT merge entirely for the common case (no concurrent edits), or use boundary-aware insertion in the CRDT merge itself.
+
+**Session summary (v0.24.3 → v0.24.4):**
+- Deterministic boundary re-insertion in `apply_patches()`
+- CRDT `skip_reorder` for boundary-aware writes
+- IPC boundary refresh: `boundary.rs` signals VFS refresh, `PatchWatcher.kt` reloads from disk
+- Context session for `auto_start()`, post-sync `resync --fix`
+
+**Releases this session:** v0.24.2, v0.24.3, v0.24.4. JB plugin v0.2.10.
+<!-- agent:boundary:aa2584d1-3aea-44d1-ad86-39dbe59bce8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- IPC boundary refresh fix ([done] — `47dd457`)
+- CRDT merge ordering — Yrs causality still reorders (needs boundary-aware CRDT or bypass)
 - SPEC.md boundary lifecycle documentation
+- `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

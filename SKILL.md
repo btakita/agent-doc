@@ -98,12 +98,10 @@ When responding to a document with multiple user questions/topics, flush partial
    <partial response as patch blocks>
    RESPONSE
    ```
-2. **Re-insert boundary and re-save baseline** after each checkpoint flush:
+2. **Re-save the baseline** after each checkpoint flush (the document has changed):
    ```bash
-   agent-doc boundary <FILE>
    cp <FILE> /tmp/agent-doc-baseline-$$.md
    ```
-   The boundary is consumed by each write — re-inserting it ensures the next checkpoint (or the user's text) is ordered correctly.
 3. Continue responding to the next section, then flush again
 4. The final write-back (step 4) writes the complete response
 

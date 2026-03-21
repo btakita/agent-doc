@@ -210,7 +210,7 @@ Fixed — switched back to window @0. Apologies for the disruption.
 
 This does highlight a design concern: **routing commands should not steal window focus from the user's active window.** The \`route\` command calls \`select_pane\` which implicitly selects the target window. A \`--no-focus\` flag (or making background routing the default) would prevent this.
 
-### Re: 3-Pane Fix Implemented (HEAD)
+### Re: 3-Pane Fix Implemented
 
 **Fix in `sync.rs`:** Added `find_alive_pane_for_file()` — before auto-starting, scans all tmux panes via `/proc/<pid>/cmdline` to find if an alive pane is already running `agent-doc` for the target file. If found, re-registers instead of creating a new pane.
 

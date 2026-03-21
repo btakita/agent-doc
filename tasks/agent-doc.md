@@ -501,6 +501,22 @@ You're right — I've been unnecessarily escaping backticks with `\`` in patch c
 **Fix:** Stop escaping backticks in patch output. Raw backticks work fine inside `<<'PATCH'` heredocs.
 
 Let me fix the pending component now with raw backticks.
+Why did this happen? SKILL.md or agent context issue?
+
+### Re: Root Cause of Escaped Backticks (HEAD)
+
+**Agent context issue, not SKILL.md.** The SKILL.md doesn't instruct me to escape backticks — it shows raw backticks in all examples. This is a model-level habit.
+
+When I generate content that will be piped through `echo "..." | agent-doc write`, I instinctively escape backticks because in `echo "string"` (double-quoted), backticks would trigger command substitution. But the SKILL.md examples use `cat <<'PATCH'` heredocs where escaping is unnecessary.
+
+**The confusion:** The SKILL.md step 4 shows `echo "<your response>"` with double quotes in its examples, but the actual implementation uses `cat <<'PATCH'` heredocs. My training conflates the two — I escape for the `echo` case even when using heredocs.
+
+**Fix options:**
+1. **Update SKILL.md** to explicitly note: "Do NOT escape backticks in heredoc patch content — `<<'PATCH'` disables shell expansion"
+2. **Change SKILL.md examples** from `echo "..."` to `cat <<'PATCH'` to match actual usage
+3. **Just remember** — this is now in auto-memory as a feedback correction
+
+Option 2 is the right fix — align the SKILL.md examples with actual practice. But since SKILL.md is bundled in the binary (`include_str!`), it requires a release to update. For now, I'll just stop escaping.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

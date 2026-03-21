@@ -407,7 +407,7 @@ So why did the CRDT path incorrectly order the human prompt?
 **Binary installed.** Plugin zip needs to be installed manually (uninstall → restart → install from disk → restart).
 
 **Plugin zip:** `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.10.zip`
-### Re: Compacted + Answers to Questions (HEAD)
+### Re: Compacted + Answers to Questions
 
 **Compacted:** 256 lines archived.
 

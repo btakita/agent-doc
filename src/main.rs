@@ -442,6 +442,9 @@ enum PluginAction {
     Install {
         /// Editor: jetbrains, vscode
         editor: String,
+        /// Install from local build instead of GitHub Releases
+        #[clap(long)]
+        local: bool,
     },
     /// Update an installed plugin to the latest version
     Update {
@@ -574,7 +577,13 @@ fn main() -> anyhow::Result<()> {
             SkillCommands::Check => skill::check(),
         },
         Commands::Plugin { action } => match action {
-            PluginAction::Install { editor } => plugin::install(&editor),
+            PluginAction::Install { editor, local } => {
+                if local {
+                    plugin::install_local(&editor)
+                } else {
+                    plugin::install(&editor)
+                }
+            }
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },

@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.23.2 | **Tests:** 459 (162 lib + 297 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.23.3 | **Tests:** 459 (162 lib + 297 bin) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
+**Library:** \`libagent_doc.so\` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
 <!-- /agent:status -->
 
 ## Architecture
@@ -85,6 +85,7 @@ claude_args: --dangerously-skip-permissions
 | v0.21.0 | \`agent-doc parallel\` (fan-out with worktrees, \`--no-worktree\`). CRDT post-merge reorder (Yrs attribution). 461 tests. |
 | v0.22.0-v0.23.0 | Boundary marker ordering, claim auto-start, VCS refresh, any-level HEAD markers, exchange default mode, SKILL.md immediate commit, code-block boundary fix. JB v0.2.8. 452 tests. |
 | v0.23.1-v0.23.2 | Stale boundary cleanup, boundary-aware insertion (unmatched + explicit patches), IPC snapshot \`content_ours\` fix, (HEAD) marker accumulation fix, examples/blog outline. 459 tests. |
+| v0.23.3 | Cross-platform sync pane guard (\`ps\` instead of \`/proc\`), pre-sync duplicate pane prevention, clippy fixes. 459 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -269,6 +270,25 @@ Refactored \`find_alive_pane_for_file()\` to use \`ps -p <pid> -o command=\` ins
 - Simpler code — no \`/proc\` filesystem access, no null-byte splitting
 
 459 tests pass. Release binary rebuilt and installed.
+
+release
+
+### Re: v0.23.3 Released (HEAD)
+
+| Target | Status |
+|--------|--------|
+| crates.io | \`agent-doc v0.23.3\` ✓ |
+| GitHub Release | [v0.23.3](https://github.com/btakita/agent-doc/releases/tag/v0.23.3) ✓ |
+| cargo install | v0.23.3 ✓ |
+| SKILL.md | v0.23.3 ✓ |
+
+**v0.23.3 changelog:**
+- Cross-platform sync pane guard (\`ps\` instead of \`/proc\`)
+- Pre-sync auto-start checks alive panes before creating duplicates
+- Clippy fixes (collapsible_if in template.rs, git.rs, terminal.rs)
+- Dead code suppression for library-only boundary functions
+
+459 tests (162 lib + 297 bin).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

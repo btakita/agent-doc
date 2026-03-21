@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.24.0 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.24.1 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.8 (boundary markers + claim auto-start) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** boundary marker step + immediate commit
+**Plugins:** JetBrains v0.2.9 (VCS refresh signal fix) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** heredoc examples + immediate commit
 <!-- /agent:status -->
 
 ## Architecture
@@ -72,7 +72,7 @@ claude_args: --dangerously-skip-permissions
 |---------|-------------|
 | v0.5.5-v0.9.6 | Window-scoped routing, 2D sync, components, patch, watch daemon, tmux-router extraction, flock locking, atomic rename. 176 tests. |
 | v0.9.7-v0.9.10 | `agent-doc write`, template mode, compaction recovery, `recover`, `template-info`, code-span parser fix. 192 tests. |
-| v0.10.0-v0.10.1 | Renamed `response_mode` → `agent_doc_mode`, bundled template instructions in SKILL.md. |
+| v0.10.0-v0.10.1 | Renamed `response_mode` -> `agent_doc_mode`, bundled template instructions in SKILL.md. |
 | v0.11.0-v0.11.2 | Append-friendly merge strategy, shared `merge.rs`, fixed duplicate headings. |
 | v0.12.0-v0.12.2 | `compact`, `convert`, lazy claim, exchange default, exchange append mode default. 218 tests. |
 | v0.13.0-v0.13.3 | `autoclaim` (SessionStart hook), git-based snapshot fallback, sync autoclaim, spare pane assignment (tmux-router v0.2.4). |
@@ -86,7 +86,7 @@ claude_args: --dangerously-skip-permissions
 | v0.22.0-v0.23.0 | Boundary marker ordering, claim auto-start, VCS refresh, any-level HEAD markers, exchange default mode, SKILL.md immediate commit, code-block boundary fix. JB v0.2.8. 452 tests. |
 | v0.23.1-v0.23.2 | Stale boundary cleanup, boundary-aware insertion (unmatched + explicit patches), IPC snapshot `content_ours` fix, (HEAD) marker accumulation fix, examples/blog outline. 459 tests. |
 | v0.23.3 | Cross-platform sync pane guard (`ps` instead of `/proc`), pre-sync duplicate pane prevention, clippy fixes. 459 tests. |
-| v0.24.0 | `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content validation tests. 497 tests. |
+| v0.24.0-v0.24.1 | `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content tests + heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -131,11 +131,13 @@ claude_args: --dangerously-skip-permissions
 
 **v0.21.0:** `agent-doc parallel` — fan-out with git worktrees (`--no-worktree` for read-only). CRDT post-merge reorder via Yrs attribution. 461 tests.
 
-**v0.22.0-v0.23.0:** Boundary marker response ordering, claim auto-start, VCS refresh signal, any-level HEAD markers, exchange default mode fix, SKILL.md immediate commit, code-block boundary search fix (lesson #13). JB plugin v0.2.7→v0.2.8. 452 tests.
+**v0.22.0-v0.23.0:** Boundary marker response ordering, claim auto-start, VCS refresh signal, any-level HEAD markers, exchange default mode fix, SKILL.md immediate commit, code-block boundary search fix (lesson #13). JB plugin v0.2.7->v0.2.8. 452 tests.
 
 **v0.23.1-v0.23.2:** Stale boundary cleanup, boundary-aware insertion (unmatched content + explicit patches), IPC snapshot `content_ours` fix, (HEAD) marker accumulation fix, examples + blog outline. 459 tests.
 
-**v0.23.3:** Cross-platform sync pane guard (`ps` replaces `/proc`), pre-sync duplicate pane prevention, orphaned window cleanup, clippy fixes. 459 tests.
+**v0.23.3:** Cross-platform sync pane guard (`ps` replaces `/proc`), pre-sync duplicate pane prevention, clippy fixes. 459 tests.
+
+**v0.24.0-v0.24.1:** `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content validation tests, heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -670,6 +672,35 @@ yes
 **Install:** `agent-doc plugin install jetbrains` or manually from the GitHub Release link above.
 
 After installing and restarting IDEA, verify the fix by checking that `.agent-doc/patches/vcs-refresh.signal` is consumed after a commit.
+
+audit docs
+compact exchange
+
+### Re: Audit + Compact Done (HEAD)
+
+**Audit-docs:** Updated CLAUDE.md (module layout + init description), README.md (quick-start + CLI reference), SPEC.md (init two-mode + new install spec). Only remaining warning: "large table" (acceptable) + SKILL.md staleness (pre-existing).
+
+**Exchange compacted:** Archived 534 lines.
+
+**Session summary (v0.23.3 → v0.24.1):**
+
+**Features:**
+- `agent-doc install` — system-level setup (prereqs, editor plugin auto-detect)
+- `agent-doc init` (no-arg) — project-level setup (.agent-doc/, SKILL.md, hooks)
+- `agent-doc init <file>` — lazy project init when .agent-doc/ missing
+- SKILL.md heredoc examples (replaced `echo` with `cat <<'RESPONSE'`)
+
+**Bugs fixed:**
+- 3-pane duplicate: sync pre-start race with `resync::prune()` — added `find_alive_pane_for_file()`
+- Cross-platform process inspection: `ps` replaces `/proc`
+- VCS refresh signal: JB plugin now watches `ENTRY_CREATE` + `ENTRY_MODIFY`
+- Orphaned window @33 cleanup
+- Escaped backticks in patch output (model habit, not SKILL.md bug)
+- Clippy fixes (collapsible_if, dead_code)
+
+**Tests:** 497 (162 lib + 297 bin + 38 CLI) — 15 new tests for install/init/skill
+
+**Released:** v0.23.3, v0.24.0, v0.24.1. JB plugin v0.2.9.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

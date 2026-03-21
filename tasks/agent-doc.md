@@ -133,6 +133,8 @@ claude_args: --dangerously-skip-permissions
 **v0.22.0-v0.23.0:** Boundary marker response ordering, claim auto-start, VCS refresh signal, any-level HEAD markers, exchange default mode fix, SKILL.md immediate commit, code-block boundary search fix (lesson #13). JB plugin v0.2.7→v0.2.8. 452 tests.
 
 **v0.23.1-v0.23.2:** Stale boundary cleanup, boundary-aware insertion (unmatched content + explicit patches), IPC snapshot \`content_ours\` fix, (HEAD) marker accumulation fix, examples + blog outline. 459 tests.
+
+**v0.23.3:** Cross-platform sync pane guard (\`ps\` replaces \`/proc\`), pre-sync duplicate pane prevention, orphaned window cleanup, clippy fixes. 459 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -289,6 +291,24 @@ release
 - Dead code suppression for library-only boundary functions
 
 459 tests (162 lib + 297 bin).
+
+compact exchange
+
+### Re: Exchange Compacted
+
+Archived 154 lines to \`.agent-doc/archives/\`.
+
+**Session summary (v0.23.2 → v0.23.3):**
+
+**Bugs fixed:**
+- 3-pane duplicate: sync pre-start race with \`resync::prune()\` — added \`find_alive_pane_for_file()\` guard
+- Orphaned window @33 — moved stray pane to stash, window auto-removed
+
+**Improvements:**
+- Cross-platform process inspection: \`ps -p <pid> -o command=\` replaces Linux-only \`/proc\`
+- Clippy cleanup: collapsible_if, dead_code suppressions
+
+**Released:** v0.23.3. 459 tests (162 lib + 297 bin).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

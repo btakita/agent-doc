@@ -625,7 +625,7 @@ JB plugin builds successfully. Restart IntelliJ to load the new plugin.
 
 Do I need to reinstall the JB plugin to test?
 
-### Re: Plugin Reinstall (HEAD)
+### Re: Plugin Reinstall
 
 Yes — the PatchWatcher changes are in compiled Kotlin bytecode, so you need to reinstall the plugin zip.
 

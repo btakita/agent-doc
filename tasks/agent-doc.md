@@ -602,7 +602,7 @@ Want me to check the plugin source and fix it?
 Yes
 Make this work across all plugins.
 
-### Re: VCS Refresh Fix — Cross-Platform (HEAD)
+### Re: VCS Refresh Fix — Cross-Platform
 
 **Root cause found:** `PatchWatcher` only watched for `ENTRY_CREATE` events. When the signal file already exists (from an unprocessed previous signal), `std::fs::write()` produces `ENTRY_MODIFY` — which was never caught.
 

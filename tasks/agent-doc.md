@@ -654,7 +654,7 @@ Does the plugin version need to be bumped?
 
 yes
 
-### Re: JB Plugin v0.2.9 Published (HEAD)
+### Re: JB Plugin v0.2.9 Published
 
 | Target | Status |
 |--------|--------|

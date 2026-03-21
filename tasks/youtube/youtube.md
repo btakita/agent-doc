@@ -43,7 +43,6 @@ I want to make a YouTube video. Considering whether or not we should edit it.
 2. **Light edit** — trim dead air, intro/outro, fix any audio hiccups. Maybe 1-2 hours of work.
 3. **Heavy edit** — cut to highlights, add chapter markers, transitions. More polished but significant effort.
 
-What's your preference? I'd suggest option 1 or 2 — upload with the whisper CC and add chapter markers in the description based on the transcript topics.
 
 ### Re: Merge videos and transcribe
 
@@ -70,4 +69,57 @@ The stream covers several topics across two sessions:
 - The SRT can be uploaded directly as YouTube CC for better accessibility than auto-captions.
 
 Want me to generate chapter markers with timestamps for the YouTube description?
+
+Yes
+
+### Re: Chapter markers (HEAD)
+
+Here are YouTube chapter markers based on the transcript:
+
+```
+0:00 Intro - Working on Corky today
+0:10 Google OAuth Consent Screen - Publishing the app
+2:48 Phase 1 done - Submitted for verification (2-6 weeks)
+3:10 agent-doc updates - Pending component, component modes
+5:14 agent-doc logo reveal
+5:42 Logo walkthrough
+6:02 Sync/CRDT fixes recap
+7:00 tmux window proliferation - Diagnosing the bug
+8:06 Writing the debugging prompt
+9:09 Speculation: focus-based session bypass
+11:02 JetBrains plugin, VS Code, Cursor support plans
+12:07 Root cause: switching tmux sessions causes stash issues
+15:32 Fix plan: stash fallback + wrong-window detection
+21:22 Phase 1 complete - Moving to Corky defaults
+21:45 Adding default GCP client ID/secret for Corky
+24:00 Security considerations - pass vs cleartext config
+24:52 agent-doc tmux fixes implemented - 6 new tests
+28:09 Reconvene after phone call
+28:22 Balancing over-specification vs under-specification in AI agent prompts
+29:02 Corky credential resolution debugging
+31:07 Both agent-doc fixes verified
+33:00 agent-doc v0.22 release
+34:03 Implementing corky doctor command
+35:03 Release done, wrapping up Corky phase
+35:54 Realizing docs weren't audited
+36:30 Discussion: audit-docs as a skill
+38:09 Missing skills - corky, cleanup
+39:07 corky doctor tests and provider checks
+40:24 agent-doc missed prompt bug - CRDT preserved edit but lost prompt
+44:38 Document corruption bug - backtick inside component tag
+45:13 Investigating the corruption
+47:04 Planning video editing approach
+47:43 Sanitizer vs parser - where the bug lives
+48:03 Should we use a markdown AST parser?
+49:05 Parser analysis - inline code vs component tag conflict
+50:46 Prompt loss deep-dive - diffing CRDT patch to isolate user edits
+52:48 Root cause: skill-side attention problem, not CRDT
+54:19 Evaluating markdown AST libraries (cmark)
+54:57 Wrapping up - "peace out everybody"
+```
+
+These are formatted for YouTube (timestamps must start with `0:00` for chapters to work). You can paste these directly into the video description.
 <!-- /agent:exchange -->
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

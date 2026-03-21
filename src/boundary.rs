@@ -5,6 +5,19 @@ use uuid::Uuid;
 use crate::component;
 use crate::snapshot;
 
+/// Signal the IDE plugin to refresh the file from disk.
+/// Uses the same patches directory as IPC, writing a VCS refresh signal
+/// that the PatchWatcher picks up and triggers a VFS refresh.
+fn signal_editor_refresh(file: &Path) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Some(root) = snapshot::find_project_root(&canonical) {
+        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
+        if signal.parent().is_some_and(|p| p.exists()) {
+            let _ = std::fs::write(&signal, "boundary-refresh");
+        }
+    }
+}
+
 /// Boundary marker prefix used to identify insertion points in append-mode components.
 pub const BOUNDARY_PREFIX: &str = "<!-- agent:boundary:";
 pub const BOUNDARY_SUFFIX: &str = " -->";
@@ -165,6 +178,11 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
 
     // Update snapshot so the boundary marker doesn't show up as a diff
     snapshot::save(file, &updated)?;
+
+    // Signal IDE plugin to refresh the file so it sees the new boundary
+    // before the next IPC patch write. Without this, the plugin's in-memory
+    // document won't have the boundary, causing fallback to plain append.
+    signal_editor_refresh(file);
 
     println!("{}", id);
     Ok(())

@@ -138,12 +138,21 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        // Refresh to ensure we have latest content
+        // Refresh VirtualFile from disk to ensure we have latest content
+        // (boundary markers may have been written to disk by agent-doc boundary)
         targetFile.refresh(false, false)
 
-        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: run {
+        // Reload document from disk if it was externally modified
+        val fdm = FileDocumentManager.getInstance()
+        val document = fdm.getDocument(targetFile) ?: run {
             LOG.warn("Could not get document for: ${patch.file}")
             return false
+        }
+        if (fdm.isDocumentUnsaved(document)) {
+            // Document has unsaved changes — don't reload (preserve user edits)
+        } else {
+            // Reload from disk to pick up boundary changes from agent-doc boundary
+            fdm.reloadFromDisk(document)
         }
 
         // Capture caret offset before write action (for cursor-aware append ordering)

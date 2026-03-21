@@ -235,4 +235,15 @@ Updated contact file with the additional details:
 - *Portrait of a Pioneer* — IMDB (tt1329423) and portraitofapioneer.com links added
 - *We Are All Patients* — book title and Amazon link added
 - "1st female Dr on a team that conducted a kidney transplant on a child" — added to contact file
+
+Let's extract out buildside.md
+I registered buildside.co
+
+Created `tasks/buildside.md` with:
+- Business overview (domain: buildside.co, partners, tagline)
+- Full marketing plan (Phase 1)
+- Next steps checklist (domain registration marked done)
+- Template mode with exchange component for future sessions
+
+Run `/agent-doc tasks/buildside.md` to continue planning there.
 <!-- /agent:exchange -->

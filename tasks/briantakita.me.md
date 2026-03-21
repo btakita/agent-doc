@@ -382,6 +382,23 @@ The header's actual rendered height was taller than 2rem due to nav item padding
 - All deeper levels shifted accordingly
 
 Verified in compiled CSS (`J7PZPCBE`). Dev server running at localhost:4100/about.
+
+The styling looks good.
+
+But on localhost:4100, I don't see the recent blog posts.
+### Re: Missing recent blog posts (HEAD)
+
+The `agent-doc-tmux-crdt-live` post (2026-03-18) doesn't exist in the briantakita.me app. The post content file was created in an earlier session but never committed to the app submodule:
+
+- **Post content dir**: `app/briantakita.me/post/content/` — latest is `2026-03-12-dogfooding-agent-doc-part3-blog.md`
+- **Post registration**: `post/index.ts` — no reference to `agent-doc-tmux-crdt-live`
+- **App submodule**: last commit `57959b3` (barrel fix) — no post additions after 2026-03-12
+
+The post content file needs to be created in `post/content/` and registered in `post/index.ts`. Want me to add it? I'll need to find the source from the earlier blog post creation session.
+
+Separately, the styling changes are approved — that task is complete. The remaining items are:
+1. Add the `agent-doc-tmux-crdt-live` blog post to the app
+2. Commit all the styling changes to briantakita.me-dev submodules
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

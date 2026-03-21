@@ -85,4 +85,81 @@ For the unit he's keeping: PS *could* flag his account or claim an outstanding b
 1. Call PS corporate (not local facility) and request the fee be waived — he's canceling promptly and keeping the other unit
 2. If they refuse and Robert has no remaining business with PS, then dispute with the bank
 3. If he still has the active unit, weigh whether $40 is worth the risk of PS complicating access on the unit he's keeping
+
+Robert & I are thinking of having a business.
+Robert has many connections in LA.
+I want to make a website and have a "company name" for my agent services.
+
+Please help with a marketing plan + a company name.
+
+### Business Partnership: Brian + Robert (HEAD)
+
+**What you're selling:** AI agent services — custom automation, document workflows, correspondence tools, web development. Brian builds, Robert connects.
+
+**Complementary strengths:**
+- **Brian:** Full-stack developer, AI agent tooling (corky, agent-doc), Rust/TypeScript, infrastructure
+- **Robert:** LA network, relationship builder, sales/coaching instinct (demonstrated in Judith Krug deal)
+
+---
+
+### Company Name Ideas (HEAD)
+
+Names that signal AI/automation + personal service:
+
+| Name | Domain availability likely | Vibe |
+|------|---------------------------|------|
+| **Ward & Takita** | wardandtakita.com | Professional services, trust |
+| **Agentcraft** | agentcraft.io | Technical, builder-oriented |
+| **Relay Works** | relayworks.co | Automation + human handoff |
+| **Signal Loop** | signalloop.io | Feedback systems, AI agents |
+| **Automaton Partners** | automatonpartners.com | Classic + technical |
+| **Build Side** | buildside.co | "Build is the new buy" — your pitch |
+| **Takita Ward** | takitaward.com | Names-first, consultancy feel |
+
+**My top pick:** **Build Side** — it directly references the "build is the new buy" pitch Robert already loves, it's memorable, and it works for both technical and non-technical audiences.
+
+---
+
+### Marketing Plan (Phase 1: Launch) (HEAD)
+
+**1. Positioning**
+- "We replace your expensive SaaS subscriptions with custom software that you own."
+- Target: Small/mid businesses paying $500+/mo for tools they've outgrown
+- Proof point: Equity Funding Source deal (replacing $13K/yr MA + $8.4K/yr TMO)
+
+**2. Website (Week 1-2)**
+- Single-page site: hero, services, case study, contact form
+- Services listed: Custom web apps, AI automation, SaaS replacement, data integration
+- Stack: Static site (Astro or plain HTML), Cloudflare Pages (free hosting)
+
+**3. Robert's Role: Referral Engine**
+- Robert works his LA network — every small business owner he knows who complains about software costs is a lead
+- Script: "My partner builds custom software for less than what you're paying monthly for [tool]. Want an intro?"
+- Commission structure: % of first contract for referred clients
+
+**4. Initial Channels**
+- **Word of mouth** (Robert's network) — highest conversion, zero cost
+- **LinkedIn** (Brian's profile) — post case studies, technical credibility
+- **Local business meetups** (Robert attends, hands out cards)
+- **Craigslist services section** — Robert already lives on CL, post in computer/gigs
+
+**5. Pricing Model**
+- Project-based: $5K-$15K for SaaS replacement projects
+- Retainer option: $1K-$3K/mo for ongoing maintenance + new features
+- "ROI guarantee" angle: "If we don't save you money vs. your current tools within 6 months, we'll refund the difference"
+
+**6. First 3 Clients**
+- Judith Krug / Equity Funding Source (already in progress)
+- Robert's other contacts who need web/tech work
+- One cold outreach win from LinkedIn or CL
+
+---
+
+**Next steps:**
+1. Pick a name and register the domain
+2. Brian builds a one-page site (can be done in a day)
+3. Robert starts soft-pitching to 5 contacts this week
+4. File a simple LLC once revenue starts (CA LLC = $800/yr minimum franchise tax, so wait until you have a paying client)
+
+Want me to draft the website copy or dig into any of these areas?
 <!-- /agent:exchange -->

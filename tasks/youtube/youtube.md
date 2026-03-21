@@ -216,16 +216,22 @@ Cloudflare Pages deploy should trigger again. The post will appear at:
 `https://briantakita.me/posts/agent-doc-tmux-crdt-live`
 
 Add the blog post url to the YouTube video description.
+Please write a LinkedIn post about this video.
+If it's better for engagement to put the link to the post in the comment vs putting it in the post itself, do so.
+Include video screenshot in the post.
 
-### Re: Add blog post URL to YouTube description
+### Re: LinkedIn post (HEAD)
 
-Done. Updated the YouTube video description with:
+Published! https://www.linkedin.com/feed/update/urn:li:share:7441146047336210432
 
-```
-Blog post: https://briantakita.me/posts/agent-doc-tmux-crdt-live
-```
+- **Image:** Video screenshot from the 5:14 mark (logo reveal)
+- **Links in first comment** (better for LinkedIn algorithm reach):
+  - YouTube: https://www.youtube.com/watch?v=N8EX3zJLHUA
+  - Blog: https://briantakita.me/posts/agent-doc-tmux-crdt-live
+  - GitHub + crates.io links
+- **Draft:** `mail/social/20260321-agent-doc-tmux-crdt-linkedin.md`
 
-Added before the "Tools:" line. The update is live on https://www.youtube.com/watch?v=N8EX3zJLHUA
+The post leads with the tmux race condition debugging hook, covers the key bugs found during the session, and ends with the "vibe coding not a tutorial" framing.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

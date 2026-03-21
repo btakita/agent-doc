@@ -329,7 +329,7 @@ The binary handles this correctly — the skill workflow (my behavior) was the i
 Want to release as v0.24.4?
 Not yet. `<!-- agent:boundary:e515c5d8-1a9e-41d6-a923-d8c8c781e661 -->` was inserted above.
 It should have been at the bottom of the content.
-### Re: Boundary Re-insertion Reverted (HEAD)
+### Re: Boundary Re-insertion Reverted
 
 You're right — re-inserting the boundary in the binary placed it in the middle of the exchange (between the response and user's next text), not at the end. This is the wrong position.
 

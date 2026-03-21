@@ -403,7 +403,7 @@ Separately, the styling changes are approved — that task is complete. The rema
 2. Commit all the styling changes to briantakita.me-dev submodules
 
 go
-### Re: Blog post added + all changes committed (HEAD)
+### Re: Blog post added + all changes committed
 
 **Blog post:** `2026-03-18-agent-doc-tmux-crdt-live.md` copied to `post/content/` and registered in `post/index.ts`.
 

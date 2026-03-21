@@ -598,6 +598,31 @@ Let me check if the PatchWatcher's `refreshVcs()` is actually calling `markEvery
 **Fix:** Wrap `refreshVcs()` in `ApplicationManager.getApplication().invokeLater { ... }` to ensure it runs on EDT.
 
 Want me to check the plugin source and fix it?
+
+Yes
+Make this work across all plugins.
+
+### Re: VCS Refresh Fix — Cross-Platform (HEAD)
+
+**Root cause found:** `PatchWatcher` only watched for `ENTRY_CREATE` events. When the signal file already exists (from an unprocessed previous signal), `std::fs::write()` produces `ENTRY_MODIFY` — which was never caught.
+
+**JetBrains fix (PatchWatcher.kt):**
+1. Added `ENTRY_MODIFY` to `WatchService` registration — catches both create and overwrite
+2. Added signal file processing in `processPendingPatches()` — handles signals that exist on plugin startup
+
+**VS Code fix (extension.ts):**
+1. Added `signalWatcher` — watches for `vcs-refresh.signal` (both create and change events)
+2. Added `processVcsRefreshSignal()` — deletes signal file and runs `git.refresh` command
+3. Added startup signal processing
+4. Added cleanup in dispose
+
+**Both plugins now:**
+- Watch for `vcs-refresh.signal` create AND modify events
+- Process existing signals on startup
+- Delete the signal file after consuming
+- Trigger VCS/git refresh so gutter annotations update immediately
+
+JB plugin builds successfully. Restart IntelliJ to load the new plugin.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

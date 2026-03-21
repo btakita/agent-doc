@@ -264,7 +264,7 @@ release
 > the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
 
 Please explain further.
-### Re: Checkpoint Boundary Explanation (HEAD)
+### Re: Checkpoint Boundary Explanation
 
 **The problem in detail:**
 
@@ -284,7 +284,7 @@ Exchange:
 Exchange:
   ...existing content...
   "Please diagnose issue..."                                  ← user's question
-  ### Re: Tmux Session Diagnosis                              ← inserted at boundary (HEAD)
+  ### Re: Tmux Session Diagnosis                              ← inserted at boundary
   ...diagnosis content...
   <!-- /agent:exchange -->
   (boundary consumed — gone)
@@ -293,9 +293,9 @@ Exchange:
 Exchange:
   ...existing content...
   "Please diagnose issue..."
-  ### Re: Tmux Session Diagnosis (HEAD)
+  ### Re: Tmux Session Diagnosis
   ...diagnosis content...
-  ### Re: Fix Implemented                                     ← appended at end (no boundary) (HEAD)
+  ### Re: Fix Implemented                                     ← appended at end (no boundary)
   <!-- /agent:exchange -->
 ```
 

@@ -340,7 +340,7 @@ Verified in compiled CSS (`ZXJ3JECB`). Dev server is running — test at localho
 
 Make sure that the height of .nav-container is the same as top of #breadcrumb.
 Likewise, ensure that following .sticky elements are position directly below the element above it.
-### Re: Precise sticky element alignment when scrolled (HEAD)
+### Re: Precise sticky element alignment when scrolled
 
 Added CSS overrides for all sticky element `top` values when scrolled. The chain is calculated from the compacted header height:
 

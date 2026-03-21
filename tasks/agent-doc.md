@@ -364,6 +364,29 @@ Yes
 **Files:** \`install.rs\` (new), \`init.rs\` (updated), \`main.rs\` (updated), \`test_cli.rs\` (updated)
 
 459 tests pass. Release binary installed.
+
+Add automated tests. Preferably functional tests that test real behavior.
+
+### Re: Functional Tests Added (HEAD)
+
+9 new CLI integration tests in \`tests/test_cli.rs\`:
+
+**install (3):**
+- \`test_cli_install_help\` — verifies help output shows \`skip-prereqs\` and \`skip-plugins\` flags
+- \`test_cli_install_skip_all\` — \`--skip-prereqs --skip-plugins\` succeeds without errors
+- \`test_cli_install_checks_prereqs\` — stderr contains \`tmux\` and \`claude\` prereq checks
+
+**init project-level (3):**
+- \`test_cli_init_creates_agent_doc_dir\` — creates \`.agent-doc/snapshots/\` and \`.agent-doc/patches/\`
+- \`test_cli_init_idempotent\` — running twice doesn't fail
+- \`test_cli_init_prints_quickstart\` — output contains quick-start hints
+
+**init document-level (3):**
+- \`test_cli_init_file_creates_document\` — creates file with \`agent_doc_session:\` frontmatter
+- \`test_cli_init_file_with_mode\` — \`--mode template\` creates template doc with \`agent:exchange\` components
+- \`test_cli_init_file_lazy_project_init\` — creating a document in a fresh dir also creates \`.agent-doc/\`
+
+489 tests pass (162 lib + 297 bin + 30 CLI).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

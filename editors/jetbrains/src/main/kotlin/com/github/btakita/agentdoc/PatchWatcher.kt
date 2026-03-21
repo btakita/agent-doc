@@ -63,7 +63,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun watchLoop(dir: Path) {
         val watchService: WatchService = FileSystems.getDefault().newWatchService()
-        dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE)
+        dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
 
         while (running) {
             val key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
@@ -89,6 +89,13 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun processPendingPatches(dir: File) {
+        // Process any pending VCS refresh signal
+        val signalFile = File(dir, "vcs-refresh.signal")
+        if (signalFile.exists()) {
+            signalFile.delete()
+            refreshVcs()
+        }
+        // Process any pending patch files
         val files = dir.listFiles { f -> f.extension == "json" } ?: return
         for (file in files) {
             processPatchFile(file)
@@ -368,7 +375,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         val markerEnd = boundaryIdx + boundaryMarker.length
         val lineEnd = if (markerEnd < closeIdx && doc.getOrNull(markerEnd) == '\n') markerEnd + 1 else markerEnd
 
-        // Replace the boundary marker line with the response content
+        // Replace the boundary marker line with the response content.
+        // The boundary is consumed — the skill workflow calls agent-doc boundary
+        // again after each checkpoint to re-insert at end of exchange.
         val before = doc.substring(0, lineStart)
         val after = doc.substring(lineEnd.coerceAtMost(closeIdx))
         return before + content.trimEnd() + "\n" + after

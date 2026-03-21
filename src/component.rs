@@ -132,14 +132,13 @@ impl Component {
             };
             let line_end = line_end.min(self.close_start);
 
-            // Replace the boundary marker line with the response content,
-            // then re-insert the boundary marker after the content so subsequent
-            // checkpoint writes in the same cycle can continue using it.
-            let mut result = String::with_capacity(doc.len() + content.len() + boundary_marker.len() + 2);
+            // Replace the boundary marker line with the response content.
+            // The boundary is consumed — the skill workflow should call
+            // `agent-doc boundary` again after each checkpoint write to
+            // re-insert it at the end of the exchange.
+            let mut result = String::with_capacity(doc.len() + content.len());
             result.push_str(&doc[..line_start]);
             result.push_str(content.trim_end());
-            result.push('\n');
-            result.push_str(&boundary_marker);
             result.push('\n');
             result.push_str(&doc[line_end..]);
             return result;
@@ -871,14 +870,8 @@ actual content
         assert!(result.contains("more user text"));
         // The code block example should be preserved
         assert!(result.contains(&format!("<!-- agent:boundary:{boundary_id} -->\n```")));
-        // The real marker should be moved after the response (re-inserted for subsequent checkpoints)
-        // It should NOT be between "more user text" and the close tag anymore
-        let response_pos = result.find("### Re: Response").unwrap();
-        let boundary_positions: Vec<_> = result.match_indices(&format!("<!-- agent:boundary:{boundary_id} -->")).collect();
-        // Should have 2 boundary markers: one in code block, one re-inserted after response
-        assert_eq!(boundary_positions.len(), 2, "expected 2 boundary markers (code block + re-inserted)");
-        // The re-inserted one should be after the response
-        assert!(boundary_positions[1].0 > response_pos, "re-inserted boundary should be after response");
+        // The real marker should be consumed (replaced by response)
+        assert!(!result.contains(&format!("more user text\n<!-- agent:boundary:{boundary_id} -->\n<!-- /agent:exchange -->")));
     }
 
     #[test]
@@ -897,11 +890,7 @@ actual content
 
         assert!(result.contains("### Re: Answer"));
         assert!(result.contains("user prompt"));
-        // Marker should be re-inserted after the content for subsequent checkpoints
-        assert!(result.contains(&format!("agent:boundary:{boundary_id}")));
-        // Content should appear before the re-inserted boundary
-        let answer_pos = result.find("### Re: Answer").unwrap();
-        let boundary_pos = result.find(&format!("agent:boundary:{boundary_id}")).unwrap();
-        assert!(answer_pos < boundary_pos, "response content should appear before re-inserted boundary");
+        // Marker should be consumed (replaced by response)
+        assert!(!result.contains("agent:boundary:"));
     }
 }

@@ -371,7 +371,7 @@ I saw that you requested me to compact the agent session to load the SKILL updat
 It seems you lost track of my inquiry to only have document HEAD in the context. Remove old snapshots from context window. I want to revive this feature.
 
 [//]: # (Only have document HEAD in the context. Remove old snapshots from context window.)
-### Re: JB Plugin + Boundary Bug + Context Optimization (HEAD)
+### Re: JB Plugin + Boundary Bug + Context Optimization
 
 **1. JB Plugin — Verified:**
 - **IntelliJ IDEA 2025.3:** v0.2.10 (up to date)

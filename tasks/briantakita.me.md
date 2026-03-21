@@ -308,7 +308,7 @@ The posts page was timing out during rebuild (cold cache). It should work after 
 
 There is a slight gap between the site header and the sticky title when scrolled.
 ![img_2.png](img_2.png)
-### Re: Fix gap between header and sticky title when scrolled (HEAD)
+### Re: Fix gap between header and sticky title when scrolled
 
 The gap comes from two sources:
 1. The breadcrumb nav has `mt-8 mb-4` which creates vertical space below the header

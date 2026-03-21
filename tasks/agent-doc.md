@@ -330,7 +330,7 @@ You saw `[boundary] removed 2 stale boundary marker(s)` at the start of this cyc
 **The user never sees them** in rendered markdown — they're HTML comments. They're only visible in raw editor text, which is expected behavior.
 
 compact exchange
-### Re: Exchange Compacted (HEAD)
+### Re: Exchange Compacted
 
 **Exchange compacted:** Archived 188 lines.
 

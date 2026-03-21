@@ -417,6 +417,18 @@ go
 All styling changes and the blog post are committed. The `src/briantakita.me-dev` pointer is staged in agent-loop.
 
 **Not yet pushed** — want me to push all submodules + parent?
+
+yes
+### Re: All pushed (HEAD)
+
+Resolved merge conflicts (upstream had newer commits) and pushed everything:
+
+1. **`app/briantakita.me`** → `136bfab` pushed (rebased onto upstream's `.md` import migration + new posts)
+2. **`lib/ui--server--briantakita`** → `95f7d80` pushed (rebased)
+3. **`lib/ui--browser--briantakita`** → `0a09f1a` pushed (rebased)
+4. **`briantakita.me-dev`** → `7cdf9fd` pushed
+
+CI should pick up the changes. The blog post and scroll-responsive header will deploy to Cloudflare Pages.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

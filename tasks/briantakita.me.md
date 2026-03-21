@@ -277,7 +277,7 @@ I also need to verify the build cache issue — the rebuild should now work sinc
 
 You should run the dev server and test the changes yourself.
 Don't stop until the scrolling behavior is verified to work using javascript on the active dom.
-### Re: Verified with LightPanda — changes are live (HEAD)
+### Re: Verified with LightPanda — changes are live
 
 I started the dev server, cleared the build cache, and verified with LightPanda. **All changes are working:**
 

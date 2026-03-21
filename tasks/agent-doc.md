@@ -408,7 +408,7 @@ Tests use CWD isolation (temp dir) since skill path resolution is CWD-relative.
 Can we validate the behavior of the SKILL.md file?
 Or is the best validation dog-fooding agent-doc?
 
-### Re: SKILL.md Validation Strategy (HEAD)
+### Re: SKILL.md Validation Strategy
 
 **Both.** SKILL.md validation has two layers:
 

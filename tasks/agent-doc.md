@@ -187,7 +187,7 @@ Tmux session 6: has 6 windows (3 agent-doc)
 
 Please diagnose issue. Add tests to replicate. Fix.
 Also, let's automatically detect if the sessions get out of an expected state.
-### Re: Fix Implemented + Post-sync Resync (HEAD)
+### Re: Fix Implemented + Post-sync Resync
 
 **Two fixes committed (`9561b47`):**
 

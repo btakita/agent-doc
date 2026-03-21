@@ -449,7 +449,7 @@ Pushed: `app/briantakita.me` → `8c8ebd9`, `briantakita.me-dev` → `6ae3082`.
 Now the size of the header, the breadcrumbs, and the title don't change.
 
 [2026-03-21 14-48-43.mp4](../../../../Videos/2026-03-21%2014-48-43.mp4)
-### Re: Scroll-responsive sizing is still in the build (HEAD)
+### Re: Scroll-responsive sizing is still in the build
 
 I restarted the dev server and verified — the CSS rules and JS handler are both present:
 

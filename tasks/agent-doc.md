@@ -340,7 +340,7 @@ add decision for binary behavior to SPEC.md
 Where is Lesson applied? Should it be applied to SPEC.md?
 
 audit docs
-### Re: Verification + SPEC.md + Audit (HEAD)
+### Re: Verification + SPEC.md + Audit
 
 **Behavior verified.** The last write log showed `[template] pre-patch boundary c57680fc inserted at end of exchange` — the binary handles boundary insertion automatically. No step 1b needed.
 

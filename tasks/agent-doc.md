@@ -165,7 +165,7 @@ Tmux Session 0 had 3 panes when I switched the editor to bcg.md on the right sid
 Please review logs and assess why this happened.
 Write tests to simulate issue.
 
-### Re: 3-Pane Bug — Root Cause Found (HEAD)
+### Re: 3-Pane Bug — Root Cause Found
 
 **The `.txt` file is a red herring.** `EditorTabSyncListener.selectionChanged()` has an early return for non-`.md` files — `20260320-linkedin-anil-podduturi.txt` never triggers routing.
 
@@ -194,6 +194,20 @@ When the plugin fires `agent-doc sync --col tasks/agent-doc.md --col tasks/bcg.m
 3. **Add a guard between prune and auto-start** — if prune removed an entry for a file that sync is about to process, skip auto-start for that file
 
 Want me to implement a fix and add tests?
+tmux: I now see window 2 selected in session 0. Why?
+
+### Re: Window 2 Selected — My Fault (HEAD)
+
+That was caused by my debug investigation. I ran \`agent-doc route tasks/linkedin.md\` which selected pane %16 in window @33 (index 2), switching the active tmux window.
+
+Output from my debug command:
+\`\`\`
+[tmux] select_pane %16 → session:window 0:2
+\`\`\`
+
+Fixed — switched back to window @0. Apologies for the disruption.
+
+This does highlight a design concern: **routing commands should not steal window focus from the user's active window.** The \`route\` command calls \`select_pane\` which implicitly selects the target window. A \`--no-focus\` flag (or making background routing the default) would prevent this.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

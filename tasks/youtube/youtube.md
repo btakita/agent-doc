@@ -201,6 +201,19 @@ Deployed.
 
 Cloudflare Pages deploy should trigger automatically from the push. The post will be live at:
 `https://briantakita.me/posts/agent-doc-tmux-crdt-live`
+
+I don't see the post on the live site.
+
+### Re: Post not visible (HEAD)
+
+Found the issue — the post index (`post/index.ts`) is a generated file that lists all blog posts. The new post wasn't in it. Fixed:
+
+1. Ran `bun run post/index.generate.ts` to regenerate the index
+2. Committed & pushed to briantakita.me (`94dd88e`)
+3. Updated briantakita.me-dev submodule pointer (`77e88ca`)
+
+Cloudflare Pages deploy should trigger again. The post will appear at:
+`https://briantakita.me/posts/agent-doc-tmux-crdt-live`
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -301,7 +301,7 @@ Validate that this prompt after `<!-- agent:boundary:36a7b066-d92c-4fdb-b85a-082
 ```
 
 Please diagnose (including reading logs).
-### Re: Boundary Mechanism + Ordering Diagnosis (HEAD)
+### Re: Boundary Mechanism + Ordering Diagnosis
 
 **The mechanism (idle → run):**
 

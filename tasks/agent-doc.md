@@ -297,7 +297,7 @@ I was thinking that `agent-doc init` would be on the project level. Mean project
 With `agent-doc install` being on the system level. Meaning binaries such as the `agent-doc` binary.
 Thoughts?
 
-### Re: Escaped Code Block Bug + Command Hierarchy (HEAD)
+### Re: Escaped Code Block Bug + Command Hierarchy
 
 **1. Code block heading bug:** When I write a response containing fenced code blocks with \`#\` headings inside them, the \`#\` lines get interpreted as markdown headings rather than code. This is a SKILL.md issue — I need to properly escape code blocks in patch responses. I'll be more careful with code block content in future responses.
 

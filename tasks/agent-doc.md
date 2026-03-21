@@ -676,7 +676,7 @@ After installing and restarting IDEA, verify the fix by checking that `.agent-do
 audit docs
 compact exchange
 
-### Re: Audit + Compact Done (HEAD)
+### Re: Audit + Compact Done
 
 **Audit-docs:** Updated CLAUDE.md (module layout + init description), README.md (quick-start + CLI reference), SPEC.md (init two-mode + new install spec). Only remaining warning: "large table" (acceptable) + SKILL.md staleness (pre-existing).
 

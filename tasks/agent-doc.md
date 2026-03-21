@@ -305,7 +305,7 @@ Can we add an `agent:boundary` to the end of the mid-cycle patch?
 Restrict this to `agent:boundary` patches. We may have other patches that change other areas of the document such as `agent:pending`.
 
 The binary handles this correctly — the skill workflow (my behavior) was the issue. I should not have split the response into two separate `agent-doc write` calls in the same cycle.
-### Re: Boundary Re-insertion Implemented (HEAD)
+### Re: Boundary Re-insertion Implemented
 
 **Fix committed (`0239b8f`):** `append_with_boundary()` now re-inserts the boundary marker after the inserted content. This enables multiple checkpoint writes in the same cycle.
 

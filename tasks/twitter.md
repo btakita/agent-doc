@@ -16,7 +16,7 @@ agent_doc_write: crdt
 See https://x.com/tannerlinsley/status/2035062107339997458
 
 This is who I can target with agent-doc.
-### Re: Tanner Linsley tweet (HEAD)
+### Re: Tanner Linsley tweet
 
 Can't fetch the tweet — X blocks automated scraping. Could you paste the tweet text here so I can analyze the audience angle?
 

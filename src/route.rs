@@ -262,7 +262,18 @@ fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane
 
 /// Auto-start a new Claude session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
-pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -> Result<()> {
+///
+/// `context_session` is an optional session override from the calling context
+/// (e.g., the sync target session). Used when frontmatter has no `tmux_session`
+/// to avoid falling back to `current_tmux_session()`, which returns whichever
+/// session the user's terminal is viewing — not necessarily the correct one.
+pub fn auto_start(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+) -> Result<()> {
     // Read tmux_session from frontmatter, validate it exists, fall back if not
     let session_name = if let Ok(content) = std::fs::read_to_string(file) {
         let requested = frontmatter::parse(&content)
@@ -279,8 +290,12 @@ pub fn auto_start(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str) -
                     name, name
                 );
             }
+        } else if let Some(ctx) = context_session {
+            // No tmux_session in frontmatter — use context session from sync
+            eprintln!("[auto_start] no tmux_session in frontmatter, using context session '{}'", ctx);
+            ctx.to_string()
         } else {
-            // No tmux_session set — use current session (first claim sets it)
+            // No tmux_session and no context — use current session (first claim sets it)
             current_tmux_session(tmux)
                 .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
         }

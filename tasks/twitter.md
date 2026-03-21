@@ -79,7 +79,7 @@ The url is https://github.com/btakita/agent-doc
 **Alternative: quote tweet** with a short demo video of agent-doc in action (editor + CLI, no GUI). Visual proof > text claims.
 
 One issue I have with agent-doc is I have done no user testing. I'm not sure what the install + onboarding experience will be like.
-### URL corrected + onboarding gap (HEAD)
+### URL corrected + onboarding gap
 
 **URL fix:** Sorry — that was a hallucinated URL. Correct link: https://github.com/btakita/agent-doc
 
@@ -91,7 +91,7 @@ One issue I have with agent-doc is I have done no user testing. I'm not sure wha
 >
 > https://github.com/btakita/agent-doc
 
-### Onboarding gap — real concern, manageable risk (HEAD)
+### Onboarding gap — real concern, manageable risk
 
 You're right that no user testing is a gap. But here's the calculus:
 

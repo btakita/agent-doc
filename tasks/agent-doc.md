@@ -337,7 +337,7 @@ Please diagnose (including reading logs).
 `Please diagnose (including reading logs).` was placed after the response patch.
 - Was this prompt an input to the response patch? If yes, then it should have been placed before the response patch.
 - Or was this missed? If yes, then it should be placed after the `agent:boundary`.
-### Re: Ordering Correction + "Please diagnose" Analysis (HEAD)
+### Re: Ordering Correction + "Please diagnose" Analysis
 
 **Your correction is right.** The boundary is the dividing line:
 - Content BEFORE boundary → appears before response

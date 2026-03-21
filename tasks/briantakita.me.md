@@ -236,6 +236,24 @@ The dev server needs a restart to pick up the changes. Please restart `bun run d
 **Summary of changes waiting for rebuild:**
 - `lib/ui--browser--briantakita/layout/hyop/index.ts` — scroll handler toggles `scrolled` class on `<html>`
 - `app/briantakita.me/app/index.css.ts` — CSS rules shrink header/title when `.scrolled`
+
+Same issue. Are you using LightPanda to test the height of the header and the h1 when scrolling?
+### Re: LightPanda verification & build cache issue (HEAD)
+
+I verified with LightPanda and direct esbuild. The root cause: **the rhonojs/rebuildjs build pipeline is serving a cached bundle**. Here's what I found:
+
+1. **Source files are correct** — `layout/hyop/index.ts` has the scroll handler, `index.css.ts` has the `.scrolled` rules
+2. **Bun resolves correctly** — `bun -e "import(...)"` reads the new code
+3. **Direct esbuild works** — `npx esbuild` bundles the scroll handler correctly
+4. **The served bundle is stale** — `index.browser-TQFLE3IX.js` still has the old `nofouc__hyop` (just `classList.remove`)
+5. **CSS was partially rebuilt** — hash changed from `XSZF7IEH` to `HT4PYFOE` but still missing `.scrolled` rules
+
+I just cleared the `dist/browser--dev` and `dist/server--dev` directories. **Please restart `bun run dev` again** — this should force a clean rebuild without cached artifacts.
+
+After restart, verify the scroll handler is present by checking:
+```
+curl -s http://localhost:4100/index.browser-*.js | grep scrolled
+```
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -125,4 +125,19 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 - Symlinks (not source_map) for local rappstack-dev resolution — avoids duplicate transitive deps
 - `@source` absolute path for Tailwind scanning (bypasses esmcss temp file issue)
 - `watch_dirs` in rebuildjs for external directory monitoring during dev
+### Re: Document compaction (HEAD)
+
+Acknowledged the session summary compaction. The document now reflects the consolidated state of work across prior sessions:
+
+**Resolved (9 items):** CI TypeError, esbuild 0.27 `.ts` resolution, Hono sub-app routing, video sitemap, search icon CSS, 32 tests, rebuildjs@0.71.1, local dev symlink workflow, @rappstack/ui--browser--blog@0.1.2 release.
+
+**Still open (6 items):**
+1. JSON-LD VideoObject for video posts
+2. `@source` absolute path won't work on CI — needs safelist or conditional include
+3. CI deploy status pending verification
+4. Search icon `w-full` class may need removal
+5. SPEC.md files for changed packages
+6. Additional unit/functional/smoke tests
+
+Ready to pick up any of these, or start new work.
 <!-- /agent:exchange -->

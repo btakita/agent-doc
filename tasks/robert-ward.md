@@ -118,6 +118,8 @@ Names that signal AI/automation + personal service:
 
 **My top pick:** **Build Side** — it directly references the "build is the new buy" pitch Robert already loves, it's memorable, and it works for both technical and non-technical audiences.
 
+So far buildside.co is the best.
+
 ---
 
 ### Marketing Plan (Phase 1: Launch)
@@ -162,4 +164,20 @@ Names that signal AI/automation + personal service:
 4. File a simple LLC once revenue starts (CA LLC = $800/yr minimum franchise tax, so wait until you have a paying client)
 
 Want me to draft the website copy or dig into any of these areas?
+
+Draft an email to Robert Ward robertward3@yahoo.com. Including:
+- `Marketing Plan (Phase 1: Launch)`
+- Other steps for robert to take
+
+### Email Drafted (HEAD)
+
+Email to Robert (robertward3@yahoo.com) pushed to Gmail Drafts (btak.dev@gmail.com).
+
+**Subject:** Build Side — Marketing Plan + Next Steps
+
+**Contents:**
+- Marketing Plan (Phase 1): website, network referrals, channels, pricing, first clients
+- Steps for Robert: identify 5 contacts, soft-pitch, business cards, LLC timing
+
+**Status:** In Gmail Drafts — open Gmail to review and send.
 <!-- /agent:exchange -->

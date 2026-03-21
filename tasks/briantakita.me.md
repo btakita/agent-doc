@@ -433,7 +433,7 @@ CI should pick up the changes. The blog post and scroll-responsive header will d
 There is a glitch with the size transition when scrolling using the downarrow.
 
 [2026-03-21 14-45-17.mp4](../../../../Videos/2026-03-21%2014-45-17.mp4)
-### Re: Fix scroll transition glitch (HEAD)
+### Re: Fix scroll transition glitch
 
 The glitch was caused by CSS transitions animating the `top`, `padding`, and `font-size` changes when the `scrolled` class toggles. With arrow-key scrolling, this happens on the very first pixel — the transition creates a visible jump as sticky elements animate from their old positions to new ones.
 

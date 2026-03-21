@@ -343,7 +343,7 @@ Want me to implement this hierarchy?
 
 Yes
 
-### Re: install + init Implemented (HEAD)
+### Re: install + init Implemented
 
 **\`agent-doc install\`** (system-level):
 - Checks prerequisites: tmux, claude — prints status + install hints

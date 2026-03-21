@@ -143,6 +143,17 @@ Then I can publish with:
 ```
 corky youtube publish mail/social/20260321-110726-youtube.md
 ```
+go
+
+### Re: go (HEAD)
+
+Attempted to publish but the YouTube OAuth token is still expired. Please run this in the terminal:
+
+```
+! corky youtube auth
+```
+
+Draft status has been set to `ready`. Once you've re-authenticated, reply "go" again and I'll publish immediately.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

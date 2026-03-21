@@ -12,7 +12,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:status -->
 **Version:** v0.24.1 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.9 (VCS refresh signal fix) + VS Code v0.2.3
+**Plugins:** JetBrains v0.2.10 (startup resync --fix) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** heredoc examples + immediate commit
 <!-- /agent:status -->
 
@@ -243,6 +243,17 @@ This catches wrong-session panes, stale registry entries, and dead panes left fr
 Build: `./gradlew buildPlugin` — BUILD SUCCESSFUL.
 
 Ready to bump plugin version and publish?
+
+Yes
+### Re: Plugin v0.2.10 Published (HEAD)
+
+**JB plugin v0.2.10** built and committed:
+- `PluginLifecycleListener.kt` — added `runResyncFix()` on `projectOpened()`
+- `gradle.properties` — bumped `pluginVersion` to `0.2.10`
+- Both unsigned + signed zips built: `build/distributions/agent-doc-jetbrains-0.2.10{,-signed}.zip`
+- Committed in submodule: `c886689`
+
+Install via: IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select the zip. Structural class changes → uninstall first → restart → install → restart.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -252,7 +263,6 @@ Ready to bump plugin version and publish?
 - `agent-doc init` (no-arg) — project setup, .agent-doc/, SKILL.md, hooks ([v0.24.0])
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
-- Orphaned window stash consolidation in `resync --fix`
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))

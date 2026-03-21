@@ -277,7 +277,12 @@ agent-doc new plan.md --mode template
 # Open plan.md in editor → plugin auto-starts tmux session
 \`\`\`
 
+We had an issue here. This text is in escaped \`\`\`
+The inner h1 `#` has taken precedence over the patch response h3s `###`.
+
 **Backward compat:** Keep \`agent-doc init <file>\` working as an alias for \`agent-doc new <file>\` (with deprecation warning). If \`init\` is called with no args, it does the project setup.
+
+Should we just keep `agent-doc init <file>` as a separate mode as the canonical command to init a new agent document? Rather than having `agent-doc new <file>` with an alias `agent-doc init <file>`?
 
 **\`agent-doc update\`** could be a separate command that:
 - Updates the binary itself (\`cargo install agent-doc\` or re-download)
@@ -287,6 +292,52 @@ agent-doc new plan.md --mode template
 This keeps concerns cleanly separated: \`init\` = first time, \`update\` = keeping current.
 
 Want me to implement this restructuring?
+
+I was thinking that `agent-doc init` would be on the project level. Mean project configuration such as `SKILL.md`
+With `agent-doc install` being on the system level. Meaning binaries such as the `agent-doc` binary.
+Thoughts?
+
+### Re: Escaped Code Block Bug + Command Hierarchy (HEAD)
+
+**1. Code block heading bug:** When I write a response containing fenced code blocks with \`#\` headings inside them, the \`#\` lines get interpreted as markdown headings rather than code. This is a SKILL.md issue — I need to properly escape code blocks in patch responses. I'll be more careful with code block content in future responses.
+
+**2. Keep \`agent-doc init <file>\`** — agreed. No rename needed. \`init\` with a file arg creates a document, \`init\` without args initializes the project. Same command, two modes:
+
+\`\`\`
+agent-doc init              # project-level: .agent-doc/, skill, hooks
+agent-doc init <file>       # document-level: scaffold a new session doc
+\`\`\`
+
+**3. Three-tier command hierarchy — this is clean:**
+
+| Command | Scope | What it does |
+|---------|-------|-------------|
+| \`agent-doc install\` | **System** | Install/update the binary, editor plugins |
+| \`agent-doc init\` | **Project** | Create \`.agent-doc/\`, install SKILL.md, configure hooks |
+| \`agent-doc init <file>\` | **Document** | Scaffold a new session document |
+
+**\`agent-doc install\`** (system-level):
+- Self-update binary (check latest GitHub Release, download if newer)
+- Install/update editor plugins (\`--editor jetbrains\|vscode\`)
+- Check prerequisites (tmux, claude) and report missing deps
+- Idempotent — safe to re-run
+
+**\`agent-doc init\`** (project-level):
+- Create \`.agent-doc/\` directory structure
+- Install SKILL.md to \`~/.claude/skills/agent-doc/\`
+- Add SessionStart hook for autoclaim (if not already present)
+- Print project-specific quick-start
+
+**New user flow:**
+\`\`\`
+cargo install agent-doc      # get the binary
+agent-doc install            # system setup (plugins, prereq check)
+cd my-project
+agent-doc init               # project setup (.agent-doc/, skill, hooks)
+agent-doc init plan.md       # create first document
+\`\`\`
+
+Want me to implement this hierarchy?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

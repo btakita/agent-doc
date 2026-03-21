@@ -211,6 +211,20 @@ Then in an agent-doc session, Claude Code would have a `browser_fetch` tool that
 **Effort estimate:** MVP (single-site extractor + WebSocket server + MCP integration) is a weekend project. The extension boilerplate is small; the real work is per-site DOM selectors.
 
 Want me to add this to the pending section as a feature spec?
+
+Extract a feature document with the context related to the browser extension integration.
+### Feature document created (HEAD)
+
+Extracted to `tasks/todo/browser-bridge.md` — standalone feature spec with:
+
+- Problem statement (authenticated web content inaccessible to agents)
+- Architecture diagram (extension + MCP server + per-site extractors)
+- Component breakdown (extension, MCP server, extractors table)
+- Security model (localhost-only, no credential exposure)
+- MCP tool definitions (`browser_fetch`, `browser_execute`)
+- Implementation notes (tab reuse, rate limiting, error handling)
+
+Ready for planning when you want to build it.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

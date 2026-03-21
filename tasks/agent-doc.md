@@ -230,7 +230,12 @@ Each `/agent-doc` invocation triggers the SKILL which uses Claude's `Read` tool 
 
 The diff is computed by ME (the agent) by comparing the two texts — it's not computed by tooling. I read both, compare, and respond to the differences. There's no separate "diff" payload.
 
+Can we pivot toward using our tooling without having to load largely duplicate snapshots of agent doc content into the context. Can we have a HEAD snapshot with diffs going backward? Help me understand how this context works?
+I presume that we don't need to go back in time with the context. We can always roll forward with the latest HEAD of the document. Can we roll forward with the relevant diff(s)...recognizing the position of the diff relative to the rest of the document? While purging old snapshots of the document? Do we have tooling to revert or lookup old snapshots of the document? Let's prefer using our context tokens efficiently.
+
 **Do we purge document versions?** No. Each `Read` call adds the full content to Claude's context. Prior reads from earlier cycles are still in context until Claude's automatic compression removes them. There's no explicit purge.
+
+Does this cause bias toward content that is redundant across the different versions of the document? Even if the we evolved past an older state, can the older state that is repeated across many versions still over-bias the current instructions?
 
 **Boundary ordering is STILL broken.** You're seeing the response placed after the boundary because the **JB plugin hasn't been updated yet**. The fix (`47dd457` — reload document from disk before applying patches) is in the built plugin zip but you haven't installed it:
 
@@ -243,10 +248,14 @@ Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → s
 agent-doc plugin install jetbrains --local
 ```
 
+Not true. I already updated to 0.2.10 when I ran `Run Agent Doc`.
+
 Until the plugin is updated, the in-memory Document API won't have the boundary, and every IPC write falls back to plain append (wrong ordering).
 **Q: Will the session reference the archived document?**
 
 No. The archive is a plain file on disk. The agent does NOT automatically read it. Context from compacted exchanges is lost from the agent's perspective unless explicitly asked to read the archive. The archive exists for **human reference** only.
+
+If purge old snapshots from the in-memory context, then we may want to read the archive for reference.
 
 **When compaction IS useful:**
 - Before a context compaction event (Claude's automatic context trimming) — a shorter document means less is lost
@@ -263,7 +272,6 @@ I just had an external edit placing my current edit from below the agent:boundar
 The response to my compaction prompt was placed before the first response patch after the compaction event.
 
 With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
-BUG: I was reading the output. I accidentally started `agent-doc run`...which exposed an issue. As I was reading the pre-run response patch, when the run completed, `### Re: Context Loading + Boundary Still Broken` was prepended in front of the already commited previous patch via `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`
 ### Re: Stale Boundary Insertion Bug
 
 **The bug:** You accidentally triggered a run while reading output. The response was inserted at a stale boundary (`0da14dac`) from a previous cycle — it was prepended in front of the already-committed previous patch instead of appended at the end.
@@ -275,13 +283,38 @@ BUG: I was reading the output. I accidentally started `agent-doc run`...which ex
 **Fix needed:** The boundary cleanup (stale marker removal + new marker insertion) should happen in `agent-doc write --stream` itself, not just in the SKILL workflow's step 1b. This way, regardless of HOW the write is triggered, stale boundaries are always cleaned before the response is placed.
 
 This is another case where deterministic logic belongs in the binary, not the skill. The skill shouldn't be responsible for cleaning up stale boundaries — the binary should do it as part of every write.
-<!-- agent:boundary:caa8b505-bf02-414d-b832-8947e3ccc23a -->
-<!-- /agent:exchange -->
+
+Do we **ever** want the SKILL to be responsible for inserting the boundary marker at the end of the exchange component?
+Should this **only** be implemented by the `agent-doc` deterministic commands? If so, should re remove 1b from SKILL.md?
+
+
+BUG: I was reading the output. I accidentally started `agent-doc run`...which exposed an issue. As I was reading the pre-run response patch, when the run completed, `### Re: Context Loading + Boundary Still Broken` was prepended in front of the already commited previous patch via `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`
+### Re: Remove Step 1b from SKILL.md (HEAD)
+
+**Yes — boundary management should be ONLY in the binary.** The SKILL should never be responsible for boundary insertion. Here's why:
+
+1. **Boundary insertion is deterministic** — it's the same operation every time (remove stale, insert new at end of exchange). No LLM reasoning needed.
+2. **Multiple write paths** — `agent-doc write --stream` is called from SKILL workflow, `agent-doc run`, `agent-doc stream`, and the watch daemon. All need boundaries. Only the SKILL path currently does step 1b.
+3. **The stale boundary bug proves it** — when a non-SKILL path triggers a write, stale boundaries cause wrong ordering because step 1b wasn't called.
+
+**The right design:**
+- `agent-doc write --stream` should: (1) remove stale boundaries from the baseline, (2) insert a fresh boundary at end of exchange in the baseline, (3) apply patches at the new boundary, (4) re-insert boundary at end after patching
+- Step 1b should be REMOVED from SKILL.md
+- `agent-doc boundary` CLI command stays for manual/diagnostic use but isn't part of the workflow
+
+**Implementation plan:**
+1. Move boundary cleanup + insertion into `apply_patches()` or `run_stream()` in `write.rs`
+2. Remove step 1b from SKILL.md
+3. Update SPEC.md to document that boundary management is fully binary-owned
+
+Want me to implement this?
+<!-- agent:boundary:c2784cdc-bee9-4fff-8833-5bdeb517aa1d -->
+<!-- /agent:exchange -->4
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Stale boundary cleanup in write** — move cleanup from SKILL step 1b into `agent-doc write --stream` (active)
+- **Move boundary into binary write path** — remove step 1b from SKILL (active)
 - JB plugin install needed — boundary refresh fix not active until v0.2.10+ installed
 - CRDT merge ordering — Yrs causality still reorders
 - SPEC.md boundary lifecycle documentation

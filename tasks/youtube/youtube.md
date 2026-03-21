@@ -217,7 +217,7 @@ Cloudflare Pages deploy should trigger again. The post will appear at:
 
 Add the blog post url to the YouTube video description.
 
-### Re: Add blog post URL to YouTube description (HEAD)
+### Re: Add blog post URL to YouTube description
 
 Done. Updated the YouTube video description with:
 

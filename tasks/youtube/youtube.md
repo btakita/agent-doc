@@ -145,7 +145,7 @@ corky youtube publish mail/social/20260321-110726-youtube.md
 ```
 go
 
-### Re: go (HEAD)
+### Re: go
 
 Attempted to publish but the YouTube OAuth token is still expired. Please run this in the terminal:
 

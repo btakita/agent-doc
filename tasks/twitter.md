@@ -118,7 +118,7 @@ This version has no link, no name-drop. It's a concept pitch. If Tanner engages,
 
 Can we use lightpanda to scrape the twitter post?
 Do you need my credentials to login using lightpanda?
-### Lightpanda + X scraping (HEAD)
+### Lightpanda + X scraping
 
 Lightpanda is installed but **X blocks it the same way** — returns "Something went wrong, try again" without a logged-in session. X requires authentication to view tweets.
 

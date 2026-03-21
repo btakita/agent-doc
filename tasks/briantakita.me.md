@@ -459,6 +459,20 @@ I restarted the dev server and verified — the CSS rules and JS handler are bot
 The scroll-responsive behavior should work at `localhost:4100/about`. Are you testing on localhost or the live site? The live site (`briantakita.me`) hasn't deployed this CI run yet — the scrolled CSS isn't there.
 
 If you're on localhost and it's not working, try a hard refresh (Ctrl+Shift+R) to clear the browser cache.
+
+deploy
+### Re: Deployed and live (HEAD)
+
+The site is already deployed. Both CI runs completed successfully:
+- `6ae3082` (transition fix) — completed at 18:46 UTC
+- `7cdf9fd` (main changes) — completed at 18:40 UTC
+
+**Live site verification (`briantakita.me`):**
+- CSS (`E6B4CNGZ_WRJU4LIB`): All `.scrolled` rules present
+- JS (`ESF3YL4J`): Scroll handler with `classList.toggle("scrolled")` present
+- Blog post: should be at `briantakita.me/posts/agent-doc-tmux-crdt-live`
+
+The scroll-responsive header is live on production. Try `https://briantakita.me/about` — hard refresh if cached.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

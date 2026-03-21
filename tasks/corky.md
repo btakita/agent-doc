@@ -920,7 +920,7 @@ Syncing lucas...
   Pull failed -- continuing with push
   Pushed changes
 ```
-### Debug: Duplicate Writes + Pull Failed (HEAD)
+### Debug: Duplicate Writes + Pull Failed
 
 **1. Duplicate writes — NOT a bug, it's fan-out**
 

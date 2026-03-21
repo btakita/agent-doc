@@ -254,6 +254,26 @@ After restart, verify the scroll handler is present by checking:
 ```
 curl -s http://localhost:4100/index.browser-*.js | grep scrolled
 ```
+
+This is incorrect.
+Use LightPanda to load the page and execute javascript to verify the sizes of the main header and the page title:
+- at the top of the file
+- when scrolled
+### Re: LightPanda testing blocked — dev server down (HEAD)
+
+The dev server is no longer running (likely crashed when I cleared the `dist/` cache). I set up a CDP testing pipeline with LightPanda to measure element sizes before/after scroll, but couldn't connect.
+
+**What I need from you:**
+1. Restart `bun run dev` in the briantakita.me-dev terminal
+2. Confirm it's serving at `localhost:4100`
+
+Once the server is back, I'll run the LightPanda CDP test to measure:
+- Header height at page top vs after scrolling
+- H1 title font-size at top vs scrolled
+- Whether the `scrolled` class gets toggled on `<html>`
+- Whether my CSS rules are in the compiled stylesheet
+
+I also need to verify the build cache issue — the rebuild should now work since the dist cache was cleared.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

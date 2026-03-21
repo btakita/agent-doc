@@ -305,6 +305,22 @@ I started the dev server, cleared the build cache, and verified with LightPanda.
 **Note:** LightPanda CDP mode kept crashing on page navigation (YouTube embed JS errors), so I couldn't measure computed sizes after programmatic scrolling. But the static size reductions + scroll-responsive CSS rules are confirmed in the build output.
 
 The posts page was timing out during rebuild (cold cache). It should work after the initial build completes.
+
+There is a slight gap between the site header and the sticky title when scrolled.
+![img_2.png](img_2.png)
+### Re: Fix gap between header and sticky title when scrolled (HEAD)
+
+The gap comes from two sources:
+1. The breadcrumb nav has `mt-8 mb-4` which creates vertical space below the header
+2. The `<hr>` at the bottom of the header adds a separator line with spacing
+
+Added CSS rules in `index.css.ts`:
+```css
+.scrolled .Breadcrumbs { margin-top: 0; margin-bottom: 0; }
+.scrolled .blog__header hr { display: none; }
+```
+
+Verified both rules are in the compiled CSS (`WGATE4RG_PHK6Y6PP.css`). The dev server is running on the about page. The posts page has a build timeout issue (unrelated to our changes — likely the cold cache rebuild taking too long for all 51 blog posts).
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -247,11 +247,6 @@ You're right — the ordering is wrong. The diagnosis response (`Re: Tmux Sessio
 
 **The fix is in the skill workflow, not the binary:** When writing checkpoints, I should ensure the response is inserted AT the boundary — not appended to the exchange. The boundary marker exists precisely for this purpose. In the previous cycle, I wrote the first checkpoint without referencing the boundary, and the second write correctly used it.
 
-**Lesson:** All checkpoint writes in the skill workflow should use `--stream` with the same boundary context. The binary's `agent-doc write --stream` already supports boundary-aware insertion for unmatched content — the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
-
-This is a skill-level discipline issue, not a binary bug. I'll be more careful with checkpoint ordering in future cycles.
-
-release
 ### Re: v0.24.3 Released
 
 **agent-doc v0.24.3** published:
@@ -260,6 +255,53 @@ release
 **Changes in v0.24.3:**
 - Context session for `auto_start()` — eliminates wrong-session pane creation during sync
 - Post-sync `resync --fix` — automatically catches and fixes drift after every sync
+**Lesson:** All checkpoint writes in the skill workflow should use `--stream` with the same boundary context. The binary's `agent-doc write --stream` already supports boundary-aware insertion for unmatched content — the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
+
+This is a skill-level discipline issue, not a binary bug. I'll be more careful with checkpoint ordering in future cycles.
+
+release
+
+> the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
+
+Please explain further.
+### Re: Checkpoint Boundary Explanation (HEAD)
+
+**The problem in detail:**
+
+The boundary marker is a **one-use insertion point**. When `agent-doc write --stream` inserts unmatched content at the boundary, the marker is consumed (content replaces it). If I then do a SECOND write in the same cycle, there's no boundary left — the second write's unmatched content gets appended to the end of the exchange instead.
+
+**Timeline of the broken cycle:**
+
+```
+[Before cycle starts]
+Exchange:
+  ...existing content...
+  "Please diagnose issue. Add tests to replicate. Fix."     ← user's question
+  <!-- agent:boundary:UUID -->                                ← boundary marker
+  <!-- /agent:exchange -->
+
+[After first write (checkpoint)]
+Exchange:
+  ...existing content...
+  "Please diagnose issue..."                                  ← user's question
+  ### Re: Tmux Session Diagnosis                              ← inserted at boundary (HEAD)
+  ...diagnosis content...
+  <!-- /agent:exchange -->
+  (boundary consumed — gone)
+
+[After second write]
+Exchange:
+  ...existing content...
+  "Please diagnose issue..."
+  ### Re: Tmux Session Diagnosis (HEAD)
+  ...diagnosis content...
+  ### Re: Fix Implemented                                     ← appended at end (no boundary) (HEAD)
+  <!-- /agent:exchange -->
+```
+
+**The fix:** Don't use streaming checkpoints that consume the boundary. Instead, accumulate the full response and write it once. OR if checkpoints are needed, only do a single `agent-doc write` at the end — don't checkpoint mid-cycle unless the response is very long.
+
+The binary handles this correctly — the skill workflow (my behavior) was the issue. I should not have split the response into two separate `agent-doc write` calls in the same cycle.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -232,7 +232,7 @@ Is this cleanup something that should happen in the agent-doc binary?
 
 How about OSX + Windows? Is there a solution?
 
-### Re: Window Cleanup + Cross-Platform Solution (HEAD)
+### Re: Window Cleanup + Cross-Platform Solution
 
 **Window 2 cleaned up.** Moved pane %16 (linkedin.md) from window @33 to stash. Window @33 automatically removed. Session 0 now has 2 windows: @0 (agent-doc, 2 panes) and @2 (stash, 6 panes).
 

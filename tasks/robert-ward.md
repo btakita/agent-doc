@@ -180,4 +180,50 @@ Email to Robert (robertward3@yahoo.com) pushed to Gmail Drafts (btak.dev@gmail.c
 - Steps for Robert: identify 5 contacts, soft-pitch, business cards, LLC timing
 
 **Status:** In Gmail Drafts — open Gmail to review and send.
+
+Added context about Robert:
+
+Mother:
+- Dr Barbara Korsch
+- Children's Hospital in LA
+  - Head of Children's Hospital teaching program
+    - Taught interns and residents
+- Professor of pediatrics
+- 1st female Dr who conducted a Kidney Transplant on a child
+  - On the team. Not a lead Physician
+- Documentary made about her
+  - Portrait of a Pioneer
+- Author of a multi volume publication on Doctor <-> Patient Communication
+
+Father:
+- Dr Robert Ward II
+- Physician in Child in Children's Hospital in LA
+- Surgeon
+- Wrote books
+- Author
+  - Infectious Diseases of Children
+
+Grandfather:
+- Helped thousands of people escape from Nazi Germany
+- Karl Korsch
+  - https://en.wikipedia.org/wiki/Karl_Korsch
+
+### Robert's Family — Summary (HEAD)
+
+**Mother — Dr. Barbara Korsch**
+- Professor of Pediatrics, Children's Hospital Los Angeles
+- Head of the teaching program (trained interns and residents)
+- On the team that performed one of the first kidney transplants on a child (not lead physician)
+- Subject of documentary *Portrait of a Pioneer*
+- Author of multi-volume publication on doctor-patient communication — pioneered this field in medical education
+
+**Father — Dr. Robert Ward II**
+- Physician/surgeon at Children's Hospital Los Angeles
+- Author of *Infectious Diseases of Children* — foundational pediatric textbook
+
+**Grandfather — Karl Korsch**
+- Helped thousands escape Nazi Germany
+- Notable Marxist theorist and philosopher
+
+Updated Robert's contact file (`mail/contacts/robert-ward/CLAUDE.md`) with family details, practice info, and Build Side partnership note.
 <!-- /agent:exchange -->

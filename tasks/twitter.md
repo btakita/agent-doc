@@ -62,7 +62,10 @@ The document-as-interface pattern eliminates the tool-switching problem because:
 >
 > It's called agent-doc. Open source, works with Claude Code. The document is the protocol.
 >
-> https://github.com/nicholasgasior/agent-doc [replace with real link]
+> https://github.com/btakita/agent-doc [replace with real link]
+
+Why do you keep on using `https://github.com/nicholasgasior/agent-doc`?
+The url is https://github.com/btakita/agent-doc
 
 **Tone calibration:**
 - Lead with empathy (you felt the same pain)
@@ -74,6 +77,44 @@ The document-as-interface pattern eliminates the tool-switching problem because:
 **Should you reply directly?** Yes. Tanner has massive reach (100K+ followers). A genuine reply from someone who built a solution to the exact pain he's describing is valuable signal, not spam. But it needs to be authentic — you actually built this, and the approach is genuinely different from everything he listed.
 
 **Alternative: quote tweet** with a short demo video of agent-doc in action (editor + CLI, no GUI). Visual proof > text claims.
+
+One issue I have with agent-doc is I have done no user testing. I'm not sure what the install + onboarding experience will be like.
+### URL corrected + onboarding gap (HEAD)
+
+**URL fix:** Sorry — that was a hallucinated URL. Correct link: https://github.com/btakita/agent-doc
+
+**Updated draft reply:**
+
+> The tool-switching fatigue is real. I hit the same wall and built something different: a markdown file IS the interface. Edit in your editor, submit via CLI, response appears inline. No app, no GUI, no new keybindings. Sessions persist as git-tracked files.
+>
+> It's called agent-doc. Open source, works with Claude Code.
+>
+> https://github.com/btakita/agent-doc
+
+### Onboarding gap — real concern, manageable risk (HEAD)
+
+You're right that no user testing is a gap. But here's the calculus:
+
+**Why it's okay to reply anyway:**
+- Tanner is a *builder*. He'll read the README, clone, and try it. He won't expect a polished onboarding wizard.
+- His tweet says "I just need to keep shipping" — he's looking for pragmatic tools, not consumer products
+- Open source = expectation of rough edges. The question is whether the *concept* lands, not the install experience.
+
+**What could go wrong:**
+- `cargo install` fails on his system (missing deps, Rust version)
+- README doesn't explain the mental model clearly enough
+- No quick-start example to copy-paste
+
+**Minimum viable onboarding before replying:**
+1. **Test `cargo install agent-doc` on a clean-ish system** — does it build?
+2. **README has a 30-second quick-start** — `cargo install agent-doc && agent-doc init plan.md && agent-doc submit plan.md`
+3. **One working example file** in the repo someone can clone and try immediately
+
+**Alternative approach:** Reply to Tanner without the link first. Just describe the concept. If he's interested ("that sounds cool, link?"), then you share the repo. This gives you time to polish onboarding while still planting the seed.
+
+> Same pain here. I stopped chasing tools and made the document the interface — markdown file in your editor, CLI submit, response inline. No app, no GUI. Sessions persist as git-tracked files. Been shipping with it for weeks.
+
+This version has no link, no name-drop. It's a concept pitch. If Tanner engages, you follow up with the repo.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

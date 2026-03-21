@@ -68,15 +68,21 @@ Transcribed and diarized 5 phone calls with Robert Ward (310-968-4542). Whisper 
 Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
-**Compacted.** Calls 1–5 reduced from ~190 lines of verbose dialogue to 5 compact summaries (~20 lines total). Full transcripts remain archived at `mail/contacts/robert-ward/recordings/`. Key Takeaways section preserved unchanged.
 
-Robert reserved 2 public storage units over the phone.
-Robert moved his items into 1 of the storage units.
-Robert is attempting to cancel the 2nd storage unit.
+### Storage Unit Update (HEAD)
 
-PS still wants to charge $40 for the admin charge.
+Robert reserved 2 public storage units, moved items into 1, and is canceling the 2nd. PS wants to charge a $40 admin fee for the cancellation.
 
-Robert wants to reverse the $40 charge with his bank.
+**Can his bank reverse the $40?**
+Yes — Robert can file a chargeback/dispute. For $40, banks typically issue a provisional credit quickly. Strength of the dispute depends on whether the admin fee was disclosed upfront:
+- **Not disclosed** → strong chargeback case
+- **Agreed to in terms** → bank may rule in PS's favor after investigation
 
-Can his bank reverse the charge. Would PS retaliate in any way?
+**Would Public Storage retaliate?**
+For the unit he's keeping: PS *could* flag his account or claim an outstanding balance, restricting access until resolved. Large storage companies generally don't retaliate over $40, but disputing while being an active customer creates friction.
+
+**Recommended approach:**
+1. Call PS corporate (not local facility) and request the fee be waived — he's canceling promptly and keeping the other unit
+2. If they refuse and Robert has no remaining business with PS, then dispute with the bank
+3. If he still has the active unit, weigh whether $40 is worth the risk of PS complicating access on the unit he's keeping
 <!-- /agent:exchange -->

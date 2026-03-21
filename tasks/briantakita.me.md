@@ -321,6 +321,22 @@ Added CSS rules in `index.css.ts`:
 ```
 
 Verified both rules are in the compiled CSS (`WGATE4RG_PHK6Y6PP.css`). The dev server is running on the about page. The posts page has a build timeout issue (unrelated to our changes — likely the cold cache rebuild taking too long for all 51 blog posts).
+
+There is still a gap between the header and the breadcrumb.
+![img_3.png](img_3.png)
+### Re: Fix remaining gap — HR wrapper div (HEAD)
+
+The `<hr>` was hidden but its wrapper `<div class="max-w-3xl mx-auto px-4">` still took space. Changed the CSS from hiding just the `<hr>` to hiding the entire wrapper div:
+
+```css
+/* Before: only hid the hr line */
+.scrolled .blog__header hr { display: none; }
+
+/* After: hides the wrapper div containing the hr */
+.scrolled .blog__header > div:last-child { display: none; }
+```
+
+Verified in compiled CSS (`ZXJ3JECB`). Dev server is running — test at localhost:4100/about.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

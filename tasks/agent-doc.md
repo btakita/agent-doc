@@ -388,7 +388,7 @@ This is the beginning of the last non-commited patch.
 Is there any value to have the `agent:boundary` once we have the last patch? How do we know what the last patch is?
 
 Should the agent-doc skill have a dog-fooding component? At some point I want to directly support humans dog-fooding their own systems using agent-doc as the interface.
-### Re: Document Corruption + Dog-fooding + Boundary Questions (HEAD)
+### Re: Document Corruption + Dog-fooding + Boundary Questions
 
 **Document corruption fixed.** The orphaned `<!-- /agent:exchange -->`)` at line 387 was caused by my response containing the literal text `<!-- /agent:exchange -->` — the CRDT merge and component parser interpreted it as a real close tag, breaking the exchange structure. This is **lesson #13** again: any content containing `<!--` markers can confuse parsers. I manually repaired the structure.
 

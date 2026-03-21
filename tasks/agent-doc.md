@@ -164,10 +164,6 @@ claude_args: --dangerously-skip-permissions
 - Missing `agent:pending` → patch becomes unmatched content (no spurious creation)
 - Wrong-session panes in tmux session 2 → `resync --fix` cleanup (7/11 fixed)
 
-**Commits:** `c886689` (JB v0.2.10), `eac3740` (SKILL.md step 3b), `ba874fa` (--local flag)
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
-
-release
 ### Re: v0.24.2 Released
 
 **agent-doc v0.24.2** published:
@@ -182,11 +178,47 @@ release
 - JB plugin v0.2.10 — `resync --fix` on IDE startup
 
 **Tests:** 497 (all pass). **PyPI:** not published (pending).
+**Commits:** `c886689` (JB v0.2.10), `eac3740` (SKILL.md step 3b), `ba874fa` (--local flag)
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
+
+release
+Tmux session 0: has 4 windows (3 agent-doc)
+Tmux session 6: has 6 windows (3 agent-doc)
+
+Please diagnose issue. Add tests to replicate. Fix.
+Also, let's automatically detect if the sessions get out of an expected state.
+### Re: Tmux Session Diagnosis (HEAD)
+
+**Cleanup done:** `resync --fix` fixed 5/7 issues. Session 2 down from 6→3 windows. Session 0 stable at 4 (but 2 wrong-window panes fixed).
+
+**Root cause investigation:**
+
+All affected documents have `tmux_session: '0'` in frontmatter — so the `current_tmux_session()` fallback isn't the issue. The code in `auto_start()` correctly reads frontmatter and passes `session_name = "0"` to `auto_start_in_session()`.
+
+**Hypothesis:** The panes were created before `tmux_session` was written to frontmatter. The sync pre-start loop at `sync.rs:120` calls `auto_start()` which reads frontmatter. But `sync.rs:134-142` writes `tmux_session` AFTER the pre-start loop. So:
+
+1. Tab switch triggers `sync`
+2. Pre-start loop finds file without alive pane
+3. `auto_start()` reads frontmatter — `tmux_session` may be empty if this is a first claim
+4. Falls back to `current_tmux_session()` → returns "2" (whatever session user is viewing)
+5. Pane created in session 2
+6. Post-sync writes `tmux_session: '0'` to frontmatter (too late — pane already in wrong session)
+
+**The fix:** `auto_start()` should check if frontmatter has no `tmux_session` AND the sync is targeting a specific session (from `--window`), it should use the sync's target session, not `current_tmux_session()`.
+
+**Next steps:**
+1. Add `resync` validation to `sync` (auto-detect + warn/fix bad state)
+2. Fix the race: pass target session from sync context into auto_start
+3. Add tests
+
+Working on the fix now.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- **Tmux wrong-session race fix** — pass sync target session to auto_start (active)
+- **Auto-detect bad tmux state** — resync validation in sync workflow (active)
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

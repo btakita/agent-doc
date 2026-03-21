@@ -739,7 +739,7 @@ release
 
 release
 
-### Re: Already Released (HEAD)
+### Re: Already Released
 
 **v0.23.2 is already fully released** from the previous cycle. No new code changes since the tag.
 

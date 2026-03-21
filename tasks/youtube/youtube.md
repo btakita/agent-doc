@@ -154,6 +154,16 @@ Attempted to publish but the YouTube OAuth token is still expired. Please run th
 ```
 
 Draft status has been set to `ready`. Once you've re-authenticated, reply "go" again and I'll publish immediately.
+
+go
+
+### Re: go (publish) (HEAD)
+
+Published! https://www.youtube.com/watch?v=N8EX3zJLHUA
+
+- Video uploaded with CC subtitles and chapter markers
+- Visibility: public
+- Draft updated: `mail/social/20260321-110726-youtube.md` (status: published)
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

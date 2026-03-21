@@ -243,7 +243,7 @@ Yes. How can we ensure that the CRDT follows the correct merge order?
 Notice my prompt from the previous run `Yes. How can we ensure that the CRDT follows the correct merge order?`.
 In the commit, it was placed above `### Re: CRDT Merge Ordering Investigation`.
 But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
-### Re: CRDT Reordering Root Cause Found (HEAD)
+### Re: CRDT Reordering Root Cause Found
 
 **Confirmed:** The `reorder_agent_before_human()` function in `crdt.rs` explicitly puts agent content (client=1) BEFORE human content (client=2). Lines 158-159:
 

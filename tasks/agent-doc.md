@@ -188,6 +188,8 @@ There are multiple agent-doc tmux windows in tmux session 2. How did that happen
 
 **Root cause:** `auto_start_in_session` creates new windows when it can't find a registered pane in the target session. If the frontmatter says `tmux_session: '0'` but the pane was created in session 2 (because that was the "current" session at the time), each auto-start creates a new window in session 2 instead of session 0.
 
+We need to create the pan in `tmux_session: '0'` as specified in the frontmatter. Even if `tmux_session: '0'` is not instantiated. The "current" session should only be used when there is no `tmux_session` defined. 
+
 `resync` reports these as "in session '2', expected '0'" — the panes are alive but in the wrong session.
 
 **Fix options:**
@@ -198,6 +200,28 @@ There are multiple agent-doc tmux windows in tmux session 2. How did that happen
 **Recommendation:** Run `resync --fix` to clean up. The panes will be killed and re-created in session 0 on next use. This is the safest approach — the Claude sessions in those panes are likely stale anyway.
 
 Want me to run `resync --fix`?
+yes. Does the JB Plugin has `resync --fix` available? I see `Sync Tmux Layout`, but that doesn't seem to perform `resync --fix`.
+
+### Re: resync --fix Done + Plugin Action (HEAD)
+
+**Cleanup results:**
+- `resync --fix` fixed 7 of 11 issues — killed wrong-session panes, deregistered stale entries
+- Manually killed 1 orphan pane (%6) not in the registry
+- Session 2 now clean: only zsh + corky windows remain
+- 6 active sessions remain (agent-doc, robert-ward, judith-krug, linkedin, benjamin-becker, browser-bridge)
+
+**JB plugin and `resync --fix`:**
+
+No — the JB plugin doesn't have a `resync --fix` action. "Sync Tmux Layout" runs `agent-doc sync` which arranges panes to match the editor layout. It's a different operation.
+
+**Options to add it:**
+1. **Plugin action:** Add "Resync Sessions" to the agent-doc menu that runs `agent-doc resync --fix`
+2. **Automatic:** Run `resync --fix` as part of `sync` (already partially done — `sync` calls `resync::prune()` but not `--fix`)
+3. **Startup hook:** Run `resync --fix` when the plugin starts (catches drift from previous sessions)
+
+**Recommendation:** Option 3 — run `resync --fix` on plugin startup. This catches wrong-session/wrong-window issues left over from previous IDE sessions or system restarts. It's transparent to the user and prevents the kind of drift we just cleaned up.
+
+Want me to add this to the JB plugin?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

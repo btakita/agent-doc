@@ -119,6 +119,30 @@ Here are YouTube chapter markers based on the transcript:
 ```
 
 These are formatted for YouTube (timestamps must start with `0:00` for chapters to work). You can paste these directly into the video description.
+
+Upload to YouTube along with Closed Captioning and chapter markers. Add description.
+
+### Re: Upload to YouTube (HEAD)
+
+Draft created: `mail/social/20260321-110726-youtube.md`
+
+- **Title:** Building Agent-Doc: Live Debugging tmux Race Conditions & CRDT Document Sessions
+- **Video:** `tmp/2026-03-18-merged.mp4` (2.4 GB)
+- **CC:** `tasks/youtube/2026-03-18-merged.srt`
+- **Chapters:** included in description
+- **Tags:** agent-doc, corky, tmux, crdt, rust, ai-coding, live-coding, vibe-coding, agentic-programming
+- **Visibility:** public
+
+**Blocker:** YouTube OAuth token for btakita is expired. Please re-authenticate:
+
+```
+! corky youtube auth
+```
+
+Then I can publish with:
+```
+corky youtube publish mail/social/20260321-110726-youtube.md
+```
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

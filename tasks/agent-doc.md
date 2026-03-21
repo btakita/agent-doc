@@ -573,7 +573,7 @@ Can we have the plugin refresh the document after the git commit via IPC?
 So the agent-doc can send a refresh file command to the IPC mechanism?
 Would this logic be implemented in the FFI plugin where each editor plugin receives an event?
 
-### Re: VCS Refresh After Commit (HEAD)
+### Re: VCS Refresh After Commit
 
 **The mechanism already exists** — `agent-doc commit` writes `vcs-refresh.signal` to `.agent-doc/patches/`, and the JB plugin's `PatchWatcher` watches for it:
 

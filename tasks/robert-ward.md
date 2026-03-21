@@ -208,7 +208,7 @@ Grandfather:
 - Karl Korsch
   - https://en.wikipedia.org/wiki/Karl_Korsch
 
-### Robert's Family — Summary (HEAD)
+### Robert's Family — Summary
 
 **Mother — Dr. Barbara Korsch**
 - Professor of Pediatrics, Children's Hospital Los Angeles

@@ -864,4 +864,87 @@ release
 **Installed:** `corky 0.19.1` locally via `cargo install`
 
 **VERSIONS.md** updated with changelog entry covering all three bug fixes + GPU auto-detection.
+
+Getting duplicate writes.
+
+And `Pull failed -- continuing with push`
+
+Please debug. What are the root causes of these issues?
+
+```
+~/work/btakita/agent-loop main ⇡21 !41 ?6                                                                                                                                                                                              05:07:35
+❯ corky watch
+corky watch: polling every 300s (Ctrl-C to stop)
+
+=== Account: btak.dev (btak.dev@gmail.com) ===
+Connecting via Gmail API as btak.dev@gmail.com
+Access token expired, refreshing...
+  Label: INBOX
+    13 messages to process
+  Wrote: your-new-privacy-settings-on-play.md
+  Wrote: brian-finish-setting-up-your-galaxy-s25-ultra-device-with-go.md
+  Wrote: reminder-continue-to-apply-for-the-job-senior-integrations-s.md
+  Wrote: your-profile-has-been-viewed-by-a-recruiter.md
+  Wrote: underdog-io-update-on-profile-activity.md
+  Wrote: lynx-analytics-is-hiring-for-senior-software-engineer-us-29-.md
+  Wrote: hey-brian-exciting-remote-software-engineer-jobs-available-n.md
+  Wrote: thanks-for-your-interest-in-orum-brian.md
+  Wrote: university-of-virginia-is-hiring-for-senior-full-stack-web-d.md
+  Wrote: information-technology-senior-management-forum-is-hiring-for.md
+  Wrote: job-opportunities-at-marriott-international.md
+  Wrote: senior-software-engineer-at-cybercoders-in-new-york-ny-and-1.md
+  Wrote: thank-you-for-your-interest-in-u-haul.md
+
+=== Account: proton-dev (dev@briantakita.me) ===
+Connecting to 127.0.0.1:1143 as dev@briantakita.me
+Syncing label: INBOX
+  No new messages
+
+=== Account: personal (brian.takita@gmail.com) ===
+Connecting to imap.gmail.com:993 as brian.takita@gmail.com
+Syncing label: correspondence
+  No new messages
+Syncing label: for-lucas
+  Fetching 3 message(s)
+  Wrote: just-in-loyalty360-has-new-front-end-engineer-jobs-open.md
+  Wrote: just-in-loyalty360-has-new-front-end-engineer-jobs-open.md
+  Wrote: your-calyptus-weekly-wrapup.md
+  Wrote: your-calyptus-weekly-wrapup.md
+  Wrote: thanks-for-your-interest-in-hightouch-brian-takita.md
+  Wrote: thanks-for-your-interest-in-hightouch-brian-takita.md
+Syncing label: voice-sms
+  No new messages
+
+1 label(s) with new messages
+Syncing lucas...
+  Pull failed -- continuing with push
+  Pushed changes
+```
+### Debug: Duplicate Writes + Pull Failed (HEAD)
+
+**1. Duplicate writes — NOT a bug, it's fan-out**
+
+The `for-lucas` label has routing configured (`personal:for-lucas → mailboxes/lucas`). Each message is written to TWO directories:
+- `mail/conversations/` (base)
+- `mail/mailboxes/lucas/conversations/` (routing destination)
+
+The "Wrote:" print in `merge_message_to_file()` (imap_sync.rs:191) fires once per directory, but only shows the filename — not the directory path. So it looks like duplicates.
+
+**Fix options:**
+- A) Show the destination: `Wrote: file.md → mailboxes/lucas/conversations/`
+- B) Only print once per message (hide fan-out detail)
+
+Recommend A — it makes fan-out visible.
+
+---
+
+**2. Pull failed — lucas mailbox has no upstream**
+
+`mailbox/sync.rs:204` runs `git pull --rebase` in the lucas mailbox directory. This fails because the lucas mailbox repo has no remote/upstream tracking branch configured. The code ignores stderr and continues to push.
+
+**Fix:** Check if the repo has a remote before attempting pull. If no remote, skip pull silently (don't print a warning for an expected condition).
+
+---
+
+Want me to implement both fixes?
 <!-- /agent:exchange -->

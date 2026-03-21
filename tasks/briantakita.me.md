@@ -497,6 +497,9 @@ compact exchange
 **Open items:**
 - Scroll-responsive behavior may not be working on production (user reported sizes not changing — could be browser cache)
 - `rappstack-dev` changes to `blog__header.ts` are separate from briantakita.me-dev changes (different repos)
+
+compact exchange
+<!-- agent:boundary:9911ee87-7474-43a5-bfd4-a8d90d521419 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

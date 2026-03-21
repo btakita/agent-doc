@@ -223,7 +223,7 @@ The previous changes went to the wrong file (rappstack-dev source, not the local
 Ready for you to test with `bun run dev`.
 
 Same issue. Please verify your fixes with LightPanda. Test the sizes using the scrolling behavior.
-### Re: Debugging build pipeline (HEAD)
+### Re: Debugging build pipeline
 
 I investigated why the changes aren't showing up:
 

@@ -263,7 +263,6 @@ release
 
 > the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
 
-Please explain further.
 ### Re: Checkpoint Boundary Explanation
 
 **The problem in detail:**
@@ -301,12 +300,39 @@ Exchange:
 
 **The fix:** Don't use streaming checkpoints that consume the boundary. Instead, accumulate the full response and write it once. OR if checkpoints are needed, only do a single `agent-doc write` at the end — don't checkpoint mid-cycle unless the response is very long.
 
+I want the checkpoint mid-cycle. For a more responsive UI.
+Can we add an `agent:boundary` to the end of the mid-cycle patch?
+Restrict this to `agent:boundary` patches. We may have other patches that change other areas of the document such as `agent:pending`.
+
 The binary handles this correctly — the skill workflow (my behavior) was the issue. I should not have split the response into two separate `agent-doc write` calls in the same cycle.
+### Re: Boundary Re-insertion Implemented (HEAD)
+
+**Fix committed (`0239b8f`):** `append_with_boundary()` now re-inserts the boundary marker after the inserted content. This enables multiple checkpoint writes in the same cycle.
+
+**Before:** Boundary consumed on first write → second write falls back to plain append → wrong ordering.
+
+**After:** Each checkpoint write inserts at the boundary, then moves the boundary after the content → next checkpoint finds it and inserts correctly.
+
+```
+[Checkpoint 1]  content → boundary marker (re-inserted)
+[Checkpoint 2]  content → boundary marker (re-inserted again)
+[Final write]   content → boundary marker (cleaned up next cycle)
+```
+
+**Changed files:**
+- `component.rs` — `append_with_boundary()` re-inserts marker after content
+- `PatchWatcher.kt` — Kotlin fallback updated with same behavior
+- `template.rs` — 2 tests updated to expect re-inserted boundary
+
+**Tests:** 497 all pass.
+
+Want to release as v0.24.4?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Boundary re-insertion for checkpoint writes ([done])
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

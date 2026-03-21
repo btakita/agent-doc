@@ -520,7 +520,7 @@ Option 2 is the right fix — align the SKILL.md examples with actual practice. 
 
 Let's use Option 2 and release.
 
-### Re: SKILL.md Heredoc Examples + v0.24.1 Released (HEAD)
+### Re: SKILL.md Heredoc Examples + v0.24.1 Released
 
 Updated all 3 `echo` examples in SKILL.md to use `cat <<'RESPONSE'` heredocs:
 - Step 3 (streaming checkpoints): `echo '<partial...'` → `cat <<'RESPONSE'`

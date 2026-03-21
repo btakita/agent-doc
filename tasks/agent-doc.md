@@ -186,7 +186,7 @@ This seems similar to `git init`
 Steps 1-5 could also be a separate command. Which could be `agent-doc install` or `agent-doc update` or `agent-doc setup`.
 Thoughts?
 
-### Proposed `agent-doc setup` Command (HEAD)
+### Proposed `agent-doc setup` Command
 
 ```bash
 agent-doc setup [--editor jetbrains|vscode] [--no-plugin] [--no-skill]
@@ -494,7 +494,7 @@ The completed items you removed were correct. Items that should be added from th
 
 Why are you escaping **all** backticks in the patch output?
 
-### Re: Escaped Backticks Bug (HEAD)
+### Re: Escaped Backticks Bug
 
 You're right — I've been unnecessarily escaping backticks with `\`` in patch content piped through `cat <<'PATCH'`. Since the heredoc uses `'PATCH'` (single-quoted delimiter), shell expansion is already disabled. The `\`` is written literally to the file as `\``, which renders as escaped backticks in your editor.
 

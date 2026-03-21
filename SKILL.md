@@ -94,7 +94,9 @@ When responding to a document with multiple user questions/topics, flush partial
 
 1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
    ```bash
-   echo '<partial response as patch blocks>' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   <partial response as patch blocks>
+   RESPONSE
    ```
 2. **Re-save the baseline** after each checkpoint flush (the document has changed):
    ```bash
@@ -118,7 +120,9 @@ Use `agent-doc write --stream` to atomically append the response:
 1. **Save a baseline copy** of the document content (before step 3) to a temp file
 2. **Pipe your response** through `agent-doc write`:
    ```bash
-   echo "<your response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   <your response>
+   RESPONSE
    ```
 3. `agent-doc write --stream` handles:
    - Appending `## Assistant\n\n<response>\n\n## User\n\n`
@@ -147,7 +151,9 @@ The agent responds with **patch blocks** that target specific components.
    - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
 3. **Pipe through `agent-doc write` with `--stream` flag:**
    ```bash
-   echo "<your patch response>" | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   <your patch response>
+   RESPONSE
    ```
 4. `agent-doc write --stream` handles:
    - Parsing patch blocks from the response

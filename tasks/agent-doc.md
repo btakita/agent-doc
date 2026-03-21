@@ -736,6 +736,21 @@ release
 - `(HEAD)` marker accumulation fix (strip from heading lines only, post-commit cleanup)
 - `try_ipc()` synthesizes exchange patch when only unmatched content + boundary exists
 - 459 tests (162 lib + 297 bin)
+
+release
+
+### Re: Already Released (HEAD)
+
+**v0.23.2 is already fully released** from the previous cycle. No new code changes since the tag.
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.23.2` ✓ |
+| GitHub Release | [v0.23.2](https://github.com/btakita/agent-doc/releases/tag/v0.23.2) ✓ |
+| cargo install | v0.23.2 ✓ |
+| SKILL.md | v0.23.2 ✓ |
+
+No further release action needed.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

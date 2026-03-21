@@ -92,7 +92,7 @@ I want to make a website and have a "company name" for my agent services.
 
 Please help with a marketing plan + a company name.
 
-### Business Partnership: Brian + Robert (HEAD)
+### Business Partnership: Brian + Robert
 
 **What you're selling:** AI agent services — custom automation, document workflows, correspondence tools, web development. Brian builds, Robert connects.
 
@@ -102,7 +102,7 @@ Please help with a marketing plan + a company name.
 
 ---
 
-### Company Name Ideas (HEAD)
+### Company Name Ideas
 
 Names that signal AI/automation + personal service:
 
@@ -120,7 +120,7 @@ Names that signal AI/automation + personal service:
 
 ---
 
-### Marketing Plan (Phase 1: Launch) (HEAD)
+### Marketing Plan (Phase 1: Launch)
 
 **1. Positioning**
 - "We replace your expensive SaaS subscriptions with custom software that you own."

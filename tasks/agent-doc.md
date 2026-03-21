@@ -565,6 +565,39 @@ Are there alternative names to consider?
 The self-closing syntax discussion from earlier (`<!-- agent:boundary:UUID / -->`) would further distinguish them visually, but it's not necessary for correctness.
 
 **Verdict:** Keep `agent:boundary`. It's established, accurate, and the alternative names don't offer enough improvement to justify a migration.
+
+The JB plugin shows a green sidebar (new git content).
+When I run the **Refresh** command (Ctrl+Alt+Y in this editor session), the commit is recognized with the patch header having a blue sidebar (modified git content).
+
+Can we have the plugin refresh the document after the git commit via IPC?
+So the agent-doc can send a refresh file command to the IPC mechanism?
+Would this logic be implemented in the FFI plugin where each editor plugin receives an event?
+
+### Re: VCS Refresh After Commit (HEAD)
+
+**The mechanism already exists** — `agent-doc commit` writes `vcs-refresh.signal` to `.agent-doc/patches/`, and the JB plugin's `PatchWatcher` watches for it:
+
+1. `git.rs:signal_vcs_refresh()` writes `.agent-doc/patches/vcs-refresh.signal`
+2. `PatchWatcher.kt` polls every 500ms via `WatchService`
+3. When signal detected: deletes file, calls `refreshVcs()` → `markEverythingDirty()`
+
+**The bug:** The signal file exists right now and hasn't been consumed:
+```
+-rw-r--r-- 1 brian brian 7 Mar 21 08:24 vcs-refresh.signal
+```
+
+This means either:
+1. **PatchWatcher isn't running** — it may have crashed or not started
+2. **WatchService missed the event** — Java's inotify can miss events if the file is written and deleted before the next poll
+3. **Path mismatch** — the watcher is watching a different `.agent-doc/patches/` directory
+
+**Most likely cause:** The PatchWatcher IS running (since IPC patches work — we see "IPC patch consumed by plugin" in every write). But `signal_vcs_refresh()` creates the file, and the WatchService correctly fires a CREATE event. The PatchWatcher checks `filename == "vcs-refresh.signal"` and deletes + refreshes.
+
+Let me check if the PatchWatcher's `refreshVcs()` is actually calling `markEverythingDirty()` on the right thread. IntelliJ requires VCS operations on the EDT (Event Dispatch Thread). If `refreshVcs()` runs on the watcher thread, the `markEverythingDirty()` call may silently fail.
+
+**Fix:** Wrap `refreshVcs()` in `ApplicationManager.getApplication().invokeLater { ... }` to ensure it runs on EDT.
+
+Want me to check the plugin source and fix it?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

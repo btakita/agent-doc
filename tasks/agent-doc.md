@@ -173,7 +173,7 @@ claude_args: --dangerously-skip-permissions
 
 There are multiple agent-doc tmux windows in tmux session 2. How did that happen?
 
-### Re: Multiple agent-doc Windows in Session 2 (HEAD)
+### Re: Multiple agent-doc Windows in Session 2
 
 **What happened:** 6 panes are in tmux session 2, each in its own window. They should all be in session 0 (stash window).
 

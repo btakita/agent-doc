@@ -175,6 +175,28 @@ I've analyzed the layout. Here's what's taking up space:
 This would bring the fixed top space from ~8.5rem down to ~6rem (~40% reduction).
 
 Want me to implement these changes, or do you want different sizing? I can also add scroll-responsive behavior (full-size → compact on scroll) if you prefer that over a permanently compact header.
+
+Let's try it. I'll run the local server after you are done to test.
+### Re: Implementing compact header (HEAD)
+
+Done. Applied all changes across 3 files:
+
+**1. `briantakita.me-dev/lib/ui--server--briantakita/header/briantakita__header.ts`**
+- Logo: `w-16 h-10` → `w-12 h-7`
+
+**2. `src/rappstack-dev/lib/ui--server--blog/header/blog__header.ts`**
+- Nav padding: `p-4` → `py-1.5 px-4`
+- Logo text: `text-xl sm:text-2xl` → `text-base sm:text-lg`
+- Default logo image: `w-16 h-10` → `w-12 h-7`
+
+**3. `briantakita.me-dev/lib/ui--server--briantakita/sticky/index.ts`**
+- Nav top: `4.5rem` → `2.75rem`
+- H1 top: `5.75rem` → `4rem`, min-height: `2.75rem` → `2rem`
+- H2 top: `8.25rem` → `6rem`, min-height: `2.75rem` → `2rem`
+- H3 top: `10.75rem` → `8rem`, min-height: `1.75rem` → `1.5rem`
+- All deeper levels reduced proportionally
+
+Ready for you to test with `bun run dev`.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

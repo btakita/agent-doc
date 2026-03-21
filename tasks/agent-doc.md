@@ -300,7 +300,6 @@ Describe the mechanism to correctly move `agent:boundary` below all human prompt
 Validate that this prompt after `<!-- agent:boundary:36a7b066-d92c-4fdb-b85a-082d95afc927 -->` is run after the patch response. This behavior should be in the SPEC.md
 ```
 
-Please diagnose (including reading logs).
 ### Re: Boundary Mechanism + Ordering Diagnosis
 
 **The mechanism (idle → run):**
@@ -322,7 +321,7 @@ Looking at the document, the ordering is actually correct this time:
 - Line 293: "Validate that this prompt..." (prompt 2 — typed after response appeared)
 
 The response IS sandwiched between two prompts — but this is CORRECT because:
-- Prompt 1 was typed BEFORE the response → appears before it
+- Prompt 1 was typed BEFORE the response → appears before it: But it was located after the `agent:boundary`. Since it was located after the `agent:boundary`, it should be placed after the response patch.
 - Prompt 2 was typed AFTER the response appeared → appears after it
 
 The old boundary `36a7b066` was from the PREVIOUS cycle's re-insertion. The user typed prompt 1 after it. Then the response was written. Then the user typed prompt 2 after the response.
@@ -332,12 +331,47 @@ The old boundary `36a7b066` was from the PREVIOUS cycle's re-insertion. The user
 **SPEC.md update needed:** The boundary lifecycle (insert → consume → re-insert → cleanup) should be documented in SPEC.md. The key invariant: "prompts typed while idle always appear before the response because `agent-doc boundary` runs at step 1b and places the boundary after all user text."
 
 Want me to update SPEC.md with this?
-<!-- agent:boundary:67e1928f-097c-41e6-a77a-89eb6bea6a26 -->
+Yes. And we should assert that this is a deterministic operation due to it being implemented by `agent-doc boundary`.
+
+Please diagnose (including reading logs).
+`Please diagnose (including reading logs).` was placed after the response patch.
+- Was this prompt an input to the response patch? If yes, then it should have been placed before the response patch.
+- Or was this missed? If yes, then it should be placed after the `agent:boundary`.
+### Re: Ordering Correction + "Please diagnose" Analysis (HEAD)
+
+**Your correction is right.** The boundary is the dividing line:
+- Content BEFORE boundary → appears before response
+- Content AFTER boundary → appears after response
+
+When `agent-doc boundary` runs at step 1b, it moves the boundary to the end of exchange. All user prompts typed while idle end up BEFORE the new boundary. The response is then inserted at the boundary (after prompts). This is deterministic — `agent-doc boundary` is a binary operation.
+
+**"Please diagnose (including reading logs.)" analysis:**
+
+This prompt WAS an input to the response — I read it and responded to it. But it ended up AFTER the response patch in the document. This is the same CRDT reordering bug.
+
+**What happened:**
+1. "Please diagnose..." was in the document before `agent-doc boundary` ran
+2. Step 1b placed the new boundary AFTER it (correct)
+3. I saved the baseline (containing "Please diagnose..." + boundary)
+4. `apply_patches` inserted response at boundary (after "Please diagnose...")
+5. CRDT merge reordered — moved "Please diagnose..." after the response
+
+Even with `skip_reorder`, the CRDT merge can still reorder content. The skip_reorder flag prevents the explicit agent-before-human swap, but the underlying Yrs CRDT merge can still produce different ordering based on its causality model.
+
+**The real fix:** Don't rely on CRDT merge for ordering. Instead, after `apply_patches()` produces "content_ours" with correct ordering (response at boundary, after prompts), check if the document hasn't changed. If unchanged → write directly (no CRDT merge needed). The CRDT merge only triggers when `content_current != base`.
+
+Since the user doesn't edit during response generation in most cases, the direct write path (`content_current == base`) should handle the common case correctly. The CRDT path is only for concurrent edits.
+
+**To SPEC.md:** I'll add the boundary lifecycle with the invariant that boundary positioning is deterministic (binary operation) and the ordering guarantee.
+
+Compact exchange and release?
+<!-- agent:boundary:021b51d1-0918-40aa-937e-39a6f89ab343 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- CRDT merge ordering — still reordering even with skip_reorder (investigation needed)
 - SPEC.md boundary lifecycle documentation
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

@@ -363,9 +363,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         // interleaving when the agent replaces component content while the user
         // appends within the same region (lazily-rs.md corruption bug).
         let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
-        let result = merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
-        eprintln!("[write] CRDT merge successful — no conflicts possible.");
-        result
+        // Skip CRDT reordering when boundary-aware insertion was used.
+        // The boundary marker already determines correct prompt→response ordering.
+        let had_boundary = base.contains("<!-- agent:boundary:");
+        merge::merge_contents_crdt_opts(Some(&base_state), &content_ours, &content_current, had_boundary)?
     };
 
     atomic_write(file, &final_content)?;

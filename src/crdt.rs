@@ -170,7 +170,7 @@ fn reorder_agent_before_human(doc: &Doc) -> String {
 /// **Stale base detection:** If the CRDT base text doesn't match either ours
 /// or theirs as a prefix/substring, the base is stale. In that case, we use
 /// `ours_text` as the base to prevent duplicate insertions.
-pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> Result<String> {
+pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str, skip_reorder: bool) -> Result<String> {
     // Short-circuit: if both sides are identical, no merge needed
     if ours_text == theirs_text {
         eprintln!("[crdt] ours == theirs, skipping merge");
@@ -313,8 +313,15 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
             .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
     }
 
-    // Read merged result with agent-before-human reordering at append boundary
-    let merged = reorder_agent_before_human(&ours_doc);
+    // Read merged result. Skip reordering when boundary-aware insertion was used —
+    // the boundary marker already determines correct ordering.
+    let merged = if skip_reorder {
+        let text = ours_doc.get_or_insert_text(TEXT_KEY);
+        let txn = ours_doc.transact();
+        text.get_string(&txn)
+    } else {
+        reorder_agent_before_human(&ours_doc)
+    };
 
     // Post-merge dedup: remove identical adjacent blocks (#15)
     Ok(dedup_adjacent_blocks(&merged))
@@ -477,7 +484,7 @@ mod tests {
         let ours = format!("{base}## Agent\n\nAgent response.\n");
         let theirs = format!("{base}## User\n\nUser addition.\n");
 
-        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&base_state), &ours, &theirs, false).unwrap();
 
         // Both additions should be present
         assert!(merged.contains("Agent response."), "missing agent text");
@@ -497,7 +504,7 @@ mod tests {
         let ours = "Line 1\nAgent line\nLine 3\n";
         let theirs = "Line 1\nUser line\nLine 3\n";
 
-        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+        let merged = merge(Some(&base_state), ours, theirs, false).unwrap();
 
         // Both insertions preserved, no conflict
         assert!(merged.contains("Agent line"), "missing agent insertion");
@@ -512,7 +519,7 @@ mod tests {
         let ours = "Agent wrote this.\n";
         let theirs = "User wrote this.\n";
 
-        let merged = merge(None, ours, theirs).unwrap();
+        let merged = merge(None, ours, theirs, false).unwrap();
 
         assert!(merged.contains("Agent wrote this."));
         assert!(merged.contains("User wrote this."));
@@ -568,7 +575,7 @@ mod tests {
         let base_doc = CrdtDoc::from_text(base);
         let state = base_doc.encode_state();
 
-        let merged = merge(Some(&state), base, base).unwrap();
+        let merged = merge(Some(&state), base, base, false).unwrap();
         assert_eq!(merged, base);
     }
 
@@ -579,7 +586,7 @@ mod tests {
         let state = base_doc.encode_state();
 
         let ours = "Original.\nAgent added.\n";
-        let merged = merge(Some(&state), ours, base).unwrap();
+        let merged = merge(Some(&state), ours, base, false).unwrap();
         assert_eq!(merged, ours);
     }
 
@@ -629,7 +636,7 @@ Committed and pushed.
 {}{}
 ", base_content, user_prompt);
 
-        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&base_state), &ours, &theirs, false).unwrap();
 
         // User prompt should appear exactly ONCE
         let prompt_count = merged.matches("Opening a video a shows video a.").count();
@@ -659,7 +666,7 @@ Committed and pushed.
         let ours = format!("{}{}Agent response.\n", base_content, shared_addition);
         let theirs = format!("{}{}", base_content, shared_addition);
 
-        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&base_state), &ours, &theirs, false).unwrap();
 
         let count = merged.matches("User typed this.").count();
         assert_eq!(
@@ -697,7 +704,7 @@ Committed and pushed.
         // User types something in their editor at the same position
         let theirs = "# Doc\n\nPrevious content.\n\n**Soft-bristle brush only**\n";
 
-        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+        let merged = merge(Some(&base_state), ours, theirs, false).unwrap();
 
         // Both texts should be present as contiguous blocks, not interleaved
         assert!(
@@ -724,7 +731,7 @@ Committed and pushed.
         let ours = "Agent wrote this line\n";
         let theirs = "User wrote different text\n";
 
-        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+        let merged = merge(Some(&base_state), ours, theirs, false).unwrap();
 
         // At least one side's text should appear contiguously
         let has_agent_contiguous = merged.contains("Agent wrote this line");
@@ -817,7 +824,7 @@ Please comprehensively test adherence to the spec.
         let theirs = format!("{header}{theirs_exchange}{footer}");
 
         // Using stale CRDT state (previous cycle) — this is what triggers the bug
-        let merged = merge(Some(&stale_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&stale_state), &ours, &theirs, false).unwrap();
 
         // Agent's replacement text should be contiguous (no interleaving)
         assert!(
@@ -873,7 +880,7 @@ All committed and pushed.
 
         // Use baseline as CRDT base (the fix)
         let baseline_state = CrdtDoc::from_text(&baseline).encode_state();
-        let merged = merge(Some(&baseline_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&baseline_state), &ours, &theirs, false).unwrap();
 
         // Agent text should be contiguous
         assert!(
@@ -919,7 +926,7 @@ commit and push all rappstack packages.
 **Soft-bristle brush only**
 ";
 
-        let merged = merge(Some(&base_state), ours, theirs).unwrap();
+        let merged = merge(Some(&base_state), ours, theirs, false).unwrap();
 
         // Agent formatting must be intact
         assert!(
@@ -964,7 +971,7 @@ commit and push all rappstack packages.
         // User inserts a line in the middle of the original exchange
         let theirs = format!("{header}Line one of old content\nUser inserted this line\nLine two of old content\nLine three of old content\n{footer}");
 
-        let merged = merge(Some(&baseline_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&baseline_state), &ours, &theirs, false).unwrap();
 
         // Agent text should be contiguous — no mid-word splits
         assert!(
@@ -1002,7 +1009,7 @@ commit and push all rappstack packages.
         // Human appends their own text
         let theirs = format!("{base}User added this line.\n");
 
-        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+        let merged = merge(Some(&base_state), &ours, &theirs, false).unwrap();
 
         // Both should be present
         assert!(merged.contains("Agent wrote this."), "missing agent text");

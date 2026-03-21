@@ -58,7 +58,7 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 | `input` | replace | User prompt area |
 | (custom) | replace | All other components default to replace |
 
-Per-component behavior is configured in `.agent-doc/components.toml` (see §7.20).
+Per-component behavior is configured in `.agent-doc/components.toml` (see §7.21).
 
 ## 3. Snapshot System
 
@@ -130,27 +130,43 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 ### 7.2 init
 
-`agent-doc init <FILE> [TITLE] [--agent NAME]` — scaffolds frontmatter + `## User` block. Fails if exists.
+Two modes:
 
-### 7.3 diff
+**No-arg (project init):** `agent-doc init` — checks prerequisites, creates `.agent-doc/snapshots/` and `.agent-doc/patches/` directories, and installs `.claude/skills/agent-doc/SKILL.md`. Idempotent. Run once per project before creating session documents.
+
+**With file (document scaffold):** `agent-doc init <FILE> [TITLE] [--agent NAME]` — scaffolds frontmatter + `## User` block. Fails if file already exists. Lazily runs project init first if `.agent-doc/` does not exist.
+
+### 7.3 install
+
+`agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]` — system-level setup.
+
+1. **Prerequisite check** (unless `--skip-prereqs`): verifies `tmux` and `claude` are on `PATH`; prints ok or MISSING with install hint for each. Does not fail — only warns.
+2. **Editor plugin install** (unless `--skip-plugins`):
+   - If `--editor` is given, installs only that editor's plugin.
+   - Otherwise, auto-detects installed editors: JetBrains (checks `~/.local/share/JetBrains/` on Linux, `/Applications/IntelliJ*` on macOS) and VS Code family (`cursor`, `codium`, `code`).
+   - If no editors detected, prints a hint to use `--editor` and exits without error.
+   - Calls `crate::plugin::install(editor)` for each detected editor.
+   - Prints a summary of installed and failed editors.
+
+### 7.4 diff
 
 `agent-doc diff <FILE>` — prints unified diff to stdout.
 
-### 7.4 reset
+### 7.5 reset
 
 `agent-doc reset <FILE>` — clears session ID, deletes snapshot.
 
-### 7.5 clean
+### 7.6 clean
 
 `agent-doc clean <FILE>` — squashes all `agent-doc:` commits for file into one via `git reset --soft`.
 
-### 7.6 audit-docs
+### 7.7 audit-docs
 
 `agent-doc audit-docs [--root DIR]` — checks CLAUDE.md/AGENTS.md/README.md/SKILL.md for tree path accuracy, line budget (1000), staleness, and actionable content. Exit 1 on issues.
 
 `--root DIR` overrides auto-detection of the project root directory. Without it, the root is resolved via project markers (Cargo.toml, package.json, etc.), then `.git`, then CWD fallback.
 
-### 7.7 start
+### 7.8 start
 
 `agent-doc start <FILE>` — start Claude in a new tmux pane and register the session.
 
@@ -159,7 +175,7 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 3. Register session → pane in `sessions.json`
 4. Exec `claude` (replaces process)
 
-### 7.8 route
+### 7.9 route
 
 `agent-doc route <FILE> [--pane P]` — route a `/agent-doc` command to the correct tmux pane.
 
@@ -179,7 +195,7 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 4. If split-window fails → fall back to creating a new window
 5. If no registered pane found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
 
-### 7.9 claim
+### 7.10 claim
 
 `agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P]` — claim a document for a tmux pane.
 
@@ -207,7 +223,7 @@ This prevents the JetBrains plugin from hitting persistent error balloons when a
 - `tmux display-message` — 3-second overlay on the target pane showing "Claimed {file} (pane {id})"
 - `.agent-doc/claims.log` — appends `Claimed {file} for pane {id}` for deferred display by the SKILL.md workflow on next invocation
 
-### 7.10 focus
+### 7.11 focus
 
 `agent-doc focus <FILE> [--pane P]` — focus the tmux pane for a session document.
 
@@ -217,7 +233,7 @@ This prevents the JetBrains plugin from hitting persistent error balloons when a
 
 Exits with error if the pane is dead or no session is registered.
 
-### 7.11 layout
+### 7.12 layout
 
 `agent-doc layout <FILE>... [--split h|v] [--window W]` — arrange tmux panes to mirror editor split layout.
 
@@ -230,7 +246,7 @@ Exits with error if the pane is dead or no session is registered.
 
 `--split h` (default): horizontal/side-by-side. `--split v`: vertical/stacked. Single file falls back to `focus`. Dead panes and files without sessions are skipped with warnings.
 
-### 7.12 resync
+### 7.13 resync
 
 `agent-doc resync [--fix]` — validate sessions.json against live tmux panes.
 
@@ -257,7 +273,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations.
 
-### 7.13 prompt
+### 7.14 prompt
 
 `agent-doc prompt <FILE>` — detect permission prompts from a Claude Code session.
 
@@ -266,7 +282,7 @@ Exits with error if the pane is dead or no session is registered.
 - `--answer N` navigates to option N and confirms
 - `--all` polls all live sessions, returns JSON array
 
-### 7.14 commit
+### 7.15 commit
 
 `agent-doc commit <FILE>` — selective commit with auto-generated timestamp.
 
@@ -284,7 +300,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
 
-### 7.15 skill
+### 7.16 skill
 
 `agent-doc skill install` — write the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md` in the current project. Idempotent (skips if content matches).
 
@@ -292,7 +308,7 @@ Exits with error if the pane is dead or no session is registered.
 
 The bundled SKILL.md contains an `agent-doc-version` frontmatter field set to the binary's version at build time. When the skill is invoked via Claude Code, the pre-flight step compares this field against the installed binary version (`agent-doc --version`). If the binary is newer, `agent-doc skill install` runs automatically to update the skill before proceeding.
 
-### 7.16 outline
+### 7.17 outline
 
 `agent-doc outline <FILE> [--json]` — display markdown section structure with line counts and approximate token counts.
 
@@ -303,13 +319,13 @@ The bundled SKILL.md contains an `agent-doc-version` frontmatter field set to th
 
 Default output: indented text table. `--json` outputs a JSON array of section objects (`heading`, `depth`, `line`, `lines`, `tokens`).
 
-### 7.17 upgrade
+### 7.18 upgrade
 
 `agent-doc upgrade` — check crates.io for latest version, upgrade via GitHub Releases binary download → cargo install → pip install (cascade).
 
 > **Startup version check:** On every invocation (except `upgrade` itself), `warn_if_outdated` queries crates.io (with a 24h cache at `~/.cache/agent-doc/version-cache.json`) and prints a one-line stderr warning if a newer version is available. Errors are silently ignored so normal operation is never blocked.
 
-### 7.18 plugin
+### 7.19 plugin
 
 `agent-doc plugin install <EDITOR>` — download and install the editor plugin from the latest GitHub Release.
 
@@ -319,7 +335,7 @@ Default output: indented text table. `--json` outputs a JSON array of section ob
 
 Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Releases (`btakita/agent-doc`). Prefers signed assets (`*-signed.zip`) when available, falling back to unsigned. Auto-detects standard plugin directories for each editor (e.g., JetBrains plugin dir via `idea.plugins.path` or platform defaults, VS Code `~/.vscode/extensions/`).
 
-### 7.19 sync
+### 7.20 sync
 
 `agent-doc sync --col <FILES>,... [--col <FILES>,...] [--window W] [--focus FILE]` — declarative 2D layout sync.
 
@@ -335,7 +351,7 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 5. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
 6. **VERIFY** — confirm final layout matches desired order
 
-### 7.20 patch
+### 7.21 patch
 
 `agent-doc patch <FILE> <COMPONENT> [CONTENT]` — replace content in a named component.
 
@@ -363,7 +379,7 @@ pre_patch = "cmd"      # Shell command: stdin→stdout transform
 post_patch = "cmd"     # Shell command: fire-and-forget
 ```
 
-### 7.21 write
+### 7.22 write
 
 `agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk]` — apply patch blocks from stdin to a template document.
 
@@ -386,9 +402,20 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Snapshot invariant:** All write paths (inline, template, stream, IPC) save the snapshot as `content_ours` — the baseline with the agent response applied. The working tree file may differ (due to concurrent user edits merged in), but the snapshot always reflects only the agent's contribution. This is the foundation of correct diff detection.
 
-**Boundary marker cleanup:** On IPC write, stale boundary markers from prior responses are removed before inserting new content. When unmatched content exists and the target component has a boundary marker, a synthesized patch with `boundary_id` is sent to the plugin for boundary-aware insertion.
+**Boundary marker lifecycle (binary-owned):** Boundary management is fully deterministic and handled by the binary — never by the SKILL workflow. The `apply_patches()` function manages the complete lifecycle:
 
-### 7.22 watch
+1. **Pre-patch cleanup:** Remove all stale boundary markers from the document
+2. **Fresh insertion:** Insert a new boundary at the END of the exchange component (after all user text)
+3. **Patch application:** Response content is inserted at the boundary position via `append_with_boundary()`
+4. **Post-patch re-insertion:** A new boundary is inserted at the END of exchange (after the response)
+
+**Invariant:** User prompts typed while idle always appear before the response because the fresh boundary is placed after all user text. The boundary is the dividing line — content before boundary = before response, content after boundary = after response.
+
+**Design principle:** Boundary insertion was initially implemented in the SKILL workflow (step 1b) but moved to the binary because: (1) it's deterministic (unit-testable with fixed inputs), (2) ALL write paths need it (SKILL, run, stream, watch), (3) non-SKILL paths bypassing step 1b caused stale boundary bugs. **Rule: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
+
+**IPC boundary:** When unmatched content exists and the target component has a boundary marker, a synthesized patch with `boundary_id` is sent to the plugin for boundary-aware insertion. The `PatchWatcher` reloads the document from disk before applying patches to ensure it has the latest boundary marker.
+
+### 7.23 watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.
 
@@ -400,7 +427,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - `--status` reports whether the daemon is running
 - `--debounce` sets the debounce delay in milliseconds (default 500)
 
-### 7.23 history
+### 7.24 history
 
 `agent-doc history <FILE>` — list exchange versions from git history.
 
@@ -414,7 +441,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 2. Prepend the old exchange content into the current document's exchange component
 3. The restored content appears above the current exchange, preserving both
 
-### 7.24 terminal
+### 7.25 terminal
 
 `agent-doc terminal <FILE> [--session NAME]` — open an external terminal with tmux attached to the session.
 

@@ -241,7 +241,7 @@ I just had an external edit placing my current edit from below the agent:boundar
 The response to my compaction prompt was placed before the first response patch after the compaction event.
 
 With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
-### Re: Context Loading + Boundary Still Broken (HEAD)
+### Re: Context Loading + Boundary Still Broken
 
 **How context works in the SKILL workflow:**
 

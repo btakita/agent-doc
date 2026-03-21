@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.23.0"
+agent-doc-version: "0.24.1"
 ---
 
 # agent-doc submit
@@ -108,6 +108,16 @@ When responding to a document with multiple user questions/topics, flush partial
 **When to checkpoint:** After each `### Re:` section, after completing a code implementation summary, or after any response block that takes >15s to generate. Skip checkpoints for short single-topic responses.
 
 **All writes use `--stream` (CRDT merge)** — this eliminates merge conflicts when the user edits the document during response generation.
+
+### 3b. Update pending (template mode)
+
+If the document has an `<!-- agent:pending -->` component, **every response MUST include a `<!-- patch:pending -->` block** reflecting the current state. This is not optional — pending drift makes task lists unreliable.
+
+**What to update each cycle:**
+- Items completed during this response → remove or mark `([done])`
+- New items discovered → add with context
+- Active work items → move to top
+- Reprioritize based on current work direction
 
 ### 4. Write back to the document
 

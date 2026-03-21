@@ -204,7 +204,7 @@ Cloudflare Pages deploy should trigger automatically from the push. The post wil
 
 I don't see the post on the live site.
 
-### Re: Post not visible (HEAD)
+### Re: Post not visible
 
 Found the issue — the post index (`post/index.ts`) is a generated file that lists all blog posts. The new post wasn't in it. Fixed:
 

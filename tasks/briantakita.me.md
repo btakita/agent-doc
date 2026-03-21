@@ -445,6 +445,20 @@ The glitch was caused by CSS transitions animating the `top`, `padding`, and `fo
 - `transition: margin 0.2s ease, top 0.2s ease` from `.scrolled .Breadcrumbs`
 
 Pushed: `app/briantakita.me` → `8c8ebd9`, `briantakita.me-dev` → `6ae3082`.
+
+Now the size of the header, the breadcrumbs, and the title don't change.
+
+[2026-03-21 14-48-43.mp4](../../../../Videos/2026-03-21%2014-48-43.mp4)
+### Re: Scroll-responsive sizing is still in the build (HEAD)
+
+I restarted the dev server and verified — the CSS rules and JS handler are both present:
+
+- **CSS** (`E6B4CNGZ`): All `.scrolled` rules intact (nav-container padding, logo size, h1/h2 font-size, breadcrumb top, sticky offsets)
+- **JS** (`VUS53LD5`): `nofouc__hyop` has the scroll handler that toggles `scrolled` class
+
+The scroll-responsive behavior should work at `localhost:4100/about`. Are you testing on localhost or the live site? The live site (`briantakita.me`) hasn't deployed this CI run yet — the scrolled CSS isn't there.
+
+If you're on localhost and it's not working, try a hard refresh (Ctrl+Shift+R) to clear the browser cache.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

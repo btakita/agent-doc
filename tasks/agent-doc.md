@@ -222,6 +222,27 @@ No — the JB plugin doesn't have a `resync --fix` action. "Sync Tmux Layout" ru
 **Recommendation:** Option 3 — run `resync --fix` on plugin startup. This catches wrong-session/wrong-window issues left over from previous IDE sessions or system restarts. It's transparent to the user and prevents the kind of drift we just cleaned up.
 
 Want me to add this to the JB plugin?
+
+Yes.
+
+The last run did not register the commit. I did not run `/compact`. I have since run `/compact`. Should this issue be fixed now?
+![img_1.png](img_1.png)
+### Re: resync --fix on Startup + Commit Issue (HEAD)
+
+**Commit issue:** Fixed. The previous session compacted before the commit step could run. This session's step 0b committed it as `47c2fec`. The gutter should now be clean for that response.
+
+**JB plugin startup resync:** Added `resync --fix` to `PluginLifecycleListener.projectOpened()`. On IDE startup:
+1. Checks if `.agent-doc/` exists (skips if not an agent-doc project)
+2. Runs `agent-doc resync --fix` on a daemon thread (non-blocking)
+3. Logs results to `idea.log` under `#com.github.btakita.agentdoc`
+
+This catches wrong-session panes, stale registry entries, and dead panes left from previous IDE sessions — transparently, without user action.
+
+**File changed:** `editors/jetbrains/.../PluginLifecycleListener.kt` — added `runResyncFix()` method + companion LOG.
+
+Build: `./gradlew buildPlugin` — BUILD SUCCESSFUL.
+
+Ready to bump plugin version and publish?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

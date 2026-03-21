@@ -419,7 +419,7 @@ Is there any value to have the `agent:boundary` once we have the last patch? How
 
 Should the agent-doc skill have a dog-fooding component? At some point I want to directly support humans dog-fooding their own systems using agent-doc as the interface.
 Note that my prompts were placed after the last patch.
-### Re: Compact + Dog-fooding + Prompt Ordering (HEAD)
+### Re: Compact + Dog-fooding + Prompt Ordering
 
 **Compacted:** 271 lines archived.
 

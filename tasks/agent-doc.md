@@ -390,7 +390,7 @@ Add automated tests. Preferably functional tests that test real behavior.
 
 Can we have tests for SKILL.md behavior?
 
-### Re: SKILL.md Tests Added (HEAD)
+### Re: SKILL.md Tests Added
 
 6 new CLI tests for skill behavior:
 

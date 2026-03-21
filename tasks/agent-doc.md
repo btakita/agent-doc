@@ -175,11 +175,6 @@ claude_args: --dangerously-skip-permissions
 **Design discussions:**
 - Boundary lifecycle: one-use insertion point, re-inserted by binary after consumption, cleaned up next cycle
 - Binary vs agent: deterministic operations (boundary re-insertion) belong in binary, LLM operations in SKILL.md (documented in CLAUDE.md)
-- Dog-fooding: not redundant — it's the PRACTICE that validates the binary-vs-agent principle. The principle says WHERE to put code; dog-fooding tells us WHEN the principle is violated. Useful as a lesson, not a separate skill.
-- User prompts placed after last patch: noted. The boundary re-insertion ensures prompts are captured regardless of position.
-
-**Pending v0.24.4 release** with boundary re-insertion fix.
-Release
 ### Re: v0.24.4 Released
 
 **agent-doc v0.24.4** published:
@@ -193,13 +188,42 @@ Release
 **Also noted from user feedback (not yet implemented):**
 - AST parsing should handle literal component markers in response text (currently causes corruption)
 - Dog-fooding as a meta-concern: validates binary-vs-agent principle in practice
-<!-- agent:boundary:b494d371-3b17-45b2-aad4-b667a9ce1780 -->
+- Dog-fooding: not redundant — it's the PRACTICE that validates the binary-vs-agent principle. The principle says WHERE to put code; dog-fooding tells us WHEN the principle is violated. Useful as a lesson, not a separate skill.
+- User prompts placed after last patch: noted. The boundary re-insertion ensures prompts are captured regardless of position.
+
+**Pending v0.24.4 release** with boundary re-insertion fix.
+Release
+My prompt `Release` as placed after the agent patch. It should have been before the patch.
+Why was the prompt placed after the patch?
+### Re: Prompt Ordering After Patch (HEAD)
+
+You're right — "Release" (your prompt) appears at line 195, AFTER the "Re: v0.24.4 Released" response (lines 178-194). It should be BEFORE the response.
+
+**Root cause:** The CRDT merge reordered them. Here's what happened:
+
+1. You typed "Release" in the exchange
+2. `agent-doc boundary` inserted a boundary at the end (after "Release")
+3. I saved a baseline, then wrote the response
+4. The response was inserted at the boundary position (correct)
+5. But the CRDT 3-way merge reconciled the baseline (which had "Release" at the end) with the write (which placed the response at the boundary)
+6. The merge saw the response as "new content from the write" and "Release" as "existing content from both sides" — but the merge algorithm doesn't guarantee insertion ORDER relative to existing content when both baseline and document have different content
+
+**This is a CRDT merge ordering bug** — the Yrs CRDT doesn't preserve the semantic ordering of "user text should come before agent response" because it doesn't understand the meaning. It only guarantees no data loss.
+
+**Fix options:**
+1. **Use the boundary as a hard separator** — the binary should ensure content inserted at the boundary always appears BEFORE any content that was already below the boundary. This is a binary-level fix in the CRDT merge path.
+2. **Don't use CRDT merge for checkpoint writes** — use simple file replacement instead of `--stream` (loses concurrent edit safety)
+3. **Post-write reorder** — after CRDT merge, scan for user prompts that ended up after agent responses and reorder them
+
+Option 1 is the right approach but requires investigation into the Yrs CRDT merge behavior. Want me to investigate?
+<!-- agent:boundary:97c4f516-29dd-455b-894d-abae35da5586 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- AST parsing for literal component markers in response text (prevent document corruption)
+- **CRDT merge prompt ordering bug** — user prompts appear after agent responses (active)
+- AST parsing for literal component markers in response text
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

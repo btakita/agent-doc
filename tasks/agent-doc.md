@@ -202,7 +202,7 @@ We need to create the pan in `tmux_session: '0'` as specified in the frontmatter
 Want me to run `resync --fix`?
 yes. Does the JB Plugin has `resync --fix` available? I see `Sync Tmux Layout`, but that doesn't seem to perform `resync --fix`.
 
-### Re: resync --fix Done + Plugin Action (HEAD)
+### Re: resync --fix Done + Plugin Action
 
 **Cleanup results:**
 - `resync --fix` fixed 7 of 11 issues — killed wrong-session panes, deregistered stale entries

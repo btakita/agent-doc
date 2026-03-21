@@ -386,7 +386,7 @@ Verified in compiled CSS (`J7PZPCBE`). Dev server running at localhost:4100/abou
 The styling looks good.
 
 But on localhost:4100, I don't see the recent blog posts.
-### Re: Missing recent blog posts (HEAD)
+### Re: Missing recent blog posts
 
 The `agent-doc-tmux-crdt-live` post (2026-03-18) doesn't exist in the briantakita.me app. The post content file was created in an earlier session but never committed to the app submodule:
 

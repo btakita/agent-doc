@@ -29,7 +29,7 @@ Publish a verified Google OAuth app for corky so users don't need to create thei
 - [x] Phase 2: Built-in default credentials in corky (committed)
 - [x] Phase 3: `corky doctor` command (committed)
 - [x] Phase 4: Self-serve documentation (committed)
-- [ ] Release
+- [x] Release v0.18.0 (crates.io + PyPI + GitHub)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -358,6 +358,22 @@ Visit both URLs to unblock, then I'll complete the release:
 2. `https://github.com/btakita/corky/security/secret-scanning/unblock-secret/3B6qbJSSznD3Z47O7q72Kxv7aCV`
 
 done
+
+### v0.18.0 released! (HEAD)
+
+**Published to all targets:**
+- **crates.io**: `corky v0.18.0` — published
+- **PyPI**: `corky-0.18.0` — published
+- **GitHub Release**: `https://github.com/btakita/corky/releases/tag/v0.18.0` — with prebuilt binary
+- **Tag**: `v0.18.0` pushed
+
+**Release contents:**
+- Built-in GCP OAuth credentials (zero-config Gmail API sync)
+- `corky doctor` command (gmail, linkedin, youtube health checks + 11 tests)
+- Privacy policy, terms of service, self-hosted Gmail setup guide
+- Build-time credential injection via `env!()` macro
+
+All 4 phases complete. Google verification review is pending (2-6 weeks).
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -365,5 +381,5 @@ done
 - [x] Phase 2: Built-in default credentials in corky (committed)
 - [x] Phase 3: `corky doctor` command (committed)
 - [x] Phase 4: Self-serve documentation (committed)
-- [ ] Release
+- [x] Release v0.18.0 (crates.io + PyPI + GitHub)
 <!-- /agent:pending -->

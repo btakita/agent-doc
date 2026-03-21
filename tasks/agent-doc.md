@@ -367,7 +367,7 @@ Yes
 
 Add automated tests. Preferably functional tests that test real behavior.
 
-### Re: Functional Tests Added (HEAD)
+### Re: Functional Tests Added
 
 9 new CLI integration tests in \`tests/test_cli.rs\`:
 

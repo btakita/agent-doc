@@ -129,7 +129,7 @@ fn read_frontmatter_session(file: &Path) -> Result<Option<String>> {
 /// panes for this project.
 fn find_active_project_session(tmux: &Tmux) -> Result<Option<String>> {
     let registry = crate::sessions::load()?;
-    for (_session_id, entry) in &registry {
+    for entry in registry.values() {
         if tmux.pane_alive(&entry.pane) {
             // This pane is alive — find which tmux session it belongs to
             if let Some(session_name) = pane_session_name(tmux, &entry.pane) {
@@ -217,17 +217,17 @@ fn is_session_attached(tmux: &Tmux, session: &str) -> bool {
 /// 2. `$TERMINAL` env var (used as: `$TERMINAL -e {tmux_command}`)
 /// 3. Error with instructions
 fn resolve_terminal_command(cfg: &config::Config, tmux_command: &str) -> Result<String> {
-    if let Some(ref terminal) = cfg.terminal {
-        if let Some(ref cmd_template) = terminal.command {
-            let resolved = cmd_template.replace("{tmux_command}", tmux_command);
-            return Ok(resolved);
-        }
+    if let Some(ref terminal) = cfg.terminal
+        && let Some(ref cmd_template) = terminal.command
+    {
+        let resolved = cmd_template.replace("{tmux_command}", tmux_command);
+        return Ok(resolved);
     }
 
-    if let Ok(terminal) = std::env::var("TERMINAL") {
-        if !terminal.is_empty() {
-            return Ok(format!("{} -e {}", terminal, tmux_command));
-        }
+    if let Ok(terminal) = std::env::var("TERMINAL")
+        && !terminal.is_empty()
+    {
+        return Ok(format!("{} -e {}", terminal, tmux_command));
     }
 
     anyhow::bail!(

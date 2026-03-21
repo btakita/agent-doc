@@ -80,25 +80,49 @@ pub fn run_with_tmux(
                 None => continue,
             };
 
-            let has_alive_pane = sessions::lookup(&session_id)
+            let registered_pane = sessions::lookup(&session_id)
                 .ok()
-                .flatten()
-                .map(|pane| tmux.pane_alive(&pane))
+                .flatten();
+            let has_alive_pane = registered_pane
+                .as_ref()
+                .map(|pane| tmux.pane_alive(pane))
                 .unwrap_or(false);
 
-            if !has_alive_pane {
-                let file_str = file_path.to_string_lossy().to_string();
+            if has_alive_pane {
+                // Pane is alive — no auto-start needed.
+                // Re-register with correct window if the sync will move it.
+                continue;
+            }
+
+            // No alive pane in registry. Before auto-starting, check if any
+            // alive pane in the target session is already running agent-doc
+            // for this file (registry may have been pruned or stale).
+            // This prevents creating duplicate panes.
+            let file_str = file_path.to_string_lossy().to_string();
+            if let Some(existing) = find_alive_pane_for_file(tmux, &file_str) {
                 eprintln!(
-                    "[sync] auto-starting session for {} (no alive pane)",
-                    file_path.display()
+                    "[sync] found alive pane {} for {} (re-registering)",
+                    existing, file_path.display()
                 );
-                if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str) {
+                if let Err(e) = sessions::register(&session_id, &existing, &file_str) {
                     eprintln!(
-                        "[sync] warning: auto-start failed for {}: {}",
-                        file_path.display(),
-                        e
+                        "[sync] warning: re-register failed for {}: {}",
+                        file_path.display(), e
                     );
                 }
+                continue;
+            }
+
+            eprintln!(
+                "[sync] auto-starting session for {} (no alive pane)",
+                file_path.display()
+            );
+            if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str) {
+                eprintln!(
+                    "[sync] warning: auto-start failed for {}: {}",
+                    file_path.display(),
+                    e
+                );
             }
         }
     }
@@ -212,4 +236,73 @@ fn register_synced_files(
     if changed {
         let _ = sessions::save(&registry);
     }
+}
+
+/// Find an alive tmux pane that is running `agent-doc start <file>`.
+///
+/// Scans all tmux panes for one whose command line matches the file path.
+/// This catches panes that were pruned from the registry but are still alive.
+///
+/// Uses `ps -p <pid> -o command=` for cross-platform compatibility (Linux + macOS).
+fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
+    let output = tmux.cmd()
+        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let pane_id = parts[0];
+        let pid_str = parts[1];
+
+        // Check the pane's process and its children for agent-doc + file_path
+        if pid_has_agent_doc_for_file(pid_str, file_path) {
+            eprintln!(
+                "[sync] found alive agent-doc pane {} (pid {}) for {}",
+                pane_id, pid_str, file_path
+            );
+            return Some(pane_id.to_string());
+        }
+
+        // Check child processes (pane PID is usually a shell)
+        if let Ok(children) = std::process::Command::new("pgrep")
+            .args(["-P", pid_str])
+            .output()
+        {
+            for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
+                let child_pid = child_pid.trim();
+                if !child_pid.is_empty() && pid_has_agent_doc_for_file(child_pid, file_path) {
+                    eprintln!(
+                        "[sync] found alive agent-doc child (pid {}) in pane {} for {}",
+                        child_pid, pane_id, file_path
+                    );
+                    return Some(pane_id.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if a process (by PID) is running agent-doc for a specific file.
+///
+/// Uses `ps -p <pid> -o command=` which works on both Linux and macOS.
+fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
+    let output = match std::process::Command::new("ps")
+        .args(["-p", pid, "-o", "command="])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return false,
+    };
+    let cmdline = String::from_utf8_lossy(&output.stdout);
+    let has_agent = cmdline.contains("agent-doc") || cmdline.contains("claude");
+    let has_file = cmdline.contains(file_path);
+    has_agent && has_file
 }

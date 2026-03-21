@@ -117,8 +117,9 @@ pub fn commit(file: &Path) -> Result<()> {
     // After commit, strip (HEAD) markers from the snapshot so the working tree
     // is clean. The committed content has (HEAD) markers; the working tree should not.
     // This creates the blue gutter diff the user sees.
-    if let Ok(ref s) = commit_status {
-        if s.success() {
+    if let Ok(ref s) = commit_status
+        && s.success()
+    {
             // Strip (HEAD) from snapshot
             if let Some(ref snap) = snapshot_content {
                 let clean_snap = strip_head_markers(snap);
@@ -133,7 +134,6 @@ pub fn commit(file: &Path) -> Result<()> {
                 }
             }
             signal_vcs_refresh(file);
-        }
     }
 
     Ok(())

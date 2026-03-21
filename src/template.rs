@@ -203,11 +203,11 @@ pub fn apply_patches_with_overrides(
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
             .unwrap_or_else(|| default_mode(&patch.name));
         // For append mode, use boundary-aware insertion when a marker exists
-        if mode == "append" {
-            if let Some(bid) = find_boundary_in_component(&result, comp) {
-                result = comp.append_with_boundary(&result, &patch.content, &bid);
-                continue;
-            }
+        if mode == "append"
+            && let Some(bid) = find_boundary_in_component(&result, comp)
+        {
+            result = comp.append_with_boundary(&result, &patch.content, &bid);
+            continue;
         }
         let new_content = apply_mode(mode, comp.content(&result), &patch.content);
         result = comp.replace_content(&result, &new_content);

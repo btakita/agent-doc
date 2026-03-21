@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -15,6 +15,7 @@ pub fn format_marker(id: &str) -> String {
 }
 
 /// Extract a boundary ID from a marker string, if present.
+#[allow(dead_code)]
 pub fn extract_id(marker: &str) -> Option<&str> {
     let trimmed = marker.trim();
     trimmed
@@ -27,6 +28,7 @@ pub fn extract_id(marker: &str) -> Option<&str> {
 ///
 /// Returns `Some((marker_line_start, marker_line_end))` — the byte range of
 /// the entire line containing the marker (including trailing newline).
+#[allow(dead_code)]
 pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &str) -> Option<(usize, usize)> {
     let content_region = &doc[comp.open_end..comp.close_start];
     let marker = format_marker(boundary_id);
@@ -59,6 +61,7 @@ pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &s
 ///
 /// Scans the component's content for any `<!-- agent:boundary:UUID -->` marker,
 /// skipping matches inside code blocks. Returns the UUID if found.
+#[allow(dead_code)]
 pub fn find_boundary_id_in_component(doc: &str, comp: &component::Component) -> Option<String> {
     let content_region = &doc[comp.open_end..comp.close_start];
     let code_ranges = component::find_code_ranges(doc);
@@ -120,6 +123,7 @@ pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
 }
 
 /// Remove a specific boundary marker from the document.
+#[allow(dead_code)]
 pub fn remove(doc: &str, boundary_id: &str) -> String {
     let marker_line = format!("{}\n", format_marker(boundary_id));
     doc.replace(&marker_line, "")

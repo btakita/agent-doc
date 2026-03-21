@@ -327,12 +327,30 @@ The binary handles this correctly — the skill workflow (my behavior) was the i
 **Tests:** 497 all pass.
 
 Want to release as v0.24.4?
+Not yet. `<!-- agent:boundary:e515c5d8-1a9e-41d6-a923-d8c8c781e661 -->` was inserted above.
+It should have been at the bottom of the content.
+### Re: Boundary Re-insertion Reverted (HEAD)
+
+You're right — re-inserting the boundary in the binary placed it in the middle of the exchange (between the response and user's next text), not at the end. This is the wrong position.
+
+**Reverted** binary re-insertion (`da3e4d3`). The boundary is consumed by writes as before.
+
+**New approach:** The SKILL.md checkpoint workflow now calls `agent-doc boundary` after each checkpoint write (`bbf1366`). This places the boundary at the END of the exchange — the correct position — so subsequent writes and user text are ordered properly.
+
+**Checkpoint workflow (updated):**
+1. Write checkpoint → boundary consumed
+2. `agent-doc boundary <FILE>` → new boundary at end of exchange
+3. `cp <FILE> /tmp/agent-doc-baseline-$$.md` → re-save baseline
+4. Continue responding, write next checkpoint at new boundary
+
+This keeps the boundary at the correct position (end of exchange) without polluting the middle of the document.
+
+**Tests:** 497 all pass. Ready to release v0.24.4?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Boundary re-insertion for checkpoint writes ([done])
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

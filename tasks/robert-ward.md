@@ -69,7 +69,7 @@ Note the changes to the frontmatter.
 
 <!-- agent:exchange -->
 
-### Storage Unit Update (HEAD)
+### Storage Unit Update
 
 Robert reserved 2 public storage units, moved items into 1, and is canceling the 2nd. PS wants to charge a $40 admin fee for the cancellation.
 

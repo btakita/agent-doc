@@ -387,6 +387,23 @@ Add automated tests. Preferably functional tests that test real behavior.
 - \`test_cli_init_file_lazy_project_init\` — creating a document in a fresh dir also creates \`.agent-doc/\`
 
 489 tests pass (162 lib + 297 bin + 30 CLI).
+
+Can we have tests for SKILL.md behavior?
+
+### Re: SKILL.md Tests Added (HEAD)
+
+6 new CLI tests for skill behavior:
+
+- \`test_cli_skill_install_help\` — help text exits 0
+- \`test_cli_skill_check_help\` — help text exits 0
+- \`test_cli_skill_install_creates_file\` — creates \`.claude/skills/agent-doc/SKILL.md\` with \`agent-doc-version:\` frontmatter
+- \`test_cli_skill_check_after_install\` — check passes after fresh install (version match)
+- \`test_cli_skill_install_idempotent\` — two consecutive installs both succeed
+- \`test_cli_skill_install_reload_compact\` — \`--reload compact\` outputs \`SKILL_RELOAD=compact\` or "already up to date"
+
+Tests use CWD isolation (temp dir) since skill path resolution is CWD-relative.
+
+495 tests pass (162 lib + 297 bin + 36 CLI).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

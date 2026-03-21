@@ -131,9 +131,90 @@ Lightpanda is installed but **X blocks it the same way** — returns "Something 
 4. **Manual paste** (what you did — works fine for occasional use)
 
 For now, the tweet content is captured and we have the draft replies ready. Want to finalize which version to send?
+
+I want to  make a chrome + brave extension to handle interactions with different websites including twitter.
+Perhaps it can have a standalone background server that dispatches to/from different tabs.
+It should somehow be able to communicate with an agent-doc document.
+
+So if I were to ask to visit a url, perhaps agent-doc can route the request to the extension server, the extension server routes to the tab with the page open or a new tab, javascript can be executed on the dom to extract the text of the tweet, the text can be sent back to the agent-doc document.
+### Browser extension bridge — architecture sketch (HEAD)
+
+This is a strong idea. The core insight: **you already have an authenticated session in your browser** — the extension just exposes it to agent-doc. No credential passing, no OAuth reimplementation.
+
+**Architecture:**
+
+```
+agent-doc document
+    │
+    ├── agent-doc CLI detects URL request
+    │   (e.g., "fetch https://x.com/...")
+    │
+    ├── Sends request to extension server
+    │   (localhost WebSocket or HTTP)
+    │
+    ├── Extension server dispatches to browser tab
+    │   ├── Opens URL in existing/new tab
+    │   ├── Injects content script
+    │   └── Extracts content via DOM selectors
+    │
+    └── Returns extracted content to agent-doc
+        (piped back into document or CLI)
+```
+
+**Components:**
+
+1. **Browser extension** (Chrome/Brave manifest v3)
+   - Background service worker — WebSocket/HTTP server on localhost
+   - Content scripts — injectable extractors per domain (twitter.js, linkedin.js, etc.)
+   - Permissions: `activeTab`, `scripting`, `tabs`
+
+2. **Local bridge server** (could be part of the extension or standalone)
+   - Listens on `localhost:PORT` for requests from agent-doc
+   - Routes to the correct tab via Chrome's `chrome.tabs` API
+   - Returns extracted content as JSON
+
+3. **agent-doc integration** — two approaches:
+   - **MCP server**: Extension exposes an MCP endpoint, Claude Code connects to it natively
+   - **CLI command**: `agent-doc fetch <URL>` that talks to the extension server
+
+**MCP is the better path.** Claude Code already supports MCP servers. If the extension exposes an MCP-compatible endpoint, Claude Code (and by extension agent-doc sessions) can call it directly without any agent-doc code changes:
+
+```json
+// .claude/mcp.json
+{
+  "browser-bridge": {
+    "command": "browser-bridge-server",
+    "args": ["--port", "9222"]
+  }
+}
+```
+
+Then in an agent-doc session, Claude Code would have a `browser_fetch` tool that:
+- Sends URL to extension
+- Extension navigates tab, runs content script
+- Returns markdown-formatted content
+
+**Per-site extractors** (content scripts):
+- `x.com` — extract tweet text, author, timestamp, reply chain
+- `linkedin.com` — extract post text, comments, profile data
+- `github.com` — already works via `gh` CLI, but extension could handle issues/PRs visually
+- Generic fallback — `document.body.innerText` or readability-style extraction
+
+**Security model:**
+- Extension only listens on `localhost` — no external exposure
+- Uses your existing browser session cookies — no credentials stored or transmitted
+- Per-domain content scripts are sandboxed
+- Agent-doc never sees raw cookies/tokens, only extracted content
+
+**Name suggestion:** `browser-bridge` or `agent-bridge`
+
+**Effort estimate:** MVP (single-site extractor + WebSocket server + MCP integration) is a weekend project. The extension boilerplate is small; the real work is per-site DOM selectors.
+
+Want me to add this to the pending section as a feature spec?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- **browser-bridge extension**: Chrome/Brave extension that bridges authenticated browser sessions to agent-doc via MCP. Exposes per-site content extractors (X, LinkedIn, etc.) on localhost. See exchange for architecture sketch.
 <!-- /agent:pending -->

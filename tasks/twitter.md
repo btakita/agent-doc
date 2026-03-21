@@ -115,6 +115,22 @@ You're right that no user testing is a gap. But here's the calculus:
 > Same pain here. I stopped chasing tools and made the document the interface — markdown file in your editor, CLI submit, response inline. No app, no GUI. Sessions persist as git-tracked files. Been shipping with it for weeks.
 
 This version has no link, no name-drop. It's a concept pitch. If Tanner engages, you follow up with the repo.
+
+Can we use lightpanda to scrape the twitter post?
+Do you need my credentials to login using lightpanda?
+### Lightpanda + X scraping (HEAD)
+
+Lightpanda is installed but **X blocks it the same way** — returns "Something went wrong, try again" without a logged-in session. X requires authentication to view tweets.
+
+**Don't pass credentials through lightpanda** — it's a headless browser that would need to handle X's OAuth flow, 2FA, etc. Not worth the security risk for one tweet.
+
+**Good news: we already have the tweet text** (you pasted it earlier). No scraping needed for this use case. If you want to scrape X threads regularly, the better path would be:
+1. **Nitter instances** (if any are still alive) — unauthenticated X frontend
+2. **X API** with a developer account ($100/mo basic tier)
+3. **Browser extension** that exports tweet threads to clipboard/file
+4. **Manual paste** (what you did — works fine for occasional use)
+
+For now, the tweet content is captured and we have the draft replies ready. Want to finalize which version to send?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

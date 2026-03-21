@@ -255,6 +255,20 @@ let output = std::process::Command::new("ps")
 \`\`\`
 
 This is simpler and cross-platform. I can refactor \`find_alive_pane_for_file()\` to use \`ps\` instead of \`/proc\`. Want me to do that now?
+
+yes
+
+### Re: Cross-Platform Refactor Done (HEAD)
+
+Refactored \`find_alive_pane_for_file()\` to use \`ps -p <pid> -o command=\` instead of \`/proc/<pid>/cmdline\`.
+
+**Changes:**
+- Extracted \`pid_has_agent_doc_for_file(pid, file_path)\` helper — runs \`ps -p <pid> -o command=\` and checks output for \`agent-doc\`/\`claude\` + file path
+- Main function checks pane PID directly, then child PIDs via \`pgrep -P\`
+- Both \`ps\` and \`pgrep\` work on Linux and macOS
+- Simpler code — no \`/proc\` filesystem access, no null-byte splitting
+
+459 tests pass. Release binary rebuilt and installed.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

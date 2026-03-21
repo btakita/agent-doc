@@ -258,7 +258,7 @@ Install via: IDEA → Settings → Plugins → gear → "Install Plugin from Dis
 I want agent:pending to be active as the run starts, is being processed, and ends.
 Make agent:pending update whenever there is state to update.
 Should we have a dedicated agent for `agent:pending`?
-### Re: Active agent:pending Management (HEAD)
+### Re: Active agent:pending Management
 
 **No dedicated agent needed** — subagents are ~7x cost (lesson #9) and this is a checklist operation the primary agent should do as part of every response.
 

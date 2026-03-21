@@ -169,7 +169,7 @@ Draft an email to Robert Ward robertward3@yahoo.com. Including:
 - `Marketing Plan (Phase 1: Launch)`
 - Other steps for robert to take
 
-### Email Drafted (HEAD)
+### Email Drafted
 
 Email to Robert (robertward3@yahoo.com) pushed to Gmail Drafts (btak.dev@gmail.com).
 

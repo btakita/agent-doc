@@ -651,6 +651,25 @@ Does the plugin version need to be bumped?
 **For `agent-doc plugin install`: depends.** The `plugin install` command downloads from GitHub Releases. If you want users to get this fix via `agent-doc plugin install`, you'd need to bump version, build, and create a new GitHub Release.
 
 **Recommendation:** Bump to v0.2.9 and publish to GitHub Releases so `agent-doc plugin install jetbrains` picks up the fix. Want me to do that?
+
+yes
+
+### Re: JB Plugin v0.2.9 Published (HEAD)
+
+| Target | Status |
+|--------|--------|
+| Plugin version | 0.2.9 |
+| GitHub Release | [jetbrains-v0.2.9](https://github.com/btakita/agent-doc/releases/tag/jetbrains-v0.2.9) |
+| Signed zip | built |
+
+**Changes in v0.2.9:**
+- `WatchService` now watches `ENTRY_CREATE` + `ENTRY_MODIFY` (fixes signal file not consumed when overwritten)
+- Startup processing for existing `vcs-refresh.signal` files
+- Git gutter updates automatically after `agent-doc commit`
+
+**Install:** `agent-doc plugin install jetbrains` or manually from the GitHub Release link above.
+
+After installing and restarting IDEA, verify the fix by checking that `.agent-doc/patches/vcs-refresh.signal` is consumed after a commit.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

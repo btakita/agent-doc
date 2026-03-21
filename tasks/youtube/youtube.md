@@ -169,7 +169,7 @@ Create a blog post on briantakita.me about this video. Read the cc transcript. F
 Give a recap and some interesting commentary.
 Make this a featured post.
 
-### Re: Blog post (HEAD)
+### Re: Blog post
 
 Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-18-agent-doc-tmux-crdt-live.md`
 

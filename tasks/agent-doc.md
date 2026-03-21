@@ -277,7 +277,7 @@ Should we have a dedicated agent for `agent:pending`?
 Want me to update SKILL.md with this step?
 Yes.
 Is there a way to auto-update the agent-doc jetbrains plugin from this agent-doc run?
-### Re: SKILL.md Updated + Plugin Auto-Update (HEAD)
+### Re: SKILL.md Updated + Plugin Auto-Update
 
 **SKILL.md updated** with step 3b — mandatory `<!-- patch:pending -->` in every template-mode response. Committed: `eac3740`. Also bumped SKILL.md version to 0.24.1.
 

@@ -331,15 +331,6 @@ It was a **failure to identify**. Boundary insertion was conceived as a "workflo
 2. **No failure mode visible** — SKILL was the only write path, so step 1b always ran
 3. **Pattern was additive** — new feature added to existing workflow, not a redesign
 
-The failure appeared when other write paths (`agent-doc run`, stream, watch) bypassed the SKILL. **Lesson: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
-
-**Binary installed.** Next cycle uses the new binary — no step 1b needed.
-- a failure to correctly assign binary vs agentic operation?
-verify the behavior
-add decision for binary behavior to SPEC.md
-Where is Lesson applied? Should it be applied to SPEC.md?
-
-audit docs
 ### Re: Verification + SPEC.md + Audit
 
 **Behavior verified.** The last write log showed `[template] pre-patch boundary c57680fc inserted at end of exchange` — the binary handles boundary insertion automatically. No step 1b needed.
@@ -357,15 +348,106 @@ audit docs
 - CLAUDE.md stale (needs module layout update for template.rs changes)
 - README.md stale (same)
 - Large table warning (acceptable)
-<!-- agent:boundary:71cbe535-e12e-48f9-945c-3de9bd36129a -->
+The failure appeared when other write paths (`agent-doc run`, stream, watch) bypassed the SKILL. **Lesson: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
+
+**Binary installed.** Next cycle uses the new binary — no step 1b needed.
+- a failure to correctly assign binary vs agentic operation?
+verify the behavior
+add decision for binary behavior to SPEC.md
+Where is Lesson applied? Should it be applied to SPEC.md?
+
+audit docs
+
+> - JB plugin install needed — boundary refresh fix not active until v0.2.10+ installed
+
+Before claiming that the JB plugin is out of date, we should verify that the plugin is out of date via inspection.
+
+It seems that the agent-doc deterministic moving of `agent:boundary` did not work. See the current uncommitted state vs the committed state. It seems that we never:
+- committed the patch response above the `agent:boundary`
+- moved `agent:boundary` below the human prompt.
+
+I saw that you requested me to compact the agent session to load the SKILL update. Can we have this be part of our current SKILL behavior? Can we prompt the user to run `/compact` to update the skill via a question?
+
+It seems you lost track of my inquiry to only have document HEAD in the context. Remove old snapshots from context window. I want to revive this feature.
+
+[//]: # (Only have document HEAD in the context. Remove old snapshots from context window.)
+### Re: JB Plugin + Boundary Bug + Context Optimization (HEAD)
+
+**1. JB Plugin — Verified:**
+- **IntelliJ IDEA 2025.3:** v0.2.10 (up to date)
+- **PyCharm 2025.3:** v0.2.8 (behind — update if used for agent-doc)
+
+You're right that I should verify before claiming. Removing from pending.
+
+**2. Boundary Ordering — Still Broken (Root Cause Found):**
+
+The git diff confirms user prompts are being reordered AFTER the agent response. Diagnosed the root cause:
+
+`flush_to_document()` (stream checkpoint writes) forces `mode_overrides = {"exchange": "replace"}` which **bypasses** the boundary-aware `append_with_boundary()` path entirely. The replace mode discards all existing exchange content (including user prompts) and replaces with just the response. The CRDT merge then re-integrates the "lost" user prompts, but at the wrong position (after the response instead of before).
+
+**The fix:** `flush_to_document()` should NOT use `"replace"` mode for the exchange component when a boundary exists. It should use the boundary-aware append path so that response content is inserted AT the boundary (which is at the end), preserving user prompts before it.
+
+Want me to implement this fix?
+
+**3. SKILL Auto-Update Compact Prompt:**
+
+Currently the SKILL prints "Skill updated — run /compact to reload" and stops. You're asking if we can make this more interactive. In the Claude Code model, the SKILL can't "wait" for user input — it runs and completes. But we could use `AskUserQuestion` to create a prompt-and-stop pattern:
+
+```
+AskUserQuestion: "SKILL.md was updated to v0.24.X. Run /compact to reload the skill, then re-run /agent-doc."
+```
+
+This is more visible than a print statement and pauses the agent until the user responds. I can update the SKILL pre-flight to use this pattern.
+
+**4. Document HEAD Context — Reviving Your Feature Request:**
+
+You want to load only the current document HEAD + a computed diff, instead of loading full document + full snapshot (which are ~90% identical, wasting context tokens).
+
+**Proposed approach — `agent-doc diff`:**
+
+A binary command that outputs only the user's changes since the last snapshot:
+
+```bash
+agent-doc diff <FILE>
+```
+
+Output: a structured diff (added/removed/modified lines with position context) that the SKILL can use instead of reading the full snapshot. The SKILL workflow would change from:
+
+```
+Step 1: Read <FILE>          → full document (N tokens)
+Step 1: Read snapshot         → full document (N tokens, ~90% duplicate)
+Step 2: Agent computes diff   → wastes context comparing
+```
+
+To:
+
+```
+Step 1: Read <FILE>           → full document (N tokens)
+Step 1b: Run agent-doc diff   → structured diff only (0.1N tokens)
+Step 2: Agent reads diff      → responds to changes directly
+```
+
+**Token savings:** Instead of 2N tokens, we use ~1.1N tokens. For a 400-line document, that's saving ~360 lines of redundant content per cycle.
+
+**What the diff output would include:**
+- Added lines (with surrounding context for position)
+- Modified lines (old → new)
+- Deleted lines
+- Section headers for orientation ("in exchange component, after ### Re: ...")
+
+This is deterministic — perfect for binary implementation. The snapshot is still maintained for the next cycle's diff computation, but it never needs to be loaded into the agent's context.
+
+Should I implement `agent-doc diff` as the next step?
+<!-- agent:boundary:e96ac8fd-5bc2-4509-9aad-41fe6dbd8bd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- SKILL.md reload needed — run `/compact` to get updated version without step 1b
+- **Boundary ordering fix** — `flush_to_document()` replace mode bypasses boundary-aware insertion (root cause found, ready to fix)
+- **`agent-doc diff`** — binary command for token-efficient context loading (document HEAD + diff instead of full document + full snapshot)
+- SKILL auto-update: use AskUserQuestion instead of print+stop
 - CLAUDE.md + README.md staleness — update for template.rs boundary changes
-- JB plugin install needed — boundary refresh fix
 - CRDT merge ordering — Yrs causality still reorders
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download

@@ -159,7 +159,21 @@ pub fn apply_patches_with_overrides(
     file: &Path,
     mode_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    let mut result = doc.to_string();
+    // Pre-patch: ensure a fresh boundary exists in the exchange component.
+    // Remove any stale boundaries from previous cycles, then insert a new one
+    // at the end of the exchange. This is deterministic — belongs in the binary,
+    // not the SKILL workflow.
+    let mut result = remove_all_boundaries(doc);
+    if let Ok(components) = component::parse(&result)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        let id = uuid::Uuid::new_v4().to_string();
+        let marker = format!("<!-- agent:boundary:{} -->", id);
+        let content = exchange.content(&result);
+        let new_content = format!("{}\n{}\n", content.trim_end(), marker);
+        result = exchange.replace_content(&result, &new_content);
+        eprintln!("[template] pre-patch boundary {} inserted at end of exchange", &id[..id.len().min(8)]);
+    }
 
     // Apply patches in reverse order (by position) to preserve byte offsets
     let components = component::parse(&result)
@@ -284,6 +298,25 @@ pub fn apply_patches_with_overrides(
     }
 
     Ok(result)
+}
+
+/// Remove all boundary markers from a document (line-level removal).
+fn remove_all_boundaries(doc: &str) -> String {
+    let prefix = "<!-- agent:boundary:";
+    let suffix = " -->";
+    let mut result = String::with_capacity(doc.len());
+    for line in doc.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(prefix) && trimmed.ends_with(suffix) {
+            continue; // Skip boundary marker lines
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    if !doc.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+    result
 }
 
 /// Find a boundary marker ID inside a component's content, skipping code blocks.

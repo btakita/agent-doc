@@ -44,7 +44,7 @@ Raw Codex?
 
 My 🧠 hurts  and I just need to keep shipping.
 ```
-### Tanner's pain = agent-doc's pitch (HEAD)
+### Tanner's pain = agent-doc's pitch
 
 Tanner's tweet distills the exact problem agent-doc solves. He's not complaining about AI quality — he's complaining about **the interface layer**. Every tool he lists (Ghostty, opencode, CC, Cursor, Warp, T3 Code, Codex) is a different *shell* around the same LLM. The UX is the bottleneck, not the model.
 

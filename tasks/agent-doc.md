@@ -404,6 +404,39 @@ Can we have tests for SKILL.md behavior?
 Tests use CWD isolation (temp dir) since skill path resolution is CWD-relative.
 
 495 tests pass (162 lib + 297 bin + 36 CLI).
+
+Can we validate the behavior of the SKILL.md file?
+Or is the best validation dog-fooding agent-doc?
+
+### Re: SKILL.md Validation Strategy (HEAD)
+
+**Both.** SKILL.md validation has two layers:
+
+**1. Structural validation (testable):**
+- SKILL.md contains required sections (Workflow steps 0-5, Document Format, Snapshot Storage)
+- Frontmatter has \`agent-doc-version:\` matching the binary
+- All referenced commands exist (\`agent-doc boundary\`, \`agent-doc write --stream\`, \`agent-doc commit\`, \`agent-doc recover\`)
+- The \`instruction-files\` audit crate already does this — \`agent-doc audit-docs\` checks that SKILL.md references valid subcommands and file paths
+
+**2. Behavioral validation (dog-fooding only):**
+- Does the skill produce correct diff responses?
+- Does it handle template mode vs append mode correctly?
+- Does it properly escape code blocks in patch responses? (we found a bug with this earlier)
+- Does it checkpoint at the right moments?
+- Does it handle boundary markers correctly?
+
+**This second layer can't be automated** — it requires LLM interpretation of the skill instructions. Dog-fooding IS the test suite for behavioral correctness. Every time you run \`/agent-doc\` on this document, you're running a behavioral test.
+
+**What we CAN add to automated tests:**
+- \`test_skill_md_contains_required_steps\` — parse SKILL.md, verify steps 0-5 are present
+- \`test_skill_md_references_valid_commands\` — extract all \`agent-doc <cmd>\` references, verify each is a valid subcommand
+- \`test_skill_md_version_matches_binary\` — already covered by \`test_cli_skill_check_after_install\`
+
+**\`agent-doc audit-docs\`** already does most of this. The audit checks SKILL.md, CLAUDE.md, and SPEC.md for stale references. Running \`make precommit\` (which includes audit-docs) before release catches structural drift.
+
+**Bottom line:** Dog-fooding is the primary validation for SKILL.md behavior. The audit + skill check tests catch structural issues. The gap is behavioral regression testing — which would require running Claude in CI (expensive, non-deterministic). For now, this document session IS the behavioral test suite.
+
+Want me to release v0.24.0 with the install/init commands and new tests?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

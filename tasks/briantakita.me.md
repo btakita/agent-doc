@@ -221,6 +221,21 @@ The previous changes went to the wrong file (rappstack-dev source, not the local
 **Behavior:** Full-size header at page top → compact header + smaller titles on scroll.
 
 Ready for you to test with `bun run dev`.
+
+Same issue. Please verify your fixes with LightPanda. Test the sizes using the scrolling behavior.
+### Re: Debugging build pipeline (HEAD)
+
+I investigated why the changes aren't showing up:
+
+1. **The code changes are correct** — verified `index.css.ts` has the `.scrolled` CSS rules and `layout/hyop/index.ts` has the scroll handler
+2. **The dev server isn't rebuilding** — the compiled JS bundle (`index.browser-TQFLE3IX.js`) doesn't contain the scroll handler, and even modifying entry files doesn't trigger a rebuild. The esbuild watch seems inactive.
+3. **I also tried touching entry files** to force a rebuild — same result, hash didn't change
+
+The dev server needs a restart to pick up the changes. Please restart `bun run dev` (kill and re-run). After that I can verify with LightPanda.
+
+**Summary of changes waiting for rebuild:**
+- `lib/ui--browser--briantakita/layout/hyop/index.ts` — scroll handler toggles `scrolled` class on `<html>`
+- `app/briantakita.me/app/index.css.ts` — CSS rules shrink header/title when `.scrolled`
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

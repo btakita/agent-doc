@@ -215,7 +215,11 @@ Grandfather:
 - Head of the teaching program (trained interns and residents)
 - On the team that performed one of the first kidney transplants on a child (not lead physician)
 - Subject of documentary *Portrait of a Pioneer*
+  - https://www.imdb.com/title/tt1329423/
+  - https://www.portraitofapioneer.com/about.html
 - Author of multi-volume publication on doctor-patient communication — pioneered this field in medical education
+  - We Are All Patients
+    - https://www.amazon.com/Are-Patients-Barbara-Maria-Korsch/dp/1932800387
 
 **Father — Dr. Robert Ward II**
 - Physician/surgeon at Children's Hospital Los Angeles
@@ -226,4 +230,9 @@ Grandfather:
 - Notable Marxist theorist and philosopher
 
 Updated Robert's contact file (`mail/contacts/robert-ward/CLAUDE.md`) with family details, practice info, and Build Side partnership note.
+
+Updated contact file with the additional details:
+- *Portrait of a Pioneer* — IMDB (tt1329423) and portraitofapioneer.com links added
+- *We Are All Patients* — book title and Amazon link added
+- "1st female Dr on a team that conducted a kidney transplant on a child" — added to contact file
 <!-- /agent:exchange -->

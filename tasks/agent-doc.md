@@ -258,7 +258,7 @@ This is simpler and cross-platform. I can refactor \`find_alive_pane_for_file()\
 
 yes
 
-### Re: Cross-Platform Refactor Done (HEAD)
+### Re: Cross-Platform Refactor Done
 
 Refactored \`find_alive_pane_for_file()\` to use \`ps -p <pid> -o command=\` instead of \`/proc/<pid>/cmdline\`.
 

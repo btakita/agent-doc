@@ -242,7 +242,6 @@ If it does, the ordering issue is in the CRDT merge. If it doesn't, the issue is
 Yes. How can we ensure that the CRDT follows the correct merge order?
 Notice my prompt from the previous run `Yes. How can we ensure that the CRDT follows the correct merge order?`.
 In the commit, it was placed above `### Re: CRDT Merge Ordering Investigation`.
-But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
 ### Re: CRDT Reordering Root Cause Found
 
 **Confirmed:** The `reorder_agent_before_human()` function in `crdt.rs` explicitly puts agent content (client=1) BEFORE human content (client=2). Lines 158-159:
@@ -256,7 +255,11 @@ This is correct for **concurrent edits** (user types WHILE agent responds — th
 
 **The fundamental issue:** The CRDT reordering doesn't distinguish between:
 1. **Prompt text** (user typed before agent, already in baseline) — should be BEFORE response
-2. **Concurrent edits** (user typed during agent response, NOT in baseline) — ordering less critical
+2. **Concurrent edits** (user typed during agent response, NOT in baseline) — ordering less critical: Actually, we should explicitly treat prompts before `agent:boundary` as being rendered before the patch and prompts after the `agent:boundary` as being rendered after the patch. Except when there is no current run occurring. Then the prompt will be placed before the patch in the next run.
+
+What happens if someone is typing while the prompt is occurring? We should have our polling watcher wait until the edit is complete before sending the diff to the run. This logic should already be in agent-doc.
+
+Keep on iterating until we have our system is aligned with the correct behavior that I outlined.
 
 **Why prompts end up in the "Added" boundary:** If the prompt text is identical in baseline and current document, the CRDT diff should mark it as "unchanged" (not "Added"). But the diff algorithm operates on character-level changes, and surrounding context changes (boundary marker insertion/removal, response insertion) can cause the CRDT to re-attribute nearby unchanged text.
 
@@ -267,14 +270,29 @@ This is correct for **concurrent edits** (user types WHILE agent responds — th
 **Recommendation:** Option 1 — add a flag to skip reordering when boundary-aware insertion was used. The write command knows whether a boundary was consumed. Pass this to the CRDT merge so it skips reordering.
 
 Want me to implement this?
-<!-- agent:boundary:2a9688d7-278b-434f-a825-3d37edd65bfd -->
+But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
+Yes. implement Option 1. Note that we moved after the patch response:
+> But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
+### Re: CRDT Reorder Skip Implemented (HEAD)
+
+**Committed (`3ad88f6`):** CRDT merge now skips `reorder_agent_before_human()` when a boundary marker is present in the baseline.
+
+**Changes:**
+- `crdt::merge()` — added `skip_reorder: bool` parameter
+- `merge::merge_contents_crdt_opts()` — new function with skip_reorder passthrough
+- `write.rs` — detects `had_boundary = base.contains("agent:boundary:")`, passes to merge
+- `ffi.rs` — defaults to `skip_reorder=false` (no boundary context in FFI)
+- All 14 test call sites updated with explicit `false`
+
+**How it works:** When the baseline contains a boundary marker, the write knows that `apply_patches()` used boundary-aware insertion (which already placed the response after the user's prompt). The CRDT merge preserves this ordering instead of swapping agent before human.
+
+**Tests:** 497 all pass. This should fix the prompt-after-response ordering issue. Let's verify in the next cycle — your prompt should appear BEFORE my response.
+<!-- agent:boundary:587aaedc-d169-4af6-a5a8-6902c81dcdf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **CRDT reordering fix** — disable reorder for boundary-aware writes (active)
-- AST parsing for literal component markers in response text
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

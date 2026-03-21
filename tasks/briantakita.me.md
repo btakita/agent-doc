@@ -200,7 +200,7 @@ Ready for you to test with `bun run dev`.
 
 The site header and sticky heading is still the original size. They need to be smaller when the user scrolls.
 ![2026-03-21_12-01.png](../../../../Pictures/agent-loop/2026-03-21_12-01.png)
-### Re: Scroll-responsive header and title (HEAD)
+### Re: Scroll-responsive header and title
 
 The previous changes went to the wrong file (rappstack-dev source, not the local briantakita.me-dev copy). Now I've implemented **scroll-responsive** compacting — the header and titles shrink when the user scrolls:
 

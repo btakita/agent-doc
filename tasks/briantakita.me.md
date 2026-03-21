@@ -197,6 +197,30 @@ Done. Applied all changes across 3 files:
 - All deeper levels reduced proportionally
 
 Ready for you to test with `bun run dev`.
+
+The site header and sticky heading is still the original size. They need to be smaller when the user scrolls.
+![2026-03-21_12-01.png](../../../../Pictures/agent-loop/2026-03-21_12-01.png)
+### Re: Scroll-responsive header and title (HEAD)
+
+The previous changes went to the wrong file (rappstack-dev source, not the local briantakita.me-dev copy). Now I've implemented **scroll-responsive** compacting — the header and titles shrink when the user scrolls:
+
+**Changes made:**
+
+1. **`briantakita.me-dev/lib/ui--browser--briantakita/layout/hyop/index.ts`**
+   - Added scroll listener to `nofouc__hyop` — toggles `scrolled` class on `<html>` when `scrollY > 0`
+   - Passive listener, debounced with boolean check for performance
+
+2. **`briantakita.me-dev/app/briantakita.me/app/index.css.ts`**
+   - `.scrolled .blog__header .nav-container` — padding shrinks from 1rem to 0.25rem top/bottom
+   - `.scrolled .blog__header .logo` — font-size shrinks to 1rem
+   - `.scrolled .blog__header .logo svg/img` — logo shrinks to 2.5rem x 1.5rem
+   - `.scrolled .sticky h1` — title shrinks to 1.25rem (from 2.25rem)
+   - `.scrolled .sticky h2` — shrinks to 1.125rem
+   - All transitions are 0.2s ease for smooth animation
+
+**Behavior:** Full-size header at page top → compact header + smaller titles on scroll.
+
+Ready for you to test with `bun run dev`.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -466,7 +466,7 @@ yes
 `agent:pending` has not been updated recently.
 How can we ensure that `agent:pending` is always actively updated?
 
-### Re: Keeping agent:pending Updated (HEAD)
+### Re: Keeping agent:pending Updated
 
 The SKILL.md already instructs the agent to manage pending items — the "Pending protocol" memory says: "When user approves work, add to \`agent:pending\` and flush BEFORE responding." But in practice, I've been adding items to the exchange instead of promoting them to pending.
 

@@ -540,7 +540,7 @@ Updated all 3 `echo` examples in SKILL.md to use `cat <<'RESPONSE'` heredocs:
 Does `agent:boundary` have an ideal match with the component behavior?
 Are there alternative names to consider?
 
-### Re: agent:boundary Naming Analysis (HEAD)
+### Re: agent:boundary Naming Analysis
 
 **What it does:** Marks the insertion point in an append-mode component where the next response should be placed. It separates "what the user typed before submit" from "what the user types while waiting."
 

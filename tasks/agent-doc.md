@@ -275,13 +275,28 @@ Should we have a dedicated agent for `agent:pending`?
 **Implementation:** I'll update the SKILL.md to include this as a required step. No binary changes needed — it's a skill-level instruction.
 
 Want me to update SKILL.md with this step?
+Yes.
+Is there a way to auto-update the agent-doc jetbrains plugin from this agent-doc run?
+### Re: SKILL.md Updated + Plugin Auto-Update (HEAD)
+
+**SKILL.md updated** with step 3b — mandatory `<!-- patch:pending -->` in every template-mode response. Committed: `eac3740`. Also bumped SKILL.md version to 0.24.1.
+
+**JB plugin auto-update from agent-doc run:**
+
+`agent-doc plugin install jetbrains` exists but downloads from **GitHub Releases** — it requires a published release. For local builds (like what we just did), the options are:
+
+1. **Current:** Manual install via IDEA Settings → Plugins → gear → "Install from Disk..." (requires IDE restart)
+2. **`--local` flag:** Add `agent-doc plugin install jetbrains --local` that copies from `editors/jetbrains/build/distributions/` to the IDE plugins dir. No network needed, still requires IDE restart.
+3. **Hot-reload:** Not possible — JetBrains plugins can't be hot-swapped at runtime (ClassLoader limitations). IDE restart is always required for structural changes.
+
+**Recommendation:** Option 2 (`--local` flag) would let you run `agent-doc plugin install jetbrains --local` from a session and then just restart IDEA. Want me to implement it?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- `agent-doc install` — system setup, prereq check, editor plugin auto-detect ([v0.24.0])
-- `agent-doc init` (no-arg) — project setup, .agent-doc/, SKILL.md, hooks ([v0.24.0])
+- **SKILL.md step 3b** — mandatory pending updates ([done])
+- JB plugin auto-update: `agent-doc plugin install --local` (proposed)
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.24.1 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.24.2 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.10 (startup resync --fix) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** heredoc examples + immediate commit
+**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** step 3b + heredoc examples
 <!-- /agent:status -->
 
 ## Architecture
@@ -87,6 +87,7 @@ claude_args: --dangerously-skip-permissions
 | v0.23.1-v0.23.2 | Stale boundary cleanup, boundary-aware insertion (unmatched + explicit patches), IPC snapshot `content_ours` fix, (HEAD) marker accumulation fix, examples/blog outline. 459 tests. |
 | v0.23.3 | Cross-platform sync pane guard (`ps` instead of `/proc`), pre-sync duplicate pane prevention, clippy fixes. 459 tests. |
 | v0.24.0-v0.24.1 | `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content tests + heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests. |
+| v0.24.2 | SKILL.md step 3b (mandatory pending), `plugin install --local`, JB v0.2.10 (startup resync --fix). 497 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -138,198 +139,14 @@ claude_args: --dangerously-skip-permissions
 **v0.23.3:** Cross-platform sync pane guard (`ps` replaces `/proc`), pre-sync duplicate pane prevention, clippy fixes. 459 tests.
 
 **v0.24.0-v0.24.1:** `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content validation tests, heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests.
+
+**v0.24.2:** SKILL.md step 3b (mandatory pending updates), `plugin install --local`, JB plugin v0.2.10 (startup resync --fix). 497 tests.
 <!-- /agent:history -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
-### Re: Audit + Compact Done
-
-**Audit-docs:** Updated CLAUDE.md (module layout + init description), README.md (quick-start + CLI reference), SPEC.md (init two-mode + new install spec). Only remaining warning: "large table" (acceptable) + SKILL.md staleness (pre-existing).
-
-**Exchange compacted:** Archived 534 lines.
-
-**Session summary (v0.23.3 → v0.24.1):**
-
-**Features:**
-- `agent-doc install` — system-level setup (prereqs, editor plugin auto-detect)
-- `agent-doc init` (no-arg) — project-level setup (.agent-doc/, SKILL.md, hooks)
-- `agent-doc init <file>` — lazy project init when .agent-doc/ missing
-- SKILL.md heredoc examples (replaced `echo` with `cat <<'RESPONSE'`)
-
-**Bugs fixed:**
-- 3-pane duplicate: sync pre-start race with `resync::prune()` — added `find_alive_pane_for_file()`
-- Cross-platform process inspection: `ps` replaces `/proc`
-- VCS refresh signal: JB plugin now watches `ENTRY_CREATE` + `ENTRY_MODIFY`
-- Orphaned window @33 cleanups
-- Escaped backticks in patch output (model habit, not SKILL.md bug)
-- Clippy fixes (collapsible_if, dead_code)
-
-**Tests:** 497 (162 lib + 297 bin + 38 CLI) — 15 new tests for install/init/skill
-
-**Released:** v0.23.3, v0.24.0, v0.24.1. JB plugin v0.2.9.
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-124751.md`*
-
-There are multiple agent-doc tmux windows in tmux session 2. How did that happen?
-
-### Re: Multiple agent-doc Windows in Session 2
-
-**What happened:** 6 panes are in tmux session 2, each in its own window. They should all be in session 0 (stash window).
-
-| Window | Pane | File |
-|--------|------|------|
-| @37 | %19 | tasks/x.md |
-| @11 | %15 | tasks/youtube.md |
-| @31 | %14 | tasks/kevin-volk.md |
-| @41 | %11 | tasks/lucas-noble.md |
-| @35 | %2 | tasks/corky.md |
-| @39 | %6 | (unknown — not in registry) |
-
-**Root cause:** `auto_start_in_session` creates new windows when it can't find a registered pane in the target session. If the frontmatter says `tmux_session: '0'` but the pane was created in session 2 (because that was the "current" session at the time), each auto-start creates a new window in session 2 instead of session 0.
-
-We need to create the pan in `tmux_session: '0'` as specified in the frontmatter. Even if `tmux_session: '0'` is not instantiated. The "current" session should only be used when there is no `tmux_session` defined. 
-
-`resync` reports these as "in session '2', expected '0'" — the panes are alive but in the wrong session.
-
-**Fix options:**
-1. **`resync --fix`** — kill wrong-session panes and let them be re-created in the correct session on next route
-2. **Manual cleanup** — move panes to session 0's stash window, update registry
-3. **Consolidate** — join all 6 panes into session 0's stash, close empty windows in session 2
-
-**Recommendation:** Run `resync --fix` to clean up. The panes will be killed and re-created in session 0 on next use. This is the safest approach — the Claude sessions in those panes are likely stale anyway.
-
-Want me to run `resync --fix`?
-yes. Does the JB Plugin has `resync --fix` available? I see `Sync Tmux Layout`, but that doesn't seem to perform `resync --fix`.
-
-### Re: resync --fix Done + Plugin Action
-
-**Cleanup results:**
-- `resync --fix` fixed 7 of 11 issues — killed wrong-session panes, deregistered stale entries
-- Manually killed 1 orphan pane (%6) not in the registry
-- Session 2 now clean: only zsh + corky windows remain
-- 6 active sessions remain (agent-doc, robert-ward, judith-krug, linkedin, benjamin-becker, browser-bridge)
-
-**JB plugin and `resync --fix`:**
-
-No — the JB plugin doesn't have a `resync --fix` action. "Sync Tmux Layout" runs `agent-doc sync` which arranges panes to match the editor layout. It's a different operation.
-
-**Options to add it:**
-1. **Plugin action:** Add "Resync Sessions" to the agent-doc menu that runs `agent-doc resync --fix`
-2. **Automatic:** Run `resync --fix` as part of `sync` (already partially done — `sync` calls `resync::prune()` but not `--fix`)
-3. **Startup hook:** Run `resync --fix` when the plugin starts (catches drift from previous sessions)
-
-**Recommendation:** Option 3 — run `resync --fix` on plugin startup. This catches wrong-session/wrong-window issues left over from previous IDE sessions or system restarts. It's transparent to the user and prevents the kind of drift we just cleaned up.
-
-Want me to add this to the JB plugin?
-
-Yes.
-
-The last run did not register the commit. I did not run `/compact`. I have since run `/compact`. Should this issue be fixed now?
-![img_1.png](img_1.png)
-### Re: resync --fix on Startup + Commit Issue
-
-**Commit issue:** Fixed. The previous session compacted before the commit step could run. This session's step 0b committed it as `47c2fec`. The gutter should now be clean for that response.
-
-**JB plugin startup resync:** Added `resync --fix` to `PluginLifecycleListener.projectOpened()`. On IDE startup:
-1. Checks if `.agent-doc/` exists (skips if not an agent-doc project)
-2. Runs `agent-doc resync --fix` on a daemon thread (non-blocking)
-3. Logs results to `idea.log` under `#com.github.btakita.agentdoc`
-
-This catches wrong-session panes, stale registry entries, and dead panes left from previous IDE sessions — transparently, without user action.
-
-**File changed:** `editors/jetbrains/.../PluginLifecycleListener.kt` — added `runResyncFix()` method + companion LOG.
-
-Build: `./gradlew buildPlugin` — BUILD SUCCESSFUL.
-
-Ready to bump plugin version and publish?
-
-Yes
-### Re: Plugin v0.2.10 Published
-
-**JB plugin v0.2.10** built and committed:
-- `PluginLifecycleListener.kt` — added `runResyncFix()` on `projectOpened()`
-- `gradle.properties` — bumped `pluginVersion` to `0.2.10`
-- Both unsigned + signed zips built: `build/distributions/agent-doc-jetbrains-0.2.10{,-signed}.zip`
-- Committed in submodule: `c886689`
-
-Install via: IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select the zip. Structural class changes → uninstall first → restart → install → restart.
-
-I want agent:pending to be active as the run starts, is being processed, and ends.
-Make agent:pending update whenever there is state to update.
-Should we have a dedicated agent for `agent:pending`?
-### Re: Active agent:pending Management
-
-**No dedicated agent needed** — subagents are ~7x cost (lesson #9) and this is a checklist operation the primary agent should do as part of every response.
-
-**Recommendation:** Add to SKILL.md as a required step:
-
-> **Step 3b: Update pending.** Every response MUST include a `<!-- patch:pending -->` block reflecting current state. Mark completed items with `([done])`, add new items discovered during the response, reorder by priority. This is not optional — pending drift is the #1 cause of stale task lists.
-
-**What changes each cycle:**
-- Items completed during this response → mark `([done])` or remove
-- New items discovered → add with context
-- Reprioritize based on current work direction
-- Active work items → move to top
-
-**Implementation:** I'll update the SKILL.md to include this as a required step. No binary changes needed — it's a skill-level instruction.
-
-Want me to update SKILL.md with this step?
-Yes.
-Is there a way to auto-update the agent-doc jetbrains plugin from this agent-doc run?
-### Re: SKILL.md Updated + Plugin Auto-Update
-
-**SKILL.md updated** with step 3b — mandatory `<!-- patch:pending -->` in every template-mode response. Committed: `eac3740`. Also bumped SKILL.md version to 0.24.1.
-
-What will happen if the document does not have a `patch:pending`? Will it add one to the bottom of the document?
-
-**JB plugin auto-update from agent-doc run:**
-
-`agent-doc plugin install jetbrains` exists but downloads from **GitHub Releases** — it requires a published release. For local builds (like what we just did), the options are:
-
-1. **Current:** Manual install via IDEA Settings → Plugins → gear → "Install from Disk..." (requires IDE restart)
-2. **`--local` flag:** Add `agent-doc plugin install jetbrains --local` that copies from `editors/jetbrains/build/distributions/` to the IDE plugins dir. No network needed, still requires IDE restart.
-3. **Hot-reload:** Not possible — JetBrains plugins can't be hot-swapped at runtime (ClassLoader limitations). IDE restart is always required for structural changes.
-
-**Recommendation:** Option 2 (`--local` flag) would let you run `agent-doc plugin install jetbrains --local` from a session and then just restart IDEA. Want me to implement it?
-Yes.
-### Re: Missing pending + --local + Stale Boundary
-
-**1. Missing `agent:pending` component:** If a document has no `<!-- agent:pending -->` component, the `<!-- patch:pending -->` block becomes unmatched content — it gets appended to the exchange/output component instead. The step 3b instruction says "if the document has an `agent:pending` component" as a guard. No spurious component creation.
-
-**2. `--local` flag implemented:** `agent-doc plugin install jetbrains --local`
-
-- Walks up from CWD to find `editors/jetbrains/build/distributions/`
-- Prefers signed zip over unsigned, picks most recently modified
-- Extracts to the IDE plugins directory (same flow as remote install)
-- Also works for VS Code: `agent-doc plugin install vscode --local`
-- Tested: correctly finds `agent-doc-jetbrains-0.2.10-signed.zip`
-- Committed: `ba874fa`
-
-**Usage from a session:**
-```bash
-agent-doc plugin install jetbrains --local
-# then restart IDEA
-```
-
-**3. Stale boundary marker:** The `<!-- agent:boundary:566fe778... -->` you saw was from the previous cycle. Boundary markers are HTML comments (invisible in rendered markdown) but visible in raw text. They get cleaned up at the start of the next cycle — you saw `[boundary] removed 1 stale boundary marker(s)` in this cycle's output. The marker was leftover because the previous response was inserted AT the boundary but the marker wasn't consumed when you typed after it. This is working as designed — stale boundaries are cleaned up on the next `agent-doc boundary` call.
-Is the following `agent:boundary` still active? Why is it here?
-### Re: Boundary Marker Lifecycle
-
-Yes, the `c44a3262` boundary was still "active" — meaning it was in the document waiting for the next response to be inserted at its position. Here's the full lifecycle:
-
-1. **Insert:** `agent-doc boundary` places `<!-- agent:boundary:UUID -->` at the end of exchange
-2. **Use:** `agent-doc write --stream` inserts the response at the boundary position
-3. **Cleanup:** The marker itself is NOT deleted by the write — it remains in the document as an HTML comment (invisible in rendered markdown)
-4. **Next cycle:** `agent-doc boundary` removes all stale markers before inserting a new one
-
-You saw `[boundary] removed 2 stale boundary marker(s)` at the start of this cycle — that cleaned up both `566fe778` (from 2 cycles ago) and `c44a3262` (from last cycle).
-
-**Why not delete during write?** The boundary marker is the insertion point. After the response is placed there, the marker stays as a no-op HTML comment. Deleting it during write would require an additional file mutation after the CRDT merge, which could conflict with concurrent user edits. Cleaning up at the start of the next cycle is simpler and safer.
-
-**The user never sees them** in rendered markdown — they're HTML comments. They're only visible in raw editor text, which is expected behavior.
-
-compact exchange
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
 ### Re: Exchange Compacted
 
 **Exchange compacted:** Archived 188 lines.
@@ -349,6 +166,22 @@ compact exchange
 
 **Commits:** `c886689` (JB v0.2.10), `eac3740` (SKILL.md step 3b), `ba874fa` (--local flag)
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
+
+release
+### Re: v0.24.2 Released (HEAD)
+
+**agent-doc v0.24.2** published:
+- crates.io ✓
+- GitHub Release ✓ (with binary + JB plugin zips)
+- `cargo install` ✓ (v0.24.2 in `~/.cargo/bin/`)
+- Tag pushed: `v0.24.2`
+
+**Changes in v0.24.2:**
+- SKILL.md step 3b — mandatory `<!-- patch:pending -->` updates each cycle
+- `agent-doc plugin install --local` — install from local build directory
+- JB plugin v0.2.10 — `resync --fix` on IDE startup
+
+**Tests:** 497 (all pass). **PyPI:** not published (pending).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

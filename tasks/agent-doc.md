@@ -289,7 +289,7 @@ Should this **only** be implemented by the `agent-doc` deterministic commands? I
 
 
 BUG: I was reading the output. I accidentally started `agent-doc run`...which exposed an issue. As I was reading the pre-run response patch, when the run completed, `### Re: Context Loading + Boundary Still Broken` was prepended in front of the already commited previous patch via `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`
-### Re: Remove Step 1b from SKILL.md (HEAD)
+### Re: Remove Step 1b from SKILL.md
 
 **Yes — boundary management should be ONLY in the binary.** The SKILL should never be responsible for boundary insertion. Here's why:
 

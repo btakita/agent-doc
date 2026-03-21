@@ -144,7 +144,7 @@ Ready to pick up any of these, or start new work.
 I want to format briantakita.me to be more readable.
 There is too much space taken on the top by the site header and the sticky title.
 The site header text and title text needs to be smaller when in sticky mode.
-### Re: Reduce header and sticky title space (HEAD)
+### Re: Reduce header and sticky title space
 
 I've analyzed the layout. Here's what's taking up space:
 

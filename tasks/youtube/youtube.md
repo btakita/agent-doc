@@ -214,6 +214,18 @@ Found the issue — the post index (`post/index.ts`) is a generated file that li
 
 Cloudflare Pages deploy should trigger again. The post will appear at:
 `https://briantakita.me/posts/agent-doc-tmux-crdt-live`
+
+Add the blog post url to the YouTube video description.
+
+### Re: Add blog post URL to YouTube description (HEAD)
+
+Done. Updated the YouTube video description with:
+
+```
+Blog post: https://briantakita.me/posts/agent-doc-tmux-crdt-live
+```
+
+Added before the "Tools:" line. The update is live on https://www.youtube.com/watch?v=N8EX3zJLHUA
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

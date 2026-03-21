@@ -264,7 +264,7 @@ The response to my compaction prompt was placed before the first response patch 
 
 With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
 BUG: I was reading the output. I accidentally started `agent-doc run`...which exposed an issue. As I was reading the pre-run response patch, when the run completed, `### Re: Context Loading + Boundary Still Broken` was prepended in front of the already commited previous patch via `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`
-### Re: Stale Boundary Insertion Bug (HEAD)
+### Re: Stale Boundary Insertion Bug
 
 **The bug:** You accidentally triggered a run while reading output. The response was inserted at a stale boundary (`0da14dac`) from a previous cycle — it was prepended in front of the already-committed previous patch instead of appended at the end.
 

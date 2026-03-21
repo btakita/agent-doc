@@ -195,7 +195,7 @@ claude_args: --dangerously-skip-permissions
 Release
 My prompt `Release` as placed after the agent patch. It should have been before the patch.
 Why was the prompt placed after the patch?
-### Re: Prompt Ordering After Patch (HEAD)
+### Re: Prompt Ordering After Patch
 
 You're right — "Release" (your prompt) appears at line 195, AFTER the "Re: v0.24.4 Released" response (lines 178-194). It should be BEFORE the response.
 

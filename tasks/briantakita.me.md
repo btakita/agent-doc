@@ -125,7 +125,7 @@ Migrated from Elysia/relysjs to Hono/rhonojs:
 - Symlinks (not source_map) for local rappstack-dev resolution — avoids duplicate transitive deps
 - `@source` absolute path for Tailwind scanning (bypasses esmcss temp file issue)
 - `watch_dirs` in rebuildjs for external directory monitoring during dev
-### Re: Document compaction (HEAD)
+### Re: Document compaction
 
 Acknowledged the session summary compaction. The document now reflects the consolidated state of work across prior sessions:
 
@@ -140,4 +140,42 @@ Acknowledged the session summary compaction. The document now reflects the conso
 6. Additional unit/functional/smoke tests
 
 Ready to pick up any of these, or start new work.
+
+I want to format briantakita.me to be more readable.
+There is too much space taken on the top by the site header and the sticky title.
+The site header text and title text needs to be smaller when in sticky mode.
+### Re: Reduce header and sticky title space (HEAD)
+
+I've analyzed the layout. Here's what's taking up space:
+
+**Current header stack (desktop):**
+- Site header: `p-4` padding (1rem top+bottom) + `h-10` logo (2.5rem) ≈ **4.5rem** total
+- Sticky nav (if present): `top-[4.5rem]`
+- Sticky h1 title: `top-[5.75rem]`, `min-h-[2.75rem]`
+- Combined: **~8.5rem** (~136px) of fixed space at the top
+
+**Files to modify:**
+
+1. **`briantakita.me-dev/lib/ui--server--briantakita/header/briantakita__header.ts`** — logo size
+2. **`src/rappstack-dev/lib/ui--server--blog/header/blog__header.ts`** — header padding, logo text size
+3. **`briantakita.me-dev/lib/ui--server--briantakita/sticky/index.ts`** — sticky title offsets and heights
+
+**Proposed changes:**
+
+| Element | Current | Proposed |
+|---------|---------|----------|
+| Nav container padding | `p-4` | `py-1.5 px-4` |
+| Logo image | `w-16 h-10` | `w-12 h-7` |
+| Logo text | `text-xl sm:text-2xl` | `text-base sm:text-lg` |
+| Sticky nav top | `top-[4.5rem]` | `top-[2.75rem]` |
+| Sticky h1 top | `top-[5.75rem]` | `top-[4rem]` |
+| Sticky h1 min-height | `min-h-[2.75rem]` | `min-h-[2rem]` |
+| All deeper sticky offsets | scaled proportionally | reduced by ~2rem |
+
+This would bring the fixed top space from ~8.5rem down to ~6rem (~40% reduction).
+
+Want me to implement these changes, or do you want different sizing? I can also add scroll-responsive behavior (full-size → compact on scroll) if you prefer that over a permanently compact header.
 <!-- /agent:exchange -->
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

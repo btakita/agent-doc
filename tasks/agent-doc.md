@@ -216,7 +216,6 @@ You're right — "Release" (your prompt) appears at line 195, AFTER the "Re: v0.
 3. **Post-write reorder** — after CRDT merge, scan for user prompts that ended up after agent responses and reorder them
 
 Option 1 is the right approach but requires investigation into the Yrs CRDT merge behavior. Want me to investigate?
-Yes. How can we ensure that the CRDT follows the correct merge order?
 ### Re: CRDT Merge Ordering Investigation
 
 **Key finding:** The `reorder_agent_before_human()` function in `crdt.rs` only handles contiguous "Added" chunks at the document end. It doesn't handle interleaved insertions near the boundary.
@@ -240,13 +239,41 @@ Let me verify: in the last cycle, was the baseline saved before or after the bou
 If it does, the ordering issue is in the CRDT merge. If it doesn't, the issue is in the skill workflow timing.
 
 **Next step:** Add diagnostic logging to the merge path to see what "ours" and "theirs" look like at merge time. Or simpler: verify the baseline contains the user's prompt text.
-<!-- agent:boundary:2eeb7238-9e8f-43cd-a6d3-1fe6bbc4b604 -->
+Yes. How can we ensure that the CRDT follows the correct merge order?
+Notice my prompt from the previous run `Yes. How can we ensure that the CRDT follows the correct merge order?`.
+In the commit, it was placed above `### Re: CRDT Merge Ordering Investigation`.
+But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
+### Re: CRDT Reordering Root Cause Found (HEAD)
+
+**Confirmed:** The `reorder_agent_before_human()` function in `crdt.rs` explicitly puts agent content (client=1) BEFORE human content (client=2). Lines 158-159:
+
+```rust
+result.push_str(&agent_text);  // agent first
+result.push_str(&human_text);  // human second
+```
+
+This is correct for **concurrent edits** (user types WHILE agent responds — the agent's response is the primary content). But it's WRONG for **prompts** (user typed BEFORE the agent response — the prompt should come first).
+
+**The fundamental issue:** The CRDT reordering doesn't distinguish between:
+1. **Prompt text** (user typed before agent, already in baseline) — should be BEFORE response
+2. **Concurrent edits** (user typed during agent response, NOT in baseline) — ordering less critical
+
+**Why prompts end up in the "Added" boundary:** If the prompt text is identical in baseline and current document, the CRDT diff should mark it as "unchanged" (not "Added"). But the diff algorithm operates on character-level changes, and surrounding context changes (boundary marker insertion/removal, response insertion) can cause the CRDT to re-attribute nearby unchanged text.
+
+**Two fix paths:**
+1. **Don't reorder at all** — the boundary marker already handles ordering. The reorder function was designed for pre-boundary append mode. With boundary-aware writes, the insert position is explicit. Disable reordering for boundary-aware writes.
+2. **Reverse the order** — put human before agent in the reorder function. This is simpler but may break append-mode documents.
+
+**Recommendation:** Option 1 — add a flag to skip reordering when boundary-aware insertion was used. The write command knows whether a boundary was consumed. Pass this to the CRDT merge so it skips reordering.
+
+Want me to implement this?
+<!-- agent:boundary:2a9688d7-278b-434f-a825-3d37edd65bfd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **CRDT merge prompt ordering** — investigate baseline timing vs merge reordering (active)
+- **CRDT reordering fix** — disable reorder for boundary-aware writes (active)
 - AST parsing for literal component markers in response text
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

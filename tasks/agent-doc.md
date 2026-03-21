@@ -227,7 +227,7 @@ Yes.
 
 The last run did not register the commit. I did not run `/compact`. I have since run `/compact`. Should this issue be fixed now?
 ![img_1.png](img_1.png)
-### Re: resync --fix on Startup + Commit Issue (HEAD)
+### Re: resync --fix on Startup + Commit Issue
 
 **Commit issue:** Fixed. The previous session compacted before the commit step could run. This session's step 0b committed it as `47c2fec`. The gutter should now be clean for that response.
 

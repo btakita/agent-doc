@@ -238,7 +238,7 @@ The dev server needs a restart to pick up the changes. Please restart `bun run d
 - `app/briantakita.me/app/index.css.ts` — CSS rules shrink header/title when `.scrolled`
 
 Same issue. Are you using LightPanda to test the height of the header and the h1 when scrolling?
-### Re: LightPanda verification & build cache issue (HEAD)
+### Re: LightPanda verification & build cache issue
 
 I verified with LightPanda and direct esbuild. The root cause: **the rhonojs/rebuildjs build pipeline is serving a cached bundle**. Here's what I found:
 

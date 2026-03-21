@@ -372,7 +372,7 @@ All elements are flush with no spacing gaps. The scroll-responsive compacting is
 
 The breadcrumbs are still too high. Need to be a bit lower.
 ![2026-03-21_14-06.png](../../../../Pictures/agent-loop/2026-03-21_14-06.png)
-### Re: Breadcrumb pushed down 0.5rem (HEAD)
+### Re: Breadcrumb pushed down 0.5rem
 
 The header's actual rendered height was taller than 2rem due to nav item padding (`sm:py-1`). Increased all scrolled `top` values by 0.5rem:
 

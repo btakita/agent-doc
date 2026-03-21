@@ -14,6 +14,40 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
+        // Clean up wrong-session/stale panes left from previous IDE sessions
+        runResyncFix(project)
+    }
+
+    private fun runResyncFix(project: Project) {
+        val basePath = project.basePath ?: return
+        val agentDocDir = java.io.File(basePath, ".agent-doc")
+        if (!agentDocDir.isDirectory) return
+
+        Thread({
+            try {
+                val process = ProcessBuilder("agent-doc", "resync", "--fix")
+                    .directory(java.io.File(basePath))
+                    .redirectErrorStream(true)
+                    .start()
+                val exitCode = process.waitFor()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                if (output.isNotEmpty()) {
+                    LOG.info("[resync] $output")
+                }
+                if (exitCode != 0) {
+                    LOG.warn("[resync] agent-doc resync --fix exited with code $exitCode")
+                }
+            } catch (e: Exception) {
+                LOG.info("[resync] agent-doc not available: ${e.message}")
+            }
+        }, "agent-doc-resync-fix").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    companion object {
+        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PluginLifecycleListener::class.java)
     }
 
     override fun projectClosed(project: Project) {

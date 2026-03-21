@@ -293,7 +293,6 @@ What will happen if the document does not have a `patch:pending`? Will it add on
 
 **Recommendation:** Option 2 (`--local` flag) would let you run `agent-doc plugin install jetbrains --local` from a session and then just restart IDEA. Want me to implement it?
 Yes.
-Is the previous `agent:boundary` still active? Why is it here?
 ### Re: Missing pending + --local + Stale Boundary
 
 **1. Missing `agent:pending` component:** If a document has no `<!-- agent:pending -->` component, the `<!-- patch:pending -->` block becomes unmatched content — it gets appended to the exchange/output component instead. The step 3b instruction says "if the document has an `agent:pending` component" as a guard. No spurious component creation.
@@ -314,13 +313,26 @@ agent-doc plugin install jetbrains --local
 ```
 
 **3. Stale boundary marker:** The `<!-- agent:boundary:566fe778... -->` you saw was from the previous cycle. Boundary markers are HTML comments (invisible in rendered markdown) but visible in raw text. They get cleaned up at the start of the next cycle — you saw `[boundary] removed 1 stale boundary marker(s)` in this cycle's output. The marker was leftover because the previous response was inserted AT the boundary but the marker wasn't consumed when you typed after it. This is working as designed — stale boundaries are cleaned up on the next `agent-doc boundary` call.
+Is the following `agent:boundary` still active? Why is it here?
+### Re: Boundary Marker Lifecycle (HEAD)
+
+Yes, the `c44a3262` boundary was still "active" — meaning it was in the document waiting for the next response to be inserted at its position. Here's the full lifecycle:
+
+1. **Insert:** `agent-doc boundary` places `<!-- agent:boundary:UUID -->` at the end of exchange
+2. **Use:** `agent-doc write --stream` inserts the response at the boundary position
+3. **Cleanup:** The marker itself is NOT deleted by the write — it remains in the document as an HTML comment (invisible in rendered markdown)
+4. **Next cycle:** `agent-doc boundary` removes all stale markers before inserting a new one
+
+You saw `[boundary] removed 2 stale boundary marker(s)` at the start of this cycle — that cleaned up both `566fe778` (from 2 cycles ago) and `c44a3262` (from last cycle).
+
+**Why not delete during write?** The boundary marker is the insertion point. After the response is placed there, the marker stays as a no-op HTML comment. Deleting it during write would require an additional file mutation after the CRDT merge, which could conflict with concurrent user edits. Cleaning up at the start of the next cycle is simpler and safer.
+
+**The user never sees them** in rendered markdown — they're HTML comments. They're only visible in raw editor text, which is expected behavior.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- `agent-doc plugin install --local` — install from local build ([done])
-- SKILL.md step 3b — mandatory pending updates ([done])
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

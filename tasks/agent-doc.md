@@ -162,7 +162,7 @@ I need to start to address new users.
 
 Let's figure out how to make the agent-doc binary install, editor plugin install, and any other configuration seamless as possible.
 
-### Re: New User Onboarding Plan (HEAD)
+### Re: New User Onboarding Plan
 
 **Current install steps (too many):**
 1. Install Rust toolchain (\`rustup\`)
@@ -176,7 +176,7 @@ Let's figure out how to make the agent-doc binary install, editor plugin install
 
 **Goal: \`agent-doc setup\` — one command does everything.**
 
-### Proposed \`agent-doc setup\` Command (HEAD)
+### Proposed \`agent-doc setup\` Command
 
 \`\`\`bash
 agent-doc setup [--editor jetbrains|vscode] [--no-plugin] [--no-skill]
@@ -189,7 +189,7 @@ agent-doc setup [--editor jetbrains|vscode] [--no-plugin] [--no-skill]
 4. **Create \`.agent-doc/\` directory** — snapshots, patches, sessions.json
 5. **Print quick-start guide** — "Create your first document: \`agent-doc init plan.md\`"
 
-### Distribution Options (HEAD)
+### Distribution Options
 
 | Method | Audience | Effort |
 |--------|----------|--------|
@@ -207,14 +207,14 @@ agent-doc setup [--editor jetbrains|vscode] [--no-plugin] [--no-skill]
 4. **PyPI publish** — already have maturin, just need to publish
 5. **npm wrapper** — later (low priority)
 
-### SKILL.md Auto-Install (HEAD)
+### SKILL.md Auto-Install
 
 Currently the skill must be manually installed. Options:
 - **SessionStart hook** — add \`agent-doc skill install\` to Claude Code hooks (already partially done with autoclaim)
 - **Plugin-triggered** — JetBrains/VS Code plugin runs \`agent-doc skill install\` on first launch
 - **\`setup\` command** — installs the hook automatically
 
-### Quick-Start README (HEAD)
+### Quick-Start README
 
 The README should have a 3-line getting started:
 \`\`\`bash

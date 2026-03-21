@@ -111,6 +111,7 @@ claude_args: --dangerously-skip-permissions
 14. **Immutable session binding** — `tmux_session` in frontmatter should never be silently overwritten by claim. This caused cross-session pane swapping when autoclaim or lazy-claim ran in a different session. Fix: refuse to overwrite unless `--force`. Track multi-step plans in `agent:pending` to survive context compaction.
 15. **No Gson in JetBrains plugin** — Gson causes `ClassNotFoundException` at runtime in some IntelliJ builds. Use hand-written JSON parsing. This bug was found and fixed twice (SlashCommandCompletionContributor Mar 11, PatchWatcher Mar 18) — check git history before introducing "bundled" dependencies.
 16. **Never fall back to current_tmux_session() when tmux_session is set** — `display-message #{session_name}` returns whichever session the user's terminal is viewing. If the user switches to session 1, all routes using `current_tmux_session()` as fallback will create panes in session 1. Fix: bail with error instead of fallback. Only use `current_tmux_session()` for first-claim (no frontmatter binding yet).
+17. **Deterministic operations belong in the binary, not the skill** — when adding a feature, ask "will ALL write paths need this?" If yes, implement in the binary. Boundary insertion was initially a SKILL step (1b) but caused stale boundary bugs when non-SKILL paths (run, stream, watch) bypassed it. Moved to `apply_patches()` in v0.24.4. The binary-vs-agent test: "can it be unit-tested with fixed inputs?" If yes → binary.
 <!-- /agent:lessons -->
 
 ## Session History
@@ -310,7 +311,6 @@ BUG: I was reading the output. I accidentally started `agent-doc run`...which ex
 Want me to implement this?
 Yes...and let's review why the design principle of binary for deterministic operations was not followed. Was this is:
 - a failure to identify the feature as a potential binary vs agentic operation?
-- a failure to correctly assign binary vs agentic operation?
 ### Re: Boundary Moved to Binary + Why It Wasn't
 
 **Implemented (`6d6007e`):** Boundary management is now fully binary-owned.
@@ -334,15 +334,39 @@ It was a **failure to identify**. Boundary insertion was conceived as a "workflo
 The failure appeared when other write paths (`agent-doc run`, stream, watch) bypassed the SKILL. **Lesson: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
 
 **Binary installed.** Next cycle uses the new binary — no step 1b needed.
-<!-- agent:boundary:ef39a488-5999-470e-81ac-42287ee1096c -->
+- a failure to correctly assign binary vs agentic operation?
+verify the behavior
+add decision for binary behavior to SPEC.md
+Where is Lesson applied? Should it be applied to SPEC.md?
+
+audit docs
+### Re: Verification + SPEC.md + Audit (HEAD)
+
+**Behavior verified.** The last write log showed `[template] pre-patch boundary c57680fc inserted at end of exchange` — the binary handles boundary insertion automatically. No step 1b needed.
+
+**SPEC.md updated (`0ae0164`)** with boundary lifecycle:
+- Pre-patch cleanup → fresh insertion → patch application → post-patch re-insertion
+- Invariant: user prompts always before response
+- Design principle: "when adding deterministic operations, ask 'will ALL write paths need this?' If yes, it belongs in the binary"
+- IPC boundary: PatchWatcher reloads from disk
+
+**Lesson location:** The lesson ("deterministic operations that ALL write paths need → binary") is now in SPEC.md under the boundary lifecycle section. It's also in the exchange history. Should I also add it as lesson #17 in the `agent:lessons` component?
+
+**Audit results:**
+- SKILL.md stale (still has step 1b in the loaded version — binary version is updated, need `/compact` to reload)
+- CLAUDE.md stale (needs module layout update for template.rs changes)
+- README.md stale (same)
+- Large table warning (acceptable)
+<!-- agent:boundary:71cbe535-e12e-48f9-945c-3de9bd36129a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- JB plugin install needed — boundary refresh fix not active until v0.2.10+ installed
+- SKILL.md reload needed — run `/compact` to get updated version without step 1b
+- CLAUDE.md + README.md staleness — update for template.rs boundary changes
+- JB plugin install needed — boundary refresh fix
 - CRDT merge ordering — Yrs causality still reorders
-- SPEC.md boundary lifecycle documentation
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

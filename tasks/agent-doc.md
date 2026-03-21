@@ -281,6 +281,8 @@ Is there a way to auto-update the agent-doc jetbrains plugin from this agent-doc
 
 **SKILL.md updated** with step 3b — mandatory `<!-- patch:pending -->` in every template-mode response. Committed: `eac3740`. Also bumped SKILL.md version to 0.24.1.
 
+What will happen if the document does not have a `patch:pending`? Will it add one to the bottom of the document?
+
 **JB plugin auto-update from agent-doc run:**
 
 `agent-doc plugin install jetbrains` exists but downloads from **GitHub Releases** — it requires a published release. For local builds (like what we just did), the options are:
@@ -290,13 +292,35 @@ Is there a way to auto-update the agent-doc jetbrains plugin from this agent-doc
 3. **Hot-reload:** Not possible — JetBrains plugins can't be hot-swapped at runtime (ClassLoader limitations). IDE restart is always required for structural changes.
 
 **Recommendation:** Option 2 (`--local` flag) would let you run `agent-doc plugin install jetbrains --local` from a session and then just restart IDEA. Want me to implement it?
+Yes.
+Is the previous `agent:boundary` still active? Why is it here?
+### Re: Missing pending + --local + Stale Boundary
+
+**1. Missing `agent:pending` component:** If a document has no `<!-- agent:pending -->` component, the `<!-- patch:pending -->` block becomes unmatched content — it gets appended to the exchange/output component instead. The step 3b instruction says "if the document has an `agent:pending` component" as a guard. No spurious component creation.
+
+**2. `--local` flag implemented:** `agent-doc plugin install jetbrains --local`
+
+- Walks up from CWD to find `editors/jetbrains/build/distributions/`
+- Prefers signed zip over unsigned, picks most recently modified
+- Extracts to the IDE plugins directory (same flow as remote install)
+- Also works for VS Code: `agent-doc plugin install vscode --local`
+- Tested: correctly finds `agent-doc-jetbrains-0.2.10-signed.zip`
+- Committed: `ba874fa`
+
+**Usage from a session:**
+```bash
+agent-doc plugin install jetbrains --local
+# then restart IDEA (HEAD)
+```
+
+**3. Stale boundary marker:** The `<!-- agent:boundary:566fe778... -->` you saw was from the previous cycle. Boundary markers are HTML comments (invisible in rendered markdown) but visible in raw text. They get cleaned up at the start of the next cycle — you saw `[boundary] removed 1 stale boundary marker(s)` in this cycle's output. The marker was leftover because the previous response was inserted AT the boundary but the marker wasn't consumed when you typed after it. This is working as designed — stale boundaries are cleaned up on the next `agent-doc boundary` call.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **SKILL.md step 3b** — mandatory pending updates ([done])
-- JB plugin auto-update: `agent-doc plugin install --local` (proposed)
+- `agent-doc plugin install --local` — install from local build ([done])
+- SKILL.md step 3b — mandatory pending updates ([done])
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

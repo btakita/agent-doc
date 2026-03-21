@@ -600,7 +600,6 @@ Let me check if the PatchWatcher's `refreshVcs()` is actually calling `markEvery
 Want me to check the plugin source and fix it?
 
 Yes
-Make this work across all plugins.
 
 ### Re: VCS Refresh Fix — Cross-Platform
 
@@ -623,6 +622,23 @@ Make this work across all plugins.
 - Trigger VCS/git refresh so gutter annotations update immediately
 
 JB plugin builds successfully. Restart IntelliJ to load the new plugin.
+
+Do I need to reinstall the JB plugin to test?
+
+### Re: Plugin Reinstall (HEAD)
+
+Yes — the PatchWatcher changes are in compiled Kotlin bytecode, so you need to reinstall the plugin zip.
+
+**Steps:**
+1. IDEA Settings > Plugins > gear icon > "Install Plugin from Disk..."
+2. Select: `file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.8.zip`
+3. Restart IDEA
+
+Since this is a behavioral change (adding `ENTRY_MODIFY` to an existing watcher + signal processing in startup), reinstalling over the existing v0.2.8 should work without uninstall first.
+
+After restart, the VCS gutter should update automatically when `agent-doc commit` runs — no more manual Ctrl+Alt+Y.
+
+**To verify:** After reinstall, check that `.agent-doc/patches/vcs-refresh.signal` gets deleted after a commit.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

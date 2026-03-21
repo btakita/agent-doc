@@ -337,6 +337,10 @@ You're right — re-inserting the boundary in the binary placed it in the middle
 
 **New approach:** The SKILL.md checkpoint workflow now calls `agent-doc boundary` after each checkpoint write (`bbf1366`). This places the boundary at the END of the exchange — the correct position — so subsequent writes and user text are ordered properly.
 
+Can we have the **checkpoint write** also append a boundary?...since this should be a deterministic operation. This would only apply to `agent:boundary` patches.
+
+Meta: Prefer that deterministic operations be written in the agent-doc binary. While llm operations be written in SKILL.md. Is this already expressed somewhere? Such as in the agent-doc AGENTS.md.
+
 **Checkpoint workflow (updated):**
 1. Write checkpoint → boundary consumed
 2. `agent-doc boundary <FILE>` → new boundary at end of exchange
@@ -344,6 +348,21 @@ You're right — re-inserting the boundary in the binary placed it in the middle
 4. Continue responding, write next checkpoint at new boundary
 
 This keeps the boundary at the correct position (end of exchange) without polluting the middle of the document.
+
+**Tests:** 497 all pass. Ready to release v0.24.4?
+### Re: Deterministic Boundary Re-insertion (HEAD)
+
+You're right — boundary re-insertion is deterministic and belongs in the binary, not the skill. The binary-vs-agent principle IS documented in CLAUDE.md:
+
+> **Binary vs Agent Responsibility** table: "Component parsing, patch application, mode resolution" → **Binary (Rust)** — "Deterministic, testable, consistent across agents"
+
+**Implementation (`4d4481f`):** `apply_patches()` in `template.rs` now detects when a boundary was consumed during patching and re-inserts a new one at the END of the exchange component:
+
+1. Before patching: check if exchange has a boundary
+2. After patching: if boundary was consumed, generate new UUID and insert at end of exchange (just before `<!-- /agent:exchange -->`)
+3. The new boundary is at the correct position — end of exchange, not inline after content
+
+**Reverted SKILL.md** (`5bcbf8e`) — the checkpoint workflow no longer needs manual `agent-doc boundary` calls. The binary handles it automatically.
 
 **Tests:** 497 all pass. Ready to release v0.24.4?
 <!-- /agent:exchange -->

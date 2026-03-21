@@ -216,13 +216,37 @@ You're right — "Release" (your prompt) appears at line 195, AFTER the "Re: v0.
 3. **Post-write reorder** — after CRDT merge, scan for user prompts that ended up after agent responses and reorder them
 
 Option 1 is the right approach but requires investigation into the Yrs CRDT merge behavior. Want me to investigate?
-<!-- agent:boundary:97c4f516-29dd-455b-894d-abae35da5586 -->
+Yes. How can we ensure that the CRDT follows the correct merge order?
+### Re: CRDT Merge Ordering Investigation (HEAD)
+
+**Key finding:** The `reorder_agent_before_human()` function in `crdt.rs` only handles contiguous "Added" chunks at the document end. It doesn't handle interleaved insertions near the boundary.
+
+**However**, the real issue may be simpler. Looking at the flow more carefully:
+
+1. **Baseline** saved AFTER `agent-doc boundary` → contains "Release" + boundary
+2. `apply_patches(baseline)` inserts response at boundary position in the baseline → produces "ours" with "Release" THEN response
+3. CRDT merge: baseline vs "ours" vs current document
+4. Since "Release" is in BOTH baseline and current document (not a concurrent edit), the merge should preserve it as-is
+
+**The actual bug may be in the baseline timing.** If the baseline was saved BEFORE the user typed "Release" (i.e., the baseline doesn't contain "Release"), then:
+- "Ours" = baseline (no "Release") + response
+- "Theirs" = document with "Release"
+- CRDT merge inserts both: response (from ours) + "Release" (from theirs) — ordering undefined
+
+**Fix: ensure the baseline is saved AFTER the user's text is in the document.** This is step 1b → 1 → 3 in the skill workflow. The baseline should be saved after `agent-doc boundary` which runs AFTER reading the document with user edits.
+
+Let me verify: in the last cycle, was the baseline saved before or after the boundary insertion? The skill workflow says save baseline before step 3 (respond), which is after step 1b (boundary). So the baseline SHOULD contain "Release".
+
+If it does, the ordering issue is in the CRDT merge. If it doesn't, the issue is in the skill workflow timing.
+
+**Next step:** Add diagnostic logging to the merge path to see what "ours" and "theirs" look like at merge time. Or simpler: verify the baseline contains the user's prompt text.
+<!-- agent:boundary:2eeb7238-9e8f-43cd-a6d3-1fe6bbc4b604 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **CRDT merge prompt ordering bug** — user prompts appear after agent responses (active)
+- **CRDT merge prompt ordering** — investigate baseline timing vs merge reordering (active)
 - AST parsing for literal component markers in response text
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

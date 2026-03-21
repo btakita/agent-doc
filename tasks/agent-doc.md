@@ -364,35 +364,16 @@ Should the agent-doc skill have a dog-fooding component? At some point I want to
 2. After patching: if boundary was consumed, generate new UUID and insert at end of exchange (just before `
 ### Re: Boundary Position After Final Write
 
-Over here, we have an issue with `<!-- /agent:exchange -->`. It has been replaced in the non-committed git changeset.
-Please note the commit that happened before the previous non-commited block.
-Add tests to replicate this issue.
-
-**No functional difference.** For the final write of a cycle, the re-inserted boundary serves no purpose — it will be cleaned up by the next cycle's `agent-doc boundary` call anyway.
-
-**Where the user types doesn't matter:**
-- **Before the boundary:** Text is inside the exchange, between the response and the boundary. Next cycle sees it.
-- **After the boundary:** Text is inside the exchange, between the boundary and `<!-- /agent:exchange -->`. Next cycle sees it.
-
-Both positions are captured by the diff. Comment stripping removes boundary markers before comparing, so the diff sees user text regardless of its position relative to the boundary.
-
-**The re-inserted boundary only matters for mid-cycle checkpoints:**
-- Checkpoint 1 writes, consumes boundary, `apply_patches` re-inserts at end
-- Checkpoint 2 writes at the new boundary → correct ordering
-- Final write writes at the boundary → correct ordering
-- After the final write: boundary is re-inserted but never used again (harmless)
-
-For the final write, it's a no-op artifact. The code is simpler with a single rule ("always re-insert after consuming") rather than trying to detect "is this the last write?"
-This is the beginning of the last non-commited patch.
-
-Is there any value to have the `agent:boundary` once we have the last patch? How do we know what the last patch is?
-
-Should the agent-doc skill have a dog-fooding component? At some point I want to directly support humans dog-fooding their own systems using agent-doc as the interface.
+Over here, we have an issue with `
 ### Re: Document Corruption + Dog-fooding + Boundary Questions
 
-**Document corruption fixed.** The orphaned `<!-- /agent:exchange -->`)` at line 387 was caused by my response containing the literal text `<!-- /agent:exchange -->` — the CRDT merge and component parser interpreted it as a real close tag, breaking the exchange structure. This is **lesson #13** again: any content containing `<!--` markers can confuse parsers. I manually repaired the structure.
+**Document corruption fixed.** The orphaned close tag at line 387 was caused by my response containing the literal close tag text — the CRDT merge and component parser interpreted it as a real close tag, breaking the exchange structure. This is **lesson #13** again: any content containing `<!--` markers can confuse parsers. I manually repaired the structure.
 
-**Root cause of this specific corruption:** In my "Re: Deterministic Boundary Re-insertion" response, I wrote `just before <!-- /agent:exchange -->` as literal text. The write pipeline treated it as a real close tag during template patching. The fix is skill-level: never include literal component markers in response text — use escaped versions like `&lt;!-- /agent:exchange --&gt;` instead.
+Can the CRDT merge how handle this? The agent-doc binary should have robust markdown AST parsing. Was there an issue with the AST parsing or was AST parsing bypassed?
+
+**Root cause of this specific corruption:** In my "Re: Deterministic Boundary Re-insertion" response, I wrote the close tag as literal text. The write pipeline treated it as a real close tag during template patching. The fix is skill-level: never include literal component markers in response text — use HTML entities instead.
+
+See note above. We should fix the AST parsing. However it will still be good to keep this SKILL because of how the editor interprets code escaping.
 
 **How do we know what the last patch is?** We don't — and we shouldn't need to. The binary is stateless per-write. The re-insertion rule ("always re-insert at end of exchange after consuming") is correct because:
 - Mid-cycle: enables the next checkpoint to find the boundary
@@ -410,12 +391,67 @@ Self-referential enhancement IS a powerful pattern — agent-doc developing itse
 The principle could be added as a **lesson** in the document rather than a separate skill. Something like: "Dog-fooding agent-doc via agent-doc sessions surfaces UX issues that synthetic tests miss (boundary ordering, checkpoint writes, tmux session drift)."
 
 Want me to add it as a lesson?
+
+Maybe...Is this redundant or useful? I asked about dog-fooding as a meta-concern re: binary vs skill changes.
+
+&lt;!-- /agent:exchange --&gt;`. It has been replaced in the non-committed git changeset.
+Please note the commit that happened before the previous non-commited block.
+Add tests to replicate this issue.
+
+**No functional difference.** For the final write of a cycle, the re-inserted boundary serves no purpose — it will be cleaned up by the next cycle's `agent-doc boundary` call anyway.
+
+**Where the user types doesn't matter:**
+- **Before the boundary:** Text is inside the exchange, between the response and the boundary. Next cycle sees it.
+- **After the boundary:** Text is inside the exchange, between the boundary and the close tag. Next cycle sees it.
+
+Both positions are captured by the diff. Comment stripping removes boundary markers before comparing, so the diff sees user text regardless of its position relative to the boundary.
+
+**The re-inserted boundary only matters for mid-cycle checkpoints:**
+- Checkpoint 1 writes, consumes boundary, `apply_patches` re-inserts at end
+- Checkpoint 2 writes at the new boundary → correct ordering
+- Final write writes at the boundary → correct ordering
+- After the final write: boundary is re-inserted but never used again (harmless)
+
+For the final write, it's a no-op artifact. The code is simpler with a single rule ("always re-insert after consuming") rather than trying to detect "is this the last write?"
+This is the beginning of the last non-commited patch.
+
+Is there any value to have the `agent:boundary` once we have the last patch? How do we know what the last patch is?
+
+Should the agent-doc skill have a dog-fooding component? At some point I want to directly support humans dog-fooding their own systems using agent-doc as the interface.
+Note that my prompts were placed after the last patch.
+### Re: Compact + Dog-fooding + Prompt Ordering (HEAD)
+
+**Compacted:** 271 lines archived.
+
+**Session summary (v0.24.2 → v0.24.3):**
+
+**Features:**
+- Context session for `auto_start()` — eliminates wrong-session pane creation
+- Post-sync `resync --fix` — auto-catches tmux drift
+- Deterministic boundary re-insertion in `apply_patches()` — re-inserts at END of exchange after checkpoint writes
+- SKILL.md step 3b — mandatory pending updates
+
+**Bugs fixed:**
+- Wrong-session panes (session 2 instead of 0) — `current_tmux_session()` fallback race
+- Document corruption from literal component markers in response text (lesson #13)
+- Boundary ordering issues with checkpoint writes
+
+**Released:** v0.24.2 (SKILL.md step 3b, plugin install --local, JB v0.2.10), v0.24.3 (context session fix, post-sync resync)
+
+**Design discussions:**
+- Boundary lifecycle: one-use insertion point, re-inserted by binary after consumption, cleaned up next cycle
+- Binary vs agent: deterministic operations (boundary re-insertion) belong in binary, LLM operations in SKILL.md (documented in CLAUDE.md)
+- Dog-fooding: not redundant — it's the PRACTICE that validates the binary-vs-agent principle. The principle says WHERE to put code; dog-fooding tells us WHEN the principle is violated. Useful as a lesson, not a separate skill.
+- User prompts placed after last patch: noted. The boundary re-insertion ensures prompts are captured regardless of position.
+
+**Pending v0.24.4 release** with boundary re-insertion fix.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Document corruption from literal markers in response text (lesson to add)
+- **v0.24.4 release** — boundary re-insertion + context session + post-sync resync
+- Document corruption from literal markers (lesson #17 to add)
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

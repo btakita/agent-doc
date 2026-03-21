@@ -157,7 +157,7 @@ Draft status has been set to `ready`. Once you've re-authenticated, reply "go" a
 
 go
 
-### Re: go (publish) (HEAD)
+### Re: go (publish)
 
 Published! https://www.youtube.com/watch?v=N8EX3zJLHUA
 

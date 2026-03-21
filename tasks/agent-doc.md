@@ -442,7 +442,7 @@ Do this.
 Want me to release v0.24.0 with the install/init commands and new tests?
 yes
 
-### Re: SKILL.md Content Tests + v0.24.0 Released (HEAD)
+### Re: SKILL.md Content Tests + v0.24.0 Released
 
 **2 new SKILL.md content tests:**
 - \`test_skill_md_contains_required_steps\` — verifies all 8 workflow step headings (0, 0b, 1, 1b, 2, 3, 4, 5)
@@ -463,25 +463,55 @@ yes
 - Cross-platform sync pane guard (\`ps\` instead of \`/proc\`)
 - 15 new CLI tests (install, init, skill content validation)
 - 497 tests (162 lib + 297 bin + 38 CLI)
+`agent:pending` has not been updated recently.
+How can we ensure that `agent:pending` is always actively updated?
+
+### Re: Keeping agent:pending Updated (HEAD)
+
+The SKILL.md already instructs the agent to manage pending items — the "Pending protocol" memory says: "When user approves work, add to \`agent:pending\` and flush BEFORE responding." But in practice, I've been adding items to the exchange instead of promoting them to pending.
+
+**Options to enforce active pending updates:**
+
+**1. SKILL.md enforcement (cheapest):**
+Add a step to the SKILL.md workflow: "After each release or feature completion, update \`agent:pending\` — mark completed items \`[x]\` and add new items from the exchange discussion."
+
+**2. Audit-docs check:**
+Add a rule to \`agent-doc audit-docs\` that warns when \`agent:pending\` hasn't been modified in the last N commits but the exchange has new content. This catches drift.
+
+**3. Compact-time reconciliation:**
+When compacting the exchange, automatically scan for completed items (mentioned as "done", "released", "implemented" in the exchange) and mark them \`[x]\` in pending. Also scan for new items discussed but not added.
+
+**My recommendation: option 1 + 3.** Add the SKILL.md instruction (free) and have compact auto-reconcile (catches everything). Option 2 adds noise for a problem that compact already solves.
+
+**Immediate fix — let me update pending now:**
+
+The completed items you removed were correct. Items that should be added from this session's discussion:
+- \`agent-doc install\` (system setup) — done in v0.24.0
+- \`agent-doc init\` (project setup, no-arg mode) — done in v0.24.0
+- Orphaned window stash consolidation in \`resync --fix\` — discussed but not yet built
+- Install script (\`curl | sh\`) — discussed but not yet built
+- Homebrew formula — discussed but not yet built
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Release v0.22.0
-- [x] Move cursor-aware patch logic to shared library FFI (`agent_doc_apply_patch_with_caret`)
-- [x] Boundary marker for response ordering (`agent-doc boundary`, FFI, plugin support)
+- \`agent-doc install\` — system setup, prereq check, editor plugin auto-detect ([v0.24.0])
+- \`agent-doc init\` (no-arg) — project setup, .agent-doc/, SKILL.md, hooks ([v0.24.0])
+- Install script (\`curl | sh\`) for binary download
+- Homebrew formula (\`brew tap btakita/agent-doc\`)
+- Orphaned window stash consolidation in \`resync --fix\`
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))
 - Multi-agent backends — codex, gemini ([#20](https://github.com/btakita/agent-doc/issues/20))
-- `agent-doc deep` — parallel subagent fan-out with worktrees ([#21](https://github.com/btakita/agent-doc/issues/21))
-- `agent-doc status` — Ratatui TUI dashboard ([#22](https://github.com/btakita/agent-doc/issues/22))
+- \`agent-doc deep\` — parallel subagent fan-out with worktrees ([#21](https://github.com/btakita/agent-doc/issues/21))
+- \`agent-doc status\` — Ratatui TUI dashboard ([#22](https://github.com/btakita/agent-doc/issues/22))
 - Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
-- Docker sandboxing (`--sandboxed`) ([#24](https://github.com/btakita/agent-doc/issues/24))
-- `agent/api.rs` — direct HTTP API backend ([#25](https://github.com/btakita/agent-doc/issues/25))
-- `agent-doc init --dashboard` ([#26](https://github.com/btakita/agent-doc/issues/26))
+- Docker sandboxing (\`--sandboxed\`) ([#24](https://github.com/btakita/agent-doc/issues/24))
+- \`agent/api.rs\` — direct HTTP API backend ([#25](https://github.com/btakita/agent-doc/issues/25))
+- \`agent-doc init --dashboard\` ([#26](https://github.com/btakita/agent-doc/issues/26))
 - Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
 - Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
-- `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
+- \`agent-doc stream\` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
 <!-- /agent:pending -->

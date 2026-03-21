@@ -273,6 +273,8 @@ Want me to implement this?
 But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
 Yes. implement Option 1. Note that we moved after the patch response:
 > But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
+Describe the mechanism to correctly move `agent:boundary` below all human prompts writter after the initial `agent:boundary`...when perform an agent-doc run from an idle state.
+
 ### Re: CRDT Reorder Skip Implemented
 
 **Committed (`3ad88f6`):** CRDT merge now skips `reorder_agent_before_human()` when a boundary marker is present in the baseline.
@@ -287,12 +289,56 @@ Yes. implement Option 1. Note that we moved after the patch response:
 **How it works:** When the baseline contains a boundary marker, the write knows that `apply_patches()` used boundary-aware insertion (which already placed the response after the user's prompt). The CRDT merge preserves this ordering instead of swapping agent before human.
 
 **Tests:** 497 all pass. This should fix the prompt-after-response ordering issue. Let's verify in the next cycle — your prompt should appear BEFORE my response.
-<!-- agent:boundary:587aaedc-d169-4af6-a5a8-6902c81dcdf1 -->
+Validate that this prompt after `<!-- agent:boundary:36a7b066-d92c-4fdb-b85a-082d95afc927 -->` is run after the patch response. This behavior should be in the SPEC.md
+
+Note that in the last patch is sandwiched between two prompts which are both after `<!-- agent:boundary:36a7b066-d92c-4fdb-b85a-082d95afc927 -->`.
+
+In the uncommitted changeset we have:
+```
+Describe the mechanism to correctly move `agent:boundary` below all human prompts writter after the initial `agent:boundary`...when perform an agent-doc run from an idle state.
+...<patch>...
+Validate that this prompt after `<!-- agent:boundary:36a7b066-d92c-4fdb-b85a-082d95afc927 -->` is run after the patch response. This behavior should be in the SPEC.md
+```
+
+Please diagnose (including reading logs).
+### Re: Boundary Mechanism + Ordering Diagnosis (HEAD)
+
+**The mechanism (idle → run):**
+
+1. User types prompts in the exchange (while agent is idle)
+2. User invokes `/agent-doc` which triggers the skill workflow
+3. Step 1b: `agent-doc boundary` runs — removes ALL stale boundaries, inserts new boundary at END of exchange (after ALL user text)
+4. Step 3: Agent reads user's prompts from the diff
+5. Step 4: `agent-doc write --stream` inserts response at the boundary position (which is after all prompts)
+6. `apply_patches()` re-inserts boundary at end of exchange (after response)
+
+This means prompts typed while idle are ALWAYS before the boundary, and the response is inserted at the boundary (after the prompts). **This is correct behavior.**
+
+**Diagnosis of the current document:**
+
+Looking at the document, the ordering is actually correct this time:
+- Line 277: "Describe the mechanism..." (prompt 1 — typed after old boundary `36a7b066`)
+- Line 279: `### Re: CRDT Reorder Skip Implemented` (response — inserted at old boundary)
+- Line 293: "Validate that this prompt..." (prompt 2 — typed after response appeared)
+
+The response IS sandwiched between two prompts — but this is CORRECT because:
+- Prompt 1 was typed BEFORE the response → appears before it
+- Prompt 2 was typed AFTER the response appeared → appears after it
+
+The old boundary `36a7b066` was from the PREVIOUS cycle's re-insertion. The user typed prompt 1 after it. Then the response was written. Then the user typed prompt 2 after the response.
+
+**The 5 stale boundaries cleaned this cycle** confirm multiple boundaries had accumulated from prior cycles. The new boundary `4d9116f5` is now at the end (after all content).
+
+**SPEC.md update needed:** The boundary lifecycle (insert → consume → re-insert → cleanup) should be documented in SPEC.md. The key invariant: "prompts typed while idle always appear before the response because `agent-doc boundary` runs at step 1b and places the boundary after all user text."
+
+Want me to update SPEC.md with this?
+<!-- agent:boundary:67e1928f-097c-41e6-a77a-89eb6bea6a26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- SPEC.md boundary lifecycle documentation
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

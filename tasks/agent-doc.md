@@ -273,7 +273,7 @@ Refactored \`find_alive_pane_for_file()\` to use \`ps -p <pid> -o command=\` ins
 
 release
 
-### Re: v0.23.3 Released (HEAD)
+### Re: v0.23.3 Released
 
 | Target | Status |
 |--------|--------|

@@ -382,7 +382,7 @@ Please diagnose (including reading logs).
 
 Note that a significant portion of the prompt is after the agent patch.
 Please diagnose, write tests, fix, and do a local install of the binary + SKILL for testing.
-### Re: Diagnosis + Fix + Local Install (HEAD)
+### Re: Diagnosis + Fix + Local Install
 
 **Root cause found:** The IPC ordering bug is NOT in the CRDT merge — it's in the **editor document caching**.
 

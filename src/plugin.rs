@@ -236,6 +236,130 @@ pub fn install(editor: &str) -> Result<()> {
     }
 }
 
+pub fn install_local(editor: &str) -> Result<()> {
+    match editor {
+        "jetbrains" | "jb" | "idea" => install_jetbrains_local(),
+        "vscode" | "code" | "vscodium" | "codium" | "cursor" => install_vscode_local(),
+        _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    }
+}
+
+fn find_local_build_dir() -> Result<PathBuf> {
+    // Walk up from CWD to find project root with editors/ directory
+    let cwd = std::env::current_dir().context("Failed to get CWD")?;
+    let mut dir = cwd.as_path();
+    loop {
+        let editors = dir.join("editors");
+        if editors.is_dir() {
+            return Ok(dir.to_path_buf());
+        }
+        // Also check if we're in the agent-doc submodule from a parent workspace
+        let src_agent_doc = dir.join("src/agent-doc/editors");
+        if src_agent_doc.is_dir() {
+            return Ok(dir.join("src/agent-doc"));
+        }
+        dir = dir.parent().context("Could not find project root with editors/ directory")?;
+    }
+}
+
+fn install_jetbrains_local() -> Result<()> {
+    let project_root = find_local_build_dir()?;
+    let dist_dir = project_root.join("editors/jetbrains/build/distributions");
+
+    // Find the latest signed zip, fall back to unsigned
+    let zip_path = find_local_zip(&dist_dir, true)
+        .or_else(|| find_local_zip(&dist_dir, false))
+        .with_context(|| format!("No agent-doc-jetbrains*.zip found in {}", dist_dir.display()))?;
+
+    eprintln!("Installing from local build: {}", zip_path.display());
+
+    let dirs = jetbrains_plugin_dirs();
+    let target_dir = choose_plugins_dir(&dirs)?;
+
+    // Remove old installation if present
+    let dest = target_dir.join("agent-doc-jetbrains");
+    if dest.exists() {
+        fs::remove_dir_all(&dest).context("Failed to remove old plugin")?;
+    }
+
+    // Extract zip
+    let file = fs::File::open(&zip_path).context("Failed to open zip")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let name = entry.name().to_string();
+        let out_path = target_dir.join(&name);
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = fs::File::create(&out_path)?;
+            io::copy(&mut entry, &mut outfile)?;
+        }
+    }
+
+    eprintln!("Plugin installed to {}", target_dir.display());
+    eprintln!("Restart your IDE to activate.");
+    Ok(())
+}
+
+fn install_vscode_local() -> Result<()> {
+    let project_root = find_local_build_dir()?;
+    let dist_dir = project_root.join("editors/vscode");
+
+    // Find .vsix file
+    let vsix = fs::read_dir(&dist_dir)
+        .context("Failed to read VS Code build directory")?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.ends_with(".vsix") { Some(e.path()) } else { None }
+        })
+        .max_by_key(|p| p.metadata().ok().and_then(|m| m.modified().ok()))
+        .with_context(|| format!("No .vsix file found in {}", dist_dir.display()))?;
+
+    eprintln!("Installing from local build: {}", vsix.display());
+
+    let code = detect_code_cmd();
+    let status = std::process::Command::new(code)
+        .args(["--install-extension"])
+        .arg(&vsix)
+        .status()
+        .with_context(|| format!("Failed to run `{code} --install-extension`"))?;
+
+    if !status.success() {
+        bail!("`{code} --install-extension` exited with {status}");
+    }
+
+    eprintln!("Extension installed via `{code}`.");
+    Ok(())
+}
+
+fn find_local_zip(dist_dir: &std::path::Path, signed: bool) -> Option<PathBuf> {
+    let entries = fs::read_dir(dist_dir).ok()?;
+    let suffix = if signed { "-signed.zip" } else { ".zip" };
+
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("agent-doc-jetbrains") && name.ends_with(suffix) {
+                // If looking for unsigned, exclude signed
+                if !signed && name.ends_with("-signed.zip") {
+                    return None;
+                }
+                Some(e.path())
+            } else {
+                None
+            }
+        })
+        // Pick the most recently modified
+        .max_by_key(|p| p.metadata().ok().and_then(|m| m.modified().ok()))
+}
+
 pub fn update(editor: &str) -> Result<()> {
     let release = fetch_latest_release()?;
     let version = release_version(&release);

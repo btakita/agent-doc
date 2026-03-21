@@ -517,6 +517,26 @@ When I generate content that will be piped through `echo "..." | agent-doc write
 3. **Just remember** — this is now in auto-memory as a feedback correction
 
 Option 2 is the right fix — align the SKILL.md examples with actual practice. But since SKILL.md is bundled in the binary (`include_str!`), it requires a release to update. For now, I'll just stop escaping.
+
+Let's use Option 2 and release.
+
+### Re: SKILL.md Heredoc Examples + v0.24.1 Released (HEAD)
+
+Updated all 3 `echo` examples in SKILL.md to use `cat <<'RESPONSE'` heredocs:
+- Step 3 (streaming checkpoints): `echo '<partial...'` → `cat <<'RESPONSE'`
+- Step 4a (append mode): `echo "<your response>"` → `cat <<'RESPONSE'`
+- Step 4b (template mode): `echo "<your patch response>"` → `cat <<'RESPONSE'`
+
+**v0.24.1 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | `agent-doc v0.24.1` |
+| GitHub Release | [v0.24.1](https://github.com/btakita/agent-doc/releases/tag/v0.24.1) |
+| cargo install | v0.24.1 |
+| SKILL.md | v0.24.1 |
+
+497 tests pass. SKILL.md updated via `agent-doc skill install`.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

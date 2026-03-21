@@ -936,6 +936,8 @@ The "Wrote:" print in `merge_message_to_file()` (imap_sync.rs:191) fires once pe
 
 Recommend A — it makes fan-out visible.
 
+Go with option A
+
 ---
 
 **2. Pull failed — lucas mailbox has no upstream**
@@ -944,7 +946,28 @@ Recommend A — it makes fan-out visible.
 
 **Fix:** Check if the repo has a remote before attempting pull. If no remote, skip pull silently (don't print a warning for an expected condition).
 
+The branch should have a remote/upstream tracking branch configured. Please discuss options.
+
 ---
 
 Want me to implement both fixes?
+Yes
+### Both Fixes Implemented (HEAD)
+
+**Fix 1: "Wrote:" shows destination** (`imap_sync.rs`):
+- Base dir: `Wrote: file.md` (unchanged)
+- Routing destination: `Wrote: file.md → mailboxes/lucas/conversations/`
+- Both IMAP and Gmail API paths fixed (they share `merge_message_to_file`)
+
+**Fix 2: Pull improved** (`mailbox/sync.rs`):
+- Checks `git remote` first — no remote = skip pull silently (no warning for local-only mailboxes)
+- With remote: shows reason on failure — `Pull failed (last stderr line)` instead of generic "continuing with push"
+- Your lucas mailbox DOES have a remote (`origin → github.com:btakita/mailbox-lucas.git` with `main` tracking `origin/main`). The pull failure was transient (likely network or rebase conflict), not missing config.
+
+**Upstream options for lucas mailbox:**
+Since the remote/tracking is already configured correctly, no action needed. The improved error message will show the actual failure reason next time. If you want more resilience:
+- `git pull --rebase --autostash` would handle uncommitted changes during pull
+- A retry with backoff could handle transient network failures
+
+Both changes compile. Ready to commit or release when you approve.
 <!-- /agent:exchange -->

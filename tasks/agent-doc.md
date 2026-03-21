@@ -308,13 +308,38 @@ BUG: I was reading the output. I accidentally started `agent-doc run`...which ex
 3. Update SPEC.md to document that boundary management is fully binary-owned
 
 Want me to implement this?
-<!-- agent:boundary:c2784cdc-bee9-4fff-8833-5bdeb517aa1d -->
-<!-- /agent:exchange -->4
+Yes...and let's review why the design principle of binary for deterministic operations was not followed. Was this is:
+- a failure to identify the feature as a potential binary vs agentic operation?
+- a failure to correctly assign binary vs agentic operation?
+### Re: Boundary Moved to Binary + Why It Wasn't (HEAD)
+
+**Implemented (`6d6007e`):** Boundary management is now fully binary-owned.
+
+`apply_patches_with_overrides()` now does:
+1. Remove all stale boundaries from doc
+2. Insert fresh boundary at end of exchange
+3. Apply patches at the new boundary
+4. Post-patch: re-insert boundary at end
+
+Step 1b **removed** from SKILL.md. The SKILL no longer calls `agent-doc boundary`.
+
+**Why the design principle wasn't followed:**
+
+It was a **failure to identify**. Boundary insertion was conceived as a "workflow step" rather than data manipulation. The binary-vs-agent test ("can it be unit-tested with fixed inputs?") clearly applies, but wasn't applied because:
+
+1. **Initial scope was small** — one call in the SKILL, no other write paths
+2. **No failure mode visible** — SKILL was the only write path, so step 1b always ran
+3. **Pattern was additive** — new feature added to existing workflow, not a redesign
+
+The failure appeared when other write paths (`agent-doc run`, stream, watch) bypassed the SKILL. **Lesson: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
+
+**Binary installed.** Next cycle uses the new binary — no step 1b needed.
+<!-- agent:boundary:ef39a488-5999-470e-81ac-42287ee1096c -->
+<!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Move boundary into binary write path** — remove step 1b from SKILL (active)
 - JB plugin install needed — boundary refresh fix not active until v0.2.10+ installed
 - CRDT merge ordering — Yrs causality still reorders
 - SPEC.md boundary lifecycle documentation

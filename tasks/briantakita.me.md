@@ -396,9 +396,27 @@ The `agent-doc-tmux-crdt-live` post (2026-03-18) doesn't exist in the briantakit
 
 The post content file needs to be created in `post/content/` and registered in `post/index.ts`. Want me to add it? I'll need to find the source from the earlier blog post creation session.
 
+Yes. Continue.
+
 Separately, the styling changes are approved — that task is complete. The remaining items are:
 1. Add the `agent-doc-tmux-crdt-live` blog post to the app
 2. Commit all the styling changes to briantakita.me-dev submodules
+
+go
+### Re: Blog post added + all changes committed (HEAD)
+
+**Blog post:** `2026-03-18-agent-doc-tmux-crdt-live.md` copied to `post/content/` and registered in `post/index.ts`.
+
+**Commits made (4 submodules):**
+
+1. **`app/briantakita.me`** (`a13f504`): Blog post + scroll-responsive CSS
+2. **`lib/ui--server--briantakita`** (`9ceb749`): Compact header/sticky sizing
+3. **`lib/ui--browser--briantakita`** (`e32dc84`): Scroll handler
+4. **`briantakita.me-dev`** (`ff2dd7c`): Parent submodule pointer update
+
+All styling changes and the blog post are committed. The `src/briantakita.me-dev` pointer is staged in agent-loop.
+
+**Not yet pushed** — want me to push all submodules + parent?
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

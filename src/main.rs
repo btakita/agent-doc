@@ -15,6 +15,7 @@ mod focus;
 mod git;
 mod history;
 mod init;
+mod install;
 mod layout;
 mod mode;
 mod outline;
@@ -98,10 +99,10 @@ enum Commands {
         #[arg(long)]
         restore: Option<String>,
     },
-    /// Scaffold a new session document
+    /// Scaffold a new session document (omit file to initialize project)
     Init {
-        /// Path for the new session document
-        file: PathBuf,
+        /// Path for the new session document (omit to initialize project)
+        file: Option<PathBuf>,
         /// Session title
         title: Option<String>,
         /// Agent backend to use
@@ -110,6 +111,18 @@ enum Commands {
         /// Document mode: append (default) or template
         #[arg(long)]
         mode: Option<String>,
+    },
+    /// System-level setup: check prerequisites, install editor plugins
+    Install {
+        /// Editor to install plugin for (jetbrains or vscode; auto-detected if omitted)
+        #[arg(long)]
+        editor: Option<String>,
+        /// Skip prerequisite checks
+        #[arg(long)]
+        skip_prereqs: bool,
+        /// Skip plugin installation
+        #[arg(long)]
+        skip_plugins: bool,
     },
     /// Preview the diff that would be sent
     Diff {
@@ -475,7 +488,10 @@ fn main() -> anyhow::Result<()> {
             None => history::list(&file),
         },
         Commands::Init { file, title, agent, mode } => {
-            init::run(&file, title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
+            init::run(file.as_deref(), title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
+        }
+        Commands::Install { editor, skip_prereqs, skip_plugins } => {
+            install::run(editor.as_deref(), skip_prereqs, skip_plugins)
         }
         Commands::Diff { file, wait } => diff::run(&file, wait),
         Commands::Reset { file } => reset::run(&file),

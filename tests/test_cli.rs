@@ -120,10 +120,16 @@ fn test_cli_run_requires_file() {
 }
 
 #[test]
-fn test_cli_init_requires_file() {
+fn test_cli_init_no_file_runs_project_init() {
+    let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
     cmd.arg("init");
-    cmd.assert().failure();
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Project initialized"));
+    // .agent-doc/ directory should be created
+    assert!(tmp.path().join(".agent-doc").is_dir());
 }
 
 #[test]
@@ -275,4 +281,314 @@ fn test_cli_help_shows_start_and_route() {
         .success()
         .stdout(predicate::str::contains("start"))
         .stdout(predicate::str::contains("route"));
+}
+
+// ── install tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_cli_install_help() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["install", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("skip-prereqs"))
+        .stdout(predicate::str::contains("skip-plugins"));
+}
+
+#[test]
+fn test_cli_install_skip_all() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["install", "--skip-prereqs", "--skip-plugins"]);
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Skipping plugin installation"));
+}
+
+#[test]
+fn test_cli_install_checks_prereqs() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["install", "--skip-plugins"]);
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("tmux"))
+        .stderr(predicate::str::contains("claude"));
+}
+
+// ── init tests (project-level, no file arg) ──────────────────────────────────
+
+#[test]
+fn test_cli_init_creates_agent_doc_dir() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.arg("init");
+    cmd.assert().success();
+    assert!(tmp.path().join(".agent-doc/snapshots").is_dir());
+    assert!(tmp.path().join(".agent-doc/patches").is_dir());
+}
+
+#[test]
+fn test_cli_init_idempotent() {
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // First run
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.arg("init");
+    cmd.assert().success();
+
+    // Second run in the same dir must also succeed
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.arg("init");
+    cmd.assert().success();
+}
+
+#[test]
+fn test_cli_init_prints_quickstart() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.arg("init");
+    // The quick-start hint mentions "agent-doc init" or "quick"
+    cmd.assert()
+        .success()
+        .stderr(
+            predicate::str::contains("agent-doc init")
+                .or(predicate::str::contains("quick"))
+                .or(predicate::str::contains("Quick")),
+        );
+}
+
+// ── init tests (document-level, with file arg) ───────────────────────────────
+
+#[test]
+fn test_cli_init_file_creates_document() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["init", "test.md"]);
+    cmd.assert().success();
+
+    assert!(doc.exists());
+    let content = std::fs::read_to_string(&doc).unwrap();
+    // Must have YAML frontmatter with a session ID
+    assert!(content.contains("agent_doc_session:"), "expected frontmatter with session id");
+}
+
+#[test]
+fn test_cli_init_file_with_mode() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("test.md");
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["init", "test.md", "--mode", "template"]);
+    cmd.assert().success();
+
+    assert!(doc.exists());
+    let content = std::fs::read_to_string(&doc).unwrap();
+    // Template-mode documents have component markers
+    assert!(content.contains("agent:exchange"), "expected exchange component marker");
+    assert!(content.contains("agent_doc_format: template"), "expected template format in frontmatter");
+}
+
+#[test]
+fn test_cli_init_file_lazy_project_init() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    // Confirm .agent-doc/ does not exist yet
+    assert!(!tmp.path().join(".agent-doc").exists());
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["init", "test.md"]);
+    cmd.assert().success();
+
+    // Both the project directory and the document should have been created
+    assert!(tmp.path().join(".agent-doc").is_dir(), ".agent-doc/ should be lazily created");
+    assert!(tmp.path().join("test.md").exists(), "test.md should be created");
+}
+
+// ── skill tests ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_cli_skill_install_help() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["skill", "install", "--help"]);
+    cmd.assert().success();
+}
+
+#[test]
+fn test_cli_skill_check_help() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["skill", "check", "--help"]);
+    cmd.assert().success();
+}
+
+#[test]
+fn test_cli_skill_install_creates_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
+    assert!(skill_path.exists(), "SKILL.md should be created");
+    let content = std::fs::read_to_string(&skill_path).unwrap();
+    assert!(content.contains("agent-doc-version:"), "SKILL.md should have agent-doc-version in frontmatter");
+}
+
+#[test]
+fn test_cli_skill_check_after_install() {
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // Install first
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    // Check should succeed (version matches)
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "check"]);
+    cmd.assert().success();
+}
+
+#[test]
+fn test_cli_skill_install_idempotent() {
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // First install
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    // Second install must also succeed
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
+    assert!(skill_path.exists(), "SKILL.md should still exist after second install");
+}
+
+#[test]
+fn test_cli_skill_install_reload_compact() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install", "--reload", "compact"]);
+    let output = cmd.output().unwrap();
+    assert!(output.status.success(), "skill install --reload compact should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Either the skill was freshly installed (prints SKILL_RELOAD=compact to stdout)
+    // or it was already up to date (prints "already up to date" to stderr).
+    assert!(
+        stdout.contains("SKILL_RELOAD=compact") || stderr.contains("already up to date"),
+        "expected SKILL_RELOAD=compact or 'already up to date', got stdout={stdout:?} stderr={stderr:?}"
+    );
+}
+
+#[test]
+fn test_skill_md_contains_required_steps() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
+    let content = std::fs::read_to_string(&skill_path).unwrap();
+
+    let required_steps = ["### 0.", "### 0b.", "### 1.", "### 1b.", "### 2.", "### 3.", "### 4.", "### 5."];
+    for step in &required_steps {
+        assert!(
+            content.contains(step),
+            "SKILL.md missing required workflow step: {step}"
+        );
+    }
+}
+
+#[test]
+fn test_skill_md_references_valid_commands() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
+    let content = std::fs::read_to_string(&skill_path).unwrap();
+
+    // Get valid subcommands by running `agent-doc --help`
+    let help_output = agent_doc_cmd().arg("--help").output().unwrap();
+    let help_text = String::from_utf8_lossy(&help_output.stdout);
+    let valid_subcommands: std::collections::HashSet<String> = help_text
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            // Help lines for subcommands start with the command name followed by spaces and description
+            let word = trimmed.split_whitespace().next()?;
+            // Only accept lowercase words that look like subcommand names (no punctuation)
+            if word.chars().all(|c| c.is_ascii_lowercase() || c == '-') && !word.is_empty() {
+                Some(word.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Tokens that are not subcommands but are valid in SKILL.md:
+    // - `submit` is the skill's invocation name (used in the title/heading)
+    // - flags like `--version`, `--help` are valid options, not subcommands
+    let allowed_non_subcommands: std::collections::HashSet<&str> =
+        ["submit", "--version", "--help"].iter().copied().collect();
+
+    // Extract all `agent-doc <word>` patterns from SKILL.md
+    let mut invalid_refs: Vec<String> = Vec::new();
+    for line in content.lines() {
+        // Find all occurrences of `agent-doc <something>` in the line
+        let mut search = line;
+        while let Some(pos) = search.find("agent-doc") {
+            let after = &search[pos + "agent-doc".len()..];
+            // Skip if nothing follows or followed by non-whitespace (e.g., `agent-doc-version:`)
+            let after_trimmed = after.trim_start_matches(' ');
+            if after_trimmed == after && !after.is_empty() {
+                // No space after `agent-doc` — skip (it's part of another word like `agent-doc-version`)
+                search = &search[pos + "agent-doc".len()..];
+                continue;
+            }
+            // Extract the next word after `agent-doc `
+            let next_word = after_trimmed.split_whitespace().next();
+            if let Some(cmd_name) = next_word {
+                // Strip any trailing punctuation like `:`, `)`, `` ` ``
+                let cmd_clean: String = cmd_name
+                    .chars()
+                    .take_while(|c| c.is_ascii_lowercase() || *c == '-')
+                    .collect();
+                if !cmd_clean.is_empty()
+                    && !valid_subcommands.contains(&cmd_clean)
+                    && !allowed_non_subcommands.contains(cmd_clean.as_str())
+                {
+                    invalid_refs.push(format!("agent-doc {cmd_clean}"));
+                }
+            }
+            search = &search[pos + "agent-doc".len()..];
+        }
+    }
+
+    assert!(
+        invalid_refs.is_empty(),
+        "SKILL.md references unknown agent-doc subcommands: {:?}\nValid subcommands: {:?}",
+        invalid_refs,
+        valid_subcommands
+    );
 }

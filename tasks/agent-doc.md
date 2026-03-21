@@ -356,6 +356,8 @@ You're right — boundary re-insertion is deterministic and belongs in the binar
 
 > **Binary vs Agent Responsibility** table: "Component parsing, patch application, mode resolution" → **Binary (Rust)** — "Deterministic, testable, consistent across agents"
 
+Should the agent-doc skill have a dog-fooding component? At some point I want to directly support humans dog-fooding their own systems using agent-doc as the interface. This particular heuristic is a good principle with agentic development. But does it belong in the general agent-doc SKILL.md or in an auxiliary SKILL dedicated to dog-fooding. Is self-referential enhancement (dog-fooding) a core principle?
+
 **Implementation (`4d4481f`):** `apply_patches()` in `template.rs` now detects when a boundary was consumed during patching and re-inserts a new one at the END of the exchange component:
 
 1. Before patching: check if exchange has a boundary
@@ -365,6 +367,24 @@ You're right — boundary re-insertion is deterministic and belongs in the binar
 **Reverted SKILL.md** (`5bcbf8e`) — the checkpoint workflow no longer needs manual `agent-doc boundary` calls. The binary handles it automatically.
 
 **Tests:** 497 all pass. Ready to release v0.24.4?
+Now that we have an `agent:boundary` at the end of the last patch...what is the difference between writing a response before and after the `agent:boundary` when it's from the last patch of the run?
+### Re: Boundary Position After Final Write (HEAD)
+
+**No functional difference.** For the final write of a cycle, the re-inserted boundary serves no purpose — it will be cleaned up by the next cycle's `agent-doc boundary` call anyway.
+
+**Where the user types doesn't matter:**
+- **Before the boundary:** Text is inside the exchange, between the response and the boundary. Next cycle sees it.
+- **After the boundary:** Text is inside the exchange, between the boundary and `<!-- /agent:exchange -->`. Next cycle sees it.
+
+Both positions are captured by the diff. Comment stripping removes boundary markers before comparing, so the diff sees user text regardless of its position relative to the boundary.
+
+**The re-inserted boundary only matters for mid-cycle checkpoints:**
+- Checkpoint 1 writes, consumes boundary, `apply_patches` re-inserts at end
+- Checkpoint 2 writes at the new boundary → correct ordering
+- Final write writes at the boundary → correct ordering
+- After the final write: boundary is re-inserted but never used again (harmless)
+
+For the final write, it's a no-op artifact. The code is simpler with a single rule ("always re-insert after consuming") rather than trying to detect "is this the last write?"
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

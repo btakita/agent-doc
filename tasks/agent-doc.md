@@ -180,7 +180,7 @@ claude_args: --dangerously-skip-permissions
 
 **Pending v0.24.4 release** with boundary re-insertion fix.
 Release
-### Re: v0.24.4 Released (HEAD)
+### Re: v0.24.4 Released
 
 **agent-doc v0.24.4** published:
 - crates.io ✓ | GitHub Release ✓ | cargo install ✓ | Tag v0.24.4 pushed

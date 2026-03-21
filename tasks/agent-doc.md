@@ -311,7 +311,7 @@ Want me to implement this?
 Yes...and let's review why the design principle of binary for deterministic operations was not followed. Was this is:
 - a failure to identify the feature as a potential binary vs agentic operation?
 - a failure to correctly assign binary vs agentic operation?
-### Re: Boundary Moved to Binary + Why It Wasn't (HEAD)
+### Re: Boundary Moved to Binary + Why It Wasn't
 
 **Implemented (`6d6007e`):** Boundary management is now fully binary-owned.
 

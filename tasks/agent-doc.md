@@ -252,7 +252,7 @@ You're right — the ordering is wrong. The diagnosis response (`Re: Tmux Sessio
 This is a skill-level discipline issue, not a binary bug. I'll be more careful with checkpoint ordering in future cycles.
 
 release
-### Re: v0.24.3 Released (HEAD)
+### Re: v0.24.3 Released
 
 **agent-doc v0.24.3** published:
 - crates.io ✓ | GitHub Release ✓ | `cargo install` ✓ | Tag `v0.24.3` pushed

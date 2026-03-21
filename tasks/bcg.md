@@ -199,7 +199,7 @@ Should I edit this or send a followup?
 Please read my message at /home/brian/work/btakita/agent-loop/mail/contacts/anil-podduturi/20260320-linkedin-anil-podduturi.txt
 
 And draft a followup if recommended.
-### Review of Anil message + follow-up recommendation (HEAD)
+### Review of Anil message + follow-up recommendation
 
 **Your March 10 message is solid.** It already mentions Inspyr Solutions, Project Helix, the Tenfore connection, and asks directly. Tony's request is already fulfilled in the original.
 

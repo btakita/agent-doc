@@ -176,6 +176,15 @@ Let's figure out how to make the agent-doc binary install, editor plugin install
 
 **Goal: \`agent-doc setup\` — one command does everything.**
 
+We have `agent-doc init` which initializes a new document.
+Perhaps we should rename `agent-doc init` to `agent-doc new`. Or use a command tree to represent the document or session. `agent-doc session new` or `agent-doc document new` or `agent-doc md new`.
+
+Then make this feature use `agent-doc init` instead of `agent-doc setup`.
+This seems similar to `git init`
+
+Steps 1-5 could also be a separate command. Which could be `agent-doc install` or `agent-doc update` or `agent-doc setup`.
+Thoughts?
+
 ### Proposed \`agent-doc setup\` Command
 
 \`\`\`bash
@@ -224,6 +233,60 @@ agent-doc init plan.md --mode template
 \`\`\`
 
 Want me to start implementing \`agent-doc setup\`?
+
+### Re: Command Naming — init vs new vs setup
+
+Agree with the \`git init\` analogy. Here's a proposed command structure:
+
+**Renamed commands:**
+
+| Current | New | Analogy |
+|---------|-----|---------|
+| \`agent-doc init plan.md\` | \`agent-doc new plan.md\` | Create a new document |
+| (none) | \`agent-doc init\` | Initialize project (\`.agent-doc/\`, plugins, skill, hooks) |
+
+**\`agent-doc init\`** = project-level setup (like \`git init\`):
+- Creates \`.agent-doc/\` directory (snapshots, patches, sessions.json)
+- Checks prerequisites (tmux, claude)
+- Installs editor plugin (auto-detect or \`--editor\`)
+- Installs SKILL.md
+- Installs SessionStart hook for autoclaim
+- Prints quick-start guide
+
+**\`agent-doc new <file>\`** = create a document:
+- Same as current \`agent-doc init <file>\`
+- Scaffolds frontmatter + components
+
+**For steps 1-5 (external deps):**
+Those are pre-\`agent-doc\` steps — the user needs the binary before they can run \`agent-doc init\`. The install script (\`curl | sh\`) handles the binary download. Then \`agent-doc init\` handles everything else.
+
+**Flow for a new user:**
+\`\`\`bash
+# 1. Install binary (one of these) (HEAD)
+cargo install agent-doc          # Rust users
+curl -fsSL .../install.sh | sh   # Everyone else
+
+# 2. Initialize project (HEAD)
+cd my-project
+agent-doc init                   # creates .agent-doc/, installs plugin + skill
+
+# 3. Create first document (HEAD)
+agent-doc new plan.md --mode template
+
+# 4. Start working (HEAD)
+# Open plan.md in editor → plugin auto-starts tmux session (HEAD)
+\`\`\`
+
+**Backward compat:** Keep \`agent-doc init <file>\` working as an alias for \`agent-doc new <file>\` (with deprecation warning). If \`init\` is called with no args, it does the project setup.
+
+**\`agent-doc update\`** could be a separate command that:
+- Updates the binary itself (\`cargo install agent-doc\` or re-download)
+- Updates editor plugins
+- Updates SKILL.md
+
+This keeps concerns cleanly separated: \`init\` = first time, \`update\` = keeping current.
+
+Want me to implement this restructuring?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

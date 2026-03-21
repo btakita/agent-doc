@@ -262,19 +262,19 @@ Those are pre-\`agent-doc\` steps — the user needs the binary before they can 
 
 **Flow for a new user:**
 \`\`\`bash
-# 1. Install binary (one of these) (HEAD)
+# 1. Install binary (one of these)
 cargo install agent-doc          # Rust users
 curl -fsSL .../install.sh | sh   # Everyone else
 
-# 2. Initialize project (HEAD)
+# 2. Initialize project
 cd my-project
 agent-doc init                   # creates .agent-doc/, installs plugin + skill
 
-# 3. Create first document (HEAD)
+# 3. Create first document
 agent-doc new plan.md --mode template
 
-# 4. Start working (HEAD)
-# Open plan.md in editor → plugin auto-starts tmux session (HEAD)
+# 4. Start working
+# Open plan.md in editor → plugin auto-starts tmux session
 \`\`\`
 
 **Backward compat:** Keep \`agent-doc init <file>\` working as an alias for \`agent-doc new <file>\` (with deprecation warning). If \`init\` is called with no args, it does the project setup.

@@ -222,25 +222,6 @@ So compaction is a **future-session optimization**, not a current-session benefi
 
 How do we reconcile the 4 states of document & session compaction?
 
-**Q: Will the session reference the archived document?**
-
-No. The archive is a plain file on disk. The agent does NOT automatically read it. Context from compacted exchanges is lost from the agent's perspective unless explicitly asked to read the archive. The archive exists for **human reference** only.
-
-**When compaction IS useful:**
-- Before a context compaction event (Claude's automatic context trimming) — a shorter document means less is lost
-- When starting a new session on the same document — less context to load
-- When the exchange is so long it approaches Claude's context limits
-
-**When compaction is NOT useful:**
-- Mid-session when the conversation is active — context is already loaded
-- When the user is still referencing inline content in the exchange
-
-**Bottom line:** Compaction should be a user-initiated action when they decide the exchange history is no longer needed in active context. Not an agent optimization.
-
-I just had an external edit placing my current edit from below the agent:boundary to abore the agent:boundary.
-The response to my compaction prompt was placed before the first response patch after the compaction event.
-
-With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
 ### Re: Context Loading + Boundary Still Broken
 
 **How context works in the SKILL workflow:**
@@ -263,14 +244,46 @@ agent-doc plugin install jetbrains --local
 ```
 
 Until the plugin is updated, the in-memory Document API won't have the boundary, and every IPC write falls back to plain append (wrong ordering).
-<!-- agent:boundary:f0c4aeb4-2ec5-449c-9531-4ce2d0323c5a -->
+**Q: Will the session reference the archived document?**
+
+No. The archive is a plain file on disk. The agent does NOT automatically read it. Context from compacted exchanges is lost from the agent's perspective unless explicitly asked to read the archive. The archive exists for **human reference** only.
+
+**When compaction IS useful:**
+- Before a context compaction event (Claude's automatic context trimming) — a shorter document means less is lost
+- When starting a new session on the same document — less context to load
+- When the exchange is so long it approaches Claude's context limits
+
+**When compaction is NOT useful:**
+- Mid-session when the conversation is active — context is already loaded
+- When the user is still referencing inline content in the exchange
+
+**Bottom line:** Compaction should be a user-initiated action when they decide the exchange history is no longer needed in active context. Not an agent optimization.
+
+I just had an external edit placing my current edit from below the agent:boundary to abore the agent:boundary.
+The response to my compaction prompt was placed before the first response patch after the compaction event.
+
+With this latest patch response, `### Re: Compaction First-Principles` onward was placed after `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`. The boundary should be after the patch response.
+BUG: I was reading the output. I accidentally started `agent-doc run`...which exposed an issue. As I was reading the pre-run response patch, when the run completed, `### Re: Context Loading + Boundary Still Broken` was prepended in front of the already commited previous patch via `<!-- agent:boundary:0da14dac-5e5f-4d73-bfa3-1b989080ac5e -->`
+### Re: Stale Boundary Insertion Bug (HEAD)
+
+**The bug:** You accidentally triggered a run while reading output. The response was inserted at a stale boundary (`0da14dac`) from a previous cycle — it was prepended in front of the already-committed previous patch instead of appended at the end.
+
+**Root cause:** `apply_patches()` re-inserts a boundary after consuming one. If the previous cycle's re-inserted boundary isn't cleaned up before the next write (e.g., because the boundary cleanup at step 1b was skipped or the run was triggered from a different path), the write finds the STALE boundary and inserts there.
+
+**The `agent-doc run` path** (triggered by the plugin's auto-submit or `agent-doc start`) doesn't go through the SKILL workflow — it goes directly to `agent-doc submit` which calls `agent-doc write`. Step 1b (`agent-doc boundary`) is only called by the SKILL workflow, not by `agent-doc run`.
+
+**Fix needed:** The boundary cleanup (stale marker removal + new marker insertion) should happen in `agent-doc write --stream` itself, not just in the SKILL workflow's step 1b. This way, regardless of HOW the write is triggered, stale boundaries are always cleaned before the response is placed.
+
+This is another case where deterministic logic belongs in the binary, not the skill. The skill shouldn't be responsible for cleaning up stale boundaries — the binary should do it as part of every write.
+<!-- agent:boundary:caa8b505-bf02-414d-b832-8947e3ccc23a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **JB plugin install needed** — boundary refresh fix not active until v0.2.10+ installed
-- CRDT merge ordering — Yrs causality still reorders (needs boundary-aware CRDT or bypass)
+- **Stale boundary cleanup in write** — move cleanup from SKILL step 1b into `agent-doc write --stream` (active)
+- JB plugin install needed — boundary refresh fix not active until v0.2.10+ installed
+- CRDT merge ordering — Yrs causality still reorders
 - SPEC.md boundary lifecycle documentation
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download

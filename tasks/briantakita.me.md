@@ -429,6 +429,22 @@ Resolved merge conflicts (upstream had newer commits) and pushed everything:
 4. **`briantakita.me-dev`** → `7cdf9fd` pushed
 
 CI should pick up the changes. The blog post and scroll-responsive header will deploy to Cloudflare Pages.
+
+There is a glitch with the size transition when scrolling using the downarrow.
+
+[2026-03-21 14-45-17.mp4](../../../../Videos/2026-03-21%2014-45-17.mp4)
+### Re: Fix scroll transition glitch (HEAD)
+
+The glitch was caused by CSS transitions animating the `top`, `padding`, and `font-size` changes when the `scrolled` class toggles. With arrow-key scrolling, this happens on the very first pixel — the transition creates a visible jump as sticky elements animate from their old positions to new ones.
+
+**Fix:** Removed all transitions. The size change is now instant. Since the page is already scrolling when the class toggles, a smooth transition isn't perceptible anyway — it just causes glitches.
+
+**Removed:**
+- `transition: all 0.2s ease` from `.scrolled .sticky` and `.scrolled .blog__header`
+- `transition: padding/font-size/width/height 0.2s ease` from base header selectors
+- `transition: margin 0.2s ease, top 0.2s ease` from `.scrolled .Breadcrumbs`
+
+Pushed: `app/briantakita.me` → `8c8ebd9`, `briantakita.me-dev` → `6ae3082`.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

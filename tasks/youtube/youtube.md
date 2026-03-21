@@ -164,6 +164,31 @@ Published! https://www.youtube.com/watch?v=N8EX3zJLHUA
 - Video uploaded with CC subtitles and chapter markers
 - Visibility: public
 - Draft updated: `mail/social/20260321-110726-youtube.md` (status: published)
+
+Create a blog post on briantakita.me about this video. Read the cc transcript. Find interesting topics.
+Give a recap and some interesting commentary.
+Make this a featured post.
+
+### Re: Blog post (HEAD)
+
+Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-18-agent-doc-tmux-crdt-live.md`
+
+- **Featured:** yes
+- **Video embed:** included
+- **Tags:** agent-doc, corky, tmux, crdt, rust, claude-code, live-coding, vibe-coding, agentic-programming
+
+**Sections:**
+1. Making Corky Public — OAuth consent screen, built-in defaults
+2. The tmux Proliferation Bug — your speculation vs actual root cause, the fix
+3. Component Modes and the Pending System — new agent-doc features
+4. The Document Corruption Bug — backtick parsing edge case, cmark AST discussion
+5. The Prompt Loss Problem — CRDT diff analysis, boundary marker solution
+6. Over-Specification vs Under-Specification — balancing agent instructions
+7. Tools Used & Links
+
+The post follows the style of your previous live session posts — honest about what went wrong, technically detailed, with the "vibe coding not a tutorial" framing. The tmux debugging section includes the "what I thought vs what it was" narrative arc from the transcript.
+
+To deploy, push changes in `src/briantakita.me-dev` and the Cloudflare Pages workflow will build and deploy.
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

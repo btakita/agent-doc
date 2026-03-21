@@ -360,7 +360,7 @@ Used `[class*="z-[48]"]` attribute selectors to target each sticky level without
 
 Now the breadcrumb is below the header.
 ![img_4.png](img_4.png)
-### Re: Confirmed — sticky alignment looks correct (HEAD)
+### Re: Confirmed — sticky alignment looks correct
 
 The screenshot shows the gap is eliminated. The sticky stack when scrolled:
 - **Header** (BT logo + nav) — compact, no HR

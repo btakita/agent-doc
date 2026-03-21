@@ -537,6 +537,34 @@ Updated all 3 `echo` examples in SKILL.md to use `cat <<'RESPONSE'` heredocs:
 | SKILL.md | v0.24.1 |
 
 497 tests pass. SKILL.md updated via `agent-doc skill install`.
+Does `agent:boundary` have an ideal match with the component behavior?
+Are there alternative names to consider?
+
+### Re: agent:boundary Naming Analysis (HEAD)
+
+**What it does:** Marks the insertion point in an append-mode component where the next response should be placed. It separates "what the user typed before submit" from "what the user types while waiting."
+
+**Current name: `agent:boundary`**
+- Pros: Clearly describes the function — it's a boundary between the agent's response territory and the user's new input
+- Cons: Could be confused with component boundaries (`&lt;!-- agent:name --&gt;` / `&lt;!-- /agent:name --&gt;`)
+
+**Alternative names considered:**
+
+| Name | Meaning | Fit |
+|------|---------|-----|
+| `agent:boundary` | Dividing line between prompt and response | Current — good but overloaded with "component boundary" |
+| `agent:cursor` | Where the agent will write next | Intuitive but conflicts with editor cursor concept |
+| `agent:insertion-point` | Explicit about purpose | Verbose |
+| `agent:anchor` | Anchor for response placement | Clean, distinct from other agent concepts |
+| `agent:mark` | A marker for insertion | Too generic |
+| `agent:reply-at` | Where the reply goes | Descriptive but awkward |
+| `agent:pending` | Where pending response goes | Already used for the pending component |
+
+**My assessment:** `agent:boundary` is a good name. It accurately describes the semantic — it's a boundary between the user's prompt and where the response will be inserted. The "component boundary" confusion is minimal because component markers use paired open/close tags while boundary markers are single unpaired markers.
+
+The self-closing syntax discussion from earlier (`<!-- agent:boundary:UUID / -->`) would further distinguish them visually, but it's not necessary for correctness.
+
+**Verdict:** Keep `agent:boundary`. It's established, accurate, and the alternative names don't offer enough improvement to justify a migration.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

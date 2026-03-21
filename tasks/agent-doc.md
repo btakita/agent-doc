@@ -712,7 +712,7 @@ If this is an issue, identify root cause, write test, fix.
 audit docs
 release
 
-### Re: Audit + v0.23.2 Released (HEAD)
+### Re: Audit + v0.23.2 Released
 
 **Audit results:** 5 warnings (all timestamp-based, no content gaps). Updated:
 - **CLAUDE.md:** IPC section updated with `try_ipc()` new `content_ours` parameter and synthesized boundary patch behavior

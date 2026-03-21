@@ -642,7 +642,7 @@ After restart, the VCS gutter should update automatically when `agent-doc commit
 
 Does the plugin version need to be bumped?
 
-### Re: Plugin Version Bump (HEAD)
+### Re: Plugin Version Bump
 
 **For local dev installs: no.** IntelliJ allows reinstalling the same version from disk. The bytecode gets replaced, and after restart the new behavior is active.
 

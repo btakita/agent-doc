@@ -185,7 +185,7 @@ release
 Tmux session 0: has 4 windows (3 agent-doc)
 Tmux session 6: has 6 windows (3 agent-doc)
 
-### Re: Tmux Session Diagnosis (HEAD)
+### Re: Tmux Session Diagnosis
 
 **Cleanup done:** `resync --fix` fixed 5/7 issues. Session 2 down from 6→3 windows. Session 0 stable at 4 (but 2 wrong-window panes fixed).
 
@@ -236,7 +236,7 @@ Also, let's automatically detect if the sessions get out of an expected state.
 Take a look at this document. In the last patch, we had some uncommitted content inserted above the agent:boundary (`Re: Tmux Session Diagnosis`).
 
 Yet `Re: Fix Implemented + Post-sync Resync` was the unsubmitted content for `Re: Fix Implemented + Post-sync Resync (HEAD)`.
-### Re: Response Ordering Issue (HEAD)
+### Re: Response Ordering Issue
 
 You're right — the ordering is wrong. The diagnosis response (`Re: Tmux Session Diagnosis`) appears ABOVE the user's question ("Please diagnose..."), which violates the expected flow.
 

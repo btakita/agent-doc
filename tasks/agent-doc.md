@@ -368,7 +368,7 @@ Should the agent-doc skill have a dog-fooding component? At some point I want to
 
 **Tests:** 497 all pass. Ready to release v0.24.4?
 Now that we have an `agent:boundary` at the end of the last patch...what is the difference between writing a response before and after the `agent:boundary` when it's from the last patch of the run?
-### Re: Boundary Position After Final Write (HEAD)
+### Re: Boundary Position After Final Write
 
 **No functional difference.** For the final write of a cycle, the re-inserted boundary serves no purpose — it will be cleaned up by the next cycle's `agent-doc boundary` call anyway.
 

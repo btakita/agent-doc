@@ -273,7 +273,7 @@ Want me to implement this?
 But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
 Yes. implement Option 1. Note that we moved after the patch response:
 > But in the uncommitted git response it was moved after the patch and before the `agent:boundary`.
-### Re: CRDT Reorder Skip Implemented (HEAD)
+### Re: CRDT Reorder Skip Implemented
 
 **Committed (`3ad88f6`):** CRDT merge now skips `reorder_agent_before_human()` when a boundary marker is present in the baseline.
 

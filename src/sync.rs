@@ -63,6 +63,35 @@ pub fn run_with_tmux(
             .flat_map(|arg| arg.split(','))
             .map(|s| PathBuf::from(s.trim()))
             .collect();
+
+        // Determine the target session for auto-start. Prefer:
+        // 1. Session of the --window argument
+        // 2. tmux_session from any file in the batch
+        // This avoids falling back to current_tmux_session() which may return
+        // whichever session the user is viewing (not the intended one).
+        let context_session: Option<String> = window
+            .and_then(|w| {
+                // Get session name from window ID
+                let output = tmux
+                    .cmd()
+                    .args(["display-message", "-t", w, "-p", "#{session_name}"])
+                    .output()
+                    .ok()?;
+                if output.status.success() {
+                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !name.is_empty() { Some(name) } else { None }
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                // Fall back to tmux_session from any file in the batch
+                all_files.iter().find_map(|f| {
+                    let content = std::fs::read_to_string(f).ok()?;
+                    let (fm, _) = frontmatter::parse(&content).ok()?;
+                    fm.tmux_session
+                })
+            });
         for file_path in &all_files {
             if !file_path.exists() {
                 continue;
@@ -117,7 +146,7 @@ pub fn run_with_tmux(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
             );
-            if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str) {
+            if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str, context_session.as_deref()) {
                 eprintln!(
                     "[sync] warning: auto-start failed for {}: {}",
                     file_path.display(),
@@ -146,6 +175,12 @@ pub fn run_with_tmux(
     // file→pane assignments from tmux-router. This ensures autoclaim works
     // for files arranged by sync, even if they were never individually claimed.
     register_synced_files(&session_files.borrow(), &result.file_panes);
+
+    // Post-sync: validate and auto-fix session state.
+    // Catches wrong-session panes early and fixes them before the user notices.
+    if let Err(e) = resync::run(true) {
+        eprintln!("[sync] warning: post-sync resync failed: {}", e);
+    }
 
     Ok(())
 }

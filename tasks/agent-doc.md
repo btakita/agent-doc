@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.24.2 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.24.3 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
 **Plugins:** JetBrains v0.2.10 (startup resync --fix) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** step 3b + heredoc examples
@@ -88,6 +88,7 @@ claude_args: --dangerously-skip-permissions
 | v0.23.3 | Cross-platform sync pane guard (`ps` instead of `/proc`), pre-sync duplicate pane prevention, clippy fixes. 459 tests. |
 | v0.24.0-v0.24.1 | `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content tests + heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests. |
 | v0.24.2 | SKILL.md step 3b (mandatory pending), `plugin install --local`, JB v0.2.10 (startup resync --fix). 497 tests. |
+| v0.24.3 | Context session for auto_start (wrong-session fix), post-sync resync --fix. 497 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -141,6 +142,8 @@ claude_args: --dangerously-skip-permissions
 **v0.24.0-v0.24.1:** `agent-doc install` (system setup), `agent-doc init` (project setup), lazy project init, SKILL.md content validation tests, heredoc examples, VCS refresh signal fix (JB v0.2.9). 497 tests.
 
 **v0.24.2:** SKILL.md step 3b (mandatory pending updates), `plugin install --local`, JB plugin v0.2.10 (startup resync --fix). 497 tests.
+
+**v0.24.3:** Context session for auto_start (eliminates wrong-session pane creation), post-sync resync --fix (auto-catches drift). 497 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -247,6 +250,16 @@ You're right — the ordering is wrong. The diagnosis response (`Re: Tmux Sessio
 **Lesson:** All checkpoint writes in the skill workflow should use `--stream` with the same boundary context. The binary's `agent-doc write --stream` already supports boundary-aware insertion for unmatched content — the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
 
 This is a skill-level discipline issue, not a binary bug. I'll be more careful with checkpoint ordering in future cycles.
+
+release
+### Re: v0.24.3 Released (HEAD)
+
+**agent-doc v0.24.3** published:
+- crates.io ✓ | GitHub Release ✓ | `cargo install` ✓ | Tag `v0.24.3` pushed
+
+**Changes in v0.24.3:**
+- Context session for `auto_start()` — eliminates wrong-session pane creation during sync
+- Post-sync `resync --fix` — automatically catches and fixes drift after every sync
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

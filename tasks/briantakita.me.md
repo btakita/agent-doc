@@ -259,7 +259,7 @@ This is incorrect.
 Use LightPanda to load the page and execute javascript to verify the sizes of the main header and the page title:
 - at the top of the file
 - when scrolled
-### Re: LightPanda testing blocked — dev server down (HEAD)
+### Re: LightPanda testing blocked — dev server down
 
 The dev server is no longer running (likely crashed when I cleared the `dist/` cache). I set up a CDP testing pipeline with LightPanda to measure element sizes before/after scroll, but couldn't connect.
 

@@ -921,10 +921,16 @@ real status content
             "response should appear after the user prompt (boundary insertion)"
         );
 
-        // Boundary marker should be consumed (replaced by response)
+        // Boundary marker should be re-inserted after the response for subsequent checkpoints
         assert!(
-            !result.contains("test-uuid-123"),
-            "boundary marker should be consumed after insertion"
+            result.contains("test-uuid-123"),
+            "boundary marker should be re-inserted after response for checkpoint support"
+        );
+        // The boundary should appear AFTER the response content
+        let boundary_pos = result.find("test-uuid-123").unwrap();
+        assert!(
+            boundary_pos > response_pos,
+            "re-inserted boundary should be after response"
         );
     }
 
@@ -957,10 +963,15 @@ real status content
             "response should appear after user prompt"
         );
 
-        // Boundary marker should be consumed
+        // Boundary marker should be re-inserted after the response for checkpoint support
         assert!(
-            !result.contains("patch-uuid-456"),
-            "boundary marker should be consumed by explicit patch"
+            result.contains("patch-uuid-456"),
+            "boundary marker should be re-inserted after response"
+        );
+        let boundary_pos = result.find("patch-uuid-456").unwrap();
+        assert!(
+            boundary_pos > response_pos,
+            "re-inserted boundary should be after response"
         );
     }
 }

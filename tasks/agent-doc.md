@@ -328,6 +328,8 @@ agent-doc init <file>       # document-level: scaffold a new session doc
 - Add SessionStart hook for autoclaim (if not already present)
 - Print project-specific quick-start
 
+`agent-doc init` should lazily run `agent-doc install`
+
 **New user flow:**
 \`\`\`
 cargo install agent-doc      # get the binary
@@ -338,6 +340,30 @@ agent-doc init plan.md       # create first document
 \`\`\`
 
 Want me to implement this hierarchy?
+
+Yes
+
+### Re: install + init Implemented (HEAD)
+
+**\`agent-doc install\`** (system-level):
+- Checks prerequisites: tmux, claude — prints status + install hints
+- Auto-detects editors (JetBrains dirs, VS Code/Cursor/Codium binaries)
+- Installs editor plugins via \`plugin::install()\`
+- \`--editor\`, \`--skip-prereqs\`, \`--skip-plugins\` flags
+
+**\`agent-doc init\`** (no args = project-level):
+- Lazily calls \`install::check_prereqs()\`
+- Creates \`.agent-doc/snapshots/\` and \`.agent-doc/patches/\`
+- Installs SKILL.md
+- Prints quick-start guide
+
+**\`agent-doc init <file>\`** (document-level):
+- Same as before (scaffolds session document)
+- Lazily runs project init first if \`.agent-doc/\` doesn't exist
+
+**Files:** \`install.rs\` (new), \`init.rs\` (updated), \`main.rs\` (updated), \`test_cli.rs\` (updated)
+
+459 tests pass. Release binary installed.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

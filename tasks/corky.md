@@ -852,7 +852,7 @@ Refactored: extracted `build_label_routes_from_routing()` (testable, takes routi
 All changes are in corky submodule working tree (uncommitted). Ready to commit and prepare for release.
 
 release
-### Released v0.19.1 (HEAD)
+### Released v0.19.1
 
 **Commit:** `ba9d712` — watch bug fixes (routing scope, 404 resilience, IMAP shutdown)
 

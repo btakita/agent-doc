@@ -168,7 +168,7 @@ claude_args: --dangerously-skip-permissions
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260321-153247.md`*
 
 release
-### Re: v0.24.2 Released (HEAD)
+### Re: v0.24.2 Released
 
 **agent-doc v0.24.2** published:
 - crates.io ✓

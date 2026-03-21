@@ -122,7 +122,7 @@ These are formatted for YouTube (timestamps must start with `0:00` for chapters 
 
 Upload to YouTube along with Closed Captioning and chapter markers. Add description.
 
-### Re: Upload to YouTube (HEAD)
+### Re: Upload to YouTube
 
 Draft created: `mail/social/20260321-110726-youtube.md`
 

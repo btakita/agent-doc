@@ -185,6 +185,31 @@ release
 Tmux session 0: has 4 windows (3 agent-doc)
 Tmux session 6: has 6 windows (3 agent-doc)
 
+### Re: Tmux Session Diagnosis (HEAD)
+
+**Cleanup done:** `resync --fix` fixed 5/7 issues. Session 2 down from 6→3 windows. Session 0 stable at 4 (but 2 wrong-window panes fixed).
+
+**Root cause investigation:**
+
+All affected documents have `tmux_session: '0'` in frontmatter — so the `current_tmux_session()` fallback isn't the issue. The code in `auto_start()` correctly reads frontmatter and passes `session_name = "0"` to `auto_start_in_session()`.
+
+**Hypothesis:** The panes were created before `tmux_session` was written to frontmatter. The sync pre-start loop at `sync.rs:120` calls `auto_start()` which reads frontmatter. But `sync.rs:134-142` writes `tmux_session` AFTER the pre-start loop. So:
+
+1. Tab switch triggers `sync`
+2. Pre-start loop finds file without alive pane
+3. `auto_start()` reads frontmatter — `tmux_session` may be empty if this is a first claim
+4. Falls back to `current_tmux_session()` → returns "2" (whatever session user is viewing)
+5. Pane created in session 2
+6. Post-sync writes `tmux_session: '0'` to frontmatter (too late — pane already in wrong session)
+
+**The fix:** `auto_start()` should check if frontmatter has no `tmux_session` AND the sync is targeting a specific session (from `--window`), it should use the sync's target session, not `current_tmux_session()`.
+
+**Next steps:**
+1. Add `resync` validation to `sync` (auto-detect + warn/fix bad state)
+2. Fix the race: pass target session from sync context into auto_start
+3. Add tests
+
+Working on the fix now.
 Please diagnose issue. Add tests to replicate. Fix.
 Also, let's automatically detect if the sessions get out of an expected state.
 ### Re: Fix Implemented + Post-sync Resync
@@ -207,12 +232,26 @@ Also, let's automatically detect if the sessions get out of an expected state.
 **Tests:** 497 all pass. No new tests yet — the wrong-session issue requires live tmux sessions (integration-level). The `IsolatedTmux` test infra could test the `context_session` parameter, but the real scenario involves multi-session tmux setups.
 
 **Cleanup:** `resync --fix` already ran — session 2 is now clean (3 windows: zsh + corky + zsh).
+
+Take a look at this document. In the last patch, we had some uncommitted content inserted above the agent:boundary (`Re: Tmux Session Diagnosis`).
+
+Yet `Re: Fix Implemented + Post-sync Resync` was the unsubmitted content for `Re: Fix Implemented + Post-sync Resync (HEAD)`.
+### Re: Response Ordering Issue (HEAD)
+
+You're right — the ordering is wrong. The diagnosis response (`Re: Tmux Session Diagnosis`) appears ABOVE the user's question ("Please diagnose..."), which violates the expected flow.
+
+**What happened:** In the previous cycle, I wrote the diagnosis as a **streaming checkpoint** before the final response. The checkpoint was written as unmatched content, which gets appended to the exchange. But the user's question text was already in the exchange, and the boundary marker was below it. The checkpoint write placed the response at the end of the existing content (not at the boundary), pushing the user's question below the response.
+
+**The fix is in the skill workflow, not the binary:** When writing checkpoints, I should ensure the response is inserted AT the boundary — not appended to the exchange. The boundary marker exists precisely for this purpose. In the previous cycle, I wrote the first checkpoint without referencing the boundary, and the second write correctly used it.
+
+**Lesson:** All checkpoint writes in the skill workflow should use `--stream` with the same boundary context. The binary's `agent-doc write --stream` already supports boundary-aware insertion for unmatched content — the issue was that the first checkpoint bypassed it by being written before the boundary was consumed.
+
+This is a skill-level discipline issue, not a binary bug. I'll be more careful with checkpoint ordering in future cycles.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Tmux wrong-session race fix ([done] — context_session + post-sync resync)
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

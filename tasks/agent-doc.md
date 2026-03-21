@@ -71,19 +71,20 @@ claude_args: --dangerously-skip-permissions
 | Version | Key Changes |
 |---------|-------------|
 | v0.5.5-v0.9.6 | Window-scoped routing, 2D sync, components, patch, watch daemon, tmux-router extraction, flock locking, atomic rename. 176 tests. |
-| v0.9.7-v0.9.10 | `agent-doc write`, template mode, compaction recovery, `recover`, `template-info`, code-span parser fix. 192 tests. |
-| v0.10.0-v0.10.1 | Renamed `response_mode` → `agent_doc_mode`, bundled template instructions in SKILL.md. |
-| v0.11.0-v0.11.2 | Append-friendly merge strategy, shared `merge.rs`, fixed duplicate headings. |
-| v0.12.0-v0.12.2 | `compact`, `convert`, lazy claim, exchange default, exchange append mode default. 218 tests. |
-| v0.13.0-v0.13.3 | `autoclaim` (SessionStart hook), git-based snapshot fallback, sync autoclaim, spare pane assignment (tmux-router v0.2.4). |
-| v0.14.0-v0.14.9 | Route focus fix, `commands` subcommand, plugin autocomplete (v0.2.0), bidirectional `convert`, multi-backtick. 235 tests. |
+| v0.9.7-v0.9.10 | \`agent-doc write\`, template mode, compaction recovery, \`recover\`, \`template-info\`, code-span parser fix. 192 tests. |
+| v0.10.0-v0.10.1 | Renamed \`response_mode\` → \`agent_doc_mode\`, bundled template instructions in SKILL.md. |
+| v0.11.0-v0.11.2 | Append-friendly merge strategy, shared \`merge.rs\`, fixed duplicate headings. |
+| v0.12.0-v0.12.2 | \`compact\`, \`convert\`, lazy claim, exchange default, exchange append mode default. 218 tests. |
+| v0.13.0-v0.13.3 | \`autoclaim\` (SessionStart hook), git-based snapshot fallback, sync autoclaim, spare pane assignment (tmux-router v0.2.4). |
+| v0.14.0-v0.14.9 | Route focus fix, \`commands\` subcommand, plugin autocomplete (v0.2.0), bidirectional \`convert\`, multi-backtick. 235 tests. |
 | v0.15.0-v0.16.1 | CRDT stream mode (yrs), chain-of-thought, reactive file-watching, truncation detection, native compact. 309 tests. |
-| v0.17.0-v0.17.30 | Format/write split, IPC write, JNA FFI (NativeLib.kt), VS Code prepend, immutable session binding, `lib-path`. 440 tests. |
-| v0.18.0-v0.18.1 | `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
+| v0.17.0-v0.17.30 | Format/write split, IPC write, JNA FFI (NativeLib.kt), VS Code prepend, immutable session binding, \`lib-path\`. 440 tests. |
+| v0.18.0-v0.18.1 | \`undo\`, \`extract\`, \`transfer\`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3. 446 tests. |
 | v0.19.0 | ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7). 446 tests. |
-| v0.20.0-v0.20.3 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. Numeric session fix (colon suffix). `claims` subcommand. 451 tests. |
-| v0.21.0 | `agent-doc parallel` (fan-out with worktrees, `--no-worktree`). CRDT post-merge reorder (Yrs attribution). 461 tests. |
+| v0.20.0-v0.20.3 | CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs. Session affinity enforcement. Numeric session fix (colon suffix). \`claims\` subcommand. 451 tests. |
+| v0.21.0 | \`agent-doc parallel\` (fan-out with worktrees, \`--no-worktree\`). CRDT post-merge reorder (Yrs attribution). 461 tests. |
 | v0.22.0-v0.23.0 | Boundary marker ordering, claim auto-start, VCS refresh, any-level HEAD markers, exchange default mode, SKILL.md immediate commit, code-block boundary fix. JB v0.2.8. 452 tests. |
+| v0.23.1-v0.23.2 | Stale boundary cleanup, boundary-aware insertion (unmatched + explicit patches), IPC snapshot \`content_ours\` fix, (HEAD) marker accumulation fix, examples/blog outline. 459 tests. |
 <!-- /agent:releases -->
 
 ## Lessons
@@ -112,23 +113,25 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:history -->
 **v0.5.5-v0.9.6:** Foundation — window-scoped routing, 2D sync, components, patch, watch daemon, tmux-router extraction, flock locking, atomic rename, stale snapshot recovery.
 
-**v0.9.7-v0.12.2:** `agent-doc write`, template mode, compaction recovery, `recover`, `exchange` convention, append-friendly merge, `compact`/`convert`, lazy claim.
+**v0.9.7-v0.12.2:** \`agent-doc write\`, template mode, compaction recovery, \`recover\`, \`exchange\` convention, append-friendly merge, \`compact\`/\`convert\`, lazy claim.
 
-**v0.13.0-v0.14.9:** `autoclaim`, git-based snapshot fallback, `commands`, plugin autocomplete (v0.2.0), bidirectional `convert`, code-range-aware `strip_comments`, multi-backtick.
+**v0.13.0-v0.14.9:** \`autoclaim\`, git-based snapshot fallback, \`commands\`, plugin autocomplete (v0.2.0), bidirectional \`convert\`, code-range-aware \`strip_comments\`, multi-backtick.
 
 **v0.15.0-v0.16.1:** CRDT stream mode (yrs), chain-of-thought streaming, reactive file-watching, truncation detection, native compact. 309 tests.
 
-**v0.17.0-v0.17.30:** Format/write split. IPC write + JetBrains PatchWatcher. JNA FFI (NativeLib.kt). VS Code prepend. Immutable `tmux_session` binding. `lib-path` + `merge_frontmatter()` FFI export.
+**v0.17.0-v0.17.30:** Format/write split. IPC write + JetBrains PatchWatcher. JNA FFI (NativeLib.kt). VS Code prepend. Immutable \`tmux_session\` binding. \`lib-path\` + \`merge_frontmatter()\` FFI export.
 
-**v0.18.0-v0.18.1:** `undo`, `extract`, `transfer`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3.
+**v0.18.0-v0.18.1:** \`undo\`, \`extract\`, \`transfer\`. Pre-response snapshots. Gson revert, h2 scaffolding. JB v0.2.6, VS Code v0.2.3.
 
 **v0.19.0:** ExecutionMode in config.toml. TmuxBatch (tmux-router v0.2.7).
 
-**v0.20.0-v0.20.3:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement, numeric session fix (colon suffix), `agent-doc claims` subcommand. 451 tests.
+**v0.20.0-v0.20.3:** CRDT dedup (#15), frontmatter patches (#16), binary-vs-agent docs, session affinity enforcement, numeric session fix (colon suffix), \`agent-doc claims\` subcommand. 451 tests.
 
-**v0.21.0:** `agent-doc parallel` — fan-out with git worktrees (`--no-worktree` for read-only). CRDT post-merge reorder via Yrs attribution. 461 tests.
+**v0.21.0:** \`agent-doc parallel\` — fan-out with git worktrees (\`--no-worktree\` for read-only). CRDT post-merge reorder via Yrs attribution. 461 tests.
 
 **v0.22.0-v0.23.0:** Boundary marker response ordering, claim auto-start, VCS refresh signal, any-level HEAD markers, exchange default mode fix, SKILL.md immediate commit, code-block boundary search fix (lesson #13). JB plugin v0.2.7→v0.2.8. 452 tests.
+
+**v0.23.1-v0.23.2:** Stale boundary cleanup, boundary-aware insertion (unmatched content + explicit patches), IPC snapshot \`content_ours\` fix, (HEAD) marker accumulation fix, examples + blog outline. 459 tests.
 <!-- /agent:history -->
 
 ## Exchange
@@ -751,6 +754,29 @@ release
 | SKILL.md | v0.23.2 ✓ |
 
 No further release action needed.
+
+compact exchange
+
+### Re: Exchange Compacted
+
+Archived 620 lines to \`.agent-doc/archives/\`. Use \`agent-doc history tasks/agent-doc.md\` to browse past exchanges.
+
+**Session summary (v0.23.0 → v0.23.2):**
+
+**Bugs fixed:**
+- Orphaned boundary markers — \`insert()\` now auto-cleans stale markers before inserting
+- 0 components IPC bug — unmatched content now uses boundary-aware insertion
+- Explicit patches in append mode now consume boundary markers
+- IPC snapshot saves \`content_ours\` (fixes post-boundary user edits being silently lost)
+- \`(HEAD)\` marker accumulation — strips from heading lines only, post-commit cleanup
+- \`try_ipc()\` synthesizes exchange patch when only unmatched content + boundary exists
+
+**Docs/examples:**
+- \`examples/agent-doc/\` — sanitized task file + README + blog outline for [#28](https://github.com/btakita/agent-doc/issues/28)
+- SPEC.md updated with IPC snapshot invariant, boundary cleanup, HEAD marker cleanup
+- VERSIONS.md + CLAUDE.md updated
+
+**Released:** v0.23.1 → v0.23.2. 459 tests (162 lib + 297 bin).
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

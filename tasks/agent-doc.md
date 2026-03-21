@@ -245,7 +245,7 @@ Build: `./gradlew buildPlugin` — BUILD SUCCESSFUL.
 Ready to bump plugin version and publish?
 
 Yes
-### Re: Plugin v0.2.10 Published (HEAD)
+### Re: Plugin v0.2.10 Published
 
 **JB plugin v0.2.10** built and committed:
 - `PluginLifecycleListener.kt` — added `runResyncFix()` on `projectOpened()`

@@ -314,7 +314,7 @@ agent-doc plugin install jetbrains --local
 
 **3. Stale boundary marker:** The `<!-- agent:boundary:566fe778... -->` you saw was from the previous cycle. Boundary markers are HTML comments (invisible in rendered markdown) but visible in raw text. They get cleaned up at the start of the next cycle — you saw `[boundary] removed 1 stale boundary marker(s)` in this cycle's output. The marker was leftover because the previous response was inserted AT the boundary but the marker wasn't consumed when you typed after it. This is working as designed — stale boundaries are cleaned up on the next `agent-doc boundary` call.
 Is the following `agent:boundary` still active? Why is it here?
-### Re: Boundary Marker Lifecycle (HEAD)
+### Re: Boundary Marker Lifecycle
 
 Yes, the `c44a3262` boundary was still "active" — meaning it was in the document waiting for the next response to be inserted at its position. Here's the full lifecycle:
 

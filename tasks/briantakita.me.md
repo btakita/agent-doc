@@ -324,7 +324,7 @@ Verified both rules are in the compiled CSS (`WGATE4RG_PHK6Y6PP.css`). The dev s
 
 There is still a gap between the header and the breadcrumb.
 ![img_3.png](img_3.png)
-### Re: Fix remaining gap — HR wrapper div (HEAD)
+### Re: Fix remaining gap — HR wrapper div
 
 The `<hr>` was hidden but its wrapper `<div class="max-w-3xl mx-auto px-4">` still took space. Changed the CSS from hiding just the `<hr>` to hiding the entire wrapper div:
 

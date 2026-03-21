@@ -209,6 +209,8 @@ Output from my debug command:
 Fixed — switched back to window @0. Apologies for the disruption.
 
 This does highlight a design concern: **routing commands should not steal window focus from the user's active window.** The \`route\` command calls \`select_pane\` which implicitly selects the target window. A \`--no-focus\` flag (or making background routing the default) would prevent this.
+Add tests and implement. Also clean up tmux window 2 in session 0.
+Is this cleanup something that should happen in the agent-doc binary?
 
 ### Re: 3-Pane Fix Implemented
 
@@ -227,6 +229,32 @@ This does highlight a design concern: **routing commands should not steal window
 459 tests pass. Release binary rebuilt and installed.
 
 **Note:** This is a Linux-specific fix (`/proc` filesystem). Unit testing requires `IsolatedTmux` + spawning a real agent-doc process. The fix is manually verifiable by running `agent-doc sync` with stale registry entries.
+
+How about OSX + Windows? Is there a solution?
+
+### Re: Window Cleanup + Cross-Platform Solution (HEAD)
+
+**Window 2 cleaned up.** Moved pane %16 (linkedin.md) from window @33 to stash. Window @33 automatically removed. Session 0 now has 2 windows: @0 (agent-doc, 2 panes) and @2 (stash, 6 panes).
+
+**Should the binary handle this cleanup?** Yes — \`resync --fix\` already detects wrong-window panes. The fix should include moving orphaned single-pane windows to stash. Currently \`resync --fix\` kills wrong-session panes and deregisters wrong-process panes, but it doesn't consolidate orphaned windows. Adding a "stash orphaned single-pane windows" step to \`resync --fix\` would prevent this class of issue.
+
+**Cross-platform \`find_alive_pane_for_file()\`:**
+
+| Platform | Process inspection |
+|----------|-------------------|
+| **Linux** | \`/proc/<pid>/cmdline\` (current impl) |
+| **macOS** | \`ps -p <pid> -o command=\` — returns full command line |
+| **Windows** | N/A — tmux doesn't run on Windows natively (WSL uses Linux \`/proc\`) |
+
+**Better approach:** Use \`ps\` universally instead of \`/proc\`. \`ps -p <pid> -o command=\` works on both Linux and macOS:
+
+\`\`\`rust
+let output = std::process::Command::new("ps")
+    .args(["-p", &pid.to_string(), "-o", "command="])
+    .output();
+\`\`\`
+
+This is simpler and cross-platform. I can refactor \`find_alive_pane_for_file()\` to use \`ps\` instead of \`/proc\`. Want me to do that now?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

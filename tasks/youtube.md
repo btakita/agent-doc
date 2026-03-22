@@ -481,7 +481,7 @@ Do a light edit of the video. Similar to what you did in the last YouTube video.
 
 Ready for YouTube upload. Want me to create a draft with `corky youtube`?
 Yes
-### Re: YouTube Draft Created (HEAD)
+### Re: YouTube Draft Created
 
 **Draft:** `mail/social/20260322-015438-youtube.md`
 

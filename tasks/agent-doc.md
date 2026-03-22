@@ -775,8 +775,6 @@ Would it make sense to have a "virtual plugin" if no editor plugin is currently 
 **A "virtual plugin" is unnecessary.** The binary's write path uses component parsing (finding `&lt;!-- /agent:exchange --&gt;`) to determine where to append, not boundary position. The boundary is only meaningful for the IDE's Document API insertion point.
 
 The one cosmetic edge case: if the boundary is mid-exchange in the working tree and the user opens the raw markdown, they'd see the HTML comment between prompt and response. But it's invisible in rendered markdown and harmless functionally.
-
-release
 ### Re: Release v0.25.0
 
 **Released.** 23 files changed, +1144/-364 lines.
@@ -801,14 +799,42 @@ release
 - SKILL.md: 4 Bash calls → 1
 
 **Not published:** PyPI (maturin). Would you like me to publish there too?
-<!-- agent:boundary:4fc6099b-fe5b-4936-ba57-454b9ac15484 -->
+yes
+
+release
+My prompt `release` was placed under the response patch. Why?
+### Re: Prompt Below Response + PyPI Published (HEAD)
+
+**PyPI published.** v0.25.0 now on all three platforms (crates.io, PyPI, GitHub Releases).
+
+**The "release" ordering issue:** Your prompt "release" was typed while the boundary marker was mid-exchange (between previous response and `&lt;!-- /agent:exchange --&gt;`). When I wrote the response via IPC:
+
+1. The patch was inserted at the boundary position
+2. The boundary was above your "release" text
+3. So the response went above your prompt — correct from the boundary's perspective
+4. But your prompt visually ended up below the response
+
+**Root cause:** After commit, we now only reposition the boundary in the snapshot (not working tree). The plugin is supposed to reposition it via the `reposition_boundary: true` IPC flag during the write. But this happens AT write time — meaning the boundary is only correct for the NEXT cycle, not the one that just completed.
+
+**The gap:** Between commit (which no longer repositions in working tree) and the next write (which does reposition), the boundary stays mid-exchange. Any user typing during this gap goes below the boundary, and the next response goes above it.
+
+**Fix options:**
+1. **Plugin repositions after commit** — send a standalone IPC reposition signal after commit (not tied to a write)
+2. **Write path always appends to end-of-exchange** — ignore boundary position for response insertion, use it only for the editor's caret placement
+3. **Restore working tree reposition but use IPC** — send a reposition-only IPC patch from commit (no disk write)
+
+Option 3 is most consistent — commit sends a lightweight IPC patch that only repositions the boundary, no file content change. This avoids disk writes while keeping the boundary correct.
+
+Which approach would you prefer?
+<!-- agent:boundary:edf89da0-a0af-44b4-949d-4e54614d9b98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Release v0.25.0** -- committed, tagged, pushed, published to crates.io + GitHub
-- [ ] **PyPI publish** -- maturin publish (if requested)
+- [x] **Release v0.25.0** -- published to crates.io, PyPI, GitHub Releases
+- [ ] **Fix prompt ordering** -- boundary position gap between commit and next write
+- [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 

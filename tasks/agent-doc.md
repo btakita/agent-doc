@@ -507,7 +507,7 @@ Would Option A be implemented in the shared object? Where it would drive command
 **Also:** The plugin is still generating full UUIDs for new boundaries (line 480: `741debb0-69cc-4eb5-a230-dc8ed230080a`) instead of 8-char short IDs. The binary side generates short IDs correctly (`f8d4da55` in the snapshot). The PatchWatcher's UUID generation may not have been updated in the installed plugin build.
 
 Investigate
-### Re: Both Options A & B + FFI architecture (HEAD)
+### Re: Both Options A & B + FFI architecture
 
 **Yes, both options complement each other.** Here's the investigation:
 

@@ -408,6 +408,7 @@ Blog post with context: https://briantakita.me/posts/agent-resume-recruiter-work
 To publish: `corky social publish` or schedule with `scheduled_at` field. Remember to post the first comment with links manually right after publishing.
 It is a blend of vibe coding and structured collaboration. I'm not afraid of vibe coding personally. Both vibe coding and structured collaboration can be useful
 
+
 **Re: vibe coding framing**
 
 Good call — "Not vibe coding" was too dismissive. Updated the draft and the corky draft file to embrace the blend:
@@ -415,5 +416,14 @@ Good call — "Not vibe coding" was too dismissive. Updated the draft and the co
 > It's a blend of vibe coding and structured collaboration — both have their place. The difference is having the tooling to move fluidly between them, applying 20+ years of engineering judgment at a pace that wasn't possible before.
 
 Draft file updated: `mail/social/20260322-agent-resume-workflow-linkedin.md`
-<!-- agent:boundary:806cab17-90ae-4f9b-ba47-7c7fa0ed06f3 -->
+Publish
+
+**Re: Publish**
+
+Done.
+
+- **Post published:** https://www.linkedin.com/feed/update/urn:li:share:7441567383225290753
+- **First comment posted** (ID: `7441567425197789184`) with YouTube video + blog post links
+- Draft file updated to `status: published` with `post_id` and `published_at`
+<!-- agent:boundary:708f16a1-1334-4120-83b7-132ed91f135c -->
 <!-- /agent:exchange -->

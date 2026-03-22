@@ -826,7 +826,7 @@ Option 3 is most consistent — commit sends a lightweight IPC patch that only r
 
 Which approach would you prefer?
 Option 3
-### Re: Option 3 Implemented — IPC Boundary Reposition from Commit (HEAD)
+### Re: Option 3 Implemented — IPC Boundary Reposition from Commit
 
 **Done.** Added `try_ipc_reposition_boundary()` in write.rs — sends a lightweight IPC patch with only `reposition_boundary: true` (no content changes). Called from `commit()` after the snapshot reposition.
 

@@ -229,7 +229,7 @@ Add a task to monitor for timeouts with a decision between Option 1 & 3 in `agen
 - if a IPC timeout occurs either:
   - Increase timeout (4s instead of 2s)
   - Batch boundary reposition with the response patch (do it in `agent-doc write` instead of `agent-doc commit`)
-### Re: Snapshot-Only Boundary Reposition (HEAD)
+### Re: Snapshot-Only Boundary Reposition
 
 **Changed approach:** `commit()` now repositions the boundary in the **snapshot only** — the working tree file is NEVER modified during commit.
 

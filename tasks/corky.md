@@ -985,7 +985,7 @@ corky 0.19.1 is now installed with GPU-accelerated transcription. The Makefile h
 
 Note: `cargo install --path . --features transcribe-cuda` alone fails because it doesn't set the `CORKY_DEFAULT_GCP_CLIENT_ID`/`CORKY_DEFAULT_GCP_CLIENT_SECRET` compile-time env vars. Always use `make install` (which reads them from `pass`).
 Can we make the `--gpu` install if compatible libraries are found the default installation of corky?
-### GPU as Default Install (HEAD)
+### GPU as Default Install
 
 **Already done for the two recommended install paths:**
 - `make install` — auto-detects GPU via `nvidia-smi`, tries `--features transcribe-cuda`, falls back to CPU

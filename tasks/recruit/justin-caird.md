@@ -80,7 +80,7 @@ Note Justin's reply.
 
 Draft a reply.
 Prepare a resume based on what his client is looking for.
-### Re: Justin's reply — resume & availability (HEAD)
+### Re: Justin's reply — resume & availability
 
 Justin's latest message (exported from LinkedIn conversation):
 
@@ -96,7 +96,7 @@ The profile emphasizes:
 - Context engineering and spec-driven development
 - Full career breadth showing 20+ years
 
-### Draft LinkedIn reply: (HEAD)
+### Draft LinkedIn reply:
 
 Hi Justin,
 
@@ -121,7 +121,7 @@ Brian
 - Mentions legacy modernization since that's the actual work (20-year-old ERP systems)
 - Gives specific availability windows rather than "I'm flexible"
 - Keeps it concise — Justin already knows the background from the first exchange
-<!-- agent:boundary:99ab4e30 -->
+<!-- agent:boundary:b523a404 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -252,21 +252,52 @@ Add a task to monitor for timeouts with a decision between Option 1 & 3 in `agen
 **About the poll cycle:** Java NIO `WatchService` on Linux uses **inotify** (event-based, not polling). The 500ms `poll()` is just the blocking wait timeout, not a polling interval. File creation is detected instantly by inotify. The IPC timeout was caused by the plugin being busy processing a previous patch (the response write), not by slow detection.
 
 Binary installed. 508 tests pass. No more IPC timeouts or disk write fallbacks from commit.
-<!-- agent:boundary:6f4224e1-7cdc-4d06-be3d-9dc6767a25f2 -->
+Implement:
+- [ ] **SPEC.md update** — document stash window routing contract
+- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
+### Re: SPEC.md + AST Migration + CRDT Research (HEAD)
+
+**1. SPEC.md updated** — added section 8.4 "Stash Window Routing" documenting the stash lifecycle, invariants, and zero-working-tree-writes contract.
+
+**2. Markdown AST migration — assessment + partial implementation:**
+
+pulldown-cmark is already in the codebase and doing the hard work via `find_code_ranges()`. The assessment found that most scanning functions (`component::parse`, `strip_comments`, `parse_patches`, boundary scanning) cannot be cleanly replaced because pulldown-cmark treats HTML comments as opaque `Event::Html` — the agent marker semantics still need manual parsing.
+
+**One clear migration candidate was found and implemented: `outline.rs`.**
+- `heading_depth()` + manual line scanning replaced with `collect_headings()` using `Parser::new_ext` + `into_offset_iter()`
+- Now handles setext headings (`===`/`---`) and correctly ignores headings inside code blocks
+- 5 new tests added (ATX, no-space, code block, setext, code block ignored)
+
+**DRY fix:** `find_comment_end()` was duplicated between `component.rs` and `template.rs`. Made `pub(crate)` in component.rs, imported in template.rs.
+
+**3. CRDT merge ordering — research complete:**
+
+**Root cause:** Client IDs are swapped. Agent = `Doc::with_client_id(1)`, Human = `Doc::with_client_id(2)`. Yrs places higher client ID first → human content appears before agent content.
+
+**Recommended fix (Option A — flip client IDs):**
+- Agent → `Doc::with_client_id(2)` (higher = first)
+- Human → `Doc::with_client_id(1)` (lower = second)
+- This gives native correct ordering without `reorder_agent_before_human()` post-merge hack
+- Minimal change: swap two lines + remove reorder function
+
+Want me to implement Option A?
+
+**Totals:** 512 tests pass. Binary installed.
+<!-- agent:boundary:b8aee972-ce6b-416d-968a-dcb122b95c94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **Snapshot-only boundary reposition** — no working tree writes from commit()
-- [x] **Eliminated IPC timeout** — removed reposition IPC (snapshot-only approach)
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-- [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
+- [x] **SPEC.md update** — stash window routing contract (section 8.4)
+- [x] **Markdown AST — outline.rs migrated** — pulldown-cmark heading detection + setext support
+- [x] **DRY fix** — `find_comment_end()` deduplicated (component.rs → template.rs import)
+- [x] **AST assessment** — only outline.rs was a viable candidate; other scanners stay manual
+- [ ] **CRDT merge ordering** — flip client IDs (Option A, ready to implement)
+- [ ] **Boundary-aware replace for `flush_to_document`**
 - [ ] **README.md staleness** — update to match current state
-- [ ] **CRDT merge ordering** — Yrs causality (final writes only)
-- [ ] **`agent-doc submit`** — combined binary command <!-- deps: flush -->
+- [ ] **`agent-doc submit`** — combined binary command
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

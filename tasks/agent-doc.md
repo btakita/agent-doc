@@ -596,6 +596,8 @@ In SPEC.md, make sure we also express the desired behavior, regardless of how it
 
 The specs express the desired behavior independently of implementation — a new plugin in any language can implement boundary management correctly by following these specs.
 Build and install for testing.
+Boundary ID format should be configurable in case more or less hex values are wanted.
+Perhaps the boundary id can include a 1-2 word summary of the run.
 ### Re: Build and install for testing
 
 Already done. The binary was built and installed earlier this session:
@@ -608,7 +610,30 @@ Already done. The binary was built and installed earlier this session:
 You can test the boundary cleanup now — it's active. The snapshot path already uses the new `remove_all_boundaries()` cleanup (confirmed by `[commit] repositioned boundary in snapshot` log messages in the last two commits).
 
 To test the FFI export from a plugin, the shared library needs to be rebuilt too: `cargo build --release` produces `target/release/libagent_doc.so` with the new function.
-<!-- agent:boundary:bb9133ec -->
+
+I still see many uncommitted `agent:boundary` components in this file. Do I need to /compact for a SKILL update?
+### Re: Configurable boundary IDs + summary + stale boundaries (HEAD)
+
+**1. Configurable boundary ID length** — Already implemented. `BOUNDARY_ID_LEN` constant in `lib.rs` controls the length (default 8). To change, update that constant. The SPEC says 8-char hex but the implementation is configurable.
+
+For a more user-facing config (e.g., frontmatter or `.agent-doc/config.toml`), I can add that. Worth doing?
+
+**2. Boundary ID with 1-2 word summary** — Great idea for debugging. Instead of `<!-- agent:boundary:a0cfeb34 -->`, it could be `<!-- agent:boundary:a0cfeb34:boundary-fix -->` where the suffix is a slugified summary of the current run/response. The suffix would be ignored by the regex matcher (which matches `<!-- agent:boundary:... -->`), so it's backward compatible.
+
+Implementation: add an optional `summary` parameter to `new_boundary_id()` and `format_boundary_marker()`. The write path would pass a truncated topic from the response.
+
+**3. Stale boundaries in working tree** — No, you don't need `/compact`. The SKILL is fine. The problem is the **plugin** — it's still using its old Kotlin `repositionBoundaryToEnd()` which only handles one boundary per cycle. The new FFI export (`agent_doc_reposition_boundary_to_end()`) hasn't been integrated into the plugin yet.
+
+**Working tree vs snapshot:**
+- Snapshot: 2 real boundaries (clean — the new `commit()` cleanup works)
+- Working tree: 12 real boundaries (dirty — plugin IPC reposition misses stale ones)
+
+The plugin adds a new boundary each IPC reposition cycle but doesn't remove the old ones scattered through earlier exchange sections. Until the plugin calls the FFI function, stale boundaries will accumulate in the working tree.
+
+**Quick fix now:** I can add a one-time working-tree cleanup step to `agent-doc commit` that fires when it detects more than 1 boundary in the working tree. This would write the cleaned file to disk (overriding the "never write working tree" rule) but only when stale boundaries are detected. The tradeoff: a brief IDE reload, but it clears the accumulated garbage.
+
+Want me to implement that? Or wait for the plugin FFI integration?
+<!-- agent:boundary:9a7f4067 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -618,9 +643,12 @@ To test the FFI export from a plugin, the shared library needs to be rebuilt too
 - [x] Option A: FFI export `agent_doc_reposition_boundary_to_end()`
 - [x] SPEC.md: Document boundary behavior requirements
 - [x] Binary built, installed, 522 tests pass
-- [ ] **Plugin integration** — call FFI function from PatchWatcher instead of Kotlin reposition
+- [ ] **Configurable boundary ID length** — expose via config.toml / frontmatter
+- [ ] **Boundary ID with summary suffix** — `a0cfeb34:boundary-fix`
+- [ ] **Working-tree stale boundary cleanup** — one-time disk write when >1 boundary detected
+- [ ] **Plugin FFI integration** — call `agent_doc_reposition_boundary_to_end()` from PatchWatcher
 - [ ] Fix plugin short boundary IDs (installed plugin still using full UUIDs)
-- [ ] agent-doc v0.25.5 release with boundary fixes
+- [ ] agent-doc v0.25.5 release
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

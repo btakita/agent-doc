@@ -843,7 +843,7 @@ Binary rebuilt and installed. Test this by typing a prompt after a commit — it
 Add to SPEC.md
 audit docs
 release
-### Re: SPEC Update + Release v0.25.1 (HEAD)
+### Re: SPEC Update + Release v0.25.1
 
 **SPEC.md updated.** Added boundary reposition lifecycle section under the commit write contract — documents the two IPC signals (write-time and commit-time) and the fallback when no plugin is active.
 

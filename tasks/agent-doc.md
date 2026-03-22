@@ -431,7 +431,7 @@ What is the collision chance of the uuid? What would be the impact of a collisio
 
 When I navigate the editor focus back to toby-gi
 
-### Re: Configurable boundary UUID length (HEAD)
+### Re: Configurable boundary UUID length
 
 **Collision analysis:**
 - 8 hex chars = 32 bits = ~4.3 billion values

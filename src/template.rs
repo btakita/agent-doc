@@ -295,6 +295,27 @@ pub fn apply_patches_with_overrides(
     Ok(result)
 }
 
+/// Reposition the boundary marker to the end of the exchange component.
+///
+/// Removes all existing boundaries and inserts a fresh one at the end of
+/// the exchange. This is the same pre-patch logic used in
+/// `apply_patches_with_overrides()`, extracted for use by the IPC write path.
+///
+/// Returns the document unchanged if no exchange component exists.
+pub fn reposition_boundary_to_end(doc: &str) -> String {
+    let mut result = remove_all_boundaries(doc);
+    if let Ok(components) = component::parse(&result)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        let id = uuid::Uuid::new_v4().to_string();
+        let marker = format!("<!-- agent:boundary:{} -->", id);
+        let content = exchange.content(&result);
+        let new_content = format!("{}\n{}\n", content.trim_end(), marker);
+        result = exchange.replace_content(&result, &new_content);
+    }
+    result
+}
+
 /// Remove all boundary markers from a document (line-level removal).
 /// Skips boundaries inside fenced code blocks (lesson #13).
 fn remove_all_boundaries(doc: &str) -> String {
@@ -1070,5 +1091,36 @@ real status content
             !result.contains("<!-- agent:boundary:real-id -->"),
             "boundary outside code block must be removed: {result}"
         );
+    }
+
+    #[test]
+    fn reposition_boundary_moves_to_end() {
+        let doc = "\
+<!-- agent:exchange -->
+Previous response.
+<!-- agent:boundary:old-id -->
+User prompt here.
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end(doc);
+        // Old boundary should be gone
+        assert!(!result.contains("old-id"), "old boundary should be removed");
+        // New boundary should exist
+        assert!(result.contains("<!-- agent:boundary:"), "new boundary should be inserted");
+        // New boundary should be after the user prompt, before close tag
+        let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
+        let prompt_pos = result.find("User prompt here.").unwrap();
+        let close_pos = result.find("<!-- /agent:exchange -->").unwrap();
+        assert!(boundary_pos > prompt_pos, "boundary should be after user prompt");
+        assert!(boundary_pos < close_pos, "boundary should be before close tag");
+    }
+
+    #[test]
+    fn reposition_boundary_no_exchange_unchanged() {
+        let doc = "\
+<!-- agent:output -->
+Some content.
+<!-- /agent:output -->";
+        let result = reposition_boundary_to_end(doc);
+        assert!(!result.contains("<!-- agent:boundary:"), "no boundary should be added to non-exchange");
     }
 }

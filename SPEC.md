@@ -413,7 +413,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Design principle:** Boundary insertion was initially implemented in the SKILL workflow (step 1b) but moved to the binary because: (1) it's deterministic (unit-testable with fixed inputs), (2) ALL write paths need it (SKILL, run, stream, watch), (3) non-SKILL paths bypassing step 1b caused stale boundary bugs. **Rule: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
 
-**IPC boundary:** When unmatched content exists and the target component has a boundary marker, a synthesized patch with `boundary_id` is sent to the plugin for boundary-aware insertion. The `PatchWatcher` reloads the document from disk before applying patches to ensure it has the latest boundary marker.
+**IPC boundary:** Before building the IPC patch JSON, all IPC write paths call `reposition_boundary_to_end()` on the current document in memory. This removes stale boundaries and inserts a fresh one at the end of the exchange — the same pre-patch step that `apply_patches_with_overrides()` performs. The repositioned document is used only for `boundary_id` extraction (never written to disk by this step). Without this, the IPC path would read the old boundary position (above the user's new prompt), causing responses to be inserted before the prompt. When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically.
 
 ### 7.23 watch
 
@@ -567,9 +567,10 @@ The stash system preserves running Claude sessions when the user switches editor
 **Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing.
 
 **Boundary reposition lifecycle:**
-1. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch
-2. During `agent-doc commit`: a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly
-3. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
+1. **Before IPC patch JSON (`reposition_boundary_to_end()`):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and call `reposition_boundary_to_end()` in memory. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
+2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch
+3. During `agent-doc commit`: a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly
+4. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
 
 ## 9. Git Integration
 

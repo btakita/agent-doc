@@ -300,8 +300,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let hash = snapshot::doc_hash(file)?;
             let patch_file = patches_dir.join(format!("{}.json", hash));
 
-            // Read current document to scan for boundary markers
-            let current_doc_for_boundary = std::fs::read_to_string(file).unwrap_or_default();
+            // Read current document and reposition boundary (same as primary IPC path)
+            let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
+            let current_doc_for_boundary = template::reposition_boundary_to_end(&raw_doc);
 
             let ipc_patches: Vec<serde_json::Value> = patches
                 .iter()
@@ -474,8 +475,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Read current document to scan for boundary markers
-    let current_doc_for_boundary = std::fs::read_to_string(file).unwrap_or_default();
+    // Read current document and reposition boundary to end of exchange.
+    // This matches the pre-patch step in template::apply_patches_with_overrides():
+    // remove stale boundaries, insert fresh one at end. Without this, the IPC
+    // path would use the old boundary position (above the user's new prompt),
+    // causing responses to appear before the prompt instead of after.
+    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
+    let current_doc_for_boundary = template::reposition_boundary_to_end(&raw_doc);
 
     // Separate frontmatter patch from component patches
     let mut frontmatter_yaml: Option<String> = None;
@@ -723,10 +729,12 @@ pub fn try_ipc(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Read current document to scan for boundary markers.
-    // If no boundary exists for a component, insert one on disk first
-    // so the plugin can use boundary-based insertion.
-    let current_doc = std::fs::read_to_string(file).unwrap_or_default();
+    // Read current document and reposition boundary to end of exchange.
+    // This matches the pre-patch step in template::apply_patches_with_overrides():
+    // without this, the boundary stays above the user's new prompt, and the
+    // response would be inserted before it (prompt ordering bug).
+    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
+    let current_doc = template::reposition_boundary_to_end(&raw_doc);
 
     // Separate frontmatter patch from component patches.
     // For append-mode components without a boundary, set ensure_boundary flag

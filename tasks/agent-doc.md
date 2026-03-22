@@ -1037,7 +1037,35 @@ Yes
 **Result:** No more disk writes for boundary insertion → no File Cache Conflicts from this path. The plugin handles boundary insertion entirely through the Document API.
 
 Plugin v0.2.12 rebuilt. Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → `agent-doc-jetbrains-0.2.12.zip` → restart.
-<!-- agent:boundary:fd632cac-52ef-4abd-aa25-84b2653e40bb -->
+In tmux session 0, there are 3 windows. I was changing between tasks/youtube.md and tasks/corky.md on the right editor side. I noticed that some claude sessions restarted as well. Please explain why.
+### Re: Claude Sessions Restarting on Tab Switch (HEAD)
+
+**What's happening:** When you switch editor tabs (e.g., youtube.md → corky.md), the agent-doc routing system detects the new file and may re-route panes. Here's the mechanism:
+
+**1. Autoclaim (SessionStart hook):**
+When a Claude session starts (including after context compaction), the `autoclaim` hook runs. It checks which file is active in the editor and claims it for the current pane. If you switched tabs, autoclaim picks up the NEW file and re-routes.
+
+**2. Window-scoped routing:**
+Both `tasks/agent-doc.md` and `tasks/youtube.md` share window `@0` (2 panes). When you switch the editor focus to `tasks/corky.md`, the routing may try to assign an existing pane to corky.md — which kills the previous session in that pane.
+
+**3. Tmux session state:**
+```
+Window @0:
+  %18 → agent-doc.md (PID 2066534 — DEAD, replaced by this Claude session)
+  %32 → youtube.md (PID 549047 — alive)
+```
+
+The agent-doc.md session (PID 2066534) died — this current Claude session replaced it. The old `agent-doc start` process is gone, but the pane is alive with a new Claude process.
+
+**Why sessions restart:** When you switch editor files and trigger autoclaim or route, the system may:
+1. Kill the existing Claude process in the pane (to make room for the new file's session)
+2. Start a new `agent-doc start` for the new file
+3. This restarts the Claude session with a fresh context
+
+**To prevent this:** Each file should have a dedicated pane. If you're working on 3 files (agent-doc, youtube, corky), you need 3 panes in the window. Currently you have 2 panes, so switching to a 3rd file forces a pane reuse (killing an existing session).
+
+Want me to add a 3rd pane to window @0 for corky?
+<!-- agent:boundary:ef210df0-037b-4c6f-aec8-5103f3f5366b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1045,7 +1073,6 @@ Plugin v0.2.12 rebuilt. Install: IDEA → Settings → Plugins → gear → "Ins
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
 - [x] **IPC boundary insertion** — `ensure_boundary` flag replaces disk writes
-- [x] **Orphaned boundary fix** — restricted to append-mode components
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
 - [ ] **README.md staleness** — update to match current state

@@ -720,7 +720,7 @@ Does YouTube work with any TUI browsers? Would https://github.com/Siriusmart/you
 
 **Recommendation:** Ship `youtube comment` as-is. If pinning volume increases, revisit InnerTube approach by capturing current request format from DevTools. For now, the `&lc=` deep link makes manual pinning trivial.
 release
-### Re: Inline Questions + Release (HEAD)
+### Re: Inline Questions + Release
 
 **Q: Would implementing `clickTrackingParams` on top of the Go prototype work?**
 

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft corrected (1099, corp in progress). Ready for review.
+Benjamin replied. Draft response ready (needs resume attachment).
 <!-- /agent:status -->
 
 ## Exchange
@@ -69,7 +69,7 @@ Hi Benjamin,
 
 Yes, I'm open to contract work. I'd be 1099 for now — I'm in the process of setting up a corporation for C2C.
 
-I'm most interested in agent loop harness engineering — building the infrastructure that makes AI agents reliable in production. I've been shipping Rust tooling for agent sessions (document-as-interface, tmux routing, git-native correspondence) and recently architected a real-time multimodal AI pipeline on NVIDIA H100 GPUs.
+I'm most interested in agent loop harness engineering — building the infrastructure that makes AI agents reliable in production. I've been shipping Rust tooling for agent sessions (document-as-interface, tmux routing, git-native correspondence) and recently architected a real-time multimodal (video, audio, text) AI pipeline on NVIDIA H100 GPUs.
 
 Full-stack across Rust, Python, TypeScript, and AWS.
 
@@ -79,9 +79,36 @@ Best,
 Brian
 
 Ready to send, or further tweaks?
+
+Read /home/brian/work/btakita/agent-loop/mail/contacts/benjamin-becker/20260320-linkedin-benjamin-becker.txt
+
+draft a reply
+### Re: Benjamin's Response + Draft Reply (HEAD)
+
+Benjamin responded (3:54 PM, Mar 20). Key points:
+- **Roles:** AI agent infra/orchestration/eval, real-time multimodal pipelines, backend Rust/Python/TS on AWS, early-stage LLM-native products
+- **His model:** Helps engineers land contracts + optionally scale by bringing in execution support. You stay client-facing. Runs through your LLC/contract.
+- **Ask:** Send resume to start targeting roles
+
+**Draft reply:**
+
+Hi Benjamin,
+
+Thanks for the breakdown — the agent infra and real-time pipeline roles are right in my wheelhouse. The model sounds solid too, especially the flexibility to stay hands-on or delegate as needed.
+
+Here's my resume: [attach PDF]
+
+Happy to jump on a quick call if it helps narrow things down. What works for you?
+
+Best,
+Brian
+
+Attach your resume PDF when sending. Want to tweak, or ready to send?
+<!-- agent:boundary:8d8250dc-5032-4590-99cc-f2b79162cb56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Send resume PDF to Benjamin Becker via LinkedIn
 <!-- /agent:pending -->

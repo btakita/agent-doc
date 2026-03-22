@@ -244,9 +244,37 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:cd65f438 -->
+
+> when multiple agents operate across a large codebase
+
+I want to focus both on code and data context. Correspondence, documents, events, etc.
+I also want to emphasize capturing insights over voice & v
+### Re: Broadening context and emphasizing insight capture (HEAD)
+
+Updated the existence-lang bullet to cover code + data context (correspondence, documents, events), and sharpened the corky bullet around insight capture.
+
+**Final draft reply (v5):**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky captures insights from live audio/video via Whisper transcription and routes them into git-native context — correspondence, documents, events all flow into agent-accessible knowledge alongside code
+- Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across code and data contexts — correspondence, documents, events, not just source files
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:439cc726 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply (v4) and resume PDF, then send via LinkedIn
+- Review final draft reply (v5) and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

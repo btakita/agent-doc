@@ -497,6 +497,8 @@ The YouTube draft file is already updated with the new title and description —
 I authed on my own.
 Edit the video
 
+rebuild and deploy blog
+
 **Re: Edit YouTube video**
 
 Done. YouTube video updated: https://www.youtube.com/watch?v=IenfqO2vmAw
@@ -505,5 +507,18 @@ All three platforms now have consistent "job search workflow" wording:
 - **LinkedIn** — Updated
 - **YouTube** — Updated
 - **Blog post** — Updated locally (needs rebuild + deploy)
-<!-- agent:boundary:3debf962-fe0b-453f-9971-5f4763410257 -->
+
+**Re: rebuild and deploy blog**
+
+Done. Blog rebuilt and deployed:
+- Built locally with `make build`
+- Committed in `briantakita.me` submodule: `170c0f4`
+- Pushed to trigger Cloudflare Pages deploy
+- Parent `briantakita.me-dev` updated: `181ffa9`
+
+All three platforms now live with "job search workflow":
+- **LinkedIn** — https://www.linkedin.com/feed/update/urn:li:share:7441567383225290753
+- **YouTube** — https://www.youtube.com/watch?v=IenfqO2vmAw
+- **Blog** — https://briantakita.me/posts/agent-resume-recruiter-workflow-live (deploying via Cloudflare Pages)
+<!-- agent:boundary:5760e348-5e0f-487a-9b68-702377d7ac84 -->
 <!-- /agent:exchange -->

@@ -404,7 +404,7 @@ Files changed:
 - `Makefile` — added `release-gpu` target
 - `.github/workflows/release.yml` — added CUDA + Metal matrix entries with suffix-based artifact naming
 continue
-### Re: Continue — MP4 Bug Fixed + Workflow Streamlined (HEAD)
+### Re: Continue — MP4 Bug Fixed + Workflow Streamlined
 
 **Both remaining items were the same fix.** The problem: `.mp4` was in `SYMPHONIA_EXTS`, so symphonia tried to decode it, failed with "Unknown sample rate" (video MP4s don't expose audio codec params cleanly), and the error propagated without falling back to ffmpeg.
 

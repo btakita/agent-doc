@@ -1057,6 +1057,8 @@ Window @0:
 
 The agent-doc.md session (PID 2066534) died — this current Claude session replaced it. The old `agent-doc start` process is gone, but the pane is alive with a new Claude process.
 
+This should not have happened because tasks/agent-doc.md is on the left editor side while tasks/youtube.md is on the right editor side. Why did this happen? I noticed that the tmux window layout was readjusting the panes.
+
 **Why sessions restart:** When you switch editor files and trigger autoclaim or route, the system may:
 1. Kill the existing Claude process in the pane (to make room for the new file's session)
 2. Start a new `agent-doc start` for the new file
@@ -1065,14 +1067,47 @@ The agent-doc.md session (PID 2066534) died — this current Claude session repl
 **To prevent this:** Each file should have a dedicated pane. If you're working on 3 files (agent-doc, youtube, corky), you need 3 panes in the window. Currently you have 2 panes, so switching to a 3rd file forces a pane reuse (killing an existing session).
 
 Want me to add a 3rd pane to window @0 for corky?
-<!-- agent:boundary:ef210df0-037b-4c6f-aec8-5103f3f5366b -->
+No
+
+We have the stash window. I thought we were using the stash pane.
+I notice that long running claude tasks would keep the tmux pane running, even if we swaped out a different pane on the same side...by viewing a different file in the editor.
+### Re: Pane Routing — Editor Side vs Stash (HEAD)
+
+**What actually happened (better news than I thought):**
+
+The youtube session was NOT killed. It was stashed to a new window @117 when you switched to corky. The Claude session (PID 549047) is still alive:
+
+```
+Window @0 (active):
+  %18 → agent-doc.md (LEFT editor side)
+  %33 → corky.md (RIGHT editor side, NEW)
+
+Window @117 (stashed):
+  %32 → youtube.md (still alive, PID 549047)
+
+Window @2 (stash):
+  %4 → judith-krug.md
+  %5 → benjamin-becker.md
+```
+
+**Why it happened:** When you opened corky.md on the RIGHT editor side, the routing system:
+1. Detected corky.md needs a pane in window @0
+2. Stashed youtube (%32) to a new window @117 (not the existing stash @2)
+3. Created new pane %33 for corky.md
+
+**Why it used a new window @117 instead of stash @2:** This is likely a bug or behavior quirk in `reconcile()` — it should join the existing stash window, not create a new one. The existing stash window @2 already has spare capacity.
+
+**The user's expectation is correct:** Long-running Claude tasks should keep running in the stash when you swap files on the same editor side. The youtube session IS still running (just in @117 instead of @2), so the core behavior is working. The cosmetic issue is the extra window.
+
+**Your key insight — "long running claude tasks would keep the tmux pane running":** Yes, that's the designed behavior. The stash system preserves running sessions when you switch files. The session is moved to stash, not killed. When you switch back to youtube.md in the editor, the routing should move %32 back from @117 to @0.
+<!-- agent:boundary:699bf040-5b09-43be-b57b-96da5049eb18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **IPC boundary insertion** — `ensure_boundary` flag replaces disk writes
+- [ ] **Stash window routing** — investigate why youtube was stashed to @117 instead of @2
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
 - [ ] **README.md staleness** — update to match current state

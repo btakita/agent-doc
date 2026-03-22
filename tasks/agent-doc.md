@@ -484,7 +484,7 @@ These stale boundaries are still added in an uncommitted state. Why are they add
 Does anything need to be fixed in agent-doc or the Plugin?
 
 **Current boundary:** The active boundary at line 480 is still a full UUID (`741debb0-69cc-4eb5-a230-dc8ed230080a`) — the plugin should be generating 8-char IDs. This suggests the plugin may not have been reloaded with the latest build. Check if the installed plugin version matches v0.2.13.
-### Re: Why stale boundaries are uncommitted + what needs fixing (HEAD)
+### Re: Why stale boundaries are uncommitted + what needs fixing
 
 **The stale boundaries (lines 402, 416, 433, 458) are NOT in the snapshot** — they were cleaned from the snapshot in earlier commits. But they persist in the **working tree** because neither the plugin nor `agent-doc commit` cleans the working tree file of stale boundaries.
 

@@ -1205,17 +1205,38 @@ Binary installed. Try switching editor tabs to test.
 
 **Best approach — hybrid:** Keep the current stash window + largest-pane targeting. When `join-pane` still fails (all panes tiny), fall back to `break-pane -d` which creates a new detached window. This is what already happens — the fix I just made should prevent MOST failures by targeting the largest pane.
 
+When we hit the fallback case, the `break-pane -d` should create another stash window. We would need track all of the stash windows and the panes they contain as our stash inventory.
+
 **The real question is: does the fix work?** The `largest_pane_in_window` change should prevent "pane too small" in nearly all cases (the stash window is 200 rows, the largest pane should have at least 30+ rows). Let's test by switching editor tabs and see if stashing works without creating new windows.
 
 If it still fails, the next step is to increase the stash window to 500 rows or use `break-pane -d` as the primary stash method (accept multiple windows, add cleanup).
-<!-- agent:boundary:e153c537-765b-4b29-903e-37054a593051 -->
+### Re: Overflow Stash Windows (HEAD)
+
+**Implemented.** When `join-pane` fails (pane too small), the fallback now creates a named stash window instead of an anonymous one.
+
+**Changes:**
+
+1. **`break_pane_to_stash()`** — breaks a pane out with `break-pane -d`, then renames the new window to "stash". This makes it part of the stash inventory (findable by `find_stash_window`/`find_all_stash_windows`).
+
+2. **`find_all_stash_windows()`** — returns ALL windows named "stash" in the session (primary + overflow). This is the stash inventory query.
+
+3. **Fallback chain in `stash_pane()`:**
+   - Try `join-pane -dv` to largest pane in primary stash (fast path)
+   - On failure → `break_pane_to_stash` creates overflow stash window named "stash"
+   - All stash windows are discoverable via `find_all_stash_windows()`
+
+**Stash inventory:** `tmux list-windows -F '#{window_id} #{window_name}' | grep stash` shows all stash windows. When retrieving a pane from stash (editor tab switch back), `reconcile` can search all stash windows.
+
+Binary installed. 508 tests pass.
+<!-- agent:boundary:ef392af2-c015-432d-807d-0aee272ec92c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **Stash "pane too small" fix** — target largest pane instead of first
+- [x] **Stash overflow windows** — `break_pane_to_stash` + `find_all_stash_windows`
+- [x] **Stash "pane too small" fix** — target largest pane
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->

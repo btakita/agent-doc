@@ -985,10 +985,28 @@ corky 0.19.1 is now installed with GPU-accelerated transcription. The Makefile h
 
 Note: `cargo install --path . --features transcribe-cuda` alone fails because it doesn't set the `CORKY_DEFAULT_GCP_CLIENT_ID`/`CORKY_DEFAULT_GCP_CLIENT_SECRET` compile-time env vars. Always use `make install` (which reads them from `pass`).
 Can we make the `--gpu` install if compatible libraries are found the default installation of corky?
-<!-- agent:boundary:989a1bb3-a0ad-443c-8049-18e0ea9b6c27 -->
+### GPU as Default Install (HEAD)
+
+**Already done for the two recommended install paths:**
+- `make install` — auto-detects GPU via `nvidia-smi`, tries `--features transcribe-cuda`, falls back to CPU
+- `install.sh` — auto-detects GPU, downloads CUDA binary variant if available
+
+**Not possible for bare `cargo install --path .`:**
+Cargo features are compile-time static — `build.rs` can't dynamically enable features. The `transcribe-cuda` feature pulls in `whisper-rs/cuda` as a dependency, which must be selected at the `cargo install` invocation level.
+
+**What we can do:**
+1. Document `make install` as the recommended install method (already done in README)
+2. Add a `corky install` self-install command that runs the GPU detection + correct cargo flags internally — but this is circular (corky must already be installed to run it)
+3. Add a thin shell wrapper `cargo-install-corky` that does the detection — but this adds complexity for minimal gain
+
+**Recommendation:** The current setup is already correct. `make install` and `install.sh` are the documented default paths, and both auto-detect GPU. No changes needed — bare `cargo install` is a developer escape hatch, not the primary install method.
+<!-- agent:boundary:6be8bd79-fdfc-4ab1-80a7-84875ca69011 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] SPEC.md §6.8, §6.9, §18 — drafted, uncommitted in corky submodule
+- [ ] Commit + release pending SPEC.md + write destination + pull improvements
+- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

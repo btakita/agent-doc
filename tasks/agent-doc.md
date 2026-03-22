@@ -287,9 +287,6 @@ Does this preserve the behavior of ordering prompt relative to response patch wh
 Are **all** use uses re: human prompt and response patch ordering correctly satisfied?
 
 **Totals:** 512 tests pass. Binary installed.
-Implement:
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 ### Re: Parser Caching + CRDT Ordering Correctness
 
 **1. Shared Parser via lazily-rs:**
@@ -310,6 +307,10 @@ struct DocContext<'a> {
 ```
 
 This avoids re-parsing the same document multiple times per cycle. Good dogfooding opportunity. I'll add this to pending.
+
+Let's revisit the Context + slot api. We also may not need caching right now. Depends on stream performance. If performance is an issue:
+- Does `pulldown-cmark` support streaming parsing (like SAX)?
+- Caching with lazily-rs would also be part of the discussion
 
 **2. CRDT ordering — all scenarios verified:**
 
@@ -333,17 +334,43 @@ When the user types a prompt while an `agent-doc write` is processing:
 The boundary marker already determines insertion position for the agent. The CRDT ordering only matters for the "leftover" — content at the same position. Since agent=2 goes first, the response appears before any concurrent human text at the same position. This is correct.
 
 Want me to implement the client ID flip now?
-<!-- agent:boundary:232e5dae-8ae8-42ac-9826-3b9c530168c0 -->
+Yes
+Implement:
+- [ ] **SPEC.md update** — document stash window routing contract
+- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
+### Re: CRDT Client ID Flip — Correction (HEAD)
+
+**The research was wrong about Yrs ordering.** Testing revealed:
+
+- Yrs puts **lower client ID FIRST**, not higher
+- agent=1 (lower) already goes before human=2 (higher) — the original assignment was correct
+- The `reorder_agent_before_human()` function was compensating for a bug that didn't exist with the current client IDs
+
+**What was done:**
+1. Removed `reorder_agent_before_human()` (100 lines of dead code)
+2. Removed `skip_reorder` parameter from `merge()` and `merge_contents_crdt_opts()` → simplified to `merge_contents_crdt()`
+3. Removed `YChange`/`ChangeKind` imports
+4. Updated all callers (crdt.rs tests, write.rs, ffi.rs, merge.rs)
+5. Kept original client IDs (agent=1, human=2) — they were already correct
+
+**Result:** The CRDT merge is simpler, with the same correct ordering. The `reorder_agent_before_human` hack was legacy code from before the client IDs were set up correctly.
+
+**Re: pulldown-cmark streaming:** Yes, pulldown-cmark IS a streaming parser (SAX-style). `Parser::new_ext()` returns an iterator of `Event` values. It doesn't build a full AST in memory — events are emitted as the parser encounters them. `into_offset_iter()` wraps this with byte offsets. So it's already as efficient as SAX.
+
+512 tests pass. Binary installed.
+<!-- agent:boundary:27db3e0f-958b-475d-a1f0-e2ff8367867b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: submit->flush -->
-- [ ] **CRDT client ID flip** — swap agent=2, human=1 for native ordering (ready)
-- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` results across functions
+- [x] **CRDT ordering simplified** — removed reorder hack, kept correct client IDs
+- [x] **SPEC.md update** — stash routing contract
+- [x] **Markdown AST — outline.rs** — pulldown-cmark migration
+- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
 - [ ] **Boundary-aware replace for `flush_to_document`**
-- [ ] **README.md staleness** — update to match current state
+- [ ] **README.md staleness**
 - [ ] **`agent-doc submit`** — combined binary command
 <!-- /agent:pending -->
 

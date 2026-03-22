@@ -335,9 +335,6 @@ The boundary marker already determines insertion position for the agent. The CRD
 
 Want me to implement the client ID flip now?
 Yes
-Implement:
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 ### Re: CRDT Client ID Flip — Correction
 
 **The research was wrong about Yrs ordering.** Testing revealed:
@@ -355,19 +352,52 @@ Implement:
 
 **Result:** The CRDT merge is simpler, with the same correct ordering. The `reorder_agent_before_human` hack was legacy code from before the client IDs were set up correctly.
 
+Is the client id going to work for every case? Is this fully deterministic?
+
 **Re: pulldown-cmark streaming:** Yes, pulldown-cmark IS a streaming parser (SAX-style). `Parser::new_ext()` returns an iterator of `Event` values. It doesn't build a full AST in memory — events are emitted as the parser encounters them. `into_offset_iter()` wraps this with byte offsets. So it's already as efficient as SAX.
 
 512 tests pass. Binary installed.
-<!-- agent:boundary:27db3e0f-958b-475d-a1f0-e2ff8367867b -->
+Implement:
+- [ ] **SPEC.md update** — document stash window routing contract
+- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
+### Re: Client ID Determinism (HEAD)
+
+**Yes, it's fully deterministic.** Here's why:
+
+**Yrs concurrent insert ordering rule:** When two clients insert at the same position, Yrs uses a deterministic tie-breaker: **lower client ID goes first** (left). This is part of the YATA algorithm (Yjs/Yrs) and is not configurable — it's baked into the CRDT spec.
+
+**Our setup:**
+- `Doc::with_client_id(1)` — agent (ours)
+- `Doc::with_client_id(2)` — human (theirs)
+- Both docs are ephemeral (created fresh each `merge()` call)
+- IDs are hardcoded constants, not random
+
+**Determinism guarantees:**
+1. Same inputs → same output (pure function, no randomness)
+2. Lower client ID always goes first (YATA spec)
+3. No persistent state drift (docs are recreated each call)
+4. No network/timestamp dependency (local-only merge)
+
+**Edge cases that ARE handled:**
+- Multiple concurrent inserts at same position → ordered by client ID
+- Mid-document inserts → ordered by client ID at that position
+- Delete + insert conflicts → Yrs preserves both sides (no data loss)
+- Empty base state → works (null base creates fresh doc)
+
+**Edge cases that DON'T apply:**
+- Multi-client (3+) merges → we only have 2 clients (agent + human)
+- Network partition → local-only, no network
+- Clock skew → no timestamps used
+
+The ordering is as deterministic as `1 < 2`.
+<!-- agent:boundary:6811bfbc-2000-43d5-85a0-b6a2a187b973 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: submit->flush -->
-- [x] **CRDT ordering simplified** — removed reorder hack, kept correct client IDs
-- [x] **SPEC.md update** — stash routing contract
-- [x] **Markdown AST — outline.rs** — pulldown-cmark migration
+- [x] **CRDT ordering verified deterministic** — Yrs YATA: lower client ID always first
 - [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
 - [ ] **Boundary-aware replace for `flush_to_document`**
 - [ ] **README.md staleness**

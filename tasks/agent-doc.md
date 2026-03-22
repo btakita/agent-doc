@@ -920,26 +920,49 @@ Both include the two commit fixes (working tree overwrite + snapshot leak). You 
 3. Verify your prompt survives the commit cycle and appears in the diff
 
 If the plugin hasn't been installed yet: IDEA → Settings → Plugins → gear → "Install from Disk..." → select `agent-doc-jetbrains-0.2.12.zip` → restart.
-<!-- agent:boundary:2b8a62da-083f-4a7c-bee4-945ccf08a7af -->
+
+Continue with pending jobs.
+### Re: Continuing Pending Jobs (HEAD)
+
+**Completed two SKILL updates:**
+
+**1. SKILL update for `agent-doc diff` (step 1):**
+Step 1 now reads only the document HEAD + runs `agent-doc diff <FILE>` for a compact unified diff. The snapshot file is never loaded into context. This saves ~N tokens per cycle (where N = document size) by eliminating the duplicate document read.
+
+Old flow: `Read <FILE>` (N tokens) + `Read snapshot` (N tokens, ~90% duplicate) = 2N tokens
+New flow: `Read <FILE>` (N tokens) + `agent-doc diff` output (~0.1N tokens) = 1.1N tokens
+
+**2. SKILL auto-update uses AskUserQuestion:**
+When the binary version is newer than the SKILL version, the pre-flight now uses `AskUserQuestion` instead of print+stop. This creates a visible prompt in the CLI that pauses until the user responds.
+
+**3. SKILL version bumped to 0.24.4.**
+
+Binary rebuilt, tests pass (504: 165 lib + 301 bin + 38 CLI), installed. SKILL.md installed to project.
+
+**Next pending items:**
+- Markdown AST migration (`pulldown-cmark`)
+- Boundary-aware replace for `flush_to_document`
+- CLAUDE.md + README.md staleness
+
+Want me to continue with the AST migration or another item?
+<!-- agent:boundary:8a308db7-2857-4f85-9979-4fdc1051d802 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: diff_skill->diff_cmd -->
+<!-- deps: -->
+- [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command, no snapshot read
+- [x] **SKILL auto-update: AskUserQuestion** — replaces print+stop
 - [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak bugs
 - [x] **Boundary repositioning on commit** — `reposition_boundary_to_end()` in git.rs
-- [x] **JB plugin v0.2.12 install** — caret removal + end-of-exchange fallback
-- [x] **Remove caret fallback** — replaced with end-of-exchange append (v0.2.12)
+- [x] **JB plugin v0.2.12** — caret removal + end-of-exchange fallback
 - [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
 - [x] Boundary snowball fix (`ce84701`)
 - [x] Boundary re-insertion in all write paths (`3a08011`)
 - [x] `remove_all_boundaries()` code-block awareness
-- [x] Plugin v0.2.11 build (`3c06c36`)
-- [ ] **SKILL update for `agent-doc diff`** — replace snapshot read with diff command in step 1
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] Boundary-aware replace for `flush_to_document`
-- [ ] SKILL auto-update: use AskUserQuestion instead of print+stop
 - [ ] CLAUDE.md + README.md staleness
 - [ ] CRDT merge ordering — Yrs causality (final writes only)
 - [ ] `agent-doc submit` — combined binary command

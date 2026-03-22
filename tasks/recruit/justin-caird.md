@@ -135,6 +135,7 @@ To rebuild if you edit the profile: `make -C resume PROFILE=eci-solutions`
 
 This needs to be supported.
 I could mention dashboard as interface with bi-directional real-time updates in the markdown using CRDT
+Along with human-agent align orchestration
 ### Re: Strengthening the agent-doc bullet
 
 Good call. "Exactly the pattern ECI is building toward" is a claim without evidence. Revised bullet:
@@ -161,9 +162,31 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:e032f201 -->
+### Re: Adding human-agent alignment orchestration (HEAD)
+
+Incorporated. Updated bullet now covers both the technical mechanism (CRDT, bi-directional) and the orchestration story (human-agent alignment):
+
+**Final draft reply:**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a dashboard-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+- I have experience modernizing legacy systems (Backbone→Svelte/React at SocialChorus, Rails migrations, .NET at NASPP)
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:7f9cbd54 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review updated draft reply and resume PDF, then send via LinkedIn
+- Review final draft reply and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

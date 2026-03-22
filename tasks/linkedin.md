@@ -459,6 +459,7 @@ Post now has two comments:
 2. GitHub source code links
 
 Still pending: Do you want to edit the post body to fix "recruiter workflow" → "job search workflow"?
+Yes
 
 **Re: Fix "recruiter workflow" across all platforms**
 
@@ -475,5 +476,22 @@ Still pending: Do you want to edit the post body to fix "recruiter workflow" →
 - Then rebuild + deploy the blog
 
 Do you want me to update the blog post file now, or wait for the YouTube auth first?
-<!-- agent:boundary:3b7b89d9-83cc-4019-a977-3143d58c0eae -->
+update blog post
+then youtube auth
+
+**Re: update blog post then youtube auth**
+
+**Blog post** — Already updated. Changes made to `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-19-agent-resume-recruiter-workflow-live.md`:
+- Title → "Building Agent Resume: AI-Powered Job Search Workflow with Resume Generation"
+- Description → "job applications" instead of "recruiter conversations"
+- Body heading, iframe title, section headers, and references all updated
+- Needs rebuild + deploy to go live
+
+**YouTube** — Auth failed (token expired, browser callback wasn't received). You'll need to:
+1. Run `corky youtube auth` from a terminal
+2. Complete the Google OAuth flow in the browser
+3. Then run `corky youtube edit mail/social/20260322-015438-youtube.md`
+
+The YouTube draft file is already updated with the new title and description — just needs the auth to push the edit.
+<!-- agent:boundary:9b05a907-3f86-4c43-8dfb-642436c707e5 -->
 <!-- /agent:exchange -->

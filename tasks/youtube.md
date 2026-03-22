@@ -553,7 +553,27 @@ This is a browser cache issue. Try:
 2. **Or:** Open DevTools → Network tab → check "Disable cache" → refresh
 
 The dev server is serving the updated content with the new post included.
-<!-- agent:boundary:a14ea081-1c85-4808-b552-3ad78c7ddb75 -->
+
+We lost the site header, breadcrumbs, and sticky header text being smaller on scroll. Did one of our modules become reverted or lose the previous changes?
+![img_5.png](img_5.png)
+### Re: Missing Header Styles (HEAD)
+
+**Found it.** The `ui--server--blog` submodule has uncommitted changes in `header/blog__header.ts` that shrink the header:
+
+```diff
+- logo_image_class ??= 'w-16 h-10'    →  'w-12 h-7'
+- 'p-4'                                →  'py-1.5' + 'px-4'
+- 'text-xl' / 'sm:text-2xl'           →  'text-base' / 'sm:text-lg'
+```
+
+These are local modifications in `src/rappstack-dev/lib/ui--server--blog/header/blog__header.ts` — logo made smaller, padding reduced, text size decreased. They were never committed and are bleeding into the dev server.
+
+**Options:**
+1. **Revert** — `git -C src/rappstack-dev/lib/ui--server--blog checkout header/blog__header.ts` to restore original sizes
+2. **Keep** — If you intentionally wanted a more compact header, commit these changes
+
+Which do you want?
+<!-- agent:boundary:608d1a32-eb65-4b69-8307-f692f2ab5586 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -569,5 +589,6 @@ The dev server is serving the updated content with the new post included.
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
 - [x] Create blog post for briantakita.me
+- [ ] Fix header regression in ui--server--blog
 - [ ] Deploy briantakita.me to production
 <!-- /agent:pending -->

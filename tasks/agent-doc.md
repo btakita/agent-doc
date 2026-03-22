@@ -548,7 +548,7 @@ Alternatively, the plugin could run its own `repositionBoundaryToEnd()` **after 
 
 Want me to implement both?
 Yes
-### Re: Implement both Option A & B (HEAD)
+### Re: Implement both Option A & B
 
 **Done.** Both implemented and tested:
 
@@ -574,7 +574,7 @@ Yes
 - `src/template.rs` — `reposition_boundary_to_end()` uses `new_boundary_id()` (8-char)
 
 **Next step:** Plugin-side integration — have `PatchWatcher` call the new FFI function instead of its Kotlin implementation.
-<!-- agent:boundary:a6eb51a3 -->
+<!-- agent:boundary:3ffa19dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

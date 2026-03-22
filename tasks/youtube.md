@@ -543,7 +543,17 @@ bun run app/briantakita.me/post/index.generate.ts
 The new `index.ts` now includes the import for `2026-03-19-agent-resume-recruiter-workflow-live.md` (line 28). The dev server should hot-reload and show the post in Recent Posts.
 
 If it still doesn't appear, you may need to restart the dev server.
-<!-- agent:boundary:c42d8591-ebf7-485a-a27d-78837afe8ad9 -->
+Still seeing a stale site in my browser.
+### Re: Stale Browser (HEAD)
+
+The post **is** in the dev server output — I confirmed by curling localhost:4100 and finding `agent-resume-recruiter-workflow-live` in the HTML.
+
+This is a browser cache issue. Try:
+1. **Hard refresh:** `Ctrl+Shift+R` (or `Cmd+Shift+R` on Mac)
+2. **Or:** Open DevTools → Network tab → check "Disable cache" → refresh
+
+The dev server is serving the updated content with the new post included.
+<!-- agent:boundary:a14ea081-1c85-4808-b552-3ad78c7ddb75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -559,5 +569,5 @@ If it still doesn't appear, you may need to restart the dev server.
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
 - [x] Create blog post for briantakita.me
-- [ ] Verify post visible on dev server + deploy
+- [ ] Deploy briantakita.me to production
 <!-- /agent:pending -->

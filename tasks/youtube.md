@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Blog post created for YouTube video. Site ready for build/deploy.
+All updates released and pushed. Ready for production deploy.
 <!-- /agent:status -->
 
 ## Exchange
@@ -575,7 +575,8 @@ These are local modifications in `src/rappstack-dev/lib/ui--server--blog/header/
 Which do you want?
 
 keep, commit, and push
-### Re: Keep, Commit, Push (HEAD)
+release updates
+### Re: Keep, Commit, Push
 
 **Done.** Committed and pushed the compact header changes through all three repos:
 
@@ -584,7 +585,18 @@ keep, commit, and push
 3. `agent-loop` — updated submodule pointer `6e01913`
 
 The compact header (smaller logo, reduced padding, smaller text) is now the committed state.
-<!-- agent:boundary:f3346a4d-a925-418e-826a-bdaeb7c63b72 -->
+### Re: Release Updates (HEAD)
+
+**All released and pushed:**
+
+1. **`@rappstack/ui--server--blog@0.1.2`** — published to npm with compact header style
+2. **`rappstack-dev`** — submodule pointers updated, pushed
+3. **`briantakita.me`** — blog post + regenerated index committed and pushed
+4. **`briantakita.me-dev`** — submodule pointer updated, pushed
+5. **`agent-loop`** — all submodule pointers updated
+
+The `^0.1.1` range in briantakita.me-dev will auto-resolve to 0.1.2 on next install/deploy.
+<!-- agent:boundary:a540d188-3b0f-45dc-a160-e58553b58ad2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -600,6 +612,7 @@ The compact header (smaller logo, reduced padding, smaller text) is now the comm
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
 - [x] Create blog post for briantakita.me
-- [x] Commit compact header style in ui--server--blog
+- [x] Commit compact header style + publish @rappstack/ui--server--blog@0.1.2
+- [x] Release all submodule updates
 - [ ] Deploy briantakita.me to production
 <!-- /agent:pending -->

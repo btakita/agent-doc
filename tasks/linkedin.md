@@ -418,6 +418,8 @@ Good call — "Not vibe coding" was too dismissive. Updated the draft and the co
 Draft file updated: `mail/social/20260322-agent-resume-workflow-linkedin.md`
 Publish
 
+Is this a recruiter or recruitee workflow?
+
 **Re: Publish**
 
 Done.
@@ -425,5 +427,18 @@ Done.
 - **Post published:** https://www.linkedin.com/feed/update/urn:li:share:7441567383225290753
 - **First comment posted** (ID: `7441567425197789184`) with YouTube video + blog post links
 - Draft file updated to `status: published` with `post_id` and `published_at`
-<!-- agent:boundary:708f16a1-1334-4120-83b7-132ed91f135c -->
+
+Add first comment.
+Include
+
+**Re: recruiter vs recruitee workflow**
+
+Good catch — "recruiter workflow" is misleading. You're the job seeker, not the recruiter. Options:
+
+1. **"agent-driven job search workflow"** — clearest
+2. **"recruiter outreach workflow"** — implies outreach *to* recruiters
+3. **"candidate workflow"** — formal
+
+Want me to edit the published post via `corky linkedin edit` to fix this? The change would be in the first line.
+<!-- agent:boundary:454c95aa-4910-4f98-a584-9544b6eef812 -->
 <!-- /agent:exchange -->

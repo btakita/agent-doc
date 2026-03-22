@@ -976,19 +976,34 @@ add tests
 - `find_boundary_id_skips_code_blocks` — boundary inside fenced code → not found
 - `find_boundary_id_finds_real_marker` — real boundary outside code → found
 
-tasks/corky.md
 ### Re: Switching to corky
 
 Acknowledged. Run `/agent-doc tasks/corky.md` to start that session.
 
+No..Cancel this. `tasks/corky.md` was an incomplete statement. See below.
+
 Pending items cleaned up per your edits.
-<!-- agent:boundary:a0de54d0-7e3d-4b94-bc03-3901f1e711f4 -->
+We just had a File Cache Conflict fom the editor while I was typing.
+tasks/corky.md has orphaned `agent:boundary` tags.
+### Re: File Cache Conflict + Orphaned Boundaries (HEAD)
+
+**Orphaned boundaries in `corky.md` cleaned up.** Removed 5 stale boundary markers, kept the last one (line 1077).
+
+**Root cause:** `ensure_boundary_on_disk()` was inserting boundaries for ALL components — including replace-mode components like `pending` and `status` that don't need them. Each IPC write cycle inserted new boundaries without cleaning old ones.
+
+**Fix:** `ensure_boundary_on_disk()` now only inserts for append-mode components (`exchange`, `findings`). Replace-mode components skip boundary insertion entirely. This prevents boundary accumulation in components where the entire content is replaced each write.
+
+**File Cache Conflict:** This happens when the binary writes to the file on disk (via `ensure_boundary_on_disk` or `reposition_boundary_to_end`) and the IDE detects the external modification. The IDE then prompts whether to reload from disk or keep the in-memory version. With the fix, non-exchange components won't trigger disk writes for boundary insertion, reducing the frequency of these conflicts.
+
+Binary rebuilt, installed, 511 tests pass.
+<!-- agent:boundary:4b853478-84df-4552-854d-2ceb7e4f3844 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
+- [x] **Orphaned boundary fix** — `ensure_boundary_on_disk` restricted to append-mode components
 - [x] **CLAUDE.md updated** — module layout + boundary responsibility row
 - [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command
 - [x] **SKILL auto-update: AskUserQuestion**

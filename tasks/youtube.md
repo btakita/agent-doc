@@ -649,7 +649,7 @@ Use corky. If corky is missing features to accomplish this task, plan the featur
 
 2. **`--pin` flag** — Pin the comment after posting
    - API: YouTube doesn't have a direct "pin comment" API endpoint for the Data API v3. Pinning is only available through the YouTube Studio UI.
-   - **Alternative:** Post the comment via API, then pin it manually in YouTube Studio, OR use the undocumented Creator Studio API (fragile).
+   - **Alternative:** Post the comment via API, then pin it manually in YouTube Studio, OR use the undocumented Creator Studio API (fragile).: Tell me more about the Creator Studio API
 
 **Recommended approach:**
 1. Implement `corky youtube comment` to post the comment
@@ -662,7 +662,57 @@ Use corky. If corky is missing features to accomplish this task, plan the featur
 > Topics covered: Agent Resume (TOML-based resume generation), Corky recruiter pipeline, agent-doc parallel commands, CRDT improvements, and more.
 
 Want me to implement `youtube comment` in corky now, or post the comment manually for now and implement later?
-<!-- agent:boundary:a848744e-1173-4dcb-a667-2e4f63227ef4 -->
+Implement `youtube comment`
+Discuss using the Creator Studio API to pin the comment.
+### Re: Implement youtube comment + Creator Studio API (HEAD)
+
+**`youtube comment` implemented and built!** All tests pass (clippy + 8 youtube tests).
+
+**Changes:**
+- `src/social/youtube.rs` — Added `insert_comment()` / `insert_comment_at()` using `POST /youtube/v3/commentThreads?part=snippet`
+- `src/social/mod.rs` — Added `run_youtube_comment()` handler (follows LinkedIn comment pattern)
+- `src/cli.rs` — Added `Comment { file, body }` variant to `YoutubeCommands`
+- `src/main.rs` — Added routing for `YoutubeCommands::Comment`
+
+**Usage:**
+```bash
+corky youtube comment <DRAFT_FILE> "comment text"
+```
+
+After posting, it prints the comment ID and a direct link with `&lc=COMMENT_ID` for easy manual pinning.
+
+**Need to re-auth YouTube** — token expired. Run from the mail directory:
+```bash
+cd mail && ../.bin/corky youtube auth
+```
+Then approve in the browser. After that I can post the comment.
+
+---
+
+**Creator Studio API for Pinning — Deep Dive:**
+
+The YouTube Data API v3 has **no endpoint for pinning comments**. The only known approach is YouTube's private InnerTube API:
+
+**Endpoint:** `POST https://www.youtube.com/youtubei/v1/comment/perform_comment_action`
+
+**How it worked (2023):**
+- Request body with `context.client` (clientName: "WEB", clientVersion) and an `actions` array containing a base64-encoded protobuf blob with the comment ID, channel ID, and action type
+- Auth: Same OAuth2 token with `youtube.force-ssl` scope
+- A working Go implementation existed (MarkRosemaker, GitHub issue youtube/api-samples#360)
+
+**Current status (2025): BROKEN**
+- YouTube changed `actions` → `params` (single base64 string, not array)
+- Now requires `clickTrackingParams` — a runtime-generated ID from a prior page load
+- Multiple users confirm it stopped working in early 2025
+- No maintained open-source implementation exists
+
+**Options for pinning:**
+1. **Manual pin via YouTube Studio** (recommended for now) — The `&lc=COMMENT_ID` link highlights the exact comment for one-click pinning
+2. **InnerTube reverse-engineering** — Would require intercepting the current request format from Chrome DevTools, extracting the protobuf schema, and maintaining it against YouTube's frequent changes. High effort, fragile.
+3. **Browser automation** (Puppeteer/Playwright) — Too heavy for a CLI tool
+
+**Recommendation:** Ship `youtube comment` as-is. If pinning volume increases, revisit InnerTube approach by capturing current request format from DevTools. For now, the `&lc=` deep link makes manual pinning trivial.
+<!-- agent:boundary:17bfe2d9-22cc-4cbf-ac48-a66afc785cba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -682,6 +732,8 @@ Want me to implement `youtube comment` in corky now, or post the comment manuall
 - [x] Release all submodule updates
 - [x] Deploy briantakita.me to Cloudflare Pages
 - [x] Remove Docker/Contabo deployment infrastructure
-- [ ] Implement `corky youtube comment` command
-- [ ] Post pinned comment on YouTube video with blog post link
+- [x] Implement `corky youtube comment` command
+- [ ] Re-auth YouTube token (expired)
+- [ ] Post comment on YouTube video with blog post link
+- [ ] Commit + release corky with youtube comment feature
 <!-- /agent:pending -->

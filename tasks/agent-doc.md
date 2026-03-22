@@ -233,6 +233,8 @@ The autoclaim reads the registry (`sessions.json`) which stores the old path. Wh
 
 **Recommendation:** Option 1 (validate + prune in autoclaim). It's a 5-line fix in `autoclaim.rs`: check `Path::new(&entry.file).exists()`, if not, remove from registry and log. No editor plugin changes needed.
 
+Option 1
+
 ### Re: ClawTeam investigation
 
 **What it is:** Agent swarm orchestration (Python/CLI). Leader agent spawns workers via `clawteam spawn`, each getting a git worktree + tmux window + identity. Workers communicate via file-based transport or ZeroMQ. Uses a "board" for task assignment/status.
@@ -252,6 +254,8 @@ The autoclaim reads the registry (`sessions.json`) which stores the old path. Wh
 
 Worth bookmarking for the swarm coordination patterns, but not a dependency or integration target.
 
+How about a task queue model with real-time interactive documents in agent-doc?
+
 ### Re: Autoclaim error on renamed file
 
 **Implemented: file existence validation in autoclaim.** When a claimed file no longer exists (renamed/deleted), the stale entry is:
@@ -264,13 +268,52 @@ If ALL claims for a pane are stale, the pane gets a clean message instead of an 
 This handles the `tasks/toby-hill.md → tasks/employment/toby-hill.md` rename case. The pane will no longer try to `agent-doc start` on the old path. The user can re-claim the file at its new path with `/agent-doc claim tasks/employment/toby-hill.md`.
 
 Binary installed. 521 tests pass.
-<!-- agent:boundary:18c154d1-9334-43eb-9cf4-ac4afb2b91dd -->
+
+### Re: Option 1 (HEAD)
+
+Already implemented. Autoclaim now validates file existence and prunes stale entries.
+
+### Re: Task queue model with real-time interactive documents (HEAD)
+
+The idea: combine a centralized task queue (like ClawTeam's "board") with agent-doc's document-as-UI approach. Each task gets a document. The queue coordinates which agent works on which document.
+
+**How it could work:**
+
+1. **Queue document** — a template-mode document with a `&lt;!-- agent:queue --&gt;` component listing tasks:
+   ```markdown
+   &lt;!-- agent:queue --&gt;
+   - [ ] Fix auth middleware → tasks/auth-fix.md (assigned: pane %5)
+   - [ ] Add pagination → tasks/pagination.md (unassigned)
+   - [x] Update README → tasks/readme.md (done)
+   &lt;!-- /agent:queue --&gt;
+   ```
+
+2. **Task documents** — each task is a regular agent-doc session document. The agent works on it interactively. Progress is visible in real-time via the document.
+
+3. **Orchestrator** — a watch-mode agent monitors the queue document. When a task is unassigned, it spawns a new pane (via tmux-router) and claims the task document. When a task is done, it updates the queue.
+
+**What already exists:**
+- `parallel.rs` + `worktree.rs` — git worktree isolation per task
+- `tmux-router` — pane management, routing, auto-start
+- `sessions.json` — session registry (who's working on what)
+- `watch.rs` — file-watching for auto-submit
+- Template mode + components — structured document updates
+
+**What's missing:**
+- A "queue" component type with task assignment semantics
+- An orchestrator that reads the queue and spawns agents
+- Task completion detection (could be based on a `&lt;!-- agent:status --&gt;` component in each task doc)
+- Cross-document coordination (one agent's output feeds another's input)
+
+**Simplest MVP:** Use the existing `&lt;!-- agent:pending --&gt;` component as a task queue. An orchestrator document lists all tasks. A watch-mode agent picks up unassigned tasks, creates panes, and claims documents. No new binary features needed — just a SKILL.md workflow for the orchestrator.
+
+This naturally extends agent-doc's existing parallel fan-out model but adds persistent, visible coordination through documents.
+<!-- agent:boundary:550a2f4c-ffd6-4d27-acf8-700d2da6d645 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

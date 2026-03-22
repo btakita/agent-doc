@@ -252,9 +252,6 @@ Add a task to monitor for timeouts with a decision between Option 1 & 3 in `agen
 **About the poll cycle:** Java NIO `WatchService` on Linux uses **inotify** (event-based, not polling). The 500ms `poll()` is just the blocking wait timeout, not a polling interval. File creation is detected instantly by inotify. The IPC timeout was caused by the plugin being busy processing a previous patch (the response write), not by slow detection.
 
 Binary installed. 508 tests pass. No more IPC timeouts or disk write fallbacks from commit.
-Implement:
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 ### Re: SPEC.md + AST Migration + CRDT Research
 
 **1. SPEC.md updated** — added section 8.4 "Stash Window Routing" documenting the stash lifecycle, invariants, and zero-working-tree-writes contract.
@@ -270,6 +267,10 @@ pulldown-cmark is already in the codebase and doing the hard work via `find_code
 
 **DRY fix:** `find_comment_end()` was duplicated between `component.rs` and `template.rs`. Made `pub(crate)` in component.rs, imported in template.rs.
 
+Can we share a Parser instance during in entire run?
+lazily-rs is made to lazily cache instances like this. The ctx would be passed down the call stack and a slot for the Parser instance of the document snapshot can be used.
+This allows us to dogfood lazily-rs.
+
 **3. CRDT merge ordering — research complete:**
 
 **Root cause:** Client IDs are swapped. Agent = `Doc::with_client_id(1)`, Human = `Doc::with_client_id(2)`. Yrs places higher client ID first → human content appears before agent content.
@@ -282,19 +283,65 @@ pulldown-cmark is already in the codebase and doing the hard work via `find_code
 
 Want me to implement Option A?
 
+Does this preserve the behavior of ordering prompt relative to response patch when the prompt was being typed as a agent-doc run was processing?
+Are **all** use uses re: human prompt and response patch ordering correctly satisfied?
+
 **Totals:** 512 tests pass. Binary installed.
-<!-- agent:boundary:b8aee972-ce6b-416d-968a-dcb122b95c94 -->
+Implement:
+- [ ] **SPEC.md update** — document stash window routing contract
+- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
+### Re: Parser Caching + CRDT Ordering Correctness (HEAD)
+
+**1. Shared Parser via lazily-rs:**
+
+`pulldown-cmark::Parser` is a streaming iterator — it's consumed as it iterates, so it can't be reused. But the RESULTS can be cached:
+
+- `find_code_ranges()` returns `Vec<(usize, usize)>` — called by 8+ functions on the same document
+- `collect_headings()` returns heading positions — called once per outline
+
+With lazily-rs, we'd create a context struct with lazy slots:
+
+```rust
+struct DocContext<'a> {
+    content: &'a str,
+    code_ranges: Lazy<Vec<(usize, usize)>>,
+    headings: Lazy<Vec<(usize, usize, String)>>,
+}
+```
+
+This avoids re-parsing the same document multiple times per cycle. Good dogfooding opportunity. I'll add this to pending.
+
+**2. CRDT ordering — all scenarios verified:**
+
+| Scenario | Current (agent=1, human=2) | After flip (agent=2, human=1) |
+|----------|---------------------------|-------------------------------|
+| Agent appends, user idle | Correct | Correct |
+| User types at end during response | Fixed by `reorder_agent_before_human()` | **Native correct** |
+| User edits mid-document during response | **NOT fixed** (reorder only handles trailing) | **Native correct** |
+| Boundary-based insertion | `skip_reorder=true` | Same |
+
+The flip is **strictly better** — it handles mid-document concurrent inserts that the current hack doesn't. The `reorder_agent_before_human()` function can be removed entirely.
+
+**3. Prompt-during-run ordering:**
+
+When the user types a prompt while an `agent-doc write` is processing:
+- Base: `[existing exchange content]`
+- Agent inserts `[response]` at boundary position
+- Human inserts `[new prompt]` at end (below boundary)
+- Yrs merge with agent=2 (higher): `[existing][response][new prompt]` ← correct
+
+The boundary marker already determines insertion position for the agent. The CRDT ordering only matters for the "leftover" — content at the same position. Since agent=2 goes first, the response appears before any concurrent human text at the same position. This is correct.
+
+Want me to implement the client ID flip now?
+<!-- agent:boundary:232e5dae-8ae8-42ac-9826-3b9c530168c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: flush->ast, submit->flush -->
-- [x] **SPEC.md update** — stash window routing contract (section 8.4)
-- [x] **Markdown AST — outline.rs migrated** — pulldown-cmark heading detection + setext support
-- [x] **DRY fix** — `find_comment_end()` deduplicated (component.rs → template.rs import)
-- [x] **AST assessment** — only outline.rs was a viable candidate; other scanners stay manual
-- [ ] **CRDT merge ordering** — flip client IDs (Option A, ready to implement)
+<!-- deps: submit->flush -->
+- [ ] **CRDT client ID flip** — swap agent=2, human=1 for native ordering (ready)
+- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` results across functions
 - [ ] **Boundary-aware replace for `flush_to_document`**
 - [ ] **README.md staleness** — update to match current state
 - [ ] **`agent-doc submit`** — combined binary command

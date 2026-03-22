@@ -906,7 +906,7 @@ My previous prompt was placed below the response patch & the `agent:boundary`. W
 My previous prompt was committed above the response patch. However the uncommited state moved the prompt below the response patch but above the `agent:boundry`. Why? Please add tests. Fix
 
 Please compile and install a local version so we can test the current behavior before releasing.
-### Re: Local Build Already Installed (HEAD)
+### Re: Local Build Already Installed
 
 The binary is already compiled and installed from this session:
 

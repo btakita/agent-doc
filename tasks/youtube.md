@@ -530,7 +530,20 @@ Recap and add interesting commentary to these topics.
 The post follows the same format as the previous `agent-doc-tmux-crdt-live` post — YouTube embed, section-per-topic with commentary, honest about what worked and what's still broken.
 
 Want me to review/adjust anything, or build and deploy the site?
-<!-- agent:boundary:400dd84f-7b9c-41f9-a293-c2eb50f9fcb4 -->
+I don't see this new post in Recent Posts on localhost:4100
+### Re: Post Not Showing (HEAD)
+
+**Fixed.** The post index needed regeneration. The blog uses a generated `index.ts` that imports all posts from the `content/` directory — new `.md` files aren't auto-discovered.
+
+Ran:
+```
+bun run app/briantakita.me/post/index.generate.ts
+```
+
+The new `index.ts` now includes the import for `2026-03-19-agent-resume-recruiter-workflow-live.md` (line 28). The dev server should hot-reload and show the post in Recent Posts.
+
+If it still doesn't appear, you may need to restart the dev server.
+<!-- agent:boundary:c42d8591-ebf7-485a-a27d-78837afe8ad9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -546,5 +559,5 @@ Want me to review/adjust anything, or build and deploy the site?
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
 - [x] Create blog post for briantakita.me
-- [ ] Build and deploy briantakita.me with new post
+- [ ] Verify post visible on dev server + deploy
 <!-- /agent:pending -->

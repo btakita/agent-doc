@@ -1190,7 +1190,7 @@ Some options I can think of:
 - For example, can we run a pane in the background while it is hidden from view?
 
 Binary installed. Try switching editor tabs to test.
-### Re: Stash Alternatives (HEAD)
+### Re: Stash Alternatives
 
 **Options analyzed:**
 

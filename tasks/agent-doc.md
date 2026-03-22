@@ -470,7 +470,7 @@ release
 
 521 tests pass.
 We have multiple `agent:boundary` in this document. Is this because we were running an old binary?
-### Re: Multiple `agent:boundary` markers (HEAD)
+### Re: Multiple `agent:boundary` markers
 
 Yes — this was caused by the **old binary (pre-v0.25.4)**. The JetBrains plugin's `PatchWatcher` was appending a new boundary marker on each patch cycle without removing previous ones, causing accumulation.
 

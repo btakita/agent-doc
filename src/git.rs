@@ -160,14 +160,16 @@ pub fn commit(file: &Path) -> Result<()> {
             // unnecessary (staging doesn't modify the working tree) and caused file
             // cache conflicts in the IDE.
 
-            // Reposition boundary in snapshot only (not working tree).
-            // Working tree writes cause IDE to reload, losing user keystrokes.
-            // Plugin handles working-tree reposition via IPC flag.
+            // Reposition boundary in snapshot AND via IPC to the plugin.
+            // Working tree is NOT written directly (would lose user keystrokes).
+            // The IPC signal tells the plugin to reposition in its Document buffer.
             let t_reposition = std::time::Instant::now();
             reposition_boundary_in_snapshot(file);
+            // Send IPC reposition signal to plugin (non-blocking, non-fatal)
+            crate::write::try_ipc_reposition_boundary(file);
             let elapsed_reposition = t_reposition.elapsed().as_millis();
             if elapsed_reposition > 0 {
-                eprintln!("[perf] commit.reposition_boundary_in_snapshot: {}ms", elapsed_reposition);
+                eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
             }
     }
 

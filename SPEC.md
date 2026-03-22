@@ -564,7 +564,12 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 
-**Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing. The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag sent during `agent-doc write`.
+**Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing.
+
+**Boundary reposition lifecycle:**
+1. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch
+2. During `agent-doc commit`: a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly
+3. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
 
 ## 9. Git Integration
 

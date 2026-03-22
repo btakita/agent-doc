@@ -922,7 +922,7 @@ Both include the two commit fixes (working tree overwrite + snapshot leak). You 
 If the plugin hasn't been installed yet: IDEA → Settings → Plugins → gear → "Install from Disk..." → select `agent-doc-jetbrains-0.2.12.zip` → restart.
 
 Continue with pending jobs.
-### Re: Continuing Pending Jobs (HEAD)
+### Re: Continuing Pending Jobs
 
 **Completed two SKILL updates:**
 

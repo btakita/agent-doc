@@ -349,7 +349,7 @@ Why would option 2 be cleaner than option 1? Would option 1 work across differen
 Or is option 2 using the shared object over FFI?
 Rather than having tasks/todo/todo.md, lets move the queue implementation into `agent:todo`. Will work on it soon.
 
-### Re: Option 1 vs Option 2 for sync/route integration (HEAD)
+### Re: Option 1 vs Option 2 for sync/route integration
 
 You're right — **Option 1 is better.** Here's why:
 
@@ -361,7 +361,7 @@ Neither option uses the shared object over FFI. Both `sync` and `route` are CLI 
 
 **Implementation:** In `sync.rs`, after arranging panes, check if any visible `.md` file with agent-doc frontmatter has no session entry. If so, call `route::auto_start()` for it. This is a ~10-line addition.
 
-### Re: Move queue to `agent:todo` (HEAD)
+### Re: Move queue to `agent:todo`
 
 Noted. Will move the task queue implementation into the `agent:todo` component model when you're ready. The `tasks/todo/todo.md` content stays as-is for now as a reference.
 <!-- agent:boundary:e42c1a3d-ba8c-4190-ab62-3d2fa9480bfb -->

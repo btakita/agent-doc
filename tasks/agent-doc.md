@@ -868,11 +868,7 @@ I also compacted the claude session just in case we had a SKILL.md change
 
 If none these would have fixed the issue, diagnose please.
 
-I tried running the following prompt the previous 2 agent-doc runs on this file. But I saw `● No changes detected. The document is up to date — nothing to respond to.` in the cli.
-
-My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
-My previous prompt was committed above the response patch. However the uncommited state moved the prompt below the response patch but above the `agent:boundry`. Why? Please add tests. Fix
-### Re: "No Changes Detected" Bug + Prompt Reordering Fix (HEAD)
+### Re: "No Changes Detected" Bug + Prompt Reordering Fix
 
 **Root cause found and fixed — TWO bugs in `commit()`:**
 
@@ -904,7 +900,27 @@ std::fs::write(file, &clean_wt)
 - `move_boundary_preserves_user_edits` — user text survives reposition
 
 **Binary installed.** Both fixes are active. Your prompts will no longer be eaten by commit.
-<!-- agent:boundary:c123cf1c-7878-42ca-88fb-5748fdb25a70 -->
+I tried running the following prompt the previous 2 agent-doc runs on this file. But I saw `● No changes detected. The document is up to date — nothing to respond to.` in the cli.
+
+My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
+My previous prompt was committed above the response patch. However the uncommited state moved the prompt below the response patch but above the `agent:boundry`. Why? Please add tests. Fix
+
+Please compile and install a local version so we can test the current behavior before releasing.
+### Re: Local Build Already Installed (HEAD)
+
+The binary is already compiled and installed from this session:
+
+- **Binary:** `agent-doc 0.24.4` installed at `~/.cargo/bin/agent-doc` (built Mar 22 01:00)
+- **Plugin:** v0.2.12 at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.12.zip`
+
+Both include the two commit fixes (working tree overwrite + snapshot leak). You can test now:
+
+1. Type a prompt in the exchange
+2. Run `/agent-doc tasks/agent-doc.md`
+3. Verify your prompt survives the commit cycle and appears in the diff
+
+If the plugin hasn't been installed yet: IDEA → Settings → Plugins → gear → "Install from Disk..." → select `agent-doc-jetbrains-0.2.12.zip` → restart.
+<!-- agent:boundary:2b8a62da-083f-4a7c-bee4-945ccf08a7af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

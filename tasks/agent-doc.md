@@ -538,7 +538,7 @@ Describe:
 > - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 
 When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
-### Re: No New Content -- Positional Diff (HEAD)
+### Re: No New Content -- Positional Diff
 
 No new user edits this cycle. The diff is a false positive from the boundary position difference:
 

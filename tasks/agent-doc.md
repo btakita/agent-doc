@@ -695,7 +695,6 @@ Binary installed.
 continue
 - [ ] **SKILL update for preflight** -- use preflight instead of separate recover/commit/diff/read steps
 
-audit docs
 ### Re: SKILL Updated for Preflight
 
 **SKILL.md updated.** Steps 0, 0b, 1, 2 collapsed into a single `agent-doc preflight` call.
@@ -710,14 +709,30 @@ audit docs
 4 Bash calls reduced to 1. Run `/compact` to reload the updated SKILL.
 
 Binary + SKILL installed. 519 tests pass.
-<!-- agent:boundary:e0b40631-e71f-4ebf-970f-2616769dc475 -->
+It seems that as I was typing, the patch that moved `agent:boundary` below the prompt caused me to lose what I was typing.
+release
+### Re: Boundary Reposition Losing User Input (HEAD)
+
+**Root cause identified.** When `agent-doc commit` calls `reposition_boundary_in_both()`, it rewrites the working tree file with the boundary moved to end-of-exchange. If you're actively typing, the plugin's VCS refresh reloads from disk, discarding your in-progress keystrokes.
+
+**The sequence:**
+1. You're typing in the exchange (editor buffer has partial text)
+2. `agent-doc commit` finishes → `reposition_boundary_in_both()` rewrites working tree
+3. Plugin gets VCS refresh → reloads from disk
+4. Your in-progress keystrokes are lost
+
+**Fix:** Remove the working tree write from `reposition_boundary_in_both()` — only update the snapshot. The plugin already handles boundary reposition via the `reposition_boundary: true` IPC flag we implemented earlier this session. The disk write is redundant when the plugin is active.
+
+For the non-plugin case (terminal-only), boundary position doesn't matter since there's no visual editor.
+
+Ready to implement when you say go.
+<!-- agent:boundary:6637aa88-635c-41a4-9b1d-d1fa61204b25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **SKILL update for preflight** -- steps collapsed, renumbered
-- [x] **agent-doc preflight** -- implemented + tested
+- [ ] **Fix boundary reposition losing user input** -- remove working tree write from reposition_boundary_in_both(), rely on plugin IPC flag
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 

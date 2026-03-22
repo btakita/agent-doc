@@ -596,7 +596,32 @@ The compact header (smaller logo, reduced padding, smaller text) is now the comm
 5. **`agent-loop`** — all submodule pointers updated
 
 The `^0.1.1` range in briantakita.me-dev will auto-resolve to 0.1.2 on next install/deploy.
-<!-- agent:boundary:a540d188-3b0f-45dc-a160-e58553b58ad2 -->
+deploy
+### Re: Deploy (HEAD)
+
+**Blocker:** Docker build fails — the Dockerfile references `lib/ui--server--blog/package.json` and other `@rappstack/*` libs that no longer exist locally. These were moved to npm packages but the Dockerfile still expects them as workspace directories.
+
+```
+ERROR: "/lib/ui--server--blog/package.json": not found
+```
+
+The Dockerfile needs to be updated to remove the `COPY lib/ui--server--blog/...` lines (and similar) for packages that are now consumed from npm rather than local workspace.
+
+Missing local dirs referenced in Dockerfile:
+- `lib/domain--any--blog/`
+- `lib/domain--browser/`
+- `lib/domain--browser--blog/`
+- `lib/domain--server/`
+- `lib/domain--server--blog/`
+- `lib/ui--any/`
+- `lib/ui--any--blog/`
+- `lib/ui--browser/`
+- `lib/ui--browser--blog/`
+- `lib/ui--server/`
+- `lib/ui--server--blog/`
+
+These are all `@rappstack/*` npm packages now. Want me to fix the Dockerfile by removing those lines? This is a briantakita.me-dev task — should I track it there instead?
+<!-- agent:boundary:3d25aed7-ed65-4bf1-8851-819fb8e22dd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -614,5 +639,5 @@ The `^0.1.1` range in briantakita.me-dev will auto-resolve to 0.1.2 on next inst
 - [x] Create blog post for briantakita.me
 - [x] Commit compact header style + publish @rappstack/ui--server--blog@0.1.2
 - [x] Release all submodule updates
-- [ ] Deploy briantakita.me to production
+- [ ] Fix Dockerfile stale workspace refs → deploy briantakita.me
 <!-- /agent:pending -->

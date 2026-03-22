@@ -545,7 +545,7 @@ No new user edits this cycle. The diff is a false positive from the boundary pos
 Same content, different position relative to the boundary. This confirms the issue -- the working tree boundary stays where it was, so user text typed below it stays below.
 
 **Ready to implement Option 2** (boundary reposition in write path) whenever you say go. This would ensure the boundary is always at the end of exchange in both working tree and snapshot after each write.
-### Re: Option 2 Implemented -- Boundary Reposition in Write Path (HEAD)
+### Re: Option 2 Implemented -- Boundary Reposition in Write Path
 
 **Implemented.** After IPC write succeeds, a second IPC patch repositions the boundary to end of exchange.
 
@@ -589,7 +589,7 @@ Implement Option 2. Install update. I want to test in this document.
 Add automated testing.
 
 Add performance profile data in our logs. So we can evaluate runtime performance.
-### Re: Performance Logging (HEAD)
+### Re: Performance Logging
 
 **Acknowledged.** Adding performance timing data to key operations. This will help evaluate whether caching (lazily-rs DocContext) is needed.
 

@@ -592,7 +592,7 @@ You can see the current state of the document with the git HEAD and git diff.
 Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
 
 Let's keep on tracking the context state storing only the document HEAD.
-### Re: Boundary Snowball Fix Implemented (HEAD)
+### Re: Boundary Snowball Fix Implemented
 
 **Fixed and installed.** Two changes in `template.rs`:
 
@@ -634,7 +634,7 @@ The re-insertion message confirms the snowball fix works — the boundary is now
 Note that I intervened with the plugin moving the commited response patch to the cursor for my own sanity.
 Please fix the plugin to not move the commited response patch to the cursor asap.
 The plugin removed the `agent:boundary` when it moved the response patch.
-### Re: Plugin Cursor Fix + Naming + agent-doc diff (HEAD)
+### Re: Plugin Cursor Fix + Naming + agent-doc diff
 
 **1. Plugin cursor fix — DONE (`3a08011`):**
 

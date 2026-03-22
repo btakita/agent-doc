@@ -833,6 +833,70 @@ pub fn try_ipc_full_content(
     write_ipc_and_poll(&patch_file, &ipc_payload, file, 0, Some(content))
 }
 
+/// Send a reposition-only IPC signal to the plugin.
+///
+/// No content changes — just tells the plugin to move the boundary marker
+/// to the end of the exchange component. Used by `commit()` to keep the
+/// boundary at end-of-exchange without writing to the working tree
+/// (which would cause keystroke loss if the user is typing).
+///
+/// Returns `true` if the plugin consumed the signal, `false` on timeout
+/// or if no plugin is active.
+pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
+    let canonical = match file.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let hash = match snapshot::doc_hash(file) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let patches_dir = project_root.join(".agent-doc/patches");
+
+    if !patches_dir.exists() {
+        return false;
+    }
+
+    let patch_file = patches_dir.join(format!("{}.json", hash));
+
+    let payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": [],
+        "unmatched": "",
+        "reposition_boundary": true,
+    });
+
+    let json = match serde_json::to_string_pretty(&payload) {
+        Ok(j) => j,
+        Err(_) => return false,
+    };
+    if atomic_write(&patch_file, &json).is_err() {
+        return false;
+    }
+
+    eprintln!("[commit] IPC reposition boundary signal sent");
+
+    // Short poll — non-critical, don't block long
+    let timeout = std::time::Duration::from_millis(500);
+    let poll_interval = std::time::Duration::from_millis(50);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if !patch_file.exists() {
+            eprintln!("[commit] plugin repositioned boundary via IPC");
+            return true;
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    // Timeout — clean up
+    let _ = std::fs::remove_file(&patch_file);
+    eprintln!("[commit] IPC reposition timeout (non-fatal)");
+    false
+}
+
 /// Write an IPC patch file and poll for plugin ACK (file deletion).
 ///
 /// Returns `Ok(true)` if consumed, `Ok(false)` on timeout.

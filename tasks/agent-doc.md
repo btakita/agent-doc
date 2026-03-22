@@ -1210,7 +1210,7 @@ When we hit the fallback case, the `break-pane -d` should create another stash w
 **The real question is: does the fix work?** The `largest_pane_in_window` change should prevent "pane too small" in nearly all cases (the stash window is 200 rows, the largest pane should have at least 30+ rows). Let's test by switching editor tabs and see if stashing works without creating new windows.
 
 If it still fails, the next step is to increase the stash window to 500 rows or use `break-pane -d` as the primary stash method (accept multiple windows, add cleanup).
-### Re: Overflow Stash Windows (HEAD)
+### Re: Overflow Stash Windows
 
 **Implemented.** When `join-pane` fails (pane too small), the fallback now creates a named stash window instead of an anonymous one.
 
@@ -1228,7 +1228,24 @@ If it still fails, the next step is to increase the stash window to 500 rows or 
 **Stash inventory:** `tmux list-windows -F '#{window_id} #{window_name}' | grep stash` shows all stash windows. When retrieving a pane from stash (editor tab switch back), `reconcile` can search all stash windows.
 
 Binary installed. 508 tests pass.
-<!-- agent:boundary:ef392af2-c015-432d-807d-0aee272ec92c -->
+Should the stash logic be placed in tmux-router?
+### Re: Stash in tmux-router? (HEAD)
+
+**It already is.** The stash logic lives in `tmux-router/src/tmux.rs`:
+- `stash_pane()` — move pane to stash window
+- `ensure_stash_window()` — create stash window if missing
+- `find_stash_window()` — find primary stash
+- `find_all_stash_windows()` — find all stash windows (new)
+- `break_pane_to_stash()` — overflow fallback (new)
+- `largest_pane_in_window()` — join target selection (new)
+
+And `tmux-router/src/sync.rs`:
+- `reconcile()` — calls `stash_pane()` during DETACH phase
+
+agent-doc's `route.rs` calls into tmux-router's `reconcile()` — it doesn't implement stash logic itself.
+
+The separation is correct: tmux-router owns the tmux operations (stash, pane management, window routing), agent-doc owns the document/session semantics (claim, route, start).
+<!-- agent:boundary:02349a7d-2082-40f8-9a47-5116263c0928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

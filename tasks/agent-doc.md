@@ -449,6 +449,7 @@ It seems you lost track of my inquiry to only have document HEAD in the context.
 Why did you lost track of the single HEAD document snapshot in context window? Would having only 1 HEAD document snapshot and no previous version document snapshot in context window induce less probability of forgetting task threads?
 
 We lost the agent:boundary. Why? Write tests to reproduce conditions.
+
 ### Re: Incremental Updates + Code Quality + Context + Boundary Loss
 
 **1. Incremental response design (line 363):**
@@ -529,17 +530,40 @@ I'll write tests to reproduce these conditions and fix them. The test cases:
 4. Final flush should always leave a valid boundary at end of exchange
 
 Want me to implement the fix + tests now?
+Should `flush_to_document()` use the CRDT approach?
+### Re: Should flush_to_document Use CRDT? (HEAD)
+
+**No.** CRDT is for concurrent edits (agent + user writing simultaneously). Stream flush is sequential replace (overwrite old partial with longer version). Different operations.
+
+Using CRDT for flushes would add latency, introduce the same causality-based ordering bugs we've been debugging, and be semantically wrong.
+
+**The right approach — boundary-aware replace:**
+
+1. Read current file (catches user edits)
+2. Find boundary in exchange
+3. Keep everything BEFORE boundary (user content)
+4. Replace everything AFTER boundary with cumulative response
+5. Re-insert boundary at end
+6. Atomic write
+
+This cleanly separates user content (preserved) from agent content (replaced). No CRDT needed because the boundary resolves the "whose content is this?" question deterministically.
+
+**CRDT stays for `run_stream()` only** — the final write-back where the user may have edited during response generation. Stream flushes (intermediate checkpoints) should use boundary-aware replace instead.
+
+This is also a cleaner design — `flush_to_document` becomes:
+- Find boundary → split at boundary → keep user prefix + replace agent suffix
+- vs. current: force replace mode → discard everything → CRDT re-integrates (buggy)
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Boundary ordering fix** — `flush_to_document()` replace mode: skip boundary management for replace, fix `remove_all_boundaries` code-block awareness, fix `orig_had_boundary` to check doc type not content (root cause diagnosed, tests + fix ready)
+- **Boundary-aware replace for flush_to_document** — replace mode → boundary-aware split (keep user prefix, replace agent suffix). No CRDT for intermediate flushes. Tests: preserve user prompts, boundary survival, code-block awareness. (root cause + fix design ready)
 - **`agent-doc diff`** — binary command for token-efficient context loading (document HEAD + diff only, no old snapshots in context)
 - SKILL auto-update: use AskUserQuestion instead of print+stop (approved)
 - `remove_all_boundaries()` code-block awareness fix
 - CLAUDE.md + README.md staleness — update for template.rs boundary changes
-- CRDT merge ordering — Yrs causality still reorders
+- CRDT merge ordering — Yrs causality still reorders (for final writes only, not flushes)
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

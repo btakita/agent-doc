@@ -345,13 +345,32 @@ The autoclaim fix handles the **error** (pruning the stale entry so the pane doe
 **Recommendation:** Option 2 is cleanest. The plugin already debounces tab changes. Adding a `route` call for the active file would handle both layout sync AND session creation. The `route` command is idempotent — if a session already exists, it just focuses the pane.
 
 Want me to implement option 2?
-<!-- agent:boundary:7bd297d1-a23f-432e-9c55-66b2c8b59ac1 -->
+Why would option 2 be cleaner than option 1? Would option 1 work across different editors in a more seamless way?
+Or is option 2 using the shared object over FFI?
+Rather than having tasks/todo/todo.md, lets move the queue implementation into `agent:todo`. Will work on it soon.
+
+### Re: Option 1 vs Option 2 for sync/route integration (HEAD)
+
+You're right — **Option 1 is better.** Here's why:
+
+**Option 2 (plugin calls `route`)** requires each editor plugin (JetBrains, VS Code) to independently add the `route` call. It's plugin-specific code that duplicates the same logic in Kotlin and TypeScript.
+
+**Option 1 (`sync` calls `route` for unclaimed files)** puts the logic in the Rust binary. All editors call `sync` — so any editor that calls `sync` automatically gets session auto-start for free. No editor-specific changes needed. This follows the existing design principle: "deterministic behavior belongs in the binary."
+
+Neither option uses the shared object over FFI. Both `sync` and `route` are CLI commands that the plugin shells out to. The FFI (`libagent_doc.so` via JNA) is only used for component patching and frontmatter merge — process-level coordination stays in the CLI.
+
+**Implementation:** In `sync.rs`, after arranging panes, check if any visible `.md` file with agent-doc frontmatter has no session entry. If so, call `route::auto_start()` for it. This is a ~10-line addition.
+
+### Re: Move queue to `agent:todo` (HEAD)
+
+Noted. Will move the task queue implementation into the `agent:todo` component model when you're ready. The `tasks/todo/todo.md` content stays as-is for now as a reference.
+<!-- agent:boundary:e42c1a3d-ba8c-4190-ab62-3d2fa9480bfb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Sync/route integration** — auto-start sessions for unclaimed files on tab navigation
+- [ ] **Sync auto-starts unclaimed files** — `sync` calls `route` for visible `.md` files with agent-doc frontmatter but no session (Option 1)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

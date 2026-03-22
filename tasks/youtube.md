@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All done. Exchange compacted. Pin comment manually via YouTube Studio.
+Found 2 Linda Takita notifications: 40:31-40:34 and 41:16-41:18.
 <!-- /agent:status -->
 
 ## Exchange
@@ -47,7 +47,22 @@ All done. Exchange compacted. Pin comment manually via YouTube Studio.
 - Manual pin via `&lc=` deep link is the current path
 - Chrome Extension for YouTube Studio automation deferred to agent-doc
 
-<!-- agent:boundary:25ef288d-abc1-4303-ad68-4c60afd5ac38 -->
+In [2026-03-22 10-27-48.mp4](../../../../Videos/2026-03-22%2010-27-48.mp4)
+Please identify frame ranges where I receive a text message notification from Linda Takita
+### Re: Linda Takita Notification Frame Ranges (HEAD)
+
+Found **2 text message notifications** from Linda Takita (via Pulse SMS) in the video:
+
+**Notification 1 — 40:31 to 40:34** (3 seconds)
+- Video frames: **72,930 – 73,020** (at 30fps)
+- Content: "We hear you, Brian and I'm keeping you in my prayers as always 🙏 We look forward to seeing..."
+
+**Notification 2 — 41:16 to 41:18** (2 seconds)
+- Video frames: **74,280 – 74,340** (at 30fps)
+- Content: "Dad will be 72 this year."
+
+Both appear as Pulse SMS popups in the top-right corner of the screen. To cut these out with ffmpeg, you'd need two cuts totaling ~5 seconds.
+<!-- agent:boundary:babd54f7-9e43-4155-982b-bfef4c412171 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -55,4 +70,5 @@ All done. Exchange compacted. Pin comment manually via YouTube Studio.
 <!-- agent:pending patch=replace -->
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
+- [ ] Cut Linda Takita notifications from 2026-03-22 10-27-48.mp4 (40:31-40:34, 41:16-41:18)
 <!-- /agent:pending -->

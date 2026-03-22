@@ -185,7 +185,13 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             for (p in patch.patches) {
-                result = applyComponentPatchNative(result, p.component, p.content, caretOffset, p.boundaryId)
+                val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
+                    // No boundary on disk — find any existing boundary in the Document API content
+                    findBoundaryInComponent(result, p.component)
+                } else {
+                    p.boundaryId
+                }
+                result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId)
             }
 
             // Apply unmatched content to exchange or output component
@@ -193,6 +199,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
                 result = if (exchangeResult != result) exchangeResult
                     else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
+            }
+
+            // Reposition boundary to end of exchange if requested
+            if (patch.repositionBoundary) {
+                result = repositionBoundaryToEnd(result, "exchange") ?: result
             }
 
             if (result != content) {
@@ -217,7 +228,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null): String {
         val mode = extractComponentMode(doc, component)
 
-        // Boundary marker takes precedence over caret offset for append mode
+        // Boundary marker takes precedence for append mode
         if (mode == "append" && !boundaryId.isNullOrBlank()) {
             val nativeResult = NativePatching.applyComponentPatchWithBoundary(doc, component, content, mode, boundaryId)
             if (nativeResult != null) return nativeResult
@@ -226,16 +237,35 @@ class PatchWatcher(private val project: Project) : Disposable {
             if (kotlinResult != null) return kotlinResult
         }
 
-        // Fall back to caret-aware insertion
-        if (mode == "append" && caretOffset != null) {
-            val nativeResult = NativePatching.applyComponentPatchWithCaret(doc, component, content, mode, caretOffset)
-            if (nativeResult != null) return nativeResult
-            val kotlinResult = applyComponentPatchWithCaret(doc, component, content, caretOffset)
-            if (kotlinResult != null) return kotlinResult
+        // When no boundary exists for append mode, insert before the close tag
+        // (end-of-exchange). Never use caret-based insertion — it places content
+        // at the cursor position which is unpredictable.
+        if (mode == "append") {
+            val result = applyComponentPatchEndOfExchange(doc, component, content)
+            if (result != null) return result
         }
 
         return NativePatching.applyComponentPatch(doc, component, content, mode)
             ?: applyComponentPatchKotlin(doc, component, content)
+    }
+
+    /**
+     * Find a boundary marker UUID inside a component's content.
+     * Returns the boundary ID if found, null otherwise.
+     */
+    private fun findBoundaryInComponent(doc: String, component: String): String? {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:$component -->"
+        val boundaryPattern = Regex("""<!-- agent:boundary:([a-f0-9-]+) -->""")
+
+        val openMatch = openPattern.find(doc) ?: return null
+        val contentStart = openMatch.range.last + 1
+        val closeIdx = doc.indexOf(closeTag, contentStart)
+        if (closeIdx < 0) return null
+
+        val componentContent = doc.substring(contentStart, closeIdx)
+        val boundaryMatch = boundaryPattern.findAll(componentContent).lastOrNull()
+        return boundaryMatch?.groupValues?.getOrNull(1)
     }
 
     /**
@@ -395,6 +425,41 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
+     * End-of-exchange append: insert content right before the close tag.
+     * Used when no boundary marker exists. Inserts a new boundary after
+     * the content so future cycles can use boundary-based insertion.
+     */
+    private fun applyComponentPatchEndOfExchange(doc: String, component: String, content: String): String? {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:$component -->"
+
+        val codeRanges = findCodeBlockRanges(doc)
+
+        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+        } ?: return null
+
+        val contentStart = openMatch.range.last + 1
+
+        var searchFrom = contentStart
+        var closeIdx: Int
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom)
+            if (closeIdx < 0) return null
+            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+            searchFrom = closeIdx + closeTag.length
+        }
+
+        // Insert content + new boundary right before the close tag
+        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
+        val before = doc.substring(0, closeIdx)
+        val after = doc.substring(closeIdx)
+        val prefix = if (before.endsWith("\n")) "" else "\n"
+        return before + prefix + content.trimEnd() + "\n" + newBoundary + "\n" + after
+    }
+
+    /**
      * Kotlin fallback: replace content between component markers.
      * Used when native library is unavailable.
      */
@@ -485,6 +550,56 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
+    /**
+     * Move the boundary marker to end of exchange component.
+     * Returns the repositioned content, or null if no reposition needed.
+     */
+    private fun repositionBoundaryToEnd(doc: String, component: String): String? {
+        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:$component -->"
+        val boundaryPattern = Regex("""<!-- agent:boundary:([a-f0-9-]+) -->""")
+
+        val codeRanges = findCodeBlockRanges(doc)
+
+        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+        } ?: return null
+
+        val contentStart = openMatch.range.last + 1
+        var searchFrom = contentStart
+        var closeIdx: Int
+        while (true) {
+            closeIdx = doc.indexOf(closeTag, searchFrom)
+            if (closeIdx < 0) return null
+            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+            searchFrom = closeIdx + closeTag.length
+        }
+
+        val componentContent = doc.substring(contentStart, closeIdx)
+        val boundaryMatch = boundaryPattern.findAll(componentContent).lastOrNull() ?: return null
+        val boundaryStart = contentStart + boundaryMatch.range.first
+        val boundaryEnd = contentStart + boundaryMatch.range.last + 1
+
+        // Check if already at end (nothing after boundary except whitespace before close tag)
+        val afterBoundary = doc.substring(boundaryEnd, closeIdx).trim()
+        if (afterBoundary.isEmpty()) return null
+
+        // Find the full line containing the boundary
+        val lineStart = doc.lastIndexOf('\n', boundaryStart - 1).let {
+            if (it >= contentStart) it + 1 else contentStart
+        }
+        val lineEnd = if (boundaryEnd < closeIdx && doc.getOrNull(boundaryEnd) == '\n') boundaryEnd + 1 else boundaryEnd
+
+        // Remove boundary from current position, re-insert at end
+        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
+        val before = doc.substring(0, lineStart)
+        val middle = doc.substring(lineEnd, closeIdx)
+        val after = doc.substring(closeIdx)
+        val prefix = if (middle.endsWith("\n")) "" else "\n"
+        return before + middle + prefix + newBoundary + "\n" + after
+    }
+
     override fun dispose() {
         running = false
         watchThread?.interrupt()
@@ -514,12 +629,14 @@ data class IpcPatch(
     val unmatched: String,
     val frontmatter: String?,
     val fullContent: String?,
+    val repositionBoundary: Boolean = false,
 )
 
 data class ComponentPatch(
     val component: String,
     val content: String,
     val boundaryId: String? = null,
+    val ensureBoundary: Boolean = false,
 )
 
 /**
@@ -553,13 +670,15 @@ fun parsePatchJson(json: String): IpcPatch? {
             val component = extractStringField(objJson, "component")
             val content = extractStringField(objJson, "content")
             val boundaryId = extractStringField(objJson, "boundary_id")
+            val ensureBoundary = objJson.contains("\"ensure_boundary\"") && objJson.contains("true")
             if (component != null && content != null) {
-                patches.add(ComponentPatch(component, content, boundaryId))
+                patches.add(ComponentPatch(component, content, boundaryId, ensureBoundary))
             }
             pos = objEnd + 1
         }
 
-        return IpcPatch(file, patches, unmatched, frontmatter, fullContent)
+        val repositionBoundary = json.contains("\"reposition_boundary\"") && json.contains("true")
+        return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary)
     } catch (e: Exception) {
         return null
     }

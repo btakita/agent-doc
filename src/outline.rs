@@ -1,4 +1,5 @@
 use anyhow::Result;
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
 use std::path::Path;
 
 /// A heading-delimited section of a markdown document.
@@ -34,80 +35,136 @@ pub fn run(file: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn parse_sections(body: &str) -> Vec<Section> {
-    let mut sections: Vec<Section> = Vec::new();
-    let lines: Vec<&str> = body.lines().collect();
+/// Collect `(byte_offset, depth, heading_text)` for every heading in `body`
+/// using pulldown-cmark. Handles ATX headings (`# …`), setext headings
+/// (`===` / `---` underlines), and correctly skips headings inside code blocks.
+fn collect_headings(body: &str) -> Vec<(usize, usize, String)> {
+    let mut headings = Vec::new();
+    let parser = Parser::new_ext(body, Options::empty());
+    let mut iter = parser.into_offset_iter();
 
-    for (i, line) in lines.iter().enumerate() {
-        if let Some(depth) = heading_depth(line) {
-            // Close the previous section's line count
-            if let Some(prev) = sections.last_mut() {
-                let content_start = prev.line; // heading line (0-indexed in our tracking)
-                prev.lines = i - content_start;
-                let section_text = lines[content_start + 1..i].join("\n");
-                prev.tokens = section_text.len().div_ceil(4); // ceil(bytes/4)
+    while let Some((event, range)) = iter.next() {
+        if let Event::Start(Tag::Heading { level, .. }) = event {
+            let depth = heading_level_to_depth(level);
+            let byte_start = range.start;
+
+            // Collect all inline text events until the matching End(Heading)
+            let mut text = String::new();
+            for (inner_event, _) in iter.by_ref() {
+                match inner_event {
+                    Event::End(pulldown_cmark::TagEnd::Heading(_)) => break,
+                    Event::Text(t) | Event::Code(t) => text.push_str(&t),
+                    _ => {}
+                }
             }
-
-            sections.push(Section {
-                heading: line.to_string(),
-                depth,
-                line: i, // 0-indexed for internal tracking
-                lines: 0,
-                tokens: 0,
-            });
+            headings.push((byte_start, depth, text));
         }
+    }
+
+    headings
+}
+
+fn heading_level_to_depth(level: HeadingLevel) -> usize {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
+}
+
+fn parse_sections(body: &str) -> Vec<Section> {
+    let lines: Vec<&str> = body.lines().collect();
+    let headings = collect_headings(body);
+
+    // Convert byte offsets → 0-based line numbers.
+    // Build a lookup: byte offset of each line start.
+    let mut line_starts: Vec<usize> = Vec::with_capacity(lines.len() + 1);
+    line_starts.push(0);
+    for line in &lines {
+        let prev = *line_starts.last().unwrap();
+        line_starts.push(prev + line.len() + 1); // +1 for '\n'
+    }
+
+    // For a given byte offset find the 0-based line index.
+    let byte_to_line = |byte_off: usize| -> usize {
+        line_starts
+            .partition_point(|&start| start <= byte_off)
+            .saturating_sub(1)
+    };
+
+    // Build Section list from headings. We store line index (0-based) internally
+    // and convert to 1-based at the end, matching the original behaviour.
+    let mut sections: Vec<Section> = Vec::new();
+
+    for (byte_off, depth, text) in &headings {
+        let line_idx = byte_to_line(*byte_off);
+
+        // Build the canonical heading string. For ATX headings the source line
+        // starts with `#`; for setext headings the source line is plain text.
+        // We reconstruct an ATX-style string so the display format is stable.
+        let heading_str = {
+            let src_line = lines.get(line_idx).copied().unwrap_or("").trim();
+            if src_line.starts_with('#') {
+                src_line.to_string()
+            } else {
+                // Setext heading — emit canonical ATX form
+                format!("{} {}", "#".repeat(*depth), text)
+            }
+        };
+
+        // Close the previous section
+        if let Some(prev) = sections.last_mut() {
+            let prev_line = prev.line; // 0-based
+            prev.lines = line_idx - prev_line;
+            let section_text = lines[prev_line + 1..line_idx].join("\n");
+            prev.tokens = section_text.len().div_ceil(4);
+        }
+
+        sections.push(Section {
+            heading: heading_str,
+            depth: *depth,
+            line: line_idx, // 0-based for now
+            lines: 0,
+            tokens: 0,
+        });
     }
 
     // Close the last section
     if let Some(prev) = sections.last_mut() {
-        let content_start = prev.line;
-        prev.lines = lines.len() - content_start;
-        let section_text = lines[content_start + 1..].join("\n");
+        let prev_line = prev.line;
+        prev.lines = lines.len() - prev_line;
+        let section_text = lines[prev_line + 1..].join("\n");
         prev.tokens = section_text.len().div_ceil(4);
     }
 
-    // Handle content before any heading
-    if sections.is_empty() || sections[0].line > 0 {
-        let end = sections.first().map_or(lines.len(), |s| s.line);
-        if end > 0 {
-            let preamble_text: String = lines[..end].join("\n");
-            let preamble_tokens = preamble_text.len().div_ceil(4);
-            if preamble_tokens > 0 {
-                sections.insert(
-                    0,
-                    Section {
-                        heading: "(preamble)".to_string(),
-                        depth: 0,
-                        line: 0,
-                        lines: end,
-                        tokens: preamble_tokens,
-                    },
-                );
-            }
+    // Preamble: content before the first heading
+    let first_heading_line = sections.first().map_or(lines.len(), |s| s.line);
+    if first_heading_line > 0 {
+        let preamble_text: String = lines[..first_heading_line].join("\n");
+        let preamble_tokens = preamble_text.len().div_ceil(4);
+        if preamble_tokens > 0 {
+            sections.insert(
+                0,
+                Section {
+                    heading: "(preamble)".to_string(),
+                    depth: 0,
+                    line: 0,
+                    lines: first_heading_line,
+                    tokens: preamble_tokens,
+                },
+            );
         }
     }
 
-    // Convert line numbers from 0-indexed body to 1-indexed display
-    // (frontmatter offset is handled by the caller if needed)
+    // Convert 0-based line indices to 1-based for display
     for s in &mut sections {
-        s.line += 1; // 1-based
+        s.line += 1;
     }
 
     sections
-}
-
-fn heading_depth(line: &str) -> Option<usize> {
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with('#') {
-        return None;
-    }
-    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
-    // Must have a space after the hashes (or be just hashes at end of line)
-    if hashes > 0 && (trimmed.len() == hashes || trimmed.as_bytes()[hashes] == b' ') {
-        Some(hashes)
-    } else {
-        None
-    }
 }
 
 fn print_text(sections: &[Section]) {
@@ -161,13 +218,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_heading_depth() {
-        assert_eq!(heading_depth("# Title"), Some(1));
-        assert_eq!(heading_depth("## Section"), Some(2));
-        assert_eq!(heading_depth("### Sub"), Some(3));
-        assert_eq!(heading_depth("Not a heading"), None);
-        assert_eq!(heading_depth("#NoSpace"), None);
-        assert_eq!(heading_depth("  ## Indented"), Some(2));
+    fn test_collect_headings_atx() {
+        let body = "# Title\n\n## Section\n\n### Sub\n";
+        let headings = collect_headings(body);
+        assert_eq!(headings.len(), 3);
+        assert_eq!(headings[0].1, 1);
+        assert_eq!(headings[0].2, "Title");
+        assert_eq!(headings[1].1, 2);
+        assert_eq!(headings[1].2, "Section");
+        assert_eq!(headings[2].1, 3);
+        assert_eq!(headings[2].2, "Sub");
+    }
+
+    #[test]
+    fn test_collect_headings_no_space_not_heading() {
+        // `#NoSpace` is not a valid ATX heading per CommonMark
+        let body = "#NoSpace\n\n# Real\n";
+        let headings = collect_headings(body);
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].2, "Real");
+    }
+
+    #[test]
+    fn test_collect_headings_inside_code_block_ignored() {
+        let body = "```\n# Not a heading\n```\n\n# Real\n";
+        let headings = collect_headings(body);
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].2, "Real");
     }
 
     #[test]
@@ -196,6 +273,27 @@ mod tests {
         let body = "";
         let sections = parse_sections(body);
         assert!(sections.is_empty());
+    }
+
+    #[test]
+    fn test_setext_headings() {
+        // Setext-style: underlined with === (H1) or --- (H2)
+        let body = "Title\n=====\n\nSome content here\n\nSection\n-------\n\nMore content\n";
+        let sections = parse_sections(body);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].depth, 1);
+        assert_eq!(sections[0].heading, "# Title");
+        assert_eq!(sections[1].depth, 2);
+        assert_eq!(sections[1].heading, "## Section");
+    }
+
+    #[test]
+    fn test_heading_inside_code_block_ignored() {
+        // A `#` heading inside a fenced code block must not create a section
+        let body = "## Real\n\nContent\n\n```\n## Fake\n```\n\nmore\n";
+        let sections = parse_sections(body);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].heading, "## Real");
     }
 
     #[test]

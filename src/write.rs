@@ -47,6 +47,12 @@ fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
     None
 }
 
+/// Check if a component is append-mode (needs boundary markers).
+fn is_append_mode_component(name: &str) -> bool {
+    matches!(name, "exchange" | "findings")
+}
+
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -212,6 +218,8 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 /// with code 75 (EX_TEMPFAIL) instead of falling back to disk write.
 /// When `force_disk` is true, always uses direct disk write.
 pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Result<()> {
+    let t_total = std::time::Instant::now();
+
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -262,12 +270,26 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 .with_context(|| format!("failed to read {}", file.display()))?;
             let base = baseline.unwrap_or(&content_at_start);
             let mode_overrides = std::collections::HashMap::new();
+            let t_apply = std::time::Instant::now();
             let content_ours = template::apply_patches_with_overrides(
                 base, &patches, &unmatched, file, &mode_overrides,
             ).context("failed to apply patches for snapshot")?;
+            let elapsed_apply = t_apply.elapsed().as_millis();
+            if elapsed_apply > 0 {
+                eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
+            }
 
             // Plugin is installed — try IPC
+            let t_ipc = std::time::Instant::now();
             if try_ipc(file, &patches, &unmatched, None, baseline, Some(&content_ours))? {
+                let elapsed_ipc = t_ipc.elapsed().as_millis();
+                if elapsed_ipc > 0 {
+                    eprintln!("[perf] try_ipc: {}ms", elapsed_ipc);
+                }
+                let elapsed_total = t_total.elapsed().as_millis();
+                if elapsed_total > 0 {
+                    eprintln!("[perf] run_stream total: {}ms", elapsed_total);
+                }
                 // IPC succeeded — plugin applied patches
                 recover::clear_pending(file)?;
                 return Ok(());
@@ -291,6 +313,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     });
                     if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
                         patch_json["boundary_id"] = serde_json::Value::String(bid);
+                    } else if is_append_mode_component(&p.name) {
+                        patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
                     }
                     patch_json
                 })
@@ -323,6 +347,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     }
 
     // No plugin installed or --force-disk — direct disk write
+    let t_disk = std::time::Instant::now();
 
     // Read document state
     let content_at_start = std::fs::read_to_string(file)
@@ -334,9 +359,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // inline attr (patch=append on tag) > components.toml > built-in default.
     // The skill sends delta content for append-mode components.
     let mode_overrides = std::collections::HashMap::new();
+    let t_apply2 = std::time::Instant::now();
     let mut content_ours = template::apply_patches_with_overrides(
         base, &patches, &unmatched, file, &mode_overrides,
     ).context("failed to apply template patches")?;
+    let elapsed_apply2 = t_apply2.elapsed().as_millis();
+    if elapsed_apply2 > 0 {
+        eprintln!("[perf] apply_patches_with_overrides (disk): {}ms", elapsed_apply2);
+    }
 
     // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
     if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
@@ -363,10 +393,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         // interleaving when the agent replaces component content while the user
         // appends within the same region (lazily-rs.md corruption bug).
         let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
-        // Skip CRDT reordering when boundary-aware insertion was used.
-        // The boundary marker already determines correct prompt→response ordering.
-        let had_boundary = base.contains("<!-- agent:boundary:");
-        merge::merge_contents_crdt_opts(Some(&base_state), &content_ours, &content_current, had_boundary)?
+        // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
+        merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?
     };
 
     atomic_write(file, &final_content)?;
@@ -384,6 +412,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     // Clear pending response after successful write
     recover::clear_pending(file)?;
+
+    let elapsed_disk = t_disk.elapsed().as_millis();
+    if elapsed_disk > 0 {
+        eprintln!("[perf] disk_write_path: {}ms", elapsed_disk);
+    }
+    let elapsed_total = t_total.elapsed().as_millis();
+    if elapsed_total > 0 {
+        eprintln!("[perf] run_stream total: {}ms", elapsed_total);
+    }
 
     eprintln!(
         "[write] Stream patches applied to {} ({} components patched, CRDT)",
@@ -455,6 +492,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
                 });
                 if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
                     patch_json["boundary_id"] = serde_json::Value::String(bid);
+                } else if is_append_mode_component(&p.name) {
+                    patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
                 }
                 Some(patch_json)
             }
@@ -684,10 +723,14 @@ pub fn try_ipc(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Read current document to scan for boundary markers
+    // Read current document to scan for boundary markers.
+    // If no boundary exists for a component, insert one on disk first
+    // so the plugin can use boundary-based insertion.
     let current_doc = std::fs::read_to_string(file).unwrap_or_default();
 
-    // Separate frontmatter patch from component patches
+    // Separate frontmatter patch from component patches.
+    // For append-mode components without a boundary, set ensure_boundary flag
+    // so the plugin inserts one via Document API (no disk write, no cache conflict).
     let mut ipc_patches: Vec<serde_json::Value> = patches
         .iter()
         .filter(|p| p.name != "frontmatter")
@@ -698,6 +741,9 @@ pub fn try_ipc(
             });
             if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
                 patch_json["boundary_id"] = serde_json::Value::String(bid);
+            } else if is_append_mode_component(&p.name) {
+                // No boundary on disk — tell plugin to insert one
+                patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
             }
             patch_json
         })
@@ -721,6 +767,18 @@ pub fn try_ipc(
                 }));
                 effective_unmatched = String::new();
                 break;
+            } else if is_append_mode_component(target) {
+                eprintln!(
+                    "[write] synthesizing {} patch for unmatched content (ensure_boundary)",
+                    target
+                );
+                ipc_patches.push(serde_json::json!({
+                    "component": target,
+                    "content": effective_unmatched,
+                    "ensure_boundary": true,
+                }));
+                effective_unmatched = String::new();
+                break;
             }
         }
     }
@@ -730,6 +788,7 @@ pub fn try_ipc(
         "patches": ipc_patches,
         "unmatched": effective_unmatched,
         "baseline": baseline.unwrap_or(""),
+        "reposition_boundary": true,
     });
 
     if let Some(yaml) = frontmatter_yaml {
@@ -1467,5 +1526,40 @@ mod tests {
             json_str.contains("\u{2014}"),
             "JSON should contain raw UTF-8 em dash"
         );
+    }
+
+    // --- is_append_mode_component tests ---
+
+    #[test]
+    fn append_mode_component_exchange() {
+        assert!(is_append_mode_component("exchange"));
+        assert!(is_append_mode_component("findings"));
+    }
+
+    #[test]
+    fn replace_mode_components_not_append() {
+        assert!(!is_append_mode_component("pending"));
+        assert!(!is_append_mode_component("status"));
+        assert!(!is_append_mode_component("output"));
+        assert!(!is_append_mode_component("todo"));
+    }
+
+    #[test]
+    fn find_boundary_id_skips_code_blocks() {
+        // Boundary-looking text inside a fenced code block must not be returned
+        let content = "<!-- agent:exchange -->\n```\n<!-- agent:boundary:fake-id -->\n```\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert!(
+            result.is_none(),
+            "boundary inside code block must not be found, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn find_boundary_id_finds_real_marker() {
+        let content = "<!-- agent:exchange -->\nSome text.\n<!-- agent:boundary:real-uuid-5678 -->\nMore text.\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert_eq!(result, Some("real-uuid-5678".to_string()));
     }
 }

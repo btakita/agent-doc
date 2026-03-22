@@ -9,6 +9,7 @@ mod compact;
 mod config;
 mod convert;
 mod parallel;
+mod preflight;
 mod diff;
 mod extract;
 mod focus;
@@ -323,6 +324,11 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Run all pre-agent steps (recover, commit, claims, diff, document HEAD) and output JSON
+    Preflight {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Archive old exchanges / compact component content
     Compact {
         /// Path to the session document
@@ -626,6 +632,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Commands::Preflight { file } => preflight::run(&file),
         Commands::Compact {
             file,
             keep,

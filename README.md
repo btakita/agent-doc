@@ -4,6 +4,8 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
+**v0.25.0** | JetBrains plugin v0.2.12 | VS Code extension v0.2.3
+
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
 Interactive document sessions with AI agents.
@@ -19,6 +21,17 @@ scrolls away. Documents are persistent — you can reorganize, delete noise,
 annotate inline, and curate the conversation as a living artifact. The agent
 sees your edits as diffs, so every change carries intent.
 
+## Features
+
+- **Boundary markers** — component open/close tags (`<!-- agent:name -->...<!-- /agent:name -->`) managed by the binary across all write paths
+- **IPC-first writes** — IDE plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
+- **CRDT merge** — yrs-based conflict-free merge for concurrent edits; no reorder hack
+- **pulldown-cmark outline parsing** — CommonMark-compliant section structure and token counts; component tags inside code spans/blocks are ignored
+- **Stash window routing** — failed `split-window` calls land in a stash window instead of creating visible throwaway windows; resync purges idle stash windows
+- **Streaming** — real-time CRDT write-back loop with chain-of-thought routing
+- **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session
+- **519 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
+
 ## Install
 
 ```sh
@@ -28,8 +41,11 @@ cargo install --path .
 ## Quick Start
 
 ```sh
-agent-doc init session.md "Topic Name"    # scaffold a session doc
+agent-doc install                         # check prereqs + install editor plugins
+agent-doc init                            # initialize project (.agent-doc/, SKILL.md)
+agent-doc init session.md "Topic Name"   # scaffold a session doc
 agent-doc run session.md                  # diff, send, append response
+agent-doc preflight session.md             # pre-agent checks → JSON (recover, commit, claims, diff, doc)
 agent-doc diff session.md                 # preview what would be sent
 agent-doc reset session.md                # clear session + snapshot
 agent-doc clean session.md                # squash session git history
@@ -351,14 +367,18 @@ Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plu
 
 ## Editor Integration
 
-### JetBrains
+### JetBrains (v0.2.12)
 
 External Tool: Program=`agent-doc`, Args=`run $FilePath$`,
 Working dir=`$ProjectFileDir$`, Output paths=`$FilePath$`. Assign keyboard shortcut.
 
-### VS Code
+Install via `agent-doc plugin install jetbrains` or `Settings → Plugins` (marketplace).
+
+### VS Code (v0.2.3)
 
 Task: `"command": "agent-doc run ${file}"`. Bind to keybinding.
+
+Install via `agent-doc plugin install vscode` or the VS Code marketplace.
 
 ### Vim/Neovim
 
@@ -370,7 +390,10 @@ nnoremap <leader>as :!agent-doc run %<CR>:e<CR>
 
 ```
 agent-doc run <file> [-b] [--agent <name>] [--model <model>] [--dry-run] [--no-git]
-agent-doc init <file> [title] [--agent <name>]
+agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]
+agent-doc init                              # project init: .agent-doc/ dirs + SKILL.md
+agent-doc init <file> [title] [--agent <name>]  # scaffold session document
+agent-doc preflight <file>                         # pre-agent checks → JSON (recover, commit, claims, diff, doc)
 agent-doc diff <file>
 agent-doc reset <file>
 agent-doc clean <file>
@@ -400,6 +423,10 @@ agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
 agent-doc plugin update <editor>    # update editor plugin to latest
 agent-doc plugin list               # list available editor plugins
 ```
+
+## Module Layout
+
+See [CLAUDE.md](CLAUDE.md#module-layout) for the full source module layout, binary vs. agent responsibility table, and conventions used when adding new subcommands.
 
 ## Domain Ontology
 

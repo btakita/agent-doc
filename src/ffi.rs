@@ -365,7 +365,7 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
         Some(unsafe { std::slice::from_raw_parts(base_state, base_state_len) })
     };
 
-    match crdt::merge(base, ours_str, theirs_str, false) {
+    match crdt::merge(base, ours_str, theirs_str) {
         Ok(merged_text) => {
             // Encode the merged state for persistence
             let doc = crdt::CrdtDoc::from_text(&merged_text);

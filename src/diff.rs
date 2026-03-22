@@ -112,6 +112,8 @@ fn match_html_comment(content: &str, pos: usize) -> Option<(usize, &str)> {
 ///
 /// Both snapshot and current content are comment-stripped before comparison.
 pub fn compute(doc: &Path) -> Result<Option<String>> {
+    let t_total = std::time::Instant::now();
+
     let previous = snapshot::resolve(doc)?.unwrap_or_default();
     let snap_path = snapshot::path_for(doc)?;
 
@@ -126,8 +128,13 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         previous.len(),
     );
 
+    let t_strip = std::time::Instant::now();
     let current_stripped = strip_comments(&current);
     let previous_stripped = strip_comments(&previous);
+    let elapsed_strip = t_strip.elapsed().as_millis();
+    if elapsed_strip > 0 {
+        eprintln!("[perf] diff.strip_comments: {}ms", elapsed_strip);
+    }
 
     eprintln!(
         "[diff] stripped: doc_len={} snap_len={}",
@@ -142,6 +149,10 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 
     if !has_changes {
         eprintln!("[diff] no changes detected between snapshot and document (after comment stripping)");
+        let elapsed_total = t_total.elapsed().as_millis();
+        if elapsed_total > 0 {
+            eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
+        }
         return Ok(None);
     }
 
@@ -151,6 +162,10 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     if is_stale_snapshot(&previous, &current) {
         eprintln!("[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale");
         snapshot::save(doc, &current)?;
+        let elapsed_total = t_total.elapsed().as_millis();
+        if elapsed_total > 0 {
+            eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
+        }
         return Ok(None);
     }
 
@@ -166,6 +181,12 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         output.push_str(prefix);
         output.push_str(change.value());
     }
+
+    let elapsed_total = t_total.elapsed().as_millis();
+    if elapsed_total > 0 {
+        eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
+    }
+
     Ok(Some(output))
 }
 

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Found 2 Linda Takita notifications: 40:31-40:34 and 41:16-41:18.
+Video cut complete: 3 ranges removed, output at 2026-03-22 10-27-48-edited.mp4 (403 MB).
 <!-- /agent:status -->
 
 ## Exchange
@@ -61,8 +61,24 @@ Found **2 text message notifications** from Linda Takita (via Pulse SMS) in the 
 - Video frames: **74,280 – 74,340** (at 30fps)
 - Content: "Dad will be 72 this year."
 
+Cut those frames from the video. Also cut from 41:32.2 to 41.36.7
+
 Both appear as Pulse SMS popups in the top-right corner of the screen. To cut these out with ffmpeg, you'd need two cuts totaling ~5 seconds.
-<!-- agent:boundary:babd54f7-9e43-4155-982b-bfef4c412171 -->
+### Re: Cut Notification Frames (HEAD)
+
+Cut **3 ranges** (~11.5s total) from `2026-03-22 10-27-48.mp4`:
+
+| # | Range | Duration | Reason |
+|---|-------|----------|--------|
+| 1 | 40:31–40:34 | 3s | Linda Takita notification 1 |
+| 2 | 41:16–41:18 | 2s | Linda Takita notification 2 |
+| 3 | 41:32.2–41:36.7 | 4.5s | User-specified cut |
+
+**Output:** [`2026-03-22 10-27-48-edited.mp4`](../../../../Videos/2026-03-22%2010-27-48-edited.mp4)
+- Duration: 1:30:26 (original 1:30:38)
+- Size: 403 MB (re-encoded x264 CRF23, down from 4 GB raw)
+- 4 segments kept via ffmpeg trim+concat filter
+<!-- agent:boundary:a8705d95-607a-42c7-88a2-b45b5d5682bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -70,5 +86,4 @@ Both appear as Pulse SMS popups in the top-right corner of the screen. To cut th
 <!-- agent:pending patch=replace -->
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
-- [ ] Cut Linda Takita notifications from 2026-03-22 10-27-48.mp4 (40:31-40:34, 41:16-41:18)
 <!-- /agent:pending -->

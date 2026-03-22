@@ -121,7 +121,7 @@ Brian
 - Gives specific availability windows rather than "I'm flexible"
 - Keeps it concise — Justin already knows the background from the first exchange
 Where is the resume?
-### Re: Where is the resume? (HEAD)
+### Re: Where is the resume?
 
 The resume PDF is at: `resume/BrianTakita-eci-solutions.pdf`
 
@@ -130,7 +130,7 @@ Open it: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solu
 Also — typo in the draft: "afternoo ET" → "afternoon ET" on the Wednesday line. Fix before sending.
 
 To rebuild if you edit the profile: `make -C resume PROFILE=eci-solutions`
-<!-- agent:boundary:74281633 -->
+<!-- agent:boundary:3e6529ea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

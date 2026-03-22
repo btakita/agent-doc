@@ -157,7 +157,7 @@ claude_args: --dangerously-skip-permissions
 
 tasks/youtube.md has a editor dialog show up for either a file cache conflict or external file change.
 Why?
-### Re: youtube.md File Cache Conflict (HEAD)
+### Re: youtube.md File Cache Conflict
 
 **Most likely cause: `commit()` writing to the working tree file.**
 

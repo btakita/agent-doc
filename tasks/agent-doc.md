@@ -513,10 +513,6 @@ Yes...`agent-doc preflight <FILE>` is a better name than `agent-doc submit <FILE
 | `prep` | Short for prepare | Short, snappy | Informal |
 
 **My recommendation: `preflight`.** It's descriptive (pre-agent checks + data gathering), distinct from `submit`/`run` (which do the full loop), and the aviation metaphor fits -- you're checking everything before takeoff (the agent response).
-Describe:
-> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
-
-When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
 ### Re: Prompt Below Boundary After agent-doc run
 
 **This is the expected consequence of snapshot-only boundary reposition.**
@@ -538,14 +534,28 @@ The working tree boundary is NOT moved after commit (to avoid cache conflicts). 
 **Option 2 is the best approach.** The write path already handles IPC reliably (the response patch is consumed within 2s). Adding boundary reposition to the response patch itself means no separate IPC call. The boundary would be at end of exchange in the written content.
 
 Want me to implement Option 2?
-<!-- agent:boundary:81371ca1-6377-4943-a9aa-d89d40e3d495 -->
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+
+When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
+### Re: No New Content -- Positional Diff (HEAD)
+
+No new user edits this cycle. The diff is a false positive from the boundary position difference:
+
+- **Snapshot** (repositioned by commit): user text at lines 516-519, boundary at line 541 (end)
+- **Working tree** (not repositioned): boundary at line 537, user text at lines 537-541 (below boundary)
+
+Same content, different position relative to the boundary. This confirms the issue -- the working tree boundary stays where it was, so user text typed below it stays below.
+
+**Ready to implement Option 2** (boundary reposition in write path) whenever you say go. This would ensure the boundary is always at the end of exchange in both working tree and snapshot after each write.
+<!-- agent:boundary:340c4ad5-ade0-401d-940c-6795c94fd54e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [ ] **Boundary reposition in write path** -- batch with response IPC (Option 2)
-- [ ] **`agent-doc preflight`** -- combined pre-flight + diff + document HEAD output (v0.25.0)
+- [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf-dependent)
 <!-- /agent:pending -->
 

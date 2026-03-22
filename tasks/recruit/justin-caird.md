@@ -221,7 +221,7 @@ Let's focus on things like live audio/video notes to capture insights during dev
 - corky shows agents handling real-world communication, not just code — relevant for ERP where data flows across departments
 - existence-lang as "domain language layer" maps directly to ERP modernization: you need shared semantics when agents touch 20-year-old systems
 - Keeps Presence AI as the production credibility anchor
-### Re: Toning down the pitch, focusing on practical capabilities (HEAD)
+### Re: Toning down the pitch, focusing on practical capabilities
 
 Agreed — no overselling. Revised corky bullet to focus on the practical: voice transcription, capturing insights during work sessions, not enterprise scaling.
 
@@ -244,7 +244,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:bc7072dc -->
+<!-- agent:boundary:886933fa -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

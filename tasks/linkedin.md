@@ -1,354 +1,138 @@
 ---
-agent_doc_session: a953811a-bf72-4aa9-bbd6-5904a5a07a1d
+agent_doc_session: 9c8a9b79-2d92-4000-8104-23c0606086a8
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
-# LinkedIn
+# Dave Franklin — BCG AI Factory Builder (HEAD)
 
-## Profile
+## Context
 
-**About section** (copy-paste ready):
-> Over 20 years of software development experience... Most recently built the full real-time AI avatar pipeline at Presence AI... Now building spec-driven agent tooling and collaborative intelligence workflows in Rust.
+Dave Franklin (Inspire Solutions) recruiting for **BCG AI Factory** — 12+ month contract, 100% remote, W2 ~$140-145/hr (~$230K + benefits gap). 10-20 person AI factory buildout. Role: execution-oriented AI-native builders shipping Claude Code agents and GenAI workflows.
 
-**Company taglines** (saved to `mail/topics/brian-takita/README.md`):
-- Brand identity: "Collaborative intelligence tooling — from spec to ship."
-- Marketing/pitch: "Spec-driven agent tooling for teams that ship."
+**Call scheduled:** Tue Mar 4 at 12:30 PM EST.
 
-## Post #1 — Agent Tooling (PUBLISHED)
+## Files Created
 
-- **Draft**: `mail/social/20260224-agent-tooling-linkedin.md` (status: published)
-- **Image**: `~/Pictures/agent-loop/2026-02-25_18-22-my-humble-setup.png` (tmux multi-pane setup)
-- **Content**: Introduction to corky + agent-doc + spec-driven methodology with tmux routing
-- Published via `corky social publish` with image upload + scheduling (`scheduled_at` + `corky watch`)
-- Self-referential dog-fooding line included
+- `mail/contacts/dave-franklin/CLAUDE.md` — contact file, role details, compensation, call summary
+- `mail/contacts/dave-franklin/AGENTS.md` — symlink to CLAUDE.md
+- `mail/contacts/dave-franklin/recordings/20260303-dave-franklin.txt` — 38 min call transcription
+- `mail/contacts/dave-franklin/bcg-research.md` — BCG research ($13.5B rev, BCG X, agentic AI push, Anil connection)
 
-## Post Cadence
+## Resume — Consulting Profile
 
-1. **Post #1** (done) — Introduction to corky + agent-doc + spec-driven methodology
-2. **Post #2** (planned) — Deep dive on topics/mailbox architecture ("How I share AI context with collaborators without giving them my whole inbox")
-3. **Post #3** (planned) — Video demo of the agent-doc workflow (30-60s screen recording)
+Built `resume/profiles/consulting.toml` targeting BCG per Dave's suggestions. Build: `make PROFILE=consulting`
 
-## Corky LinkedIn Integration
+**Changes applied:**
+- Added **AI Products Shipped** section (Presence AI, corky, agent-doc, tagpath)
+- Consolidated honk.com + TrueCar into single entry
+- Censible dates: Jan 2016 – Apr 2024 (8 years)
+- Removed: Freelance, SocialChorus, Open Source sections
+- Cleaned duplicate phrases between tagline and summary
+- **Document-as-interface arc:** Neo Innovation/Tenfore (2015) → agent-doc (2024) — Brian owns the IP
+- **corky bullet:** topics, Whisper diarized transcription, social media posting, scheduled delivery, Python→Rust spec-driven rewrite in under 1 day
+- Margins reduced → 3-page PDF. Proofread clean.
 
-**Implemented (v0.12.0):**
-- `corky social auth linkedin --profile btakita` — OAuth2 flow, token stored in `tokens.json`
-- `corky social publish` with `--dry-run` flag — validates auth, uploads images, prints payload
-- `images: Vec<String>` in draft YAML — single image or multi-image carousel
-- LinkedIn REST API (`/rest/posts` + `/rest/images`) — upgraded from deprecated v2 UGC
-- `corky schedule run` / `corky watch` — client-side scheduling with `scheduled_at` field
-- Status: `draft` + `scheduled_at` → auto-ready; `published` → skip (prevents double-publish)
-- Logo: `assets/logo.svg` + `logo-128.png` + `logo-64.png` (corgi-in-a-bottle design)
-- Run from: `cd /home/brian/work/btakita/agent-loop && corky watch &` (needs `mail/` in CWD)
+**Release velocity:** 57 releases across 3 Rust tools in 11 days (~5.2/day)
 
-**Not available:**
-- LinkedIn Messaging API — partner-only, not available to self-service developer apps
-- Workaround: monitor LinkedIn via email notifications (`corky sync`), steer conversations to email
+**IP note:** Brian owns Tenfore document-as-interface work (claimed ownership due to unpaid debt, granted Tenfore unrestricted license). No patents found.
 
-## Decisions
+**Anil Podduturi** — currently at BCG, managed Tenfore project at Neo Innovation. Warm path into BCG.
 
-- **Directory naming**: Keep `mail/` — documented in SPECS.md §2.5
-- **Scheduling**: No shared trait — thin `schedule.rs` dispatches via `ScheduledKind` match
-- **LinkedIn API ToS**: §3.1 "no automating posting" — gray zone for `corky watch`, fine for user-initiated
-- **Best post times**: Tue–Thu, 8–10 AM ET; avoid Mon/Fri and evenings
-- **Video vs screenshot**: Screenshot for first post (instant legibility); video for follow-up
-- **Logo PNGs**: Committed to repo, not built from SVG (avoids external tool dependency)
-- **LinkedIn messaging**: Out of scope — use email instead (corky's sweet spot)
+**Commits pushed:**
+- `b0e82d5` (resume) — consulting profile, AI Products Shipped, Honk+TrueCar merge, Censible date fix
+- `8a58944` (resume) — proofread fixes, corky expansion, margin reduction (4→3 pages)
 
-## Contacts
+**Status:** Resume sent to Dave. Ready for call.
 
-- **Toby Hill** — D24 Search (DeepTech recruiter). Calendly note: "AI developer tooling in Rust — agent orchestration, automated workflows, full-stack. Open to DeepTech roles."
+## Assistant
 
-## LinkedIn Conversation Export Bookmarklet
+Compacted. Reduced from 355 lines of back-and-forth to a structured reference document. All key context preserved: role details, files created, resume changes, IP notes, Anil connection, commit history, and current status.
 
-Exports the currently visible LinkedIn messaging thread as a timestamped text file.
+## User
 
-**Filename format:** `yyyymmdd-linkedin-contact-name.txt` (e.g., `20260311-linkedin-mia-tomeo.txt`)
+Connect with Anil
+- BCG: Project Helix
 
-```javascript
-javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';const time=timeEl?timeEl.textContent.trim():'';const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\n').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
-```
+True Engineer builders
+People are "green"
 
-**To install:** Create a new bookmark, paste the `javascript:void(...)` code as the URL.
+I'm building AI:
+What is it?
+How did you build it?
+Why did you build it?
 
-**Note:** LinkedIn lazy-loads messages — scroll up to load older messages before clicking.
 
-<!-- agent:exchange -->
-The bookmarklet is already in the static section of this document (## LinkedIn Conversation Export Bookmarklet, lines 63-75). In template mode, `agent-doc write` only patches `<!-- agent:exchange -->` — the static sections above it are never touched by the agent. So it's safe here.
+I'm in consideration for Project Helix
+If I gave you a name, could you put in a word for me?
+Do you know anyone?
 
-The exchange section does get compacted/replaced over time, but the bookmarklet lives *outside* the exchange component.
+Steve Edison
+Inspyr Solutions
+Tony Tomai
+Eric Rose
 
-If you want a second copy for extra safety: `agent-loop/bin/linkedin-export-bookmarklet.js` would be a natural spot. But given the template mode guarantee, keeping it in this document is fine.
+Please fill in tony-tomai contact with context.
+Please transcribe + diarize the call in main/contacts/tony-tomai/recordings
 
-Help me reply to some comments https://www.linkedin.com/feed/update/urn:li:activity:7440756026619940864
+<!-- agent:exchange patch=append -->
+### Draft SMS response to Dave Franklin
 
-Let's start with Michael Darmousseh:
-> Are you using autoresearch (idea from Karpathy) to automate building skills/agents? I built out an internal tool for optimizing skills with the technique.
+Dave's messages (from `dave_franklin_sms.txt`):
+> "Hi Brian, this is Dave Franklin with Inspyrsolutions. I tried calling and your voicemail is not working. Anyway, still waiting on next steps from BCG. There have been several team members out on spring break returning this week."
 
-I havn't used Karpahy's technique. What got me started was this:
+> "Hi Brian, this is Dave Franklin with Inspyrsolutions. Still waiting on BCG to advise on next steps with interviews, offers, etc. Since several team members have been out on spring break with families, still in a holding pattern. However, wanted to keep you in the loop. If I hear anything today or tomorrow, will advise."
 
-I inherited a real-time video lipsync codebase from a coworker who left. Hand-coded + AI augmented improvements on it for a while. Eventually using Claude Code on the codebase. The documentation was out of sync due to numerous refactorings spanning multiple processes, performance improvements, stability improvements, etc.
+**Draft reply:**
 
-I then made Claude audit my documentation. Which it did quite well with.
+> Hey Dave, appreciate the update. No rush — totally understand the spring break timing. I'm available whenever they're ready to move forward. In the meantime I've been shipping steadily, happy to share anything that would help position me.
 
-About 1 week later, PresenceAI shut down. I came back on the job market that has been completely different from when I started. I was inspired by some companies that were using 100% spec-driven development...as in it's not allowed to touch code.
+**Tone notes:**
+- Warm but not anxious — mirrors Dave's matter-of-fact style
+- "No rush" signals patience (you're not desperate)
+- "Shipping steadily" is a subtle signal of continued momentum without listing specifics
+- "Happy to share anything" opens the door without pushing content on him
+- Short — matches SMS format and Dave's communication style
 
-I figured, make my job search use Calude code. So I made corky to handle my correspondence. I wanted to reach out to old contacts.
+### Keep it simple — skip the LinkedIn posts/videos
 
-I also worked on a project back in 2015 where we had interactive documents that hooked into SalesForce. So I wanted to apply this concept to Claude. As I was working on Corky, I began agent-doc.
+**No** — don't mention them. Here's why:
 
-From there, it's been a matter of following good practices...which include research, iterating on SKILL.md for agentic context, building binary software (using Rust) for deterministic operations, continuous review, etc.
+1. **Dave already has your resume.** He knows what you build. Sending LinkedIn content feels like campaigning.
+2. **He's a recruiter, not the decision-maker.** Extra content doesn't help him get your resume in front of BCG — it's noise.
+3. **"Shipping steadily" is the right signal.** Active and productive without making him click links.
+4. **Save content for BCG interviews.** That's when you demo agent-doc, show livestreams, etc.
 
-Agents make it easier to follow all of the practices that once took too much time...and were dropped under schedule pressure.
+**Exception:** If Dave specifically asks "what have you been working on?" — then share 1-2 LinkedIn posts as proof points. Don't volunteer it on a status update.
 
-**Draft reply to Michael Darmousseh:**
+> If I hear anything today or tomorrow, will advise.
 
-I haven't used Karpathy's autoresearch technique specifically, but the journey that led me here rhymes with it.
+Should I follow up with Dave. He mentioned that he expected an answer by yesterday or today.
+Should I mention that I will be having interviews next week?
 
-I inherited a real-time video lipsync codebase from a colleague who left. After months of hand-coded + AI-augmented improvements — refactoring processes, performance, stability — the documentation was completely out of sync. I had Claude audit and reconcile it, and it did surprisingly well.
+**Re: LinkedIn post for YouTube video + blog post**
 
-A week later the company shut down. Coming back to the job market, I was inspired by teams doing 100% spec-driven development — no one touches code directly. So I built corky (correspondence kit) to manage my outreach, and agent-doc grew out of that — influenced by interactive document workflows I'd built back in 2015 hooked into Salesforce.
+Links in the post body get deprioritized by LinkedIn's algorithm. First comment is the right move.
 
-From there it's been iterating on the practices: research loops, evolving SKILL.md for agentic context, building deterministic operations in Rust, continuous review. The key insight is that agents make it feasible to follow *all* the practices that used to get dropped under schedule pressure.
+**Draft LinkedIn Post:**
 
-Would love to hear more about your autoresearch implementation — are you optimizing skills based on execution traces, or something else?
+Built a 60-minute screen recording of my agent-driven recruiter workflow — from resume tailoring to outreach, all orchestrated through tmux with multiple Claude Code sessions running in parallel.
 
-Tightened your story into LinkedIn-appropriate length while keeping the authentic narrative arc. Closing question invites continued conversation. Adjust tone/length/emphasis as needed.
+What you'll see:
+- Real-time spec-driven development with agent-doc interactive documents
+- corky handling correspondence drafting and email management
+- Multi-pane tmux routing where each agent handles one focused task
+- The full loop: research → spec → build → review → ship
 
-Should I post links to corky + agent-doc?
+This is what 20+ years of software development looks like when you add agent tooling to the stack. Not vibe coding — structured collaboration with AI that follows the same engineering practices I've always used, just at a pace that wasn't possible before.
 
-**Re: Should I post links?**
+The tools shown (corky, agent-doc) are open source and published on crates.io.
 
-Skip the links for this reply:
-1. **Comment replies with links get deprioritized** by LinkedIn's algorithm and look self-promotional
-2. **The repos are likely private** — dead links are worse than no links
-The repos are public. You should know that.
-   https://crates.io/crates/corky
-   https://crates.io/crates/agent-doc
-3. **The narrative is stronger without them** — origin story > sales pitch in a comment thread
-4. **Save for follow-up** — if Michael asks "where can I see it?", share links naturally then
+**First comment (post immediately after):**
 
-You already name-drop "corky" and "agent-doc" in the reply text. Curious people will ask.
-
-**Ready to post as-is** — the unquoted draft above is good to go. Copy-paste into the LinkedIn comment box.
-I agree with your other points
-
-**Re: repos are public**
-
-You're right — my mistake. Both are published on crates.io. I should have known that. Recommendation still stands though: skip the links in this reply for the algorithm/narrative reasons. Post the draft as-is.
-
-Help me reply to Ernest Franklin Spicer:
-
-> Funny... Open to Work so maybe in 20 years you didnt advance much because of falling to hype.
-
-My current response:
-
-So you are not Open to Work? Not willing to take on new clients?
-
-Anyways, My previous employer went out of business...we were primarily hand coding with some AI augmentation. Not using agent loops though until the very very end...but it was too late.
-
-**Re: Ernest Franklin Spicer reply**
-
-Your draft is solid. Here are options:
-
-**Option A (your draft, polished):**
-So you're not Open to Work? Not taking on new clients?
-My previous employer went out of business — we were primarily hand-coding with some AI augmentation. Not using agent loops until the very end... but by then it was too late.
-
-**Option B (shorter, more confident):**
-My previous employer shut down — that's why I'm open to work. Building these tools is what I did next. Happy to compare notes on what "advancing" looks like after 20 years.
-
-**Option C (don't engage):**
-This reads like a troll comment. Engaging gives it algorithm visibility. Your strongest play might be to ignore it — anyone reading will see it reflects more on Ernest than on you.
-
-Recommendation: **C** (ignore) or **A** if you want to respond.
-
-Dan Dunford
-> It's been liberating testing all my ideas as if they were real products. I've been able to iterate hundreds of tweaks, many ideas, and prove which ones may work and which ones will definitely not work.
->
->I love it. I'm now able to focus on the ideas that got attention and will work.. and eventually monetise, exciting times ahead!
- 
-I love this comment. Would love to follow his work. Should I mention some of my ideas, re: existence-lang or my other projects, or would this be in bad taste?
-
-**Re: Dan Dunford reply**
-
-Don't mention existence-lang or other projects here. Dan's comment is about *his* experience — the best reply mirrors his energy and validates what he's doing. Mentioning your projects pivots focus back to you in a thread where you're already OP.
-
-**Draft reply to Dan Dunford:**
-
-This resonates — the ability to test ideas at the speed of thought completely changes which ones you pursue. Before, you had to bet big on one idea and commit. Now you can prototype five, kill three, and double down on the two that show traction.
-
-Would love to see what you're building. Following!
-
-
-From David Bethune
-
-> It's funny how that, after decades of programming where no one questions your chops (shipped products, right?), if we use AI now suddenly we have abdicated all conscious thought and understanding of coding. How would that happen? Did farmers forget about basic agriculture because farming equipment made ag faster and easier. I think not! Ag got bigger and fed more people with tools. There was no retraction or regress.
-
-People are addicted to labels & titles...because symbols are a proxy for thought.
-What many people don't realize is AI is a cognitive enhancement...not a replacement.
-
-A tool to be mastered...just like any other tool.
-
-**Re: David Bethune reply**
-
-Your notes are strong raw material. Here's a polished draft that weaves them together:
-
-**Draft reply to David Bethune:**
-
-Exactly. People are addicted to labels and titles because symbols are a proxy for thought. "AI-generated code" vs "hand-written code" is the new version of that — as if the person directing the work somehow forgot everything they know.
-
-AI is a cognitive enhancement, not a replacement. The understanding doesn't go away — it compounds. You just get to apply it at a different resolution.
-
-From Cody Sheridan
-> My biggest limitation in software development has always been time. I know what I want to build and how I want to build it, I just haven’t had the time outside of full-time employment to actually get it done. LLMs and Agents are changing that.
-
-I resonate with this. I'm looking forward to see what you are releasing.
-
-Making software from intention makes development a true art form.
-Where the expression is the utility.
-I predict many new businesses will start from this technological wave.
-
-**Re: Cody Sheridan reply**
-
-Your notes are poetic. Here's a draft that keeps that energy while staying conversational:
-
-**Draft reply to Cody Sheridan:**
-
-Same here — time was always the bottleneck. You know what to build, you know how to build it, but the gap between intention and implementation ate all the hours.
-
-Now that gap is collapsing. Making software from intention turns development into a true art form — where the expression is the utility. I think we're going to see a wave of new collaborations and businesses from people who always had the ideas but never had the time.
-
-Looking forward to seeing what you release.
-
-From Andrei Trandafira: rate my response
-> Good direction, but agent loops are not yet the compiler era of AI engineering; they are the relay-circuit era—enough to prove the paradigm, not enough yet to guarantee robust abstraction. So yes we're at a new turn of the spiral of abstraction, but we are very early
-
-Andrei Trandafira They are yet another tool. The Agent Harness is important. And making software for deterministic operations...making context for the model. Every tool has it's place. Being early is the best place to be.
-
-**Re: Andrei Trandafira reply**
-
-Your substance is right but the phrasing is fragmented. Here's a polished version:
-
-**Draft reply to Andrei Trandafira:**
-
-Fair point — we're early. But every paradigm starts with relay circuits before compilers arrive. The key is what you build *during* that era.
-
-What I've found matters most right now: the agent harness, deterministic tooling for operations that shouldn't be probabilistic, and structured context (SKILL.md) that gives the model the right abstraction surface. These aren't compiler-era polish — they're the foundations that make the compiler era possible.
-
-Being early is exactly where you want to be.
-
-From Azizul Rabby Chowdhury
-> Feels like the real shift is just being able to finally build things that were always out of reach before.
-
-Indeed it is. All of those intentions can now be software and in some cases physical creations.
-
-**Re: Azizul Rabby Chowdhury reply**
-
-Your reply is good but could be tighter. Here's a polished version:
-
-**Draft reply to Azizul Rabby Chowdhury:**
-
-Indeed. All those intentions that were always in your head — now they can become working software. The shift isn't just speed, it's reach.
-
-How about including 3D printed creations as well.
-
-**Updated draft reply to Azizul Rabby Chowdhury:**
-
-Indeed. All those intentions that were always in your head — now they can become working software, or even physical creations off a 3D printer. The shift isn't just speed, it's reach.
-
-From Richard Lee Abraham
-> That's the way it's always been. Tech evolves; new, more efficient ways of doing things become available. AI tools are the latest version of that.
-
-The game keeps on changing. Some people comparatively benefit more than others. It's ultimately leverage that people can use or not use.
-
-**Re: Richard Lee Abraham reply**
-
-Your leverage point is strong. Here's a polished version:
-
-**Draft reply to Richard Lee Abraham:**
-
-Exactly — and the difference this time is the magnitude of leverage. Previous tech shifts gave you 2x, maybe 10x. This one is giving individual builders leverage that used to require entire teams. The game keeps changing; the people who benefit most are the ones who pick up the new tools first.
-
-> benefit most are the ones who pick up the new tools first
-
-I think those who are prepared.
-
-Please update the bookmarklet to include the date of the message.
-
-**Re: Richard Lee Abraham — updated ending**
-
-Updated draft:
-Exactly — and the difference this time is the magnitude of leverage. Previous tech shifts gave you 2x, maybe 10x. This one is giving individual builders leverage that used to require entire teams. The game keeps changing; the people who benefit most are the ones who are prepared when the shift arrives.
-
-**Re: Bookmarklet date update**
-
-Updated the bookmarklet to extract the `datetime` attribute from `<time>` elements (which has full ISO dates) and format as `YYYY-MM-DD HH:MM`. Falls back to the displayed text for messages without a datetime attribute. See the updated code in the static section above — edit the bookmarklet there directly since it's outside the exchange component.
-
-Updated bookmarklet (replace the one in ## LinkedIn Conversation Export Bookmarklet):
-
-```
-javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';let time='';if(timeEl){const te=timeEl.querySelector('time[datetime]');if(te){const dt=new Date(te.getAttribute('datetime'));time=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0')}else{time=timeEl.textContent.trim()}}const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\
-'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\
-').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\
-Exported: '+d.toISOString()+'\
-\
-'+msgs.join('\
-\
-');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
-```
-
-Copy this into the static bookmarklet section to replace the old one. The exchange component can't edit static sections directly.
-
-Should we post the following today: Sunday 15:00:00 Eastern or wait until tomorrow.
-
-**Video Pipeline (2026-03-19 02-26-07.mp4):**
-- Light edit via ffmpeg silence detection: 47 segments cut, 63→60 min, 2.8GB→380MB
-- GPU transcription (CUDA): 2058 segments in 27.6s (130x realtime)
-- Published: https://www.youtube.com/watch?v=IenfqO2vmAw
-- Blog post: https://briantakita.me/posts/agent-resume-recruiter-workflow-live
-- Comment posted (ID: `UgwZg_yU3oJaAyV8neF4AaABAg`) — needs manual pinning
-
-**YouTube Comment Response (hVNmbmY4vgo):**
-- Responded to "gross vibe coding sub human" with Option A (20+ yrs experience, back-burner ideas, abstraction path, democratization)
-- LinkedIn post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
-- LinkedIn comment with video link: ID `7440760371260444672`
-
-
-**Re: posting timing**
-
-Per your own decisions in this doc: **Best post times: Tue-Thu, 8-10 AM ET; avoid Mon/Fri and evenings.**
-
-**Wait until Tuesday morning, 8-9 AM ET.**
-
-- Sunday afternoon = low engagement (weekend mode, not professional scrolling)
-- Monday = in your "avoid" list
-- Tuesday 8-9 AM ET = your sweet spot
-- Content is evergreen — 2 days won't hurt
-
-If you need to post sooner: Monday 8 AM ET > Sunday 3 PM. But Tuesday is the play.
-
-Video pipeline and YouTube comment work noted — good documentation for the task file.
-I have another longer video to post.
-I will be having an interview on Monday 5PM Eastern.
-I want my videos up by then.
-Should I:
-- post both videos on Monday morning
-- post 1 video in the morning 1 around noon
-- post 1 video Sunday, 1 Monday morning
-
-**Re: video posting strategy for Monday interview**
-
-The interview changes the calculus — it's not about optimal LinkedIn timing, it's about having content visible before 5PM Monday.
-
-**Post 1 Sunday, 1 Monday morning.**
-
-- **Sunday evening (~7-8 PM ET)**: Post video 1. Gets ~20 hours to accumulate views/likes before the interview.
-- **Monday morning (~8-9 AM ET)**: Post video 2. Gets ~8 hours of visibility before 5PM.
-- **Why not both Monday morning**: They compete with each other in the feed. Spacing gives each its own engagement window.
-- **Why not noon**: Too close to the interview — not enough time for organic engagement.
-
-The interviewer will likely check your LinkedIn profile before the call. Two recent video posts with some engagement signals active presence.
-<!-- agent:boundary:caecdd50-1251-479e-a229-ae8f4e7a017f -->
+Full video: https://www.youtube.com/watch?v=IenfqO2vmAw
+Blog post with context: https://briantakita.me/posts/agent-resume-recruiter-workflow-live
+<!-- agent:boundary:3a5d3157-8d4c-4bd7-8023-922a24af7626 -->
 <!-- /agent:exchange -->

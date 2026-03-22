@@ -505,7 +505,7 @@ Think of it as: `run` = `submit` + agent + `write` + `commit`. The SKILL replace
 Yes...`agent-doc preflight <FILE>` is a better name than `agent-doc submit <FILE>`. Any other alternatives to consider?
 Describe:
 > - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
-### Re: Naming — preflight vs alternatives (HEAD)
+### Re: Naming — preflight vs alternatives
 
 | Name | Meaning | Pros | Cons |
 |------|---------|------|------|

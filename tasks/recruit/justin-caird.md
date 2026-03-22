@@ -319,12 +319,12 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-### Re: Expanded Presence AI bullet (HEAD)
+### Re: Expanded Presence AI bullet
 
 Good addition — specifying the multimodal outputs (live video avatars, audio avatars, text avatars, image generation) makes the pipeline concrete rather than abstract. Shows breadth of production AI experience.
 
 Draft v7 is now final with this edit incorporated.
-<!-- agent:boundary:9d30a08d -->
+<!-- agent:boundary:5b6cbdc9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

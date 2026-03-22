@@ -453,7 +453,7 @@ To change the length, update `BOUNDARY_ID_LEN` in `lib.rs`. The regex patterns a
 Binary installed. 521 tests pass.
 release
 
-### Re: Navigation + release (HEAD)
+### Re: Navigation + release
 
 **v0.25.4 released** — boundary cleanup, autoclaim pruning, sync auto-start, short boundary IDs.
 

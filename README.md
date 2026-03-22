@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
-**v0.25.1** | JetBrains plugin v0.2.12 | VS Code extension v0.2.3
+**v0.25.2** | JetBrains plugin v0.2.12 | VS Code extension v0.2.3
 
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
@@ -30,7 +30,7 @@ sees your edits as diffs, so every change carries intent.
 - **Stash window routing** — failed `split-window` calls land in a stash window instead of creating visible throwaway windows; resync purges idle stash windows
 - **Streaming** — real-time CRDT write-back loop with chain-of-thought routing
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session
-- **519 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
+- **521 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
 
 ## Install
 

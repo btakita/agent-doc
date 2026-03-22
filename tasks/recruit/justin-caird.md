@@ -310,7 +310,7 @@ A few things that might be particularly relevant for the CTO conversation:
 - agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
 - corky is a git-native toolkit for correspondence, social media, and audio/video media — it turns conversations, voice notes, and video into structured knowledge that agents can act on, with diarized transcription and per-contact context
 - Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across code and data contexts — correspondence, documents, events, not just source files
-- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline with live video avatars, audio avatars, text avatars, and image generation
 
 I'm available:
 - Tuesday 3/25: morning or afternoon ET
@@ -319,7 +319,12 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:058661d6 -->
+### Re: Expanded Presence AI bullet (HEAD)
+
+Good addition — specifying the multimodal outputs (live video avatars, audio avatars, text avatars, image generation) makes the pipeline concrete rather than abstract. Shows breadth of production AI experience.
+
+Draft v7 is now final with this edit incorporated.
+<!-- agent:boundary:9d30a08d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

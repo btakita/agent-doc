@@ -592,9 +592,6 @@ You can see the current state of the document with the git HEAD and git diff.
 Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
 
 Let's keep on tracking the context state storing only the document HEAD.
-### Re: Boundary Snowball Fix Implemented
-
-**Fixed and installed.** Two changes in `template.rs`:
 
 **1. Snowball fix (`apply_patches_with_overrides`):**
 Changed post-patch boundary re-insertion from checking `orig_had_boundary.is_some()` (content-based) to unconditionally re-inserting for any template doc with an exchange component that has no boundary after patching. This breaks the snowball: even if the previous cycle lost the boundary, the next cycle will re-insert one.
@@ -610,19 +607,35 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 **Results:** 34 template tests pass (31 existing + 3 new). Binary rebuilt and installed.
 
 **Context tracking:** Agreed on HEAD-only context. The `agent-doc diff` command is the implementation path — it outputs only the changes since the last snapshot, so the SKILL loads HEAD document + compact diff instead of HEAD + full snapshot. This keeps only one version of the document in context.
-<!-- agent:boundary:a1586c68-e15d-4f87-a2e7-5cd37422dec9 -->
+### Re: Pending/Todo Split + Boundary Fix Verification (HEAD)
+
+**Acknowledged.** `agent:pending` is now session-scoped (current work items), `agent:todo` is long-term backlog. I've cleaned up pending to remove the duplicated long-term items.
+
+**Boundary fix verified working.** The write log from this cycle shows:
+```
+[template] pre-patch boundary 9b2abee2 inserted at end of exchange
+[template] re-inserted boundary a1586c68 at end of exchange
+```
+
+The re-insertion message confirms the snowball fix works — the boundary is now unconditionally re-inserted for template docs with an exchange component. Previous cycles only showed the pre-patch insertion (no re-insertion because `orig_had_boundary` failed).
+
+**Submodule committed:** `ce84701` in `src/agent-doc` — "fix: boundary snowball bug + code-block awareness in remove_all_boundaries"
+<!-- agent:boundary:0528577e-907d-4bd0-a384-c18cf8464f11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - **`agent-doc diff`** — binary command for HEAD-only context loading (next priority)
-- IPC patch position — plugin inserts at cursor, not boundary. Needs boundary-aware insertion in plugin.
+- IPC patch position — plugin inserts at cursor, not boundary
 - Boundary-aware replace for `flush_to_document` — split at boundary instead of replace mode
-- SKILL auto-update: use AskUserQuestion instead of print+stop (approved)
+- SKILL auto-update: use AskUserQuestion instead of print+stop
 - CLAUDE.md + README.md staleness — update for template.rs changes
 - CRDT merge ordering — Yrs causality still reorders (for final writes only)
 - `agent-doc submit` — combined binary command for deterministic workflow
+<!-- /agent:pending -->
+
+<!-- agent:todo -->
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
@@ -638,4 +651,4 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 - Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
 - Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
 - `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
-<!-- /agent:pending -->
+<!-- /agent:todo -->

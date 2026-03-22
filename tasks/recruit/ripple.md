@@ -370,6 +370,24 @@ The file:// protocol feedback was saved in two places:
 This is Claude Code's auto-memory system — persistent across conversations. Next session, I'll already know to use `file:///` paths for browser-openable files.
 
 Let's save this as an email skill or in email/AGENTS.md
+
+### Re: Email skill
+
+Created `/email` skill at `.claude/skills/email/SKILL.md`. Three commands:
+
+- `/email draft <recipient> <subject>` — draft new or reply (thread search, corky integration)
+- `/email send <draft-file>` — delivery cascade: SMTP → Gmail API → browser paste fallback
+- `/email html <draft-file>` — generate HTML for browser paste workflow
+
+**Key patterns captured:**
+- Reply threading via `mail/conversations/` thread ID lookup
+- Gmail-compatible inline CSS (Gmail strips `<style>` tags)
+- `file:///` protocol for browser-openable paths
+- Delivery cascade with fallback to browser paste
+- Current btak.dev account limitations documented
+- Future corky Gmail API send feature tracked
+
+The skill consolidates everything we learned this session about email drafting, HTML formatting, and Gmail delivery constraints.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

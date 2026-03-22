@@ -237,14 +237,14 @@ Did you get Judith's response?
 Robert Ward had some comments about this email.
 
 
-#### Re: Judith's Response (2026-03-17) (HEAD)
+#### Re: Judith's Response (2026-03-17)
 
 Judith replied to the kickoff email:
 > I am out of town on a life transformed coaches retreat so I can't do anything this week. Please let's reconvene about middle of next week to discuss everything more. Thank you for your time and efforts.
 
 **Analysis:** Positive signal — she replied promptly, confirmed interest, and set a concrete timeline (mid-next week = ~Mar 24-26). The retreat aligns with her pattern of spiritual/coaching events that Robert Ward described.
 
-#### Re: Robert Ward Recording Transcriptions (HEAD)
+#### Re: Robert Ward Recording Transcriptions
 
 **Completed transcriptions:**
 - `phone_20260317-144243` — ring only (23s, no answer)
@@ -260,7 +260,7 @@ Judith replied to the kickoff email:
 
 Note: Diarize feature not compiled in corky — transcripts lack speaker labels. Used `--speakers` flag for metadata only.
 
-#### Re: Robert Ward's Email Tone Feedback — Summary (HEAD)
+#### Re: Robert Ward's Email Tone Feedback — Summary
 
 From phone_20260317-165018 (the callback after Robert read the kickoff email):
 
@@ -275,7 +275,7 @@ From phone_20260317-165018 (the callback after Robert read the kickoff email):
 
 **Applied to `mail/contacts/judith-krug/CLAUDE.md`** — updated the Tone section with Robert's coaching points for all future email drafts.
 
-#### Re: Draft Response to Judith (HEAD)
+#### Re: Draft Response to Judith
 
 Applying Robert's feedback — short, warm, no pressure, no time commitments:
 
@@ -306,4 +306,24 @@ Please use corky to transcribe and diarize all of my conversations with Robert W
 Robert had some comments about the tone of the emails. Please summarize the comments. And let's apply the suggestions to our communication AGENTS.md with Judith.
 
 Please help me with a draft response.
+
+Please have corky transcribe use --gpu on this machine by default. Set CLAUDE.local.md or a local skill.
+
+
+#### Re: Reply Sent (2026-03-19)
+
+**Sent** via `corky draft push --send`:
+- **Draft:** `mail/drafts/20260319-judith-retreat-reply.md`
+- **To:** judithkrug@gmail.com
+- **Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+- **Body:** Short, warm acknowledgment of retreat + confirmation for next week. 2 sentences per Robert's coaching.
+
+#### Re: GPU Transcription Config
+
+- This machine has NVIDIA GPU (CUDA 13.2)
+- Corky had no `--gpu` CLI flag — GPU is a compile-time feature: `transcribe-cuda`
+- **Rebuilt corky** with `cargo install --path . --features transcribe-cuda` — future transcriptions will use GPU automatically (~10x faster)
+- Created `src/corky/CLAUDE.local.md` with build instructions and transcription defaults
+- No skill needed — it's a build-time setting, not a runtime flag
+The reply looks good. Full send.
 <!-- /agent:exchange -->

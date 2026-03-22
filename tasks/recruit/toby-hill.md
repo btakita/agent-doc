@@ -1,7 +1,10 @@
 ---
 agent_doc_session: 7edcc64c-420a-493a-86e6-0a6a119dff0a
 tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
+
 
 Add a contact for toby-hill
 
@@ -78,3 +81,18 @@ Hi Toby, thank you for our call on 2/26. Here is my updated resume as requested 
 
 Best,
 Brian
+
+## Status
+
+<!-- agent:status patch=replace -->
+<!-- /agent:status -->
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->

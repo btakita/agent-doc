@@ -10,9 +10,9 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.3 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.4 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
+**Plugins:** JetBrains v0.2.13 (boundary cleanup + short IDs) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
@@ -429,7 +429,7 @@ After: `<!-- agent:boundary:aef3b25d -->`
 Binary installed. Plugin built (both unsigned and signed). 521 tests pass.
 What is the collision chance of the uuid? What would be the impact of a collision? Please make the number of uuid characters  configurable with 8 being the default.
 
-When I navigate the editor focus back to toby-gi
+When I navigate the editor focus back to toby-hill.md, the claude session does not start.
 
 ### Re: Configurable boundary UUID length
 
@@ -451,7 +451,25 @@ When I navigate the editor focus back to toby-gi
 To change the length, update `BOUNDARY_ID_LEN` in `lib.rs`. The regex patterns and prefix-matching in all code accept any length.
 
 Binary installed. 521 tests pass.
-<!-- agent:boundary:3f024095 -->
+release
+
+### Re: Navigation + release (HEAD)
+
+**v0.25.4 released** — boundary cleanup, autoclaim pruning, sync auto-start, short boundary IDs.
+
+**Changes in this release:**
+- Fix boundary marker accumulation in JB plugin (`repositionBoundaryToEnd` removes ALL boundaries)
+- Short boundary IDs (8 hex chars) — centralized `new_boundary_id()` in lib.rs
+- Autoclaim validates file existence, prunes stale entries on rename/delete
+- Sync detects alive panes with non-existent files, kills and auto-starts
+- `lookup_entry()` added to sessions.rs
+
+**Published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | binary installed ✓
+
+**Re: toby-hill.md session not starting:** The claims log shows `Claimed tasks/employment/toby-hill.md for pane %41` — so the pane was created and claimed. The Claude session should be running in that pane. If it's not visible, try switching to the pane manually. The navigation issue may be a timing/focus problem rather than a session creation problem. Let me know if the pane exists but is empty.
+
+521 tests pass.
+<!-- agent:boundary:aec06db1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

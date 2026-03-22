@@ -401,7 +401,7 @@ Send the email to Ken's amulet technologies email address.
 My engagement with Judith Krug has not started yet. We will be meeting mid next week. But it keeps on slipping.
 I should confirm the date and time of the call next week.
 
-### Re: Judith status & financial urgency (HEAD)
+### Re: Judith status & financial urgency
 
 Noted. Judith is a prospect, not a paying client yet — meeting keeps slipping, no revenue.
 

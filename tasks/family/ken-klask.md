@@ -16,7 +16,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 Please review correspondence with Ken Klask.
-### Correspondence review — Ken Klask (HEAD)
+### Correspondence review — Ken Klask
 
 **Contact:** `mail/contacts/ken-klask/CLAUDE.md`
 **Relationship:** Brother-in-law (married to Laura Klask). Founder of Amulet Technologies (HMI company, 25+ years). Products: GEMstudio, smart display modules, controller boards.

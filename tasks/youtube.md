@@ -597,7 +597,7 @@ The compact header (smaller logo, reduced padding, smaller text) is now the comm
 
 The `^0.1.1` range in briantakita.me-dev will auto-resolve to 0.1.2 on next install/deploy.
 deploy
-### Re: Deploy (HEAD)
+### Re: Deploy
 
 **Blocker:** Docker build fails — the Dockerfile references `lib/ui--server--blog/package.json` and other `@rappstack/*` libs that no longer exist locally. These were moved to npm packages but the Dockerfile still expects them as workspace directories.
 

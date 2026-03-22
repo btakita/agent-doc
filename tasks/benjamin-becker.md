@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Benjamin replied. Draft response ready (needs resume attachment).
+Custom resume generated. Ready to send with reply.
 <!-- /agent:status -->
 
 ## Exchange
@@ -104,11 +104,26 @@ Best,
 Brian
 
 Attach your resume PDF when sending. Want to tweak, or ready to send?
-<!-- agent:boundary:8d8250dc-5032-4590-99cc-f2b79162cb56 -->
+
+generate a custom resume using agent-resume + resume/data.toml
+### Re: Custom Resume Generated (HEAD)
+
+Created `resume/profiles/benjamin-becker.toml` targeting his role areas:
+- **Emphasis:** Agent infra, real-time multimodal pipelines, Rust/Python/TS, AWS, CRDT, context engineering
+- **Experience filter:** Presence AI, Open Source, Freelance, Censible, Milyoni, TrueCar, Pivotal Labs
+- **Sections:** Summary, Skills, Career Highlights, AI Products Shipped, Experience, Education
+
+Built: `resume/BrianTakita-benjamin-becker.pdf` (32KB)
+
+File path: `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-benjamin-becker.pdf`
+
+Attach this PDF when sending the reply. Ready to review the PDF and send?
+<!-- agent:boundary:4d589f81-eb80-49a3-a96d-33ddd4808032 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send resume PDF to Benjamin Becker via LinkedIn
+- Review BrianTakita-benjamin-becker.pdf
+- Send resume + reply to Benjamin Becker via LinkedIn
 <!-- /agent:pending -->

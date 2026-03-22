@@ -945,27 +945,43 @@ Binary rebuilt, tests pass (504: 165 lib + 301 bin + 38 CLI), installed. SKILL.m
 - CLAUDE.md + README.md staleness
 
 Want me to continue with the AST migration or another item?
-<!-- agent:boundary:8a308db7-2857-4f85-9979-4fdc1051d802 -->
+yes. continue
+### Re: Continuing — CLAUDE.md Updated (HEAD)
+
+**CLAUDE.md updated:**
+- Module layout: added 14 missing files (`write.rs`, `template.rs`, `boundary.rs`, `ffi.rs`, `lib.rs`, `recover.rs`, `compact.rs`, `convert.rs`, `extract.rs`, `undo.rs`, `mode.rs`, `autoclaim.rs`, `commands.rs`, `sync.rs`)
+- Binary vs Agent table: added boundary marker lifecycle row
+
+**Remaining pending items — assessment:**
+
+| Item | Scope | Recommendation |
+|------|-------|----------------|
+| Markdown AST migration | Large refactor (~5 files) | Dedicated session |
+| Boundary-aware replace for flush_to_document | Medium, depends on AST | After AST migration |
+| CRDT merge ordering | Research + impl | Dedicated session |
+| `agent-doc submit` | Combined binary command | After AST + boundary-aware flush |
+| README.md staleness | Quick doc update | Can do now |
+
+The remaining items are all medium-to-large scope. Want me to update README.md now, or save the larger items for a fresh session?
+<!-- agent:boundary:f8275add-64f6-4307-86ea-7c10e73650f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: -->
-- [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command, no snapshot read
-- [x] **SKILL auto-update: AskUserQuestion** — replaces print+stop
-- [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak bugs
-- [x] **Boundary repositioning on commit** — `reposition_boundary_to_end()` in git.rs
+<!-- deps: flush->ast, submit->flush -->
+- [x] **CLAUDE.md updated** — module layout + boundary responsibility row
+- [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command
+- [x] **SKILL auto-update: AskUserQuestion**
+- [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak
+- [x] **Boundary repositioning on commit**
 - [x] **JB plugin v0.2.12** — caret removal + end-of-exchange fallback
 - [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
-- [x] Boundary snowball fix (`ce84701`)
-- [x] Boundary re-insertion in all write paths (`3a08011`)
-- [x] `remove_all_boundaries()` code-block awareness
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-- [ ] Boundary-aware replace for `flush_to_document`
-- [ ] CLAUDE.md + README.md staleness
-- [ ] CRDT merge ordering — Yrs causality (final writes only)
-- [ ] `agent-doc submit` — combined binary command
+- [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
+- [ ] **README.md staleness** — update to match current state
+- [ ] **CRDT merge ordering** — Yrs causality (final writes only)
+- [ ] **`agent-doc submit`** — combined binary command <!-- deps: flush -->
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -637,7 +637,7 @@ The blog post is **already live** on Cloudflare Pages from the earlier push that
 Add a YouTube pinned comment with a link to the blog post and mentioning that the blog post has a summary & analysis of the video.
 
 Use corky. If corky is missing features to accomplish this task, plan the features for implementation.
-### Re: YouTube Pinned Comment (HEAD)
+### Re: YouTube Pinned Comment
 
 **Corky is missing `youtube comment`.** Current YouTube commands: `auth`, `draft`, `publish`, `edit`, `check`, `list`. No comment support.
 

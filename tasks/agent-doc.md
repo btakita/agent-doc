@@ -655,16 +655,52 @@ continue
 Plugin v0.2.12 rebuilt. Install: IDEA -> Settings -> Plugins -> gear -> "Install from Disk..." -> select `agent-doc-jetbrains-0.2.12.zip` -> restart.
 
 Binary installed. 512 tests pass.
-<!-- agent:boundary:9985cd17-ad7c-4bec-ad34-0700a7bdd6f1 -->
+Implement:
+- [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
+### Re: agent-doc preflight Implemented (HEAD)
+
+**Done.** New `agent-doc preflight <FILE>` command that combines all pre-agent steps into a single call.
+
+**Output (JSON to stdout):**
+```json
+{
+  "recovered": false,
+  "committed": true,
+  "claims": [],
+  "diff": "unified diff text",
+  "no_changes": false,
+  "document": "full document content"
+}
+```
+
+**Test run:**
+```
+recovered=False committed=True no_changes=False claims=0 diff_len=43647 doc_len=43019
+```
+
+**Changes:**
+- New `src/preflight.rs` with `PreflightOutput` struct + `run()` function
+- Wired into `main.rs` as `preflight` subcommand
+- Fixed `git::commit` stdout capture (was leaking git status to stdout, broke JSON parsing)
+- 7 new unit tests for preflight
+- 519 total tests pass
+
+**SKILL integration:** The SKILL can now replace steps 0-1 with a single Bash call:
+```bash
+output=$(agent-doc preflight <FILE>)
+```
+Then parse the JSON for diff, document, claims, etc. This is a v0.25.0 SKILL update.
+
+Binary installed.
+<!-- agent:boundary:762fec37-198a-4451-9bcc-ef5495fb7dfb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Plugin-side boundary reposition** -- `reposition_boundary` flag in IPC
-- [x] **Performance profiling** -- timing logs in write, commit, diff, find_code_ranges
-- [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf data: sub-ms, not needed yet)
+- [x] **agent-doc preflight** -- implemented + tested (519 tests)
+- [ ] **SKILL update for preflight** -- use preflight instead of separate recover/commit/diff/read steps
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

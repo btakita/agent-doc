@@ -108,9 +108,8 @@ A few things that might be particularly relevant for the CTO conversation:
 - I have experience modernizing legacy systems (Backbone→Svelte/React at SocialChorus, Rails migrations, .NET at NASPP)
 
 I'm available:
-- Monday 3/24: afternoon ET
 - Tuesday 3/25: morning or afternoon ET
-- Wednesday 3/26: morning ET
+- Wednesday 3/26: afternoon ET
 
 Happy to work around your schedule. Looking forward to it!
 
@@ -121,9 +120,20 @@ Brian
 - Mentions legacy modernization since that's the actual work (20-year-old ERP systems)
 - Gives specific availability windows rather than "I'm flexible"
 - Keeps it concise — Justin already knows the background from the first exchange
-<!-- agent:boundary:b523a404 -->
+Where is the resume?
+### Re: Where is the resume? (HEAD)
+
+The resume PDF is at: `resume/BrianTakita-eci-solutions.pdf`
+
+Open it: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
+
+Also — typo in the draft: "afternoo ET" → "afternoon ET" on the Wednesday line. Fix before sending.
+
+To rebuild if you edit the profile: `make -C resume PROFILE=eci-solutions`
+<!-- agent:boundary:74281633 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review draft reply and resume PDF, then send via LinkedIn
+- Fix "afternoo" typo in Wednesday availability
+- Review resume PDF and draft reply, then send via LinkedIn
 <!-- /agent:pending -->

@@ -457,7 +457,7 @@ Once you have the edited file, the transcription command will be:
 corky transcribe ~/Videos/<edited-file>.mp4 -o ~/Videos/<edited-file>.srt
 ```
 Do a light edit of the video. Similar to what you did in the last YouTube video. Remove dead air and general light video trimming.
-### Re: Light Edit — Dead Air Removed + GPU Transcribed (HEAD)
+### Re: Light Edit — Dead Air Removed + GPU Transcribed
 
 **Done!** Automated light edit using ffmpeg silence detection:
 

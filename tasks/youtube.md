@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Video light-edited (dead air removed) and GPU-transcribed. Ready for YouTube upload.
+YouTube draft created. Ready to publish with video + captions.
 <!-- /agent:status -->
 
 ## Exchange
@@ -480,7 +480,27 @@ Do a light edit of the video. Similar to what you did in the last YouTube video.
 - Captions: `~/Videos/2026-03-19 02-26-07-edited.srt`
 
 Ready for YouTube upload. Want me to create a draft with `corky youtube`?
-<!-- agent:boundary:9ecf4e3f-1e19-40c4-a33e-fff7e9cb66a3 -->
+Yes
+### Re: YouTube Draft Created (HEAD)
+
+**Draft:** `mail/social/20260322-015438-youtube.md`
+
+**Title:** Building Agent Resume: AI-Powered Resume Generation from Recruiter Conversations
+
+**Description:** Covers agent-resume TOML system, corky email/phone transcription, recruiter workflow automation, agent-doc interactive editing, gap analysis, and holochain experience.
+
+**Video:** `~/Videos/2026-03-19 02-26-07-edited.mp4` (60 min, 380 MB)
+**Captions:** `~/Videos/2026-03-19 02-26-07-edited.srt` (2058 segments)
+
+**Tags:** agent-resume, corky, agent-doc, ai-coding, live-coding, vibe-coding, agentic-programming, rust, resume-automation, recruiter
+
+To publish:
+```
+corky youtube publish mail/social/20260322-015438-youtube.md
+```
+
+Want me to publish now, or do you want to review/edit the draft first?
+<!-- agent:boundary:e0829007-f8fe-4bc8-857e-02ed50276d1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -494,5 +514,5 @@ Ready for YouTube upload. Want me to create a draft with `corky youtube`?
 - [x] Fix MP4 direct decode bug ("Unknown sample rate")
 - [x] Streamline video→CC workflow (repeatable single-command flow)
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
-- [ ] Upload edited video + captions to YouTube
+- [ ] Publish YouTube draft (video + captions upload)
 <!-- /agent:pending -->

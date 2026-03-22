@@ -471,7 +471,7 @@ release
 521 tests pass.
 We have multiple `agent:boundary` in this document. Is this because we were running an old binary?
 I see several uncommitted `agent:boundary` components. Why?
-### Re: Uncommitted `agent:boundary` components (HEAD)
+### Re: Uncommitted `agent:boundary` components
 
 There are **5 stale boundary markers** left over from before the v0.25.4 fix. They accumulated because the old JetBrains plugin added a new one each cycle without removing previous ones.
 

@@ -530,37 +530,6 @@ Having multiple document snapshots in context likely contributed to losing the t
 - More context budget for conversation threads (your questions)
 - Less "noise" from near-identical document versions
 - Clearer signal about what's current vs. historical
-
-This is another argument for `agent-doc diff` — by loading only HEAD + diff, we free context for the actual conversation.
-
-**6. Lost boundary — diagnosis + tests (line 451):**
-
-The boundary was lost because of the replace-mode flush path. Here's the exact sequence:
-
-1. Pre-patch: `remove_all_boundaries()` strips existing boundary
-2. Pre-patch: Fresh boundary inserted at end of exchange
-3. Replace patch: `comp.replace_content()` overwrites the entire exchange with cumulative text — boundary from step 2 is inside the exchange region and gets replaced
-4. Post-patch: Checks if original doc had a boundary → re-inserts if so
-
-The boundary survives ONLY if step 4 fires. If the original doc had no boundary (first flush, or boundary was already consumed), step 4 skips and the boundary is permanently lost.
-
-**Root cause:** `remove_all_boundaries()` is not code-block-aware (uses simple line scan), and the pre-patch/post-patch boundary dance is wasteful for replace mode — it should skip boundary management entirely when mode is replace.
-
-I'll write tests to reproduce these conditions and fix them. The test cases:
-1. Stream flush with replace mode should preserve boundary
-2. Stream flush on fresh doc (no prior boundary) should still get boundary after flush
-3. `remove_all_boundaries()` should not strip boundaries inside code blocks
-4. Final flush should always leave a valid boundary at end of exchange
-
-Want me to implement the fix + tests now?
-Should `flush_to_document()` use the CRDT approach?
-
-ISSUE: I was writing an in-line prompt. The response patch commited the response at the end of the `agent:exchange`...which is correct behavior.
-
-However, the response patch content was moved from the bottom of `agent:exchange` to the cursor location.
-You can see the current state of the document with the git HEAD and git diff.
-
-Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
 ### Re: Response Moved to Cursor + Missing Boundary
 
 **What happened (2 separate issues):**
@@ -584,18 +553,74 @@ The write log showed `[template] pre-patch boundary 492aba2f inserted at end of 
 2. Post-patch should ALWAYS re-insert boundary at end of exchange for template-mode documents, regardless of what the incoming doc had
 
 This is a one-line fix: change the condition from `if orig_had_boundary.is_some()` to `if exchange_component_exists`. Want me to implement it now?
+
+Yes
+
+This is another argument for `agent-doc diff` — by loading only HEAD + diff, we free context for the actual conversation.
+
+**6. Lost boundary — diagnosis + tests (line 451):**
+
+The boundary was lost because of the replace-mode flush path. Here's the exact sequence:
+
+1. Pre-patch: `remove_all_boundaries()` strips existing boundary
+2. Pre-patch: Fresh boundary inserted at end of exchange
+3. Replace patch: `comp.replace_content()` overwrites the entire exchange with cumulative text — boundary from step 2 is inside the exchange region and gets replaced
+4. Post-patch: Checks if original doc had a boundary → re-inserts if so
+
+The boundary survives ONLY if step 4 fires. If the original doc had no boundary (first flush, or boundary was already consumed), step 4 skips and the boundary is permanently lost.
+
+**Root cause:** `remove_all_boundaries()` is not code-block-aware (uses simple line scan), and the pre-patch/post-patch boundary dance is wasteful for replace mode — it should skip boundary management entirely when mode is replace.
+
+We currently have `<!-- agent:exchange patch=append -->`.
+
+I'll write tests to reproduce these conditions and fix them. The test cases:
+1. Stream flush with replace mode should preserve boundary
+2. Stream flush on fresh doc (no prior boundary) should still get boundary after flush
+3. `remove_all_boundaries()` should not strip boundaries inside code blocks
+4. Final flush should always leave a valid boundary at end of exchange
+
+Want me to implement the fix + tests now?
+Yes
+Should `flush_to_document()` use the CRDT approach?
+Yes
+
+ISSUE: I was writing an in-line prompt. The response patch commited the response at the end of the `agent:exchange`...which is correct behavior.
+
+However, the response patch content was moved from the bottom of `agent:exchange` to the cursor location.
+You can see the current state of the document with the git HEAD and git diff.
+
+Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
+
+Let's keep on tracking the context state storing only the document HEAD.
+### Re: Boundary Snowball Fix Implemented (HEAD)
+
+**Fixed and installed.** Two changes in `template.rs`:
+
+**1. Snowball fix (`apply_patches_with_overrides`):**
+Changed post-patch boundary re-insertion from checking `orig_had_boundary.is_some()` (content-based) to unconditionally re-inserting for any template doc with an exchange component that has no boundary after patching. This breaks the snowball: even if the previous cycle lost the boundary, the next cycle will re-insert one.
+
+**2. `remove_all_boundaries()` code-block awareness:**
+Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks (lesson #13 consistency). Previously it stripped ALL boundary-looking lines regardless of context.
+
+**3 new tests:**
+- `boundary_reinserted_even_when_original_doc_has_no_boundary` — the snowball regression test
+- `boundary_survives_multiple_cycles` — two consecutive cycles both end with a boundary
+- `remove_all_boundaries_skips_code_blocks` — preserves boundaries inside code fences
+
+**Results:** 34 template tests pass (31 existing + 3 new). Binary rebuilt and installed.
+
+**Context tracking:** Agreed on HEAD-only context. The `agent-doc diff` command is the implementation path — it outputs only the changes since the last snapshot, so the SKILL loads HEAD document + compact diff instead of HEAD + full snapshot. This keeps only one version of the document in context.
+<!-- agent:boundary:a1586c68-e15d-4f87-a2e7-5cd37422dec9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Boundary snowball fix** — `orig_had_boundary` should check document type, not content. One-line fix: always re-insert boundary for template docs with exchange component. (THIS is the root cause of all boundary loss since v0.24.4)
-- **IPC patch position** — plugin inserts at cursor, not boundary. Needs position info in IPC JSON or boundary-aware insertion in plugin.
-- **Boundary-aware replace for flush_to_document** — replace mode → boundary-aware split (keep user prefix, replace agent suffix)
-- **`agent-doc diff`** — binary command for token-efficient context loading (HEAD + diff only)
+- **`agent-doc diff`** — binary command for HEAD-only context loading (next priority)
+- IPC patch position — plugin inserts at cursor, not boundary. Needs boundary-aware insertion in plugin.
+- Boundary-aware replace for `flush_to_document` — split at boundary instead of replace mode
 - SKILL auto-update: use AskUserQuestion instead of print+stop (approved)
-- `remove_all_boundaries()` code-block awareness fix
-- CLAUDE.md + README.md staleness — update for template.rs boundary changes
+- CLAUDE.md + README.md staleness — update for template.rs changes
 - CRDT merge ordering — Yrs causality still reorders (for final writes only)
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download

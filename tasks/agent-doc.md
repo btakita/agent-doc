@@ -985,7 +985,7 @@ No..Cancel this. `tasks/corky.md` was an incomplete statement. See below.
 Pending items cleaned up per your edits.
 We just had a File Cache Conflict fom the editor while I was typing.
 tasks/corky.md has orphaned `agent:boundary` tags.
-### Re: File Cache Conflict + Orphaned Boundaries (HEAD)
+### Re: File Cache Conflict + Orphaned Boundaries
 
 **Orphaned boundaries in `corky.md` cleaned up.** Removed 5 stale boundary markers, kept the last one (line 1077).
 

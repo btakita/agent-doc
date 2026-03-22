@@ -442,7 +442,7 @@ captions: edited-video.srt
 
 If you want to adjust an existing SRT without re-transcribing (e.g., just offset timestamps after trimming the start), that's a potential `corky srt offset` command — but re-transcribing with GPU is probably fast enough to not need it.
 Edit video and use gpu transcription on the edited video.
-### Re: Edit Video + GPU Transcribe (HEAD)
+### Re: Edit Video + GPU Transcribe
 
 No edited version found yet — only the original `2026-03-19 02-26-07.mp4` (2.8GB) exists in `~/Videos/`.
 

@@ -100,7 +100,7 @@ Updated draft with Rundavoo:
 Ready to send, or further tweaks?
 
 Brooke has not read my message yet. Should I edit my previous message?
-### Re: Edit vs. New Message (HEAD)
+### Re: Edit vs. New Message
 
 **Yes, edit the previous message.** Since Brooke hasn't read it yet, LinkedIn lets you edit sent messages (three dots → Edit) — the recipient sees only the final version. Cleaner than a follow-up correction.
 

@@ -106,7 +106,8 @@ Brian
 Attach your resume PDF when sending. Want to tweak, or ready to send?
 
 generate a custom resume using agent-resume + resume/data.toml
-### Re: Custom Resume Generated (HEAD)
+<!-- agent:boundary:7a9c3aea-edf8-4071-bb9d-3539dc7e5602 -->
+### Re: Custom Resume Generated
 
 Created `resume/profiles/benjamin-becker.toml` targeting his role areas:
 - **Emphasis:** Agent infra, real-time multimodal pipelines, Rust/Python/TS, AWS, CRDT, context engineering
@@ -118,7 +119,7 @@ Built: `resume/BrianTakita-benjamin-becker.pdf` (32KB)
 File path: `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-benjamin-becker.pdf`
 
 Attach this PDF when sending the reply. Ready to review the PDF and send?
-<!-- agent:boundary:4d589f81-eb80-49a3-a96d-33ddd4808032 -->
+<!-- agent:boundary:9feda4a0-0623-4861-bd3c-563cd5909365 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

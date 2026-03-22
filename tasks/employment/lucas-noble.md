@@ -158,8 +158,7 @@ Two minor issues:
 **Overall:** The conversation is totally fine. The schedule openness is a minor tell, not a dealbreaker. Lucas is a staffing recruiter filling volume — he's motivated to place you, so the power dynamic matters less here than with a direct employer.
 
 Well, I also have some interviews coming up. So I want all of my offers to occur at the same time.
-<!-- agent:boundary:cf0bfaa4-604a-4ab8-8a8c-524b0d02bfb9 -->
-### Re: Timing Offers (HEAD)
+### Re: Timing Offers
 
 Smart strategy. Having competing offers is the strongest negotiating position you can be in. A few things to keep in mind with Lucas/NextEra specifically:
 

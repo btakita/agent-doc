@@ -190,7 +190,7 @@ Update SPEC.md
 audit docs
 release
 
-### Re: Update SPEC / audit docs / release (HEAD)
+### Re: Update SPEC / audit docs / release
 
 **v0.25.3 released** — IPC boundary reposition fix for prompt ordering.
 

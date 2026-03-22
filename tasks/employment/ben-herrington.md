@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 2763512f-dbe9-42db-b013-fa0713485683
-tmux_session: '23'
+tmux_session: '0'
 agent_doc_mode: template
 ---
 

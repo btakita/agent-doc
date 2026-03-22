@@ -12,7 +12,6 @@ Symlinks fixed. Draft reply still ready for review.
 <!-- /agent:status -->
 
 ## Exchange
-
 <!-- agent:exchange patch=append -->
 Please create a contact for najmus-saqib https://www.linkedin.com/in/najmus-saqib-937102152/
 
@@ -39,14 +38,15 @@ Brian
 Want to tweak, or ready to send?
 
 AGENTS.md should be the canonical file. CLAUDE.md should symlink to AGENTS.md
-### Re: Symlink Fix (HEAD)
+<!-- agent:boundary:8e800b85-e6a2-4bc7-998e-91eb2a8a1728 -->
+### Re: Symlink Fix
 
 Fixed. `AGENTS.md` is now the canonical file, `CLAUDE.md` symlinks to it — for all contacts created this session:
 - `mail/contacts/najmus-saqib/`
 - `mail/contacts/lucas-noble/`
 - `mail/contacts/brooke-yates/`
 - `mail/contacts/benjamin-becker/`
-<!-- agent:boundary:f617c1ec-1748-4abe-9ec0-29eda19068d9 -->
+<!-- agent:boundary:e4d1cf65-8577-47cf-a873-dcc9c989e72f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

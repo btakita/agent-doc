@@ -215,6 +215,7 @@ Is it synced via corky?
 I searched all synced conversations thoroughly — it's not there. Here's what I found and tried:
 
 - **btak.dev** (Gmail API, syncs INBOX): Only the calendar invite from Jordan Ritter is there. If Kevin's prep email went to btak.dev, it may have been auto-archived or isn't in INBOX.
+There was a bug that I saw in `corky watch`. The brian.takita@gmail.com INDOX was synced. Not btak.dev@gmail.com. tasks/corky.md is looking in
 - **personal** (IMAP, syncs correspondence/for-lucas/voice-sms): Kevin's `@staffingscience.io` address IS in the correspondence filter, so emails from him should be labeled. But this email isn't showing up — it may be a new thread that Gmail's filter hasn't processed, or it was sent to btak.dev instead.
 - Full INBOX sync on personal is impractical (1.8M messages).
 

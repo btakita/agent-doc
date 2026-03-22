@@ -198,8 +198,8 @@ Hi Justin,
 No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
 
 A few things that might be particularly relevant for the CTO conversation:
-- agent-doc is a production tool where AI agents write and maintain code through a dashboard-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
-- corky is a git-native correspondence system where agents manage email, Telegram, and Slack threads with per-contact context — the kind of structured agent orchestration that scales across an enterprise
+- agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky is a git-native correspondence system where agents manage email, Telegram, and Slack threads with per-contact context
 - Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across systems — critical for maintaining coherence when multiple agents operate across a large codebase
 - At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
 
@@ -211,14 +211,42 @@ Happy to work around your schedule. Looking forward to it!
 
 Brian
 
+> the kind of structured agent orchestration that scales across an enterprise
+
+I don't need to oversell this.
+Let's focus on things like live audio/video notes to capture insights during development or knowledge work session
+
 **Notes:**
 - Now tells the story of a platform (agent-doc + corky + existence-lang), not just one tool
 - corky shows agents handling real-world communication, not just code — relevant for ERP where data flows across departments
 - existence-lang as "domain language layer" maps directly to ERP modernization: you need shared semantics when agents touch 20-year-old systems
 - Keeps Presence AI as the production credibility anchor
-<!-- agent:boundary:88d7e6ea -->
+### Re: Toning down the pitch, focusing on practical capabilities (HEAD)
+
+Agreed — no overselling. Revised corky bullet to focus on the practical: voice transcription, capturing insights during work sessions, not enterprise scaling.
+
+**Final draft reply (v4):**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky is a git-native correspondence system with Whisper-powered voice transcription — agents capture insights from live audio/video during development sessions and route them to the right context automatically
+- Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across systems — critical for maintaining coherence when multiple agents operate across a large codebase
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:bc7072dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply (v3) and resume PDF, then send via LinkedIn
+- Review final draft reply (v4) and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

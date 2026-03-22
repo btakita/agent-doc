@@ -995,22 +995,36 @@ tasks/corky.md has orphaned `agent:boundary` tags.
 
 **File Cache Conflict:** This happens when the binary writes to the file on disk (via `ensure_boundary_on_disk` or `reposition_boundary_to_end`) and the IDE detects the external modification. The IDE then prompts whether to reload from disk or keep the in-memory version. With the fix, non-exchange components won't trigger disk writes for boundary insertion, reducing the frequency of these conflicts.
 
+Can we use CRDT instead for these?
+
 Binary rebuilt, installed, 511 tests pass.
-<!-- agent:boundary:4b853478-84df-4552-854d-2ceb7e4f3844 -->
+### Re: CRDT for Boundary Operations (HEAD)
+
+**Short answer: yes, partially.** CRDT can eliminate the File Cache Conflict for boundary insertion, but not for boundary repositioning on commit.
+
+**Two operations that write to disk:**
+
+| Operation | When | Can use CRDT? |
+|-----------|------|---------------|
+| `ensure_boundary_on_disk` | During IPC patch build (before plugin applies) | **Yes** — can use IPC instead |
+| `reposition_boundary_to_end` | After `agent-doc commit` | **No** — happens outside the IPC/CRDT pipeline |
+
+**For `ensure_boundary_on_disk`:** Instead of writing a boundary directly to disk, we can include a synthetic "insert boundary" directive in the IPC patch JSON. The plugin would insert the boundary via the Document API (no disk write, no cache conflict). This is the cleaner approach — the boundary gets inserted through the same IPC channel as the response patch.
+
+**For `reposition_boundary_to_end`:** This runs after `agent-doc commit`, which is a git operation (disk-based). The boundary reposition modifies the working tree file. We could send an IPC signal to the plugin to reposition the boundary, but the commit flow is synchronous and the plugin is async — there'd be a race. The simpler approach: use `VCS refresh` signal (which the plugin already handles) to reload from disk after commit. The File Cache Conflict should be suppressed by the VCS refresh.
+
+**Recommendation:** Convert `ensure_boundary_on_disk` to an IPC directive (eliminate the disk write). Keep `reposition_boundary_to_end` as disk-based but ensure the VCS refresh signal suppresses the cache conflict dialog.
+
+Want me to implement the IPC boundary insertion?
+<!-- agent:boundary:1f02b128-d16a-4096-9a87-849a5ccfe1d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **Orphaned boundary fix** — `ensure_boundary_on_disk` restricted to append-mode components
-- [x] **CLAUDE.md updated** — module layout + boundary responsibility row
-- [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command
-- [x] **SKILL auto-update: AskUserQuestion**
-- [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak
-- [x] **Boundary repositioning on commit**
-- [x] **JB plugin v0.2.12** — caret removal + end-of-exchange fallback
-- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
+- [x] **Orphaned boundary fix** — `ensure_boundary_on_disk` restricted to append-mode
+- [ ] **IPC boundary insertion** — replace disk write with IPC directive to eliminate cache conflicts
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
 - [ ] **README.md staleness** — update to match current state

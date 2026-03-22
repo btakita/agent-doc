@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-MP4 decode bug fixed + video transcription workflow streamlined. All pending items complete.
+Video editing + CC workflow discussed. Corky already supports caption upload with YouTube publish.
 <!-- /agent:status -->
 
 ## Exchange
@@ -419,7 +419,29 @@ corky transcribe ~/Videos/video.mp4 -o ~/Videos/video.srt
 ```
 
 `make check` passes — clippy + all tests clean.
-<!-- agent:boundary:1d794891-52ab-4e47-8233-4534efd4fded -->
+Edit the video for YouTube. Update the CC transcription according to the edit.
+### Re: Edit Video + Update CC (HEAD)
+
+**Simplest workflow (recommended):** Re-transcribe the edited video. With CUDA it'll be fast.
+
+1. Edit the video in your editor (kdenlive, DaVinci Resolve, etc.)
+2. Export the edited video
+3. `corky transcribe ~/Videos/edited-video.mp4 -o ~/Videos/edited-video.srt`
+
+**Captions already supported in YouTube upload!** Corky's draft format has a `captions` metadata field. When publishing, it auto-uploads the SRT file via the YouTube Captions API. Just set it in the draft YAML:
+```yaml
+captions: edited-video.srt
+```
+
+**Full end-to-end workflow:**
+1. Edit video → export
+2. `corky transcribe edited.mp4 -o edited.srt` (GPU)
+3. Review/fix SRT if needed
+4. Create YouTube draft with `captions: edited.srt`
+5. `corky youtube publish <draft>` — uploads video + captions together
+
+If you want to adjust an existing SRT without re-transcribing (e.g., just offset timestamps after trimming the start), that's a potential `corky srt offset` command — but re-transcribing with GPU is probably fast enough to not need it.
+<!-- agent:boundary:cd086df8-0242-4bb8-a185-cdd3088dc184 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -432,4 +454,5 @@ corky transcribe ~/Videos/video.mp4 -o ~/Videos/video.srt
 - [x] Update `release.yml` with GPU matrix entries
 - [x] Fix MP4 direct decode bug ("Unknown sample rate")
 - [x] Streamline video→CC workflow (repeatable single-command flow)
+- [ ] Edit video for YouTube + re-transcribe CC for edited version
 <!-- /agent:pending -->

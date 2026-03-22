@@ -952,7 +952,7 @@ The branch should have a remote/upstream tracking branch configured. Please disc
 
 Want me to implement both fixes?
 Yes
-### Both Fixes Implemented (HEAD)
+### Both Fixes Implemented
 
 **Fix 1: "Wrote:" shows destination** (`imap_sync.rs`):
 - Base dir: `Wrote: file.md` (unchanged)

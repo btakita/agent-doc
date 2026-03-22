@@ -49,7 +49,7 @@ Found 2 Linda Takita notifications: 40:31-40:34 and 41:16-41:18.
 
 In [2026-03-22 10-27-48.mp4](../../../../Videos/2026-03-22%2010-27-48.mp4)
 Please identify frame ranges where I receive a text message notification from Linda Takita
-### Re: Linda Takita Notification Frame Ranges (HEAD)
+### Re: Linda Takita Notification Frame Ranges
 
 Found **2 text message notifications** from Linda Takita (via Pulse SMS) in the video:
 

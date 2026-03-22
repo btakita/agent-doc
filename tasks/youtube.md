@@ -375,7 +375,7 @@ This produces both `corky-x86_64-unknown-linux-gnu.tar.gz` (CPU) and `corky-x86_
 3. Update `release.yml` with GPU matrix entries
 
 go
-### Re: Go — All Three Implemented (HEAD)
+### Re: Go — All Three Implemented
 
 **1. `transcribe-metal` feature added** to `Cargo.toml`:
 ```toml

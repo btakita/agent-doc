@@ -162,7 +162,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-### Re: Adding human-agent alignment orchestration (HEAD)
+### Re: Adding human-agent alignment orchestration
 
 Incorporated. Updated bullet now covers both the technical mechanism (CRDT, bi-directional) and the orchestration story (human-agent alignment):
 
@@ -184,7 +184,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:7f9cbd54 -->
+<!-- agent:boundary:a2d1d804 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

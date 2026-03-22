@@ -531,7 +531,7 @@ The post follows the same format as the previous `agent-doc-tmux-crdt-live` post
 
 Want me to review/adjust anything, or build and deploy the site?
 I don't see this new post in Recent Posts on localhost:4100
-### Re: Post Not Showing (HEAD)
+### Re: Post Not Showing
 
 **Fixed.** The post index needed regeneration. The blog uses a generated `index.ts` that imports all posts from the `content/` directory — new `.md` files aren't auto-discovered.
 

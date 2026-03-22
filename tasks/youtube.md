@@ -573,7 +573,18 @@ These are local modifications in `src/rappstack-dev/lib/ui--server--blog/header/
 2. **Keep** — If you intentionally wanted a more compact header, commit these changes
 
 Which do you want?
-<!-- agent:boundary:608d1a32-eb65-4b69-8307-f692f2ab5586 -->
+
+keep, commit, and push
+### Re: Keep, Commit, Push (HEAD)
+
+**Done.** Committed and pushed the compact header changes through all three repos:
+
+1. `ui--server--blog` — committed `2bcc8cb`, pushed to `rappstack/ui--server--blog`
+2. `rappstack-dev` — updated submodule pointer `173cecd`, pushed to `rappstack/dev`
+3. `agent-loop` — updated submodule pointer `6e01913`
+
+The compact header (smaller logo, reduced padding, smaller text) is now the committed state.
+<!-- agent:boundary:f3346a4d-a925-418e-826a-bdaeb7c63b72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -589,6 +600,6 @@ Which do you want?
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
 - [x] Create blog post for briantakita.me
-- [ ] Fix header regression in ui--server--blog
+- [x] Commit compact header style in ui--server--blog
 - [ ] Deploy briantakita.me to production
 <!-- /agent:pending -->

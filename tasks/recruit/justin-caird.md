@@ -184,9 +184,41 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:a2d1d804 -->
+Also mention Corky for the correspondence.
+He is probably looking for something like OpenClaw for the enterprise.
+agent-doc, corky, and a well-defined domain language system (existence-lang) bring human-agent alignment to agent orchestration.
+### Re: Adding corky + existence-lang to the pitch (HEAD)
+
+Good instinct — the three tools together tell the story of a complete agentic infrastructure stack, not just a single tool. Revised to add a bullet about corky and the domain language layer:
+
+**Final draft reply (v3):**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a dashboard-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky is a git-native correspondence system where agents manage email, Telegram, and Slack threads with per-contact context — the kind of structured agent orchestration that scales across an enterprise
+- Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across systems — critical for maintaining coherence when multiple agents operate across a large codebase
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+
+**Notes:**
+- Now tells the story of a platform (agent-doc + corky + existence-lang), not just one tool
+- corky shows agents handling real-world communication, not just code — relevant for ERP where data flows across departments
+- existence-lang as "domain language layer" maps directly to ERP modernization: you need shared semantics when agents touch 20-year-old systems
+- Keeps Presence AI as the production credibility anchor
+<!-- agent:boundary:00fff133 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply and resume PDF, then send via LinkedIn
+- Review final draft reply (v3) and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

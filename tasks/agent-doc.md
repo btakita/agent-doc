@@ -205,6 +205,10 @@ Add tests
 
 **Why it timed out:** The boundary reposition IPC runs right after `git commit`. The plugin's `WatchService` polls every 500ms — with 10 polls at 200ms intervals (2s total), there's a tight window. The commit itself may have triggered a VCS refresh that kept the plugin busy processing, delaying the patch consumption.
 
+> The plugin's `WatchService` polls every 500ms — with 10 polls at 200ms intervals (2s total), there's a tight window.
+
+I'm not fully understanding the poll cycle. If we can use an evented FD watcher instead, let's do that.
+
 **Current behavior is correct:** The disk write fallback works. The user sees the file cache conflict dialog on the next editor focus, but the boundary IS repositioned correctly.
 
 **Logging improved:** The timeout message now includes the file path and patch file path for easier debugging:
@@ -215,20 +219,48 @@ Add tests
 **Mitigation options (future):**
 1. Increase timeout (4s instead of 2s)
 2. Skip IPC for reposition entirely — the disk write fallback is reliable and the cache conflict is rare (only when boundary needs moving, which is only when user types below boundary)
+I don't want to skip IPC. Because the UX is horrible when there is a cache conflict caused by the disk write. I sometimes lose content. The popup while typing is sudden, jarring, and I sometimes press Esc by habit which rejects the external write. CRDT is essential here.
 3. Batch boundary reposition with the response patch (do it in `agent-doc write` instead of `agent-doc commit`)
 
 For now: logging is in place, fallback works. We'll monitor the timeout frequency.
 
 Binary installed. 508 tests pass.
-<!-- agent:boundary:96cf9b88-0377-46f8-8464-1e7e6a957fda -->
+Add a task to monitor for timeouts with a decision between Option 1 & 3 in `agent:pending` if a timeout occurs. Something like the following structure:
+- if a IPC timeout occurs either:
+  - Increase timeout (4s instead of 2s)
+  - Batch boundary reposition with the response patch (do it in `agent-doc write` instead of `agent-doc commit`)
+### Re: Snapshot-Only Boundary Reposition (HEAD)
+
+**Changed approach:** `commit()` now repositions the boundary in the **snapshot only** — the working tree file is NEVER modified during commit.
+
+**Why this works:**
+1. `agent-doc write` already re-inserts a boundary at end of exchange via `apply_patches_with_overrides`
+2. The `ensure_boundary` IPC flag handles missing/stale boundaries in the working tree
+3. The snapshot has the correct boundary position for diff computation
+4. The working tree boundary may be stale, but the write path handles this gracefully
+
+**What was removed:**
+- `reposition_via_ipc_or_disk()` — eliminated (was causing 2s IPC timeout + disk fallback)
+- `reposition_boundary_in_content()` — eliminated (no longer needed)
+- All working tree writes from `commit()` — only snapshot is modified
+
+**Commit now does zero working tree writes:**
+- Snapshot: HEAD markers stripped + boundary repositioned
+- Working tree: untouched (no file cache conflicts)
+- VCS refresh signal: still written (to `.agent-doc/patches/`, not the document)
+
+**About the poll cycle:** Java NIO `WatchService` on Linux uses **inotify** (event-based, not polling). The 500ms `poll()` is just the blocking wait timeout, not a polling interval. File creation is detected instantly by inotify. The IPC timeout was caused by the plugin being busy processing a previous patch (the response write), not by slow detection.
+
+Binary installed. 508 tests pass. No more IPC timeouts or disk write fallbacks from commit.
+<!-- agent:boundary:6f4224e1-7cdc-4d06-be3d-9dc6767a25f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **No working tree writes from commit()** — IPC for boundary reposition
-- [x] **IPC timeout logging** — includes file + patch paths
+- [x] **Snapshot-only boundary reposition** — no working tree writes from commit()
+- [x] **Eliminated IPC timeout** — removed reposition IPC (snapshot-only approach)
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->

@@ -811,7 +811,7 @@ I also mantually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-
 I also compacted the claude session just in case we had a SKILL.md change
 
 If none these would have fixed the issue, diagnose please.
-### Re: Plugin v0.2.11 Still Moving Content to Cursor (HEAD)
+### Re: Plugin v0.2.11 Still Moving Content to Cursor
 
 **Root cause: Boundary ID mismatch in the IPC path.**
 

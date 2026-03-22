@@ -5,7 +5,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-# LinkedIn (HEAD)
+# LinkedIn
 
 ## Profile
 

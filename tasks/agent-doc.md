@@ -607,7 +607,7 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 **Results:** 34 template tests pass (31 existing + 3 new). Binary rebuilt and installed.
 
 **Context tracking:** Agreed on HEAD-only context. The `agent-doc diff` command is the implementation path — it outputs only the changes since the last snapshot, so the SKILL loads HEAD document + compact diff instead of HEAD + full snapshot. This keeps only one version of the document in context.
-### Re: Pending/Todo Split + Boundary Fix Verification (HEAD)
+### Re: Pending/Todo Split + Boundary Fix Verification
 
 **Acknowledged.** `agent:pending` is now session-scoped (current work items), `agent:todo` is long-term backlog. I've cleaned up pending to remove the duplicated long-term items.
 

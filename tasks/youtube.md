@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-YouTube draft created. Ready to publish with video + captions.
+Video published to YouTube: https://www.youtube.com/watch?v=IenfqO2vmAw
 <!-- /agent:status -->
 
 ## Exchange
@@ -500,7 +500,16 @@ corky youtube publish mail/social/20260322-015438-youtube.md
 ```
 
 Want me to publish now, or do you want to review/edit the draft first?
-<!-- agent:boundary:e0829007-f8fe-4bc8-857e-02ed50276d1b -->
+publish
+### Re: Published (HEAD)
+
+**Published!** https://www.youtube.com/watch?v=IenfqO2vmAw
+
+- Video + captions uploaded successfully
+- Draft updated: `mail/social/20260322-015438-youtube.md` (status: published)
+
+Note: Had to re-auth YouTube token and fix video path (relative paths don't resolve correctly from `mail/social/` — used absolute path instead).
+<!-- agent:boundary:fa8debea-768e-48a7-89e3-2ab16bc6f295 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -514,5 +523,5 @@ Want me to publish now, or do you want to review/edit the draft first?
 - [x] Fix MP4 direct decode bug ("Unknown sample rate")
 - [x] Streamline video→CC workflow (repeatable single-command flow)
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
-- [ ] Publish YouTube draft (video + captions upload)
+- [x] Publish YouTube draft (video + captions upload)
 <!-- /agent:pending -->

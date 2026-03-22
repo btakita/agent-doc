@@ -501,16 +501,59 @@ Does anything need to be fixed in agent-doc or the Plugin?
 
 **Option B — Binary fix:** Have `agent-doc commit` strip stale boundary markers from the working tree after committing the snapshot. This would clean up any accumulated garbage regardless of plugin version.
 
+Can we do both Option A & B?
+Would Option A be implemented in the shared object? Where it would drive commands to the editor Plugin via FFI?
+
 **Also:** The plugin is still generating full UUIDs for new boundaries (line 480: `741debb0-69cc-4eb5-a230-dc8ed230080a`) instead of 8-char short IDs. The binary side generates short IDs correctly (`f8d4da55` in the snapshot). The PatchWatcher's UUID generation may not have been updated in the installed plugin build.
-<!-- agent:boundary:955602fd -->
+
+Investigate
+### Re: Both Options A & B + FFI architecture (HEAD)
+
+**Yes, both options complement each other.** Here's the investigation:
+
+**Current state — both already implement full cleanup:**
+- **Rust** `template::reposition_boundary_to_end()`: Scans full component, removes ALL boundaries, inserts fresh one. Code-block aware.
+- **Plugin** `PatchWatcher.repositionBoundaryToEnd()`: Same — scans full component content, filters all boundary lines, inserts one. Code-block aware.
+- **Both are correct in isolation.** The bug is in the IPC flow timing.
+
+**Root cause — timing gap in the IPC patch flow:**
+1. Binary calls `reposition_boundary_to_end()` on disk copy → sends cleaned `boundary_id` via IPC
+2. Plugin applies patch at that boundary position in its **in-memory Document** (which still has stale boundaries from before the binary cleaned)
+3. Plugin's `repositionBoundaryToEnd()` runs on the **commit signal** (reposition IPC), not after patch application
+4. Result: stale boundaries in older sections survive because the patch only touches the boundary at the insertion point
+
+**Option A — Plugin FFI cleanup:**
+The shared object (`libagent_doc.so`) currently exports:
+- `agent_doc_apply_patch_with_boundary()` — boundary-aware insertion
+- `agent_doc_apply_patch_with_caret()` — cursor-aware insertion
+- `agent_doc_apply_patch()` — generic patch
+
+It does NOT export `reposition_boundary_to_end()`. **Adding this as an FFI export** would let the plugin call the Rust implementation directly, ensuring identical cleanup logic. The plugin would call it via JNA/FFI before or after each patch cycle.
+
+Alternatively, the plugin could run its own `repositionBoundaryToEnd()` **after every IPC patch application** (not just on commit signal). This is simpler but duplicates logic.
+
+**Option B — Binary working-tree cleanup:**
+`agent-doc commit` currently:
+1. Saves snapshot (with clean boundaries via `reposition_boundary_to_end()`)
+2. Sends reposition IPC signal to plugin
+3. Does NOT modify the working tree file
+
+**Fix:** After saving the snapshot, also write a cleaned version of the working tree file (stripping stale boundaries). This ensures the on-disk file matches the snapshot's boundary state, regardless of plugin behavior.
+
+**Recommended implementation order:**
+1. **Option B first** (quick, self-contained) — add working-tree boundary cleanup to `agent-doc commit`
+2. **Option A second** (better long-term) — export `reposition_boundary_to_end()` via FFI, plugin calls it after patch application
+
+Want me to implement both?
+<!-- agent:boundary:3768c252 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix plugin boundary cleanup scope** — scan full component, not just insertion point
-- [ ] **Fix plugin short boundary IDs** — installed plugin still using full UUIDs
-- [ ] Option: add working-tree boundary cleanup to `agent-doc commit`
+- [ ] **Option B: Working-tree boundary cleanup in `agent-doc commit`** — strip stale boundaries from working tree after snapshot save
+- [ ] **Option A: FFI export `reposition_boundary_to_end()`** — plugin delegates cleanup to shared object
+- [ ] Fix plugin short boundary IDs (installed plugin still using full UUIDs)
 - [ ] agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
 - [ ] JetBrains plugin v0.2.13 (boundary dedup + short IDs)
 - [ ] VS Code plugin v0.2.3

@@ -272,18 +272,13 @@ pub fn apply_patches_with_overrides(
         }
     }
 
-    // Post-patch: if a boundary was consumed during patching, re-insert it at the
-    // END of the exchange component. This is a deterministic operation — the boundary
-    // must always exist at the end of the exchange for checkpoint writes to work.
+    // Post-patch: ensure a boundary exists at the end of the exchange component.
+    // This is unconditional for template docs with an exchange — the boundary must
+    // always exist for checkpoint writes to work. Checking the original doc's content
+    // causes a snowball: once one cycle loses the boundary, every subsequent cycle
+    // also loses it because the check always finds nothing.
     {
-        // Check if original doc had a boundary in exchange
-        let orig_had_boundary = component::parse(doc).ok().and_then(|cs| {
-            cs.iter()
-                .find(|c| c.name == "exchange")
-                .and_then(|c| find_boundary_in_component(doc, c))
-        });
-        if orig_had_boundary.is_some()
-            && let Ok(components) = component::parse(&result)
+        if let Ok(components) = component::parse(&result)
             && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
             && find_boundary_in_component(&result, exchange).is_none()
         {
@@ -301,17 +296,25 @@ pub fn apply_patches_with_overrides(
 }
 
 /// Remove all boundary markers from a document (line-level removal).
+/// Skips boundaries inside fenced code blocks (lesson #13).
 fn remove_all_boundaries(doc: &str) -> String {
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
+    let code_ranges = component::find_code_ranges(doc);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
     let mut result = String::with_capacity(doc.len());
+    let mut offset = 0;
     for line in doc.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with(prefix) && trimmed.ends_with(suffix) {
-            continue; // Skip boundary marker lines
+        let is_boundary = trimmed.starts_with(prefix) && trimmed.ends_with(suffix);
+        if is_boundary && !in_code(offset) {
+            // Skip boundary marker lines outside code blocks
+            offset += line.len() + 1; // +1 for newline
+            continue;
         }
         result.push_str(line);
         result.push('\n');
+        offset += line.len() + 1;
     }
     if !doc.ends_with('\n') && result.ends_with('\n') {
         result.pop();
@@ -1019,6 +1022,64 @@ real status content
         assert!(
             !result.contains("patch-uuid-456"),
             "boundary marker should be consumed by explicit patch"
+        );
+    }
+
+    #[test]
+    fn boundary_reinserted_even_when_original_doc_has_no_boundary() {
+        // Regression: the snowball bug — once one cycle loses the boundary,
+        // every subsequent cycle also loses it because orig_had_boundary finds nothing.
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        // Document with exchange but NO boundary marker
+        let doc = "<!-- agent:exchange patch=append -->\nUser prompt here.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, doc).unwrap();
+
+        let response = "<!-- patch:exchange -->\nAgent response.\n<!-- /patch:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+
+        // Must have a boundary at end of exchange, even though original had none
+        assert!(
+            result.contains("<!-- agent:boundary:"),
+            "boundary must be re-inserted even when original doc had no boundary: {result}"
+        );
+    }
+
+    #[test]
+    fn boundary_survives_multiple_cycles() {
+        // Simulate two consecutive write cycles — boundary must persist
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange patch=append -->\nPrompt 1.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, doc).unwrap();
+
+        // Cycle 1
+        let response1 = "<!-- patch:exchange -->\nResponse 1.\n<!-- /patch:exchange -->\n";
+        let (patches1, unmatched1) = parse_patches(response1).unwrap();
+        let result1 = apply_patches(doc, &patches1, &unmatched1, &file).unwrap();
+        assert!(result1.contains("<!-- agent:boundary:"), "cycle 1 must have boundary");
+
+        // Cycle 2 — use cycle 1's output as the new doc (simulates next write)
+        let response2 = "<!-- patch:exchange -->\nResponse 2.\n<!-- /patch:exchange -->\n";
+        let (patches2, unmatched2) = parse_patches(response2).unwrap();
+        let result2 = apply_patches(&result1, &patches2, &unmatched2, &file).unwrap();
+        assert!(result2.contains("<!-- agent:boundary:"), "cycle 2 must have boundary");
+    }
+
+    #[test]
+    fn remove_all_boundaries_skips_code_blocks() {
+        let doc = "before\n```\n<!-- agent:boundary:fake-id -->\n```\nafter\n<!-- agent:boundary:real-id -->\nend\n";
+        let result = remove_all_boundaries(doc);
+        // The one inside the code block should survive
+        assert!(
+            result.contains("<!-- agent:boundary:fake-id -->"),
+            "boundary inside code block must be preserved: {result}"
+        );
+        // The one outside should be removed
+        assert!(
+            !result.contains("<!-- agent:boundary:real-id -->"),
+            "boundary outside code block must be removed: {result}"
         );
     }
 }

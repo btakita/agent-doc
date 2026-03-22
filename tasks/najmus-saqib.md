@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created. Draft reply ready for review.
+Symlinks fixed. Draft reply still ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -37,7 +37,16 @@ Best,
 Brian
 
 Want to tweak, or ready to send?
-<!-- agent:boundary:7105b335-e25a-4f90-b537-53a66b2f16a3 -->
+
+AGENTS.md should be the canonical file. CLAUDE.md should symlink to AGENTS.md
+### Re: Symlink Fix (HEAD)
+
+Fixed. `AGENTS.md` is now the canonical file, `CLAUDE.md` symlinks to it — for all contacts created this session:
+- `mail/contacts/najmus-saqib/`
+- `mail/contacts/lucas-noble/`
+- `mail/contacts/brooke-yates/`
+- `mail/contacts/benjamin-becker/`
+<!-- agent:boundary:f617c1ec-1748-4abe-9ec0-29eda19068d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Session complete. Exchange compacted.
+Awaiting instructions for video: 2026-03-19 02-26-07.mp4
 <!-- /agent:status -->
 
 ## Exchange
@@ -253,10 +253,22 @@ Done. Here's the compacted session summary:
 - crates.io, GitHub Release, cargo install all done
 - API: v2 path (`/v2/socialActions/{urn}/comments`) — versioned `/rest/` needs partner perms
 compact exchange
+
+compact exchange
+### Re: Video File (HEAD)
+
+I see you added `2026-03-19 02-26-07.mp4` to pending. What would you like to do with this video?
+
+- **Upload to YouTube** — I can draft metadata (title, description, tags) and upload via corky
+- **Extract/process subtitles** — Generate or merge SRT files
+- **Create a social post** — LinkedIn, Twitter, etc. about the video content
+
+What's the plan for this one?
+<!-- agent:boundary:9a736155-17db-4e51-8638-bd1e6ad2c863 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(cleared — linkedin comment implemented)
+- [ ] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — awaiting instructions
 <!-- /agent:pending -->

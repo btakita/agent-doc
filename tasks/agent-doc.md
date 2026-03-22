@@ -756,7 +756,7 @@ Would it make sense to have a "virtual plugin" if no editor plugin is currently 
 | SKILL.md (installed) | Version 0.24.1 stale | Force-copied from source (0.24.4) |
 
 519 tests pass. Binary rebuilt and installed.
-### Re: Plugin Dependency for Boundary Reposition (HEAD)
+### Re: Plugin Dependency for Boundary Reposition
 
 **No, the pipeline works correctly without the plugin.** The boundary marker is a visual aid for the plugin — it tells the editor where to insert the next response. Without a plugin, boundary position doesn't matter because:
 

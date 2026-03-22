@@ -420,7 +420,7 @@ corky transcribe ~/Videos/video.mp4 -o ~/Videos/video.srt
 
 `make check` passes — clippy + all tests clean.
 Edit the video for YouTube. Update the CC transcription according to the edit.
-### Re: Edit Video + Update CC (HEAD)
+### Re: Edit Video + Update CC
 
 **Simplest workflow (recommended):** Re-transcribe the edited video. With CUDA it'll be fast.
 

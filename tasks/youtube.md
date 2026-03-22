@@ -828,7 +828,7 @@ In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https:/
 
 Describe what the post is. A summary highlighting interesting topics in the video.
 
-### Re: Duplicate Comment Request (HEAD)
+### Re: Duplicate Comment Request
 
 This was already done earlier in this session. The comment is live:
 

@@ -634,7 +634,35 @@ Remove gh Docker build.
 **Deploy status:** GH Actions triggered on push. The previous deploy with the blog post already succeeded (57s). Current cleanup deploy is queued/running.
 
 The blog post is **already live** on Cloudflare Pages from the earlier push that included the post + index regeneration.
-<!-- agent:boundary:1df04c40-dedf-4459-aa6b-01c8b01e0bc7 -->
+Add a YouTube pinned comment with a link to the blog post and mentioning that the blog post has a summary & analysis of the video.
+
+Use corky. If corky is missing features to accomplish this task, plan the features for implementation.
+### Re: YouTube Pinned Comment (HEAD)
+
+**Corky is missing `youtube comment`.** Current YouTube commands: `auth`, `draft`, `publish`, `edit`, `check`, `list`. No comment support.
+
+**Feature plan for `corky youtube comment`:**
+
+1. **`youtube comment <DRAFT_FILE_OR_VIDEO_ID> "text"`** — Post a comment on a YouTube video
+   - API: `POST /youtube/v3/commentThreads` with `snippet.videoId` + `snippet.topLevelComment.snippet.textOriginal`
+   - OAuth scope: `youtube.force-ssl` (already in corky's auth flow)
+
+2. **`--pin` flag** — Pin the comment after posting
+   - API: YouTube doesn't have a direct "pin comment" API endpoint for the Data API v3. Pinning is only available through the YouTube Studio UI.
+   - **Alternative:** Post the comment via API, then pin it manually in YouTube Studio, OR use the undocumented Creator Studio API (fragile).
+
+**Recommended approach:**
+1. Implement `corky youtube comment` to post the comment
+2. Pin it manually via YouTube Studio (no stable API for pinning)
+3. Track pinning API support as a future enhancement
+
+**Draft comment text:**
+> Blog post with summary & analysis: https://briantakita.me/posts/agent-resume-recruiter-workflow-live
+>
+> Topics covered: Agent Resume (TOML-based resume generation), Corky recruiter pipeline, agent-doc parallel commands, CRDT improvements, and more.
+
+Want me to implement `youtube comment` in corky now, or post the comment manually for now and implement later?
+<!-- agent:boundary:a848744e-1173-4dcb-a667-2e4f63227ef4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -654,4 +682,6 @@ The blog post is **already live** on Cloudflare Pages from the earlier push that
 - [x] Release all submodule updates
 - [x] Deploy briantakita.me to Cloudflare Pages
 - [x] Remove Docker/Contabo deployment infrastructure
+- [ ] Implement `corky youtube comment` command
+- [ ] Post pinned comment on YouTube video with blog post link
 <!-- /agent:pending -->

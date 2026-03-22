@@ -249,7 +249,7 @@ Brian
 
 I want to focus both on code and data context. Correspondence, documents, events, etc.
 I also want to emphasize capturing insights over voice & v
-### Re: Broadening context and emphasizing insight capture (HEAD)
+### Re: Broadening context and emphasizing insight capture
 
 Updated the existence-lang bullet to cover code + data context (correspondence, documents, events), and sharpened the corky bullet around insight capture.
 
@@ -272,7 +272,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:439cc726 -->
+<!-- agent:boundary:8c7928c9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

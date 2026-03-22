@@ -7,6 +7,8 @@ agent_doc_write: crdt
 <!-- agent:status mode=replace -->
 - [x] Research ECI Solutions & Justin Caird
 - [x] Draft response
+- [x] Build tailored resume (eci-solutions profile)
+- [x] Draft follow-up reply with resume & availability
 - [ ] Review and send
 <!-- /agent:status -->
 
@@ -78,7 +80,50 @@ Note Justin's reply.
 
 Draft a reply.
 Prepare a resume based on what his client is looking for.
+### Re: Justin's reply — resume & availability (HEAD)
+
+Justin's latest message (exported from LinkedIn conversation):
+
+> Hey Brian - I'm sorry for the delay! I have been out of town and just catching up. I'd love to explore this further with you. Can you share your resume and times you can speak this week? Looking forward to catching up on this.
+
+**Built tailored resume:** `resume/BrianTakita-eci-solutions.pdf`
+
+The profile emphasizes:
+- Agentic systems and agent tooling (agent-doc, corky, agent-kit)
+- AI Products Shipped section (their core interest)
+- Legacy modernization experience (SocialChorus Backbone→Svelte/React, CrystalCommerce Rails migration)
+- C#/.NET bolded in skills (NASPP experience included for .NET/CRM background)
+- Context engineering and spec-driven development
+- Full career breadth showing 20+ years
+
+### Draft LinkedIn reply: (HEAD)
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through document-as-interface sessions — exactly the pattern ECI is building toward
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+- I have experience modernizing legacy systems (Backbone→Svelte/React at SocialChorus, Rails migrations, .NET at NASPP)
+
+I'm available:
+- Monday 3/24: afternoon ET
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: morning ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+
+**Notes:**
+- Connects agent-doc directly to "agents that write and maintain code" — their stated goal
+- Mentions legacy modernization since that's the actual work (20-year-old ERP systems)
+- Gives specific availability windows rather than "I'm flexible"
+- Keeps it concise — Justin already knows the background from the first exchange
+<!-- agent:boundary:99ab4e30 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- Review draft reply and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

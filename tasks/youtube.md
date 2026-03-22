@@ -311,7 +311,7 @@ For the broader UX, we could add a `transcribe-gpu` feature that auto-selects CU
 Also: the MP4 direct decode failed ("Unknown sample rate") — corky's symphonia decoder should handle MP4/AAC. That's a separate bug worth fixing so you don't need the ffmpeg step.
 
 Please check local install of `corky`. Does it include `transcribe-cuda`?
-### Re: Local Corky CUDA Check (HEAD)
+### Re: Local Corky CUDA Check
 
 **Current install:** `corky v0.19.1` at `.bin/corky` → `src/corky/target/release/corky`. Built via `make release` which runs `cargo build --release` with **default features only** (`["transcribe"]`) — no CUDA.
 

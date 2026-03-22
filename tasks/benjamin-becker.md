@@ -61,7 +61,7 @@ Ready to send, or further tweaks?
 
 I don't have a Corporation at the moment. So I would be a 1099.
 But I am in the process of setting up a Corporation.
-### Re: 1099 Correction (HEAD)
+### Re: 1099 Correction
 
 Updated — removed LLC claim, positioned as 1099 with corporation in progress:
 

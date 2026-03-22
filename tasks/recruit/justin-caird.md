@@ -135,7 +135,7 @@ To rebuild if you edit the profile: `make -C resume PROFILE=eci-solutions`
 
 This needs to be supported.
 I could mention dashboard as interface with bi-directional real-time updates in the markdown using CRDT
-### Re: Strengthening the agent-doc bullet (HEAD)
+### Re: Strengthening the agent-doc bullet
 
 Good call. "Exactly the pattern ECI is building toward" is a claim without evidence. Revised bullet:
 
@@ -161,7 +161,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:971fd1cb -->
+<!-- agent:boundary:e032f201 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

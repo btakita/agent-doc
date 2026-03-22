@@ -657,7 +657,7 @@ Plugin v0.2.12 rebuilt. Install: IDEA -> Settings -> Plugins -> gear -> "Install
 Binary installed. 512 tests pass.
 Implement:
 - [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
-### Re: agent-doc preflight Implemented (HEAD)
+### Re: agent-doc preflight Implemented
 
 **Done.** New `agent-doc preflight <FILE>` command that combines all pre-agent steps into a single call.
 

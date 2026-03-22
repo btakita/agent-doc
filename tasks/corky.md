@@ -1041,7 +1041,18 @@ Implement pending
 **Installed:** corky 0.19.2 locally with GPU (transcribe-cuda)
 
 **SPEC.md §6.8, §6.9, §18** were already committed in v0.19.1 (`ba9d712`).
-<!-- agent:boundary:23848af6-5f88-49de-bb63-d335e20ec613 -->
+
+release
+### Release v0.19.2 Complete (HEAD)
+
+v0.19.2 was already committed and tagged. Completed the missing publish steps:
+
+- [PyPI](https://pypi.org/project/corky/0.19.2/) — published via maturin
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.19.2) — CUDA binary attached
+- [crates.io](https://crates.io/crates/corky/0.19.2) — already published
+
+All three publish targets are now complete.
+<!-- agent:boundary:26bf096b-67c9-4d97-bfc3-646c2c5d09fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

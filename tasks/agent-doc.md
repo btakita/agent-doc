@@ -531,7 +531,7 @@ I'll write tests to reproduce these conditions and fix them. The test cases:
 
 Want me to implement the fix + tests now?
 Should `flush_to_document()` use the CRDT approach?
-### Re: Should flush_to_document Use CRDT? (HEAD)
+### Re: Should flush_to_document Use CRDT?
 
 **No.** CRDT is for concurrent edits (agent + user writing simultaneously). Stream flush is sequential replace (overwrite old partial with longer version). Different operations.
 

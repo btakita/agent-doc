@@ -471,33 +471,25 @@ release
 521 tests pass.
 We have multiple `agent:boundary` in this document. Is this because we were running an old binary?
 I see several uncommitted `agent:boundary` components. Why?
-### Re: Uncommitted `agent:boundary` components
+I still see the stale `agent:boundary` components in this document.
+I don't see the response patch in this document.
+### Re: Stale boundaries + missing response patches (HEAD)
 
-There are **5 stale boundary markers** left over from before the v0.25.4 fix. They accumulated because the old JetBrains plugin added a new one each cycle without removing previous ones.
+**Stale boundaries cleaned up.** Removed the 4 old full-UUID boundary markers (lines 402, 416, 433, 458) that accumulated before v0.25.4.
 
-**Why uncommitted:** Boundary markers are transient UI elements — `agent-doc commit` deliberately excludes them from the snapshot. They live only in the working tree, which is why your editor shows them with green gutter (uncommitted).
+**Why responses weren't visible:** My previous responses were appended at the boundary insertion point (end of exchange, just before `&lt;!-- /agent:exchange --&gt;`), but they appeared *after* your latest edits in the document. The IPC patch was consumed by the plugin (logs confirmed this), but the content may have been below the fold or the editor view didn't scroll to it.
 
-**Current state:**
-- Line 402: `cleanup-00000000...` (from manual cleanup attempt)
-- Line 416: `d31ee92f-...` (old full UUID)
-- Line 433: `79cdec69-...` (old full UUID)
-- Line 458: `2fce24d8-...` (old full UUID)
-- Line 477: `093d2976-...` (current active boundary)
-
-Only the last one (line 477) is the real active boundary. The other 4 are stale artifacts. With v0.25.4, the plugin now strips all existing boundaries before inserting a fresh one — but it only cleans up markers *near the insertion point*. These older ones are scattered throughout the document.
-
-**Fix:** I can remove the 4 stale boundary markers (lines 402, 416, 433, 458) right now, leaving only the active one. Want me to clean them up?
-<!-- agent:boundary:0b37f682 -->
+**Current boundary:** The active boundary at line 480 is still a full UUID (`741debb0-69cc-4eb5-a230-dc8ed230080a`) — the plugin should be generating 8-char IDs. This suggests the plugin may not have been reloaded with the latest build. Check if the installed plugin version matches v0.2.13.
+<!-- agent:boundary:f8d4da55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Clean up 4 stale boundary markers in this document (awaiting approval)
+- [ ] Verify JetBrains plugin v0.2.13 is installed (boundary still using full UUID)
 - [ ] agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
 - [ ] JetBrains plugin v0.2.13 (boundary dedup + short IDs)
 - [ ] VS Code plugin v0.2.3
-- [ ] Next: consider pruning historical boundary references from this document if they add noise
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

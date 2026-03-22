@@ -517,7 +517,7 @@ Describe:
 > - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 
 When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
-### Re: Prompt Below Boundary After agent-doc run (HEAD)
+### Re: Prompt Below Boundary After agent-doc run
 
 **This is the expected consequence of snapshot-only boundary reposition.**
 

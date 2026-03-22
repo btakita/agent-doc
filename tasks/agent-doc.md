@@ -612,7 +612,7 @@ You can test the boundary cleanup now — it's active. The snapshot path already
 To test the FFI export from a plugin, the shared library needs to be rebuilt too: `cargo build --release` produces `target/release/libagent_doc.so` with the new function.
 
 I still see many uncommitted `agent:boundary` components in this file. Do I need to /compact for a SKILL update?
-### Re: Configurable boundary IDs + summary + stale boundaries (HEAD)
+### Re: Configurable boundary IDs + summary + stale boundaries
 
 **1. Configurable boundary ID length** — Already implemented. `BOUNDARY_ID_LEN` constant in `lib.rs` controls the length (default 8). To change, update that constant. The SPEC says 8-char hex but the implementation is configurable.
 
@@ -633,7 +633,7 @@ The plugin adds a new boundary each IPC reposition cycle but doesn't remove the 
 **Quick fix now:** I can add a one-time working-tree cleanup step to `agent-doc commit` that fires when it detects more than 1 boundary in the working tree. This would write the cleaned file to disk (overriding the "never write working tree" rule) but only when stale boundaries are detected. The tradeoff: a brief IDE reload, but it clears the accumulated garbage.
 
 Want me to implement that? Or wait for the plugin FFI integration?
-<!-- agent:boundary:9a7f4067 -->
+<!-- agent:boundary:4d2f4c68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

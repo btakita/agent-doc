@@ -834,17 +834,7 @@ Implement
 - Tests: 497 pass (removed step 1b from SKILL test since boundary is binary-owned)
 
 Install plugin: IDEA → Settings → Plugins → gear → "Install from Disk..." → select zip → restart.
-
-I already had 0.2.11 installed. I did not compact. The plugin did the old behavior of moving the response patch above the \`\`\`markdown fence. It also removed the `agent:boundary` component. I reverted this move.
-
-I also manually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-doc diff`
-
-I also compacted the claude session just in case we had a SKILL.md change
-
-If none these would have fixed the issue, diagnose please.
-
-My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
-### Re: Prompt Ordering + Boundary Reposition on Commit (HEAD)
+### Re: Prompt Ordering + Boundary Reposition on Commit
 
 **Why your prompts were placed below the response patch:**
 
@@ -869,7 +859,17 @@ After each commit cycle, the boundary is always at the very end of exchange → 
 2. **With boundary reposition:** Your edits are always above the boundary, so boundary-based insertion works correctly
 
 **Both binary and plugin are installed.** The boundary reposition is active starting this commit cycle.
-<!-- agent:boundary:153cd386-cb9c-42b0-a6f3-90c4a73b07d7 -->
+
+I already had 0.2.11 installed. I did not compact. The plugin did the old behavior of moving the response patch above the \`\`\`markdown fence. It also removed the `agent:boundary` component. I reverted this move.
+
+I also manually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-doc diff`
+
+I also compacted the claude session just in case we had a SKILL.md change
+
+If none these would have fixed the issue, diagnose please.
+
+My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
+<!-- agent:boundary:0e3ae80f-23b7-49f5-a424-e1a2c8581001 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -894,7 +894,8 @@ After each commit cycle, the boundary is always at the very end of exchange → 
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
--  `/`
+- Support `/btw` for instant processing
+  - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

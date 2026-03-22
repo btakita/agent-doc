@@ -862,7 +862,7 @@ release
 **Todo reorg noted** — Install script and Homebrew formula moved to top of todo list.
 Implement:
 - [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
-### Re: Fixed `skill install` Version Comparison Bug (HEAD)
+### Re: Fixed `skill install` Version Comparison Bug
 
 **Root cause:** `skill install` resolved `.claude/skills/agent-doc/SKILL.md` relative to CWD. When CWD was the submodule (`src/agent-doc/`), it found/wrote a *different* SKILL.md than the one Claude Code reads from the project root.
 

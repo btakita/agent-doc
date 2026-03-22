@@ -338,7 +338,7 @@ Yes
 Implement:
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-### Re: CRDT Client ID Flip — Correction (HEAD)
+### Re: CRDT Client ID Flip — Correction
 
 **The research was wrong about Yrs ordering.** Testing revealed:
 

@@ -869,7 +869,8 @@ I also compacted the claude session just in case we had a SKILL.md change
 If none these would have fixed the issue, diagnose please.
 
 My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
-<!-- agent:boundary:0e3ae80f-23b7-49f5-a424-e1a2c8581001 -->
+My previous prompt was committed above the response patch. However the uncommited state moved the prompt below the response patch but above the `agent:boundry`. Why? Please add tests. Fix
+<!-- agent:boundary:883ce812-409f-453a-8cb4-274bddcdfa0a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

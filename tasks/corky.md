@@ -970,4 +970,19 @@ Since the remote/tracking is already configured correctly, no action needed. The
 - A retry with backoff could handle transient network failures
 
 Both changes compile. Ready to commit or release when you approve.
+
+Install with --gpu. Install corky should compile with the --gpu flag support if the machine has the necessary libraries installed.
+### Installed corky with GPU support (HEAD)
+
+`make install` auto-detected the NVIDIA GPU and compiled with `transcribe-cuda`:
+
+```
+GPU detected — attempting install with transcribe-cuda...
+Installed with GPU support (transcribe-cuda).
+```
+
+corky 0.19.1 is now installed with GPU-accelerated transcription. The Makefile handles the GCP OAuth credentials via `pass` and the GPU detection via `nvidia-smi` automatically.
+
+Note: `cargo install --path . --features transcribe-cuda` alone fails because it doesn't set the `CORKY_DEFAULT_GCP_CLIENT_ID`/`CORKY_DEFAULT_GCP_CLIENT_SECRET` compile-time env vars. Always use `make install` (which reads them from `pass`).
+<!-- agent:boundary:7fb895a0-d135-412e-8068-6418c1b68207 -->
 <!-- /agent:exchange -->

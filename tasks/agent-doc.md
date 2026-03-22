@@ -692,14 +692,32 @@ output=$(agent-doc preflight <FILE>)
 Then parse the JSON for diff, document, claims, etc. This is a v0.25.0 SKILL update.
 
 Binary installed.
-<!-- agent:boundary:762fec37-198a-4451-9bcc-ef5495fb7dfb -->
+continue
+- [ ] **SKILL update for preflight** -- use preflight instead of separate recover/commit/diff/read steps
+
+audit docs
+### Re: SKILL Updated for Preflight (HEAD)
+
+**SKILL.md updated.** Steps 0, 0b, 1, 2 collapsed into a single `agent-doc preflight` call.
+
+**New step structure:**
+- **Step 0:** Pre-flight (claim + auto-update + preflight command)
+- **Step 1:** Respond
+- **Step 1b:** Update pending
+- **Step 2:** Write back
+- **Step 3:** Git integration
+
+4 Bash calls reduced to 1. Run `/compact` to reload the updated SKILL.
+
+Binary + SKILL installed. 519 tests pass.
+<!-- agent:boundary:e0b40631-e71f-4ebf-970f-2616769dc475 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **agent-doc preflight** -- implemented + tested (519 tests)
-- [ ] **SKILL update for preflight** -- use preflight instead of separate recover/commit/diff/read steps
+- [x] **SKILL update for preflight** -- steps collapsed, renumbered
+- [x] **agent-doc preflight** -- implemented + tested
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 

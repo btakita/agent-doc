@@ -632,7 +632,7 @@ Option 2 is the cleanest. Want me to implement it?
 yes
 
 continue
-### Re: Plugin-Side Boundary Reposition Implemented (HEAD)
+### Re: Plugin-Side Boundary Reposition Implemented
 
 **Implemented.** The IPC patch now includes `"reposition_boundary": true`. The plugin repositions the boundary to end of exchange after applying all component patches, in the same processing cycle. No second IPC needed.
 

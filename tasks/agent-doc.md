@@ -1159,7 +1159,7 @@ Are you certain as in we logged this or found a "smoking gun"? Or are you assumi
 **Next step:** Once we have log evidence, we can fix the root cause — either by using `select-window -t @0` BEFORE the stash operations (pre-anchoring), or by passing explicit window targets to `auto_start` instead of relying on "current window."
 yes
 We triggered the bug when switching to tasks/briantakita.me.md
-### Re: Stash Bug Found + Fixed (HEAD)
+### Re: Stash Bug Found + Fixed
 
 **I was assuming — now I have the smoking gun.**
 

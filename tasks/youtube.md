@@ -225,7 +225,7 @@ Post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 Re-posting would create a duplicate. The comment is live on the LinkedIn post.
 Now post the comment with the video link.
 
-### Re: Compact Exchange (HEAD)
+### Re: Compact Exchange
 
 Done. Here's the compacted session summary:
 

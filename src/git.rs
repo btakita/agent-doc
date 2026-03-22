@@ -148,10 +148,10 @@ pub fn commit(file: &Path) -> Result<()> {
             // Strip (HEAD) from snapshot
             if let Some(ref snap) = snapshot_content {
                 let clean_snap = strip_head_markers(snap);
-                if clean_snap != *snap {
-                    if let Err(e) = crate::snapshot::save(file, &clean_snap) {
-                        eprintln!("[commit] failed to clean snapshot: {}", e);
-                    }
+                if clean_snap != *snap
+                    && let Err(e) = crate::snapshot::save(file, &clean_snap)
+                {
+                    eprintln!("[commit] failed to clean snapshot: {}", e);
                 }
             }
             // Note: working tree is NOT modified here. The staged content has (HEAD)
@@ -190,23 +190,22 @@ pub fn commit(file: &Path) -> Result<()> {
 /// `reposition_boundary: true` IPC flag sent during `agent-doc write`.
 fn reposition_boundary_in_snapshot(file: &Path) {
     // Check for active run — don't reposition if a run is in progress
-    if let Ok(canonical) = file.canonicalize() {
-        if let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical) {
-            if pending_path.exists() {
-                eprintln!("[commit] skipping boundary reposition — active run detected");
-                return;
-            }
-        }
+    if let Ok(canonical) = file.canonicalize()
+        && let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical)
+        && pending_path.exists()
+    {
+        eprintln!("[commit] skipping boundary reposition — active run detected");
+        return;
     }
 
     // Reposition in snapshot only
-    if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        if let Some(new_snap) = move_boundary_to_end_in(&snap_content) {
-            if let Err(e) = crate::snapshot::save(file, &new_snap) {
-                eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
-            } else {
-                eprintln!("[commit] repositioned boundary in snapshot");
-            }
+    if let Ok(Some(snap_content)) = crate::snapshot::load(file)
+        && let Some(new_snap) = move_boundary_to_end_in(&snap_content)
+    {
+        if let Err(e) = crate::snapshot::save(file, &new_snap) {
+            eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+        } else {
+            eprintln!("[commit] repositioned boundary in snapshot");
         }
     }
 }

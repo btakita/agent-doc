@@ -977,7 +977,7 @@ add tests
 - `find_boundary_id_finds_real_marker` — real boundary outside code → found
 
 tasks/corky.md
-### Re: Switching to corky (HEAD)
+### Re: Switching to corky
 
 Acknowledged. Run `/agent-doc tasks/corky.md` to start that session.
 

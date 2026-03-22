@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Video published to YouTube: https://www.youtube.com/watch?v=IenfqO2vmAw
+Blog post created for YouTube video. Site ready for build/deploy.
 <!-- /agent:status -->
 
 ## Exchange
@@ -509,7 +509,28 @@ publish
 - Draft updated: `mail/social/20260322-015438-youtube.md` (status: published)
 
 Note: Had to re-auth YouTube token and fix video path (relative paths don't resolve correctly from `mail/social/` — used absolute path instead).
-<!-- agent:boundary:fa8debea-768e-48a7-89e3-2ab16bc6f295 -->
+Create a blog post for briantakita.me that is on this uploaded YouTube video.
+Use the transcription to create interesting topics based on the transcription content.
+Recap and add interesting commentary to these topics.
+### Re: Blog Post Created (HEAD)
+
+**File:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-19-agent-resume-recruiter-workflow-live.md`
+
+**Topics covered from the transcription:**
+
+1. **Agent Resume** — TOML-based experience database, gap analysis, contextual evaluation of whether to include experience (Holochain example)
+2. **Corky Recruiter Pipeline** — Full end-to-end: email ingestion, phone call transcription/diarization, context assembly, resume generation, email drafting
+3. **Agent-Doc Parallel/Deep Command** — Worktree-based concurrent tasks as a first-class DSL command
+4. **CRDT Prompt Ordering Fix** — Post-merge attribution via YRS to fix user text appearing above agent responses
+5. **FFI Shared Library Architecture** — Why CRDT logic lives in Rust with thin plugin wrappers
+6. **Tmux Pane Affinity Debugging** — Continued whack-a-mole on concurrent pane operations
+7. **Agent-Doc v0.21.0 Release** — With all the above improvements
+8. **Philosophy** — Lightweight processes, future-proofing for evolving LLMs, business ambitions
+
+The post follows the same format as the previous `agent-doc-tmux-crdt-live` post — YouTube embed, section-per-topic with commentary, honest about what worked and what's still broken.
+
+Want me to review/adjust anything, or build and deploy the site?
+<!-- agent:boundary:400dd84f-7b9c-41f9-a293-c2eb50f9fcb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -524,4 +545,6 @@ Note: Had to re-auth YouTube token and fix video path (relative paths don't reso
 - [x] Streamline video→CC workflow (repeatable single-command flow)
 - [x] Edit video for YouTube → export edited file → GPU transcribe CC
 - [x] Publish YouTube draft (video + captions upload)
+- [x] Create blog post for briantakita.me
+- [ ] Build and deploy briantakita.me with new post
 <!-- /agent:pending -->

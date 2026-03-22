@@ -449,7 +449,7 @@ It seems you lost track of my inquiry to only have document HEAD in the context.
 Why did you lost track of the single HEAD document snapshot in context window? Would having only 1 HEAD document snapshot and no previous version document snapshot in context window induce less probability of forgetting task threads?
 
 We lost the agent:boundary. Why? Write tests to reproduce conditions.
-### Re: Incremental Updates + Code Quality + Context + Boundary Loss (HEAD)
+### Re: Incremental Updates + Code Quality + Context + Boundary Loss
 
 **1. Incremental response design (line 363):**
 

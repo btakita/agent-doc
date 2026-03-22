@@ -1097,11 +1097,11 @@ compact exchange
 **v0.15.3** — CUDA transcription build fix (whisper-rs 0.16, bindgen 0.72.1)
 **v0.16.0** — 5 commits: let-chains refactor (61 collapsed `if`s), HTML email (`multipart/alternative`), sync imports dispatcher, inline images + clipboard attach, version bump. Published crates.io/PyPI/GitHub.
 
-### v0.17.0 — Gmail API Sync (HEAD)
+### v0.17.0 — Gmail API Sync
 
 Gmail REST API sync provider (705 lines): `messages.list`/`messages.get`, `historyId` incremental, scope-aware OAuth, `GmailLabelState`. Published all targets, binary installed locally.
 
-### VERSIONS.md Backfill (HEAD)
+### VERSIONS.md Backfill
 
 Added 14 missing entries (v0.9.5–v0.18.0) from git history. All 47 releases now documented (v0.1.0–v0.18.1).
 
@@ -1109,7 +1109,7 @@ Added 14 missing entries (v0.9.5–v0.18.0) from git history. All 47 releases no
 
 `make install` and `install.sh` auto-detect GPU via `nvidia-smi`. GPU found → tries CUDA build/binary → falls back to CPU on failure. SPEC.md §5.30 updated. `curl | sh` is the documented default install path with GPU awareness.
 
-### SPEC.md §6.8, §6.9, §18 (HEAD)
+### SPEC.md §6.8, §6.9, §18
 
 - §6.8 Gmail API Sync — provider config, OAuth scope, historyId incremental, 404 resilience, thread identity
 - §6.9 Doctor — `corky doctor [PROVIDER]`, per-provider checks, exit codes
@@ -1119,7 +1119,7 @@ Added 14 missing entries (v0.9.5–v0.18.0) from git history. All 47 releases no
 
 Ran `corky audit-docs` after v0.18.0 — fixed stale AGENTS.md/README.md (built-in GCP OAuth not documented). 68 insertions across 4 files. Re-ran clean.
 
-### v0.19.1 — Watch Bug Fixes (HEAD)
+### v0.19.1 — Watch Bug Fixes
 
 Three bugs fixed:
 1. **Routing scope** — `for-lucas` → `personal:for-lucas` in `.corky.toml` to prevent label leak across accounts
@@ -1128,14 +1128,14 @@ Three bugs fixed:
 
 4 new tests (221 total). SPEC.md §3.3, §4.5, §6.8, §9.2 updated. Published all targets.
 
-### v0.19.2 — Write Destination + Pull Improvements (HEAD)
+### v0.19.2 — Write Destination + Pull Improvements
 
 - `imap_sync.rs`: "Wrote:" shows routing target (`file.md → mailboxes/lucas/`)
 - `mailbox/sync.rs`: Checks `git remote` before pull, shows actual error on failure, skips pull for local-only repos
 - Audit docs: fixed 3 stale SPEC.md sections (§5.12, §7.2, §7.6). Re-ran clean (188 instruction lines).
 - Published crates.io/PyPI/GitHub with CUDA binary.
 
-### v0.19.3 — Metal GPU + Audio Resilience (HEAD)
+### v0.19.3 — Metal GPU + Audio Resilience
 
 - `transcribe-metal` feature for macOS Metal GPU acceleration
 - `make release-gpu` auto-detects CUDA (Linux) vs Metal (macOS)

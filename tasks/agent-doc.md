@@ -205,12 +205,47 @@ release
 **Published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | binary installed ✓
 
 521 tests pass (167 lib + 316 bin + 38 CLI).
-<!-- agent:boundary:c9c48ab4-4778-46a8-be0d-b1454a2e524d -->
+tmux session 0 window 0 right pane had an error loading tasks/toby-hill.md, which was moved to task/employment/toby-hill.md in the editor.
+
+We need a way to recover from the error. Should we retry the autoclaim? How can we tell this was from a rename?
+
+### Re: Autoclaim error after file rename (HEAD)
+
+The autoclaim reads the registry (`sessions.json`) which stores the old path. When the file is renamed in the editor, the registry entry becomes stale. Options:
+
+**1. Validate file exists in autoclaim** (simplest) — Before outputting claim commands, check if the file still exists. If not, log a warning and remove the stale entry from the registry. This handles renames, deletes, and any path drift.
+
+**2. Registry rename hook** — The editor plugin could update the registry when a file is renamed. JetBrains has `VirtualFileListener.beforePropertyChange()` for renames. But this couples the plugin to the registry format.
+
+**3. Resync on autoclaim** — Run `resync --fix` logic as part of autoclaim to prune dead entries. This already exists in `resync.rs`.
+
+**Recommendation:** Option 1 (validate + prune in autoclaim). It's a 5-line fix in `autoclaim.rs`: check `Path::new(&entry.file).exists()`, if not, remove from registry and log. No editor plugin changes needed.
+
+### Re: ClawTeam investigation (HEAD)
+
+**What it is:** Agent swarm orchestration (Python/CLI). Leader agent spawns workers via `clawteam spawn`, each getting a git worktree + tmux window + identity. Workers communicate via file-based transport or ZeroMQ. Uses a "board" for task assignment/status.
+
+**Overlap with agent-doc:**
+- Git worktrees for isolation (agent-doc has `parallel.rs` + `worktree.rs`)
+- Tmux pane management (agent-doc has tmux-router)
+- Multi-agent coordination (agent-doc has session registry + routing)
+
+**Differences:**
+- ClawTeam is a general swarm orchestrator (any CLI agent) — agent-doc is document-focused
+- ClawTeam uses Python; agent-doc is Rust
+- ClawTeam's "board" is a centralized task queue; agent-doc's documents ARE the coordination surface
+- ClawTeam targets ML experiments and full-stack dev as primary use cases
+
+**Relevance to agent-doc:** Low direct overlap. agent-doc's parallel fan-out already covers the worktree + tmux spawning. ClawTeam's "swarm self-organization" and cross-pollination patterns are interesting for inspiration but not directly applicable — agent-doc's document model is fundamentally different from a task queue model.
+
+Worth bookmarking for the swarm coordination patterns, but not a dependency or integration target.
+<!-- agent:boundary:fd59fce0-618c-4742-9ab3-c0586e433ae8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
@@ -219,6 +254,7 @@ release
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 - Support `/btw` for instant processing
   - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
+- Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))

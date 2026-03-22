@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Corky v0.20.0 released (youtube comment). Awaiting YouTube re-auth to post comment.
+All done. Video published, blog posted, comment added. Pin comment manually.
 <!-- /agent:status -->
 
 ## Exchange
@@ -755,7 +755,6 @@ No TUI browser supports YouTube Studio's comment moderation features. The YouTub
 
 **Release:** Committed `youtube comment` feature (commit `28391bf`). Current version: `0.19.3`. New feature → suggest `0.20.0`. What version do you want?
 Since `corky youtube comment` is a new feature, `0.20.0`? Thoughts?
-release
 ### Re: Release
 
 **Corky v0.20.0 released!**
@@ -776,7 +775,19 @@ Still need to re-auth YouTube to post the comment. Run:
 ! cd mail && ../.bin/corky youtube auth
 ```
 Then approve in the browser.
-<!-- agent:boundary:54a92d8b-32af-4b6b-9d55-b3b1598fb8cb -->
+In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https://briantakita.me/posts/agent-resume-recruiter-workflow-live/
+
+Describe what the post is. A summary of this video and focus on interesting topics in the video.
+### Re: YouTube Comment Posted (HEAD)
+
+**Done!** Comment posted on https://www.youtube.com/watch?v=IenfqO2vmAw
+
+**Comment ID:** `UgwZg_yU3oJaAyV8neF4AaABAg`
+
+**Content:** Blog post link + summary of 6 key topics (Agent Resume, Corky recruiter pipeline, parallel commands, CRDT ordering, FFI architecture, tmux debugging).
+
+**Pin it:** https://www.youtube.com/watch?v=IenfqO2vmAw&lc=UgwZg_yU3oJaAyV8neF4AaABAg — click the 3-dot menu on the comment → "Pin".
+<!-- agent:boundary:f945cda2-1609-4d03-af24-46227e983ce4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -798,6 +809,7 @@ Then approve in the browser.
 - [x] Remove Docker/Contabo deployment infrastructure
 - [x] Implement `corky youtube comment` command
 - [x] Release corky v0.20.0
-- [ ] Re-auth YouTube token + post comment with blog link
+- [x] Post comment on YouTube video with blog post link
+- [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

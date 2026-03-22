@@ -272,7 +272,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-### Re: Diarized transcription emphasis (HEAD)
+### Re: Diarized transcription emphasis
 
 Updated corky bullet to specifically mention diarized transcription (speaker-attributed insights from voice/video):
 
@@ -295,7 +295,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:1135816e -->
+<!-- agent:boundary:b4b93920 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

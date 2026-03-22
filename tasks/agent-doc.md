@@ -255,7 +255,7 @@ Binary installed. 508 tests pass. No more IPC timeouts or disk write fallbacks f
 Implement:
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-### Re: SPEC.md + AST Migration + CRDT Research (HEAD)
+### Re: SPEC.md + AST Migration + CRDT Research
 
 **1. SPEC.md updated** — added section 8.4 "Stash Window Routing" documenting the stash lifecycle, invariants, and zero-working-tree-writes contract.
 

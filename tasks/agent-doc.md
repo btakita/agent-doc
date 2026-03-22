@@ -12,7 +12,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:status -->
 **Version:** v0.24.4 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.10 (startup resync --fix) + VS Code v0.2.3
+**Plugins:** JetBrains v0.2.12 (caret removal + end-of-exchange) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** step 3b + checkpoint boundary
 <!-- /agent:status -->
 
@@ -767,7 +767,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.11.z
 
 Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → select zip → restart IDE.
 
-The boundary re-insertion fix + caret fallback removal will take effect after restart. Until then, the old plugin (v0.2.10) still uses the caret fallback when boundary is missing.
+The boundary re-insertion fix + caret fallback removal will take effect after restart. Until then, the old plugin (v0.2.10) still uses the caret fallback when boundary is missing. 
 
 **4. `agent-doc diff` — ready to implement.**
 
@@ -792,14 +792,55 @@ This is actually **correct boundary behavior** — the boundary marks where the 
 
 Option 2 is simplest. I can implement it in `agent-doc commit` — after committing, move the boundary to end of exchange so the user's next edit is always above it.
 
+Option 2 is fine only when there is no agent-doc run <current-file> running. Otherwise, keep the `agent:boundary` in place.
+
 **2. `agent-doc diff` — already exists!**
 
 The command is already implemented in `diff.rs`. Running `agent-doc diff tasks/agent-doc.md` outputs a unified diff between the snapshot and current document (with comment stripping).
 
 The SKILL workflow change is: instead of reading the full snapshot file, run `agent-doc diff <FILE>` and use its output. This requires updating SKILL.md step 1 to replace the snapshot read with a diff command. I'll update the SKILL for next version.
 
+Go
+
 **For now, I can start using the diff approach in this session** by running `agent-doc diff` instead of reading the snapshot. The document HEAD is still read (needed for context), but the snapshot read is replaced by the compact diff output.
-<!-- agent:boundary:a8463a03-14e7-4837-99fd-1a53a09c4baf -->
+
+I already had 0.2.11 installed. I did not compact. The plugin did the old behavior of moving the response patch above the \`\`\`markdown fence. It also removed the `agent:boundary` component. I reverted this move.
+
+I also mantually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-doc diff`
+
+I also compacted the claude session just in case we had a SKILL.md change
+
+If none these would have fixed the issue, diagnose please.
+### Re: Plugin v0.2.11 Still Moving Content to Cursor (HEAD)
+
+**Root cause: Boundary ID mismatch in the IPC path.**
+
+The IPC flow:
+1. Binary reads document from disk → extracts `boundary_id`
+2. Binary sends IPC patch JSON with `boundary_id` to plugin
+3. Plugin reloads from disk → looks for that boundary
+
+**The problem:** The IPC path never writes to disk. If the document has no boundary (lost from a previous cycle, compaction, or manual edit), `find_boundary_id` returns `None` → IPC patch has no `boundary_id` → plugin skips boundary path → **falls to caret-based insertion** → content placed at cursor position.
+
+The binary's snowball fix (`apply_patches_with_overrides`) only runs in the DISK write path. The IPC path bypasses it entirely — so once the boundary is lost from disk, every IPC cycle also loses it.
+
+**Two fixes implemented:**
+
+**1. Binary (`write.rs`) — `ensure_boundary_on_disk()`:**
+When building IPC patch and no boundary exists, inserts one into the document on disk FIRST, then includes that ID in the patch. Applied to all 3 IPC boundary-scan locations (`try_ipc`, `run_stream` timeout path, and `run_stream` direct path).
+
+**2. Plugin (`PatchWatcher.kt`) — caret fallback removed:**
+Replaced `applyComponentPatchWithCaret` fallback with `applyComponentPatchEndOfExchange` — when no boundary exists, inserts content before the close tag (end of exchange). Also inserts a new boundary for future cycles. **Caret-based insertion is fully removed** — the priority chain is now: boundary → end-of-exchange → plain append.
+
+**Boundary repositioning on commit (your constraint noted):** "Option 2 is fine only when there is no `agent-doc run <current-file>` running." Acknowledged — boundary repositioning on commit will check for active runs before moving the boundary.
+
+**Builds:**
+- Binary: `cargo build --release` + `cargo install --path .` ✓
+- Plugin: v0.2.12 at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.12.zip`
+- Tests: 497 pass (removed step 1b from SKILL test since boundary is binary-owned)
+
+Install plugin: IDEA → Settings → Plugins → gear → "Install from Disk..." → select zip → restart.
+<!-- agent:boundary:4ddae466-f7db-44dd-b535-4a35df1c9a86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -811,9 +852,11 @@ The SKILL workflow change is: instead of reading the full snapshot file, run `ag
 - [x] Boundary re-insertion in all write paths (`3a08011`)
 - [x] `remove_all_boundaries()` code-block awareness
 - [x] Plugin v0.2.11 build (`3c06c36`)
-- [ ] **Boundary repositioning on commit** — move boundary to end of exchange after `agent-doc commit`
+- [x] **Remove caret fallback** — replaced with end-of-exchange append (v0.2.12)
+- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
+- [ ] **JB plugin v0.2.12 install** — caret removal + end-of-exchange fallback
+- [ ] **Boundary repositioning on commit** — move boundary to end of exchange (skip if run active)
 - [ ] **SKILL update for `agent-doc diff`** — replace snapshot read with diff command in step 1
-- [ ] **Remove caret fallback** — replace with end-of-exchange append in plugin
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] Boundary-aware replace for `flush_to_document`
 - [ ] SKILL auto-update: use AskUserQuestion instead of print+stop

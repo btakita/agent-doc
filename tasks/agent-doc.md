@@ -638,7 +638,7 @@ continue with pending
 - [ ] **Boundary ID with summary suffix** — `a0cfeb34:boundary-fix`
 - [ ] **Working-tree stale boundary cleanup** — one-time disk write when >1 boundary detected
 - [ ] **Plugin FFI integration** — call `agent_doc_reposition_boundary_to_end()` from PatchWatcher
-### Re: Continue with pending items (HEAD)
+### Re: Continue with pending items
 
 All 4 items implemented:
 
@@ -666,7 +666,7 @@ All 4 items implemented:
 **Binary:** rebuilt, installed, 522 tests pass.
 
 Install the plugin to test the FFI-based boundary cleanup. The working-tree cleanup in the binary will also clean stale boundaries on the next commit cycle.
-<!-- agent:boundary:a12c7d6c -->
+<!-- agent:boundary:64e0bd48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

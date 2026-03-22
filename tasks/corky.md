@@ -1023,7 +1023,7 @@ This is documented in README.md line 24 as the quick install method. No changes 
 Locally, we should either use `curl | sh` or `cargo install` with `--gpu`.
 
 Implement pending
-### Pending Implemented — Released v0.19.2 (HEAD)
+### Pending Implemented — Released v0.19.2
 
 **Local install:** `make install` already uses `curl | sh` semantics with GPU auto-detection. For bare `cargo install`, the GCP compile-time env vars are required — `make install` handles both. This is the correct default.
 

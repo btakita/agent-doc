@@ -269,11 +269,11 @@ This handles the `tasks/toby-hill.md → tasks/employment/toby-hill.md` rename c
 
 Binary installed. 521 tests pass.
 
-### Re: Option 1 (HEAD)
+### Re: Option 1
 
 Already implemented. Autoclaim now validates file existence and prunes stale entries.
 
-### Re: Task queue model with real-time interactive documents (HEAD)
+### Re: Task queue model with real-time interactive documents
 
 The idea: combine a centralized task queue (like ClawTeam's "board") with agent-doc's document-as-UI approach. Each task gets a document. The queue coordinates which agent works on which document.
 

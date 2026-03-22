@@ -413,8 +413,6 @@ The "boundary-aware replace" item was conceived when we thought CRDT was being u
 - Outline.rs pulldown-cmark migration
 - CRDT ordering simplified (removed 100-line reorder hack)
 - 512 tests pass
-Describe:
-> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 ### Re: agent-doc submit
 
 **`agent-doc submit` — combined binary command that replaces the SKILL's multi-step orchestration.**
@@ -464,14 +462,55 @@ Output (JSON or structured text):
 
 **Design decision:** Should `submit` output the full document HEAD, or just the diff? Including HEAD means the SKILL doesn't need a separate `Read` call, but it adds the document content to the tool output (which goes into context anyway).
 
+If it goes into the context anyways, the output the full document HEAD.
+
+Can `agent-doc run` do all of these steps? Is there a reason to make a distinct `agent-doc submit`?
+
 This is a v0.25.0 feature — it simplifies the SKILL workflow but doesn't add new capabilities.
-<!-- agent:boundary:d1d8a8b9-efef-4d3c-a150-df667b097ec2 -->
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+### Re: submit vs run + Document HEAD (HEAD)
+
+**1. Include document HEAD — agreed.** Output includes full document so the SKILL doesn't need a separate `Read` call.
+
+**2. Can `agent-doc run` do all these steps?**
+
+`agent-doc run` (via `submit.rs`) already does the full loop:
+```
+diff → build prompt → send to agent backend → write response → commit
+```
+
+But the SKILL workflow can't use `agent-doc run` because **the agent IS Claude Code itself.** The SKILL runs inside Claude's conversation — it can't delegate to `agent-doc run` which would spawn a SEPARATE Claude process.
+
+| Path | Agent | Orchestration |
+|------|-------|---------------|
+| `agent-doc run` | Spawns Claude CLI process | Binary does everything |
+| `/agent-doc` (SKILL) | Current Claude session | SKILL orchestrates, binary assists |
+| `agent-doc stream` | Spawns streaming Claude | Binary + timer thread |
+
+**Why `submit` is needed (as a separate command from `run`):**
+
+`submit` is the **pre-flight + diff** portion of `run`, without the agent call. It's the part the SKILL needs before generating its own response:
+
+```
+agent-doc submit <FILE>  →  { document_head, diff, recovered, committed }
+                              ↓
+                    SKILL reads output, generates response
+                              ↓
+agent-doc write <FILE>   →  writes response via IPC
+agent-doc commit <FILE>  →  commits
+```
+
+Think of it as: `run` = `submit` + agent + `write` + `commit`. The SKILL replaces the agent step with itself.
+
+**Alternative naming:** `agent-doc preflight <FILE>` might be clearer since it's the pre-agent steps.
+<!-- agent:boundary:c5edc34b-b356-4cf4-992d-d5c8d884f061 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **`agent-doc submit`** — combined pre-flight + diff command (v0.25.0)
+- [ ] **`agent-doc submit` (or `preflight`)** — combined pre-flight + diff + document HEAD output (v0.25.0)
 - [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
 <!-- /agent:pending -->
 

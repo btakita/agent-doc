@@ -467,8 +467,6 @@ If it goes into the context anyways, the output the full document HEAD.
 Can `agent-doc run` do all of these steps? Is there a reason to make a distinct `agent-doc submit`?
 
 This is a v0.25.0 feature — it simplifies the SKILL workflow but doesn't add new capabilities.
-Describe:
-> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 ### Re: submit vs run + Document HEAD
 
 **1. Include document HEAD — agreed.** Output includes full document so the SKILL doesn't need a separate `Read` call.
@@ -504,14 +502,27 @@ agent-doc commit <FILE>  →  commits
 Think of it as: `run` = `submit` + agent + `write` + `commit`. The SKILL replaces the agent step with itself.
 
 **Alternative naming:** `agent-doc preflight <FILE>` might be clearer since it's the pre-agent steps.
-<!-- agent:boundary:c5edc34b-b356-4cf4-992d-d5c8d884f061 -->
+Yes...`agent-doc preflight <FILE>` is a better name than `agent-doc submit <FILE>`. Any other alternatives to consider?
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+### Re: Naming — preflight vs alternatives (HEAD)
+
+| Name | Meaning | Pros | Cons |
+|------|---------|------|------|
+| `preflight` | Pre-agent preparation | Clear intent, aviation metaphor | Slightly long |
+| `prepare` | Prepare for agent response | Simple verb | Generic |
+| `intake` | Take in the document state | Domain-specific | Unusual |
+| `prep` | Short for prepare | Short, snappy | Informal |
+
+**My recommendation: `preflight`.** It's descriptive (pre-agent checks + data gathering), distinct from `submit`/`run` (which do the full loop), and the aviation metaphor fits -- you're checking everything before takeoff (the agent response).
+<!-- agent:boundary:528df7ea-eae8-49be-b8d4-8aae27bc31a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **`agent-doc submit` (or `preflight`)** — combined pre-flight + diff + document HEAD output (v0.25.0)
-- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
+- [ ] **`agent-doc preflight`** -- combined pre-flight + diff + document HEAD output (v0.25.0)
+- [ ] **lazily-rs DocContext** -- cache `find_code_ranges()` (perf-dependent)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

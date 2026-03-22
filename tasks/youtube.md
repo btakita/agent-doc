@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Corky built without CUDA. GPU available (CUDA 13.2). Rebuild needed.
+Corky rebuilt with CUDA. GPU build strategy for GH Actions discussed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -322,6 +322,7 @@ Please check local install of `corky`. Does it include `transcribe-cuda`?
 ```bash
 cd src/corky && cargo build --release --features transcribe-cuda
 ```
+do it
 
 The `.bin/corky` symlink already points to `target/release/corky`, so it'll pick up the new binary automatically.
 
@@ -331,15 +332,60 @@ We should also update the `Makefile` so `make release` includes CUDA by default 
 3. Use an env var: `CORKY_FEATURES ?= transcribe-cuda` so it's configurable
 
 What's your preference? I'd suggest option 1 since you always have CUDA available.
-<!-- agent:boundary:8afec024-11fd-462b-baf4-5b8b34c5c70c -->
+If we have a separate `release-gpu` target, can we build both on gh actions?
+### Re: CUDA Rebuild + GH Actions GPU Builds
+
+**Done!** Corky rebuilt with `transcribe-cuda`. Binary at `.bin/corky` (v0.19.2) now includes GPU-accelerated whisper.
+
+**Re: GH Actions dual builds** — Yes, absolutely. The current `release.yml` builds CPU-only binaries for 5 targets. To add GPU variants:
+
+**Linux CUDA:** GitHub Actions `ubuntu-latest` runners don't have CUDA. Options:
+- Use `nvidia/cuda` Docker image via `container:` or via cross
+- Use a self-hosted runner with GPU (you have one?)
+- Use the [jimver04/cuda-toolkit](https://github.com/Jimver/cuda-toolkit) action to install CUDA toolkit on the runner
+
+**macOS Metal:** Apple Silicon runners (`macos-latest`) have Metal available. Just add `--features transcribe-metal` (once we add that feature flag via `whisper-rs/metal`).
+
+**Approach:** Add a second matrix dimension for GPU variant:
+```yaml
+matrix:
+  include:
+    # CPU builds (existing) (HEAD)
+    - target: x86_64-unknown-linux-gnu
+      os: ubuntu-latest
+      features: ""
+      suffix: ""
+    # GPU builds (new) (HEAD)
+    - target: x86_64-unknown-linux-gnu
+      os: ubuntu-latest
+      features: "transcribe-cuda"
+      suffix: "-cuda"
+      cuda: true
+    - target: aarch64-apple-darwin
+      os: macos-latest
+      features: "transcribe-metal"
+      suffix: "-metal"
+```
+
+This produces both `corky-x86_64-unknown-linux-gnu.tar.gz` (CPU) and `corky-x86_64-unknown-linux-gnu-cuda.tar.gz` (GPU) in the same release.
+
+**Prerequisite:** We need `transcribe-metal` feature flag in Cargo.toml first. Want me to:
+1. Add `transcribe-metal` feature
+2. Update Makefile with `release-gpu` target
+3. Update `release.yml` with GPU matrix entries
+
+?
+<!-- agent:boundary:63936efc-a48d-40ee-bd81-50629f10ce0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribed to SRT
-- [ ] Rebuild corky with `transcribe-cuda` feature
-- [ ] Update Makefile release target for CUDA
+- [x] Rebuild corky with `transcribe-cuda` feature
+- [ ] Add `transcribe-metal` feature flag for macOS
+- [ ] Update Makefile with `release-gpu` target
+- [ ] Update `release.yml` with GPU matrix entries
 - [ ] Fix MP4 direct decode bug ("Unknown sample rate")
 - [ ] Streamline video→CC workflow (repeatable single-command flow)
 <!-- /agent:pending -->

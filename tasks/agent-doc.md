@@ -576,7 +576,7 @@ In SPEC.md, make sure we also express the desired behavior, regardless of how it
 - `src/template.rs` — `reposition_boundary_to_end()` uses `new_boundary_id()` (8-char)
 
 **Next step:** Plugin-side integration — have `PatchWatcher` call the new FFI function instead of its Kotlin implementation.
-### Re: Document desired behavior in SPEC.md (HEAD)
+### Re: Document desired behavior in SPEC.md
 
 **Done.** Updated both spec files with behavioral requirements:
 
@@ -595,7 +595,7 @@ In SPEC.md, make sure we also express the desired behavior, regardless of how it
 - When to reposition (post-patch and post-commit)
 
 The specs express the desired behavior independently of implementation — a new plugin in any language can implement boundary management correctly by following these specs.
-<!-- agent:boundary:aeda0fe0 -->
+<!-- agent:boundary:91efd5a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

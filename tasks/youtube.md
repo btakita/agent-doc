@@ -64,7 +64,7 @@ Found **2 text message notifications** from Linda Takita (via Pulse SMS) in the 
 Cut those frames from the video. Also cut from 41:32.2 to 41.36.7
 
 Both appear as Pulse SMS popups in the top-right corner of the screen. To cut these out with ffmpeg, you'd need two cuts totaling ~5 seconds.
-### Re: Cut Notification Frames (HEAD)
+### Re: Cut Notification Frames
 
 Cut **3 ranges** (~11.5s total) from `2026-03-22 10-27-48.mp4`:
 

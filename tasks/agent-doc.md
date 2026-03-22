@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.2 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.3 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -186,13 +186,31 @@ Or if you want to keep the compact but reference the history, the archive has th
 - `src/write.rs` — all 3 IPC paths (`try_ipc`, `run_stream` primary, `run_stream` timeout fallback) now use repositioned boundary
 
 521 tests pass (167 lib + 316 bin + 38 CLI). Binary installed.
-<!-- agent:boundary:6afb75de-496f-4555-a92c-8416061ad166 -->
+Update SPEC.md
+audit docs
+release
+
+### Re: Update SPEC / audit docs / release (HEAD)
+
+**v0.25.3 released** — IPC boundary reposition fix for prompt ordering.
+
+**SPEC.md updates:**
+- §7.22: Documented that all IPC write paths call `reposition_boundary_to_end()` before extracting `boundary_id` values
+- §8.4: Added step 1 to the boundary reposition lifecycle (in-memory reposition before IPC JSON construction), making it a 4-step lifecycle
+
+**README.md:** Version bumped to v0.25.3, test count updated to 521.
+
+**CLAUDE.md:** Already up to date — boundary lifecycle is in the binary responsibility table, `template.rs` module description covers boundary lifecycle.
+
+**Published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | binary installed ✓
+
+521 tests pass (167 lib + 316 bin + 38 CLI).
+<!-- agent:boundary:c9c48ab4-4778-46a8-be0d-b1454a2e524d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **IPC boundary reposition fix** — commit, release
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

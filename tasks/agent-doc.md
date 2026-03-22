@@ -1122,17 +1122,49 @@ But `reconcile()` calls `select_window(target_window)` at line 734 to restore fo
 
 **Immediate fix:** I'll investigate and fix in the next session. The fix likely involves either batching the detach + select into a single tmux command (atomic), or using `select-window` ONLY when the current window is wrong (conditional).
 
+I observed the focus switching to window 1:stash. Some tmux commands were run with the focus on window 1. This caused window 2 to be created with its own agent-doc session.
+
+Please add logging so we can diagnose what happened in this case.
+Please explain the bug as you understand it.
+
 **SPEC.md update — I'll add the stash window routing contract now.**
 
 Want me to proceed with the SPEC.md update and stash focus fix?
-<!-- agent:boundary:533796f1-655c-4e88-9ea9-13062c02eb79 -->
+yes
+### Re: Focus Steal Bug Explained + Logging Added (HEAD)
+
+**The bug as I understand it:**
+
+1. User switches editor tab (youtube → corky)
+2. Plugin triggers `agent-doc route` for corky.md
+3. `reconcile()` runs — needs to stash youtube pane (%32) and attach corky pane
+4. `stash_pane()` calls `join-pane -dv %32 -t <stash_target>` to move youtube to stash
+5. **Despite `-d` flag, tmux switches focus to the stash window** (either a tmux version bug or a race where the window briefly becomes active)
+6. While focus is on the stash window, `auto_start` for corky runs — it sees "current window" as the stash window
+7. The new corky pane is created in the stash window (or a new window @117), not in @0
+8. `select_window(@0)` at line 734 switches back, but the corky pane is already in the wrong window
+9. A new window @117 was created, which the user sees as "window 2"
+
+**Key issue:** The `-d` flag on `join-pane` is supposed to prevent focus change, but it doesn't always work reliably. The `select_window(@0)` at line 734 restores focus, but any operations that ran between the stash and the restore used the wrong "current window."
+
+**Diagnostic logging added to `reconcile()` (sync.rs):**
+- Logs active window BEFORE detach phase
+- After each `stash_pane`, checks if active window changed and logs `FOCUS STEAL` error if so
+- Logs whether `select_window` needed to restore focus after detach
+- New `active_window()` method on `Tmux` struct (tmux.rs)
+
+**Binary installed.** Next time you switch editor tabs, the reconcile log will show whether focus was stolen and when. Check `agent-doc` stderr or the tmux pane output.
+
+**Next step:** Once we have log evidence, we can fix the root cause — either by using `select-window -t @0` BEFORE the stash operations (pre-anchoring), or by passing explicit window targets to `auto_start` instead of relying on "current window."
+<!-- agent:boundary:463d3810-fdfb-4830-890e-67969ace50e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [ ] **Stash focus steal fix** — prevent window flicker during reconcile stash operations
+- [x] **Focus steal diagnostic logging** — active_window tracking in reconcile DETACH phase
+- [ ] **Stash focus steal fix** — prevent focus change during reconcile (needs log evidence)
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->

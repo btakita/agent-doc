@@ -456,6 +456,29 @@ We lost the agent:boundary. Why? Write tests to reproduce conditions.
 
 Agreed — the SKILL should checkpoint-flush each `### Re:` section as soon as it's generated, not batch everything at the end. The SKILL already supports this (step 3, streaming checkpoints). I should be doing it more consistently. This cycle I'm writing one combined response because the topics are interrelated, but for future cycles with independent topics, I'll flush after each section.
 
+### Re: Should flush_to_document Use CRDT?
+
+**No.** CRDT is for concurrent edits (agent + user writing simultaneously). Stream flush is sequential replace (overwrite old partial with longer version). Different operations.
+
+Using CRDT for flushes would add latency, introduce the same causality-based ordering bugs we've been debugging, and be semantically wrong.
+
+**The right approach — boundary-aware replace:**
+
+1. Read current file (catches user edits)
+2. Find boundary in exchange
+3. Keep everything BEFORE boundary (user content)
+4. Replace everything AFTER boundary with cumulative response
+5. Re-insert boundary at end
+6. Atomic write
+
+This cleanly separates user content (preserved) from agent content (replaced). No CRDT needed because the boundary resolves the "whose content is this?" question deterministically.
+
+**CRDT stays for `run_stream()` only** — the final write-back where the user may have edited during response generation. Stream flushes (intermediate checkpoints) should use boundary-aware replace instead.
+
+This is also a cleaner design — `flush_to_document` becomes:
+- Find boundary → split at boundary → keep user prefix + replace agent suffix
+- vs. current: force replace mode → discard everything → CRDT re-integrates (buggy)
+
 **2. Code quality — "Is this code sloppy?" (line 375):**
 
 **Yes, parts of it are sloppy.** The subagent audit found 6 distinct issues:
@@ -531,39 +554,49 @@ I'll write tests to reproduce these conditions and fix them. The test cases:
 
 Want me to implement the fix + tests now?
 Should `flush_to_document()` use the CRDT approach?
-### Re: Should flush_to_document Use CRDT?
 
-**No.** CRDT is for concurrent edits (agent + user writing simultaneously). Stream flush is sequential replace (overwrite old partial with longer version). Different operations.
+ISSUE: I was writing an in-line prompt. The response patch commited the response at the end of the `agent:exchange`...which is correct behavior.
 
-Using CRDT for flushes would add latency, introduce the same causality-based ordering bugs we've been debugging, and be semantically wrong.
+However, the response patch content was moved from the bottom of `agent:exchange` to the cursor location.
+You can see the current state of the document with the git HEAD and git diff.
 
-**The right approach — boundary-aware replace:**
+Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
+### Re: Response Moved to Cursor + Missing Boundary (HEAD)
 
-1. Read current file (catches user edits)
-2. Find boundary in exchange
-3. Keep everything BEFORE boundary (user content)
-4. Replace everything AFTER boundary with cumulative response
-5. Re-insert boundary at end
-6. Atomic write
+**What happened (2 separate issues):**
 
-This cleanly separates user content (preserved) from agent content (replaced). No CRDT needed because the boundary resolves the "whose content is this?" question deterministically.
+**Issue 1 — Response moved from bottom to cursor position:**
 
-**CRDT stays for `run_stream()` only** — the final write-back where the user may have edited during response generation. Stream flushes (intermediate checkpoints) should use boundary-aware replace instead.
+The response was correctly committed at the END of exchange by `agent-doc write`. But then the JB plugin's IPC patch placed it at your cursor position (where you were editing inline). The uncommitted state shows the response moved up from the bottom to after your question.
 
-This is also a cleaner design — `flush_to_document` becomes:
-- Find boundary → split at boundary → keep user prefix + replace agent suffix
-- vs. current: force replace mode → discard everything → CRDT re-integrates (buggy)
+This is the IPC write path (path #1 of the 6 we identified). The plugin's Document API inserts at the cursor location when applying the patch, not at the boundary or end of exchange. The binary wrote it correctly to disk; the plugin then "helpfully" reorganized it in memory.
+
+**Root cause:** The IPC patch JSON doesn't include position information relative to the boundary. The plugin just applies the patch content to the component — and for append mode, it appends after whatever cursor state the editor has. When you're editing inline, the editor's caret position influences where the content lands.
+
+**Issue 2 — No `agent:boundary`. Why not?**
+
+The write log showed `[template] pre-patch boundary 492aba2f inserted at end of exchange` — so the binary DID insert a boundary during `apply_patches_with_overrides()`. But the boundary was then consumed by the patch application (the append-with-boundary path uses it as an insertion point and removes it). The post-patch re-insertion check (`orig_had_boundary`) looked at the incoming document — which had NO boundary (from the previous cycle's same bug). Since the original doc had no boundary, the post-patch step skipped re-insertion.
+
+**This is a snowball effect:** once one cycle loses the boundary, every subsequent cycle also loses it because `orig_had_boundary` always finds nothing. The pre-patch insertion creates one, the patch consumes it, and post-patch doesn't re-insert because the check fails.
+
+**The fix is what we already designed:**
+1. `orig_had_boundary` should check document type (has exchange component?), not content (does doc have a boundary line?)
+2. Post-patch should ALWAYS re-insert boundary at end of exchange for template-mode documents, regardless of what the incoming doc had
+
+This is a one-line fix: change the condition from `if orig_had_boundary.is_some()` to `if exchange_component_exists`. Want me to implement it now?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Boundary-aware replace for flush_to_document** — replace mode → boundary-aware split (keep user prefix, replace agent suffix). No CRDT for intermediate flushes. Tests: preserve user prompts, boundary survival, code-block awareness. (root cause + fix design ready)
-- **`agent-doc diff`** — binary command for token-efficient context loading (document HEAD + diff only, no old snapshots in context)
+- **Boundary snowball fix** — `orig_had_boundary` should check document type, not content. One-line fix: always re-insert boundary for template docs with exchange component. (THIS is the root cause of all boundary loss since v0.24.4)
+- **IPC patch position** — plugin inserts at cursor, not boundary. Needs position info in IPC JSON or boundary-aware insertion in plugin.
+- **Boundary-aware replace for flush_to_document** — replace mode → boundary-aware split (keep user prefix, replace agent suffix)
+- **`agent-doc diff`** — binary command for token-efficient context loading (HEAD + diff only)
 - SKILL auto-update: use AskUserQuestion instead of print+stop (approved)
 - `remove_all_boundaries()` code-block awareness fix
 - CLAUDE.md + README.md staleness — update for template.rs boundary changes
-- CRDT merge ordering — Yrs causality still reorders (for final writes only, not flushes)
+- CRDT merge ordering — Yrs causality still reorders (for final writes only)
 - `agent-doc submit` — combined binary command for deterministic workflow
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)

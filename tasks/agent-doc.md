@@ -724,7 +724,7 @@ Please fix the plugin to not move the commited response patch to the cursor asap
 The plugin removed the `agent:boundary` when it moved the response patch.
 
 Please update `agent:pending` with checkboxes and current state. Go through the remaining pending items.
-### Re: Markdown AST + Checkboxes + Pending State (HEAD)
+### Re: Markdown AST + Checkboxes + Pending State
 
 **1. Markdown AST:**
 

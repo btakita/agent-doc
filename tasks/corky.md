@@ -57,6 +57,8 @@ agent_doc_mode: template
 - [x] Attachment phases 2-3 — v0.16.0
 - [x] Gmail API sync provider — v0.17.0
 - [x] Watch bug fixes (routing scope, 404 resilience, IMAP shutdown) — v0.19.1
+- [x] Write destination + pull improvements — v0.19.2
+- [x] SPEC.md §6.8, §6.9, §18 — v0.19.1
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -1017,13 +1019,33 @@ It already:
 4. Installs to `~/.local/bin` (or `/usr/local/bin` with `--system`)
 
 This is documented in README.md line 24 as the quick install method. No changes needed — `curl | sh` is already the default GPU-aware install path.
-<!-- agent:boundary:9f475c12-1af4-4e44-ab70-512472bcfb45 -->
+
+Locally, we should either use `curl | sh` or `cargo install` with `--gpu`.
+
+Implement pending
+### Pending Implemented — Released v0.19.2 (HEAD)
+
+**Local install:** `make install` already uses `curl | sh` semantics with GPU auto-detection. For bare `cargo install`, the GCP compile-time env vars are required — `make install` handles both. This is the correct default.
+
+**Committed and released:**
+
+1. `e4b75c8` — Write destination display + pull error handling
+   - `imap_sync.rs`: "Wrote:" shows routing target (e.g., `file.md → mailboxes/lucas/`)
+   - `mailbox/sync.rs`: Checks git remote before pull, shows actual error on failure
+2. `c0649a2` — Version bump to 0.19.2
+
+**Published:**
+- [crates.io](https://crates.io/crates/corky/0.19.2)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.19.2)
+
+**Installed:** corky 0.19.2 locally with GPU (transcribe-cuda)
+
+**SPEC.md §6.8, §6.9, §18** were already committed in v0.19.1 (`ba9d712`).
+<!-- agent:boundary:23848af6-5f88-49de-bb63-d335e20ec613 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] SPEC.md §6.8, §6.9, §18 — drafted, uncommitted in corky submodule
-- [ ] Commit + release pending SPEC.md + write destination + pull improvements
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

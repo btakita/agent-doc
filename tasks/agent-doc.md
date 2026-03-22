@@ -592,6 +592,9 @@ You can see the current state of the document with the git HEAD and git diff.
 Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
 
 Let's keep on tracking the context state storing only the document HEAD.
+### Re: Boundary Snowball Fix Implemented (HEAD)
+
+**Fixed and installed.** Two changes in `template.rs`:
 
 **1. Snowball fix (`apply_patches_with_overrides`):**
 Changed post-patch boundary re-insertion from checking `orig_had_boundary.is_some()` (content-based) to unconditionally re-inserting for any template doc with an exchange component that has no boundary after patching. This breaks the snowball: even if the previous cycle lost the boundary, the next cycle will re-insert one.
@@ -607,9 +610,16 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 **Results:** 34 template tests pass (31 existing + 3 new). Binary rebuilt and installed.
 
 **Context tracking:** Agreed on HEAD-only context. The `agent-doc diff` command is the implementation path — it outputs only the changes since the last snapshot, so the SKILL loads HEAD document + compact diff instead of HEAD + full snapshot. This keeps only one version of the document in context.
+
+We agree. Have you implemented this?
+
 ### Re: Pending/Todo Split + Boundary Fix Verification
 
 **Acknowledged.** `agent:pending` is now session-scoped (current work items), `agent:todo` is long-term backlog. I've cleaned up pending to remove the duplicated long-term items.
+
+What is the appropriate names for in session items vs long term items?
+Is `agent:pending` for in session and `agent:todo` for long term ideal?
+Would `agent:session` and `agent:roadmap` be a better set of names?
 
 **Boundary fix verified working.** The write log from this cycle shows:
 ```
@@ -620,14 +630,47 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 The re-insertion message confirms the snowball fix works — the boundary is now unconditionally re-inserted for template docs with an exchange component. Previous cycles only showed the pre-patch insertion (no re-insertion because `orig_had_boundary` failed).
 
 **Submodule committed:** `ce84701` in `src/agent-doc` — "fix: boundary snowball bug + code-block awareness in remove_all_boundaries"
-<!-- agent:boundary:0528577e-907d-4bd0-a384-c18cf8464f11 -->
+
+Note that I intervened with the plugin moving the commited response patch to the cursor for my own sanity.
+Please fix the plugin to not move the commited response patch to the cursor asap.
+The plugin removed the `agent:boundary` when it moved the response patch.
+### Re: Plugin Cursor Fix + Naming + agent-doc diff (HEAD)
+
+**1. Plugin cursor fix — DONE (`3a08011`):**
+
+Fixed two locations where boundary was consumed without re-insertion:
+
+- **`component.rs:append_with_boundary()`** — the Rust FFI path used by the plugin's NativeLib. Now re-inserts a fresh boundary UUID after the response content.
+- **`PatchWatcher.kt:applyComponentPatchWithBoundary()`** — the Kotlin fallback. Same fix.
+
+Both now match the binary's post-patch behavior: consume old boundary → insert response → re-insert new boundary at end.
+
+**Why this fixes the cursor issue:** The plugin's priority chain is: boundary → caret → normal append. Without a boundary in the IPC patch JSON (snowball bug), it fell through to caret-based insertion. With both fixes (snowball + re-insertion), the boundary will always be present → plugin always uses boundary-based insertion → cursor position is irrelevant.
+
+**Binary rebuilt and installed. Plugin built** at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.10.zip`. Install via IDEA → Settings → Plugins → gear → "Install from Disk..." → restart IDE.
+
+**2. Component naming:**
+
+Both naming sets work. My recommendation:
+
+| Option | Session scope | Long-term scope | Notes |
+|--------|--------------|-----------------|-------|
+| `pending` / `todo` | Session work items | Backlog | Simple, familiar |
+| `session` / `roadmap` | Current session | Project roadmap | More semantic |
+
+`pending` / `todo` is simpler and more universally understood. `session` / `roadmap` adds semantic precision but might feel heavy. Since the document already uses `agent:pending`, keeping it and adding `agent:todo` is the lowest-friction choice. Your call.
+
+**3. `agent-doc diff` — not yet implemented.**
+
+It's the next priority item. The design is ready (from earlier discussion): binary command that outputs structured diff between current document and snapshot, so the SKILL loads HEAD + diff instead of HEAD + full snapshot.
+<!-- agent:boundary:9b04cb09-6550-496d-91d0-410a6d489fd7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **`agent-doc diff`** — binary command for HEAD-only context loading (next priority)
-- IPC patch position — plugin inserts at cursor, not boundary
+- **`agent-doc diff`** — binary command for HEAD-only context loading (next to implement)
+- **JB plugin install needed** — boundary re-insertion fix built, needs IDE restart to activate
 - Boundary-aware replace for `flush_to_document` — split at boundary instead of replace mode
 - SKILL auto-update: use AskUserQuestion instead of print+stop
 - CLAUDE.md + README.md staleness — update for template.rs changes

@@ -477,16 +477,40 @@ I don't see the response patch in this document.
 
 **Stale boundaries cleaned up.** Removed the 4 old full-UUID boundary markers (lines 402, 416, 433, 458) that accumulated before v0.25.4.
 
+These stale boundaries are still added in an uncommitted state. Why are they added in an uncommitted state?
+
 **Why responses weren't visible:** My previous responses were appended at the boundary insertion point (end of exchange, just before `&lt;!-- /agent:exchange --&gt;`), but they appeared *after* your latest edits in the document. The IPC patch was consumed by the plugin (logs confirmed this), but the content may have been below the fold or the editor view didn't scroll to it.
 
+Does anything need to be fixed in agent-doc or the Plugin?
+
 **Current boundary:** The active boundary at line 480 is still a full UUID (`741debb0-69cc-4eb5-a230-dc8ed230080a`) — the plugin should be generating 8-char IDs. This suggests the plugin may not have been reloaded with the latest build. Check if the installed plugin version matches v0.2.13.
-<!-- agent:boundary:f8d4da55 -->
+### Re: Why stale boundaries are uncommitted + what needs fixing (HEAD)
+
+**The stale boundaries (lines 402, 416, 433, 458) are NOT in the snapshot** — they were cleaned from the snapshot in earlier commits. But they persist in the **working tree** because neither the plugin nor `agent-doc commit` cleans the working tree file of stale boundaries.
+
+**Snapshot state:** 1 real boundary (`f8d4da55`, short ID) at end of exchange. Clean.
+**Working tree:** 6 real boundaries scattered throughout exchange. Dirty.
+
+**Root cause:** Two gaps:
+1. **Plugin:** `repositionBoundaryToEnd()` only strips boundaries near the insertion point (end of component), not from the full exchange body. Stale boundaries in older sections are never reached.
+2. **agent-doc commit:** Commits the snapshot (which has clean boundaries) but doesn't reconcile the working tree — so stale boundaries persist as uncommitted changes.
+
+**What needs fixing (choose one or both):**
+
+**Option A — Plugin fix (recommended):** Make `repositionBoundaryToEnd()` scan the *entire* component content for `<!-- agent:boundary:... -->` lines and remove all of them before inserting the fresh one at the end. This is the same fix from v0.25.4 but with broader scope.
+
+**Option B — Binary fix:** Have `agent-doc commit` strip stale boundary markers from the working tree after committing the snapshot. This would clean up any accumulated garbage regardless of plugin version.
+
+**Also:** The plugin is still generating full UUIDs for new boundaries (line 480: `741debb0-69cc-4eb5-a230-dc8ed230080a`) instead of 8-char short IDs. The binary side generates short IDs correctly (`f8d4da55` in the snapshot). The PatchWatcher's UUID generation may not have been updated in the installed plugin build.
+<!-- agent:boundary:955602fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Verify JetBrains plugin v0.2.13 is installed (boundary still using full UUID)
+- [ ] **Fix plugin boundary cleanup scope** — scan full component, not just insertion point
+- [ ] **Fix plugin short boundary IDs** — installed plugin still using full UUIDs
+- [ ] Option: add working-tree boundary cleanup to `agent-doc commit`
 - [ ] agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
 - [ ] JetBrains plugin v0.2.13 (boundary dedup + short IDs)
 - [ ] VS Code plugin v0.2.3

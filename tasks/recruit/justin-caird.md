@@ -9,6 +9,8 @@ agent_doc_write: crdt
 - [x] Draft response
 - [x] Build tailored resume (eci-solutions profile)
 - [x] Draft follow-up reply with resume & availability
+- [x] Update resume to close gaps (existence-lang, avatars, highlights)
+- [x] Rebuild PDF
 - [ ] Review and send
 <!-- /agent:status -->
 
@@ -336,11 +338,18 @@ The resume mentions "philosophy" and "domain ontology system (extensible)" but n
 - (b) Use "domain ontology" in the reply instead of "existence-lang"
 - (c) Both
 
+C
+Update data.toml
+
 **2. Presence AI — "avatars" and "image generation" not in resume**
 The resume says "text, audio, and video lip-sync on NVIDIA H100 GPUs via WebRTC". The draft reply says "live video avatars, audio avatars, text avatars, and image generation." The resume doesn't use "avatar" or mention image generation. Should update the resume to match.
 
+Yes. Also update data.toml
+
 **3. Highlight phrases could be stronger**
 The ECI profile doesn't bold "diarized transcription", "social media posting", or "image generation". Adding these to the profile's highlight phrases would make the resume visually reinforce the reply's claims.
+
+Yes
 
 **No gaps on:**
 - corky (diarized transcription, social media, correspondence — all covered)
@@ -348,11 +357,57 @@ The ECI profile doesn't bold "diarized transcription", "social media posting", o
 - Legacy modernization (SocialChorus, CrystalCommerce, NASPP — all included)
 
 **Recommendation:** Update the resume to close gaps 1-3, then rebuild the PDF. Want me to proceed?
-<!-- agent:boundary:76746956 -->
+go
+### Re: Resume updates complete (HEAD)
+
+Done. Updated all three files and rebuilt the PDF:
+
+**Changes:**
+
+1. **BrianTakita.md** (master resume):
+   - Summary: "domain ontology system (existence-lang, 2014)"
+   - Career Highlights: "existence-lang" replaces "extensible", adds "consistent vocabulary across code, correspondence, and data contexts"
+   - Presence AI highlight: "live video avatars, audio avatars, text avatars, and image generation"
+   - AI Products Shipped: Presence AI entry expanded with avatar types + image generation
+   - Open Source: "philosophy" → "existence-lang" with updated description
+
+2. **data.toml**:
+   - Philosophy entry → existence-lang with expanded description
+   - Multimodal pipeline entry adds avatars + image generation
+
+3. **profiles/eci-solutions.toml** — added highlight phrases:
+   - `live video avatars`, `audio avatars`, `text avatars`, `image generation`
+   - `existence-lang`, `consistent vocabulary`
+   - `diarized transcription`, `social media posting`
+
+**Rebuilt:** `resume/BrianTakita-eci-solutions.pdf`
+
+Open it: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
+
+The draft reply should also use "domain ontology (existence-lang)" instead of bare "existence-lang" — updated final draft:
+
+**Final draft reply (v8):**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky is a git-native toolkit for correspondence, social media, and audio/video media — it turns conversations, voice notes, and video into structured knowledge that agents can act on, with diarized transcription and per-contact context
+- Both tools share a domain ontology layer (existence-lang) that gives agents and humans a consistent vocabulary across code, correspondence, and data contexts
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline with live video avatars, audio avatars, text avatars, and image generation
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:d66a4bc3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Update resume to close gaps (existence-lang, avatars, highlight phrases)
-- Rebuild PDF: `make -C resume PROFILE=eci-solutions`
-- Review final draft reply and resume, then send via LinkedIn
+- Review final draft reply (v8) and updated resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

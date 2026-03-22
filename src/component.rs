@@ -204,6 +204,7 @@ fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
 /// Uses `pulldown-cmark` AST parsing with `offset_iter()` to accurately detect
 /// code regions per the CommonMark spec.
 pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let t = std::time::Instant::now();
     let mut ranges = Vec::new();
     let parser = Parser::new_ext(doc, Options::empty());
     let mut iter = parser.into_offset_iter();
@@ -227,6 +228,10 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
             }
             _ => {}
         }
+    }
+    let elapsed = t.elapsed().as_millis();
+    if elapsed > 0 {
+        eprintln!("[perf] find_code_ranges: {}ms", elapsed);
     }
     ranges
 }
@@ -336,7 +341,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
 }
 
 /// Find the end of an HTML comment (`-->`), returning byte offset past `>`.
-fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
+pub(crate) fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     let len = bytes.len();
     let mut i = start;
     while i + 3 <= len {

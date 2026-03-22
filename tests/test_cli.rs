@@ -508,7 +508,7 @@ fn test_skill_md_contains_required_steps() {
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
     let content = std::fs::read_to_string(&skill_path).unwrap();
 
-    let required_steps = ["### 0.", "### 0b.", "### 1.", "### 1b.", "### 2.", "### 3.", "### 4.", "### 5."];
+    let required_steps = ["### 0.", "### 1.", "### 2.", "### 3."];
     for step in &required_steps {
         assert!(
             content.contains(step),

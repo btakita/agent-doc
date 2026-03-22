@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::component::{self, Component};
+use crate::component::{self, find_comment_end, Component};
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -452,17 +452,6 @@ fn find_outside_code(needle: &str, haystack: &str, from: usize, code_ranges: &[(
     }
 }
 
-fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
-    let len = bytes.len();
-    let mut i = start;
-    while i + 3 <= len {
-        if &bytes[i..i + 3] == b"-->" {
-            return Some(i + 3);
-        }
-        i += 1;
-    }
-    None
-}
 
 #[cfg(test)]
 mod tests {

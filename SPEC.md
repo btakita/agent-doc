@@ -466,6 +466,36 @@ command = "wezterm start -- {tmux_command}"
 
 **Safety:** The `{tmux_command}` uses `tmux new-session -A` which attaches to an existing session if it exists, or creates a new one. This means multiple calls to `agent-doc terminal` are idempotent — they either no-op (client already attached) or attach to the existing session.
 
+### 7.26 preflight
+
+`agent-doc preflight <FILE>` — run all pre-agent steps and output JSON.
+
+Combines recover, commit, claims-log check, diff, and document HEAD read into a single call. The SKILL workflow consumes the structured JSON output instead of making separate CLI calls.
+
+**Steps (in order):**
+1. Recover orphaned pending responses (`agent-doc recover`)
+2. Commit previous cycle (`agent-doc commit`)
+3. Read and truncate `.agent-doc/claims.log`
+4. Compute diff between snapshot and current document
+5. Read document HEAD from disk
+
+**Output (JSON to stdout):**
+```json
+{
+  "recovered": false,
+  "committed": true,
+  "claims": [],
+  "diff": "unified diff text or null",
+  "no_changes": false,
+  "document": "full document content"
+}
+```
+
+- `no_changes` is `true` when the diff is `None` (snapshot == document)
+- `diff` is `null` when `no_changes` is `true`
+- `document` always contains the current HEAD content
+- Progress/diagnostic messages go to stderr
+
 ## 8. Session Routing
 
 ### 8.1 Registry
@@ -510,6 +540,31 @@ Multiple documents can map to the same pane (one Claude session, multiple files)
 `claim` binds a document to a **tmux pane**, not a Claude session. The pane is the routing target — `route` sends keystrokes to the pane. Claude sessions come and go (restart, resume), but the pane persists. If Claude restarts on the same pane, routing still works without re-claiming.
 
 Last-call-wins: any `claim` overwrites the previous mapping for that document's session UUID.
+
+### 8.4 Stash Window Routing
+
+The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.
+
+**Window-scoped routing:** Each editor split maps to a tmux pane in the primary window (`@0`). When the user switches files, `reconcile()` swaps panes by detaching unwanted ones into the stash and attaching needed ones back.
+
+**Stash lifecycle:**
+
+| Phase | Operation | Detail |
+|-------|-----------|--------|
+| DETACH | `stash_pane()` | Moves an unwanted pane into the stash window via `tmux join-pane` |
+| — | target selection | Targets the LARGEST pane in the stash (by height) to avoid "pane too small" errors |
+| — | overflow | If join fails, `break_pane_to_stash()` creates an overflow stash window (also named `"stash"`) |
+| ATTACH | `reconcile()` | Joins a stashed pane back into `@0` when needed again |
+
+**Discovery:** `find_all_stash_windows()` returns all stash windows — both the primary stash and any overflow windows. All windows named `"stash"` or matching `"stash-*"` (tmux auto-deduplication) are treated as stash windows by `is_stash_window_name()`.
+
+**Invariants:**
+- Stashed panes keep running — the Claude session remains alive inside
+- Stash windows are named `"stash"` for consistent discovery
+- The stash window is resized to 200 rows before join operations to prevent minimum-size failures
+- Focus never leaves window `@0` during stash operations (`-d` flags are always set)
+
+**Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing. The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag sent during `agent-doc write`.
 
 ## 9. Git Integration
 

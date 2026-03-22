@@ -26,6 +26,7 @@ Interactive document sessions with AI agents.
 | Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls |
 | Tmux routing, session registry, pane management | **Binary** (Rust) | Process-level coordination |
 | Pre-response snapshots, undo, extract, transfer | **Binary** (Rust) | File-level atomicity |
+| Boundary marker lifecycle (insert, reposition, cleanup) | **Binary** (Rust) | Deterministic, all write paths need it |
 | Reading diff, interpreting user intent | **Skill** (SKILL.md) | Requires LLM reasoning |
 | Generating response content | **Skill** (SKILL.md) | Non-deterministic |
 | Deciding what to write to which component | **Skill** (SKILL.md) | Context-dependent |
@@ -44,7 +45,7 @@ Use this layout when adding modules. Add new subcommands in their own file, wire
 src/
   main.rs           # CLI entry point (clap derive)
   submit.rs         # Core loop: diff, send, merge-safe write, snapshot, git
-  init.rs           # Scaffold session document
+  init.rs           # Scaffold session document; no-arg mode initializes project (.agent-doc/ dirs + SKILL.md)
   reset.rs          # Clear session + snapshot
   diff.rs           # Preview diff (dry run) + comment stripping
   clean.rs          # Squash git history
@@ -64,16 +65,33 @@ src/
   outline.rs        # Markdown section structure + token counts
   prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md (install/check)
+  install.rs        # System-level setup: check prerequisites (tmux, claude) and install editor plugins
   resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix)
   history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   plugin.rs         # Editor plugin install/update/list via GitHub Releases
+  write.rs          # Write command: parse patches, IPC-first writes, disk fallback
+  template.rs       # Template mode: patch parsing, apply_patches, boundary lifecycle
+  boundary.rs       # Boundary marker management (insert, remove, reposition)
   crdt.rs           # CRDT foundation (yrs-based conflict-free merge)
   merge.rs          # 3-way merge + CRDT merge path
   stream.rs         # Stream command: real-time CRDT write-back loop
+  ffi.rs            # C ABI exports for editor plugins (JNA/FFI)
+  lib.rs            # Library target re-exports
+  recover.rs        # Orphaned pending response detection + recovery
+  compact.rs        # Exchange compaction (archive + truncate)
+  convert.rs        # Bidirectional format conversion (inline ↔ template)
+  extract.rs        # Extract exchange sections to new documents
+  undo.rs           # Undo last response (pre-response snapshot restore)
+  mode.rs           # Document mode resolution (format + write strategy)
+  autoclaim.rs      # SessionStart hook: auto-claim documents
+  commands.rs       # List available commands for plugin autocomplete
+  sync.rs           # Sync pane state between editor and tmux
+  preflight.rs      # Pre-agent checks: recover, commit, claims, diff, document read → JSON
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend (Agent + StreamingAgent)
+    junie.rs        # Junie backend (Agent + StreamingAgent)
     streaming.rs    # StreamingAgent trait + stream-json parser
   terminal.rs       # Launch external terminal with tmux session
   parallel.rs       # Parallel fan-out with git worktrees

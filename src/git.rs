@@ -65,6 +65,8 @@ fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
 pub fn commit(file: &Path) -> Result<()> {
+    let t_total = std::time::Instant::now();
+
     let (git_root, resolved) = resolve_to_git_root(file)?;
     let timestamp = chrono_timestamp();
     let doc_name = file
@@ -81,6 +83,7 @@ pub fn commit(file: &Path) -> Result<()> {
     // - Agent response → committed (no git gutter)
     // - User's subsequent edits → uncommitted (green git gutter)
     let snapshot_content = crate::snapshot::load(file)?;
+    let t_staging = std::time::Instant::now();
     if let Some(ref snap) = snapshot_content {
         // Add (HEAD) marker to the last ### Re: heading in the snapshot.
         // The working tree keeps the heading WITHOUT the marker, creating
@@ -107,12 +110,34 @@ pub fn commit(file: &Path) -> Result<()> {
         // No snapshot — fall back to staging the entire file
         git_add_force(&git_root, &resolved)?;
     }
+    let elapsed_staging = t_staging.elapsed().as_millis();
+    if elapsed_staging > 0 {
+        eprintln!("[perf] commit.staging (hash_object+update-index): {}ms", elapsed_staging);
+    }
 
-    // Commit — ignore failure (nothing to commit is fine)
-    let commit_status = Command::new("git")
+    // Commit — ignore failure (nothing to commit is fine).
+    // Use .output() to capture stdout (prevents git status leaking to stdout
+    // when called from `preflight` which reserves stdout for JSON).
+    let t_commit = std::time::Instant::now();
+    let commit_output = Command::new("git")
         .current_dir(&git_root)
         .args(["commit", "-m", &msg, "--no-verify"])
-        .status();
+        .output();
+    let commit_status = commit_output.as_ref().map(|o| o.status);
+    let elapsed_commit = t_commit.elapsed().as_millis();
+    if elapsed_commit > 0 {
+        eprintln!("[perf] commit.git_commit: {}ms", elapsed_commit);
+    }
+
+    // Log commit output to stderr (captured from git to avoid stdout pollution)
+    if let Ok(ref o) = commit_output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                eprintln!("{}", line);
+            }
+        }
+    }
 
     // After commit, strip (HEAD) markers from the snapshot so the working tree
     // is clean. The committed content has (HEAD) markers; the working tree should not.
@@ -127,16 +152,117 @@ pub fn commit(file: &Path) -> Result<()> {
                     if let Err(e) = crate::snapshot::save(file, &clean_snap) {
                         eprintln!("[commit] failed to clean snapshot: {}", e);
                     }
-                    // Also update the working tree file to match the clean snapshot
-                    if let Err(e) = std::fs::write(file, &clean_snap) {
-                        eprintln!("[commit] failed to update working tree: {}", e);
-                    }
                 }
             }
-            signal_vcs_refresh(file);
+            // Note: working tree is NOT modified here. The staged content has (HEAD)
+            // markers, the working tree does not. This creates the blue gutter diff.
+            // Previously we stripped HEAD markers from the working tree, but that was
+            // unnecessary (staging doesn't modify the working tree) and caused file
+            // cache conflicts in the IDE.
+
+            // Reposition boundary in snapshot only (not working tree).
+            // Working tree writes cause IDE to reload, losing user keystrokes.
+            // Plugin handles working-tree reposition via IPC flag.
+            let t_reposition = std::time::Instant::now();
+            reposition_boundary_in_snapshot(file);
+            let elapsed_reposition = t_reposition.elapsed().as_millis();
+            if elapsed_reposition > 0 {
+                eprintln!("[perf] commit.reposition_boundary_in_snapshot: {}ms", elapsed_reposition);
+            }
+    }
+
+    let elapsed_total = t_total.elapsed().as_millis();
+    if elapsed_total > 0 {
+        eprintln!("[perf] commit total: {}ms", elapsed_total);
     }
 
     Ok(())
+}
+
+/// Reposition boundary in snapshot only (not working tree).
+///
+/// After commit, moves the boundary to the end of exchange in the snapshot.
+/// The working tree is NOT modified — writing to it while the user is typing
+/// causes the IDE to reload from disk, losing in-progress keystrokes.
+/// The plugin handles working-tree boundary reposition via the
+/// `reposition_boundary: true` IPC flag sent during `agent-doc write`.
+fn reposition_boundary_in_snapshot(file: &Path) {
+    // Check for active run — don't reposition if a run is in progress
+    if let Ok(canonical) = file.canonicalize() {
+        if let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical) {
+            if pending_path.exists() {
+                eprintln!("[commit] skipping boundary reposition — active run detected");
+                return;
+            }
+        }
+    }
+
+    // Reposition in snapshot only
+    if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
+        if let Some(new_snap) = move_boundary_to_end_in(&snap_content) {
+            if let Err(e) = crate::snapshot::save(file, &new_snap) {
+                eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+            } else {
+                eprintln!("[commit] repositioned boundary in snapshot");
+            }
+        }
+    }
+}
+
+/// Move boundary marker to end of exchange in a content string.
+/// Returns `Some(new_content)` if moved, `None` if already at end or no boundary.
+pub(crate) fn move_boundary_to_end_in(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let exchange = components.iter().find(|c| c.name == "exchange")?;
+
+    let comp_content = &content[exchange.open_end..exchange.close_start];
+    let prefix = "<!-- agent:boundary:";
+    let suffix = " -->";
+    let code_ranges = crate::component::find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
+
+    let mut boundary_line_start = None;
+    let mut boundary_line_end = None;
+    let mut found = false;
+
+    let mut offset = exchange.open_end;
+    for line in comp_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(prefix) && trimmed.ends_with(suffix) && !in_code(offset) {
+            boundary_line_start = Some(offset);
+            boundary_line_end = Some(offset + line.len() + 1);
+            found = true;
+        }
+        offset += line.len() + 1;
+    }
+
+    if !found {
+        return None;
+    }
+
+    let bls = boundary_line_start?;
+    let ble = boundary_line_end?;
+
+    // Check if already at end
+    let after_boundary = content[ble..exchange.close_start].trim();
+    if after_boundary.is_empty() {
+        return None;
+    }
+
+    // Remove from current position and re-insert at end
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let marker = format!("<!-- agent:boundary:{} -->", new_id);
+    let mut result = String::with_capacity(content.len() + marker.len());
+    result.push_str(&content[..bls]);
+    result.push_str(&content[ble..exchange.close_start]);
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result.push_str(&marker);
+    result.push('\n');
+    result.push_str(&content[exchange.close_start..]);
+
+    Some(result)
 }
 
 /// Strip ` (HEAD)` suffix from markdown heading lines only.
@@ -156,19 +282,6 @@ fn strip_head_markers(content: &str) -> String {
     if content.ends_with('\n') { format!("{}\n", result) } else { result }
 }
 
-/// Write a signal file to `.agent-doc/patches/` that tells the IDE plugin
-/// to refresh its VCS state after an external commit. The plugin's PatchWatcher
-/// watches this directory and triggers `VcsDirtyScopeManager.markEverythingDirty()`
-/// when it sees `vcs-refresh.signal`.
-fn signal_vcs_refresh(file: &Path) {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if let Some(root) = crate::snapshot::find_project_root(&canonical) {
-        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
-        if signal.parent().map(|p| p.exists()).unwrap_or(false) {
-            let _ = std::fs::write(&signal, "refresh");
-        }
-    }
-}
 
 /// Add ` (HEAD)` suffix to ALL new markdown headings in the agent's appended content.
 ///
@@ -476,5 +589,44 @@ mod tests {
         let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
         assert!(!result.contains("### Re: Old (HEAD)"), "old heading should not have (HEAD)");
         assert!(result.contains("### Re: New (HEAD)") || result.contains("### Re: Old\n"), "old (HEAD) should be stripped");
+    }
+
+    #[test]
+    fn move_boundary_to_end_basic() {
+        let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
+        let result = move_boundary_to_end_in(content).unwrap();
+        // Boundary should be after user prompt, before close tag
+        assert!(result.contains("User prompt.\n<!-- agent:boundary:"));
+        assert!(result.contains("-->\n<!-- /agent:exchange -->"));
+        // Old boundary consumed
+        assert!(!result.contains("abc123"));
+    }
+
+    #[test]
+    fn move_boundary_already_at_end() {
+        let content = "<!-- agent:exchange patch=append -->\nResponse.\nUser prompt.\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n";
+        let result = move_boundary_to_end_in(content);
+        assert!(result.is_none(), "should return None when boundary is already at end");
+    }
+
+    #[test]
+    fn move_boundary_no_exchange() {
+        let content = "# No exchange component\nJust text.\n";
+        let result = move_boundary_to_end_in(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn move_boundary_preserves_user_edits() {
+        // Simulates: agent response committed, user typed below boundary
+        let content = "<!-- agent:exchange patch=append -->\n### Re: Answer\nAgent response.\n<!-- agent:boundary:old-id -->\nUser's new prompt here.\nMore user text.\n<!-- /agent:exchange -->\n";
+        let result = move_boundary_to_end_in(content).unwrap();
+        // User text should be preserved and above the new boundary
+        assert!(result.contains("User's new prompt here."), "user edit must be preserved");
+        assert!(result.contains("More user text."), "user edit must be preserved");
+        // New boundary should be after user text
+        let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
+        let user_pos = result.find("User's new prompt here.").unwrap();
+        assert!(boundary_pos > user_pos, "boundary must be after user text");
     }
 }

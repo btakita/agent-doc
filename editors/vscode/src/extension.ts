@@ -593,6 +593,7 @@ interface IpcPatch {
 
 class PatchWatcher implements vscode.Disposable {
     private watcher: vscode.FileSystemWatcher | undefined;
+    private signalWatcher: vscode.FileSystemWatcher | undefined;
     private patchesDir: string | undefined;
     private outputChannel: vscode.OutputChannel;
 
@@ -621,9 +622,16 @@ class PatchWatcher implements vscode.Disposable {
         this.watcher = vscode.workspace.createFileSystemWatcher(pattern, false, true, true);
         this.watcher.onDidCreate((uri) => this.onPatchFileCreated(uri));
 
+        // Watch for VCS refresh signal (created by agent-doc commit)
+        const signalPattern = new vscode.RelativePattern(patchesDir, 'vcs-refresh.signal');
+        this.signalWatcher = vscode.workspace.createFileSystemWatcher(signalPattern, false, false, true);
+        this.signalWatcher.onDidCreate(() => this.onVcsRefreshSignal(patchesDir));
+        this.signalWatcher.onDidChange(() => this.onVcsRefreshSignal(patchesDir));
+
         this.outputChannel.appendLine(`PatchWatcher: watching ${patchesDir}`);
 
-        // Process any existing patch files on startup
+        // Process any existing patch files and signals on startup
+        this.processVcsRefreshSignal(patchesDir);
         this.processPendingPatches(patchesDir);
     }
 
@@ -645,6 +653,24 @@ class PatchWatcher implements vscode.Disposable {
 
         // Fallback: use workspace root
         return path.join(roots[0].uri.fsPath, '.agent-doc', 'patches');
+    }
+
+    private onVcsRefreshSignal(patchesDir: string): void {
+        this.processVcsRefreshSignal(patchesDir);
+    }
+
+    private processVcsRefreshSignal(patchesDir: string): void {
+        const signalFile = path.join(patchesDir, 'vcs-refresh.signal');
+        try {
+            if (fs.existsSync(signalFile)) {
+                fs.unlinkSync(signalFile);
+                // Trigger VS Code's git extension to refresh
+                vscode.commands.executeCommand('git.refresh');
+                this.outputChannel.appendLine('VCS refresh triggered after external commit');
+            }
+        } catch {
+            // signal file may have been consumed by another process
+        }
     }
 
     private processPendingPatches(dir: string): void {
@@ -904,6 +930,7 @@ class PatchWatcher implements vscode.Disposable {
 
     dispose(): void {
         this.watcher?.dispose();
+        this.signalWatcher?.dispose();
         this.outputChannel.dispose();
     }
 }

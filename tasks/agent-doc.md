@@ -1184,8 +1184,31 @@ $ tmux join-pane -dv -s %32 -t %0
 
 **Focus steal:** The focus switching you observed is likely a side effect — when `break_pane` creates a new window, tmux may briefly show it despite `-d`. With the fix, `break_pane` fallback should rarely trigger (only if the stash window has zero room after 200-row resize).
 
+Some options I can think of:
+- If `pane too small` error occurs, please create another stash window.
+- Or is there an alternative method to stash panes is not exposed to `pane too small` errors?
+- For example, can we run a pane in the background while it is hidden from view?
+
 Binary installed. Try switching editor tabs to test.
-<!-- agent:boundary:8c5bec5e-25eb-4923-8eb0-e9a001327ef8 -->
+### Re: Stash Alternatives (HEAD)
+
+**Options analyzed:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Target largest pane (current fix) | Simple, works for most cases | Still fails if ALL panes are tiny |
+| Create overflow stash window | Robust fallback | Multiple stash windows to manage |
+| One window per stashed pane (`break-pane -d`) | Zero pane-size issues | Many windows (cosmetic clutter) |
+| Run pane in background | Ideal UX | tmux doesn't support truly invisible panes |
+
+**tmux constraint:** Every pane MUST be in a window. There's no "background pane" concept. The closest is a window that's never selected (our stash window).
+
+**Best approach — hybrid:** Keep the current stash window + largest-pane targeting. When `join-pane` still fails (all panes tiny), fall back to `break-pane -d` which creates a new detached window. This is what already happens — the fix I just made should prevent MOST failures by targeting the largest pane.
+
+**The real question is: does the fix work?** The `largest_pane_in_window` change should prevent "pane too small" in nearly all cases (the stash window is 200 rows, the largest pane should have at least 30+ rows). Let's test by switching editor tabs and see if stashing works without creating new windows.
+
+If it still fails, the next step is to increase the stash window to 500 rows or use `break-pane -d` as the primary stash method (accept multiple windows, add cleanup).
+<!-- agent:boundary:e153c537-765b-4b29-903e-37054a593051 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1193,7 +1216,6 @@ Binary installed. Try switching editor tabs to test.
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
 - [x] **Stash "pane too small" fix** — target largest pane instead of first
-- [x] **Focus steal diagnostic logging** — active_window tracking in reconcile
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->

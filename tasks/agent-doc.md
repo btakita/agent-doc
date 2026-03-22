@@ -603,9 +603,6 @@ Key operations to profile:
 I'll add this to pending for the next session. The boundary reposition is now working (disk write + VCS refresh). Want me to verify the VCS refresh is suppressing the cache conflict dialog? Try switching to another file tab and back.
 Yes
 continue
-> **IPC-based reposition doesn't work**
-
-Are we hitting a deadlock the single thread? Would async rust help for this?
 ### Re: IPC Deadlock + Async + Performance Profiling
 
 **Performance profiling added.** Timing logs for write, commit, diff, and find_code_ranges. First data point from this commit:
@@ -632,17 +629,42 @@ Not for this specific issue. The bottleneck is the plugin's processing speed, no
 2. **Plugin-side reposition** -- add a `"reposition_boundary": true` flag to the IPC patch. The plugin repositions the boundary after applying the response, in the same processing cycle. No second IPC needed.
 
 Option 2 is the cleanest. Want me to implement it?
-<!-- agent:boundary:074ec987-a260-4335-be66-eb9440ff3b1e -->
+yes
+
+continue
+### Re: Plugin-Side Boundary Reposition Implemented (HEAD)
+
+**Implemented.** The IPC patch now includes `"reposition_boundary": true`. The plugin repositions the boundary to end of exchange after applying all component patches, in the same processing cycle. No second IPC needed.
+
+**Binary changes:**
+- `try_ipc()` in `write.rs`: adds `"reposition_boundary": true` to IPC payload
+
+**Plugin changes:**
+- `IpcPatch` data class: added `repositionBoundary: Boolean` field
+- `parsePatchJson()`: reads `reposition_boundary` from JSON
+- After all patches applied: calls `repositionBoundaryToEnd()` if flag is set
+- `repositionBoundaryToEnd()`: finds boundary in exchange, moves it to end if not already there, generates new UUID
+
+**Flow (single IPC cycle):**
+1. Binary sends IPC with patches + `reposition_boundary: true`
+2. Plugin applies component patches (response content)
+3. Plugin repositions boundary to end of exchange
+4. Plugin writes result via `document.setText()`
+5. Binary polls for ACK, updates snapshot
+
+Plugin v0.2.12 rebuilt. Install: IDEA -> Settings -> Plugins -> gear -> "Install from Disk..." -> select `agent-doc-jetbrains-0.2.12.zip` -> restart.
+
+Binary installed. 512 tests pass.
+<!-- agent:boundary:9985cd17-ad7c-4bec-ad34-0700a7bdd6f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] **Plugin-side boundary reposition** -- `reposition_boundary` flag in IPC
 - [x] **Performance profiling** -- timing logs in write, commit, diff, find_code_ranges
-- [x] **Boundary reposition in commit** -- disk write + VCS refresh
-- [ ] **Plugin-side boundary reposition** -- add reposition_boundary flag to IPC (eliminates second IPC)
 - [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf data needed first)
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf data: sub-ms, not needed yet)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

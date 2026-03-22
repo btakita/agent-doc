@@ -469,7 +469,7 @@ Can `agent-doc run` do all of these steps? Is there a reason to make a distinct 
 This is a v0.25.0 feature — it simplifies the SKILL workflow but doesn't add new capabilities.
 Describe:
 > - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
-### Re: submit vs run + Document HEAD (HEAD)
+### Re: submit vs run + Document HEAD
 
 **1. Include document HEAD — agreed.** Output includes full document so the SKILL doesn't need a separate `Read` call.
 

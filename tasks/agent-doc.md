@@ -601,17 +601,48 @@ Key operations to profile:
 - `agent-doc commit` -- git staging + boundary reposition
 
 I'll add this to pending for the next session. The boundary reposition is now working (disk write + VCS refresh). Want me to verify the VCS refresh is suppressing the cache conflict dialog? Try switching to another file tab and back.
-<!-- agent:boundary:11215050-0ff9-4af3-860a-e24187f89a75 -->
+Yes
+continue
+> **IPC-based reposition doesn't work**
+
+Are we hitting a deadlock the single thread? Would async rust help for this?
+### Re: IPC Deadlock + Async + Performance Profiling (HEAD)
+
+**Performance profiling added.** Timing logs for write, commit, diff, and find_code_ranges. First data point from this commit:
+- `commit.staging: 3ms`
+- `commit.git_commit: 268ms` (git is the bottleneck)
+- `commit total: 274ms`
+
+**Is the IPC timeout a single-thread deadlock?**
+
+No deadlock. The binary writes a JSON file and polls for deletion. The plugin runs in a separate JVM process (IntelliJ). They communicate via filesystem -- no shared threads.
+
+The timeout happens because the **plugin's WatchService loop is busy.** The sequence:
+1. Binary writes response IPC patch -> plugin detects, processes (takes 100-500ms)
+2. Binary immediately writes boundary reposition IPC patch
+3. Plugin is still processing step 1 (or handling VCS refresh) when step 2 arrives
+4. Plugin picks up step 2 after finishing step 1, but the binary's 2s poll has expired
+
+**Would async Rust help?**
+
+Not for this specific issue. The bottleneck is the plugin's processing speed, not the binary's threading model. The binary is just polling a file -- async wouldn't make the plugin process faster.
+
+**What WOULD help:**
+1. **Batching** -- combine response + reposition into a single IPC patch (what we tried with fullContent, but it overwrites concurrent edits)
+2. **Plugin-side reposition** -- add a `"reposition_boundary": true` flag to the IPC patch. The plugin repositions the boundary after applying the response, in the same processing cycle. No second IPC needed.
+
+Option 2 is the cleanest. Want me to implement it?
+<!-- agent:boundary:074ec987-a260-4335-be66-eb9440ff3b1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] **Performance profiling** -- timing logs in write, commit, diff, find_code_ranges
 - [x] **Boundary reposition in commit** -- disk write + VCS refresh
-- [ ] **Performance profiling** -- add timing logs to key operations
-- [ ] **Verify VCS refresh suppresses cache conflict dialog**
+- [ ] **Plugin-side boundary reposition** -- add reposition_boundary flag to IPC (eliminates second IPC)
 - [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf-dependent on profiling)
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf data needed first)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

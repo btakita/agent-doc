@@ -585,7 +585,7 @@ release updates
 3. `agent-loop` — updated submodule pointer `6e01913`
 
 The compact header (smaller logo, reduced padding, smaller text) is now the committed state.
-### Re: Release Updates (HEAD)
+### Re: Release Updates
 
 **All released and pushed:**
 

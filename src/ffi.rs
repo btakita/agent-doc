@@ -425,6 +425,36 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
     }
 }
 
+/// Reposition boundary marker to end of exchange component.
+///
+/// Removes all existing boundary markers from the document and inserts a single
+/// fresh one at the end of the exchange component. Returns the document unchanged
+/// if no exchange component exists.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end(
+    doc: *const c_char,
+) -> FfiPatchResult {
+    let make_err = |msg: &str| FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    };
+
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+    };
+
+    let result = template::reposition_boundary_to_end(doc_str);
+    FfiPatchResult {
+        text: CString::new(result).unwrap_or_default().into_raw(),
+        error: ptr::null_mut(),
+    }
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety
@@ -500,6 +530,23 @@ mod tests {
         assert!(text.contains("model: opus"));
         assert!(text.contains("agent_doc_session: abc"));
         assert!(text.contains("Body"));
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn reposition_boundary_removes_stale() {
+        let doc = "<!-- agent:exchange patch=append -->\ntext\n<!-- agent:boundary:aaaa1111 -->\nmore\n<!-- agent:boundary:bbbb2222 -->\n<!-- /agent:exchange -->\n";
+        let c_doc = CString::new(doc).unwrap();
+        let result = unsafe { agent_doc_reposition_boundary_to_end(c_doc.as_ptr()) };
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        // Should have exactly one boundary marker at the end
+        let boundary_count = text.matches("<!-- agent:boundary:").count();
+        assert_eq!(boundary_count, 1, "should have exactly 1 boundary, got {}", boundary_count);
+        // The boundary should be just before the close tag
+        assert!(text.contains("more\n<!-- agent:boundary:"));
+        assert!(text.contains(" -->\n<!-- /agent:exchange -->"));
         unsafe { agent_doc_free_string(result.text) };
     }
 

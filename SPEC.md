@@ -404,16 +404,26 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Boundary marker lifecycle (binary-owned):** Boundary management is fully deterministic and handled by the binary — never by the SKILL workflow. The `apply_patches()` function manages the complete lifecycle:
 
-1. **Pre-patch cleanup:** Remove all stale boundary markers from the document
+1. **Pre-patch cleanup:** Remove ALL stale boundary markers from the entire document (not just the target component)
 2. **Fresh insertion:** Insert a new boundary at the END of the exchange component (after all user text)
 3. **Patch application:** Response content is inserted at the boundary position via `append_with_boundary()`
 4. **Post-patch re-insertion:** A new boundary is inserted at the END of exchange (after the response)
 
-**Invariant:** User prompts typed while idle always appear before the response because the fresh boundary is placed after all user text. The boundary is the dividing line — content before boundary = before response, content after boundary = after response.
+**Boundary marker format:** `<!-- agent:boundary:{id} -->` where `{id}` is an 8-character hex string (first 8 chars of a UUID v4 with hyphens removed). Short IDs reduce visual noise while maintaining negligible collision probability (~4.3 billion values, self-correcting on collision via next cycle's cleanup).
+
+**Invariants:**
+- At most ONE boundary marker exists in the document at any time (outside of code blocks)
+- User prompts typed while idle always appear before the response because the fresh boundary is placed after all user text
+- The boundary is the dividing line — content before boundary = before response, content after boundary = after response
+- Boundaries inside fenced code blocks are excluded from all scanning and cleanup operations
+
+**Cleanup scope:** `remove_all_boundaries()` scans the ENTIRE document (not just the exchange component) and removes every `<!-- agent:boundary:... -->` line that is not inside a fenced code block. This prevents stale boundary accumulation from interrupted cycles or plugin bugs. A single fresh boundary is then inserted at end-of-exchange.
 
 **Design principle:** Boundary insertion was initially implemented in the SKILL workflow (step 1b) but moved to the binary because: (1) it's deterministic (unit-testable with fixed inputs), (2) ALL write paths need it (SKILL, run, stream, watch), (3) non-SKILL paths bypassing step 1b caused stale boundary bugs. **Rule: when adding deterministic operations, ask "will ALL write paths need this?" If yes, it belongs in the binary.**
 
 **IPC boundary:** Before building the IPC patch JSON, all IPC write paths call `reposition_boundary_to_end()` on the current document in memory. This removes stale boundaries and inserts a fresh one at the end of the exchange — the same pre-patch step that `apply_patches_with_overrides()` performs. The repositioned document is used only for `boundary_id` extraction (never written to disk by this step). Without this, the IPC path would read the old boundary position (above the user's new prompt), causing responses to be inserted before the prompt. When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically.
+
+**FFI export:** `agent_doc_reposition_boundary_to_end(doc)` — exposed via C ABI for editor plugins. Takes a document string, returns a cleaned document with all stale boundaries removed and a single fresh 8-char boundary at end-of-exchange. Plugins should call this via JNA/FFI rather than reimplementing boundary cleanup logic.
 
 ### 7.23 watch
 
@@ -566,10 +576,12 @@ The stash system preserves running Claude sessions when the user switches editor
 
 **Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing.
 
+**Snapshot boundary cleanup:** After committing, `commit()` calls `reposition_boundary_to_end()` on the snapshot content. This uses `remove_all_boundaries()` to strip ALL stale boundaries from the snapshot (not just the last one), then inserts a single fresh 8-char boundary at end-of-exchange. The cleaned snapshot is saved back. This guarantees the snapshot never accumulates stale boundaries regardless of plugin behavior.
+
 **Boundary reposition lifecycle:**
-1. **Before IPC patch JSON (`reposition_boundary_to_end()`):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and call `reposition_boundary_to_end()` in memory. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
-2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch
-3. During `agent-doc commit`: a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly
+1. **Before IPC patch JSON (`reposition_boundary_to_end()`):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and call `reposition_boundary_to_end()` in memory. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
+2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch. The plugin should call `agent_doc_reposition_boundary_to_end()` via FFI to ensure identical cleanup logic.
+3. During `agent-doc commit`: (a) the snapshot is cleaned via `reposition_boundary_to_end()`, and (b) a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly.
 4. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
 
 ## 9. Git Integration

@@ -74,6 +74,12 @@ interface AgentDocLib : Library {
     ): FfiPatchResult
 
     /**
+     * Reposition boundary marker to end of exchange component.
+     * Removes all stale boundaries and inserts a single fresh 8-char one.
+     */
+    fun agent_doc_reposition_boundary_to_end(doc: String): FfiPatchResult
+
+    /**
      * Parse components from a document.
      * Returns JSON array of component objects.
      */
@@ -196,6 +202,29 @@ object NativePatching {
             if (result.error != null) {
                 val error = result.error!!.getString(0)
                 LOG.warn("[native] apply_patch_with_boundary error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Reposition boundary marker to end of exchange component via FFI.
+     * Removes all stale boundaries, inserts a single fresh 8-char one.
+     * Returns the cleaned document, or null if FFI is unavailable/errors.
+     */
+    fun repositionBoundaryToEnd(doc: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_reposition_boundary_to_end(doc)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] reposition_boundary error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }

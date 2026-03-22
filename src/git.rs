@@ -161,10 +161,14 @@ pub fn commit(file: &Path) -> Result<()> {
             // cache conflicts in the IDE.
 
             // Reposition boundary in snapshot AND via IPC to the plugin.
-            // Working tree is NOT written directly (would lose user keystrokes).
+            // Working tree is NOT written directly (would lose user keystrokes)
+            // UNLESS stale boundaries are detected — then a one-time cleanup is needed.
             // The IPC signal tells the plugin to reposition in its Document buffer.
             let t_reposition = std::time::Instant::now();
             reposition_boundary_in_snapshot(file);
+            // Clean stale boundaries from working tree if >1 detected.
+            // This is a safety net for when the plugin IPC reposition misses stale markers.
+            clean_stale_boundaries_in_working_tree(file);
             // Send IPC reposition signal to plugin (non-blocking, non-fatal)
             crate::write::try_ipc_reposition_boundary(file);
             let elapsed_reposition = t_reposition.elapsed().as_millis();
@@ -198,73 +202,64 @@ fn reposition_boundary_in_snapshot(file: &Path) {
         return;
     }
 
-    // Reposition in snapshot only
-    if let Ok(Some(snap_content)) = crate::snapshot::load(file)
-        && let Some(new_snap) = move_boundary_to_end_in(&snap_content)
-    {
-        if let Err(e) = crate::snapshot::save(file, &new_snap) {
-            eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
-        } else {
-            eprintln!("[commit] repositioned boundary in snapshot");
+    // Reposition in snapshot only — use template::reposition_boundary_to_end()
+    // which removes ALL stale boundaries and inserts a single fresh one.
+    if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
+        let new_snap = crate::template::reposition_boundary_to_end(&snap_content);
+        if new_snap != snap_content {
+            if let Err(e) = crate::snapshot::save(file, &new_snap) {
+                eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+            } else {
+                eprintln!("[commit] repositioned boundary in snapshot");
+            }
         }
     }
 }
 
-/// Move boundary marker to end of exchange in a content string.
-/// Returns `Some(new_content)` if moved, `None` if already at end or no boundary.
-pub(crate) fn move_boundary_to_end_in(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
-    let exchange = components.iter().find(|c| c.name == "exchange")?;
+/// Clean stale boundary markers from the working tree file.
+///
+/// Counts boundary markers in the working tree. If more than 1 exists (outside
+/// code blocks), rewrites the file with all stale boundaries removed and a single
+/// fresh one at end-of-exchange. This is a safety net for when the plugin IPC
+/// reposition misses stale markers scattered through older exchange sections.
+///
+/// Only triggers when stale boundaries are detected — no disk write otherwise.
+fn clean_stale_boundaries_in_working_tree(file: &Path) {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
 
-    let comp_content = &content[exchange.open_end..exchange.close_start];
+    // Count real boundary markers (outside code blocks)
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
-    let code_ranges = crate::component::find_code_ranges(content);
+    let code_ranges = agent_doc::component::find_code_ranges(&content);
     let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
-
-    let mut boundary_line_start = None;
-    let mut boundary_line_end = None;
-    let mut found = false;
-
-    let mut offset = exchange.open_end;
-    for line in comp_content.lines() {
+    let mut count = 0;
+    let mut offset = 0;
+    for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with(prefix) && trimmed.ends_with(suffix) && !in_code(offset) {
-            boundary_line_start = Some(offset);
-            boundary_line_end = Some(offset + line.len() + 1);
-            found = true;
+            count += 1;
         }
         offset += line.len() + 1;
     }
 
-    if !found {
-        return None;
+    if count <= 1 {
+        return; // Clean or single boundary — nothing to do
     }
 
-    let bls = boundary_line_start?;
-    let ble = boundary_line_end?;
-
-    // Check if already at end
-    let after_boundary = content[ble..exchange.close_start].trim();
-    if after_boundary.is_empty() {
-        return None;
+    eprintln!("[commit] detected {} stale boundaries in working tree, cleaning", count);
+    let cleaned = agent_doc::template::reposition_boundary_to_end(&content);
+    if cleaned != content {
+        if let Err(e) = std::fs::write(file, &cleaned) {
+            eprintln!("[commit] failed to clean working tree boundaries: {}", e);
+        } else {
+            eprintln!("[commit] cleaned stale boundaries from working tree");
+        }
     }
-
-    // Remove from current position and re-insert at end
-    let new_id = uuid::Uuid::new_v4().to_string();
-    let marker = format!("<!-- agent:boundary:{} -->", new_id);
-    let mut result = String::with_capacity(content.len() + marker.len());
-    result.push_str(&content[..bls]);
-    result.push_str(&content[ble..exchange.close_start]);
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result.push_str(&marker);
-    result.push('\n');
-    result.push_str(&content[exchange.close_start..]);
-
-    Some(result)
 }
+
 
 /// Strip ` (HEAD)` suffix from markdown heading lines only.
 fn strip_head_markers(content: &str) -> String {
@@ -593,9 +588,9 @@ mod tests {
     }
 
     #[test]
-    fn move_boundary_to_end_basic() {
+    fn reposition_boundary_to_end_basic() {
         let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
-        let result = move_boundary_to_end_in(content).unwrap();
+        let result = agent_doc::template::reposition_boundary_to_end(content);
         // Boundary should be after user prompt, before close tag
         assert!(result.contains("User prompt.\n<!-- agent:boundary:"));
         assert!(result.contains("-->\n<!-- /agent:exchange -->"));
@@ -604,28 +599,19 @@ mod tests {
     }
 
     #[test]
-    fn move_boundary_already_at_end() {
-        let content = "<!-- agent:exchange patch=append -->\nResponse.\nUser prompt.\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n";
-        let result = move_boundary_to_end_in(content);
-        assert!(result.is_none(), "should return None when boundary is already at end");
-    }
-
-    #[test]
-    fn move_boundary_no_exchange() {
+    fn reposition_boundary_no_exchange() {
         let content = "# No exchange component\nJust text.\n";
-        let result = move_boundary_to_end_in(content);
-        assert!(result.is_none());
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        // Should return unchanged if no exchange
+        assert_eq!(result.trim(), content.trim());
     }
 
     #[test]
-    fn move_boundary_preserves_user_edits() {
-        // Simulates: agent response committed, user typed below boundary
+    fn reposition_boundary_preserves_user_edits() {
         let content = "<!-- agent:exchange patch=append -->\n### Re: Answer\nAgent response.\n<!-- agent:boundary:old-id -->\nUser's new prompt here.\nMore user text.\n<!-- /agent:exchange -->\n";
-        let result = move_boundary_to_end_in(content).unwrap();
-        // User text should be preserved and above the new boundary
+        let result = agent_doc::template::reposition_boundary_to_end(content);
         assert!(result.contains("User's new prompt here."), "user edit must be preserved");
         assert!(result.contains("More user text."), "user edit must be preserved");
-        // New boundary should be after user text
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let user_pos = result.find("User's new prompt here.").unwrap();
         assert!(boundary_pos > user_pos, "boundary must be after user text");

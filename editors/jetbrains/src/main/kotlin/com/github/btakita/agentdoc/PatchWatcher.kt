@@ -202,8 +202,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             // Reposition boundary to end of exchange if requested
+            // Prefer FFI (removes ALL stale boundaries), fallback to Kotlin
             if (patch.repositionBoundary) {
-                result = repositionBoundaryToEnd(result, "exchange") ?: result
+                result = NativePatching.repositionBoundaryToEnd(result)
+                    ?: repositionBoundaryToEnd(result, "exchange")
+                    ?: result
             }
 
             if (result != content) {

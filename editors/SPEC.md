@@ -50,7 +50,29 @@ Common behavior required of all `agent-doc` editor plugins.
 - All actions are only enabled/visible when a `.md` file is active or selected.
 - Non-`.md` files are ignored by tab sync and prompt polling.
 
-## 9. CLI Dependency
+## 9. Boundary Marker Management
+
+Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that mark the insertion point for agent responses in the exchange component. Plugins must maintain the following invariants:
+
+**Invariants:**
+- At most ONE boundary marker exists in the document at any time (outside of code blocks)
+- The boundary is always at the END of the exchange component content
+- Boundaries inside fenced code blocks are never touched
+
+**Boundary ID format:** 8-character hex string (e.g., `a0cfeb34`). Plugins generating boundary markers must use 8-char hex IDs, not full UUIDs.
+
+**Reposition behavior:** When the plugin receives a `reposition_boundary: true` IPC signal:
+1. Remove ALL `<!-- agent:boundary:... -->` lines from the exchange component (not just the last one)
+2. Insert a single fresh boundary with a new 8-char hex ID at the end of the exchange content
+3. Skip boundary markers inside fenced code blocks
+
+**Recommended implementation:** Call `agent_doc_reposition_boundary_to_end()` via FFI/JNA on the shared library (`libagent_doc.so` / `libagent_doc.dylib`). This ensures identical cleanup logic across all platforms and prevents divergence between plugin and binary behavior.
+
+**When to reposition:**
+- After applying an IPC patch (when `reposition_boundary` flag is set)
+- After receiving a standalone reposition IPC signal (post-commit)
+
+## 10. CLI Dependency
 
 - Plugins resolve `agent-doc` from: `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/`, `/usr/local/bin/`, or `$PATH`.
 - All commands run from the project root directory.

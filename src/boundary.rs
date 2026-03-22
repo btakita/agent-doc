@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::path::Path;
-use uuid::Uuid;
 
 use crate::component;
 use crate::snapshot;

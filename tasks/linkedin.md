@@ -406,5 +406,14 @@ Blog post with context: https://briantakita.me/posts/agent-resume-recruiter-work
 **Draft file:** `mail/social/20260322-agent-resume-workflow-linkedin.md` (status: draft)
 
 To publish: `corky social publish` or schedule with `scheduled_at` field. Remember to post the first comment with links manually right after publishing.
-<!-- agent:boundary:cb6dc30a-e555-4abf-87c0-ebf2583b27b6 -->
+It is a blend of vibe coding and structured collaboration. I'm not afraid of vibe coding personally. Both vibe coding and structured collaboration can be useful
+
+**Re: vibe coding framing**
+
+Good call — "Not vibe coding" was too dismissive. Updated the draft and the corky draft file to embrace the blend:
+
+> It's a blend of vibe coding and structured collaboration — both have their place. The difference is having the tooling to move fluidly between them, applying 20+ years of engineering judgment at a pace that wasn't possible before.
+
+Draft file updated: `mail/social/20260322-agent-resume-workflow-linkedin.md`
+<!-- agent:boundary:806cab17-90ae-4f9b-ba47-7c7fa0ed06f3 -->
 <!-- /agent:exchange -->

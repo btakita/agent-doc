@@ -400,7 +400,7 @@ This document is not in a good state.
 There are multiple `agent:boundary` components.
 The uncommitted response patch is in the incorrect spot.
 
-### Re: Multiple boundary markers / document state (HEAD)
+### Re: Multiple boundary markers / document state
 
 **Root cause found:** The plugin's `repositionBoundaryToEnd()` only moved the LAST boundary marker — it didn't remove the others. Each write cycle added a new boundary via `applyComponentPatchWithBoundary()`, and reposition only moved one, leaving the rest behind.
 

@@ -544,7 +544,7 @@ The new `index.ts` now includes the import for `2026-03-19-agent-resume-recruite
 
 If it still doesn't appear, you may need to restart the dev server.
 Still seeing a stale site in my browser.
-### Re: Stale Browser (HEAD)
+### Re: Stale Browser
 
 The post **is** in the dev server output — I confirmed by curling localhost:4100 and finding `agent-resume-recruiter-workflow-live` in the HTML.
 

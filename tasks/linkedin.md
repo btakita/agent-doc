@@ -6,7 +6,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
-# Dave Franklin — BCG AI Factory Builder (HEAD)
+# Dave Franklin — BCG AI Factory Builder
 
 ## Context
 

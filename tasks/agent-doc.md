@@ -733,6 +733,9 @@ ensure that README and SPEC is up to date
 
 **Fix implemented:** Removed working tree write from `reposition_boundary_in_both()` → renamed to `reposition_boundary_in_snapshot()`. Only the snapshot is updated during commit. The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag. This eliminates keystroke loss when typing during commit.
 
+Does this require a plugin to run for the pipeline to work correctly?
+Would it make sense to have a "virtual plugin" if no editor plugin is currently running?
+
 **Also cleaned up:**
 - Removed dead `reposition_boundary_via_ipc()` from write.rs (was unused)
 - Removed dead `signal_vcs_refresh()` from git.rs (no longer needed without working tree writes)
@@ -753,7 +756,26 @@ ensure that README and SPEC is up to date
 | SKILL.md (installed) | Version 0.24.1 stale | Force-copied from source (0.24.4) |
 
 519 tests pass. Binary rebuilt and installed.
-<!-- agent:boundary:f3daff2f-9baf-4388-8a4b-b6ef9727ae88 -->
+### Re: Plugin Dependency for Boundary Reposition (HEAD)
+
+**No, the pipeline works correctly without the plugin.** The boundary marker is a visual aid for the plugin — it tells the editor where to insert the next response. Without a plugin, boundary position doesn't matter because:
+
+1. `agent-doc write --stream` finds the exchange component and appends to it regardless of boundary position
+2. Snapshot-only reposition keeps the snapshot accurate for diff computation
+3. Terminal-only workflows don't need boundary markers — they're invisible in plain text
+
+**What happens in each scenario:**
+
+| Scenario | Boundary reposition | Result |
+|----------|-------------------|--------|
+| Plugin running | Plugin handles via IPC `reposition_boundary: true` | Boundary moves in editor buffer |
+| No plugin, IPC timeout | Boundary stays where it was in working tree | Next write still works (appends to exchange end) |
+| No plugin at all | Boundary stays in working tree | Harmless — snapshot has correct position |
+
+**A "virtual plugin" is unnecessary.** The binary's write path uses component parsing (finding `&lt;!-- /agent:exchange --&gt;`) to determine where to append, not boundary position. The boundary is only meaningful for the IDE's Document API insertion point.
+
+The one cosmetic edge case: if the boundary is mid-exchange in the working tree and the user opens the raw markdown, they'd see the HTML comment between prompt and response. But it's invisible in rendered markdown and harmless functionally.
+<!-- agent:boundary:45f746db-6d48-4b2c-bbe1-849309ad2494 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

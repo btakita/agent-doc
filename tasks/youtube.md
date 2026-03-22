@@ -679,6 +679,10 @@ Discuss using the Creator Studio API to pin the comment.
 corky youtube comment <DRAFT_FILE> "comment text"
 ```
 
+Add tests
+Update SPEC.md
+Update README.md
+
 After posting, it prints the comment ID and a direct link with `&lc=COMMENT_ID` for easy manual pinning.
 
 **Need to re-auth YouTube** — token expired. Run from the mail directory:
@@ -687,6 +691,7 @@ cd mail && ../.bin/corky youtube auth
 ```
 Then approve in the browser. After that I can post the comment.
 
+Done
 ---
 
 **Creator Studio API for Pinning — Deep Dive:**
@@ -702,17 +707,55 @@ The YouTube Data API v3 has **no endpoint for pinning comments**. The only known
 
 **Current status (2025): BROKEN**
 - YouTube changed `actions` → `params` (single base64 string, not array)
-- Now requires `clickTrackingParams` — a runtime-generated ID from a prior page load
+- Now requires `clickTrackingParams` — a runtime-generated ID from a prior page load: If we were to implement `clickTrackingParams` on top of the existing prototype Go implementation, would this work for now?
 - Multiple users confirm it stopped working in early 2025
 - No maintained open-source implementation exists
 
 **Options for pinning:**
 1. **Manual pin via YouTube Studio** (recommended for now) — The `&lc=COMMENT_ID` link highlights the exact comment for one-click pinning
-2. **InnerTube reverse-engineering** — Would require intercepting the current request format from Chrome DevTools, extracting the protobuf schema, and maintaining it against YouTube's frequent changes. High effort, fragile.
-3. **Browser automation** (Puppeteer/Playwright) — Too heavy for a CLI tool
+2. **InnerTube reverse-engineering** — Would require intercepting the current request format from Chrome DevTools, extracting the protobuf schema, and maintaining it against YouTube's frequent changes. High effort, fragile.: Would this mean I manually pin a command and capture the Network Activity?
+3. **Browser automation** (Puppeteer/Playwright) — Too heavy for a CLI tool: Let's make this pending. agent-doc will have a Chrome Extension to drive interactions.
+
+Does YouTube work with any TUI browsers? Would https://github.com/Siriusmart/youtube-tui be useful for this?
 
 **Recommendation:** Ship `youtube comment` as-is. If pinning volume increases, revisit InnerTube approach by capturing current request format from DevTools. For now, the `&lc=` deep link makes manual pinning trivial.
-<!-- agent:boundary:17bfe2d9-22cc-4cbf-ac48-a66afc785cba -->
+release
+### Re: Inline Questions + Release (HEAD)
+
+**Q: Would implementing `clickTrackingParams` on top of the Go prototype work?**
+
+Unlikely to be stable. The `clickTrackingParams` is a session-specific token generated when YouTube renders the comment section. To get it, you'd need to:
+1. Fetch the video page or comment section via the InnerTube `next` endpoint
+2. Parse the response to extract `clickTrackingParams` from the comment action renderer
+3. Use it within the same session for the pin action
+
+This is effectively a two-step API call where step 1 simulates loading the page. It *could* work if someone reverse-engineers the current protobuf schema, but YouTube changes these internal structures without notice. The Go prototype's authors confirmed it broke — the format changed from `actions[]` to `params` string, suggesting deeper structural changes.
+
+**Q: Would I manually pin and capture Network Activity?**
+
+Yes, exactly. The process would be:
+1. Open Chrome DevTools → Network tab
+2. Navigate to your video's comment section
+3. Pin a comment manually
+4. Capture the `perform_comment_action` request — inspect the `params` field, headers, and any tracking IDs
+5. Reverse-engineer the protobuf structure from the base64-encoded `params`
+
+This gives you a working snapshot of the current format. But it requires re-doing this process whenever YouTube changes the internal API.
+
+**Q: Browser automation via agent-doc Chrome Extension?**
+
+Good idea — adding to pending. A Chrome Extension that receives commands from agent-doc could handle YouTube Studio interactions (pin, unpin, etc.) without fragile API reverse-engineering. The extension runs in the authenticated browser context, so no additional auth needed.
+
+**Q: YouTube TUI / youtube-tui for pinning?**
+
+`youtube-tui` (Siriusmart) is a viewer — it plays videos, browses channels, and manages playlists via the InnerTube API. It does NOT support comment management (pin/unpin/post). It's useful for browsing YouTube from the terminal but won't help with the pinning use case.
+
+No TUI browser supports YouTube Studio's comment moderation features. The YouTube Studio web UI requires JavaScript that no TUI browser handles.
+
+---
+
+**Release:** Committed `youtube comment` feature (commit `28391bf`). Current version: `0.19.3`. New feature → suggest `0.20.0`. What version do you want?
+<!-- agent:boundary:fbbf77f7-6eb7-44b2-aab5-53cf89e485e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -733,7 +776,7 @@ The YouTube Data API v3 has **no endpoint for pinning comments**. The only known
 - [x] Deploy briantakita.me to Cloudflare Pages
 - [x] Remove Docker/Contabo deployment infrastructure
 - [x] Implement `corky youtube comment` command
-- [ ] Re-auth YouTube token (expired)
-- [ ] Post comment on YouTube video with blog post link
-- [ ] Commit + release corky with youtube comment feature
+- [ ] Release corky (version TBD — suggest 0.20.0)
+- [ ] Re-auth YouTube token + post comment with blog link
+- [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

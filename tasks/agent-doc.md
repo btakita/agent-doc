@@ -154,12 +154,36 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/6242da3f1642397f4c39c15718184ea2013c87e2c39a77a88b2d05db9e40765a-20260322-061326.md`*
+
+tasks/youtube.md has a editor dialog show up for either a file cache conflict or external file change.
+Why?
+### Re: youtube.md File Cache Conflict (HEAD)
+
+**Most likely cause: `commit()` writing to the working tree file.**
+
+After each commit, `commit()` does two things that modify the file on disk:
+
+1. **`strip_head_markers`** — reads the working tree, strips `(HEAD)` suffixes, writes back. This modifies the file if any heading had `(HEAD)`.
+
+2. **`reposition_boundary_to_end`** — reads the file, moves boundary if needed, writes back. For youtube.md the boundary is already at end (no write), but if the boundary was elsewhere it would write.
+
+When the youtube session commits (which happens every `/agent-doc` cycle), the working tree file is modified by step 1. The IDE detects this as an external change and shows the dialog.
+
+**The fix:** The `strip_head_markers` write should go through the IPC channel (VCS refresh signal) rather than direct disk write. Or better: the IDE plugin should suppress the "file changed externally" dialog for files it knows are managed by agent-doc.
+
+**Quick mitigation:** In IntelliJ, you can set "Reload files modified externally" to "Always" in Settings → Appearance & Behavior → System Settings. This auto-reloads without the dialog.
+
+**Proper fix:** Add a `suppress_reload_dialog` flag in the VCS refresh signal, or move the HEAD marker stripping to the snapshot only (don't modify the working tree at all — let the committed version have HEAD markers, working tree doesn't need them stripped since the IDE shows git gutter anyway).
+
+Want me to remove the working-tree `strip_head_markers` write? The `(HEAD)` markers in the working tree are harmless — the git gutter already shows the boundary visually.
+<!-- agent:boundary:a0ed278c-df23-409d-89cf-35be11678f22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
+- [ ] **Remove working-tree HEAD marker writes** — prevent file cache conflicts from commit()
 - [x] **Stash overflow windows** — `break_pane_to_stash` + `find_all_stash_windows`
 - [x] **Stash "pane too small" fix** — target largest pane
 - [ ] **SPEC.md update** — document stash window routing contract

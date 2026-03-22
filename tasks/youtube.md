@@ -350,12 +350,12 @@ If we have a separate `release-gpu` target, can we build both on gh actions?
 ```yaml
 matrix:
   include:
-    # CPU builds (existing) (HEAD)
+    # CPU builds (existing)
     - target: x86_64-unknown-linux-gnu
       os: ubuntu-latest
       features: ""
       suffix: ""
-    # GPU builds (new) (HEAD)
+    # GPU builds (new)
     - target: x86_64-unknown-linux-gnu
       os: ubuntu-latest
       features: "transcribe-cuda"

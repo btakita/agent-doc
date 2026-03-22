@@ -163,11 +163,12 @@ pub fn apply_patches_with_overrides(
     // Remove any stale boundaries from previous cycles, then insert a new one
     // at the end of the exchange. This is deterministic — belongs in the binary,
     // not the SKILL workflow.
+    let summary = file.file_stem().and_then(|s| s.to_str());
     let mut result = remove_all_boundaries(doc);
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = crate::new_boundary_id();
+        let id = crate::new_boundary_id_with_summary(summary);
         let marker = crate::format_boundary_marker(&id);
         let content = exchange.content(&result);
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
@@ -303,12 +304,20 @@ pub fn apply_patches_with_overrides(
 ///
 /// Returns the document unchanged if no exchange component exists.
 pub fn reposition_boundary_to_end(doc: &str) -> String {
+    reposition_boundary_to_end_with_summary(doc, None)
+}
+
+/// Reposition boundary with an optional human-readable summary suffix.
+///
+/// The summary is slugified and appended to the boundary ID:
+/// `a0cfeb34:agent-doc` instead of just `a0cfeb34`.
+pub fn reposition_boundary_to_end_with_summary(doc: &str, summary: Option<&str>) -> String {
     let mut result = remove_all_boundaries(doc);
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = uuid::Uuid::new_v4().to_string();
-        let marker = format!("<!-- agent:boundary:{} -->", id);
+        let id = crate::new_boundary_id_with_summary(summary);
+        let marker = crate::format_boundary_marker(&id);
         let content = exchange.content(&result);
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);

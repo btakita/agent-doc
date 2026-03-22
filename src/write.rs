@@ -302,7 +302,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
             // Read current document and reposition boundary (same as primary IPC path)
             let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-            let current_doc_for_boundary = template::reposition_boundary_to_end(&raw_doc);
+            let current_doc_for_boundary = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
 
             let ipc_patches: Vec<serde_json::Value> = patches
                 .iter()
@@ -481,7 +481,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     // path would use the old boundary position (above the user's new prompt),
     // causing responses to appear before the prompt instead of after.
     let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc_for_boundary = template::reposition_boundary_to_end(&raw_doc);
+    let current_doc_for_boundary = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
 
     // Separate frontmatter patch from component patches
     let mut frontmatter_yaml: Option<String> = None;
@@ -734,7 +734,7 @@ pub fn try_ipc(
     // without this, the boundary stays above the user's new prompt, and the
     // response would be inserted before it (prompt ordering bug).
     let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc = template::reposition_boundary_to_end(&raw_doc);
+    let current_doc = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
 
     // Separate frontmatter patch from component patches.
     // For append-mode components without a boundary, set ensure_boundary flag

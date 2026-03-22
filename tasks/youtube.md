@@ -501,7 +501,7 @@ corky youtube publish mail/social/20260322-015438-youtube.md
 
 Want me to publish now, or do you want to review/edit the draft first?
 publish
-### Re: Published (HEAD)
+### Re: Published
 
 **Published!** https://www.youtube.com/watch?v=IenfqO2vmAw
 

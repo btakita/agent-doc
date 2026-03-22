@@ -802,7 +802,6 @@ The one cosmetic edge case: if the boundary is mid-exchange in the working tree 
 yes
 
 release
-My prompt `release` was placed under the response patch. Why?
 ### Re: Prompt Below Response + PyPI Published
 
 **PyPI published.** v0.25.0 now on all three platforms (crates.io, PyPI, GitHub Releases).
@@ -826,14 +825,28 @@ My prompt `release` was placed under the response patch. Why?
 Option 3 is most consistent — commit sends a lightweight IPC patch that only repositions the boundary, no file content change. This avoids disk writes while keeping the boundary correct.
 
 Which approach would you prefer?
-<!-- agent:boundary:edf89da0-a0af-44b4-949d-4e54614d9b98 -->
+Option 3
+### Re: Option 3 Implemented — IPC Boundary Reposition from Commit (HEAD)
+
+**Done.** Added `try_ipc_reposition_boundary()` in write.rs — sends a lightweight IPC patch with only `reposition_boundary: true` (no content changes). Called from `commit()` after the snapshot reposition.
+
+**How it works:**
+1. `commit()` repositions boundary in snapshot (as before)
+2. `commit()` sends IPC signal: `{"patches": [], "reposition_boundary": true}`
+3. Plugin receives signal → calls `repositionBoundaryToEnd()` on the Document buffer
+4. Boundary moves to end-of-exchange in the editor — no disk write, no keystroke loss
+5. If no plugin active, IPC times out after 500ms (non-fatal, silently skipped)
+
+**Timing:** The IPC poll uses a short 500ms timeout with 50ms poll interval (vs 2s for content writes). This is non-critical — if the plugin doesn't respond in time, the boundary just stays where it is until the next write.
+
+Binary rebuilt and installed. Test this by typing a prompt after a commit — it should stay above the next response.
+<!-- agent:boundary:8e7a72ff-e115-47fe-8187-5e4e26978265 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Release v0.25.0** -- published to crates.io, PyPI, GitHub Releases
-- [ ] **Fix prompt ordering** -- boundary position gap between commit and next write
+- [x] **Fix prompt ordering (Option 3)** -- IPC reposition from commit, no disk write
 - [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->

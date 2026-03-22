@@ -196,7 +196,7 @@ If we time out, please log so we can debug. We will mitigate if we encounter the
 
 Binary installed. 508 tests pass.
 Add tests
-### Re: IPC Timeout Logging + Status (HEAD)
+### Re: IPC Timeout Logging + Status
 
 **The IPC timeout just happened** on this commit cycle:
 ```

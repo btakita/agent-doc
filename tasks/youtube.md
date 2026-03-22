@@ -664,7 +664,7 @@ Use corky. If corky is missing features to accomplish this task, plan the featur
 Want me to implement `youtube comment` in corky now, or post the comment manually for now and implement later?
 Implement `youtube comment`
 Discuss using the Creator Studio API to pin the comment.
-### Re: Implement youtube comment + Creator Studio API (HEAD)
+### Re: Implement youtube comment + Creator Studio API
 
 **`youtube comment` implemented and built!** All tests pass (clippy + 8 youtube tests).
 

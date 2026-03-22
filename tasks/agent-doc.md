@@ -963,20 +963,36 @@ yes. continue
 | README.md staleness | Quick doc update | Can do now |
 
 The remaining items are all medium-to-large scope. Want me to update README.md now, or save the larger items for a fresh session?
-<!-- agent:boundary:f8275add-64f6-4307-86ea-7c10e73650f7 -->
+continue with pending
+add tests
+### Re: Tests Added (HEAD)
+
+**7 new tests in `write.rs`:**
+- `ensure_boundary_inserts_when_missing` — no boundary → inserts + writes to disk
+- `ensure_boundary_returns_existing_id_without_write` — existing boundary → returns ID, no rewrite
+- `ensure_boundary_returns_none_for_missing_component` — wrong component name → None
+- `ensure_boundary_returns_none_for_missing_file` — file doesn't exist → None
+- `ensure_boundary_inserts_with_correct_newline_prefix` — newline handling edge case
+- `find_boundary_id_skips_code_blocks` — boundary inside fenced code → not found
+- `find_boundary_id_finds_real_marker` — real boundary outside code → found
+
+**Session test totals:** 511 tests (165 lib + 308 bin + 38 CLI). 11 new tests added this session (4 in git.rs + 7 in write.rs).
+
+**Remaining pending:** Markdown AST migration, boundary-aware flush, README.md, CRDT ordering, `agent-doc submit`.
+<!-- agent:boundary:3d92a090-5d5b-4d62-9570-79a020ab756f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **CLAUDE.md updated** — module layout + boundary responsibility row
-- [x] **SKILL update for `agent-doc diff`** — step 1 uses diff command
-- [x] **SKILL auto-update: AskUserQuestion**
-- [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak
+- [x] **Tests added** — 7 new in write.rs, 4 new in git.rs (511 total)
+- [x] **CLAUDE.md updated** — module layout + boundary responsibility
+- [x] **SKILL update for `agent-doc diff`** + AskUserQuestion auto-update
+- [x] **Commit preserves user edits** — working tree overwrite + snapshot leak
 - [x] **Boundary repositioning on commit**
 - [x] **JB plugin v0.2.12** — caret removal + end-of-exchange fallback
-- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
+- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()`
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
 - [ ] **README.md staleness** — update to match current state

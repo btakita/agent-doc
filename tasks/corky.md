@@ -984,5 +984,11 @@ Installed with GPU support (transcribe-cuda).
 corky 0.19.1 is now installed with GPU-accelerated transcription. The Makefile handles the GCP OAuth credentials via `pass` and the GPU detection via `nvidia-smi` automatically.
 
 Note: `cargo install --path . --features transcribe-cuda` alone fails because it doesn't set the `CORKY_DEFAULT_GCP_CLIENT_ID`/`CORKY_DEFAULT_GCP_CLIENT_SECRET` compile-time env vars. Always use `make install` (which reads them from `pass`).
-<!-- agent:boundary:7fb895a0-d135-412e-8068-6418c1b68207 -->
+Can we make the `--gpu` install if compatible libraries are found the default installation of corky?
+<!-- agent:boundary:989a1bb3-a0ad-443c-8049-18e0ea9b6c27 -->
 <!-- /agent:exchange -->
+
+## Pending / Not Built (HEAD)
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

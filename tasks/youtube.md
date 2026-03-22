@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-GPU build pipeline implemented: transcribe-metal feature + release-gpu target + GH Actions matrix.
+MP4 decode bug fixed + video transcription workflow streamlined. All pending items complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -403,7 +403,23 @@ Files changed:
 - `Cargo.toml` — added `transcribe-metal` feature
 - `Makefile` — added `release-gpu` target
 - `.github/workflows/release.yml` — added CUDA + Metal matrix entries with suffix-based artifact naming
-<!-- agent:boundary:d875fbd2-3265-478d-9759-29cfff8b5a42 -->
+continue
+### Re: Continue — MP4 Bug Fixed + Workflow Streamlined (HEAD)
+
+**Both remaining items were the same fix.** The problem: `.mp4` was in `SYMPHONIA_EXTS`, so symphonia tried to decode it, failed with "Unknown sample rate" (video MP4s don't expose audio codec params cleanly), and the error propagated without falling back to ffmpeg.
+
+**Fix in `audio.rs`:**
+- Symphonia failures now fall back to ffmpeg automatically (try → fallback pattern)
+- Added `VIDEO_EXTS` (`mov`, `mkv`, `webm`, `avi`, `ts`, `mts`) that skip straight to ffmpeg
+- `corky transcribe video.mp4` now works end-to-end — no manual ffmpeg step
+
+**Your workflow is now a single command:**
+```
+corky transcribe ~/Videos/video.mp4 -o ~/Videos/video.srt
+```
+
+`make check` passes — clippy + all tests clean.
+<!-- agent:boundary:1d794891-52ab-4e47-8233-4534efd4fded -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -414,6 +430,6 @@ Files changed:
 - [x] Add `transcribe-metal` feature flag for macOS
 - [x] Update Makefile with `release-gpu` target
 - [x] Update `release.yml` with GPU matrix entries
-- [ ] Fix MP4 direct decode bug ("Unknown sample rate")
-- [ ] Streamline video→CC workflow (repeatable single-command flow)
+- [x] Fix MP4 direct decode bug ("Unknown sample rate")
+- [x] Streamline video→CC workflow (repeatable single-command flow)
 <!-- /agent:pending -->

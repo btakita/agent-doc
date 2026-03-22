@@ -387,11 +387,6 @@ Is the client id going to work for every case? Is this fully deterministic?
 - Clock skew → no timestamps used
 
 The ordering is as deterministic as `1 < 2`.
-Implement:
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-
-continue
 ### Re: Continuing Pending Items
 
 **Boundary-aware replace for `flush_to_document` — resolved by design.**
@@ -418,16 +413,66 @@ The "boundary-aware replace" item was conceived when we thought CRDT was being u
 - Outline.rs pulldown-cmark migration
 - CRDT ordering simplified (removed 100-line reorder hack)
 - 512 tests pass
-<!-- agent:boundary:fd2276ff-a678-41ff-b0ea-7862a13e0b97 -->
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+### Re: agent-doc submit (HEAD)
+
+**`agent-doc submit` — combined binary command that replaces the SKILL's multi-step orchestration.**
+
+Currently the SKILL workflow does these steps as separate tool calls:
+1. `agent-doc recover <FILE>` — check for orphaned responses
+2. `agent-doc commit <FILE>` — commit previous cycle
+3. `Read <FILE>` — load document into context
+4. `agent-doc diff <FILE>` — compute user changes
+5. Agent generates response (LLM reasoning)
+6. `agent-doc write <FILE> --stream` — apply response via IPC/disk
+7. `agent-doc commit <FILE>` — commit response
+
+**`agent-doc submit` would combine steps 1-4 into one call:**
+
+```bash
+agent-doc submit <FILE>
+```
+
+Output (JSON or structured text):
+```json
+{
+  "recovered": false,
+  "committed": true,
+  "diff": "unified diff of user changes",
+  "document_head": "full document content (HEAD)",
+  "no_changes": false
+}
+```
+
+**What it does:**
+1. Recover orphaned responses (step 1)
+2. Commit previous cycle (step 2)
+3. Compute diff (step 4) — includes comment stripping, snapshot comparison
+4. Return document HEAD + diff to the agent
+
+**What it does NOT do:**
+- Read the document into Claude's context (still needs `Read` tool or the output includes it)
+- Generate the response (LLM reasoning — always the skill's job)
+- Write the response (separate `agent-doc write` call)
+
+**Benefits:**
+- 4 tool calls → 1 tool call (faster cycle time)
+- Boundary management, recovery, commit all happen atomically
+- Less context used for orchestration steps
+- The SKILL becomes simpler: `submit` → reason → `write` → `commit`
+
+**Design decision:** Should `submit` output the full document HEAD, or just the diff? Including HEAD means the SKILL doesn't need a separate `Read` call, but it adds the document content to the tool output (which goes into context anyway).
+
+This is a v0.25.0 feature — it simplifies the SKILL workflow but doesn't add new capabilities.
+<!-- agent:boundary:d1d8a8b9-efef-4d3c-a150-df667b097ec2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Boundary-aware replace for `flush_to_document`** — resolved by design (IPC + replace mode)
-- [x] **README.md staleness** — updating via subagent
-- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent, future)
-- [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+- [ ] **`agent-doc submit`** — combined pre-flight + diff command (v0.25.0)
+- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -209,7 +209,7 @@ tmux session 0 window 0 right pane had an error loading tasks/toby-hill.md, whic
 
 We need a way to recover from the error. Should we retry the autoclaim? How can we tell this was from a rename?
 
-### Re: Autoclaim error after file rename (HEAD)
+### Re: Autoclaim error after file rename
 
 The autoclaim reads the registry (`sessions.json`) which stores the old path. When the file is renamed in the editor, the registry entry becomes stale. Options:
 
@@ -221,7 +221,7 @@ The autoclaim reads the registry (`sessions.json`) which stores the old path. Wh
 
 **Recommendation:** Option 1 (validate + prune in autoclaim). It's a 5-line fix in `autoclaim.rs`: check `Path::new(&entry.file).exists()`, if not, remove from registry and log. No editor plugin changes needed.
 
-### Re: ClawTeam investigation (HEAD)
+### Re: ClawTeam investigation
 
 **What it is:** Agent swarm orchestration (Python/CLI). Leader agent spawns workers via `clawteam spawn`, each getting a git worktree + tmux window + identity. Workers communicate via file-based transport or ZeroMQ. Uses a "board" for task assignment/status.
 

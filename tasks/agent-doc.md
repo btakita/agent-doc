@@ -252,7 +252,7 @@ The autoclaim reads the registry (`sessions.json`) which stores the old path. Wh
 
 Worth bookmarking for the swarm coordination patterns, but not a dependency or integration target.
 
-### Re: Autoclaim error on renamed file (HEAD)
+### Re: Autoclaim error on renamed file
 
 **Implemented: file existence validation in autoclaim.** When a claimed file no longer exists (renamed/deleted), the stale entry is:
 1. Logged as a warning: `[autoclaim] Pruning stale claim: tasks/toby-hill.md (file no longer exists)`

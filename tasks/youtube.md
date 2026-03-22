@@ -255,7 +255,7 @@ Done. Here's the compacted session summary:
 compact exchange
 
 compact exchange
-### Re: Video File (HEAD)
+### Re: Video File
 
 I see you added `2026-03-19 02-26-07.mp4` to pending. What would you like to do with this video?
 

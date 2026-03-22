@@ -1071,7 +1071,7 @@ No
 
 We have the stash window. I thought we were using the stash pane.
 I notice that long running claude tasks would keep the tmux pane running, even if we swaped out a different pane on the same side...by viewing a different file in the editor.
-### Re: Pane Routing — Editor Side vs Stash (HEAD)
+### Re: Pane Routing — Editor Side vs Stash
 
 **What actually happened (better news than I thought):**
 

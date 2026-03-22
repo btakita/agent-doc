@@ -1017,7 +1017,7 @@ Binary rebuilt, installed, 511 tests pass.
 
 Want me to implement the IPC boundary insertion?
 Yes
-### Re: IPC Boundary Insertion Implemented (HEAD)
+### Re: IPC Boundary Insertion Implemented
 
 **`ensure_boundary_on_disk` eliminated.** Replaced with `ensure_boundary` flag in IPC patch JSON.
 

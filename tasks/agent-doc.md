@@ -606,7 +606,7 @@ continue
 > **IPC-based reposition doesn't work**
 
 Are we hitting a deadlock the single thread? Would async rust help for this?
-### Re: IPC Deadlock + Async + Performance Profiling (HEAD)
+### Re: IPC Deadlock + Async + Performance Profiling
 
 **Performance profiling added.** Timing logs for write, commit, diff, and find_code_ranges. First data point from this commit:
 - `commit.staging: 3ms`

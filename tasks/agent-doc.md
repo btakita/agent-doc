@@ -592,7 +592,7 @@ You can see the current state of the document with the git HEAD and git diff.
 Why did this happen? Was this due to the document not having a `agent:boundary`? Btw, we still don't have an `agent:boundary`. Why not?
 
 Let's keep on tracking the context state storing only the document HEAD.
-### Re: Boundary Snowball Fix Implemented (HEAD)
+### Re: Boundary Snowball Fix Implemented
 
 **Fixed and installed.** Two changes in `template.rs`:
 

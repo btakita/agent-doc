@@ -1016,15 +1016,36 @@ Binary rebuilt, installed, 511 tests pass.
 **Recommendation:** Convert `ensure_boundary_on_disk` to an IPC directive (eliminate the disk write). Keep `reposition_boundary_to_end` as disk-based but ensure the VCS refresh signal suppresses the cache conflict dialog.
 
 Want me to implement the IPC boundary insertion?
-<!-- agent:boundary:1f02b128-d16a-4096-9a87-849a5ccfe1d3 -->
+Yes
+### Re: IPC Boundary Insertion Implemented (HEAD)
+
+**`ensure_boundary_on_disk` eliminated.** Replaced with `ensure_boundary` flag in IPC patch JSON.
+
+**Binary changes (`write.rs`):**
+- Removed `ensure_boundary_on_disk()` function entirely
+- Added `is_append_mode_component()` helper (returns true for `exchange`/`findings`)
+- When no boundary exists for an append-mode component, sets `"ensure_boundary": true` in the IPC patch JSON instead of writing to disk
+- Applied to all 3 IPC paths: `try_ipc`, timeout path, and `run_stream` direct path
+
+**Plugin changes (`PatchWatcher.kt`):**
+- `ComponentPatch` data class: added `ensureBoundary: Boolean` field
+- JSON parser: reads `ensure_boundary` boolean from patch JSON
+- Patch application: when `ensureBoundary=true` and no `boundaryId`, calls `findBoundaryInComponent()` to search the Document API's in-memory content for an existing boundary
+- Added `findBoundaryInComponent()` helper: searches component content for boundary marker regex
+- If no boundary found in-memory either, falls through to `applyComponentPatchEndOfExchange` (which creates one)
+
+**Result:** No more disk writes for boundary insertion → no File Cache Conflicts from this path. The plugin handles boundary insertion entirely through the Document API.
+
+Plugin v0.2.12 rebuilt. Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → `agent-doc-jetbrains-0.2.12.zip` → restart.
+<!-- agent:boundary:fd632cac-52ef-4abd-aa25-84b2653e40bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **Orphaned boundary fix** — `ensure_boundary_on_disk` restricted to append-mode
-- [ ] **IPC boundary insertion** — replace disk write with IPC directive to eliminate cache conflicts
+- [x] **IPC boundary insertion** — `ensure_boundary` flag replaces disk writes
+- [x] **Orphaned boundary fix** — restricted to append-mode components
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->
 - [ ] **README.md staleness** — update to match current state

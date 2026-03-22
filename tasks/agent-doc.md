@@ -168,7 +168,7 @@ agent-doc undo tasks/agent-doc.md
 
 Or if you want to keep the compact but reference the history, the archive has the full exchange.
 
-### Re: JB plugin moving prompt after response patch (HEAD)
+### Re: JB plugin moving prompt after response patch
 
 **Root cause found and fixed.** The IPC write path was using the boundary position from disk (stale — above the user's new prompt), while the disk write path repositions the boundary to end-of-exchange before applying patches.
 

@@ -556,7 +556,7 @@ The dev server is serving the updated content with the new post included.
 
 We lost the site header, breadcrumbs, and sticky header text being smaller on scroll. Did one of our modules become reverted or lose the previous changes?
 ![img_5.png](img_5.png)
-### Re: Missing Header Styles (HEAD)
+### Re: Missing Header Styles
 
 **Found it.** The `ui--server--blog` submodule has uncommitted changes in `header/blog__header.ts` that shrink the header:
 

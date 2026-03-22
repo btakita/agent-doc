@@ -879,7 +879,7 @@ Now `install()`, `install_and_check_updated()`, and `check()` all resolve to the
 release
 compact exchange
 
-### Re: release (HEAD)
+### Re: release
 
 **v0.25.2 released** — skill install superproject root fix + clippy let-chain cleanup.
 

@@ -1038,7 +1038,7 @@ Yes
 
 Plugin v0.2.12 rebuilt. Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → `agent-doc-jetbrains-0.2.12.zip` → restart.
 In tmux session 0, there are 3 windows. I was changing between tasks/youtube.md and tasks/corky.md on the right editor side. I noticed that some claude sessions restarted as well. Please explain why.
-### Re: Claude Sessions Restarting on Tab Switch (HEAD)
+### Re: Claude Sessions Restarting on Tab Switch
 
 **What's happening:** When you switch editor tabs (e.g., youtube.md → corky.md), the agent-doc routing system detects the new file and may re-route panes. Here's the mechanism:
 

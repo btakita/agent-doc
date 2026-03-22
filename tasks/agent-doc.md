@@ -670,6 +670,8 @@ Install the plugin to test the FFI-based boundary cleanup. The working-tree clea
 Implement:
 - [ ] Wire `new_boundary_id_with_summary()` into write paths (currently available but unused)
 - [ ] Install plugin v0.2.14 and test boundary cleanup
+
+The uncommitted `<!-- agent:boundary:93405c25-e7e1-42b7-af90-78ebc0494e42 -->` should use the 8 character hex. Make sure all agent:boundary uuids are consistently generated.
 ### Re: Wire summary + install plugin
 
 **Summary suffix wired into write paths:**
@@ -680,17 +682,36 @@ All boundary creation in the write pipeline now passes the document filename ste
 
 Result: boundaries now look like `<!-- agent:boundary:a0cfeb34:agent-doc -->` instead of `<!-- agent:boundary:a0cfeb34 -->`. The `:agent-doc` suffix comes from the filename `agent-doc.md`.
 
+What is advantage of using the filename as the summary in the id?
+
 **Plugin install:** Manual via IDE — IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.14.zip` from `editors/jetbrains/build/distributions/`.
 
 Binary rebuilt, installed, 522 tests pass.
-<!-- agent:boundary:65cdbcdc -->
+### Re: Full UUID boundary + filename summary value (HEAD)
+
+**1. Full UUID boundary source:** The full UUID (`93405c25-e7e1-42b7-af90-78ebc0494e42`) comes from the **old plugin** — v0.2.14 hasn't been installed yet. The binary generates 8-char IDs correctly (the active boundary `79b4de67` at line 690 is 8-char). The old plugin's IPC reposition handler creates full UUIDs. Once you install v0.2.14, the plugin will use the FFI function which generates 8-char IDs with summary.
+
+The binary's working-tree cleanup runs after each commit and removes stale boundaries, but the plugin adds a new full-UUID one via IPC reposition *after* the cleanup. This is the race:
+1. Commit → binary cleans working tree (8-char boundary)
+2. IPC reposition → old plugin replaces it with full-UUID boundary
+
+**Install v0.2.14 to fix:** IDEA → Settings → Plugins → gear → Install from Disk → `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.14.zip`
+
+**2. Filename as summary — advantage:**
+
+The filename tells you *which document* the boundary belongs to at a glance, useful when:
+- **Debugging multi-document sessions** — multiple documents open, multiple tmux panes, stale boundaries from different files. `a0cfeb34:agent-doc` vs `b5c7e123:resume` instantly identifies the source.
+- **Log reading** — commit logs show `pre-patch boundary b87288f7:agent-doc inserted` — you see both the ID and which doc, without looking up the file.
+- **Collision triage** — if two documents somehow share a boundary ID (nearly impossible), the summary disambiguates.
+
+That said, it's a low-value convenience. If the noise isn't worth it, we can drop the summary and keep plain 8-char IDs. The summary suffix is backward compatible — removing it later has no impact.
+<!-- agent:boundary:4247d988 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Wire `new_boundary_id_with_summary()` into write paths
-- [ ] **Install plugin v0.2.14** — manual: IDEA → Plugins → Install from Disk
+- [ ] **Install plugin v0.2.14** — fixes full UUID → 8-char via FFI
 - [ ] agent-doc v0.25.5 release with all boundary fixes
 <!-- /agent:pending -->
 

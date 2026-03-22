@@ -602,6 +602,8 @@ Changed post-patch boundary re-insertion from checking `orig_had_boundary.is_som
 **2. `remove_all_boundaries()` code-block awareness:**
 Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks (lesson #13 consistency). Previously it stripped ALL boundary-looking lines regardless of context.
 
+Are we using the AST or regexes?
+
 **3 new tests:**
 - `boundary_reinserted_even_when_original_doc_has_no_boundary` — the snowball regression test
 - `boundary_survives_multiple_cycles` — two consecutive cycles both end with a boundary
@@ -612,6 +614,7 @@ Now uses `find_code_ranges()` to skip boundary markers inside fenced code blocks
 **Context tracking:** Agreed on HEAD-only context. The `agent-doc diff` command is the implementation path — it outputs only the changes since the last snapshot, so the SKILL loads HEAD document + compact diff instead of HEAD + full snapshot. This keeps only one version of the document in context.
 
 We agree. Have you implemented this?
+Well? What's the answer?
 
 ### Re: Pending/Todo Split + Boundary Fix Verification
 
@@ -632,8 +635,6 @@ The re-insertion message confirms the snowball fix works — the boundary is now
 **Submodule committed:** `ce84701` in `src/agent-doc` — "fix: boundary snowball bug + code-block awareness in remove_all_boundaries"
 
 Note that I intervened with the plugin moving the commited response patch to the cursor for my own sanity.
-Please fix the plugin to not move the commited response patch to the cursor asap.
-The plugin removed the `agent:boundary` when it moved the response patch.
 ### Re: Plugin Cursor Fix + Naming + agent-doc diff
 
 **1. Plugin cursor fix — DONE (`3a08011`):**
@@ -647,7 +648,15 @@ Both now match the binary's post-patch behavior: consume old boundary → insert
 
 **Why this fixes the cursor issue:** The plugin's priority chain is: boundary → caret → normal append. Without a boundary in the IPC patch JSON (snowball bug), it fell through to caret-based insertion. With both fixes (snowball + re-insertion), the boundary will always be present → plugin always uses boundary-based insertion → cursor position is irrelevant.
 
+> the boundary will always be present
+
+We cannot assume. The human or another process can always delete the boundary. Need robustness as a fallback.
+- Use git history to find the `agent:boundary` to reinsert
+- Insert `agent:boundary` right before the close of `agent:exchange` 
+
 **Binary rebuilt and installed. Plugin built** at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.10.zip`. Install via IDEA → Settings → Plugins → gear → "Install from Disk..." → restart IDE.
+
+Please increment version.
 
 **2. Component naming:**
 
@@ -660,17 +669,62 @@ Both naming sets work. My recommendation:
 
 `pending` / `todo` is simpler and more universally understood. `session` / `roadmap` adds semantic precision but might feel heavy. Since the document already uses `agent:pending`, keeping it and adding `agent:todo` is the lowest-friction choice. Your call.
 
+Is there a risk of `pending` / `todo` shadowing another component use case for those names? Would `pending` or `todo` be the bast name for a component that does something different from its current behavior?
+
 **3. `agent-doc diff` — not yet implemented.**
 
 It's the next priority item. The design is ready (from earlier discussion): binary command that outputs structured diff between current document and snapshot, so the SKILL loads HEAD + diff instead of HEAD + full snapshot.
-<!-- agent:boundary:9b04cb09-6550-496d-91d0-410a6d489fd7 -->
+
+Implement.
+
+Please fix the plugin to not move the commited response patch to the cursor asap.
+The plugin removed the `agent:boundary` when it moved the response patch.
+### Re: AST vs Regex + Naming + Robustness + Plugin Fix + Implement (HEAD)
+
+**1. AST or regexes?**
+
+`find_code_ranges()` uses regex-like pattern matching (manual byte scanning for backtick sequences), not a proper AST parser. It's a lightweight CommonMark fence detector — scans for `\`\`\`` sequences at line boundaries and tracks open/close state. Good enough for code block detection, but not a full markdown AST.
+
+**2. Naming — pending/todo:**
+
+`pending` and `todo` are generic enough that they *could* shadow other use cases. For example, someone might want `agent:todo` for a user-managed checklist (not agent-managed). But in practice, the component name is just a label — the `patch=` attribute controls behavior, not the name.
+
+If you want names that are unambiguously agent-doc-scoped: `agent:workqueue` / `agent:backlog`, or `agent:active` / `agent:backlog`. But honestly, `pending` / `todo` are fine — the `agent:` prefix already namespaces them. Keep it simple.
+
+**3. Boundary robustness — fallback when boundary is deleted:**
+
+You're right — we can't assume the boundary will always be present. The current fallback chain in the plugin is: boundary → caret → normal append. But the caret path is the problem.
+
+**Better fallback chain:**
+1. Boundary marker (primary) → insert at boundary
+2. Git history recovery → find last boundary position from git, re-insert
+3. End-of-exchange append → insert right before the close tag
+
+Option 3 is the simplest robust fallback: if no boundary, just append at the end of the exchange component (before `&lt;!-- /agent:exchange --&gt;`). This is always correct — new content goes at the bottom. The caret-based insertion should be REMOVED entirely — it was designed for a use case that boundary-aware insertion handles better.
+
+I'll implement this: remove caret fallback, replace with end-of-exchange append.
+
+**4. Plugin version bumped to v0.2.11.** Built at:
+```
+editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.11.zip
+```
+
+Install: IDEA → Settings → Plugins → gear → "Install from Disk..." → select zip → restart.
+
+**5. `agent-doc diff` — implementing now.**
+
+**6. Plugin cursor fix — already done (`3a08011`).**
+
+The fix is in the built plugin (v0.2.11). Both `component.rs:append_with_boundary()` and `PatchWatcher.kt:applyComponentPatchWithBoundary()` now re-insert a fresh boundary after consuming the old one. Once you install v0.2.11 and restart IDEA, the boundary will persist across IPC writes and the caret fallback won't trigger.
+<!-- agent:boundary:fa5af1d1-2664-43e9-9d19-3b3826b9daff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **`agent-doc diff`** — binary command for HEAD-only context loading (next to implement)
-- **JB plugin install needed** — boundary re-insertion fix built, needs IDE restart to activate
+- **JB plugin v0.2.11 install needed** — boundary re-insertion fix, needs IDE restart
+- **Remove caret fallback from plugin** — replace with end-of-exchange append for robustness
+- **`agent-doc diff`** — binary command for HEAD-only context loading (implementing)
 - Boundary-aware replace for `flush_to_document` — split at boundary instead of replace mode
 - SKILL auto-update: use AskUserQuestion instead of print+stop
 - CLAUDE.md + README.md staleness — update for template.rs changes

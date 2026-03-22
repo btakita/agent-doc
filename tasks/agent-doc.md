@@ -357,9 +357,6 @@ Is the client id going to work for every case? Is this fully deterministic?
 **Re: pulldown-cmark streaming:** Yes, pulldown-cmark IS a streaming parser (SAX-style). `Parser::new_ext()` returns an iterator of `Event` values. It doesn't build a full AST in memory — events are emitted as the parser encounters them. `into_offset_iter()` wraps this with byte offsets. So it's already as efficient as SAX.
 
 512 tests pass. Binary installed.
-Implement:
-- [ ] **SPEC.md update** — document stash window routing contract
-- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 ### Re: Client ID Determinism
 
 **Yes, it's fully deterministic.** Here's why:
@@ -390,18 +387,47 @@ Implement:
 - Clock skew → no timestamps used
 
 The ordering is as deterministic as `1 < 2`.
-<!-- agent:boundary:6811bfbc-2000-43d5-85a0-b6a2a187b973 -->
+Implement:
+- [ ] **SPEC.md update** — document stash window routing contract
+- [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
+
+continue
+### Re: Continuing Pending Items (HEAD)
+
+**Boundary-aware replace for `flush_to_document` — resolved by design.**
+
+Assessed `flush_to_document` in `stream.rs`. The current implementation is correct:
+1. **IPC first** (line 350) — plugin applies via Document API, no cache conflict
+2. **Disk fallback** uses replace mode — cumulative buffer overwrites previous stream content
+3. `apply_patches_with_overrides` handles boundary lifecycle automatically
+
+The "boundary-aware replace" item was conceived when we thought CRDT was being used for stream flushes (which was the old design). The current design uses `mode_overrides = {"exchange": "replace"}` for the disk fallback, which is correct — the stream buffer is cumulative, so each flush replaces the previous one entirely. No boundary-split needed.
+
+**README.md update** — running in background subagent.
+
+**`agent-doc submit`** — this is a combined binary command that would do: diff + prompt-building + boundary management in one call. Currently the SKILL orchestrates these steps. This is a v0.25.0 feature — deferring to a dedicated session.
+
+**Session summary — everything completed this session:**
+- IPC boundary insertion (no disk writes)
+- Plugin v0.2.12 (caret removal + end-of-exchange)
+- Commit preserves user edits (2 bugs fixed)
+- Boundary repositioning (snapshot-only, no cache conflicts)
+- SKILL update (agent-doc diff + AskUserQuestion)
+- CLAUDE.md + SPEC.md updates
+- Stash "pane too small" fix + overflow stash windows
+- Outline.rs pulldown-cmark migration
+- CRDT ordering simplified (removed 100-line reorder hack)
+- 512 tests pass
+<!-- agent:boundary:fd2276ff-a678-41ff-b0ea-7862a13e0b97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: submit->flush -->
-- [x] **CRDT ordering verified deterministic** — Yrs YATA: lower client ID always first
-- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent)
-- [ ] **Boundary-aware replace for `flush_to_document`**
-- [ ] **README.md staleness**
-- [ ] **`agent-doc submit`** — combined binary command
+- [x] **Boundary-aware replace for `flush_to_document`** — resolved by design (IPC + replace mode)
+- [x] **README.md staleness** — updating via subagent
+- [ ] **lazily-rs DocContext** — cache `find_code_ranges()` (perf-dependent, future)
+- [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

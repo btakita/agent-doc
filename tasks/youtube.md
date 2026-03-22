@@ -441,7 +441,22 @@ captions: edited-video.srt
 5. `corky youtube publish <draft>` — uploads video + captions together
 
 If you want to adjust an existing SRT without re-transcribing (e.g., just offset timestamps after trimming the start), that's a potential `corky srt offset` command — but re-transcribing with GPU is probably fast enough to not need it.
-<!-- agent:boundary:cd086df8-0242-4bb8-a185-cdd3088dc184 -->
+Edit video and use gpu transcription on the edited video.
+### Re: Edit Video + GPU Transcribe (HEAD)
+
+No edited version found yet — only the original `2026-03-19 02-26-07.mp4` (2.8GB) exists in `~/Videos/`.
+
+**Next steps:**
+1. Open the original in your video editor (kdenlive, etc.)
+2. Make your cuts/edits
+3. Export to `~/Videos/` (any name works)
+4. Submit here with the edited filename and I'll GPU-transcribe it immediately
+
+Once you have the edited file, the transcription command will be:
+```
+corky transcribe ~/Videos/<edited-file>.mp4 -o ~/Videos/<edited-file>.srt
+```
+<!-- agent:boundary:7700aa3a-8476-457e-8d66-b0fe119db618 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -454,5 +469,5 @@ If you want to adjust an existing SRT without re-transcribing (e.g., just offset
 - [x] Update `release.yml` with GPU matrix entries
 - [x] Fix MP4 direct decode bug ("Unknown sample rate")
 - [x] Streamline video→CC workflow (repeatable single-command flow)
-- [ ] Edit video for YouTube + re-transcribe CC for edited version
+- [ ] Edit video for YouTube → export edited file → GPU transcribe CC
 <!-- /agent:pending -->

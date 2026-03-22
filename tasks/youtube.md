@@ -623,7 +623,7 @@ Missing local dirs referenced in Dockerfile:
 These are all `@rappstack/*` npm packages now. Want me to fix the Dockerfile by removing those lines? This is a briantakita.me-dev task — should I track it there instead?
 Why are we using Dockerfile? We should just remove the Dockerfile as we don't use Contabo anymore.
 Remove gh Docker build.
-### Re: Remove Docker + Deploy (HEAD)
+### Re: Remove Docker + Deploy
 
 **Done.** Removed all Docker/Contabo deployment infrastructure:
 

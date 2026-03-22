@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Transcription complete: 2026-03-19 02-26-07.srt (748 segments, CPU). GPU support discussion open.
+Corky built without CUDA. GPU available (CUDA 13.2). Rebuild needed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -309,14 +309,37 @@ cd src/corky && cargo install --path . --features transcribe-cuda
 For the broader UX, we could add a `transcribe-gpu` feature that auto-selects CUDA on Linux/Windows and Metal on macOS using conditional compilation. Want me to implement that?
 
 Also: the MP4 direct decode failed ("Unknown sample rate") — corky's symphonia decoder should handle MP4/AAC. That's a separate bug worth fixing so you don't need the ffmpeg step.
-<!-- agent:boundary:ffe72d5a-d936-4f20-b63b-2351f8e7fe27 -->
+
+Please check local install of `corky`. Does it include `transcribe-cuda`?
+### Re: Local Corky CUDA Check (HEAD)
+
+**Current install:** `corky v0.19.1` at `.bin/corky` → `src/corky/target/release/corky`. Built via `make release` which runs `cargo build --release` with **default features only** (`["transcribe"]`) — no CUDA.
+
+**Your GPU:** NVIDIA with CUDA 13.2 + `nvcc` installed. GPU compute is fully available.
+
+**The fix is simple** — rebuild with CUDA:
+
+```bash
+cd src/corky && cargo build --release --features transcribe-cuda
+```
+
+The `.bin/corky` symlink already points to `target/release/corky`, so it'll pick up the new binary automatically.
+
+We should also update the `Makefile` so `make release` includes CUDA by default on your machine. Options:
+1. Change `release` target to `cargo build --release --features transcribe-cuda`
+2. Add a separate `release-gpu` target
+3. Use an env var: `CORKY_FEATURES ?= transcribe-cuda` so it's configurable
+
+What's your preference? I'd suggest option 1 since you always have CUDA available.
+<!-- agent:boundary:8afec024-11fd-462b-baf4-5b8b34c5c70c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribed to SRT
-- [ ] GPU auto-detect feature for corky transcribe
+- [ ] Rebuild corky with `transcribe-cuda` feature
+- [ ] Update Makefile release target for CUDA
 - [ ] Fix MP4 direct decode bug ("Unknown sample rate")
 - [ ] Streamline video→CC workflow (repeatable single-command flow)
 <!-- /agent:pending -->

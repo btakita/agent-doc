@@ -998,7 +998,7 @@ tasks/corky.md has orphaned `agent:boundary` tags.
 Can we use CRDT instead for these?
 
 Binary rebuilt, installed, 511 tests pass.
-### Re: CRDT for Boundary Operations (HEAD)
+### Re: CRDT for Boundary Operations
 
 **Short answer: yes, partially.** CRDT can eliminate the File Cache Conflict for boundary insertion, but not for boundary repositioning on commit.
 

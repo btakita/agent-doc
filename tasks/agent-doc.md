@@ -777,7 +777,7 @@ go
 > Please update `agent:pending` with checkboxes and current state. Go through the remaining pending items.
 
 This should have been placed above the response patch. Why is it below the response patch?
-### Re: Ordering Bug + agent-doc diff (HEAD)
+### Re: Ordering Bug + agent-doc diff
 
 **1. Why the prompt was placed below the response:**
 

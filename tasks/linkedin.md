@@ -315,6 +315,7 @@ Should we post the following today: Sunday 15:00:00 Eastern or wait until tomorr
 - LinkedIn post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 - LinkedIn comment with video link: ID `7440760371260444672`
 
+
 **Re: posting timing**
 
 Per your own decisions in this doc: **Best post times: Tue-Thu, 8-10 AM ET; avoid Mon/Fri and evenings.**
@@ -329,5 +330,25 @@ Per your own decisions in this doc: **Best post times: Tue-Thu, 8-10 AM ET; avoi
 If you need to post sooner: Monday 8 AM ET > Sunday 3 PM. But Tuesday is the play.
 
 Video pipeline and YouTube comment work noted — good documentation for the task file.
-<!-- agent:boundary:45949b1d-bb7b-43c9-b29b-998597768781 -->
+I have another longer video to post.
+I will be having an interview on Monday 5PM Eastern.
+I want my videos up by then.
+Should I:
+- post both videos on Monday morning
+- post 1 video in the morning 1 around noon
+- post 1 video Sunday, 1 Monday morning
+
+**Re: video posting strategy for Monday interview**
+
+The interview changes the calculus — it's not about optimal LinkedIn timing, it's about having content visible before 5PM Monday.
+
+**Post 1 Sunday, 1 Monday morning.**
+
+- **Sunday evening (~7-8 PM ET)**: Post video 1. Gets ~20 hours to accumulate views/likes before the interview.
+- **Monday morning (~8-9 AM ET)**: Post video 2. Gets ~8 hours of visibility before 5PM.
+- **Why not both Monday morning**: They compete with each other in the feed. Spacing gives each its own engagement window.
+- **Why not noon**: Too close to the interview — not enough time for organic engagement.
+
+The interviewer will likely check your LinkedIn profile before the call. Two recent video posts with some engagement signals active presence.
+<!-- agent:boundary:caecdd50-1251-479e-a229-ae8f4e7a017f -->
 <!-- /agent:exchange -->

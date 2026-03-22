@@ -803,14 +803,6 @@ The SKILL workflow change is: instead of reading the full snapshot file, run `ag
 Go
 
 **For now, I can start using the diff approach in this session** by running `agent-doc diff` instead of reading the snapshot. The document HEAD is still read (needed for context), but the snapshot read is replaced by the compact diff output.
-
-I already had 0.2.11 installed. I did not compact. The plugin did the old behavior of moving the response patch above the \`\`\`markdown fence. It also removed the `agent:boundary` component. I reverted this move.
-
-I also mantually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-doc diff`
-
-I also compacted the claude session just in case we had a SKILL.md change
-
-If none these would have fixed the issue, diagnose please.
 ### Re: Plugin v0.2.11 Still Moving Content to Cursor
 
 **Root cause: Boundary ID mismatch in the IPC path.**
@@ -834,28 +826,64 @@ Replaced `applyComponentPatchWithCaret` fallback with `applyComponentPatchEndOfE
 
 **Boundary repositioning on commit (your constraint noted):** "Option 2 is fine only when there is no `agent-doc run <current-file>` running." Acknowledged — boundary repositioning on commit will check for active runs before moving the boundary.
 
+Implement
+
 **Builds:**
 - Binary: `cargo build --release` + `cargo install --path .` ✓
 - Plugin: v0.2.12 at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.12.zip`
 - Tests: 497 pass (removed step 1b from SKILL test since boundary is binary-owned)
 
 Install plugin: IDEA → Settings → Plugins → gear → "Install from Disk..." → select zip → restart.
-<!-- agent:boundary:4ddae466-f7db-44dd-b535-4a35df1c9a86 -->
+
+I already had 0.2.11 installed. I did not compact. The plugin did the old behavior of moving the response patch above the \`\`\`markdown fence. It also removed the `agent:boundary` component. I reverted this move.
+
+I also manually removed the ` (HEAD)` suffix for `### Re: Ordering Bug + agent-doc diff`
+
+I also compacted the claude session just in case we had a SKILL.md change
+
+If none these would have fixed the issue, diagnose please.
+
+My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
+### Re: Prompt Ordering + Boundary Reposition on Commit (HEAD)
+
+**Why your prompts were placed below the response patch:**
+
+Your prompts (lines 839-847) were typed BELOW the `agent:boundary` marker (line 837). The boundary marks where the next response will be inserted. Content typed after the boundary stays after the insertion point — so when the response was placed AT the boundary, your prompts ended up after it.
+
+This is the correct boundary behavior — the issue is that there was no mechanism to move the boundary to the end of exchange after each commit, so your new edits could accidentally land below it.
+
+**Fix implemented: Boundary repositioning on commit.**
+
+`agent-doc commit` now calls `reposition_boundary_to_end()` after a successful commit. This:
+
+1. Finds the boundary marker in the exchange component
+2. Checks if it's already at the end — if so, no-op
+3. If not at end: removes it from current position, re-inserts at end of exchange (before close tag)
+4. Updates both the working tree file and the snapshot
+5. **Skips repositioning if an active run exists** (pending file detected) — per your constraint
+
+After each commit cycle, the boundary is always at the very end of exchange → your next edit is always above it → your prompts always appear before the response insertion point.
+
+**Will plugin v0.2.12 fix it?** Yes, two ways:
+1. **Even without boundary:** The new end-of-exchange fallback inserts at the bottom instead of at cursor
+2. **With boundary reposition:** Your edits are always above the boundary, so boundary-based insertion works correctly
+
+**Both binary and plugin are installed.** The boundary reposition is active starting this commit cycle.
+<!-- agent:boundary:153cd386-cb9c-42b0-a6f3-90c4a73b07d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: diff_skill->diff_cmd, boundary_commit->boundary_fix -->
-- [x] **JB plugin v0.2.11 install** — boundary re-insertion fix
+<!-- deps: diff_skill->diff_cmd -->
+- [x] **JB plugin v0.2.12 install** — caret removal + end-of-exchange fallback
+- [x] **Remove caret fallback** — replaced with end-of-exchange append (v0.2.12)
+- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
+- [x] **Boundary repositioning on commit** — `reposition_boundary_to_end()` in git.rs
 - [x] Boundary snowball fix (`ce84701`)
 - [x] Boundary re-insertion in all write paths (`3a08011`)
 - [x] `remove_all_boundaries()` code-block awareness
 - [x] Plugin v0.2.11 build (`3c06c36`)
-- [x] **Remove caret fallback** — replaced with end-of-exchange append (v0.2.12)
-- [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
-- [ ] **JB plugin v0.2.12 install** — caret removal + end-of-exchange fallback
-- [ ] **Boundary repositioning on commit** — move boundary to end of exchange (skip if run active)
 - [ ] **SKILL update for `agent-doc diff`** — replace snapshot read with diff command in step 1
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] Boundary-aware replace for `flush_to_document`
@@ -866,6 +894,7 @@ Install plugin: IDEA → Settings → Plugins → gear → "Install from Disk...
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
+-  `/`
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

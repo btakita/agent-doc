@@ -1043,7 +1043,8 @@ Implement pending
 **SPEC.md §6.8, §6.9, §18** were already committed in v0.19.1 (`ba9d712`).
 
 release
-### Release v0.19.2 Complete (HEAD)
+audit docs
+### Release v0.19.2 Complete
 
 v0.19.2 was already committed and tagged. Completed the missing publish steps:
 
@@ -1052,7 +1053,23 @@ v0.19.2 was already committed and tagged. Completed the missing publish steps:
 - [crates.io](https://crates.io/crates/corky/0.19.2) — already published
 
 All three publish targets are now complete.
-<!-- agent:boundary:26bf096b-67c9-4d97-bfc3-646c2c5d09fd -->
+### Audit Docs — Clean (HEAD)
+
+Ran `corky audit-docs` — found 3 stale files vs `src/mailbox/sync.rs`.
+
+**Root cause:** v0.19.2's pull error handling changes weren't reflected in docs.
+
+**Fixes (SPEC.md, 3 lines):**
+- §5.12 — pull skipped for local-only mailboxes (no remote), logs actual error on failure
+- §7.2 — pull step notes "local-only repos with no remote" skip
+- §7.6 — reset pull step notes "submodules with remote only"
+
+README.md and AGENTS.md had no content about pull behavior — staleness was mtime-based only (touched to clear).
+
+**Re-ran `corky audit-docs` — No issues found. 188 instruction lines.**
+
+Committed (`0cd23c7`) and pushed.
+<!-- agent:boundary:e87a9bf3-ab77-4ebd-afca-2f85dbd6294e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

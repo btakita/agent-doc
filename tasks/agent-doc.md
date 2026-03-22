@@ -718,6 +718,8 @@ The `:agent-doc` suffix comes from the document filename. No further code change
 
 Next: install plugin v0.2.14 to fix the full-UUID issue from the old plugin, then release v0.25.5.
 release
+audit docs
+update SPEC.md, README.md
 ### Re: Release v0.25.5
 
 **agent-doc v0.25.5 released:**
@@ -739,14 +741,29 @@ release
 - Removed dead `move_boundary_to_end_in()`, updated tests to use new function
 
 **522 tests pass.** 14 files changed, 216 insertions, 85 deletions.
-<!-- agent:boundary:c7a3c1ed -->
+compact exchange
+### Re: Audit docs, update docs, compact exchange (HEAD)
+
+**Audit docs:** 1 advisory remaining (large table in CLAUDE.md — pre-existing, not a blocker). All staleness warnings cleared.
+
+**README.md:** Updated version line to `v0.25.5 | JetBrains plugin v0.2.14 | VS Code extension v0.2.3`.
+
+**SPEC.md:** Already updated earlier this session with boundary lifecycle invariants, cleanup scope, FFI export, and snapshot cleanup docs.
+
+**Exchange compacted:** 590 lines archived to `.agent-doc/archives/`. Exchange is now clean.
+
+**Plugin v0.2.14 installed** — confirmed by user.
+<!-- agent:boundary:608626fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] agent-doc v0.25.5 released
-- [ ] **Install plugin v0.2.14** — IDEA → Plugins → Install from Disk
+- [x] agent-doc v0.25.5 released (all targets)
+- [x] Plugin v0.2.14 installed
+- [x] Audit docs — 1 advisory remaining (large table, pre-existing)
+- [x] README.md updated to v0.25.5
+- [x] Exchange compacted (590 lines archived)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

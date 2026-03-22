@@ -427,16 +427,36 @@ After: `<!-- agent:boundary:aef3b25d -->`
 - Regex patterns already accept any `[a-f0-9-]+` length — backward compatible
 
 Binary installed. Plugin built (both unsigned and signed). 521 tests pass.
-<!-- agent:boundary:f1c826b6 -->
+What is the collision chance of the uuid? What would be the impact of a collision? Please make the number of uuid characters  configurable with 8 being the default.
+
+When I navigate the editor focus back to toby-gi
+
+### Re: Configurable boundary UUID length (HEAD)
+
+**Collision analysis:**
+- 8 hex chars = 32 bits = ~4.3 billion values
+- Birthday paradox: ~65K boundaries before 50% collision chance
+- In practice: 1-2 boundaries exist simultaneously (old ones are cleaned up each cycle)
+- **Collision impact:** Wrong insertion point for one response. Self-correcting — next cycle removes all boundaries and inserts a fresh one. No data loss.
+- **Risk: negligible** at 8 chars for the boundary lifecycle
+
+**Implementation:** Centralized `new_boundary_id()` and `format_boundary_marker()` in `lib.rs`. The `BOUNDARY_ID_LEN` constant (default 8) controls the length. All boundary ID generation now goes through this:
+
+- `lib.rs` — `new_boundary_id()` + `format_boundary_marker()` + `BOUNDARY_ID_LEN` constant
+- `component.rs` — `append_with_boundary()` uses `crate::new_boundary_id()`
+- `template.rs` — `reposition_boundary_to_end()` and `apply_patches_with_overrides()` use it (3 occurrences)
+- `boundary.rs` — `new_id()` delegates to lib, `insert()` uses it
+- `PatchWatcher.kt` — `.substring(0, 8)` on UUID (3 occurrences)
+
+To change the length, update `BOUNDARY_ID_LEN` in `lib.rs`. The regex patterns and prefix-matching in all code accept any length.
+
+Binary installed. 521 tests pass.
+<!-- agent:boundary:3f024095 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Short boundary UUIDs** — 8 hex chars instead of full UUID
-- [x] **Plugin: fix boundary accumulation** — repositionBoundaryToEnd removes ALL boundaries
-- [x] **Sync: kill dead-file panes** — stale-file detection + auto-start
-- [x] **Autoclaim: validate file exists** — prune stale entries
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

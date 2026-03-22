@@ -711,7 +711,7 @@ continue
 Binary + SKILL installed. 519 tests pass.
 It seems that as I was typing, the patch that moved `agent:boundary` below the prompt caused me to lose what I was typing.
 release
-### Re: Boundary Reposition Losing User Input (HEAD)
+### Re: Boundary Reposition Losing User Input
 
 **Root cause identified.** When `agent-doc commit` calls `reposition_boundary_in_both()`, it rewrites the working tree file with the boundary moved to end-of-exchange. If you're actively typing, the plugin's VCS refresh reloads from disk, discarding your in-progress keystrokes.
 

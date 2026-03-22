@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All updates released and pushed. Ready for production deploy.
+Blog post deployed to Cloudflare Pages. Docker cleanup complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -621,7 +621,20 @@ Missing local dirs referenced in Dockerfile:
 - `lib/ui--server--blog/`
 
 These are all `@rappstack/*` npm packages now. Want me to fix the Dockerfile by removing those lines? This is a briantakita.me-dev task — should I track it there instead?
-<!-- agent:boundary:3d25aed7-ed65-4bf1-8851-819fb8e22dd4 -->
+Why are we using Dockerfile? We should just remove the Dockerfile as we don't use Contabo anymore.
+Remove gh Docker build.
+### Re: Remove Docker + Deploy (HEAD)
+
+**Done.** Removed all Docker/Contabo deployment infrastructure:
+
+- Deleted: `Dockerfile`, `d.briantakita.me.docker-compose.yml`, `d.deploy.docker-compose.yml`, `d.traefik.docker-compose.yml`
+- Cleaned Makefile: removed `docker-build`, `docker-push`, `deploy`, `restart`, `stop` targets
+- Kept: GH Actions `deploy.yml` (Cloudflare Pages — this is the active deploy path)
+
+**Deploy status:** GH Actions triggered on push. The previous deploy with the blog post already succeeded (57s). Current cleanup deploy is queued/running.
+
+The blog post is **already live** on Cloudflare Pages from the earlier push that included the post + index regeneration.
+<!-- agent:boundary:1df04c40-dedf-4459-aa6b-01c8b01e0bc7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -639,5 +652,6 @@ These are all `@rappstack/*` npm packages now. Want me to fix the Dockerfile by 
 - [x] Create blog post for briantakita.me
 - [x] Commit compact header style + publish @rappstack/ui--server--blog@0.1.2
 - [x] Release all submodule updates
-- [ ] Fix Dockerfile stale workspace refs → deploy briantakita.me
+- [x] Deploy briantakita.me to Cloudflare Pages
+- [x] Remove Docker/Contabo deployment infrastructure
 <!-- /agent:pending -->

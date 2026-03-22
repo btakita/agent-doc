@@ -138,4 +138,3 @@ Key terms:
 **Key takeaway:** Your IBKR brokerage assets (stocks, bonds) and crypto are in entirely separate legal regimes. IBKR's SIPC protection does NOT extend to anything in your Zero Hash Account. If Zero Hash fails, IBKR takes no responsibility.
 
 ## User
-

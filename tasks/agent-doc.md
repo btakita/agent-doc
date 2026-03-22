@@ -718,7 +718,7 @@ The `:agent-doc` suffix comes from the document filename. No further code change
 
 Next: install plugin v0.2.14 to fix the full-UUID issue from the old plugin, then release v0.25.5.
 release
-### Re: Release v0.25.5 (HEAD)
+### Re: Release v0.25.5
 
 **agent-doc v0.25.5 released:**
 
@@ -739,7 +739,7 @@ release
 - Removed dead `move_boundary_to_end_in()`, updated tests to use new function
 
 **522 tests pass.** 14 files changed, 216 insertions, 85 deletions.
-<!-- agent:boundary:62cb4b66 -->
+<!-- agent:boundary:c7a3c1ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -946,7 +946,7 @@ Binary rebuilt, tests pass (504: 165 lib + 301 bin + 38 CLI), installed. SKILL.m
 
 Want me to continue with the AST migration or another item?
 yes. continue
-### Re: Continuing — CLAUDE.md Updated (HEAD)
+### Re: Continuing — CLAUDE.md Updated
 
 **CLAUDE.md updated:**
 - Module layout: added 14 missing files (`write.rs`, `template.rs`, `boundary.rs`, `ffi.rs`, `lib.rs`, `recover.rs`, `compact.rs`, `convert.rs`, `extract.rs`, `undo.rs`, `mode.rs`, `autoclaim.rs`, `commands.rs`, `sync.rs`)

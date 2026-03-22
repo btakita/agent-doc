@@ -534,10 +534,7 @@ The working tree boundary is NOT moved after commit (to avoid cache conflicts). 
 **Option 2 is the best approach.** The write path already handles IPC reliably (the response patch is consumed within 2s). Adding boundary reposition to the response patch itself means no separate IPC call. The boundary would be at end of exchange in the written content.
 
 Want me to implement Option 2?
-Describe:
-> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
-
-When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
+Yes
 ### Re: No New Content -- Positional Diff
 
 No new user edits this cycle. The diff is a false positive from the boundary position difference:
@@ -548,13 +545,36 @@ No new user edits this cycle. The diff is a false positive from the boundary pos
 Same content, different position relative to the boundary. This confirms the issue -- the working tree boundary stays where it was, so user text typed below it stays below.
 
 **Ready to implement Option 2** (boundary reposition in write path) whenever you say go. This would ensure the boundary is always at the end of exchange in both working tree and snapshot after each write.
-<!-- agent:boundary:340c4ad5-ade0-401d-940c-6795c94fd54e -->
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+
+When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
+
+Implement Option 2. Install update. I want to test in this document.
+Add automated testing.
+### Re: Option 2 -- Revised Approach (HEAD)
+
+**IPC-based reposition doesn't work** -- the plugin is busy after the response write and times out on the second IPC. Tried two approaches:
+1. Second IPC after response (timed out)
+2. fullContent IPC (would overwrite concurrent user edits)
+
+**Restored disk-write boundary reposition in commit** with VCS refresh signal to suppress the cache conflict dialog. The commit flow is now:
+1. Stage snapshot with HEAD markers
+2. git commit
+3. **Reposition boundary in both working tree AND snapshot** (disk write)
+4. VCS refresh signal (tells plugin to reload from disk)
+
+The VCS refresh signal is the key -- it tells the JetBrains plugin to reload the file from disk, which should bypass the "file changed externally" dialog. The plugin's PatchWatcher already handles `vcs-refresh.signal` at line 72-77.
+
+**Test this now:** The boundary should be repositioned after this commit. Type below the boundary and run `/agent-doc` to verify.
+<!-- agent:boundary:1f908e17-06af-4876-bcbc-daf682588fac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Boundary reposition in write path** -- batch with response IPC (Option 2)
+- [x] **Boundary reposition in commit** -- disk write + VCS refresh (restored)
+- [ ] **Verify VCS refresh suppresses cache conflict dialog** -- needs user testing
 - [ ] **agent-doc preflight** -- combined pre-flight + diff + document HEAD output (v0.25.0)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf-dependent)
 <!-- /agent:pending -->

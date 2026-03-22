@@ -296,7 +296,7 @@ Happy to work around your schedule. Looking forward to it!
 
 Brian
 Corky's primary function is to be a git-native tool to enhance correspondence, social media, and audio/video media for knowledge capture & expression. Start with something like that. Rephrase for clarity and impact.
-### Re: Reframing corky bullet (HEAD)
+### Re: Reframing corky bullet
 
 Reframed around corky's actual identity — git-native correspondence, social media, and audio/video media for knowledge capture & expression:
 
@@ -319,7 +319,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:8ddfc832 -->
+<!-- agent:boundary:058661d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

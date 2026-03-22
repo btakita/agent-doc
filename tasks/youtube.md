@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Awaiting instructions for video: 2026-03-19 02-26-07.mp4
+Transcribing 2026-03-19 02-26-07.mp4 (63 min, CPU-only — no GPU detected)
 <!-- /agent:status -->
 
 ## Exchange
@@ -264,11 +264,26 @@ I see you added `2026-03-19 02-26-07.mp4` to pending. What would you like to do 
 - **Create a social post** — LinkedIn, Twitter, etc. about the video content
 
 What's the plan for this one?
-<!-- agent:boundary:9a736155-17db-4e51-8638-bd1e6ad2c863 -->
+Meta: I keep on repeating the same steps for each video.
+Transcribe using corky --gpu to a Closed Captioned format.
+### Re: Transcription Workflow (HEAD)
+
+**Meta note acknowledged** — you're repeating the same steps per video. We should streamline this into a single command or workflow.
+
+**Current run:** Transcribing `2026-03-19 02-26-07.mp4` to SRT (closed captions). However:
+
+- **No GPU detected** — `whisper_backend_init_gpu: no GPU found`. Corky doesn't have a `--gpu` flag; whisper.cpp auto-detects GPU but failed. Running on CPU only — this will be slow for 63 minutes of audio.
+- **Audio extraction needed** — corky couldn't read the MP4 directly ("Unknown sample rate"), so I extracted to WAV first via ffmpeg.
+
+**GPU issue:** Is your GPU set up for compute? (CUDA/ROCm?) If so, corky's whisper.cpp backend may need to be compiled with GPU support (`--features cuda` or `--features metal`).
+
+Transcription in progress — I'll update when it completes.
+<!-- agent:boundary:c2267775-a09a-434b-81ed-bdcfb8a235ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — awaiting instructions
+- [ ] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribing (CPU, no GPU)
+- [ ] Streamline video→CC workflow (user wants repeatable single-command flow)
 <!-- /agent:pending -->

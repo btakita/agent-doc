@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Corky rebuilt with CUDA. GPU build strategy for GH Actions discussed.
+GPU build pipeline implemented: transcribe-metal feature + release-gpu target + GH Actions matrix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -374,8 +374,36 @@ This produces both `corky-x86_64-unknown-linux-gnu.tar.gz` (CPU) and `corky-x86_
 2. Update Makefile with `release-gpu` target
 3. Update `release.yml` with GPU matrix entries
 
-?
-<!-- agent:boundary:63936efc-a48d-40ee-bd81-50629f10ce0d -->
+go
+### Re: Go — All Three Implemented (HEAD)
+
+**1. `transcribe-metal` feature added** to `Cargo.toml`:
+```toml
+transcribe-metal = ["transcribe", "whisper-rs/metal"]
+```
+
+**2. `release-gpu` Makefile target** — auto-detects platform:
+- macOS → builds with `transcribe-metal`
+- Linux with NVIDIA → builds with `transcribe-cuda`
+- No GPU → falls back to CPU-only
+
+**3. `release.yml` updated** with GPU matrix entries:
+- `x86_64-linux-cuda` — installs CUDA toolkit via `Jimver/cuda-toolkit@v0.2.18`, builds with `--features transcribe-cuda`
+- `aarch64-apple-darwin-metal` — builds with `--features transcribe-metal` on macOS runner
+
+Release artifacts will now include both CPU and GPU variants:
+- `corky-x86_64-unknown-linux-gnu.tar.gz` (CPU)
+- `corky-x86_64-unknown-linux-gnu-cuda.tar.gz` (GPU)
+- `corky-aarch64-apple-darwin.tar.gz` (CPU)
+- `corky-aarch64-apple-darwin-metal.tar.gz` (GPU)
+
+`make check` passes — clippy + all tests clean.
+
+Files changed:
+- `Cargo.toml` — added `transcribe-metal` feature
+- `Makefile` — added `release-gpu` target
+- `.github/workflows/release.yml` — added CUDA + Metal matrix entries with suffix-based artifact naming
+<!-- agent:boundary:d875fbd2-3265-478d-9759-29cfff8b5a42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -383,9 +411,9 @@ This produces both `corky-x86_64-unknown-linux-gnu.tar.gz` (CPU) and `corky-x86_
 <!-- agent:pending patch=replace -->
 - [x] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribed to SRT
 - [x] Rebuild corky with `transcribe-cuda` feature
-- [ ] Add `transcribe-metal` feature flag for macOS
-- [ ] Update Makefile with `release-gpu` target
-- [ ] Update `release.yml` with GPU matrix entries
+- [x] Add `transcribe-metal` feature flag for macOS
+- [x] Update Makefile with `release-gpu` target
+- [x] Update `release.yml` with GPU matrix entries
 - [ ] Fix MP4 direct decode bug ("Unknown sample rate")
 - [ ] Streamline video→CC workflow (repeatable single-command flow)
 <!-- /agent:pending -->

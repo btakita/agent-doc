@@ -125,15 +125,45 @@ Where is the resume?
 
 The resume PDF is at: `resume/BrianTakita-eci-solutions.pdf`
 
-Open it: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
+Open it [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
 
 Also — typo in the draft: "afternoo ET" → "afternoon ET" on the Wednesday line. Fix before sending.
 
 To rebuild if you edit the profile: `make -C resume PROFILE=eci-solutions`
-<!-- agent:boundary:3e6529ea -->
+
+> exactly the pattern ECI is building toward
+
+This needs to be supported.
+I could mention dashboard as interface with bi-directional real-time updates in the markdown using CRDT
+### Re: Strengthening the agent-doc bullet (HEAD)
+
+Good call. "Exactly the pattern ECI is building toward" is a claim without evidence. Revised bullet:
+
+> agent-doc is a production tool where AI agents write and maintain code through a dashboard-as-interface model — bi-directional real-time updates in markdown documents using CRDT, so human and agent edits merge without conflicts
+
+This makes it concrete: names the mechanism (CRDT, bi-directional updates) and shows how it maps to their problem (agents writing code while humans review/steer in real time).
+
+**Updated draft reply:**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a dashboard-as-interface model — bi-directional real-time updates in markdown using CRDT, so human and agent edits merge without conflicts
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+- I have experience modernizing legacy systems (Backbone→Svelte/React at SocialChorus, Rails migrations, .NET at NASPP)
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:971fd1cb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Fix "afternoo" typo in Wednesday availability
-- Review resume PDF and draft reply, then send via LinkedIn
+- Review updated draft reply and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

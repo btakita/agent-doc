@@ -473,7 +473,7 @@ We have multiple `agent:boundary` in this document. Is this because we were runn
 I see several uncommitted `agent:boundary` components. Why?
 I still see the stale `agent:boundary` components in this document.
 I don't see the response patch in this document.
-### Re: Stale boundaries + missing response patches (HEAD)
+### Re: Stale boundaries + missing response patches
 
 **Stale boundaries cleaned up.** Removed the 4 old full-UUID boundary markers (lines 402, 416, 433, 458) that accumulated before v0.25.4.
 

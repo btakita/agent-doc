@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.4 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.5 | **Tests:** 522 (168 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.13 (boundary cleanup + short IDs) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
+**Plugins:** JetBrains v0.2.14 (FFI reposition + boundary cleanup) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 9 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
 ## Architecture
@@ -717,14 +717,36 @@ Already active. The summary suffix is wired into all write paths and producing l
 The `:agent-doc` suffix comes from the document filename. No further code changes needed — this is working in the current build.
 
 Next: install plugin v0.2.14 to fix the full-UUID issue from the old plugin, then release v0.25.5.
-<!-- agent:boundary:2ae1edcc -->
+release
+### Re: Release v0.25.5 (HEAD)
+
+**agent-doc v0.25.5 released:**
+
+- crates.io ✓
+- PyPI ✓
+- GitHub Release ✓ (https://github.com/btakita/agent-doc/releases/tag/v0.25.5)
+- Binary installed ✓ (`~/.cargo/bin/agent-doc`)
+
+**What's in this release:**
+- FFI export: `agent_doc_reposition_boundary_to_end()` for plugin integration
+- Snapshot cleanup: `commit()` uses `remove_all_boundaries()` (removes ALL, not just last)
+- Working-tree cleanup: `clean_stale_boundaries_in_working_tree()` runs after each commit
+- Boundary IDs: 8-char hex with `:summary` suffix (filename stem) — `e656d639:agent-doc`
+- `new_boundary_id_with_summary()` wired into all write paths
+- SPEC.md: boundary invariants, cleanup scope, FFI export documented
+- editors/SPEC.md: new section 9 for plugin boundary management
+- JetBrains plugin v0.2.14: FFI-first reposition with Kotlin fallback
+- Removed dead `move_boundary_to_end_in()`, updated tests to use new function
+
+**522 tests pass.** 14 files changed, 216 insertions, 85 deletions.
+<!-- agent:boundary:62cb4b66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] agent-doc v0.25.5 released
 - [ ] **Install plugin v0.2.14** — IDEA → Plugins → Install from Disk
-- [ ] agent-doc v0.25.5 release
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

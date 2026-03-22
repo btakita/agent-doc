@@ -1106,7 +1106,7 @@ Save this to agent-doc's SPEC.md.
 When I switch files in the editor, the stash window received the focus. The commands on the stash window should happen in the background while the focus remains on window 0.
 
 Add tests and fix.
-### Re: Stash Focus Steal + SPEC.md (HEAD)
+### Re: Stash Focus Steal + SPEC.md
 
 **Diagnosis:** The stash operations DO use `-d` (don't-switch) flags:
 - `stash_pane()` → `join-pane -dv` (line 508 in tmux.rs)

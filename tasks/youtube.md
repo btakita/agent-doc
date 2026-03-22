@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All done. Video published, blog posted, comment added. Pin comment manually.
+All done. Exchange compacted. Pin comment manually via YouTube Studio.
 <!-- /agent:status -->
 
 ## Exchange
@@ -775,9 +775,6 @@ Still need to re-auth YouTube to post the comment. Run:
 ! cd mail && ../.bin/corky youtube auth
 ```
 Then approve in the browser.
-In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https://briantakita.me/posts/agent-resume-recruiter-workflow-live/
-
-Describe what the post is. A summary of this video and focus on interesting topics in the video.
 ### Re: YouTube Comment Posted
 
 **Done!** Comment posted on https://www.youtube.com/watch?v=IenfqO2vmAw
@@ -787,7 +784,61 @@ Describe what the post is. A summary of this video and focus on interesting topi
 **Content:** Blog post link + summary of 6 key topics (Agent Resume, Corky recruiter pipeline, parallel commands, CRDT ordering, FFI architecture, tmux debugging).
 
 **Pin it:** https://www.youtube.com/watch?v=IenfqO2vmAw&lc=UgwZg_yU3oJaAyV8neF4AaABAg — click the 3-dot menu on the comment → "Pin".
-<!-- agent:boundary:f945cda2-1609-4d03-af24-46227e983ce4 -->
+In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https://briantakita.me/posts/agent-resume-recruiter-workflow-live/
+
+Describe what the post is. A summary highlighting interesting topics in the video.
+
+compact agent:exchange
+**Session Summary — Full YouTube Pipeline + Corky Features**
+
+**Video Pipeline (2026-03-19 02-26-07.mp4):**
+- Light edit via ffmpeg silence detection: 47 segments cut, 63→60 min, 2.8GB→380MB
+- GPU transcription (CUDA): 2058 segments in 27.6s (130x realtime)
+- Published: https://www.youtube.com/watch?v=IenfqO2vmAw
+- Blog post: https://briantakita.me/posts/agent-resume-recruiter-workflow-live
+- Comment posted (ID: `UgwZg_yU3oJaAyV8neF4AaABAg`) — needs manual pinning
+
+**YouTube Comment Response (hVNmbmY4vgo):**
+- Responded to "gross vibe coding sub human" with Option A (20+ yrs experience, back-burner ideas, abstraction path, democratization)
+- LinkedIn post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
+- LinkedIn comment with video link: ID `7440760371260444672`
+
+**Corky Features Shipped:**
+- `linkedin comment` — v0.19.0
+- `youtube comment` — v0.20.0 (crates.io, PyPI, GitHub Release w/ CUDA binary)
+- `transcribe-cuda` + `transcribe-metal` feature flags
+- `release-gpu` Makefile target (auto-detects CUDA/Metal)
+- GH Actions GPU matrix (CUDA + Metal release binaries)
+- MP4 direct decode fix (symphonia→ffmpeg fallback)
+
+**Infrastructure:**
+- Removed Docker/Contabo deployment (Dockerfile, docker-compose files)
+- Compact header committed: `@rappstack/ui--server--blog@0.1.2`
+- briantakita.me deployed to Cloudflare Pages
+
+**YouTube Pinning Research:**
+- Data API v3 has no pin endpoint
+- InnerTube `perform_comment_action` broke in 2025 (needs `clickTrackingParams`)
+- Manual pin via `&lc=` deep link is the current path
+- Chrome Extension for YouTube Studio automation deferred to agent-doc
+
+---
+
+In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https://briantakita.me/posts/agent-resume-recruiter-workflow-live/
+
+Describe what the post is. A summary highlighting interesting topics in the video.
+
+### Re: Duplicate Comment Request (HEAD)
+
+This was already done earlier in this session. The comment is live:
+
+- **Video:** https://www.youtube.com/watch?v=IenfqO2vmAw
+- **Comment ID:** `UgwZg_yU3oJaAyV8neF4AaABAg`
+- **Direct link:** https://www.youtube.com/watch?v=IenfqO2vmAw&lc=UgwZg_yU3oJaAyV8neF4AaABAg
+- **Content:** Blog post link + summary of 6 key topics (Agent Resume, Corky recruiter pipeline, parallel commands, CRDT ordering, FFI architecture, tmux debugging)
+
+To pin it, click the 3-dot menu on the comment → "Pin".
+<!-- agent:boundary:98a547e0-8f9a-478a-90ea-4c76bc4ab0c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

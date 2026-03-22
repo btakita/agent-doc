@@ -187,7 +187,7 @@ Brian
 Also mention Corky for the correspondence.
 He is probably looking for something like OpenClaw for the enterprise.
 agent-doc, corky, and a well-defined domain language system (existence-lang) bring human-agent alignment to agent orchestration.
-### Re: Adding corky + existence-lang to the pitch (HEAD)
+### Re: Adding corky + existence-lang to the pitch
 
 Good instinct — the three tools together tell the story of a complete agentic infrastructure stack, not just a single tool. Revised to add a bullet about corky and the domain language layer:
 
@@ -216,7 +216,7 @@ Brian
 - corky shows agents handling real-world communication, not just code — relevant for ERP where data flows across departments
 - existence-lang as "domain language layer" maps directly to ERP modernization: you need shared semantics when agents touch 20-year-old systems
 - Keeps Presence AI as the production credibility anchor
-<!-- agent:boundary:00fff133 -->
+<!-- agent:boundary:88d7e6ea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

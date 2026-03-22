@@ -470,50 +470,54 @@ release
 
 521 tests pass.
 We have multiple `agent:boundary` in this document. Is this because we were running an old binary?
-### Re: Multiple `agent:boundary` markers
+I see several uncommitted `agent:boundary` components. Why?
+### Re: Uncommitted `agent:boundary` components (HEAD)
 
-Yes — this was caused by the **old binary (pre-v0.25.4)**. The JetBrains plugin's `PatchWatcher` was appending a new boundary marker on each patch cycle without removing previous ones, causing accumulation.
+There are **5 stale boundary markers** left over from before the v0.25.4 fix. They accumulated because the old JetBrains plugin added a new one each cycle without removing previous ones.
 
-**Fixed in v0.25.4** (released this session):
-- **JetBrains plugin**: Now strips ALL existing boundary markers before inserting a fresh one
-- **Short IDs**: Boundary markers switched from full UUIDs (`aef3b25d-dd99-46e7-9b95-086c9817c0b7`) to 8-char (`aef3b25d`)
-- **Rust side**: `boundary.rs` module added with configurable ID length (default 8)
+**Why uncommitted:** Boundary markers are transient UI elements — `agent-doc commit` deliberately excludes them from the snapshot. They live only in the working tree, which is why your editor shows them with green gutter (uncommitted).
 
-The 9 occurrences currently in this document are a mix of:
-- **Active boundary** (1): The current marker placed by the plugin
-- **Historical text** (8): References in the architecture/discussion sections from when we debugged and fixed the issue
+**Current state:**
+- Line 402: `cleanup-00000000...` (from manual cleanup attempt)
+- Line 416: `d31ee92f-...` (old full UUID)
+- Line 433: `79cdec69-...` (old full UUID)
+- Line 458: `2fce24d8-...` (old full UUID)
+- Line 477: `093d2976-...` (current active boundary)
 
-The stale markers won't accumulate further with v0.25.4. No cleanup needed — the plugin handles it automatically now.
-<!-- agent:boundary:fa91a418 -->
+Only the last one (line 477) is the real active boundary. The other 4 are stale artifacts. With v0.25.4, the plugin now strips all existing boundaries before inserting a fresh one — but it only cleans up markers *near the insertion point*. These older ones are scattered throughout the document.
+
+**Fix:** I can remove the 4 stale boundary markers (lines 402, 416, 433, 458) right now, leaving only the active one. Want me to clean them up?
+<!-- agent:boundary:0b37f682 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
-- JetBrains plugin v0.2.13 (boundary dedup + short IDs)
-- VS Code plugin v0.2.3
-- Next: consider pruning historical boundary references from this document if they add noise
+- [ ] Clean up 4 stale boundary markers in this document (awaiting approval)
+- [ ] agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
+- [ ] JetBrains plugin v0.2.13 (boundary dedup + short IDs)
+- [ ] VS Code plugin v0.2.3
+- [ ] Next: consider pruning historical boundary references from this document if they add noise
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
-- Install script (`curl | sh`) for binary download
-- Homebrew formula (`brew tap btakita/agent-doc`)
+- [ ] Install script (`curl | sh`) for binary download
+- [ ] Homebrew formula (`brew tap btakita/agent-doc`)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
-- Support `/btw` for instant processing
-  - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
-- Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
-- Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
-- Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
-- Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))
-- Multi-agent backends — codex, gemini ([#20](https://github.com/btakita/agent-doc/issues/20))
-- `agent-doc deep` — parallel subagent fan-out with worktrees ([#21](https://github.com/btakita/agent-doc/issues/21))
-- `agent-doc status` — Ratatui TUI dashboard ([#22](https://github.com/btakita/agent-doc/issues/22))
-- Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
-- Docker sandboxing (`--sandboxed`) ([#24](https://github.com/btakita/agent-doc/issues/24))
-- `agent/api.rs` — direct HTTP API backend ([#25](https://github.com/btakita/agent-doc/issues/25))
-- `agent-doc init --dashboard` ([#26](https://github.com/btakita/agent-doc/issues/26))
-- Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
-- Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
-- `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
+- [ ] Support `/btw` for instant processing
+  - [ ] This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
+- [ ] Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
+- [ ] Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
+- [ ] Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
+- [ ] Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))
+- [ ] Multi-agent backends — codex, gemini ([#20](https://github.com/btakita/agent-doc/issues/20))
+- [ ] `agent-doc deep` — parallel subagent fan-out with worktrees ([#21](https://github.com/btakita/agent-doc/issues/21))
+- [ ] `agent-doc status` — Ratatui TUI dashboard ([#22](https://github.com/btakita/agent-doc/issues/22))
+- [ ] Sub-profiles for submodule workflows ([#23](https://github.com/btakita/agent-doc/issues/23))
+- [ ] Docker sandboxing (`--sandboxed`) ([#24](https://github.com/btakita/agent-doc/issues/24))
+- [ ] `agent/api.rs` — direct HTTP API backend ([#25](https://github.com/btakita/agent-doc/issues/25))
+- [ ] `agent-doc init --dashboard` ([#26](https://github.com/btakita/agent-doc/issues/26))
+- [ ] Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
+- [ ] Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
+- [ ] `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
 <!-- /agent:todo -->

@@ -777,7 +777,7 @@ Would it make sense to have a "virtual plugin" if no editor plugin is currently 
 The one cosmetic edge case: if the boundary is mid-exchange in the working tree and the user opens the raw markdown, they'd see the HTML comment between prompt and response. But it's invisible in rendered markdown and harmless functionally.
 
 release
-### Re: Release v0.25.0 (HEAD)
+### Re: Release v0.25.0
 
 **Released.** 23 files changed, +1144/-364 lines.
 

@@ -696,7 +696,7 @@ continue
 - [ ] **SKILL update for preflight** -- use preflight instead of separate recover/commit/diff/read steps
 
 audit docs
-### Re: SKILL Updated for Preflight (HEAD)
+### Re: SKILL Updated for Preflight
 
 **SKILL.md updated.** Steps 0, 0b, 1, 2 collapsed into a single `agent-doc preflight` call.
 

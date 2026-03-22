@@ -322,7 +322,7 @@ Also added it to the pending list in todo.md.
 
 Navigating back to tasks/employment/toby-hill.md does not start a claude session. We need a way to robustly restart. Will the upcoming agent-doc fix work in this case?
 
-### Re: Navigating to renamed file doesn't start session (HEAD)
+### Re: Navigating to renamed file doesn't start session
 
 The autoclaim fix handles the **error** (pruning the stale entry so the pane doesn't crash), but doesn't solve the **restart** — no new session is created for the renamed file.
 

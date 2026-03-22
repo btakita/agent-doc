@@ -361,16 +361,34 @@ Neither option uses the shared object over FFI. Both `sync` and `route` are CLI 
 
 **Implementation:** In `sync.rs`, after arranging panes, check if any visible `.md` file with agent-doc frontmatter has no session entry. If so, call `route::auto_start()` for it. This is a ~10-line addition.
 
+Implement
+
 ### Re: Move queue to `agent:todo`
 
 Noted. Will move the task queue implementation into the `agent:todo` component model when you're ready. The `tasks/todo/todo.md` content stays as-is for now as a reference.
-<!-- agent:boundary:e42c1a3d-ba8c-4190-ab62-3d2fa9480bfb -->
+
+### Re: Implement sync auto-start (HEAD)
+
+**Sync already has auto-start logic** (lines 56-156 in `sync.rs`). It checks each file, looks up the registry by session UUID, and if no alive pane exists, calls `route::auto_start()`.
+
+**Why it wasn't working for renames:** The old pane is still alive (showing `Error: file not found` but the shell process is still running). So `has_alive_pane` returns `true`, and sync skips auto-start.
+
+**Fix implemented:** In the sync pre-start loop, when a pane is alive but the registered file no longer exists (and differs from the current file), the stale pane is killed and the registry is updated with the new path. Then auto-start proceeds normally.
+
+**Changes:**
+- `src/sync.rs` — detect stale-file panes in the alive-pane check: if `entry.file != current_file && !registered_file.exists()`, kill the pane and fall through to auto-start
+- `src/sessions.rs` — added `lookup_entry()` to get the full `SessionEntry` (not just pane ID)
+
+Binary installed. 521 tests pass.
+
+To test: rename a claimed file in the editor, then switch tabs to trigger sync. The old pane should be killed and a new session should start for the renamed file.
+<!-- agent:boundary:f597d5b2-8905-4787-81b1-b9c6cbee98e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Sync auto-starts unclaimed files** — `sync` calls `route` for visible `.md` files with agent-doc frontmatter but no session (Option 1)
+- [x] **Sync: kill dead-file panes** — when pane is alive but registered file is gone, kill and auto-start
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

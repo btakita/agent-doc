@@ -1071,7 +1071,7 @@ README.md and AGENTS.md had no content about pull behavior — staleness was mti
 
 Committed (`0cd23c7`) and pushed.
 release corky
-### Released v0.19.3 — Metal GPU + Audio Resilience (HEAD)
+### Released v0.19.3 — Metal GPU + Audio Resilience
 
 **Changes committed (`5c98c26`):**
 - `transcribe-metal` feature for macOS Metal GPU acceleration

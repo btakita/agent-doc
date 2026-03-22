@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Blog post deployed to Cloudflare Pages. Docker cleanup complete.
+Corky v0.20.0 released (youtube comment). Awaiting YouTube re-auth to post comment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -719,7 +719,6 @@ The YouTube Data API v3 has **no endpoint for pinning comments**. The only known
 Does YouTube work with any TUI browsers? Would https://github.com/Siriusmart/youtube-tui be useful for this?
 
 **Recommendation:** Ship `youtube comment` as-is. If pinning volume increases, revisit InnerTube approach by capturing current request format from DevTools. For now, the `&lc=` deep link makes manual pinning trivial.
-release
 ### Re: Inline Questions + Release
 
 **Q: Would implementing `clickTrackingParams` on top of the Go prototype work?**
@@ -755,7 +754,29 @@ No TUI browser supports YouTube Studio's comment moderation features. The YouTub
 ---
 
 **Release:** Committed `youtube comment` feature (commit `28391bf`). Current version: `0.19.3`. New feature → suggest `0.20.0`. What version do you want?
-<!-- agent:boundary:fbbf77f7-6eb7-44b2-aab5-53cf89e485e9 -->
+Since `corky youtube comment` is a new feature, `0.20.0`? Thoughts?
+release
+### Re: Release
+
+**Corky v0.20.0 released!**
+
+- `make check` — all tests pass
+- Version bumped: `Cargo.toml` + `pyproject.toml` → 0.20.0
+- `VERSIONS.md` updated with changelog
+- Committed, tagged `v0.20.0`, pushed
+- Published to crates.io
+- Published to PyPI
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.20.0
+- CUDA binary uploaded to release
+- `make release-gpu` — GPU binary built and installed locally
+- Parent submodule pointer updated
+
+Still need to re-auth YouTube to post the comment. Run:
+```
+! cd mail && ../.bin/corky youtube auth
+```
+Then approve in the browser.
+<!-- agent:boundary:54a92d8b-32af-4b6b-9d55-b3b1598fb8cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -776,7 +797,7 @@ No TUI browser supports YouTube Studio's comment moderation features. The YouTub
 - [x] Deploy briantakita.me to Cloudflare Pages
 - [x] Remove Docker/Contabo deployment infrastructure
 - [x] Implement `corky youtube comment` command
-- [ ] Release corky (version TBD — suggest 0.20.0)
+- [x] Release corky v0.20.0
 - [ ] Re-auth YouTube token + post comment with blog link
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

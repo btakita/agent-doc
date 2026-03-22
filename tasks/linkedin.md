@@ -289,8 +289,45 @@ Updated the bookmarklet to extract the `datetime` attribute from `<time>` elemen
 Updated bookmarklet (replace the one in ## LinkedIn Conversation Export Bookmarklet):
 
 ```
-javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';let time='';if(timeEl){const te=timeEl.querySelector('time[datetime]');if(te){const dt=new Date(te.getAttribute('datetime'));time=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0')}else{time=timeEl.textContent.trim()}}const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\n'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\n').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
+javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():'Unknown';let time='';if(timeEl){const te=timeEl.querySelector('time[datetime]');if(te){const dt=new Date(te.getAttribute('datetime'));time=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0')}else{time=timeEl.textContent.trim()}}const text=bodyEl.innerText.trim();if(text)msgs.push('['+time+'] '+name+':\
+'+text)});const headerEl=document.querySelector('.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title');let contactName='Unknown';if(headerEl){const lines=headerEl.textContent.split('\
+').map(s=>s.trim()).filter(Boolean);contactName=lines[0]||'Unknown'}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().replace(/^-|-$/g,'');const d=new Date();const ymd=''+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');const content='# LinkedIn Conversation with '+contactName+'\
+Exported: '+d.toISOString()+'\
+\
+'+msgs.join('\
+\
+');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()
 ```
 
 Copy this into the static bookmarklet section to replace the old one. The exchange component can't edit static sections directly.
+
+Should we post the following today: Sunday 15:00:00 Eastern or wait until tomorrow.
+
+**Video Pipeline (2026-03-19 02-26-07.mp4):**
+- Light edit via ffmpeg silence detection: 47 segments cut, 63→60 min, 2.8GB→380MB
+- GPU transcription (CUDA): 2058 segments in 27.6s (130x realtime)
+- Published: https://www.youtube.com/watch?v=IenfqO2vmAw
+- Blog post: https://briantakita.me/posts/agent-resume-recruiter-workflow-live
+- Comment posted (ID: `UgwZg_yU3oJaAyV8neF4AaABAg`) — needs manual pinning
+
+**YouTube Comment Response (hVNmbmY4vgo):**
+- Responded to "gross vibe coding sub human" with Option A (20+ yrs experience, back-burner ideas, abstraction path, democratization)
+- LinkedIn post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
+- LinkedIn comment with video link: ID `7440760371260444672`
+
+**Re: posting timing**
+
+Per your own decisions in this doc: **Best post times: Tue-Thu, 8-10 AM ET; avoid Mon/Fri and evenings.**
+
+**Wait until Tuesday morning, 8-9 AM ET.**
+
+- Sunday afternoon = low engagement (weekend mode, not professional scrolling)
+- Monday = in your "avoid" list
+- Tuesday 8-9 AM ET = your sweet spot
+- Content is evergreen — 2 days won't hurt
+
+If you need to post sooner: Monday 8 AM ET > Sunday 3 PM. But Tuesday is the play.
+
+Video pipeline and YouTube comment work noted — good documentation for the task file.
+<!-- agent:boundary:45949b1d-bb7b-43c9-b29b-998597768781 -->
 <!-- /agent:exchange -->

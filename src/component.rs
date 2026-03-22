@@ -132,13 +132,16 @@ impl Component {
             };
             let line_end = line_end.min(self.close_start);
 
-            // Replace the boundary marker line with the response content.
-            // The boundary is consumed — the skill workflow should call
-            // `agent-doc boundary` again after each checkpoint write to
-            // re-insert it at the end of the exchange.
-            let mut result = String::with_capacity(doc.len() + content.len());
+            // Replace the boundary marker with response content + new boundary.
+            // The boundary is consumed and re-inserted, matching the binary's
+            // post-patch behavior in apply_patches_with_overrides().
+            let new_id = uuid::Uuid::new_v4();
+            let new_marker = format!("<!-- agent:boundary:{} -->", new_id);
+            let mut result = String::with_capacity(doc.len() + content.len() + new_marker.len());
             result.push_str(&doc[..line_start]);
             result.push_str(content.trim_end());
+            result.push('\n');
+            result.push_str(&new_marker);
             result.push('\n');
             result.push_str(&doc[line_end..]);
             return result;
@@ -890,7 +893,8 @@ actual content
 
         assert!(result.contains("### Re: Answer"));
         assert!(result.contains("user prompt"));
-        // Marker should be consumed (replaced by response)
-        assert!(!result.contains("agent:boundary:"));
+        // Original marker should be consumed, but a NEW boundary re-inserted
+        assert!(!result.contains(&format!("agent:boundary:{boundary_id}")));
+        assert!(result.contains("agent:boundary:"));
     }
 }

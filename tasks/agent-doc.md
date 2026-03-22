@@ -860,21 +860,34 @@ release
 **Prompt ordering fix confirmed working** — your "Add to SPEC.md / audit docs / release" prompt appeared correctly above this response, not below it. The commit-time IPC reposition is doing its job.
 
 **Todo reorg noted** — Install script and Homebrew formula moved to top of todo list.
-<!-- agent:boundary:772c6ff5-bbb6-4d91-9829-1037aa30e8db -->
+Implement:
+- [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
+### Re: Fixed `skill install` Version Comparison Bug (HEAD)
+
+**Root cause:** `skill install` resolved `.claude/skills/agent-doc/SKILL.md` relative to CWD. When CWD was the submodule (`src/agent-doc/`), it found/wrote a *different* SKILL.md than the one Claude Code reads from the project root.
+
+**Fix:** Added `resolve_root()` in `skill.rs` — uses `git rev-parse --show-superproject-working-tree` to find the superproject root when running from a submodule. Falls back to `--show-toplevel`, then CWD.
+
+Now `install()`, `install_and_check_updated()`, and `check()` all resolve to the correct project root.
+
+**Verified:**
+- Made superproject SKILL stale → `skill install` detected and overwrote it
+- Second run → "Skill already up to date (v0.25.1)"
+- Path in output: `/home/brian/work/btakita/agent-loop/.claude/skills/agent-doc/SKILL.md` (correct)
+
+519 tests pass. Binary installed.
+<!-- agent:boundary:07b7e381-022e-416c-82a7-63db31ed08b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **v0.25.1 release** -- IPC boundary reposition from commit, SPEC update
-- [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
+- [x] **Fix `skill install` version comparison bug** -- resolve to superproject root, not CWD
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 - Support `/btw` for instant processing
   - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

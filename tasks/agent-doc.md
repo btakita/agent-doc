@@ -729,7 +729,7 @@ Ready to implement when you say go.
 go
 audit docs
 ensure that README and SPEC is up to date
-### Re: Boundary Fix + Doc Audit (HEAD)
+### Re: Boundary Fix + Doc Audit
 
 **Fix implemented:** Removed working tree write from `reposition_boundary_in_both()` → renamed to `reposition_boundary_in_snapshot()`. Only the snapshot is updated during commit. The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag. This eliminates keystroke loss when typing during commit.
 

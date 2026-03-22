@@ -868,19 +868,54 @@ I also compacted the claude session just in case we had a SKILL.md change
 
 If none these would have fixed the issue, diagnose please.
 
+I tried running the following prompt the previous 2 agent-doc runs on this file. But I saw `● No changes detected. The document is up to date — nothing to respond to.` in the cli.
+
 My previous prompt was placed below the response patch & the `agent:boundary`. Why? I now installed the new plugin. Will my prompt be placed above the response patch.
 My previous prompt was committed above the response patch. However the uncommited state moved the prompt below the response patch but above the `agent:boundry`. Why? Please add tests. Fix
-<!-- agent:boundary:883ce812-409f-453a-8cb4-274bddcdfa0a -->
+### Re: "No Changes Detected" Bug + Prompt Reordering Fix (HEAD)
+
+**Root cause found and fixed — TWO bugs in `commit()`:**
+
+**Bug 1: Working tree overwritten with snapshot content.**
+After committing, `commit()` stripped HEAD markers from the snapshot and wrote the SNAPSHOT (agent-only content) to the WORKING TREE file. This destroyed any uncommitted user edits (prompts typed since last commit). Next diff: snapshot = file = no user edits → "no changes detected."
+
+**Fix:** Strip HEAD markers from the working tree file independently instead of overwriting with snapshot content. User edits are now preserved:
+```rust
+// Before (BUG): overwrote working tree with snapshot
+std::fs::write(file, &clean_snap)
+
+// After (FIX): strip HEAD markers from working tree in-place
+let wt_content = std::fs::read_to_string(file)?;
+let clean_wt = strip_head_markers(&wt_content);
+std::fs::write(file, &clean_wt)
+```
+
+**Bug 2: Boundary reposition leaked user edits into snapshot.**
+`reposition_boundary_to_end()` read the working tree (with user edits), moved the boundary, and wrote the SAME content to both file AND snapshot. This meant user edits ended up in the snapshot → next diff showed nothing.
+
+**Fix:** Process file and snapshot independently. New helper `move_boundary_to_end_in()` is a pure function that operates on content strings. The reposition function now:
+1. Reads + repositions working tree (preserves user edits)
+2. Reads + repositions snapshot separately (no user edits)
+
+**4 new tests added:**
+- `move_boundary_to_end_basic` — boundary moves from middle to end
+- `move_boundary_already_at_end` — returns None (no-op)
+- `move_boundary_no_exchange` — returns None for non-exchange docs
+- `move_boundary_preserves_user_edits` — user text survives reposition
+
+**Binary installed.** Both fixes are active. Your prompts will no longer be eaten by commit.
+<!-- agent:boundary:c123cf1c-7878-42ca-88fb-5748fdb25a70 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: diff_skill->diff_cmd -->
+- [x] **Commit preserves user edits** — fixed working tree overwrite + snapshot leak bugs
+- [x] **Boundary repositioning on commit** — `reposition_boundary_to_end()` in git.rs
 - [x] **JB plugin v0.2.12 install** — caret removal + end-of-exchange fallback
 - [x] **Remove caret fallback** — replaced with end-of-exchange append (v0.2.12)
 - [x] **IPC boundary ensure** — `ensure_boundary_on_disk()` in write.rs
-- [x] **Boundary repositioning on commit** — `reposition_boundary_to_end()` in git.rs
 - [x] Boundary snowball fix (`ce84701`)
 - [x] Boundary re-insertion in all write paths (`3a08011`)
 - [x] `remove_all_boundaries()` code-block awareness

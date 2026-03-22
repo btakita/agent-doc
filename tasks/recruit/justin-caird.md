@@ -326,7 +326,7 @@ Good addition — specifying the multimodal outputs (live video avatars, audio a
 Draft v7 is now final with this edit incorporated.
 Does the resume need to be updated to support the message?
 Any gaps in the resume?
-### Re: Resume gaps analysis (HEAD)
+### Re: Resume gaps analysis
 
 Checked the resume against the draft reply. Two gaps:
 
@@ -348,7 +348,7 @@ The ECI profile doesn't bold "diarized transcription", "social media posting", o
 - Legacy modernization (SocialChorus, CrystalCommerce, NASPP — all included)
 
 **Recommendation:** Update the resume to close gaps 1-3, then rebuild the PDF. Want me to proceed?
-<!-- agent:boundary:b9954fc0 -->
+<!-- agent:boundary:76746956 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

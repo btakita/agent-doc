@@ -311,7 +311,7 @@ This naturally extends agent-doc's existing parallel fan-out model but adds pers
 transfer this idea into a tasks/todo document
 We need a robust way to recover f
 
-### Re: Transfer task queue idea to todo (HEAD)
+### Re: Transfer task queue idea to todo
 
 Done. Added the task queue + interactive documents concept to `tasks/todo/todo.md` under a new "Ideas" section. Includes:
 - Design overview (queue document, task documents, orchestrator)

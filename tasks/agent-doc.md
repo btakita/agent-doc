@@ -1229,7 +1229,7 @@ If it still fails, the next step is to increase the stash window to 500 rows or 
 
 Binary installed. 508 tests pass.
 Should the stash logic be placed in tmux-router?
-### Re: Stash in tmux-router? (HEAD)
+### Re: Stash in tmux-router?
 
 **It already is.** The stash logic lives in `tmux-router/src/tmux.rs`:
 - `stash_pane()` — move pane to stash window

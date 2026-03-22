@@ -1192,7 +1192,7 @@ Three bugs fixed:
 - CI release workflow builds CUDA + Metal binary variants alongside CPU
 - Video formats go straight to ffmpeg; Symphonia failures fall back to ffmpeg
 - SPEC.md §5.30, README.md updated. Published all targets.
-### Exchange Cleanup (HEAD)
+### Exchange Cleanup
 
 Removed duplicate compacted summaries and verbose v0.19.3 release block. The exchange now has one clean copy of the v0.15.3–v0.19.3 history.
 <!-- agent:boundary:54bbd49e-67e6-4dde-a1f9-4fcb309be1bb -->

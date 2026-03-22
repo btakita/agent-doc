@@ -308,7 +308,19 @@ The idea: combine a centralized task queue (like ClawTeam's "board") with agent-
 **Simplest MVP:** Use the existing `&lt;!-- agent:pending --&gt;` component as a task queue. An orchestrator document lists all tasks. A watch-mode agent picks up unassigned tasks, creates panes, and claims documents. No new binary features needed — just a SKILL.md workflow for the orchestrator.
 
 This naturally extends agent-doc's existing parallel fan-out model but adds persistent, visible coordination through documents.
-<!-- agent:boundary:550a2f4c-ffd6-4d27-acf8-700d2da6d645 -->
+transfer this idea into a tasks/todo document
+We need a robust way to recover f
+
+### Re: Transfer task queue idea to todo (HEAD)
+
+Done. Added the task queue + interactive documents concept to `tasks/todo/todo.md` under a new "Ideas" section. Includes:
+- Design overview (queue document, task documents, orchestrator)
+- What already exists vs. what's missing
+- MVP approach using `&lt;!-- agent:pending --&gt;` as task queue
+- ClawTeam reference for inspiration
+
+Also added it to the pending list in todo.md.
+<!-- agent:boundary:096abab1-10ac-400b-9732-7de716c9d319 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

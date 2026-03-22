@@ -324,9 +324,35 @@ Brian
 Good addition — specifying the multimodal outputs (live video avatars, audio avatars, text avatars, image generation) makes the pipeline concrete rather than abstract. Shows breadth of production AI experience.
 
 Draft v7 is now final with this edit incorporated.
-<!-- agent:boundary:5b6cbdc9 -->
+Does the resume need to be updated to support the message?
+Any gaps in the resume?
+### Re: Resume gaps analysis (HEAD)
+
+Checked the resume against the draft reply. Two gaps:
+
+**1. existence-lang not named in resume**
+The resume mentions "philosophy" and "domain ontology system (extensible)" but never says "existence-lang". The draft reply uses "existence-lang" — Justin/CTO won't find that term in the resume. Options:
+- (a) Add existence-lang to the resume's Open Source section
+- (b) Use "domain ontology" in the reply instead of "existence-lang"
+- (c) Both
+
+**2. Presence AI — "avatars" and "image generation" not in resume**
+The resume says "text, audio, and video lip-sync on NVIDIA H100 GPUs via WebRTC". The draft reply says "live video avatars, audio avatars, text avatars, and image generation." The resume doesn't use "avatar" or mention image generation. Should update the resume to match.
+
+**3. Highlight phrases could be stronger**
+The ECI profile doesn't bold "diarized transcription", "social media posting", or "image generation". Adding these to the profile's highlight phrases would make the resume visually reinforce the reply's claims.
+
+**No gaps on:**
+- corky (diarized transcription, social media, correspondence — all covered)
+- agent-doc (CRDT, streaming merge, document-as-interface — all covered)
+- Legacy modernization (SocialChorus, CrystalCommerce, NASPP — all included)
+
+**Recommendation:** Update the resume to close gaps 1-3, then rebuild the PDF. Want me to proceed?
+<!-- agent:boundary:b9954fc0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply (v7) and resume PDF, then send via LinkedIn
+- Update resume to close gaps (existence-lang, avatars, highlight phrases)
+- Rebuild PDF: `make -C resume PROFILE=eci-solutions`
+- Review final draft reply and resume, then send via LinkedIn
 <!-- /agent:pending -->

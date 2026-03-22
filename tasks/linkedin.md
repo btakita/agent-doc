@@ -493,5 +493,17 @@ then youtube auth
 3. Then run `corky youtube edit mail/social/20260322-015438-youtube.md`
 
 The YouTube draft file is already updated with the new title and description — just needs the auth to push the edit.
-<!-- agent:boundary:9b05a907-3f86-4c43-8dfb-642436c707e5 -->
+
+I authed on my own.
+Edit the video
+
+**Re: Edit YouTube video**
+
+Done. YouTube video updated: https://www.youtube.com/watch?v=IenfqO2vmAw
+
+All three platforms now have consistent "job search workflow" wording:
+- **LinkedIn** — Updated
+- **YouTube** — Updated
+- **Blog post** — Updated locally (needs rebuild + deploy)
+<!-- agent:boundary:3debf962-fe0b-453f-9971-5f4763410257 -->
 <!-- /agent:exchange -->

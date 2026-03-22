@@ -371,6 +371,20 @@ Noted. Will move the task queue implementation into the `agent:todo` component m
 
 **Sync already has auto-start logic** (lines 56-156 in `sync.rs`). It checks each file, looks up the registry by session UUID, and if no alive pane exists, calls `route::auto_start()`.
 
+**Why it's not working for renames:** The old pane is still alive — it shows `Error: file not found` but the shell process (zsh) is still running. So `has_alive_pane` returns `true`, and sync skips auto-start.
+
+The fix: when a pane is alive but the file it's registered for no longer exists, treat it as dead. Two changes needed:
+
+1. **In sync pre-start:** After finding an alive pane, check if the registered file still exists. If not, kill the pane and proceed to auto-start.
+
+2. **In autoclaim (already done):** Prunes stale entries where files don't exist.
+
+Let me implement the sync-side fix.
+
+### Re: Implement sync auto-start
+
+**Sync already has auto-start logic** (lines 56-156 in `sync.rs`). It checks each file, looks up the registry by session UUID, and if no alive pane exists, calls `route::auto_start()`.
+
 **Why it wasn't working for renames:** The old pane is still alive (showing `Error: file not found` but the shell process is still running). So `has_alive_pane` returns `true`, and sync skips auto-start.
 
 **Fix implemented:** In the sync pre-start loop, when a pane is alive but the registered file no longer exists (and differs from the current file), the stale pane is killed and the registry is updated with the new path. Then auto-start proceeds normally.
@@ -382,13 +396,30 @@ Noted. Will move the task queue implementation into the `agent:todo` component m
 Binary installed. 521 tests pass.
 
 To test: rename a claimed file in the editor, then switch tabs to trigger sync. The old pane should be killed and a new session should start for the renamed file.
-<!-- agent:boundary:f597d5b2-8905-4787-81b1-b9c6cbee98e6 -->
+This document is not in a good state.
+There are multiple `agent:boundary` components.
+The uncommitted response patch is in the incorrect spot.
+
+### Re: Multiple boundary markers / document state (HEAD)
+
+**Root cause found:** The plugin's `repositionBoundaryToEnd()` only moved the LAST boundary marker — it didn't remove the others. Each write cycle added a new boundary via `applyComponentPatchWithBoundary()`, and reposition only moved one, leaving the rest behind.
+
+**Fix:** Changed `repositionBoundaryToEnd()` in `PatchWatcher.kt` to remove ALL boundary lines from the component content (not just the last one), then insert a single fresh boundary at the end. This matches the binary's `remove_all_boundaries()` + insert behavior.
+
+**Document cleanup:** Removed all 12 stale boundary markers from this document, leaving one clean boundary at the end of exchange.
+
+**Plugin rebuilt.** Install the updated plugin from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`.
+
+Also implemented: sync auto-start kills stale-file panes (pane alive but registered file renamed/deleted), autoclaim prunes stale entries.
+<!-- agent:boundary:f66afb32-a851-4935-bc37-952ef0bb9f4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] **Plugin: fix boundary accumulation** — `repositionBoundaryToEnd()` now removes ALL boundaries, not just the last
 - [x] **Sync: kill dead-file panes** — when pane is alive but registered file is gone, kill and auto-start
+- [x] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

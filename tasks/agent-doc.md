@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.0 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
-**Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
+**Version:** v0.25.1 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + checkpoint boundary
+**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
 ## Architecture
@@ -840,22 +840,43 @@ Option 3
 **Timing:** The IPC poll uses a short 500ms timeout with 50ms poll interval (vs 2s for content writes). This is non-critical — if the plugin doesn't respond in time, the boundary just stays where it is until the next write.
 
 Binary rebuilt and installed. Test this by typing a prompt after a commit — it should stay above the next response.
-<!-- agent:boundary:8e7a72ff-e115-47fe-8187-5e4e26978265 -->
+Add to SPEC.md
+audit docs
+release
+### Re: SPEC Update + Release v0.25.1 (HEAD)
+
+**SPEC.md updated.** Added boundary reposition lifecycle section under the commit write contract — documents the two IPC signals (write-time and commit-time) and the fallback when no plugin is active.
+
+**v0.25.1 released** to all three platforms:
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| PyPI | Published |
+| GitHub Release | [v0.25.1](https://github.com/btakita/agent-doc/releases/tag/v0.25.1) |
+| Binary | `~/.cargo/bin/agent-doc` v0.25.1 |
+| SKILL | v0.25.1 installed |
+
+**Prompt ordering fix confirmed working** — your "Add to SPEC.md / audit docs / release" prompt appeared correctly above this response, not below it. The commit-time IPC reposition is doing its job.
+
+**Todo reorg noted** — Install script and Homebrew formula moved to top of todo list.
+<!-- agent:boundary:772c6ff5-bbb6-4d91-9829-1037aa30e8db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Fix prompt ordering (Option 3)** -- IPC reposition from commit, no disk write
+- [x] **v0.25.1 release** -- IPC boundary reposition from commit, SPEC update
 - [ ] **Fix `skill install` version comparison bug** -- reports "up to date" when installed copy is stale
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
-- Support `/btw` for instant processing
-  - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
+- Support `/btw` for instant processing
+  - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))

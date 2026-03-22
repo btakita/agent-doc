@@ -360,7 +360,7 @@ Is the client id going to work for every case? Is this fully deterministic?
 Implement:
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-### Re: Client ID Determinism (HEAD)
+### Re: Client ID Determinism
 
 **Yes, it's fully deterministic.** Here's why:
 

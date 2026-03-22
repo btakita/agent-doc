@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Video cut complete: 3 ranges removed, output at 2026-03-22 10-27-48-edited.mp4 (403 MB).
+Second cut complete: 40:29.6-41:30 removed from edited video. Output: edited2.mp4 (1:29:26, 397 MB).
 <!-- /agent:status -->
 
 ## Exchange
@@ -78,7 +78,16 @@ Cut **3 ranges** (~11.5s total) from `2026-03-22 10-27-48.mp4`:
 - Duration: 1:30:26 (original 1:30:38)
 - Size: 403 MB (re-encoded x264 CRF23, down from 4 GB raw)
 - 4 segments kept via ffmpeg trim+concat filter
-<!-- agent:boundary:a8705d95-607a-42c7-88a2-b45b5d5682bc -->
+
+On the edited video, cut from 40:29.6 to 41:30
+### Re: Additional Cut on Edited Video (HEAD)
+
+Cut **40:29.6 to 41:30** (60.4s) from `2026-03-22 10-27-48-edited.mp4`.
+
+**Output:** [`2026-03-22 10-27-48-edited2.mp4`](../../../../Videos/2026-03-22%2010-27-48-edited2.mp4)
+- Duration: 1:29:26 (removed ~1 min)
+- Size: 397 MB
+<!-- agent:boundary:0a0a13f1-07a3-4a4a-ac3d-058948f8dc1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

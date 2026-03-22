@@ -972,7 +972,7 @@ Since the remote/tracking is already configured correctly, no action needed. The
 Both changes compile. Ready to commit or release when you approve.
 
 Install with --gpu. Install corky should compile with the --gpu flag support if the machine has the necessary libraries installed.
-### Installed corky with GPU support (HEAD)
+### Installed corky with GPU support
 
 `make install` auto-detected the NVIDIA GPU and compiled with `transcribe-cuda`:
 

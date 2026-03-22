@@ -367,7 +367,7 @@ Implement
 
 Noted. Will move the task queue implementation into the `agent:todo` component model when you're ready. The `tasks/todo/todo.md` content stays as-is for now as a reference.
 
-### Re: Implement sync auto-start (HEAD)
+### Re: Implement sync auto-start
 
 **Sync already has auto-start logic** (lines 56-156 in `sync.rs`). It checks each file, looks up the registry by session UUID, and if no alive pane exists, calls `route::auto_start()`.
 

@@ -295,9 +295,33 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:b4b93920 -->
+Corky's primary function is to be a git-native tool to enhance correspondence, social media, and audio/video media for knowledge capture & expression. Start with something like that. Rephrase for clarity and impact.
+### Re: Reframing corky bullet (HEAD)
+
+Reframed around corky's actual identity — git-native correspondence, social media, and audio/video media for knowledge capture & expression:
+
+**Final draft reply (v7):**
+
+Hi Justin,
+
+No worries at all! Here's my resume — I've highlighted the agentic systems and AI pipeline work that maps closest to what you described.
+
+A few things that might be particularly relevant for the CTO conversation:
+- agent-doc is a production tool where AI agents write and maintain code through a markdown-as-interface model — bi-directional real-time updates using CRDT for conflict-free human-agent co-editing, with orchestration that keeps human and agent aligned throughout the development cycle
+- corky is a git-native toolkit for correspondence, social media, and audio/video media — it turns conversations, voice notes, and video into structured knowledge that agents can act on, with diarized transcription and per-contact context
+- Both tools share a domain language layer (existence-lang) that gives agents and humans a consistent vocabulary across code and data contexts — correspondence, documents, events, not just source files
+- At Presence AI, I defined the agentic development methodology the engineering team used to ship a real-time multimodal pipeline
+
+I'm available:
+- Tuesday 3/25: morning or afternoon ET
+- Wednesday 3/26: afternoon ET
+
+Happy to work around your schedule. Looking forward to it!
+
+Brian
+<!-- agent:boundary:8ddfc832 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply (v6) and resume PDF, then send via LinkedIn
+- Review final draft reply (v7) and resume PDF, then send via LinkedIn
 <!-- /agent:pending -->

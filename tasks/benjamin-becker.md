@@ -83,7 +83,7 @@ Ready to send, or further tweaks?
 Read /home/brian/work/btakita/agent-loop/mail/contacts/benjamin-becker/20260320-linkedin-benjamin-becker.txt
 
 draft a reply
-### Re: Benjamin's Response + Draft Reply (HEAD)
+### Re: Benjamin's Response + Draft Reply
 
 Benjamin responded (3:54 PM, Mar 20). Key points:
 - **Roles:** AI agent infra/orchestration/eval, real-time multimodal pipelines, backend Rust/Python/TS on AWS, early-stage LLM-native products

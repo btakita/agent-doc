@@ -706,7 +706,7 @@ The filename tells you *which document* the boundary belongs to at a glance, use
 
 That said, it's a low-value convenience. If the noise isn't worth it, we can drop the summary and keep plain 8-char IDs. The summary suffix is backward compatible — removing it later has no impact.
 Let's add it for the logging.
-### Re: Keep summary for logging (HEAD)
+### Re: Keep summary for logging
 
 Already active. The summary suffix is wired into all write paths and producing logs like:
 
@@ -717,7 +717,7 @@ Already active. The summary suffix is wired into all write paths and producing l
 The `:agent-doc` suffix comes from the document filename. No further code changes needed — this is working in the current build.
 
 Next: install plugin v0.2.14 to fix the full-UUID issue from the old plugin, then release v0.25.5.
-<!-- agent:boundary:04eb519a -->
+<!-- agent:boundary:2ae1edcc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -803,7 +803,7 @@ yes
 
 release
 My prompt `release` was placed under the response patch. Why?
-### Re: Prompt Below Response + PyPI Published (HEAD)
+### Re: Prompt Below Response + PyPI Published
 
 **PyPI published.** v0.25.0 now on all three platforms (crates.io, PyPI, GitHub Releases).
 

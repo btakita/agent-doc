@@ -290,7 +290,7 @@ Are **all** use uses re: human prompt and response patch ordering correctly sati
 Implement:
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-### Re: Parser Caching + CRDT Ordering Correctness (HEAD)
+### Re: Parser Caching + CRDT Ordering Correctness
 
 **1. Shared Parser via lazily-rs:**
 

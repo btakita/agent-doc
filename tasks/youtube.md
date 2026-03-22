@@ -280,7 +280,7 @@ Transcribe using corky --gpu to a Closed Captioned format.
 **GPU issue:** Is your GPU set up for compute? (CUDA/ROCm?) If so, corky's whisper.cpp backend may need to be compiled with GPU support (`--features cuda` or `--features metal`).
 
 Transcription in progress — I'll update when it completes.
-### Re: Transcription Complete + GPU Support (HEAD)
+### Re: Transcription Complete + GPU Support
 
 **Transcription done!** 748 segments, 28 min on CPU (2.2x realtime). Output: `~/Videos/2026-03-19 02-26-07.srt`
 

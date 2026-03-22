@@ -413,7 +413,7 @@ Let's use a short uuid instead of a full uuid.
 
 Also implemented: sync auto-start kills stale-file panes (pane alive but registered file renamed/deleted), autoclaim prunes stale entries.
 
-### Re: Short boundary UUIDs (HEAD)
+### Re: Short boundary UUIDs
 
 Done. Boundary markers now use 8-char hex IDs instead of full UUIDs.
 

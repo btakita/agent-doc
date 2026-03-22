@@ -723,7 +723,6 @@ Implement.
 Please fix the plugin to not move the commited response patch to the cursor asap.
 The plugin removed the `agent:boundary` when it moved the response patch.
 
-Please update `agent:pending` with checkboxes and current state. Go through the remaining pending items.
 ### Re: Markdown AST + Checkboxes + Pending State
 
 **1. Markdown AST:**
@@ -738,6 +737,8 @@ Agreed — `find_code_ranges()` and all comment/component parsing should use a p
 - Keep existing tests, add new edge-case tests
 
 This is a refactor that touches `component.rs`, `diff.rs`, `template.rs`, and `boundary.rs`. I'll add it to the roadmap.
+
+implement
 
 **2. Checkbox state for pending/todo:**
 
@@ -771,27 +772,54 @@ The boundary re-insertion fix + caret fallback removal will take effect after re
 **4. `agent-doc diff` — ready to implement.**
 
 I'll implement it next cycle when you say go.
-<!-- agent:boundary:491fc02a-6b18-4cc7-a611-ce6defdddac6 -->
+go
+
+> Please update `agent:pending` with checkboxes and current state. Go through the remaining pending items.
+
+This should have been placed above the response patch. Why is it below the response patch?
+### Re: Ordering Bug + agent-doc diff (HEAD)
+
+**1. Why the prompt was placed below the response:**
+
+The boundary marker was at the end of the exchange (line 771 in the committed state). When you typed "go" and your re-quoted prompt, you typed BELOW the boundary. The response was inserted AT the boundary (above your new text). Your new prompts ended up after the response because they were typed after the boundary position.
+
+This is actually **correct boundary behavior** — the boundary marks where the NEXT response goes. Content typed after the boundary stays after the response. The issue is that there's no visual indicator of where the boundary is, so you can't tell whether you're typing above or below it.
+
+**Options to fix:**
+1. **Visible boundary** — render the boundary as a faint horizontal line in the IDE plugin (gutter icon or inline hint). This lets you see where the response will be inserted.
+2. **Always-at-end boundary** — move the boundary to the very end of exchange on every commit cycle, so new user text is always above it. This requires `agent-doc commit` to re-position the boundary.
+3. **Accept current behavior** — the boundary is a "response insertion point." Type above it for prompts, below it for post-response notes.
+
+Option 2 is simplest. I can implement it in `agent-doc commit` — after committing, move the boundary to end of exchange so the user's next edit is always above it.
+
+**2. `agent-doc diff` — already exists!**
+
+The command is already implemented in `diff.rs`. Running `agent-doc diff tasks/agent-doc.md` outputs a unified diff between the snapshot and current document (with comment stripping).
+
+The SKILL workflow change is: instead of reading the full snapshot file, run `agent-doc diff <FILE>` and use its output. This requires updating SKILL.md step 1 to replace the snapshot read with a diff command. I'll update the SKILL for next version.
+
+**For now, I can start using the diff approach in this session** by running `agent-doc diff` instead of reading the snapshot. The document HEAD is still read (needed for context), but the snapshot read is replaced by the compact diff output.
+<!-- agent:boundary:a8463a03-14e7-4837-99fd-1a53a09c4baf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-<!-- deps: diff->skill, plugin_install->plugin_fix, ast->component_refactor -->
-- [ ] **JB plugin v0.2.11 install** — boundary re-insertion fix built, needs IDE restart
-- [ ] **`agent-doc diff`** — binary command for HEAD-only context loading
+<!-- deps: diff_skill->diff_cmd, boundary_commit->boundary_fix -->
+- [x] **JB plugin v0.2.11 install** — boundary re-insertion fix
+- [x] Boundary snowball fix (`ce84701`)
+- [x] Boundary re-insertion in all write paths (`3a08011`)
+- [x] `remove_all_boundaries()` code-block awareness
+- [x] Plugin v0.2.11 build (`3c06c36`)
+- [ ] **Boundary repositioning on commit** — move boundary to end of exchange after `agent-doc commit`
+- [ ] **SKILL update for `agent-doc diff`** — replace snapshot read with diff command in step 1
 - [ ] **Remove caret fallback** — replace with end-of-exchange append in plugin
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
-- [ ] SKILL update — use `agent-doc diff` instead of full snapshot read
 - [ ] Boundary-aware replace for `flush_to_document`
 - [ ] SKILL auto-update: use AskUserQuestion instead of print+stop
 - [ ] CLAUDE.md + README.md staleness
 - [ ] CRDT merge ordering — Yrs causality (final writes only)
 - [ ] `agent-doc submit` — combined binary command
-- [x] Boundary snowball fix — unconditional re-insertion (`ce84701`)
-- [x] Boundary re-insertion in all write paths (`3a08011`)
-- [x] `remove_all_boundaries()` code-block awareness
-- [x] Plugin v0.2.11 build (`3c06c36`)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

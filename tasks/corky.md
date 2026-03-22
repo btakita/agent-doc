@@ -1053,7 +1053,7 @@ v0.19.2 was already committed and tagged. Completed the missing publish steps:
 - [crates.io](https://crates.io/crates/corky/0.19.2) — already published
 
 All three publish targets are now complete.
-### Audit Docs — Clean (HEAD)
+### Audit Docs — Clean
 
 Ran `corky audit-docs` — found 3 stale files vs `src/mailbox/sync.rs`.
 

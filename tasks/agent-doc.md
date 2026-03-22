@@ -666,19 +666,32 @@ All 4 items implemented:
 **Binary:** rebuilt, installed, 522 tests pass.
 
 Install the plugin to test the FFI-based boundary cleanup. The working-tree cleanup in the binary will also clean stale boundaries on the next commit cycle.
-<!-- agent:boundary:64e0bd48 -->
+
+Implement:
+- [ ] Wire `new_boundary_id_with_summary()` into write paths (currently available but unused)
+- [ ] Install plugin v0.2.14 and test boundary cleanup
+### Re: Wire summary + install plugin (HEAD)
+
+**Summary suffix wired into write paths:**
+
+All boundary creation in the write pipeline now passes the document filename stem as summary:
+- `write.rs` (3 call sites) — `reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem()...)`
+- `template.rs` `apply_patches_with_overrides()` — same pattern
+
+Result: boundaries now look like `<!-- agent:boundary:a0cfeb34:agent-doc -->` instead of `<!-- agent:boundary:a0cfeb34 -->`. The `:agent-doc` suffix comes from the filename `agent-doc.md`.
+
+**Plugin install:** Manual via IDE — IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.14.zip` from `editors/jetbrains/build/distributions/`.
+
+Binary rebuilt, installed, 522 tests pass.
+<!-- agent:boundary:7d79b5ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Working-tree stale boundary cleanup in `agent-doc commit`
-- [x] Configurable boundary ID + summary suffix (`new_boundary_id_with_summary()`)
-- [x] Plugin FFI integration — `NativePatching.repositionBoundaryToEnd()` via JNA
-- [x] Plugin built v0.2.14 (FFI reposition + Kotlin fallback)
-- [ ] Install plugin v0.2.14 and test boundary cleanup
-- [ ] Wire `new_boundary_id_with_summary()` into write paths (currently available but unused)
-- [ ] agent-doc v0.25.5 release
+- [x] Wire `new_boundary_id_with_summary()` into write paths
+- [ ] **Install plugin v0.2.14** — manual: IDEA → Plugins → Install from Disk
+- [ ] agent-doc v0.25.5 release with all boundary fixes
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

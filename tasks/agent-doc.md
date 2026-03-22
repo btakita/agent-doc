@@ -679,7 +679,7 @@ Implement.
 
 Please fix the plugin to not move the commited response patch to the cursor asap.
 The plugin removed the `agent:boundary` when it moved the response patch.
-### Re: AST vs Regex + Naming + Robustness + Plugin Fix + Implement (HEAD)
+### Re: AST vs Regex + Naming + Robustness + Plugin Fix + Implement
 
 **1. AST or regexes?**
 

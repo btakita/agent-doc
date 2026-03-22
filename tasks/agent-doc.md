@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.1 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.2 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -876,18 +876,33 @@ Now `install()`, `install_and_check_updated()`, and `check()` all resolve to the
 - Path in output: `/home/brian/work/btakita/agent-loop/.claude/skills/agent-doc/SKILL.md` (correct)
 
 519 tests pass. Binary installed.
-<!-- agent:boundary:07b7e381-022e-416c-82a7-63db31ed08b1 -->
+release
+compact exchange
+
+### Re: release (HEAD)
+
+**v0.25.2 released** — skill install superproject root fix + clippy let-chain cleanup.
+
+**Changes:**
+- `resolve_root()` in `skill.rs` — detects git superproject via `--show-superproject-working-tree`, falls back to `--show-toplevel`
+- All `install()`, `install_and_check_updated()`, `check()` paths use resolved root
+- Collapsed nested `if let` chains in `git.rs` using Rust let-chains (4 clippy fixes)
+
+**Published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | binary installed ✓
+
+519 tests pass.
+<!-- agent:boundary:d2788a2a-56bc-4cc5-b83b-dfeeaca79ad2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Fix `skill install` version comparison bug** -- resolve to superproject root, not CWD
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
 - Install script (`curl | sh`) for binary download
 - Homebrew formula (`brew tap btakita/agent-doc`)
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 - Support `/btw` for instant processing
   - This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))

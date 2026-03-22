@@ -178,7 +178,7 @@ When the youtube session commits (which happens every `/agent-doc` cycle), the w
 Want me to remove the working-tree `strip_head_markers` write? The `(HEAD)` markers in the working tree are harmless — the git gutter already shows the boundary visually.
 
 Do the **Proper fix**
-### Re: Proper Fix — No Working Tree Writes from commit() (HEAD)
+### Re: Proper Fix — No Working Tree Writes from commit()
 
 **Two changes eliminate file cache conflicts from `commit()`:**
 

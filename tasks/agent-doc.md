@@ -398,7 +398,8 @@ Binary installed. 521 tests pass.
 To test: rename a claimed file in the editor, then switch tabs to trigger sync. The old pane should be killed and a new session should start for the renamed file.
 This document is not in a good state.
 There are multiple `agent:boundary` components.
-The uncommitted response patch is in the incorrect spot.
+The uncommitted response patch is in the incorrect spot. 
+Let's use a short uuid instead of a full uuid.
 
 ### Re: Multiple boundary markers / document state
 
@@ -411,15 +412,31 @@ The uncommitted response patch is in the incorrect spot.
 **Plugin rebuilt.** Install the updated plugin from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`.
 
 Also implemented: sync auto-start kills stale-file panes (pane alive but registered file renamed/deleted), autoclaim prunes stale entries.
-<!-- agent:boundary:f66afb32-a851-4935-bc37-952ef0bb9f4e -->
+
+### Re: Short boundary UUIDs (HEAD)
+
+Done. Boundary markers now use 8-char hex IDs instead of full UUIDs.
+
+Before: `<!-- agent:boundary:aef3b25d-dd99-46e7-9b95-086c9817c0b7 -->`
+After: `<!-- agent:boundary:aef3b25d -->`
+
+**Changes:**
+- `src/component.rs` — `append_with_boundary()` uses `[..8]` slice of UUID
+- `src/template.rs` — `reposition_boundary_to_end()` and `apply_patches_with_overrides()` use short IDs (3 occurrences)
+- `PatchWatcher.kt` — all 3 UUID generation points use `.substring(0, 8)`
+- Regex patterns already accept any `[a-f0-9-]+` length — backward compatible
+
+Binary installed. Plugin built (both unsigned and signed). 521 tests pass.
+<!-- agent:boundary:f1c826b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Plugin: fix boundary accumulation** — `repositionBoundaryToEnd()` now removes ALL boundaries, not just the last
-- [x] **Sync: kill dead-file panes** — when pane is alive but registered file is gone, kill and auto-start
-- [x] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
+- [x] **Short boundary UUIDs** — 8 hex chars instead of full UUID
+- [x] **Plugin: fix boundary accumulation** — repositionBoundaryToEnd removes ALL boundaries
+- [x] **Sync: kill dead-file panes** — stale-file detection + auto-start
+- [x] **Autoclaim: validate file exists** — prune stale entries
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

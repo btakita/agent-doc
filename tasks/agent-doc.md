@@ -209,6 +209,18 @@ tmux session 0 window 0 right pane had an error loading tasks/toby-hill.md, whic
 
 We need a way to recover from the error. Should we retry the autoclaim? How can we tell this was from a rename?
 
+Content is:
+```
+~/work/btakita/agent-loop main ⇡422 +14 !33 ?9                                                                17:14:40
+❯ /home/brian/.cargo/bin/agent-doc start tasks/toby-hill.md
+Error: file not found: tasks/toby-hill.md
+~/work/btakita/agent-loop main ⇡422 +14 !33 ?9                                                                17:14:40
+❯ /agent-doc tasks/toby-hill.md
+zsh: no such file or directory: /agent-doc
+~/work/btakita/agent-loop main ⇡422 +14 !33 ?9
+~/work/btakita/agent-loop main ⇡422 +14 !33 ?9                                                                17:14:40
+```
+
 ### Re: Autoclaim error after file rename
 
 The autoclaim reads the registry (`sessions.json`) which stores the old path. When the file is renamed in the editor, the registry entry becomes stale. Options:
@@ -239,13 +251,26 @@ The autoclaim reads the registry (`sessions.json`) which stores the old path. Wh
 **Relevance to agent-doc:** Low direct overlap. agent-doc's parallel fan-out already covers the worktree + tmux spawning. ClawTeam's "swarm self-organization" and cross-pollination patterns are interesting for inspiration but not directly applicable — agent-doc's document model is fundamentally different from a task queue model.
 
 Worth bookmarking for the swarm coordination patterns, but not a dependency or integration target.
-<!-- agent:boundary:fd59fce0-618c-4742-9ab3-c0586e433ae8 -->
+
+### Re: Autoclaim error on renamed file (HEAD)
+
+**Implemented: file existence validation in autoclaim.** When a claimed file no longer exists (renamed/deleted), the stale entry is:
+1. Logged as a warning: `[autoclaim] Pruning stale claim: tasks/toby-hill.md (file no longer exists)`
+2. Removed from the session registry
+3. Skipped for claim output
+
+If ALL claims for a pane are stale, the pane gets a clean message instead of an error. The registry is saved after pruning so the stale entries don't reappear.
+
+This handles the `tasks/toby-hill.md → tasks/employment/toby-hill.md` rename case. The pane will no longer try to `agent-doc start` on the old path. The user can re-claim the file at its new path with `/agent-doc claim tasks/employment/toby-hill.md`.
+
+Binary installed. 521 tests pass.
+<!-- agent:boundary:18c154d1-9334-43eb-9cf4-ac4afb2b91dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
+- [x] **Autoclaim: validate file exists** — prune stale entries when file is renamed/deleted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

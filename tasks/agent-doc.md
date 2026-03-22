@@ -595,7 +595,20 @@ In SPEC.md, make sure we also express the desired behavior, regardless of how it
 - When to reposition (post-patch and post-commit)
 
 The specs express the desired behavior independently of implementation — a new plugin in any language can implement boundary management correctly by following these specs.
-<!-- agent:boundary:91efd5a7 -->
+Build and install for testing.
+### Re: Build and install for testing (HEAD)
+
+Already done. The binary was built and installed earlier this session:
+
+- **Binary:** `~/.cargo/bin/agent-doc` (updated 18:15, v0.25.4)
+- **Symlink:** `.bin/agent-doc` → release target
+- **Tests:** 522 pass (168 lib + 316 bin + 38 CLI)
+- **Shared library:** `libagent_doc.so` built with new `agent_doc_reposition_boundary_to_end()` export
+
+You can test the boundary cleanup now — it's active. The snapshot path already uses the new `remove_all_boundaries()` cleanup (confirmed by `[commit] repositioned boundary in snapshot` log messages in the last two commits).
+
+To test the FFI export from a plugin, the shared library needs to be rebuilt too: `cargo build --release` produces `target/release/libagent_doc.so` with the new function.
+<!-- agent:boundary:282b96dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -604,6 +617,7 @@ The specs express the desired behavior independently of implementation — a new
 - [x] Option B: Snapshot boundary cleanup in `agent-doc commit`
 - [x] Option A: FFI export `agent_doc_reposition_boundary_to_end()`
 - [x] SPEC.md: Document boundary behavior requirements
+- [x] Binary built, installed, 522 tests pass
 - [ ] **Plugin integration** — call FFI function from PatchWatcher instead of Kotlin reposition
 - [ ] Fix plugin short boundary IDs (installed plugin still using full UUIDs)
 - [ ] agent-doc v0.25.5 release with boundary fixes

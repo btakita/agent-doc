@@ -384,12 +384,14 @@ class PatchWatcher(private val project: Project) : Disposable {
         val markerEnd = boundaryIdx + boundaryMarker.length
         val lineEnd = if (markerEnd < closeIdx && doc.getOrNull(markerEnd) == '\n') markerEnd + 1 else markerEnd
 
-        // Replace the boundary marker line with the response content.
-        // The boundary is consumed — the skill workflow calls agent-doc boundary
-        // again after each checkpoint to re-insert at end of exchange.
+        // Replace the boundary marker with response content + new boundary.
+        // The boundary is consumed and re-inserted at end of exchange, matching
+        // the binary's post-patch behavior in apply_patches_with_overrides().
+        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
         val before = doc.substring(0, lineStart)
         val after = doc.substring(lineEnd.coerceAtMost(closeIdx))
-        return before + content.trimEnd() + "\n" + after
+        return before + content.trimEnd() + "\n" + newBoundary + "\n" + after
     }
 
     /**

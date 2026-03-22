@@ -596,7 +596,7 @@ In SPEC.md, make sure we also express the desired behavior, regardless of how it
 
 The specs express the desired behavior independently of implementation — a new plugin in any language can implement boundary management correctly by following these specs.
 Build and install for testing.
-### Re: Build and install for testing (HEAD)
+### Re: Build and install for testing
 
 Already done. The binary was built and installed earlier this session:
 
@@ -608,7 +608,7 @@ Already done. The binary was built and installed earlier this session:
 You can test the boundary cleanup now — it's active. The snapshot path already uses the new `remove_all_boundaries()` cleanup (confirmed by `[commit] repositioned boundary in snapshot` log messages in the last two commits).
 
 To test the FFI export from a plugin, the shared library needs to be rebuilt too: `cargo build --release` produces `target/release/libagent_doc.so` with the new function.
-<!-- agent:boundary:282b96dc -->
+<!-- agent:boundary:bb9133ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -503,8 +503,6 @@ Think of it as: `run` = `submit` + agent + `write` + `commit`. The SKILL replace
 
 **Alternative naming:** `agent-doc preflight <FILE>` might be clearer since it's the pre-agent steps.
 Yes...`agent-doc preflight <FILE>` is a better name than `agent-doc submit <FILE>`. Any other alternatives to consider?
-Describe:
-> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
 ### Re: Naming — preflight vs alternatives
 
 | Name | Meaning | Pros | Cons |
@@ -515,14 +513,40 @@ Describe:
 | `prep` | Short for prepare | Short, snappy | Informal |
 
 **My recommendation: `preflight`.** It's descriptive (pre-agent checks + data gathering), distinct from `submit`/`run` (which do the full loop), and the aviation metaphor fits -- you're checking everything before takeoff (the agent response).
-<!-- agent:boundary:528df7ea-eae8-49be-b8d4-8aae27bc31a9 -->
+Describe:
+> - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
+
+When `agent-doc run` occurred with no concurrent `agent-doc run`...The prompt that entered after `agent:boundary` remained positioned after `agent:boundary` from the response patch.
+### Re: Prompt Below Boundary After agent-doc run (HEAD)
+
+**This is the expected consequence of snapshot-only boundary reposition.**
+
+The working tree boundary is NOT moved after commit (to avoid cache conflicts). So the user's prompt, typed below the boundary, stays below it. When the next response is inserted at the boundary, the prompt ends up after the response.
+
+**The tradeoff we made:**
+- Cache conflict prevention (no working tree writes from commit) vs.
+- Correct prompt positioning (boundary at end of exchange)
+
+**Options:**
+
+1. **Restore working tree reposition via IPC** -- send a `fullContent` patch to the plugin after commit. We tried this and it timed out (2s). Could increase timeout or make it async (fire-and-forget).
+
+2. **Move boundary reposition to `agent-doc write`** -- the write path already has reliable IPC. After writing the response, reposition the boundary in the same IPC cycle. This batches the reposition with the response write, avoiding the separate commit-time IPC.
+
+3. **Accept the behavior** -- the user must type above the boundary. The boundary is visible in the document as `<!-- agent:boundary:UUID -->`. Users learn to type above it.
+
+**Option 2 is the best approach.** The write path already handles IPC reliably (the response patch is consumed within 2s). Adding boundary reposition to the response patch itself means no separate IPC call. The boundary would be at end of exchange in the written content.
+
+Want me to implement Option 2?
+<!-- agent:boundary:81371ca1-6377-4943-a9aa-d89d40e3d495 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **Boundary reposition in write path** -- batch with response IPC (Option 2)
 - [ ] **`agent-doc preflight`** -- combined pre-flight + diff + document HEAD output (v0.25.0)
-- [ ] **lazily-rs DocContext** -- cache `find_code_ranges()` (perf-dependent)
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (perf-dependent)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

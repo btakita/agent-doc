@@ -309,7 +309,6 @@ The idea: combine a centralized task queue (like ClawTeam's "board") with agent-
 
 This naturally extends agent-doc's existing parallel fan-out model but adds persistent, visible coordination through documents.
 transfer this idea into a tasks/todo document
-We need a robust way to recover f
 
 ### Re: Transfer task queue idea to todo
 
@@ -320,12 +319,39 @@ Done. Added the task queue + interactive documents concept to `tasks/todo/todo.m
 - ClawTeam reference for inspiration
 
 Also added it to the pending list in todo.md.
-<!-- agent:boundary:096abab1-10ac-400b-9732-7de716c9d319 -->
+
+Navigating back to tasks/employment/toby-hill.md does not start a claude session. We need a way to robustly restart. Will the upcoming agent-doc fix work in this case?
+
+### Re: Navigating to renamed file doesn't start session (HEAD)
+
+The autoclaim fix handles the **error** (pruning the stale entry so the pane doesn't crash), but doesn't solve the **restart** — no new session is created for the renamed file.
+
+**Current flow after rename:**
+1. Autoclaim prunes stale `tasks/toby-hill.md` entry
+2. Navigate to `tasks/employment/toby-hill.md` in editor
+3. Plugin calls `agent-doc sync` → arranges panes but doesn't start new sessions
+4. No session starts — the file is unclaimed
+
+**The gap:** `sync` handles layout but not session creation. `route` handles session creation but isn't called on tab navigation.
+
+**Options:**
+
+1. **Sync calls route for unclaimed files** — when `sync` sees an `.md` file with agent-doc frontmatter that has no session, call `route` to auto-start one. This is the most seamless fix.
+
+2. **Plugin calls `route` instead of (or in addition to) `sync`** — change `EditorTabSyncListener` to also run `agent-doc route <file>` for the active file. This ensures every tab navigation can create a session.
+
+3. **Manual recovery** — user runs `/agent-doc claim tasks/employment/toby-hill.md` to re-establish. Works but requires user action.
+
+**Recommendation:** Option 2 is cleanest. The plugin already debounces tab changes. Adding a `route` call for the active file would handle both layout sync AND session creation. The `route` command is idempotent — if a session already exists, it just focuses the pane.
+
+Want me to implement option 2?
+<!-- agent:boundary:7bd297d1-a23f-432e-9c55-66b2c8b59ac1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **Sync/route integration** — auto-start sessions for unclaimed files on tab navigation
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -392,7 +392,7 @@ Implement:
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 
 continue
-### Re: Continuing Pending Items (HEAD)
+### Re: Continuing Pending Items
 
 **Boundary-aware replace for `flush_to_document` — resolved by design.**
 

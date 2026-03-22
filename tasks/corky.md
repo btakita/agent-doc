@@ -1000,7 +1000,24 @@ Cargo features are compile-time static — `build.rs` can't dynamically enable f
 3. Add a thin shell wrapper `cargo-install-corky` that does the detection — but this adds complexity for minimal gain
 
 **Recommendation:** The current setup is already correct. `make install` and `install.sh` are the documented default paths, and both auto-detect GPU. No changes needed — bare `cargo install` is a developer escape hatch, not the primary install method.
-<!-- agent:boundary:6be8bd79-fdfc-4ab1-80a7-84875ca69011 -->
+
+Let's use a `curl | sh` script instead.
+### `curl | sh` Already Does This (HEAD)
+
+The `install.sh` script already exists with GPU auto-detection and is the documented default install path:
+
+```sh
+curl -sSf https://raw.githubusercontent.com/btakita/corky/main/install.sh | sh
+```
+
+It already:
+1. Detects GPU via `nvidia-smi`
+2. Downloads `corky-<target>-cuda.tar.gz` if GPU found
+3. Falls back to standard binary if CUDA variant unavailable
+4. Installs to `~/.local/bin` (or `/usr/local/bin` with `--system`)
+
+This is documented in README.md line 24 as the quick install method. No changes needed — `curl | sh` is already the default GPU-aware install path.
+<!-- agent:boundary:9f475c12-1af4-4e44-ab70-512472bcfb45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

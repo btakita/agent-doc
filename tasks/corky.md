@@ -1121,81 +1121,12 @@ Three bugs fixed:
 - CI release workflow builds CUDA + Metal binary variants alongside CPU
 - Video formats go straight to ffmpeg; Symphonia failures fall back to ffmpeg
 - SPEC.md §5.30, README.md updated. Published all targets.
-### Released v0.19.3 — Metal GPU + Audio Resilience
-
-**Changes committed (`5c98c26`):**
-- `transcribe-metal` feature for macOS Metal GPU acceleration
-- `make release-gpu` auto-detects CUDA (Linux) vs Metal (macOS)
-- CI release workflow builds CUDA + Metal binary variants alongside CPU
-- Video formats (mov, mkv, webm, avi, ts, mts) go straight to ffmpeg
-- Symphonia audio decode failures fall back to ffmpeg
-
-**Docs updated:**
-- SPEC.md §5.30 — Metal feature flag, `make release-gpu`, audio decode pipeline
-- README.md — Metal + CUDA auto-detection, video format transcription
-- `corky audit-docs` — No issues found
-
-**Published:**
-- [crates.io](https://crates.io/crates/corky/0.19.3)
-- [PyPI](https://pypi.org/project/corky/0.19.3/)
-- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.19.3) (with CUDA binary)
-
-**Installed:** corky 0.19.3 locally with GPU (transcribe-cuda)
-compact exchange
-### v0.15.3 → v0.16.0
-
-**v0.15.3** — CUDA transcription build fix (whisper-rs 0.16, bindgen 0.72.1)
-**v0.16.0** — 5 commits: let-chains refactor (61 collapsed `if`s), HTML email (`multipart/alternative`), sync imports dispatcher, inline images + clipboard attach, version bump. Published crates.io/PyPI/GitHub.
-
-### v0.17.0 — Gmail API Sync
-
-Gmail REST API sync provider (705 lines): `messages.list`/`messages.get`, `historyId` incremental, scope-aware OAuth, `GmailLabelState`. Published all targets, binary installed locally.
-
-### VERSIONS.md Backfill
-
-Added 14 missing entries (v0.9.5–v0.18.0) from git history. All 47 releases now documented (v0.1.0–v0.18.1).
-
-### GPU Auto-Detection
-
-`make install` and `install.sh` auto-detect GPU via `nvidia-smi`. GPU found → tries CUDA build/binary → falls back to CPU on failure. SPEC.md §5.30 updated. `curl | sh` is the documented default install path with GPU awareness.
-
-### SPEC.md §6.8, §6.9, §18
-
-- §6.8 Gmail API Sync — provider config, OAuth scope, historyId incremental, 404 resilience, thread identity
-- §6.9 Doctor — `corky doctor [PROVIDER]`, per-provider checks, exit codes
-- §18 Self-Hosted Deployment — credential modes, privacy model, scope list
-
-### Audit Docs
-
-Ran `corky audit-docs` after v0.18.0 — fixed stale AGENTS.md/README.md (built-in GCP OAuth not documented). 68 insertions across 4 files. Re-ran clean.
-
-### v0.19.1 — Watch Bug Fixes
-
-Three bugs fixed:
-1. **Routing scope** — `for-lucas` → `personal:for-lucas` in `.corky.toml` to prevent label leak across accounts
-2. **Gmail API 404** — `fetch_message` returns `Ok(None)` on 404, skips deleted messages instead of aborting sync
-3. **IMAP shutdown** — `shutdown: Option<&Arc<AtomicBool>>` added to `sync_account`/`sync_label`, Ctrl+C now interrupts IMAP syncs
-
-4 new tests (221 total). SPEC.md §3.3, §4.5, §6.8, §9.2 updated. Published all targets.
-
-### v0.19.2 — Write Destination + Pull Improvements
-
-- `imap_sync.rs`: "Wrote:" shows routing target (`file.md → mailboxes/lucas/`)
-- `mailbox/sync.rs`: Checks `git remote` before pull, shows actual error on failure, skips pull for local-only repos
-- Audit docs: fixed 3 stale SPEC.md sections (§5.12, §7.2, §7.6). Re-ran clean (188 instruction lines).
-- Published crates.io/PyPI/GitHub with CUDA binary.
-
-### v0.19.3 — Metal GPU + Audio Resilience
-
-- `transcribe-metal` feature for macOS Metal GPU acceleration
-- `make release-gpu` auto-detects CUDA (Linux) vs Metal (macOS)
-- CI release workflow builds CUDA + Metal binary variants alongside CPU
-- Video formats go straight to ffmpeg; Symphonia failures fall back to ffmpeg
-- SPEC.md §5.30, README.md updated. Published all targets.
 ### Exchange Cleanup
 
 Removed duplicate compacted summaries and verbose v0.19.3 release block. The exchange now has one clean copy of the v0.15.3–v0.19.3 history.
-<!-- agent:boundary:54bbd49e-67e6-4dde-a1f9-4fcb309be1bb -->
+compact contents of `agent:exchange`
+Compacted exchange from 1062 lines to 50 lines. Removed verbose conversation (watch output logs, debug discussions, implementation details, claude-mem context dumps) and kept only the release summaries.
+<!-- agent:boundary:58df03fb-8aa8-4b24-a17e-e462b80a2066 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

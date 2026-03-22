@@ -19,7 +19,7 @@ Please create a contact for najmus-saqib https://www.linkedin.com/in/najmus-saqi
 Read /home/brian/work/btakita/agent-loop/mail/contacts/najmus-saqib/20260322-linkedin-najmus-saqib.txt
 
 Draft a reply
-### Re: Contact + Draft Reply (HEAD)
+### Re: Contact + Draft Reply
 
 Created `mail/contacts/najmus-saqib/CLAUDE.md` (with `AGENTS.md` symlink).
 

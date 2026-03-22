@@ -178,6 +178,12 @@ pub fn lookup(session_id: &str) -> Result<Option<String>> {
     Ok(registry.get(session_id).map(|e| e.pane.clone()))
 }
 
+/// Look up a full registry entry by session ID.
+pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
+    let registry = load()?;
+    Ok(registry.get(session_id).cloned())
+}
+
 /// Get the pane ID of the current pane.
 /// Tries TMUX_PANE env var first, then falls back to querying tmux
 /// for the active pane (works from outside tmux, e.g. IDE processes).

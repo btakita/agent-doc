@@ -417,7 +417,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         // Replace the boundary marker with response content + new boundary.
         // The boundary is consumed and re-inserted at end of exchange, matching
         // the binary's post-patch behavior in apply_patches_with_overrides().
-        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
         val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
         val before = doc.substring(0, lineStart)
         val after = doc.substring(lineEnd.coerceAtMost(closeIdx))
@@ -451,7 +451,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         // Insert content + new boundary right before the close tag
-        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
         val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
         val before = doc.substring(0, closeIdx)
         val after = doc.substring(closeIdx)
@@ -576,28 +576,32 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         val componentContent = doc.substring(contentStart, closeIdx)
-        val boundaryMatch = boundaryPattern.findAll(componentContent).lastOrNull() ?: return null
-        val boundaryStart = contentStart + boundaryMatch.range.first
-        val boundaryEnd = contentStart + boundaryMatch.range.last + 1
+        val allBoundaries = boundaryPattern.findAll(componentContent).toList()
+        if (allBoundaries.isEmpty()) return null
 
-        // Check if already at end (nothing after boundary except whitespace before close tag)
-        val afterBoundary = doc.substring(boundaryEnd, closeIdx).trim()
-        if (afterBoundary.isEmpty()) return null
-
-        // Find the full line containing the boundary
-        val lineStart = doc.lastIndexOf('\n', boundaryStart - 1).let {
-            if (it >= contentStart) it + 1 else contentStart
+        // Check if already clean: single boundary at end with nothing after it
+        if (allBoundaries.size == 1) {
+            val onlyMatch = allBoundaries[0]
+            val boundaryEnd = contentStart + onlyMatch.range.last + 1
+            val afterBoundary = doc.substring(boundaryEnd, closeIdx).trim()
+            if (afterBoundary.isEmpty()) return null
         }
-        val lineEnd = if (boundaryEnd < closeIdx && doc.getOrNull(boundaryEnd) == '\n') boundaryEnd + 1 else boundaryEnd
 
-        // Remove boundary from current position, re-insert at end
-        val newBoundaryId = java.util.UUID.randomUUID().toString()
+        // Remove ALL boundary lines from the component content, then insert one at end.
+        // This prevents boundary accumulation when multiple write cycles each add a new one.
+        val lines = componentContent.split("\n")
+        val filteredLines = lines.filter { line ->
+            val trimmed = line.trim()
+            !(trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->"))
+        }
+        val cleanContent = filteredLines.joinToString("\n")
+
+        val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
         val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
-        val before = doc.substring(0, lineStart)
-        val middle = doc.substring(lineEnd, closeIdx)
+        val before = doc.substring(0, contentStart)
         val after = doc.substring(closeIdx)
-        val prefix = if (middle.endsWith("\n")) "" else "\n"
-        return before + middle + prefix + newBoundary + "\n" + after
+        val prefix = if (cleanContent.endsWith("\n")) "" else "\n"
+        return before + cleanContent + prefix + newBoundary + "\n" + after
     }
 
     override fun dispose() {

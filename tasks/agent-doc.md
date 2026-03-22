@@ -670,7 +670,7 @@ Install the plugin to test the FFI-based boundary cleanup. The working-tree clea
 Implement:
 - [ ] Wire `new_boundary_id_with_summary()` into write paths (currently available but unused)
 - [ ] Install plugin v0.2.14 and test boundary cleanup
-### Re: Wire summary + install plugin (HEAD)
+### Re: Wire summary + install plugin
 
 **Summary suffix wired into write paths:**
 
@@ -683,7 +683,7 @@ Result: boundaries now look like `<!-- agent:boundary:a0cfeb34:agent-doc -->` in
 **Plugin install:** Manual via IDE — IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.14.zip` from `editors/jetbrains/build/distributions/`.
 
 Binary rebuilt, installed, 522 tests pass.
-<!-- agent:boundary:7d79b5ac -->
+<!-- agent:boundary:65cdbcdc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

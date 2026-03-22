@@ -59,6 +59,7 @@ agent_doc_mode: template
 - [x] Watch bug fixes (routing scope, 404 resilience, IMAP shutdown) — v0.19.1
 - [x] Write destination + pull improvements — v0.19.2
 - [x] SPEC.md §6.8, §6.9, §18 — v0.19.1
+- [x] Metal GPU + audio resilience — v0.19.3
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -1069,7 +1070,28 @@ README.md and AGENTS.md had no content about pull behavior — staleness was mti
 **Re-ran `corky audit-docs` — No issues found. 188 instruction lines.**
 
 Committed (`0cd23c7`) and pushed.
-<!-- agent:boundary:e87a9bf3-ab77-4ebd-afca-2f85dbd6294e -->
+release corky
+### Released v0.19.3 — Metal GPU + Audio Resilience (HEAD)
+
+**Changes committed (`5c98c26`):**
+- `transcribe-metal` feature for macOS Metal GPU acceleration
+- `make release-gpu` auto-detects CUDA (Linux) vs Metal (macOS)
+- CI release workflow builds CUDA + Metal binary variants alongside CPU
+- Video formats (mov, mkv, webm, avi, ts, mts) go straight to ffmpeg
+- Symphonia audio decode failures fall back to ffmpeg
+
+**Docs updated:**
+- SPEC.md §5.30 — Metal feature flag, `make release-gpu`, audio decode pipeline
+- README.md — Metal + CUDA auto-detection, video format transcription
+- `corky audit-docs` — No issues found
+
+**Published:**
+- [crates.io](https://crates.io/crates/corky/0.19.3)
+- [PyPI](https://pypi.org/project/corky/0.19.3/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.19.3) (with CUDA binary)
+
+**Installed:** corky 0.19.3 locally with GPU (transcribe-cuda)
+<!-- agent:boundary:63ff6cc6-c953-4d74-a2ea-71c73fe7b625 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

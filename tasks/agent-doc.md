@@ -415,7 +415,7 @@ The "boundary-aware replace" item was conceived when we thought CRDT was being u
 - 512 tests pass
 Describe:
 > - [ ] **`agent-doc submit`** — combined binary command (v0.25.0, future session)
-### Re: agent-doc submit (HEAD)
+### Re: agent-doc submit
 
 **`agent-doc submit` — combined binary command that replaces the SKILL's multi-step orchestration.**
 

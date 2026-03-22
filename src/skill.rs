@@ -18,14 +18,45 @@ fn config() -> SkillConfig {
     SkillConfig::new("agent-doc", BUNDLED_SKILL, VERSION)
 }
 
-/// Install the bundled SKILL.md to the project.
-/// When `root` is None, paths are relative to CWD.
-#[allow(dead_code)]
-pub fn install_at(root: Option<&Path>) -> Result<()> {
-    config().install(root)
+/// Resolve the project root for skill installation.
+///
+/// When CWD is inside a git submodule (e.g., `src/agent-doc/`), the skill
+/// should be installed to the superproject root, not the submodule. This
+/// ensures the SKILL.md that Claude Code reads (from the project root's
+/// `.claude/skills/`) matches the binary version.
+fn resolve_root() -> Option<std::path::PathBuf> {
+    // Try superproject first (handles submodule CWD)
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-superproject-working-tree"])
+        .output()
+        .ok()?;
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !root.is_empty() {
+        return Some(std::path::PathBuf::from(root));
+    }
+
+    // Fall back to git toplevel
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !root.is_empty() {
+        return Some(std::path::PathBuf::from(root));
+    }
+
+    None
 }
 
-/// Public entry point (CWD-relative, called from main).
+/// Install the bundled SKILL.md to the project.
+/// When `root` is None, resolves to git superproject root (or CWD fallback).
+#[allow(dead_code)]
+pub fn install_at(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    config().install(resolved.as_deref())
+}
+
+/// Public entry point (resolves to superproject root, called from main).
 #[allow(dead_code)]
 pub fn install() -> Result<()> {
     install_at(None)
@@ -34,7 +65,8 @@ pub fn install() -> Result<()> {
 /// Install and return whether the file was actually updated (not just already up to date).
 pub fn install_and_check_updated() -> Result<bool> {
     let cfg = config();
-    let path = cfg.skill_path(None);
+    let resolved = resolve_root();
+    let path = cfg.skill_path(resolved.as_deref());
 
     // Check if already up to date before install
     let was_current = path.exists()
@@ -42,21 +74,22 @@ pub fn install_and_check_updated() -> Result<bool> {
             .map(|existing| existing == cfg.content)
             .unwrap_or(false);
 
-    cfg.install(None)?;
+    cfg.install(resolved.as_deref())?;
     Ok(!was_current)
 }
 
 /// Check if the installed skill matches the bundled version.
-/// When `root` is None, paths are relative to CWD.
+/// When `root` is None, resolves to git superproject root (or CWD fallback).
 pub fn check_at(root: Option<&Path>) -> Result<()> {
-    let up_to_date = config().check(root)?;
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let up_to_date = config().check(resolved.as_deref())?;
     if !up_to_date {
         std::process::exit(1);
     }
     Ok(())
 }
 
-/// Public entry point (CWD-relative, called from main).
+/// Public entry point (resolves to superproject root, called from main).
 pub fn check() -> Result<()> {
     check_at(None)
 }

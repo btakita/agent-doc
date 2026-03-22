@@ -778,7 +778,7 @@ Then approve in the browser.
 In https://www.youtube.com/watch?v=IenfqO2vmAw add a comment pointing to https://briantakita.me/posts/agent-resume-recruiter-workflow-live/
 
 Describe what the post is. A summary of this video and focus on interesting topics in the video.
-### Re: YouTube Comment Posted (HEAD)
+### Re: YouTube Comment Posted
 
 **Done!** Comment posted on https://www.youtube.com/watch?v=IenfqO2vmAw
 

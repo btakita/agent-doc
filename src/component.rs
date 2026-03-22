@@ -135,8 +135,8 @@ impl Component {
             // Replace the boundary marker with response content + new boundary.
             // The boundary is consumed and re-inserted, matching the binary's
             // post-patch behavior in apply_patches_with_overrides().
-            let new_id = uuid::Uuid::new_v4();
-            let new_marker = format!("<!-- agent:boundary:{} -->", new_id);
+            let new_id = crate::new_boundary_id();
+            let new_marker = crate::format_boundary_marker(&new_id);
             let mut result = String::with_capacity(doc.len() + content.len() + new_marker.len());
             result.push_str(&doc[..line_start]);
             result.push_str(content.trim_end());

@@ -22,6 +22,11 @@ fn signal_editor_refresh(file: &Path) {
 pub const BOUNDARY_PREFIX: &str = "<!-- agent:boundary:";
 pub const BOUNDARY_SUFFIX: &str = " -->";
 
+/// Generate a new boundary ID (delegates to lib).
+pub fn new_id() -> String {
+    agent_doc::new_boundary_id()
+}
+
 /// Format a boundary marker comment.
 pub fn format_marker(id: &str) -> String {
     format!("{}{}{}", BOUNDARY_PREFIX, id, BOUNDARY_SUFFIX)
@@ -118,7 +123,7 @@ pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
         .find(|c| c.name == component_name)
         .ok_or_else(|| anyhow::anyhow!("component '{}' not found", component_name))?;
 
-    let id = Uuid::new_v4().to_string();
+    let id = new_id();
     let marker = format_marker(&id);
 
     // Insert marker at the end of component content, just before the close tag

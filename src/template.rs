@@ -167,12 +167,12 @@ pub fn apply_patches_with_overrides(
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = uuid::Uuid::new_v4().to_string();
-        let marker = format!("<!-- agent:boundary:{} -->", id);
+        let id = crate::new_boundary_id();
+        let marker = crate::format_boundary_marker(&id);
         let content = exchange.content(&result);
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
-        eprintln!("[template] pre-patch boundary {} inserted at end of exchange", &id[..id.len().min(8)]);
+        eprintln!("[template] pre-patch boundary {} inserted at end of exchange", id);
     }
 
     // Apply patches in reverse order (by position) to preserve byte offsets

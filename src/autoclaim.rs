@@ -29,16 +29,47 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
         }
     };
 
-    let registry = sessions::load()?;
+    let mut registry = sessions::load()?;
 
     // Find all entries mapped to the current pane
-    let claimed: Vec<(&String, &sessions::SessionEntry)> = registry
+    let all_claimed: Vec<(String, sessions::SessionEntry)> = registry
         .iter()
         .filter(|(_, entry)| entry.pane == pane_id)
+        .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
-    if claimed.is_empty() {
+    if all_claimed.is_empty() {
         eprintln!("[autoclaim] No files claimed for pane {}", pane_id);
+        return Ok(());
+    }
+
+    // Validate file existence — prune stale entries (renamed/deleted files)
+    let mut stale_ids: Vec<String> = Vec::new();
+    let mut claimed: Vec<(String, sessions::SessionEntry)> = Vec::new();
+    for (session_id, entry) in all_claimed {
+        if std::path::Path::new(&entry.file).exists() {
+            claimed.push((session_id, entry));
+        } else {
+            eprintln!(
+                "[autoclaim] Pruning stale claim: {} (file no longer exists)",
+                entry.file
+            );
+            stale_ids.push(session_id);
+        }
+    }
+
+    // Remove stale entries from registry
+    if !stale_ids.is_empty() {
+        for id in &stale_ids {
+            registry.remove(id);
+        }
+        if let Err(e) = sessions::save(&registry) {
+            eprintln!("[autoclaim] Failed to save pruned registry: {}", e);
+        }
+    }
+
+    if claimed.is_empty() {
+        eprintln!("[autoclaim] All claims for pane {} were stale (files moved/deleted)", pane_id);
         return Ok(());
     }
 
@@ -60,7 +91,11 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
 
     // Sync tmux layout so pane arrangement reflects claimed files.
     // Without this, the layout remains stale after context compaction.
-    sync_after_autoclaim(tmux, &pane_id, &claimed);
+    let claimed_refs: Vec<(&String, &sessions::SessionEntry)> = claimed
+        .iter()
+        .map(|(k, v)| (k, v))
+        .collect();
+    sync_after_autoclaim(tmux, &pane_id, &claimed_refs);
 
     // Output claim commands for the new session context.
     // Claude Code's SessionStart hook pipes stdout back as context.

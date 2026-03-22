@@ -118,9 +118,33 @@ pub fn run_with_tmux(
                 .unwrap_or(false);
 
             if has_alive_pane {
-                // Pane is alive — no auto-start needed.
-                // Re-register with correct window if the sync will move it.
-                continue;
+                // Pane is alive, but check if the registered file still exists.
+                // After a rename, the pane shows an error for the old path.
+                // Detect this: registered file differs from current AND doesn't exist.
+                if let Some(ref pane) = registered_pane {
+                    if let Ok(Some(entry)) = sessions::lookup_entry(&session_id) {
+                        let registered_file = Path::new(&entry.file);
+                        let current_file = file_path.to_string_lossy();
+                        if entry.file != *current_file && !registered_file.exists() {
+                            eprintln!(
+                                "[sync] registered file {} no longer exists (renamed to {}), killing stale pane {}",
+                                entry.file, file_path.display(), pane
+                            );
+                            let _ = tmux.kill_pane(pane);
+                            // Update registry with new file path, fall through to auto-start
+                            if let Err(e) = sessions::register(&session_id, pane, &current_file) {
+                                eprintln!("[sync] warning: re-register failed: {}", e);
+                            }
+                            // Fall through to auto-start below
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
             }
 
             // No alive pane in registry. Before auto-starting, check if any

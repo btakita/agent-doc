@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.2 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.2 | **Tests:** 521 (167 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -167,12 +167,32 @@ agent-doc undo tasks/agent-doc.md
 ```
 
 Or if you want to keep the compact but reference the history, the archive has the full exchange.
-<!-- agent:boundary:cdccab81-2ba7-40e7-b409-1f31dcdcd5a3 -->
+
+### Re: JB plugin moving prompt after response patch (HEAD)
+
+**Root cause found and fixed.** The IPC write path was using the boundary position from disk (stale — above the user's new prompt), while the disk write path repositions the boundary to end-of-exchange before applying patches.
+
+**The bug:**
+1. After commit, boundary is at end of exchange: `[content] [boundary] [close]`
+2. User types prompt below boundary: `[content] [boundary] [prompt] [close]`
+3. IPC reads boundary from disk → sends old position to plugin
+4. Plugin inserts response at boundary (above prompt): `[content] [response] [boundary] [prompt]`
+5. Prompt appears to "move" after the response
+
+**The fix:** All three IPC paths in `write.rs` now call `template::reposition_boundary_to_end()` before extracting boundary IDs. This matches the pre-patch step in `apply_patches_with_overrides()`: remove stale boundaries → insert fresh one at end of exchange → extract that boundary_id for the IPC patch.
+
+**Files changed:**
+- `src/template.rs` — extracted `pub fn reposition_boundary_to_end()` from the pre-patch logic
+- `src/write.rs` — all 3 IPC paths (`try_ipc`, `run_stream` primary, `run_stream` timeout fallback) now use repositioned boundary
+
+521 tests pass (167 lib + 316 bin + 38 CLI). Binary installed.
+<!-- agent:boundary:6afb75de-496f-4555-a92c-8416061ad166 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **IPC boundary reposition fix** — commit, release
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

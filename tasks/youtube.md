@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Video editing + CC workflow discussed. Corky already supports caption upload with YouTube publish.
+Video light-edited (dead air removed) and GPU-transcribed. Ready for YouTube upload.
 <!-- /agent:status -->
 
 ## Exchange
@@ -456,7 +456,31 @@ Once you have the edited file, the transcription command will be:
 ```
 corky transcribe ~/Videos/<edited-file>.mp4 -o ~/Videos/<edited-file>.srt
 ```
-<!-- agent:boundary:7700aa3a-8476-457e-8d66-b0fe119db618 -->
+Do a light edit of the video. Similar to what you did in the last YouTube video. Remove dead air and general light video trimming.
+### Re: Light Edit — Dead Air Removed + GPU Transcribed (HEAD)
+
+**Done!** Automated light edit using ffmpeg silence detection:
+
+**What was cut:**
+- 47 silence segments (>3s at -35dB threshold) totaling ~3.3 min of dead air
+- Kept 0.5s of silence at each cut point for natural pacing
+- No content was trimmed — only dead air removal
+
+**Results:**
+| | Original | Edited |
+|---|---------|--------|
+| Duration | 63.3 min | 60.0 min |
+| Size | 2.8 GB | 380 MB |
+| Codec | h264 (source) | h264 CRF 18 (re-encoded) |
+
+**GPU Transcription:** 2058 segments in 27.6s (130x realtime with CUDA)
+
+**Output files:**
+- Video: `~/Videos/2026-03-19 02-26-07-edited.mp4`
+- Captions: `~/Videos/2026-03-19 02-26-07-edited.srt`
+
+Ready for YouTube upload. Want me to create a draft with `corky youtube`?
+<!-- agent:boundary:9ecf4e3f-1e19-40c4-a33e-fff7e9cb66a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -469,5 +493,6 @@ corky transcribe ~/Videos/<edited-file>.mp4 -o ~/Videos/<edited-file>.srt
 - [x] Update `release.yml` with GPU matrix entries
 - [x] Fix MP4 direct decode bug ("Unknown sample rate")
 - [x] Streamline video→CC workflow (repeatable single-command flow)
-- [ ] Edit video for YouTube → export edited file → GPU transcribe CC
+- [x] Edit video for YouTube → export edited file → GPU transcribe CC
+- [ ] Upload edited video + captions to YouTube
 <!-- /agent:pending -->

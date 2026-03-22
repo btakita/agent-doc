@@ -548,6 +548,8 @@ Alternatively, the plugin could run its own `repositionBoundaryToEnd()` **after 
 
 Want me to implement both?
 Yes
+
+In SPEC.md, make sure we also express the desired behavior, regardless of how it is implemented. 
 ### Re: Implement both Option A & B
 
 **Done.** Both implemented and tested:
@@ -574,14 +576,34 @@ Yes
 - `src/template.rs` — `reposition_boundary_to_end()` uses `new_boundary_id()` (8-char)
 
 **Next step:** Plugin-side integration — have `PatchWatcher` call the new FFI function instead of its Kotlin implementation.
-<!-- agent:boundary:3ffa19dc -->
+### Re: Document desired behavior in SPEC.md (HEAD)
+
+**Done.** Updated both spec files with behavioral requirements:
+
+**SPEC.md (main)** — expanded boundary marker lifecycle section:
+- **Boundary ID format:** 8-char hex, not full UUIDs. Collision analysis included.
+- **Cleanup scope:** `remove_all_boundaries()` scans the ENTIRE document, not just exchange
+- **Invariants:** At most ONE boundary at any time; always at end-of-exchange; code-block exclusion
+- **Snapshot cleanup:** `commit()` now uses `reposition_boundary_to_end()` on snapshot (removes ALL stale boundaries)
+- **FFI export:** `agent_doc_reposition_boundary_to_end(doc)` documented as the canonical cleanup entry point for plugins
+
+**editors/SPEC.md** — new section 9 "Boundary Marker Management":
+- Required invariants (single boundary, end-of-exchange, code-block awareness)
+- Boundary ID format requirement (8-char hex)
+- Reposition behavior (remove ALL, insert fresh)
+- Recommended implementation via FFI/JNA
+- When to reposition (post-patch and post-commit)
+
+The specs express the desired behavior independently of implementation — a new plugin in any language can implement boundary management correctly by following these specs.
+<!-- agent:boundary:aeda0fe0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Option B: Snapshot boundary cleanup in `agent-doc commit` — uses `remove_all_boundaries()`
-- [x] Option A: FFI export `agent_doc_reposition_boundary_to_end()` — available for plugin
+- [x] Option B: Snapshot boundary cleanup in `agent-doc commit`
+- [x] Option A: FFI export `agent_doc_reposition_boundary_to_end()`
+- [x] SPEC.md: Document boundary behavior requirements
 - [ ] **Plugin integration** — call FFI function from PatchWatcher instead of Kotlin reposition
 - [ ] Fix plugin short boundary IDs (installed plugin still using full UUIDs)
 - [ ] agent-doc v0.25.5 release with boundary fixes

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Transcribing 2026-03-19 02-26-07.mp4 (63 min, CPU-only — no GPU detected)
+Transcription complete: 2026-03-19 02-26-07.srt (748 segments, CPU). GPU support discussion open.
 <!-- /agent:status -->
 
 ## Exchange
@@ -266,7 +266,9 @@ I see you added `2026-03-19 02-26-07.mp4` to pending. What would you like to do 
 What's the plan for this one?
 Meta: I keep on repeating the same steps for each video.
 Transcribe using corky --gpu to a Closed Captioned format.
-### Re: Transcription Workflow (HEAD)
+
+/btw Looks like you did not use `corky transcribe` with `--gpu`. Could we make this `corky transcribe` use `--gpu` by default if a gpu is available on the machine? Would this be cross platform? 
+### Re: Transcription Workflow
 
 **Meta note acknowledged** — you're repeating the same steps per video. We should streamline this into a single command or workflow.
 
@@ -278,12 +280,43 @@ Transcribe using corky --gpu to a Closed Captioned format.
 **GPU issue:** Is your GPU set up for compute? (CUDA/ROCm?) If so, corky's whisper.cpp backend may need to be compiled with GPU support (`--features cuda` or `--features metal`).
 
 Transcription in progress — I'll update when it completes.
-<!-- agent:boundary:c2267775-a09a-434b-81ed-bdcfb8a235ec -->
+### Re: Transcription Complete + GPU Support (HEAD)
+
+**Transcription done!** 748 segments, 28 min on CPU (2.2x realtime). Output: `~/Videos/2026-03-19 02-26-07.srt`
+
+**Re: GPU by default** — Corky already has a `transcribe-cuda` feature flag (`Cargo.toml:58`), but it's not in the default features. Current defaults are just `["transcribe"]` which uses CPU-only whisper-rs.
+
+Options for auto-GPU:
+
+1. **Compile-time (current approach):** `cargo install corky --features transcribe-cuda` — requires CUDA toolkit on the build machine. Simple, but the user must know to opt in.
+
+2. **Runtime auto-detect with `--gpu` flag:** Add a `--gpu` CLI flag that's sugar for "use GPU if available, fall back to CPU." This doesn't work with the current whisper-rs/whisper.cpp approach since GPU support is a compile-time decision (CUDA libs must be linked).
+
+3. **Make `transcribe-cuda` the default on Linux:** Change `default = ["transcribe-cuda"]` — but this breaks builds on machines without CUDA toolkit.
+
+4. **Ship two binaries:** `corky` (CPU) and `corky-gpu` (CUDA) — more operational complexity.
+
+**Cross-platform reality:**
+- **Linux:** CUDA (NVIDIA) or Vulkan. whisper.cpp supports both.
+- **macOS:** Metal (Apple Silicon) via `whisper-rs/metal` — would need a new feature flag `transcribe-metal`.
+- **Windows:** CUDA or Vulkan.
+
+**My recommendation:** The cleanest path is to rebuild your local corky with CUDA support:
+```
+cd src/corky && cargo install --path . --features transcribe-cuda
+```
+
+For the broader UX, we could add a `transcribe-gpu` feature that auto-selects CUDA on Linux/Windows and Metal on macOS using conditional compilation. Want me to implement that?
+
+Also: the MP4 direct decode failed ("Unknown sample rate") — corky's symphonia decoder should handle MP4/AAC. That's a separate bug worth fixing so you don't need the ffmpeg step.
+<!-- agent:boundary:ffe72d5a-d936-4f20-b63b-2351f8e7fe27 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribing (CPU, no GPU)
-- [ ] Streamline video→CC workflow (user wants repeatable single-command flow)
+- [x] [2026-03-19 02-26-07.mp4](../../../../Videos/2026-03-19%2002-26-07.mp4) — transcribed to SRT
+- [ ] GPU auto-detect feature for corky transcribe
+- [ ] Fix MP4 direct decode bug ("Unknown sample rate")
+- [ ] Streamline video→CC workflow (repeatable single-command flow)
 <!-- /agent:pending -->

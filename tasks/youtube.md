@@ -512,7 +512,7 @@ Note: Had to re-auth YouTube token and fix video path (relative paths don't reso
 Create a blog post for briantakita.me that is on this uploaded YouTube video.
 Use the transcription to create interesting topics based on the transcription content.
 Recap and add interesting commentary to these topics.
-### Re: Blog Post Created (HEAD)
+### Re: Blog Post Created
 
 **File:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-19-agent-resume-recruiter-workflow-live.md`
 

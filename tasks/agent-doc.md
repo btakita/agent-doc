@@ -469,12 +469,31 @@ release
 **Re: toby-hill.md session not starting:** The claims log shows `Claimed tasks/employment/toby-hill.md for pane %41` — so the pane was created and claimed. The Claude session should be running in that pane. If it's not visible, try switching to the pane manually. The navigation issue may be a timing/focus problem rather than a session creation problem. Let me know if the pane exists but is empty.
 
 521 tests pass.
-<!-- agent:boundary:aec06db1 -->
+We have multiple `agent:boundary` in this document. Is this because we were running an old binary?
+### Re: Multiple `agent:boundary` markers (HEAD)
+
+Yes — this was caused by the **old binary (pre-v0.25.4)**. The JetBrains plugin's `PatchWatcher` was appending a new boundary marker on each patch cycle without removing previous ones, causing accumulation.
+
+**Fixed in v0.25.4** (released this session):
+- **JetBrains plugin**: Now strips ALL existing boundary markers before inserting a fresh one
+- **Short IDs**: Boundary markers switched from full UUIDs (`aef3b25d-dd99-46e7-9b95-086c9817c0b7`) to 8-char (`aef3b25d`)
+- **Rust side**: `boundary.rs` module added with configurable ID length (default 8)
+
+The 9 occurrences currently in this document are a mix of:
+- **Active boundary** (1): The current marker placed by the plugin
+- **Historical text** (8): References in the architecture/discussion sections from when we debugged and fixed the issue
+
+The stale markers won't accumulate further with v0.25.4. No cleanup needed — the plugin handles it automatically now.
+<!-- agent:boundary:fa91a418 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- agent-doc v0.25.4 released (boundary cleanup + file rename handling + short IDs)
+- JetBrains plugin v0.2.13 (boundary dedup + short IDs)
+- VS Code plugin v0.2.3
+- Next: consider pruning historical boundary references from this document if they add noise
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

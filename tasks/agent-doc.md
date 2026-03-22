@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.24.4 | **Tests:** 497 (162 lib + 297 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.0 | **Tests:** 519 (165 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✗ (pending)
-**Plugins:** JetBrains v0.2.12 (caret removal + end-of-exchange) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** step 3b + checkpoint boundary
+**Plugins:** JetBrains v0.2.12 (boundary reposition + end-of-exchange) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 8 FFI exports | **SKILL.md:** preflight + checkpoint boundary
 <!-- /agent:status -->
 
 ## Architecture
@@ -775,14 +775,40 @@ Would it make sense to have a "virtual plugin" if no editor plugin is currently 
 **A "virtual plugin" is unnecessary.** The binary's write path uses component parsing (finding `&lt;!-- /agent:exchange --&gt;`) to determine where to append, not boundary position. The boundary is only meaningful for the IDE's Document API insertion point.
 
 The one cosmetic edge case: if the boundary is mid-exchange in the working tree and the user opens the raw markdown, they'd see the HTML comment between prompt and response. But it's invisible in rendered markdown and harmless functionally.
-<!-- agent:boundary:45f746db-6d48-4b2c-bbe1-849309ad2494 -->
+
+release
+### Re: Release v0.25.0 (HEAD)
+
+**Released.** 23 files changed, +1144/-364 lines.
+
+| Target | Status |
+|--------|--------|
+| Git commit | `c2eae61` — tagged `v0.25.0` |
+| Git push | main + tag pushed |
+| crates.io | Published |
+| GitHub Release | [v0.25.0](https://github.com/btakita/agent-doc/releases/tag/v0.25.0) with binary |
+| Binary installed | `~/.cargo/bin/agent-doc` v0.25.0 |
+| SKILL installed | `.claude/skills/agent-doc/SKILL.md` v0.25.0 |
+
+**Changelog highlights:**
+- `agent-doc preflight` — consolidated pre-agent command
+- Boundary reposition fix — snapshot-only, no keystroke loss
+- CRDT merge simplification — removed reorder hack
+- pulldown-cmark outline — CommonMark-compliant
+- Plugin boundary reposition via IPC flag
+- Stash window routing improvements
+- JetBrains plugin v0.2.12
+- SKILL.md: 4 Bash calls → 1
+
+**Not published:** PyPI (maturin). Would you like me to publish there too?
+<!-- agent:boundary:4fc6099b-fe5b-4936-ba57-454b9ac15484 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Fix boundary reposition losing user input** -- snapshot-only reposition, removed working tree write
-- [x] **Doc audit** -- README, SPEC, CLAUDE.md updated
+- [x] **Release v0.25.0** -- committed, tagged, pushed, published to crates.io + GitHub
+- [ ] **PyPI publish** -- maturin publish (if requested)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 

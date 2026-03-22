@@ -1130,7 +1130,6 @@ Please explain the bug as you understand it.
 **SPEC.md update — I'll add the stash window routing contract now.**
 
 Want me to proceed with the SPEC.md update and stash focus fix?
-yes
 ### Re: Focus Steal Bug Explained + Logging Added
 
 **The bug as I understand it:**
@@ -1147,6 +1146,8 @@ yes
 
 **Key issue:** The `-d` flag on `join-pane` is supposed to prevent focus change, but it doesn't always work reliably. The `select_window(@0)` at line 734 restores focus, but any operations that ran between the stash and the restore used the wrong "current window."
 
+Are you certain as in we logged this or found a "smoking gun"? Or are you assuming a possibility?
+
 **Diagnostic logging added to `reconcile()` (sync.rs):**
 - Logs active window BEFORE detach phase
 - After each `stash_pane`, checks if active window changed and logs `FOCUS STEAL` error if so
@@ -1156,15 +1157,43 @@ yes
 **Binary installed.** Next time you switch editor tabs, the reconcile log will show whether focus was stolen and when. Check `agent-doc` stderr or the tmux pane output.
 
 **Next step:** Once we have log evidence, we can fix the root cause — either by using `select-window -t @0` BEFORE the stash operations (pre-anchoring), or by passing explicit window targets to `auto_start` instead of relying on "current window."
-<!-- agent:boundary:463d3810-fdfb-4830-890e-67969ace50e3 -->
+yes
+We triggered the bug when switching to tasks/briantakita.me.md
+### Re: Stash Bug Found + Fixed (HEAD)
+
+**I was assuming — now I have the smoking gun.**
+
+The bug is NOT a focus steal from `-d` flags. The bug is **"pane too small" in `stash_pane`.**
+
+**Root cause:** `stash_pane()` targets the FIRST pane in the stash window (`stash_panes.first()`). But after multiple stash operations, the first pane may be only 1 row tall. `join-pane` splits the target pane — a 1-row pane can't be split, so it fails with "pane too small."
+
+**Evidence:**
+```
+$ tmux join-pane -dv -s %32 -t %3
+create pane failed: pane too small     ← %3 was 1 row
+
+$ tmux join-pane -dv -s %32 -t %0
+(success)                              ← %0 was 99 rows
+```
+
+**When join fails:** `stash_pane` falls back to `break_pane(pane_id)`, which creates a NEW window (@117, @123, @124, etc.) for the pane. This is what the user sees as "extra windows being created."
+
+**Fix applied:** `stash_pane` now targets the LARGEST pane in the stash window (by height) instead of the first. New `largest_pane_in_window()` helper queries `#{pane_height}` for all panes and picks the tallest. This ensures `join-pane` always has enough space to split.
+
+**Also cleaned up:** Manually moved orphaned panes (%32, %33, %34) back into stash @2.
+
+**Focus steal:** The focus switching you observed is likely a side effect — when `break_pane` creates a new window, tmux may briefly show it despite `-d`. With the fix, `break_pane` fallback should rarely trigger (only if the stash window has zero room after 200-row resize).
+
+Binary installed. Try switching editor tabs to test.
+<!-- agent:boundary:8c5bec5e-25eb-4923-8eb0-e9a001327ef8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [x] **Focus steal diagnostic logging** — active_window tracking in reconcile DETACH phase
-- [ ] **Stash focus steal fix** — prevent focus change during reconcile (needs log evidence)
+- [x] **Stash "pane too small" fix** — target largest pane instead of first
+- [x] **Focus steal diagnostic logging** — active_window tracking in reconcile
 - [ ] **SPEC.md update** — document stash window routing contract
 - [ ] **Markdown AST migration** — replace regex/byte scanning with `pulldown-cmark`
 - [ ] **Boundary-aware replace for `flush_to_document`** <!-- deps: ast -->

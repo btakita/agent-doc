@@ -726,13 +726,41 @@ release
 For the non-plugin case (terminal-only), boundary position doesn't matter since there's no visual editor.
 
 Ready to implement when you say go.
-<!-- agent:boundary:6637aa88-635c-41a4-9b1d-d1fa61204b25 -->
+go
+audit docs
+ensure that README and SPEC is up to date
+### Re: Boundary Fix + Doc Audit (HEAD)
+
+**Fix implemented:** Removed working tree write from `reposition_boundary_in_both()` → renamed to `reposition_boundary_in_snapshot()`. Only the snapshot is updated during commit. The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag. This eliminates keystroke loss when typing during commit.
+
+**Also cleaned up:**
+- Removed dead `reposition_boundary_via_ipc()` from write.rs (was unused)
+- Removed dead `signal_vcs_refresh()` from git.rs (no longer needed without working tree writes)
+- Zero warnings in agent-doc build
+
+**Doc audit findings and fixes applied:**
+
+| File | Issue | Fix |
+|------|-------|-----|
+| README.md | Test count "512" stale | → "519" |
+| README.md | `preflight` missing from Quick Start | Added |
+| README.md | `preflight` missing from CLI Reference | Added |
+| SPEC.md | No §7.26 for `preflight` | Added full section |
+| SPEC.md | Commit write contract didn't mention keystroke loss | Updated to explain why + mention IPC flag |
+| CLAUDE.md | Duplicate `component.rs` in module layout | Removed duplicate |
+| CLAUDE.md | Missing `junie.rs` in agent/ layout | Added |
+| CLAUDE.md | Missing `preflight.rs` | Added |
+| SKILL.md (installed) | Version 0.24.1 stale | Force-copied from source (0.24.4) |
+
+519 tests pass. Binary rebuilt and installed.
+<!-- agent:boundary:f3daff2f-9baf-4388-8a4b-b6ef9727ae88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix boundary reposition losing user input** -- remove working tree write from reposition_boundary_in_both(), rely on plugin IPC flag
+- [x] **Fix boundary reposition losing user input** -- snapshot-only reposition, removed working tree write
+- [x] **Doc audit** -- README, SPEC, CLAUDE.md updated
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 <!-- /agent:pending -->
 

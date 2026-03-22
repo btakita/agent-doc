@@ -176,14 +176,32 @@ When the youtube session commits (which happens every `/agent-doc` cycle), the w
 **Proper fix:** Add a `suppress_reload_dialog` flag in the VCS refresh signal, or move the HEAD marker stripping to the snapshot only (don't modify the working tree at all — let the committed version have HEAD markers, working tree doesn't need them stripped since the IDE shows git gutter anyway).
 
 Want me to remove the working-tree `strip_head_markers` write? The `(HEAD)` markers in the working tree are harmless — the git gutter already shows the boundary visually.
-<!-- agent:boundary:a0ed278c-df23-409d-89cf-35be11678f22 -->
+
+Do the **Proper fix**
+### Re: Proper Fix — No Working Tree Writes from commit() (HEAD)
+
+**Two changes eliminate file cache conflicts from `commit()`:**
+
+**1. Removed working tree `strip_head_markers` write.**
+The staging process (`add_head_marker` → `hash-object` → `update-index`) never modifies the working tree — it only creates a staged blob. The working tree never has `(HEAD)` markers, so stripping them was a no-op that occasionally triggered spurious writes.
+
+**2. Boundary reposition now uses IPC first.**
+`reposition_via_ipc_or_disk()` tries the IPC channel (writes a `fullContent` patch to `.agent-doc/patches/`) before falling back to direct disk write. When the plugin is active:
+- Plugin picks up the patch → applies via Document API → no file cache conflict
+- If IPC times out (2s) → falls back to direct disk write
+- Without plugin → direct disk write (same as before)
+
+**Result:** `commit()` no longer writes to the working tree file in the common case (plugin active). The only disk writes are to the snapshot (which the IDE doesn't watch) and the IPC patch file (which the plugin consumes).
+
+Binary installed. 508 tests pass.
+<!-- agent:boundary:78b3566a-ac1e-4d3c-95a6-548e7afc6930 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 <!-- deps: flush->ast, submit->flush -->
-- [ ] **Remove working-tree HEAD marker writes** — prevent file cache conflicts from commit()
+- [x] **No working tree writes from commit()** — IPC for boundary reposition, removed HEAD marker stripping
 - [x] **Stash overflow windows** — `break_pane_to_stash` + `find_all_stash_windows`
 - [x] **Stash "pane too small" fix** — target largest pane
 - [ ] **SPEC.md update** — document stash window routing contract

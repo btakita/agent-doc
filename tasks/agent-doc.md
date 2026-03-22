@@ -1131,7 +1131,7 @@ Please explain the bug as you understand it.
 
 Want me to proceed with the SPEC.md update and stash focus fix?
 yes
-### Re: Focus Steal Bug Explained + Logging Added (HEAD)
+### Re: Focus Steal Bug Explained + Logging Added
 
 **The bug as I understand it:**
 

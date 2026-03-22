@@ -1002,7 +1002,7 @@ Cargo features are compile-time static — `build.rs` can't dynamically enable f
 **Recommendation:** The current setup is already correct. `make install` and `install.sh` are the documented default paths, and both auto-detect GPU. No changes needed — bare `cargo install` is a developer escape hatch, not the primary install method.
 
 Let's use a `curl | sh` script instead.
-### `curl | sh` Already Does This (HEAD)
+### `curl | sh` Already Does This
 
 The `install.sh` script already exists with GPU auto-detection and is the documented default install path:
 

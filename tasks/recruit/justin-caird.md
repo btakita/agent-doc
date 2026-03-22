@@ -72,4 +72,13 @@ Brian
 - Connects agent-doc directly to their problem ("agents that write and maintain code")
 - Keeps it short — Justin asked for a quick call, not a thesis
 - Doesn't mention C# since the role de-emphasizes traditional coding
+
+Read updated conversation /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/20260322-linkedin-justin-caird.txt
+Note Justin's reply.
+
+Draft a reply.
+Prepare a resume based on what his client is looking for.
 <!-- /agent:exchange -->
+
+<!-- agent:pending -->
+<!-- /agent:pending -->

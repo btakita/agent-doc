@@ -1151,6 +1151,7 @@ Good phrasing — "working from the agentic primitives upward." Let me weave tha
 
 Ready to send. Want me to push to Gmail drafts via corky now?
 Rewrite the draft with my updates.
+Should I include other YouTube videos such as the resume to show my corky integration?
 
 ### Final Email Draft (revised)
 
@@ -1180,7 +1181,32 @@ Rewrite the draft with my updates.
 > Brian
 
 Ready to send via corky to Gmail drafts. Say the word.
-<!-- agent:boundary:0ac66510 -->
+I also want to express the realtime markdown dashboard direction as well.
+
+Show my v
+
+### Re: Additional Videos + Dashboard Direction (HEAD)
+
+**Keep it to one link.** The playlist is enough. Here's why:
+
+- Jordan said "sure, that'd be nice" — polite interest, not deep curiosity. One link respects his time.
+- Multiple YouTube links in a follow-up email looks like a content dump, not a professional correspondence.
+- The playlist already contains your work. If he watches one video and wants more, he'll browse the playlist.
+- Adding corky integration demos, resume videos, and dashboard direction makes the email longer and dilutes the core message.
+
+**The email already has three jobs:**
+1. Deliver the demo links he asked for
+2. Clarify you're an executor, not just a visionary
+3. Ask for referrals
+
+Adding a fourth (showcase every project) weakens all three.
+
+**If you want to show the dashboard direction:** Add it to the playlist description or create a follow-up LinkedIn post that Jordan will see organically. Don't pack it into this email.
+
+**Your message was cut off at "Show my v" — complete it if you want me to address it.**
+
+The draft is ready as-is. Want me to send it?
+<!-- agent:boundary:766d014b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v4 — broken into paragraphs with agentic benefits bullets. Ready to send.
+Email draft pushed to Gmail Drafts. Resume updated with all JD keywords. Awaiting user send from Gmail.
 <!-- /agent:status -->
 
 ## Exchange
@@ -429,6 +429,7 @@ Why not include benefits such as?
 - multimodal knowledge capture
 - ontological + contextual meaning & knowledge transfer
 - correspondence
+
 ### Re: Break Up Paragraph + Add Benefits
 
 Restructured into shorter paragraphs with a bulleted benefits section:
@@ -470,13 +471,34 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Much more scannable now. Approve to send?
-<!-- agent:boundary:f753fc52 -->
+Draft email. Update resume latest info.
+### Re: Draft Email + Resume Update (HEAD)
+
+**Email drafted and pushed to Gmail Drafts:**
+- **To:** lnoble@true-source.com
+- **Subject:** Re: Job Description - Questions - Rate/Resume
+- **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
+- **Draft file:** `mail/drafts/2026-03-23-re-job-description-questions-rate-resume.md`
+
+Open your Gmail Drafts to review and send.
+
+**Resume updates already applied this session:**
+- Added Grafana, TimescaleDB, AWS Lambda, AWS CDK to Skills
+- Added Grafana monitoring bullet to Presence AI
+- Added AWS CDK + Lambda serverless to Menu.com bullet
+- Added USAA security review to TrueCar/honk.com
+- Custom profile bolding all JD-relevant keywords
+
+Resume PDF is attached to the draft and ready to go.
+<!-- agent:boundary:8969ad82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send reply to Lucas with updated resume (awaiting approval)
+- [x] Draft email via corky (pushed to Gmail Drafts)
+- [x] Update resume with latest info
+- [ ] Send from Gmail (user action)
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

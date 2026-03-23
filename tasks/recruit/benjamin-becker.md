@@ -106,7 +106,6 @@ Brian
 Attach your resume PDF when sending. Want to tweak, or ready to send?
 
 generate a custom resume using agent-resume + resume/data.toml
-<!-- agent:boundary:7a9c3aea-edf8-4071-bb9d-3539dc7e5602 -->
 ### Re: Custom Resume Generated
 
 Created `resume/profiles/benjamin-becker.toml` targeting his role areas:
@@ -119,8 +118,15 @@ Built: `resume/BrianTakita-benjamin-becker.pdf` (32KB)
 File path: `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-benjamin-becker.pdf`
 
 Attach this PDF when sending the reply. Ready to review the PDF and send?
-<!-- agent:boundary:9feda4a0-0623-4861-bd3c-563cd5909365 -->
 benjamin-becker responded
+<!-- agent:boundary:38d30dbc -->
+See the sms txt conversation in mail/contacts/benjamin-becker/*.txt
+
+It is a bit unusual to move the conversation over to Telegram.
+LinkedIn considered the message "Potentially harmful".
+Please help me understand if this seems ok or now.
+His LinkedIn profile has ~180 contacts.
+Please investigate.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

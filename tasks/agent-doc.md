@@ -975,15 +975,52 @@ The shared object is for **document manipulation** (component parsing, patch app
 | "Is user typing?" | Plugin (Kotlin/TS) | Requires editor event API |
 | "How long to wait?" | Config (shared) | Can be in `.agent-doc/config.toml` |
 | "Apply patch to document" | Shared object (Rust) | Stateless, testable |
-<!-- agent:boundary:aebb92b6 -->
+What would it take to have this debounce logic handle in the FFI plugin?
+### Re: Debounce in FFI — what would it take? (HEAD)
+
+It's possible but requires the shared object to become **stateful** — currently all FFI functions are stateless (in → out, no side effects).
+
+**What the FFI library would need:**
+
+1. **A "typing event" entry point:**
+   ```c
+   void agent_doc_typing_event(const char* file_path);
+   ```
+   Plugins call this on every document change. The library records the timestamp internally.
+
+2. **A "should submit" query:**
+   ```c
+   bool agent_doc_should_submit(const char* file_path);
+   ```
+   Returns `true` if enough time has passed since the last typing event. The plugin calls this before routing.
+
+3. **Or a "submit with debounce" blocking call:**
+   ```c
+   // Blocks until typing settles, then returns
+   void agent_doc_wait_for_typing_settle(const char* file_path, int timeout_ms);
+   ```
+   The plugin calls this before routing. The library sleeps internally, checking its own timestamp.
+
+**Trade-offs:**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| Plugin-native (current) | Full access to editor events, no FFI overhead | Duplicated in each plugin |
+| FFI stateful (`typing_event` + `should_submit`) | Single implementation, shared across plugins | FFI becomes stateful, thread-safety concerns, plugins still need to wire editor events to the FFI call |
+| FFI blocking (`wait_for_typing_settle`) | Simplest plugin integration | Blocks a thread, plugins still call `typing_event` |
+
+**Key insight:** Even with FFI, the **plugin still needs to call `typing_event()` on every document change**. The FFI only centralizes the timer logic — it doesn't eliminate the editor-specific event wiring. The savings are small: ~20 lines of timer/debounce logic vs ~5 lines of FFI call + event forwarding.
+
+**When it makes sense:** If you have 3+ plugins (JetBrains, VS Code, Neovim, Emacs) and the debounce behavior needs to be *identical* across all of them (same timing algorithm, same edge cases). For 2 plugins, the duplication cost is low.
+
+**Verdict:** Not worth it yet. When a third plugin is added, revisit.
+<!-- agent:boundary:e97806f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Conditional debounce (JetBrains plugin v0.2.18)
 - [ ] **Install plugin v0.2.18** — test typing debounce
-- [ ] VS Code extension: implement same debounce pattern
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

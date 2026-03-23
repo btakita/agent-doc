@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Email sent. Factor-based backtesting course noted for screening call talking points. Awaiting Lucas response.
+Email sent. Resume committed and pushed. Awaiting Lucas response.
 <!-- /agent:status -->
 
 ## Exchange
@@ -562,7 +562,17 @@ Yes — `resume/data.toml` was updated this session with 4 changes:
    - Added "gives agents and humans a consistent vocabulary across code, correspondence, and data contexts"
 
 The master template (`BrianTakita.md`) was also updated with: Grafana monitoring bullet at Presence AI, USAA security review bullet at TrueCar, and updated Skills line. These changes are not yet committed in the resume submodule.
-<!-- agent:boundary:6d6c1ab6 -->
+commit and push resume
+### Re: Resume Committed & Pushed (HEAD)
+
+Done. Resume submodule committed and pushed:
+
+- **Commit:** `387a7c6` in `resume/` — "Add NextEra Analytics resume profile and update data"
+- **Pushed to:** `github.com:btakita/resume.git` (main)
+- **Parent pointer updated:** `25b8ec5` in agent-loop
+
+Files committed: `BrianTakita.md`, `data.toml`, `profiles/nextera-analytics.toml`, `BrianTakita-nextera-analytics.pdf`
+<!-- agent:boundary:9c7bd9f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -571,8 +581,8 @@ The master template (`BrianTakita.md`) was also updated with: Grafana monitoring
 - [x] Draft email via corky
 - [x] Update resume with latest info
 - [x] Send email to Lucas
+- [x] Commit and push resume submodule
 - [ ] Send LinkedIn follow-up message (copy-paste)
-- [ ] Commit resume submodule changes
 - [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Mention factor-based backtesting + DuckDB/PyTorch on screening call

@@ -1223,7 +1223,7 @@ Should I add that line to the draft, or keep the email as-is and send?
 Is the draft in a file?
 Also
 
-### Re: Draft file (HEAD)
+### Re: Draft file
 
 Created the draft at:
 `mail/drafts/2026-03-23-thanks-for-the-conversation-demo-links-a-clarification.md`
@@ -1236,7 +1236,7 @@ corky draft push mail/drafts/2026-03-23-thanks-for-the-conversation-demo-links-a
 ```
 
 Or I can run it for you — just say "push it."
-<!-- agent:boundary:bdde9b43 -->
+<!-- agent:boundary:97e59c31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

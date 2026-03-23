@@ -502,7 +502,7 @@ Next steps:
 I'm learning factor-based backtesting in my quantscience.io course.
 Should we include this in the resume?
 The
-### Re: Factor-Based Backtesting Course (HEAD)
+### Re: Factor-Based Backtesting Course
 
 **Yes — highly relevant to NextEra, but save for the screening call rather than updating the resume now.** The email is already sent.
 
@@ -516,7 +516,7 @@ The
 - **Resume:** Once you complete more of the course, add under Education/Certifications: "Factor-Based Backtesting — quantscience.io (in progress)"
 
 Your message was cut off ("The ") — want to finish that thought?
-<!-- agent:boundary:456888b4 -->
+<!-- agent:boundary:01764876 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

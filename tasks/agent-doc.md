@@ -954,7 +954,7 @@ yes
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.18.zip`
 Does this need to be implemented in VSCode as well?
 Should this be implemented in the shared object FFI library instead?
-### Re: VS Code + shared object FFI for debounce? (HEAD)
+### Re: VS Code + shared object FFI for debounce?
 
 **VS Code:** Yes, the same debounce behavior should exist in the VS Code extension. The logic is identical — track last `onDidChangeTextDocument` event, conditional delay on submit.
 
@@ -975,7 +975,7 @@ The shared object is for **document manipulation** (component parsing, patch app
 | "Is user typing?" | Plugin (Kotlin/TS) | Requires editor event API |
 | "How long to wait?" | Config (shared) | Can be in `.agent-doc/config.toml` |
 | "Apply patch to document" | Shared object (Rust) | Stateless, testable |
-<!-- agent:boundary:691aecb4 -->
+<!-- agent:boundary:aebb92b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

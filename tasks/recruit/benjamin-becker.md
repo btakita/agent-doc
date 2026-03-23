@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Investigation complete. Multiple red flags identified — recommend disengaging.
+Recourse options provided. Recommend sending cease-and-desist + LinkedIn report.
 <!-- /agent:status -->
 
 ## Exchange
@@ -146,12 +146,34 @@ Please investigate.
 6. **Resume already sent** — Main risk. With a detailed resume, they can submit you to roles without your knowledge or use your credentials to win contracts staffed by others.
 
 **Recommendation:** Do not move to WhatsApp. Do not engage further. The combination of LinkedIn's own warning + low connections + off-platform push + vague staffing model is a strong scam indicator. A legitimate recruiter would have a named company, a company LinkedIn page, and no reason to leave the platform.
-<!-- agent:boundary:481c9d8e -->
+Since he has my resume, what is my recourse. If he is going to use it?
+### Re: Resume Recourse (HEAD)
+
+**What he can do with your resume:**
+- Submit you to companies without your knowledge (unauthorized representation)
+- Use your credentials to win contracts, then staff them with someone else
+- Sell your info to other recruiters/staffing firms
+
+**Your recourse:**
+
+1. **Send a cease-and-desist message on LinkedIn** — Tell him directly: "I'm not moving forward. Please do not submit my resume to any clients or share it with third parties. I have not authorized you to represent me." Creates a written record on LinkedIn's platform.
+
+2. **Report him on LinkedIn** — Use LinkedIn's "Report" feature on his profile/messages. Select "Scam or fraud." LinkedIn may investigate and remove the account.
+
+3. **Monitor for unauthorized submissions** — If companies you didn't apply to contact you, ask who submitted your resume — they'll usually tell you the staffing firm.
+
+4. **Google yourself periodically** — Search your name + "resume" or name + job titles to check if it's been posted on job boards.
+
+5. **If he misuses it** — File a complaint with the FTC (ftc.gov/complaint) for deceptive business practices, and with your state AG's consumer protection division.
+
+**Practical reality:** The resume you sent is a custom version (benjamin-becker profile). It doesn't contain SSN, bank info, or anything beyond what's already on your LinkedIn. The main risk is unauthorized job submissions — annoying but manageable. The cease-and-desist message is your strongest immediate move — it removes plausible deniability on his part.
+<!-- agent:boundary:4b320c35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ([done]) Investigate Benjamin Becker legitimacy
-- Do NOT send resume or continue engagement — scam risk
+- Send cease-and-desist message to Benjamin Becker on LinkedIn
+- Report Benjamin Becker profile on LinkedIn
+- Monitor for unauthorized resume submissions
 <!-- /agent:pending -->

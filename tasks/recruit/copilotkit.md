@@ -1295,7 +1295,7 @@ Or should I just make a note of this to hopefully remember next time.
 
 I don't have much leverage. So my interests are based on increasing my leverage from where I am at.
 
-### Re: Perspective, Leverage, and Follow-up (HEAD)
+### Re: Perspective, Leverage, and Follow-up
 
 **Don't send a follow-up about this.** You just sent the email. A second one explaining your motivations would read as over-processing the rejection. Let the email land and breathe.
 
@@ -1315,7 +1315,7 @@ When talking to someone with Jordan's position, translate your work into their l
 You don't need to change what you're building. You need to frame it in terms of what they're buying.
 
 This is a note for future interviews, not a follow-up email topic.
-<!-- agent:boundary:906c3409 -->
+<!-- agent:boundary:06a2be9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

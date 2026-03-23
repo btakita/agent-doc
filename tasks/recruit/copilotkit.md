@@ -365,7 +365,7 @@ Questions that show you understand CopilotKit deeply:
 **Key mindset: You're evaluating them too.** This is 30 minutes to determine if CopilotKit's direction aligns with where you want to build. Don't pitch too hard. Let the technical overlap speak for itself. Jordan is a systems engineer — he'll recognize the depth without you having to sell it.
 Iterate with annotations.
 
-### Re: Revised 30-Minute Flow (with annotations) (HEAD)
+### Re: Revised 30-Minute Flow (with annotations)
 
 ---
 
@@ -424,7 +424,7 @@ If he engages → DX first, enterprise knowledge work second. If not → follow 
 **Minutes 28–30: Close**
 
 > "This has been great. I'm genuinely excited about AG-UI as a protocol layer — it maps to patterns I've independently built. I'd love to continue the conversation."
-<!-- agent:boundary:08b75757 -->
+<!-- agent:boundary:5977eaf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

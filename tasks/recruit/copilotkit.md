@@ -456,7 +456,7 @@ So should I mention this earlier or later?
 - Frame it as "content creation" — frame it as "building in public"
 Iterate on the prep doc.
 
-### Re: When to Mention LinkedIn Posts/Videos (HEAD)
+### Re: When to Mention LinkedIn Posts/Videos
 
 You're right — Jordan will almost certainly ask "what have you been working on?" in the first 5–10 minutes. That's the natural moment for the LinkedIn/video mention, not minute 22.
 
@@ -482,7 +482,7 @@ You're right — Jordan will almost certainly ask "what have you been working on
 | 28–30 | Close | "Genuinely excited, love to continue" |
 
 The LinkedIn mention moved from minute 22 to the end of your pitch block (minute 7–8). Everything else stays the same.
-<!-- agent:boundary:84c81ef7 -->
+<!-- agent:boundary:5d79f211 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

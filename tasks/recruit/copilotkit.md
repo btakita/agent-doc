@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Follow-up strategy finalized. LinkedIn message drafted. Investor angle tabled for 2-3 months. Next: send message + update Kevin.
+Kevin call transcribed. Contact file updated. Follow-up email to Jordan drafted. Next: send email + send recording to Kevin.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1006,13 +1006,67 @@ You would have been fine with the work. You CAN get excited about different thin
 > I hear you that the current need is people already embedded in the CopilotKit ecosystem. I'm not there yet, but I'm staying close. Thanks for keeping the door open — I'll take you up on the 3-6 month check-in.
 
 Shorter than the last draft. Doesn't oversell. Acknowledges his actual filter honestly.
-<!-- agent:boundary:21601ddd -->
+
+Transcribe and diarize /home/brian/work/btakita/agent-loop/mail/contacts/kevin-volk/recordings/20260323-kevin-volk.amr
+Also update kevin-volk/AGENTS.md and any other related context.
+
+Jordan's email is jordan@copilotkit.ai
+Please draft a followup email
+
+### Kevin Volk Call Summary (Mar 23) (HEAD)
+
+- Kevin will send Jordan's email (jordan@copilotkit.ai — you already have it)
+- Kevin wants the interview recording + transcript — send to him
+- Kevin warned: some hiring managers get weird about candidates recording interviews. Disclose upfront in future.
+- Kevin will keep you in pipeline for similar roles at other companies
+- Kevin seeing more contract-to-hire in the market
+- Kevin will check in with you in a couple weeks
+
+Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
+
+---
+
+### Draft Follow-Up Email to Jordan (HEAD)
+
+**To:** jordan@copilotkit.ai
+**Subject:** Thanks for the conversation — demo links + a clarification
+
+> Jordan,
+>
+> Great reconnecting today. I appreciate you being straight about where CopilotKit's needs are right now.
+>
+> Two things I wanted to follow up on:
+>
+> **Demo links you asked about:**
+> [YouTube/LinkedIn links here]
+>
+> These show agent-doc in action — the CRDT merge, template patching, concurrent editing with Claude Code. You can see the workflow rather than just hear me describe it.
+>
+> **A clarification:**
+> I got excited in the conversation talking about where documents-as-interface could go, and I think that overshadowed something important: my daily work is execution. I ship releases across crates.io, PyPI, and npm. agent-doc's editor plugin uses a cross-platform FFI architecture designed for multi-editor integration — that's integration engineering at the systems level. I build, ship, and maintain packages across ecosystems as a core part of what I do every day.
+>
+> I hear you that the current need is people already embedded in the CopilotKit ecosystem. I'm not there yet, but the integration work you described — filling out the framework × feature matrix — is exactly the kind of work my toolchain is built for.
+>
+> Taking you up on the 3-6 month check-in. In the meantime, I'll stay close to what you're building.
+>
+> Best,
+> Brian
+
+---
+
+**Notes on this draft:**
+- Opens with thanks, not apology
+- Delivers the demo links he asked for (action item from the call)
+- The "clarification" reframes without being defensive — acknowledges the vision lean, then states execution credentials
+- Doesn't beg for the current role — accepts the timeline
+- Short enough that Jordan will actually read it
+<!-- agent:boundary:666ce33a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn message to Jordan today (revised draft above)
-- Email Kevin Volk: outcome update, availability for any role, ask for Jordan's email for longer follow-up
-- Calendar: 3-month check-in (June 2026)
+- Send follow-up email to Jordan at jordan@copilotkit.ai (draft above — add video links)
+- Send interview recording + transcript to Kevin Volk
+- Calendar: Kevin check-in in 2 weeks, Jordan check-in in 3 months (June 2026)
 <!-- /agent:pending -->

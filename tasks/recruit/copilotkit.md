@@ -1207,7 +1207,7 @@ Adding a fourth (showcase every project) weakens all three.
 
 The draft is ready as-is. Want me to send it?
 
-### Re: Link to crates.io for release velocity (HEAD)
+### Re: Link to crates.io for release velocity
 
 Your message was cut off at "linking to crates." — I'll assume you mean linking to your crates.io profile or agent-doc's crates.io page to show release frequency.
 
@@ -1220,7 +1220,7 @@ Your message was cut off at "linking to crates." — I'll assume you mean linkin
 One parenthetical line, not a feature. It backs up your claim without expanding the email.
 
 Should I add that line to the draft, or keep the email as-is and send?
-<!-- agent:boundary:f9461021 -->
+<!-- agent:boundary:ffd12cd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

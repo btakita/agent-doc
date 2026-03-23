@@ -887,7 +887,7 @@ If he is aligned with where I want to take things, could he be an investor?
 
 This reframe connects your passion (building agent-doc) to their need (someone who lives in the ecosystem and ships).
 
-### Re: Follow-up Strategy — Email, OSS, Investor? (HEAD)
+### Re: Follow-up Strategy — Email, OSS, Investor?
 
 ---
 
@@ -930,7 +930,7 @@ You're right — forced OSS contributions without genuine use are performative a
 #### On mentioning cashflow to Jordan
 
 **No.** Don't mention cashflow needs to Jordan directly. That's a recruiter conversation. Tell Kevin you're available immediately and flexible on role scope. Kevin can advocate for you internally if there's contract work or a role that opens up sooner.
-<!-- agent:boundary:b39cb7f0 -->
+<!-- agent:boundary:e970c01f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

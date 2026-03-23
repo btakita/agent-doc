@@ -976,7 +976,7 @@ The shared object is for **document manipulation** (component parsing, patch app
 | "How long to wait?" | Config (shared) | Can be in `.agent-doc/config.toml` |
 | "Apply patch to document" | Shared object (Rust) | Stateless, testable |
 What would it take to have this debounce logic handle in the FFI plugin?
-### Re: Debounce in FFI — what would it take? (HEAD)
+### Re: Debounce in FFI — what would it take?
 
 It's possible but requires the shared object to become **stateful** — currently all FFI functions are stateless (in → out, no side effects).
 
@@ -1014,7 +1014,7 @@ It's possible but requires the shared object to become **stateful** — currentl
 **When it makes sense:** If you have 3+ plugins (JetBrains, VS Code, Neovim, Emacs) and the debounce behavior needs to be *identical* across all of them (same timing algorithm, same edge cases). For 2 plugins, the duplication cost is low.
 
 **Verdict:** Not worth it yet. When a third plugin is added, revisit.
-<!-- agent:boundary:e97806f8 -->
+<!-- agent:boundary:c51b48c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

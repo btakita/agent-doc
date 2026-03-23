@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Recourse options provided. Recommend sending cease-and-desist + LinkedIn report.
+Scam economics explained. Part-time model is appealing but not with this contact.
 <!-- /agent:status -->
 
 ## Exchange
@@ -167,13 +167,33 @@ Since he has my resume, what is my recourse. If he is going to use it?
 5. **If he misuses it** — File a complaint with the FTC (ftc.gov/complaint) for deceptive business practices, and with your state AG's consumer protection division.
 
 **Practical reality:** The resume you sent is a custom version (benjamin-becker profile). It doesn't contain SSN, bank info, or anything beyond what's already on your LinkedIn. The main risk is unauthorized job submissions — annoying but manageable. The cease-and-desist message is your strongest immediate move — it removes plausible deniability on his part.
-<!-- agent:boundary:a118110d -->
+I liked that this was part time work. But you raise a good point.
+How would he benefit by submitting my resume without representing me?
+### Re: How He Benefits From Your Resume (HEAD)
+
+The scam model works like this:
+
+**Scenario 1 — Resume farming (most common):**
+He submits your resume to dozens of companies through staffing platforms (Bullhorn, JobDiva, etc.). If a company bites, he contacts you saying "I found you a role" and takes a placement fee or margin on your rate. He's not representing *you* — he's carpet-bombing companies with resumes and seeing what sticks. Your resume is inventory.
+
+**Scenario 2 — Credential fronting:**
+He wins a contract using your impressive background (agent infra, Rust, H100 GPUs), then either:
+- Asks you to do the client intro/interview, then subs in cheaper developers for actual delivery
+- Never involves you at all — uses your resume to win, staffs with someone else entirely
+
+**Scenario 3 — Data brokering:**
+Your resume + contact info gets sold to other recruiters/staffing firms. This is why you'd start getting random recruiter spam from firms you've never heard of.
+
+**On the part-time appeal:** That's exactly what makes this pitch effective. "Stack a few smaller contracts through your LLC" is genuinely attractive to senior engineers. Legitimate versions of this model do exist (e.g., Toptal, Gun.io, established staffing firms with named companies). The difference is those firms have verifiable identities, company pages, and don't need to leave LinkedIn to talk to you.
+
+**Bottom line:** If he were legitimate, the part-time contract stacking model would be worth exploring — just not with someone who triggers LinkedIn's scam filters, has no company name, and immediately wants off-platform.
+<!-- agent:boundary:3e9b398e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send cease-and-desist message to Benjamin Becker on LinkedIn
-- Report Benjamin Becker profile on LinkedIn
+- Decide whether to send cease-and-desist or just disengage silently
+- Report Benjamin Becker profile on LinkedIn (optional)
 - Monitor for unauthorized resume submissions
 <!-- /agent:pending -->

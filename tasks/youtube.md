@@ -138,7 +138,7 @@ Running silence detection on all 6 files now. Once complete, I'll show how much 
 Do you know the topics of each session, or should I transcribe to identify subjects?
 Transcribe and identify subjects.
 Should this be a mini-series around this particular issue of moving from the Skill into binary logic?
-### Re: Transcription & Mini-Series (HEAD)
+### Re: Transcription & Mini-Series
 
 **Transcription started** on all 6 source files (CUDA GPU, running in parallel). Once complete, I'll analyze the content to identify distinct subjects and recommend episode boundaries.
 
@@ -184,7 +184,7 @@ All 6 transcriptions complete. The sessions have a clear narrative arc:
 Does this split look right? Want to adjust any titles or merge/split episodes?
 This seems good
 continue
-### Re: Proceeding with Light Edits (HEAD)
+### Re: Proceeding with Light Edits
 
 Approved! Silence detection complete for 5/6 videos. Light edits running in parallel:
 
@@ -200,7 +200,7 @@ Approved! Silence detection complete for 5/6 videos. Light edits running in para
 Video 6 completed first (test run): 30:53 -> 19:35 after removing 11:18 of silence. Re-encoded x264 CRF23.
 
 Videos 1-2 and 4-5 encoding now. Video 3 will start once its silence detection finishes.
-<!-- agent:boundary:a2e92a36 -->
+<!-- agent:boundary:f603be0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

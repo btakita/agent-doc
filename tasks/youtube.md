@@ -405,7 +405,7 @@ It says Deleted Videos
 
 Looks like it's in the middle of processing the video.
 continue with blog post
-### Re: Pipeline Feature Doc, Blog Post, YouTube Processing (HEAD)
+### Re: Pipeline Feature Doc, Blog Post, YouTube Processing
 
 **1. Agent doc created:** `tasks/corky-youtube-pipeline.md` — feature design for `corky youtube pipeline` with configurable optional blog and social media posts.
 
@@ -416,7 +416,7 @@ continue with blog post
 - Documents the publishing pipeline (silence removal, GPU transcription, corky upload)
 - Mentions corky 0.21.0 playlist support
 - Needs deploy to Cloudflare Pages after review
-<!-- agent:boundary:b4850b37 -->
+<!-- agent:boundary:0b55cd9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -805,13 +805,31 @@ So the user got **double execution**:
 - `sync` auto-started a NEW pane (%66), started Claude, and sent `/agent-doc benjamin-becker.md` again
 
 This confirms the fix should be `--no-auto-start` on the sync call from route. Let me implement it now.
-<!-- agent:boundary:8a836273 -->
+continue
+I did not see the response btw
+### Re: Continue + missed response (HEAD)
+
+**Summary of what was done (may have been missed):**
+
+1. **Confirmed:** Auto-start also ran the document — it starts Claude AND sends `/agent-doc <file>`, causing double execution
+2. **Implemented fix:** Added `sync::run_layout_only()` which skips auto-start. Route now calls this instead of `sync::run()`.
+3. **Binary built and installed** — v0.25.6 with the fix active
+
+**The fix:** When route calls sync (via `--col`/`--focus` args), sync only rearranges existing panes — it does NOT auto-start new sessions. Auto-start only happens when `agent-doc sync` is invoked standalone.
+
+This prevents:
+- Duplicate panes (3-pane issue)
+- Double execution (command sent to original pane + new pane)
+
+Ready to release as v0.25.7 or test first?
+<!-- agent:boundary:b479549f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement --no-auto-start for sync from route** — prevent duplicate pane + double execution
+- [x] Fix route+sync race — `run_layout_only()` skips auto-start
+- [ ] Release v0.25.7 with route+sync fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

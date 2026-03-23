@@ -902,7 +902,7 @@ Is it possible to remove the delay in the debounce? Can we track the last keypre
 We may also want to track whether or not the keypress changed the document.
 If `Run Agent Doc` was run within 1.5s of the last keypress (potentially document change), the we use the debounce loop.
 Otherwise we immediately invoke the agent-doc run.
-### Re: Keypress tracking + conditional debounce (HEAD)
+### Re: Keypress tracking + conditional debounce
 
 **Yes — this is a better design.** Track the last document change timestamp, and only debounce when recent typing is detected.
 
@@ -932,7 +932,7 @@ Otherwise we immediately invoke the agent-doc run.
 The `DocumentListener` only fires on actual content changes (not cursor moves or selections), so it's the right signal.
 
 Want me to implement this?
-<!-- agent:boundary:cd7f95f6 -->
+<!-- agent:boundary:4beb253f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

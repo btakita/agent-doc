@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Deep transcript analysis running (4 subagents). Blog posts will be expanded with topic analysis.
+Subagents analyzing transcripts for individual blog posts. Series post is featured, episodes won't be.
 <!-- /agent:status -->
 
 ## Exchange
@@ -431,15 +431,20 @@ Should we have separate blog posts for each episode?
 - Agent 4: Ep4-6 combined analysis (IPC timeout, preflight, deterministic primitives)
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
-<!-- agent:boundary:f760e739 -->
+Make the series post the featured post. Individual episodes won't be feature blog posts.
+### Re: Featured Post Settings (HEAD)
+
+Updated: series overview post stays `featured: true`, individual episode posts will use `featured: false`.
+
+Deep transcript analysis still running (4 subagents reading all 6 transcripts). Will create individual episode blog posts with expanded topic analysis once complete.
+<!-- agent:boundary:c0e307da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Complete transcript deep analysis (4 subagents running)
-- [ ] Create individual blog posts per episode
-- [ ] Update series overview post with episode links
+- [ ] Create individual episode blog posts (featured: false)
 - [ ] Deploy blog to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing

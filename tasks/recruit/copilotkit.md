@@ -426,7 +426,7 @@ If he engages → DX first, enterprise knowledge work second. If not → follow 
 > "This has been great. I'm genuinely excited about AG-UI as a protocol layer — it maps to patterns I've independently built. I'd love to continue the conversation."
 Should I mention my recent LinkedIn posts and videos to demonstrate what I'm working on and how I work?
 
-### Re: Mentioning LinkedIn Posts & Videos (HEAD)
+### Re: Mentioning LinkedIn Posts & Videos
 
 **Yes, but strategically — don't lead with it.** Here's when and how:
 
@@ -451,7 +451,7 @@ If Jordan seems engaged and you're discussing the document/notebook direction or
 - Pull up videos during the call (wastes the 30 minutes)
 - List specific post titles or view counts
 - Frame it as "content creation" — frame it as "building in public"
-<!-- agent:boundary:4768da2e -->
+<!-- agent:boundary:f3644eaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

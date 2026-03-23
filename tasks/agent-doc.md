@@ -320,7 +320,7 @@ This is where AG-UI's state model becomes relevant — the JSX components could 
 
 **Verdict:** Highly feasible. The component model is already there. The main work is building the MDX renderer + component registry + file watcher. Phase 1 (read-only viewer) could be a weekend project. Phase 3 (bidirectional) is where the real value lives.
 Discuss feasibility of agent-doc + Jupyter.
-### Re: agent-doc + Jupyter feasibility (HEAD)
+### Re: agent-doc + Jupyter feasibility
 
 **Concept:** Jupyter notebooks as agent-doc session documents — cells as components, kernel execution as live evaluation, agent writes code/markdown cells, user runs them interactively.
 
@@ -379,7 +379,7 @@ This is a one-way export (Phase 0) that gives users a Jupyter view of any sessio
 **Phase 2:** Native `.ipynb` support — agent-doc reads/writes notebook JSON directly. Components are cells. The diff engine understands cell structure.
 
 **Verdict:** High feasibility, especially the export path. Strategy A (Jupyter as viewer) is achievable with minimal binary changes. Strategy B (native `.ipynb`) is a larger effort but unlocks the full Jupyter ecosystem. The most practical first step is the `export --jupyter` command.
-<!-- agent:boundary:fd1b64f7 -->
+<!-- agent:boundary:31b9dc76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

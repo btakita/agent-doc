@@ -515,7 +515,7 @@ Blog deployed:
 Posts should be live once CF Pages finishes building (typically 1-2 minutes).
 Pending:
 - Publish YouTube comment with link to the briantakita.me blog post. Describing that the post is a summary and analysis of the video.
-### Re: YouTube Comments with Blog Links (HEAD)
+### Re: YouTube Comments with Blog Links
 
 Posted comments on all 6 episodes linking to their blog post analysis:
 
@@ -529,7 +529,7 @@ Posted comments on all 6 episodes linking to their blog post analysis:
 | 6 | UgwgbNP3bXAe3BCG7Mt4AaABAg | [pin](https://www.youtube.com/watch?v=xNBkZAJuUys&lc=UgwgbNP3bXAe3BCG7Mt4AaABAg) |
 
 Each comment includes: blog post link, topics covered, and series overview link. Pin manually via the links above.
-<!-- agent:boundary:0860ee9b -->
+<!-- agent:boundary:561b736a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

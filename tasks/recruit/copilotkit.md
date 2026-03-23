@@ -1068,7 +1068,7 @@ Got it — sending from brian.takita@gmail.com. The draft is ready. Would you li
 Should I send him my most recent playlist https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
 
 Maybe add a short description over how I'm working with this?
-And how this workflow naturally would work with MDX, Notion, Jupyter, Word, Obsidian, or any other type of knowledge document software.
+And how this workflow naturally would work with MDX, Notion, Jupyter, Word, Obsidian, or any other type of knowledge document software. 
 
 ### Re: Video Link + Description for Email
 
@@ -1097,13 +1097,53 @@ Yes — send the playlist. But keep the description tight. Jordan is busy. One p
 > Brian
 
 Ready to send via corky to Gmail drafts when you give the go-ahead.
-<!-- agent:boundary:713ef57e -->
+
+My plan is to add live data components such as AG-UI compatible components when I have the markdown editing solid.
+
+Should I mention that I have a client and I am open for more clients to integrate?...So if he has any referrals, I would appreciate it? 
+BCC: Ke
+
+### Re: AG-UI Components Roadmap + Client Referrals + BCC (HEAD)
+
+**AG-UI components roadmap:** Yes, mention it — but briefly. It connects your work directly to CopilotKit's ecosystem and shows you're heading toward their stack naturally. One sentence.
+
+**Client referrals:** Yes — Jordan explicitly said "if you see something, do something" and encouraged staying connected. Asking for referrals is a natural extension of that. It also reframes the relationship from "candidate who didn't get the job" to "professional peer looking for work." Keep it light — one line at the end, not the focus.
+
+**BCC: dev** — noted, will include.
+
+**Final email draft:**
+
+**To:** jordan@copilotkit.ai
+**From:** brian.takita@gmail.com
+**BCC:** dev
+**Subject:** Thanks for the conversation — demo links + a clarification
+
+> Jordan,
+>
+> Great reconnecting today. I appreciate you being straight about where CopilotKit's needs are right now.
+>
+> Here are the demo videos I mentioned — agent-doc in action with Claude Code:
+> https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
+>
+> What you'll see: I work in a markdown document in JetBrains while Claude Code streams responses into named document regions via CRDT merge. I edit concurrently — the agent and I are collaborating in real-time through the document. Every interaction is a git commit. The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface. My plan is to add live data components — including AG-UI compatible components — once the markdown editing layer is solid.
+>
+> I also wanted to clarify something from our call: I got excited talking about where this could go, and I think that overshadowed the execution side. My daily work is shipping — I release across crates.io, PyPI, and npm. agent-doc's editor plugin uses a cross-platform FFI architecture designed for multi-editor integration. That's integration engineering at the systems level.
+>
+> I hear you that the current need is people already embedded in the CopilotKit ecosystem. Taking you up on the 3-6 month check-in. In the meantime, I'll stay close to what you're building.
+>
+> On a separate note — I'm currently doing client work and am open to taking on more. If you come across anyone in your network who could use someone with my background, I'd appreciate the referral.
+>
+> Best,
+> Brian
+
+Want me to push this to Gmail drafts via corky?
+<!-- agent:boundary:f726b508 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send follow-up email to Jordan (draft finalized — awaiting approval)
+- Send follow-up email to Jordan (final draft — awaiting send approval)
 - Send interview recording + transcript to Kevin Volk
 - Calendar: Kevin check-in in 2 weeks, Jordan check-in in 3 months (June 2026)
 <!-- /agent:pending -->

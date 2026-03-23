@@ -181,7 +181,7 @@ Look at the email from lucas noble subject: Job Description - Questions - Rate/R
 
 Please analyze and draft a response. Include a custom resume for this role.
 Research https://www.nexteraanalytics.com/ and the parent company https://www.nexteraenergy.com/.
-### Re: Job Description — Analysis & Draft Response (HEAD)
+### Re: Job Description — Analysis & Draft Response
 
 **Email from Lucas (2026-03-20):** Sent the JD for NextEra Analytics, requesting:
 1. Confirm $140/hr 1099
@@ -237,7 +237,7 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Want me to adjust the draft, tweak the resume profile, or send via corky?
-<!-- agent:boundary:17fe0a1d -->
+<!-- agent:boundary:5993f7bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

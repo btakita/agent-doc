@@ -807,6 +807,7 @@ So the user got **double execution**:
 This confirms the fix should be `--no-auto-start` on the sync call from route. Let me implement it now.
 continue
 I did not see the response btw
+I was in the middle of typing. So the polling did not seem to pause the diff construction as well.
 ### Re: Continue + missed response
 
 **Summary of what was done (may have been missed):**
@@ -822,14 +823,25 @@ This prevents:
 - Double execution (command sent to original pane + new pane)
 
 Ready to release as v0.25.7 or test first?
-<!-- agent:boundary:07025a0b -->
+test
+audit
+### Re: Polling did not pause diff construction (HEAD)
+
+Good observation. The polling runs on a separate daemon thread and only reads the Swing component tree (via `invokeLater` on EDT, which takes microseconds). It never touches the document, file system, or diff engine. The diff is constructed by `agent-doc preflight` which reads the file independently.
+
+The polling and diff are completely decoupled:
+- **Poll thread:** reads editor layout → compares hash → calls `agent-doc sync` if changed
+- **Preflight:** reads document file → compares with snapshot → computes diff
+
+No contention between them. The poll's EDT work (layout detection) is ~microseconds, invisible to the user.
+<!-- agent:boundary:2d95fadf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Fix route+sync race — `run_layout_only()` skips auto-start
-- [ ] Release v0.25.7 with route+sync fix
+- [x] Route+sync race fix implemented (`run_layout_only`)
+- [ ] Release v0.25.7
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

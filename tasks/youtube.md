@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-SRT captions: Ep4-6 done, Ep1-3 transcribing. YouTube auth still needed. Blog/LinkedIn posts queued.
+Publishing pipeline documented. All 6 episodes ready with SRT captions. Awaiting YouTube auth.
 <!-- /agent:status -->
 
 ## Exchange
@@ -305,15 +305,86 @@ Add to pending:
 ### Re: Blog & LinkedIn Posts
 
 Added to pending. Will draft after YouTube uploads are complete.
-<!-- agent:boundary:00ca4791 -->
+Meta: Let's capture the process of:
+- creating an YouTube video
+- CC transcription
+- uploading to YouTube
+- briantakita.me blog post
+- LinkedIn post (optional)
+### Re: YouTube Publishing Pipeline
+
+**Full workflow captured from this session:**
+
+#### 1. Video Creation & Editing
+```sh
+# Light edit: remove silence (waiting-for-agent dead air) (HEAD)
+ffmpeg -i INPUT.mp4 -af silencedetect=noise=-30dB:d=3 -f null - 2>&1 \
+  | grep -E "silence_(start|end)" > silence.txt
+# Parse silence ranges, build trim+concat filter, re-encode x264 CRF23 (HEAD)
+python3 light_edit.py silence.txt INPUT.mp4 OUTPUT.mp4
+
+# Manual cuts (privacy, notifications) (HEAD)
+# Use ffmpeg trim+concat with specific timestamp ranges (HEAD)
+```
+
+#### 2. Closed Captioning
+```sh
+# GPU transcription (CUDA) (HEAD)
+corky transcribe OUTPUT.mp4 -o transcript.md
+
+# Convert to SRT format (HEAD)
+python3 to_srt.py transcript.md OUTPUT.srt
+```
+
+#### 3. YouTube Upload
+```sh
+# Authenticate (once, token cached) (HEAD)
+corky youtube auth
+
+# Create draft with metadata (HEAD)
+corky youtube draft --author btakita --visibility public \
+  --tags "tag1,tag2" "Description text"
+
+# Edit draft: add title (first line after ---), video:, captions: paths (HEAD)
+# Set status: ready (HEAD)
+
+# Publish (HEAD)
+corky youtube publish mail/social/DRAFT.md
+```
+
+#### 4. Playlist
+```sh
+# Create playlist (HEAD)
+corky youtube playlist create "Series Title" \
+  --description "Series description"
+
+# Add videos (in order) (HEAD)
+corky youtube playlist add PLAYLIST_ID VIDEO_ID --position 0
+```
+
+#### 5. Blog Post (briantakita.me)
+- Create post in briantakita.me content directory
+- Embed YouTube video(s)
+- Include topic summary, links to playlist
+- Deploy to Cloudflare Pages
+
+#### 6. LinkedIn Post (optional)
+```sh
+corky linkedin draft --author btakita "Post text"
+# Edit draft, set status: ready (HEAD)
+corky linkedin publish mail/social/DRAFT.md
+# Add first comment with links (HEAD)
+corky linkedin comment DRAFT.md "Links: ..."
+```
+
+**This can be automated into a single `corky youtube pipeline` command in the future.**
+<!-- agent:boundary:182142eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Re-authenticate YouTube OAuth (`corky youtube auth`)
-- [ ] Complete re-transcription Ep1-3 (running)
-- [ ] Convert remaining transcripts to SRT captions
 - [ ] Publish 6 episodes to YouTube
 - [ ] Create "Skill to Binary" playlist
 - [ ] Add all 6 videos to playlist
@@ -321,4 +392,5 @@ Added to pending. Will draft after YouTube uploads are complete.
 - [ ] LinkedIn post with first comment links (include corky 0.21.0 YouTube playlist support)
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
+- [ ] Automate pipeline into `corky youtube pipeline` command (future)
 <!-- /agent:pending -->

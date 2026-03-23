@@ -399,7 +399,7 @@ Ready to go deeper on any of these:
 
 - **lazily in production**: "lazily runs in production Python at Presence AI. Cross-compiles to Zig and Rust. Same signal semantics everywhere — subscribe, derive, batch. Directly relevant to CopilotKit's multi-language SDK challenge."
 
-- **Framework-agnostic approach**: "I don't build for React or Svelte — I build the reactive layer underneath. rmemo, relysjs work with any renderer. That means I can contribute to CopilotKit's React SDK today and help extend to Vue, Angular, or WebComponents tomorrow."
+- **Framework-agnostic approach**: "I don't build for React or Svelte — I build the reactive layer underneath. rmemo + relementjs work with any renderer. That means I can contribute to CopilotKit's React SDK today and help extend to Vue, Angular, or WebComponents tomorrow."
 
 - **Presence AI**: "Multimodal pipeline on H100 GPUs via WebRTC — real-time streaming at infrastructure scale."
 
@@ -447,16 +447,47 @@ If Jordan seems engaged and you're discussing the document/notebook direction or
 **If he asks what you've been working on and seems to want more detail:**
 > "I've been livestreaming my development sessions — building with Claude Code and agent-doc in real-time. It's all on LinkedIn and YouTube. Happy to send links."
 
+He will probably ask early what I'm working on. But you recommend I mention this in minute 22+.
+So should I mention this earlier or later?
+
 **Don't:**
 - Pull up videos during the call (wastes the 30 minutes)
 - List specific post titles or view counts
 - Frame it as "content creation" — frame it as "building in public"
-<!-- agent:boundary:7b695547 -->
+Iterate on the prep doc.
+
+### Re: When to Mention LinkedIn Posts/Videos (HEAD)
+
+You're right — Jordan will almost certainly ask "what have you been working on?" in the first 5–10 minutes. That's the natural moment for the LinkedIn/video mention, not minute 22.
+
+**Revised timing:** Weave it into your pitch (minutes 3–8) as a closing beat after describing agent-doc and lazily:
+
+> "...I've been building in public — posting demos on LinkedIn, livestreaming dev sessions. If you want to see agent-doc in action rather than just hear me describe it, I can share links after the call."
+
+**Why this works better than saving it for minute 22:**
+- It's a natural continuation of "what are you working on" — not a tangent
+- Shows you're actively producing, not just interviewing
+- "I can share after" plants a seed without derailing the conversation
+- Jordan has something to review post-call (extends your 30 minutes)
+
+**Updated flow:**
+
+| Minutes | What | Key Points |
+|---------|------|------------|
+| 1–3 | Reconnect | CloudCrowd history, brief |
+| 3–8 | Your pitch | agent-doc → lazily → framework-agnostic → "building in public, happy to share demos" |
+| 8–15 | Technical depth | Let Jordan steer. State sync lineage, Presence AI, rmemo + relementjs |
+| 15–22 | Alignment | "Where does CopilotKit see the interaction surface expanding?" Soft document/notebook pitch |
+| 22–28 | Questions | Biggest challenge, AG-UI philosophy, team structure |
+| 28–30 | Close | "Genuinely excited, love to continue" |
+
+The LinkedIn mention moved from minute 22 to the end of your pitch block (minute 7–8). Everything else stays the same.
+<!-- agent:boundary:84c81ef7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Rehearse flow — know when to drop the LinkedIn/video mention naturally
-- Post-interview: debrief, send follow-up with video links if appropriate
+- **NOW:** Rehearse with updated timing — LinkedIn mention at end of pitch, not minute 22
+- Post-interview: debrief, send follow-up with video links
 <!-- /agent:pending -->

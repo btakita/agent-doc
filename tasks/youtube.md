@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Transcription running on 6 files (CUDA GPU). Silence detection also in progress.
+Transcript analysis complete. 6-episode mini-series proposed. Awaiting approval on titles/splits.
 <!-- /agent:status -->
 
 ## Exchange
@@ -138,34 +138,42 @@ Running silence detection on all 6 files now. Once complete, I'll show how much 
 Do you know the topics of each session, or should I transcribe to identify subjects?
 Transcribe and identify subjects.
 Should this be a mini-series around this particular issue of moving from the Skill into binary logic?
-### Re: Transcription & Mini-Series (HEAD)
+### Re: Transcript Analysis & Mini-Series Plan (HEAD)
 
-**Transcription started** on all 6 source files (CUDA GPU, running in parallel). Once complete, I'll analyze the content to identify distinct subjects and recommend episode boundaries.
+All 6 transcriptions complete. The sessions have a clear narrative arc:
 
-**On the mini-series question:** Yes, a mini-series makes more sense than a single 8:52 video. Benefits:
-- Better YouTube retention metrics (shorter videos hold attention)
-- Each part gets its own SEO title/description
-- Viewers can jump to the topic they care about
-- Natural session boundaries already exist
+**Overarching theme:** Moving agent-doc's boundary management from the Claude Code skill into deterministic binary/plugin code — and the cascade of bugs discovered along the way.
 
-**Approach:**
-1. Transcribe all 6 files (running now)
-2. Analyze transcripts for subject matter and topic shifts
-3. Propose episode titles and boundaries
-4. Light edit each episode (silence removal)
-5. Upload as a YouTube playlist
+**Proposed Mini-Series: "Skill to Binary: Debugging agent-doc Live"**
 
-Will report back with transcript analysis and episode recommendations once transcription completes.
-<!-- agent:boundary:ea673b91 -->
+| Ep | Source | Duration | Title | Key Topics |
+|----|--------|----------|-------|------------|
+| 1 | 17-04-37 | 2:03 | "The CRDT Ordering Bug" | CRDT merge ordering, "vibe coder" philosophy digression, IPC caching root cause |
+| 2 | 19-11-06 | 1:41 | "The Snowball Bug" | Boundary into binary, snowball corruption, JetBrains cursor insertion bug |
+| 3 | 00-07-18 | 2:19 | "AST Parsing & GPU Transcription" | pulldown-cmark refactor, CUDA feature flags, YouTube publishing pipeline |
+| 4 | 09-19-30 | 0:49 | "IPC Timeout Deep Dive" | IPC timeout debugging, CRDT vs semantic ordering, plugin polling architecture |
+| 5 | 10-27-48 | 1:29 | "Preflight & Browser Extension" | YouTube comment automation, preflight command, IPC boundary reposition fix |
+| 6 | 11-59-10 | 0:31 | "Deterministic Primitives" | Philosophy: binary determinism vs probabilistic agents, session wrap-up |
+
+**Narrative arc:** Ep 1 discovers the bug, Ep 2-3 fix boundary management and improve tooling, Ep 4 debugs the IPC layer, Ep 5 redesigns the orchestration (preflight), Ep 6 reflects on the design principle.
+
+**Next steps:**
+1. Approve episode titles/boundaries (or adjust)
+2. Light edit each episode (silence removal — detection running)
+3. GPU transcription for SRT closed captions
+4. Upload as YouTube playlist
+
+Does this split look right? Want to adjust any titles or merge/split episodes?
+<!-- agent:boundary:f6f2e5eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Transcribe 6 source videos (running — CUDA GPU)
-- [ ] Analyze transcripts for subject/episode boundaries
+- [ ] Approve mini-series episode titles/boundaries
 - [ ] Light edit each episode (silence removal — detection running)
-- [ ] Upload to YouTube as mini-series + playlist
+- [ ] Generate SRT closed captions from transcripts
+- [ ] Upload 6 episodes to YouTube as playlist
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

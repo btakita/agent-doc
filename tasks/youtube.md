@@ -643,18 +643,18 @@ server__build|watch
 The error was because briantakita.me-dev uses npm-published rappstack packages, not local source. Fixed via yalc:
 
 ```sh
-# In rappstack-dev: (HEAD)
+# In rappstack-dev:
 yalc publish lib/domain--any--blog
 yalc publish lib/domain--server--blog
 
-# In briantakita.me-dev: (HEAD)
+# In briantakita.me-dev:
 yalc add @rappstack/domain--any--blog
 yalc add @rappstack/domain--server--blog
 bun install
 ```
 
 The `blog_post__video_url_` export is now available in the linked packages. Try `bun run dev` again.
-<!-- agent:boundary:eda18a1c -->
+<!-- agent:boundary:69ad0fa7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

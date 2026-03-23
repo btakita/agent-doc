@@ -1060,7 +1060,7 @@ Want me to implement this now?
 `agent_doc_typing_event` should be something like `agent_doc_document_change_event`
 `agent_doc_should_submit` should be `agent_doc_should_run`
 `agent_doc_wait_for_typing_settle` should be something like `agent_doc_wait_for_debounce_settle`discuss names
-### Re: FFI debounce naming (HEAD)
+### Re: FFI debounce naming
 
 Good naming suggestions. Let me think through the semantics:
 
@@ -1093,7 +1093,7 @@ bool agent_doc_await_idle(const char* file_path, int64_t debounce_ms, int64_t ti
 | `agent_doc_await_idle(file, debounce_ms, timeout_ms)` | Blocks until idle, returns bool |
 
 Two functions, one fire-and-forget + one blocking query. Clean.
-<!-- agent:boundary:b8da14f4 -->
+<!-- agent:boundary:ac1cd811 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

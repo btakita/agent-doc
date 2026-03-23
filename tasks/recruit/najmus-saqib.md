@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Reply sent. Najmus requesting resume + Monday call availability. Awaiting Brian's input.
+Resume built (guidehouse-sba profile). Draft reply ready. Awaiting send approval + time slot confirmation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -54,13 +54,39 @@ Reply was sent. Najmus responded (7:02 PM):
 **Next steps:**
 1. **Share resume** via LinkedIn message — tailored or standard?
 2. **Confirm Monday availability** — what times work for a phone call?
-<!-- agent:boundary:9727c4fe -->
+Please draft a reply.
+Create a custom resume.
+Let's schedule a call for tomorrow.
+Schedule a call
+### Re: Draft Reply + Resume + Call Scheduling (HEAD)
+
+**Custom resume built:** `resume/BrianTakita-guidehouse-sba.pdf`
+- Highlights: Python (Django/FastAPI/Flask/SQLAlchemy), Vue.js/React/Svelte/Angular, AWS, PostgreSQL, Docker, CI/CD, Agile
+- Filtered to most relevant experience entries
+- Profile: `resume/profiles/guidehouse-sba.toml`
+
+**Draft LinkedIn reply:**
+
+> Hi Najmus,
+>
+> Thanks for following up! I've attached my resume. I'm available for a call tomorrow (Monday) — any of these times work:
+>
+> - 10:00 AM – 12:00 PM ET
+> - 2:00 PM – 4:00 PM ET
+>
+> Looking forward to discussing the details.
+>
+> Best,
+> Brian
+
+*Note: Adjust time slots to your actual availability. The 2-4 PM ET slot avoids the 5 PM CopilotKit interview with Jordan Ritter.*
+<!-- agent:boundary:ad1d3b61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Share resume with Najmus via LinkedIn
-- Confirm Monday phone call availability
-- Generate tailored resume if requested
+- Send LinkedIn reply with resume PDF attached
+- Confirm Monday call time slots (avoid 5 PM ET CopilotKit interview)
+- Prep for Monday call with Najmus (role details, rate discussion)
 <!-- /agent:pending -->

@@ -154,12 +154,32 @@ Added 4 playlist commands to corky:
 **Build:** `make check` passes — clippy clean, all 8 YouTube tests pass. No new OAuth scope needed (`youtube.force-ssl` covers playlists).
 
 Ready to commit. Want me to also add tests, update SPEC.md, and run audit-docs?
-<!-- agent:boundary:f2d0b6a2 -->
+Yes, tests, SPEC.md, README.md, audit-docs.
+### Tests, Docs, Audit — Complete (HEAD)
+
+**Tests** (5 new, 13 total passing):
+- `yt_p1_create_playlist` — creates playlist, returns ID
+- `yt_p2_add_to_playlist` — adds video, returns item ID
+- `yt_p3_list_playlists` — parses list response (2 playlists, verifies all fields)
+- `yt_p4_remove_from_playlist` — finds item by video ID, deletes it
+- `yt_p5_remove_from_playlist_not_found` — errors when video not in playlist
+
+**SPEC.md:**
+- §17.6 — added `edit`, `playlist create/add/list/remove` to CLI commands table
+- §17.7 — new "Playlist Management" section documenting API endpoints and behavior
+- §17.8 — renumbered Constraints section
+
+**README.md:** Added `playlist create/add/list` to quick reference.
+
+**Audit:** `corky audit-docs` — No issues found. 188 instruction lines.
+
+`make check` passes — clippy clean, all 13 YouTube tests pass. Ready to commit in corky submodule.
+<!-- agent:boundary:b1e02ff4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] YouTube playlist: commit, tests, SPEC.md, audit-docs
+- [ ] Commit playlist feature in corky submodule
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

@@ -345,6 +345,7 @@ All previous gaps are now covered. Your message about energy domain was cut off 
 
 Draft email is ready to send with the updated resume. Give the go-ahead when ready.
 I also have experience with creating functional reactive systems.
+
 ### Re: Functional Reactive Systems
 
 Already covered in the resume — your 15-year reactive framework lineage (backbone-signal → ctx-core → rmemo → relysjs) is listed in Career Highlights and Open Source experience. The profile bolds "reactive programming" and "event-driven" throughout. Unison (event-driven relational algebra at Pivotal Labs) is also listed.
@@ -352,7 +353,36 @@ Already covered in the resume — your 15-year reactive framework lineage (backb
 This is actually a strong differentiator for NextEra — they work with time-series forecasting and real-time optimization, which maps directly to reactive/event-driven patterns. Worth highlighting on the intro call.
 
 Ready to send the email to Lucas?
-<!-- agent:boundary:7f98a53c -->
+Show me the email draft.
+### Re: Email Draft (HEAD)
+
+Here's the final version ready to send:
+
+---
+
+Hi Lucas,
+
+Thanks for sending over the JD — the role looks like a great fit. Working alongside data and research scientists on forecasting and optimization solutions is right in my wheelhouse.
+
+I'm confirming $140/hr 1099.
+
+**Why I'm a strong fit:**
+
+I bring 20+ years of full-stack experience with deep expertise in the stack they're using — Python, Rust, AWS (including serverless), and various reactive frontend frameworks including Vue.js. I have a degree in Engineering Physics and can implement research models from papers into software — at Presence AI, I built a real-time AI pipeline translating ML research into production systems. My 8 years at Censible building an ESG analytics platform (factor screener, portfolio rebalancer, data visualization, report generation) demonstrates sustained experience turning complex data into actionable products. I'm also comfortable leading small teams and mentoring — I did both at Pivotal Labs across 20+ startups.
+
+Updated resume attached.
+
+Best,
+Brian
+
+---
+
+**To:** lnoble@true-source.com
+**Subject:** Re: Job Description - Questions - Rate/Resume
+**Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
+
+Approve to send via corky, or copy-paste manually?
+<!-- agent:boundary:bbaf57b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

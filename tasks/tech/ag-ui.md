@@ -199,7 +199,25 @@ The `test` ensures status is still "researching" before marking complete — if 
 #### Answer: Backend State Sync
 
 Yes — the backend agent maintains its own state object, and AG-UI syncs it to the UI via these SSE events. The agent emits `STATE_SNAPSHOT` or `STATE_DELTA` events as it works. The frontend applies them to its local copy. The frontend can also push state changes back to the agent (via `useCoAgent`'s `setState`), making it truly bidirectional.
-<!-- agent:boundary:555dbc87 -->
+Why does RFC 6902 have a redundant event and data.type?
+
+### Re: Why `event:` and `data.type` appear redundant (HEAD)
+
+They serve different layers — it's not actually RFC 6902 doing this, it's the **SSE transport + AG-UI protocol** combination:
+
+**`event:` (SSE layer)** — This is a standard [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) field. The browser's `EventSource` API uses it for routing: `eventSource.addEventListener("STATE_DELTA", handler)`. It's transport-level — it tells the SSE client *which listener* to invoke. If you're not using SSE (e.g., WebSocket transport), this field doesn't exist.
+
+**`data.type` (AG-UI protocol layer)** — This is inside the JSON payload and is part of the AG-UI event schema. It's transport-agnostic — it identifies the event type regardless of how it was delivered (SSE, WebSocket, webhook, etc.).
+
+**Why both?**
+1. **Transport independence** — AG-UI is transport-agnostic. The `data.type` field works whether the event arrives via SSE, WebSocket, or HTTP polling. The `event:` field is SSE-specific syntax.
+2. **Self-describing payloads** — If you log, queue, or replay events, the JSON payload carries its own type. You don't need the SSE envelope to understand it.
+3. **Middleware routing** — AG-UI's middleware layer processes events by `data.type`. It doesn't depend on transport-specific routing.
+
+In practice, when using SSE they'll always match. But they exist at different abstraction levels — one is "how the transport delivers it" and the other is "what the protocol says it is."
+
+My examples showed both because that's what the wire format looks like with SSE transport. If AG-UI were running over WebSocket, you'd only see the JSON `{ "type": "STATE_DELTA", ... }` without the `event:` line.
+<!-- agent:boundary:4846e794 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

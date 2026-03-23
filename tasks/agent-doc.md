@@ -749,13 +749,56 @@ release
 - Plugin v0.2.17 (layout detection + EDT fix)
 
 **8 files changed, 223 insertions, 7 deletions.**
-<!-- agent:boundary:c5d04aef -->
+I navigated to tasks/recruit/benjamin-becker.md. The right tmux pane split into 2 panes, resulting in 3 panes after the switch and agent-doc run.
+When I switched the editor focus to tasks/agent-doc.md, the pane layout corrected itself.
+
+Please diagnose the issue(s) that caused the 3 pane layout.
+### Re: 3-pane layout diagnosis (HEAD)
+
+**Root cause: race between `route` and `sync` auto-start.**
+
+The sequence:
+1. User clicks "Run Agent Doc" on `benjamin-becker.md` (right editor)
+2. Plugin calls `agent-doc route benjamin-becker.md --col agent-doc.md --col benjamin-becker.md --focus benjamin-becker.md`
+3. `route` sends `/agent-doc` to the existing pane for `benjamin-becker.md` (%65)
+4. After route succeeds, `sync::run()` is called with the `--col` args
+5. `sync` walks both columns, checks if each file has an alive pane
+6. If `benjamin-becker.md`'s pane (%65) appears dead during the check (it was just re-activated by route — timing-dependent), sync **auto-starts a new session**, creating pane %66
+7. Result: 3 panes — `agent-doc.md` (%55, left), `benjamin-becker.md` (%65, original), and a duplicate (%66, auto-started)
+
+**Why it corrected on focus change:**
+When you switched to `agent-doc.md`, the `LayoutChangeDetector` fired, ran `sync` again, and this time `benjamin-becker.md`'s pane was alive. Sync killed the duplicate and rearranged to 2 panes.
+
+**Three contributing issues:**
+
+1. **Race condition:** `route` re-activates the pane, but `sync` runs immediately after in the same CLI call. The pane may not be "alive" yet by the time sync checks (the Claude process inside the pane needs a moment to start responding to shell commands).
+
+2. **Auto-start during layout sync:** The sync module's auto-start feature is designed for the `agent-doc sync` standalone command, where you want to ensure all files have sessions. But when called from `route`, auto-start is redundant — route already handled the target file.
+
+3. **No dedup between route target and sync files:** Sync doesn't know which file was just routed — it treats all files in `--col` equally and may auto-start the one route already handled.
+
+**Fix options:**
+
+**A. Skip auto-start in sync when called from route:**
+Pass `--no-auto-start` flag from route to sync, disabling the auto-start logic. Sync only arranges existing panes.
+
+**B. Skip the routed file in sync:**
+The route command knows which file it just handled. Pass `--exclude <file>` to sync to skip auto-start for that file.
+
+**C. Add a brief delay between route and sync:**
+Simple but hacky — `sleep(500ms)` between route and sync to let the pane stabilize. Not recommended.
+
+**Recommendation: Option A** — it's the cleanest. Sync should only auto-start when invoked standalone, not when called as part of a route.
+
+Want me to implement option A?
+<!-- agent:boundary:b962c86a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] agent-doc v0.25.6 released (all targets)
+- [ ] **Fix route+sync race** — skip auto-start when sync is called from route
+- [ ] Test multi-file layout sync after fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

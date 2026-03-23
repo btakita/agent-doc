@@ -792,7 +792,7 @@ Simple but hacky — `sleep(500ms)` between route and sync to let the pane stabi
 
 Want me to implement option A?
 Yes. Did auto-start also run the document?
-### Re: Did auto-start also run the document? (HEAD)
+### Re: Did auto-start also run the document?
 
 **Yes.** `route::auto_start_in_session()` does the full sequence:
 1. Creates a new tmux pane (split-window or auto_start)
@@ -805,7 +805,7 @@ So the user got **double execution**:
 - `sync` auto-started a NEW pane (%66), started Claude, and sent `/agent-doc benjamin-becker.md` again
 
 This confirms the fix should be `--no-auto-start` on the sync call from route. Let me implement it now.
-<!-- agent:boundary:30eaa03e -->
+<!-- agent:boundary:8a836273 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,9 +10,9 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.5 | **Tests:** 522 (168 lib + 316 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.6 | **Tests:** 521 (168 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.14 (FFI reposition + boundary cleanup) + VS Code v0.2.3
+**Plugins:** JetBrains v0.2.17 (layout detection + EDT fix) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 9 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
@@ -731,15 +731,31 @@ Implement
 
 Plugin v0.2.17 built (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.17.zip`
-<!-- agent:boundary:ac8bdca1 -->
+release
+### Re: Release v0.25.6 (HEAD)
+
+**agent-doc v0.25.6 released:**
+
+- crates.io ✓
+- PyPI ✓
+- GitHub Release ✓ (https://github.com/btakita/agent-doc/releases/tag/v0.25.6)
+- Binary installed ✓
+
+**What's in this release:**
+- `agent-doc route --col --focus` — declarative layout sync in a single CLI call
+- Plugin: `sendToTerminal` passes full editor layout to route
+- Plugin: `LayoutChangeDetector` — ContainerListener + 5s fallback poll for tab-drag detection
+- Plugin: EDT-safe threading (invokeLater for Swing reads)
+- Plugin v0.2.17 (layout detection + EDT fix)
+
+**8 files changed, 223 insertions, 7 deletions.**
+<!-- agent:boundary:78df445a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] EDT threading fix for layout poll
-- [ ] **Install plugin v0.2.17**
-- [ ] Commit plugin changes to agent-doc repo
+- [x] agent-doc v0.25.6 released (all targets)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

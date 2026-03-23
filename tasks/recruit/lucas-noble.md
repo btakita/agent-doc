@@ -248,7 +248,7 @@ Include esg factor screener and portfolio rebalancer.
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Want me to adjust the draft, tweak the resume profile, or send via corky?
-### Re: Revised Draft (v2) (HEAD)
+### Re: Revised Draft (v2)
 
 Incorporated all three edits:
 
@@ -278,7 +278,7 @@ Brian
 ---
 
 Ready to send, or further tweaks?
-<!-- agent:boundary:41ed421a -->
+<!-- agent:boundary:430f5d90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

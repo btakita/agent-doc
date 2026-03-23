@@ -252,7 +252,7 @@ Sources:
 - [AG-UI Events](https://docs.ag-ui.com/concepts/events)
 - [Building Real-Time AI Agent UIs with AG-UI](https://itsayushgupta.medium.com/building-real-time-ai-agent-uis-with-the-ag-ui-protocol-and-agui-hooks-14a78a8f7002)
 Discuss feasibility of an interactive MDX document. Where live JSX components are embedded in Markdown.
-### Re: Interactive MDX documents with live JSX components (HEAD)
+### Re: Interactive MDX documents with live JSX components
 
 **Concept:** An agent-doc session document rendered as MDX, where `&lt;!-- agent:name --&gt;` components become live React components — progress bars, approval buttons, diff viewers, task boards — updated in real-time by the agent via IPC patches.
 
@@ -319,7 +319,7 @@ User clicks "Approve" in JSX → write to &lt;!-- agent:pending --&gt; → agent
 This is where AG-UI's state model becomes relevant — the JSX components could maintain a structured JSON state object (AG-UI StateSnapshot), and incremental updates from the agent could be expressed as JSON Patch deltas (AG-UI StateDelta). The document stays as the persistent layer; the state object is the ephemeral runtime layer for rich UI.
 
 **Verdict:** Highly feasible. The component model is already there. The main work is building the MDX renderer + component registry + file watcher. Phase 1 (read-only viewer) could be a weekend project. Phase 3 (bidirectional) is where the real value lives.
-<!-- agent:boundary:94446860 -->
+<!-- agent:boundary:9cead441 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

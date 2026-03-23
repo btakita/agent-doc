@@ -484,7 +484,7 @@ You're right — Jordan will almost certainly ask "what have you been working on
 The LinkedIn mention moved from minute 22 to the end of your pitch block (minute 7–8). Everything else stays the same.
 Please render the detail document for the call. Not just the summary.
 
-### Interview Script — CopilotKit CTO Call, Mon Mar 23, 5:00 PM ET (HEAD)
+### Interview Script — CopilotKit CTO Call, Mon Mar 23, 5:00 PM ET
 
 **Jordan Ritter, CTO — 30 minutes, open-ended format**
 
@@ -592,7 +592,7 @@ Have these ready. Don't dump them all — let the conversation pull what's relev
 | Document pitch | "MDX notebooks with CopilotKit components — DX first, enterprise knowledge work second" |
 | Building in public | "Livestreaming dev sessions, demos on LinkedIn — happy to share links" |
 | Why CopilotKit | "Protocol layer for human-agent alignment — where I want to build" |
-<!-- agent:boundary:82cc1cc4 -->
+<!-- agent:boundary:e6240409 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

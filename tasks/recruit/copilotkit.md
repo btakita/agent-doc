@@ -1070,7 +1070,7 @@ Should I send him my most recent playlist https://www.youtube.com/playlist?list=
 Maybe add a short description over how I'm working with this?
 And how this workflow naturally would work with MDX, Notion, Jupyter, Word, Obsidian, or any other type of knowledge document software.
 
-### Re: Video Link + Description for Email (HEAD)
+### Re: Video Link + Description for Email
 
 Yes — send the playlist. But keep the description tight. Jordan is busy. One paragraph max.
 
@@ -1097,7 +1097,7 @@ Yes — send the playlist. But keep the description tight. Jordan is busy. One p
 > Brian
 
 Ready to send via corky to Gmail drafts when you give the go-ahead.
-<!-- agent:boundary:f1cdc1f2 -->
+<!-- agent:boundary:713ef57e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

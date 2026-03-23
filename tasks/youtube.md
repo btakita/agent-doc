@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Light edits encoding (Ep4+6 done, Ep1/2/3/5 running). Corky supports per-video upload but not playlists yet.
+All 6 episodes light-edited. Total: 7:34:05, 1.9 GB. Ready for YouTube upload.
 <!-- /agent:status -->
 
 ## Exchange
@@ -207,7 +207,7 @@ Does Corky currently support "Upload 6 episodes to YouTube as playlist"?
 
 ```sh
 corky youtube draft --author btakita --visibility public --tags "agent-doc,live-coding"
-# Edit the draft file with title, description, video path (HEAD)
+# Edit the draft file with title, description, video path
 corky youtube publish <draft-file>
 ```
 
@@ -222,13 +222,29 @@ corky youtube publish <draft-file>
 4. Create playlist manually in YouTube Studio (or I can build `corky youtube playlist` if needed)
 
 Want me to create the 6 drafts now while the light edits finish encoding?
-<!-- agent:boundary:83693ed4 -->
+### Re: All Light Edits Complete (HEAD)
+
+All 6 episodes light-edited (silence removal at -30dB, 3s threshold):
+
+| Ep | Original | After | Removed | Size | File |
+|----|----------|-------|---------|------|------|
+| 1 | 2:02:57 | 1:58:46 | 4:12 (3.4%) | 480 MB | ep1-light.mp4 |
+| 2 | 1:40:51 | 1:31:49 | 9:03 (8.9%) | 376 MB | ep2-light.mp4 |
+| 3 | 2:19:22 | 1:59:39 | 19:42 (14.2%) | 508 MB | ep3-light.mp4 |
+| 4 | 0:49:00 | 0:42:00 | 7:01 (14.3%) | 156 MB | ep4-light.mp4 |
+| 5 | 1:29:26 | 1:02:17 | 27:10 (30.4%) | 298 MB | ep5-light.mp4 |
+| 6 | 0:30:53 | 0:19:35 | 11:18 (36.5%) | 82 MB | ep6-light.mp4 |
+| **Total** | **8:52:28** | **7:34:05** | **1:18:23** | **1.9 GB** | |
+
+Total series: 7:34 across 6 episodes (down from 8:52). All re-encoded x264 CRF23, total 1.9 GB (down from 19.5 GB raw).
+
+Ready for YouTube drafts and upload. Want me to create the 6 drafts now?
+<!-- agent:boundary:2e7df8ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Complete encoding Ep1, Ep2, Ep3, Ep5 (running)
 - [ ] Create 6 YouTube drafts with corky
 - [ ] Upload 6 episodes to YouTube
 - [ ] Create YouTube playlist (manual or build corky playlist command)

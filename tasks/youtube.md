@@ -317,48 +317,48 @@ Meta: Let's capture the process of:
 
 #### 1. Video Creation & Editing
 ```sh
-# Light edit: remove silence (waiting-for-agent dead air) (HEAD)
+# Light edit: remove silence (waiting-for-agent dead air)
 ffmpeg -i INPUT.mp4 -af silencedetect=noise=-30dB:d=3 -f null - 2>&1 \
   | grep -E "silence_(start|end)" > silence.txt
-# Parse silence ranges, build trim+concat filter, re-encode x264 CRF23 (HEAD)
+# Parse silence ranges, build trim+concat filter, re-encode x264 CRF23
 python3 light_edit.py silence.txt INPUT.mp4 OUTPUT.mp4
 
-# Manual cuts (privacy, notifications) (HEAD)
-# Use ffmpeg trim+concat with specific timestamp ranges (HEAD)
+# Manual cuts (privacy, notifications)
+# Use ffmpeg trim+concat with specific timestamp ranges
 ```
 
 #### 2. Closed Captioning
 ```sh
-# GPU transcription (CUDA) (HEAD)
+# GPU transcription (CUDA)
 corky transcribe OUTPUT.mp4 -o transcript.md
 
-# Convert to SRT format (HEAD)
+# Convert to SRT format
 python3 to_srt.py transcript.md OUTPUT.srt
 ```
 
 #### 3. YouTube Upload
 ```sh
-# Authenticate (once, token cached) (HEAD)
+# Authenticate (once, token cached)
 corky youtube auth
 
-# Create draft with metadata (HEAD)
+# Create draft with metadata
 corky youtube draft --author btakita --visibility public \
   --tags "tag1,tag2" "Description text"
 
-# Edit draft: add title (first line after ---), video:, captions: paths (HEAD)
-# Set status: ready (HEAD)
+# Edit draft: add title (first line after ---), video:, captions: paths
+# Set status: ready
 
-# Publish (HEAD)
+# Publish
 corky youtube publish mail/social/DRAFT.md
 ```
 
 #### 4. Playlist
 ```sh
-# Create playlist (HEAD)
+# Create playlist
 corky youtube playlist create "Series Title" \
   --description "Series description"
 
-# Add videos (in order) (HEAD)
+# Add videos (in order)
 corky youtube playlist add PLAYLIST_ID VIDEO_ID --position 0
 ```
 
@@ -371,14 +371,14 @@ corky youtube playlist add PLAYLIST_ID VIDEO_ID --position 0
 #### 6. LinkedIn Post (optional)
 ```sh
 corky linkedin draft --author btakita "Post text"
-# Edit draft, set status: ready (HEAD)
+# Edit draft, set status: ready
 corky linkedin publish mail/social/DRAFT.md
-# Add first comment with links (HEAD)
+# Add first comment with links
 corky linkedin comment DRAFT.md "Links: ..."
 ```
 
 **This can be automated into a single `corky youtube pipeline` command in the future.**
-<!-- agent:boundary:182142eb -->
+<!-- agent:boundary:6045d913 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -241,7 +241,7 @@ Total series: 7:34 across 6 episodes (down from 8:52). All re-encoded x264 CRF23
 Ready for YouTube drafts and upload. Want me to create the 6 drafts now?
 Did removing the silence also remove parts where I am actively coding?
 Or is the silence removal constrained to waiting from the agent to finish and low quality video?
-### Re: Silence Removal Quality Check (HEAD)
+### Re: Silence Removal Quality Check
 
 **The silence removal is cutting dead air, not active coding.**
 
@@ -262,7 +262,7 @@ I checked the top 5 longest silence gaps in Ep5 (the highest cut rate at 30.4%) 
 Active coding with any keyboard/mouse sound stays above -30dB and is preserved. The 3s minimum also prevents cutting natural pauses between sentences.
 
 **Bottom line:** The light edit removes waiting-for-agent downtime and true idle periods. Active coding and commentary are preserved.
-<!-- agent:boundary:b453d4bf -->
+<!-- agent:boundary:97fe67e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

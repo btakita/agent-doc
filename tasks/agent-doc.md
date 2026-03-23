@@ -383,7 +383,7 @@ I moved the tasks/recruit/lucas-noble.md editor from the left side to the right 
 I can `Run Agent Doc` from the JB Plugin.
 The tmux session remained on the left side.
 When I switched editor view to tasks/agent-doc.md, the tmux pane switched to the right side.
-### Re: Editor ↔ tmux layout sync behavior (HEAD)
+### Re: Editor ↔ tmux layout sync behavior
 
 Good observation. What you're seeing is:
 
@@ -407,7 +407,7 @@ When you switch which editor tab is active (clicking on `agent-doc.md`), the plu
 3. **Tab drag listener** — JetBrains has `DockManager` and `EditorTabDragOutEvent` for detecting drag operations. Hooking into these could catch the move.
 
 The simplest fix is option 1 — if JetBrains exposes split change events, we can react immediately. Want me to investigate the JetBrains API for this?
-<!-- agent:boundary:72bcdc5c -->
+<!-- agent:boundary:8155be53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1096,7 +1096,7 @@ bool agent_doc_await_idle(const char* file_path, int64_t debounce_ms, int64_t ti
 
 Two functions, one fire-and-forget + one blocking query. Clean.
 Good
-### Re: Rename submit → run + naming approved (HEAD)
+### Re: Rename submit → run + naming approved
 
 **Naming approved:** `agent_doc_document_changed` + `agent_doc_await_idle`.
 
@@ -1118,7 +1118,7 @@ For the v0.25.7 release, the current batch is:
 4. Audit docs + SPEC update
 
 That's a solid feature release. Shall I proceed with all four?
-<!-- agent:boundary:f88785f5 -->
+<!-- agent:boundary:4323bff3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

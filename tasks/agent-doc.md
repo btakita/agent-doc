@@ -379,15 +379,43 @@ This is a one-way export (Phase 0) that gives users a Jupyter view of any sessio
 **Phase 2:** Native `.ipynb` support — agent-doc reads/writes notebook JSON directly. Components are cells. The diff engine understands cell structure.
 
 **Verdict:** High feasibility, especially the export path. Strategy A (Jupyter as viewer) is achievable with minimal binary changes. Strategy B (native `.ipynb`) is a larger effort but unlocks the full Jupyter ecosystem. The most practical first step is the `export --jupyter` command.
-<!-- agent:boundary:31b9dc76 -->
+I moved the tasks/recruit/lucas-noble.md editor from the left side to the right side.
+I can `Run Agent Doc` from the JB Plugin.
+The tmux session remained on the left side.
+When I switched editor view to tasks/agent-doc.md, the tmux pane switched to the right side.
+### Re: Editor ↔ tmux layout sync behavior (HEAD)
+
+Good observation. What you're seeing is:
+
+**Layout sync triggers on editor focus, not on tab drag.**
+
+When you switch which editor tab is active (clicking on `agent-doc.md`), the plugin fires a focus event → `agent-doc layout` repositions the tmux pane to match the editor's split side. But when you *drag* a tab from left to right, there's no focus event — the tab moves but the plugin doesn't know the split position changed until you click on it.
+
+**Current flow:**
+1. User focuses editor tab → JB plugin detects `FileEditorManagerListener.selectionChanged`
+2. Plugin determines which split the editor is in (left/right)
+3. Plugin calls `agent-doc layout` or sends layout IPC → tmux pane moves to match
+
+**Gap:** JetBrains doesn't fire `selectionChanged` when a tab is dragged to a different split without changing focus. The tab physically moves but the listener doesn't trigger until you click on the tab in its new location.
+
+**Possible fixes:**
+
+1. **EditorSplitListener** — listen for `EditorSplitterListener` events (if available) which fire when splits are created/modified. This might catch tab moves between splits.
+
+2. **Periodic poll** — every N seconds, check if any tracked document's editor split position changed. Lightweight but introduces polling latency.
+
+3. **Tab drag listener** — JetBrains has `DockManager` and `EditorTabDragOutEvent` for detecting drag operations. Hooking into these could catch the move.
+
+The simplest fix is option 1 — if JetBrains exposes split change events, we can react immediately. Want me to investigate the JetBrains API for this?
+<!-- agent:boundary:72bcdc5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **Investigate JetBrains EditorSplitterListener API** for tab-move-between-splits events
 - [ ] `agent-doc export --jupyter` — convert template docs to `.ipynb`
 - [ ] Interactive MDX viewer (Phase 1)
-- [ ] Consider native `.ipynb` support (Strategy B) for full Jupyter integration
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -638,7 +638,7 @@ Would this be helpful?
 
 **Plugin v0.2.16 built** (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.16.zip`
-### Re: AnActionListener for move actions — helpful? (HEAD)
+### Re: AnActionListener for move actions — helpful?
 
 **Not needed now.** The `ContainerListener` already catches the result of all move actions (keyboard and mouse), because moving a tab between splits changes the Swing component tree — which triggers `componentAdded`/`componentRemoved`.
 
@@ -649,7 +649,7 @@ Would this be helpful?
 Since we have both ContainerListener (immediate) and the 5s poll (safety net), the AnActionListener is redundant. If testing reveals edge cases where tabs move without triggering container events, we can add it then.
 
 **TL;DR:** Skip for now. The hybrid approach covers it. Add AnActionListener only if testing reveals gaps.
-<!-- agent:boundary:afdd0352 -->
+<!-- agent:boundary:69a129c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

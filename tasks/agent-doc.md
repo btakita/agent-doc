@@ -721,7 +721,7 @@ Thread {
 **Should you fix it?** It's low priority since it works. But it's the correct pattern for any JetBrains plugin accessing Swing components. If you want it fixed, I can update `LayoutChangeDetector` now.
 
 Implement
-### Re: Implement EDT threading fix (HEAD)
+### Re: Implement EDT threading fix
 
 **Done.** `LayoutChangeDetector` now uses correct threading:
 
@@ -731,7 +731,7 @@ Implement
 
 Plugin v0.2.17 built (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.17.zip`
-<!-- agent:boundary:509224cd -->
+<!-- agent:boundary:ac8bdca1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

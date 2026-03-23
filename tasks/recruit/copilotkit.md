@@ -121,7 +121,7 @@ How likely is it that they would consider the markdown document as an agentic in
 
 This may be a good idea to explore, but I also need prep on CopilotKit's offerings as well, so I'm well rounded for the discussion.
 
-### Re: Interview Prep — CopilotKit Offerings + MDX/Jupyter Pitch (HEAD)
+### Re: Interview Prep — CopilotKit Offerings + MDX/Jupyter Pitch
 
 ---
 
@@ -202,7 +202,7 @@ This may be a good idea to explore, but I also need prep on CopilotKit's offerin
 - Don't position agent-doc as something CopilotKit should adopt wholesale — position it as validation of patterns they could build on
 - Don't go too deep into Rust/systems unless Jordan steers there (he probably will given his background)
 - Don't criticize their current architecture — show you understand it before suggesting extensions
-<!-- agent:boundary:d9d24965 -->
+<!-- agent:boundary:6c9ef98d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

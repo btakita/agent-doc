@@ -1103,7 +1103,7 @@ My plan is to add live data components such as AG-UI compatible components when 
 Should I mention that I have a client and I am open for more clients to integrate?...So if he has any referrals, I would appreciate it? 
 BCC: Kevin Volk + dev@briantakita.me
 
-I'm working from the agentic primitives upward. So I believe 
+I'm working from the agentic primitives upward. So I believe we can have a solid foundation for a seamless & deep alignment with agents through expressing knowledge.
 
 ### Re: AG-UI Components Roadmap + Client Referrals + BCC
 
@@ -1150,7 +1150,37 @@ Good phrasing — "working from the agentic primitives upward." Let me weave tha
 > The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface. I'm working from the agentic primitives upward — once the markdown editing layer is solid, the next step is live data components, including AG-UI compatible components.
 
 Ready to send. Want me to push to Gmail drafts via corky now?
-<!-- agent:boundary:082330b5 -->
+Rewrite the draft with my updates.
+
+### Final Email Draft (revised) (HEAD)
+
+**To:** jordan@copilotkit.ai
+**From:** brian.takita@gmail.com
+**BCC:** kevin@staffingscience.io, dev@briantakita.me
+**Subject:** Thanks for the conversation — demo links + a clarification
+
+> Jordan,
+>
+> Great reconnecting today. I appreciate you being straight about where CopilotKit's needs are right now.
+>
+> Here are the demo videos I mentioned — agent-doc in action with Claude Code:
+> https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
+>
+> What you'll see: I work in a markdown document in JetBrains while Claude Code streams responses into named document regions via CRDT merge. I edit concurrently — the agent and I are collaborating in real-time through the document. Every interaction is a git commit. The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface.
+>
+> I'm working from the agentic primitives upward. I believe we can have a solid foundation for seamless and deep alignment with agents through expressing knowledge. Once the markdown editing layer is solid, the next step is live data components — including AG-UI compatible components.
+>
+> I also wanted to clarify something from our call: I got excited talking about where this could go, and I think that overshadowed the execution side. My daily work is shipping — I release across crates.io, PyPI, and npm. agent-doc's editor plugin uses a cross-platform FFI architecture designed for multi-editor integration. That's integration engineering at the systems level.
+>
+> I hear you that the current need is people already embedded in the CopilotKit ecosystem. Taking you up on the 3-6 month check-in. In the meantime, I'll stay close to what you're building.
+>
+> On a separate note — I'm currently doing client work and am open to taking on more. If you come across anyone in your network who could use someone with my background, I'd appreciate the referral.
+>
+> Best,
+> Brian
+
+Ready to send via corky to Gmail drafts. Say the word.
+<!-- agent:boundary:6cd60e48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

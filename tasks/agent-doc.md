@@ -543,7 +543,6 @@ So the poll:
 - Typical cost when nothing changed: microseconds (no CLI call, no tmux interaction)
 Are there any other events that we can hook into to avoid polling?
 
-I notice that focus change d
 ### Re: Events to avoid polling
 
 Several event hooks that could replace or supplement polling:
@@ -603,18 +602,48 @@ Fallback poll (5s) → safety net (catches anything events miss)
 
 Want me to implement the hybrid approach?
 
+Yes
+
 Sources:
 - [Splitter.java source](https://github.com/JetBrains/intellij-community/blob/master/platform/util/ui/src/com/intellij/openapi/ui/Splitter.java) — `PROP_PROPORTION` and `PROP_ORIENTATION` events
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) — reference for programmatic tab movement
 - [API for moving tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362) — JetBrains platform discussion
-<!-- agent:boundary:9226926c -->
+### Re: Implement hybrid layout detection (HEAD)
+
+**Done.** New `LayoutChangeDetector` class implements the hybrid approach:
+
+**1. ContainerListener (immediate):**
+- Attaches recursively to the `EditorsSplitters` Swing tree
+- Fires on `componentAdded` / `componentRemoved`
+- Automatically attaches to newly added child containers
+- 300ms debounce before checking layout
+
+**2. Fallback poll (5s safety net):**
+- Daemon thread checks layout every 5 seconds
+- Only syncs if the layout hash changed
+- Catches edge cases events miss (e.g., drag operations that don't trigger container events)
+
+**Both paths:**
+- Compute a layout hash from `LayoutDetector.detectEditorLayout()`
+- Compare with last known hash
+- Only call `SyncLayoutAction.syncLayout()` when the hash differs
+- Concurrency guard prevents parallel syncs
+
+**Integration:**
+- `PluginLifecycleListener.projectOpened()` starts `LayoutChangeDetector`
+- `projectClosed()` disposes it (stops poll, removes listeners)
+
+**Plugin v0.2.16 built** (unsigned + signed). Install from:
+`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.16.zip`
+<!-- agent:boundary:03ab7f28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Implement hybrid layout detection (ContainerListener + events + fallback poll)
-- [ ] Test route + layout sync with multi-split editor
+- [ ] **Install plugin v0.2.16** — IDEA → Plugins → Install from Disk
+- [ ] Test: drag tab between splits → tmux pane should follow within ~300ms
+- [ ] Test: close a split → tmux panes should rearrange within ~300ms
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

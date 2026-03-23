@@ -200,7 +200,7 @@ This is a significant architectural shift for uncertain benefit. The current IPC
 
 **Recommendation:** Monitor AG-UI for ideas (their state snapshot model is interesting), but don't adopt it unless you want a web UI. The file-native, editor-plugin architecture is agent-doc's differentiator.
 Tell me more about the AG-UI state snapshot model. And how it could apply to agent-doc.
-### Re: AG-UI state snapshot model and how it could apply to agent-doc (HEAD)
+### Re: AG-UI state snapshot model and how it could apply to agent-doc
 
 **AG-UI's State Management Model:**
 
@@ -251,7 +251,7 @@ Sources:
 - [AG-UI State Management](https://docs.ag-ui.com/concepts/state)
 - [AG-UI Events](https://docs.ag-ui.com/concepts/events)
 - [Building Real-Time AI Agent UIs with AG-UI](https://itsayushgupta.medium.com/building-real-time-ai-agent-uis-with-the-ag-ui-protocol-and-agui-hooks-14a78a8f7002)
-<!-- agent:boundary:5b16ba26 -->
+<!-- agent:boundary:83d4e2c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

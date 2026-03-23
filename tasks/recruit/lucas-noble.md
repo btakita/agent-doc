@@ -329,7 +329,7 @@ While at Menu.com, I developed AWS CDK + Lambda integrated with AWS Fargate Wind
 Yes. I'm also taking a financial 
 
 **Recommendation:** Adding **Grafana** and **TimescaleDB** to Skills is the highest-impact quick fix — recruiters ctrl+F for JD keywords. Want me to update the resume profile?
-### Re: Resume Updates (HEAD)
+### Re: Resume Updates
 
 Updated the resume with your feedback. Changes made:
 
@@ -344,7 +344,7 @@ Resume rebuilt: `resume/BrianTakita-nextera-analytics.pdf`
 All previous gaps are now covered. Your message about energy domain was cut off — "I'm also taking a course with quan" — want to finish that thought?
 
 Draft email is ready to send with the updated resume. Give the go-ahead when ready.
-<!-- agent:boundary:130971b5 -->
+<!-- agent:boundary:2a8a55fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

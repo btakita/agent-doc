@@ -451,7 +451,7 @@ If Jordan seems engaged and you're discussing the document/notebook direction or
 - Pull up videos during the call (wastes the 30 minutes)
 - List specific post titles or view counts
 - Frame it as "content creation" — frame it as "building in public"
-<!-- agent:boundary:f3644eaf -->
+<!-- agent:boundary:7b695547 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -583,7 +583,7 @@ Instead, I added inline `<script type="application/ld+json">` blocks directly in
 **To make this frontmatter-driven** (so `video_url` in frontmatter auto-generates VideoObject), the `Post` interface in `@rappstack/domain--any--blog` would need to be extended with optional `video_url` and `playlist_url` fields, and the layout template would need to check for those fields and generate the JSON-LD. That's a rappstack framework change — doable but separate from this session.
 
 Do it here
-### Re: Frontmatter-Driven VideoObject (HEAD)
+### Re: Frontmatter-Driven VideoObject
 
 Implemented across the rappstack framework + briantakita site:
 
@@ -603,7 +603,7 @@ Implemented across the rappstack framework + briantakita site:
 Now any post with `video_url:` in frontmatter automatically gets VideoObject structured data. No inline JSON-LD needed.
 
 Needs: rappstack publish + briantakita rebuild + deploy to verify.
-<!-- agent:boundary:e799d34f -->
+<!-- agent:boundary:eae77de6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

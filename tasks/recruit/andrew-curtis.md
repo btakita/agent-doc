@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft updated: hybrid short-term + relocation disclosure. Ready to send.
+Call transcribed. Resume rebuilt for biostatistics/gov role. RTR pending signature. Resume ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -152,14 +152,56 @@ Best,
 Brian
 
 This is upfront about the timeline: available for the 6-month contract hybrid, remote question only applies to hire conversion. Adjust or send?
-<!-- agent:boundary:46e980ea -->
+Please transcribe and diarize my conversation with Andrew Curtis.
+/home/brian/work/btakita/agent-loop/mail/contacts/andrew-curtis/andrew-curtis_20260323-153505_4106895587.amr
+ 
+From this conversation + all other context, please customize my resume.
+### Re: Call Transcription + Resume Customization (HEAD)
+
+**Call transcribed and diarized:** `mail/contacts/andrew-curtis/20260323-phone-call-transcript.md`
+16-minute screening call with full speaker attribution.
+
+**Key intel from the call:**
+
+| Detail | Value |
+|--------|-------|
+| Recruiting firm | Occam's Group |
+| Consulting partner | FTI (middle layer) |
+| End client | Biostatistics company (government-related) |
+| Security | US citizen required, potential clearance |
+| Location | Boston hybrid "as needed" — not daily |
+| Rate | $110/hr on 1099 (agreed) |
+| RTR | Sent via SignNow to btac.dev |
+| Deadline | Resume within ~1 hour, submitting end of day |
+| Positions | 3 senior full-stack engineers |
+
+**What Andrew wants in the resume:**
+- Highlight Python + React full-stack (primary)
+- AI-forward is a plus, not the core ask
+- Engineering physics degree is "really good to know"
+- Brian mentioned: agent-doc/Jupyter for bioinformatics, math comfort, model tuning
+
+**Resume updated:** `resume/BrianTakita-andrew-curtis.pdf`
+- Profile updated with biostatistics/government angle
+- Engineering Physics, math/statistics, research terms now bolded
+- USAA security review highlighted (government/security context)
+- Full-stack Python/React remains primary emphasis
+- All experience sections included (Presence AI through Pivotal Labs)
+
+**Contact file updated:** `mail/contacts/andrew-curtis/AGENTS.md` with full call details.
+
+**Action items:**
+1. Sign RTR (check email from recruiter@occamsgroup.com via SignNow)
+2. Send resume PDF to Andrew (email or LinkedIn)
+3. Wait for submission + next interview with end client
+<!-- agent:boundary:29d6dc61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn reply to Andrew Curtis (hybrid + relocation disclosure)
-- Attach resume PDF when sending
-- Schedule screening call once times confirmed
-- Prep talking points: MDX+Jupyter data viz, USAA regulated data, data pipeline framing
+- Sign RTR from recruiter@occamsgroup.com (SignNow)
+- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf)
+- Wait for submission to FTI/end client
+- Prep for next interview: bioinformatics context, Jupyter/agent-doc demo, security clearance process
 <!-- /agent:pending -->

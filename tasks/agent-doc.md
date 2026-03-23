@@ -732,7 +732,7 @@ Implement
 Plugin v0.2.17 built (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.17.zip`
 release
-### Re: Release v0.25.6 (HEAD)
+### Re: Release v0.25.6
 
 **agent-doc v0.25.6 released:**
 
@@ -749,7 +749,7 @@ release
 - Plugin v0.2.17 (layout detection + EDT fix)
 
 **8 files changed, 223 insertions, 7 deletions.**
-<!-- agent:boundary:78df445a -->
+<!-- agent:boundary:d17d1584 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

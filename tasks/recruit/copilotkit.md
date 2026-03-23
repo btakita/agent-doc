@@ -1251,14 +1251,14 @@ Or I can run it for you — just say "push it."
 The draft file is ready. Should I push it to Gmail drafts now?
 In my request for a referral...please include that I am interested in integrating AG-UI components.
 
-### Re: AG-UI integration in referral ask (HEAD)
+### Re: AG-UI integration in referral ask
 
 Updated the draft. The referral line now reads:
 
 > "On a separate note — I'm currently doing client work and am open to taking on more, particularly projects involving AG-UI integration. If you come across anyone in your network who could use someone with my background, I'd appreciate the referral."
 
 Draft file updated. Ready to push to Gmail drafts.
-<!-- agent:boundary:b8e6ccfa -->
+<!-- agent:boundary:9fcf4e35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

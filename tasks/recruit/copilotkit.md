@@ -1012,6 +1012,7 @@ Also update kevin-volk/AGENTS.md and any other related context.
 
 Jordan's email is jordan@copilotkit.ai
 Please draft a followup email
+From brian.takita@gmail.com
 
 ### Kevin Volk Call Summary (Mar 23)
 
@@ -1060,7 +1061,11 @@ Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
 - The "clarification" reframes without being defensive — acknowledges the vision lean, then states execution credentials
 - Doesn't beg for the current role — accepts the timeline
 - Short enough that Jordan will actually read it
-<!-- agent:boundary:92c576ef -->
+
+### Re: Email sender noted (HEAD)
+
+Got it — sending from brian.takita@gmail.com. The draft is ready. Would you like me to send it via corky, or would you prefer to copy-paste it into Gmail yourself? Also, please provide the video/demo links to include.
+<!-- agent:boundary:7061f2f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

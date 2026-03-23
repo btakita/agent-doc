@@ -78,7 +78,7 @@ CopilotKit (Tawkit, Inc.) — open-source framework for building AI copilots and
 5. **CloudCrowd history** — Jordan was CTO when you got the offer in 2010. Warm conversation.
 
 Tell me more about the ag-ui spec.
-### Re: AG-UI Spec Deep Dive (HEAD)
+### Re: AG-UI Spec Deep Dive
 
 **Transport:** Transport-agnostic, primarily HTTP+SSE. Agents implement `run(input: RunAgentInput) -> Observable<BaseEvent>`. Standard `HttpAgent` client sends POST with `RunAgentInput`, receives stream of typed `BaseEvent` objects. Also supports HTTP Binary Protocol (production perf) and WebSockets.
 
@@ -113,7 +113,7 @@ Tell me more about the ag-ui spec.
 | `TOOL_CALL_*` lifecycle | IPC patch system | Agent↔host communication |
 
 The mental model overlap is deep — AG-UI patches JSON state via RFC 6902, agent-doc patches document regions via named components. Both stream events, both handle concurrent human edits, both maintain snapshots for recovery. The difference is the medium (JSON state vs markdown document) and the transport (HTTP+SSE vs filesystem+IPC).
-<!-- agent:boundary:4c19e980 -->
+<!-- agent:boundary:c76d05f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

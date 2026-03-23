@@ -199,7 +199,59 @@ If you ever want a browser-based interface for agent-doc sessions (e.g., for use
 This is a significant architectural shift for uncertain benefit. The current IPC-first model works well for the editor-centric workflow.
 
 **Recommendation:** Monitor AG-UI for ideas (their state snapshot model is interesting), but don't adopt it unless you want a web UI. The file-native, editor-plugin architecture is agent-doc's differentiator.
-<!-- agent:boundary:bc0d3493 -->
+Tell me more about the AG-UI state snapshot model. And how it could apply to agent-doc.
+### Re: AG-UI state snapshot model and how it could apply to agent-doc (HEAD)
+
+**AG-UI's State Management Model:**
+
+AG-UI uses a **snapshot-delta pattern** for synchronizing structured state between an agent backend and a frontend:
+
+1. **StateSnapshot** — sends the complete state object. Frontend replaces its entire state model:
+   ```typescript
+   { type: "STATE_SNAPSHOT", snapshot: { tasks: [...], status: "running", ... } }
+   ```
+
+2. **StateDelta** — sends incremental updates as RFC 6902 JSON Patch operations:
+   ```typescript
+   { type: "STATE_DELTA", delta: [
+     { op: "replace", path: "/status", value: "complete" },
+     { op: "add", path: "/tasks/-", value: { name: "new task" } }
+   ] }
+   ```
+
+3. **Bidirectional** — both agent and frontend can modify shared state. The agent reads app state for context; the frontend observes agent state changes in real-time.
+
+**How this maps to agent-doc:**
+
+| AG-UI Concept | agent-doc Equivalent | Gap |
+|---|---|---|
+| StateSnapshot | Snapshot file (`.agent-doc/snapshots/`) | agent-doc snapshots are full-document, not structured state objects |
+| StateDelta (JSON Patch) | IPC patch file (`.agent-doc/patches/`) | agent-doc patches are component-level, not JSON Patch RFC 6902 |
+| Shared state object | Document components (`&lt;!-- agent:name --&gt;`) | Components ARE the shared state — both user and agent modify them |
+| Event stream (SSE) | IPC filesystem + plugin watcher | No HTTP transport; filesystem is the channel |
+| `fast-json-patch` apply | CRDT merge (`yrs`-based) | agent-doc uses CRDT for conflict-free merge, not JSON Patch |
+
+**What's interesting for agent-doc:**
+
+1. **Structured state as first-class concept.** AG-UI's state object is arbitrary JSON — agents can expose internal state (progress, decisions, errors) as structured data that the frontend renders. agent-doc currently embeds this in markdown components, which is less structured. A `&lt;!-- agent:state --&gt;` component could hold JSON state that the plugin renders as a rich panel (progress bars, decision trees, error summaries).
+
+2. **JSON Patch for component updates.** Instead of replacing entire component content, agent-doc could emit RFC 6902 patches targeting specific lines/sections within a component. This would be more efficient for large components where only a few lines change (e.g., updating a single pending item without rewriting the entire list).
+
+3. **Snapshot-delta pattern for recovery.** AG-UI uses snapshots as recovery points after connection loss. agent-doc already does this (snapshot + CRDT state), but could formalize it: on plugin reconnect, send a full StateSnapshot; during normal operation, send only StateDelta patches.
+
+4. **Bidirectional state observation.** AG-UI lets the frontend push state TO the agent (e.g., user selections, form inputs). agent-doc's model is already bidirectional (user edits the document, agent reads the diff), but the diff is coarse-grained (whole document). Component-level state deltas could enable finer-grained user → agent signals.
+
+**Practical application — what I'd take from AG-UI:**
+
+The most transferable idea is **structured component state with JSON Patch deltas**. Instead of replacing `&lt;!-- agent:pending --&gt;` content wholesale each cycle, the binary could compute a JSON Patch from the old → new content and send that via IPC. The plugin would apply the patch atomically, preserving cursor position and undo stack within the component. This is a refinement of the existing IPC mechanism, not a protocol change.
+
+The event stream model (SSE over HTTP) doesn't fit agent-doc's filesystem-native architecture, but the *concepts* (lifecycle events, delta vs snapshot, recovery) are already present in agent-doc's design — just expressed differently (git commits as lifecycle, IPC patches as deltas, snapshot files as recovery).
+
+Sources:
+- [AG-UI State Management](https://docs.ag-ui.com/concepts/state)
+- [AG-UI Events](https://docs.ag-ui.com/concepts/events)
+- [Building Real-Time AI Agent UIs with AG-UI](https://itsayushgupta.medium.com/building-real-time-ai-agent-uis-with-the-ag-ui-protocol-and-agui-hooks-14a78a8f7002)
+<!-- agent:boundary:5b16ba26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -207,7 +259,8 @@ This is a significant architectural shift for uncertain benefit. The current IPC
 <!-- agent:pending -->
 - [x] agent-doc v0.25.5 released
 - [x] Plugin v0.2.14 installed
-- [ ] Consider AG-UI if web UI is ever needed (currently not a fit)
+- [ ] Consider JSON Patch (RFC 6902) for component-level deltas
+- [ ] Consider structured `agent:state` component for rich plugin rendering
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

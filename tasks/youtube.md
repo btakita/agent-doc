@@ -265,7 +265,7 @@ Active coding with any keyboard/mouse sound stays above -30dB and is preserved. 
 I updated corky to support youtube playlists. See tasks/corky.md.
 Let's create a playlist of these episodes.
 Go
-### Re: YouTube Drafts & Playlist (HEAD)
+### Re: YouTube Drafts & Playlist
 
 **6 YouTube drafts created** with video paths, titles, and descriptions. All set to `ready` status.
 
@@ -283,7 +283,7 @@ Go
 corky youtube auth
 ```
 Then re-run `/agent-doc tasks/youtube.md` to continue with publishing.
-<!-- agent:boundary:47a055ef -->
+<!-- agent:boundary:ef028607 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

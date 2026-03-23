@@ -474,7 +474,7 @@ Plugin v0.2.15 rebuilt. Binary built and installed. 521 tests pass.
 continue:
 - [ ] Test route + layout sync with multi-split editor
 - [ ] Investigate EditorSplitterListener for tab-drag events
-### Re: Test layout sync + EditorSplitterListener investigation (HEAD)
+### Re: Test layout sync + EditorSplitterListener investigation
 
 **Testing route + layout sync:**
 
@@ -512,7 +512,7 @@ Sources:
 - [API for moving editor tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362)
 - [How to track file editors](https://www.plugin-dev.com/intellij/editor/editor-open-close/)
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter)
-<!-- agent:boundary:a16deabe -->
+<!-- agent:boundary:0f21488f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -530,7 +530,15 @@ That's a great detail. The stack maps almost perfectly to NextEra's:
 DuckDB and TimescaleDB are both optimized for analytical/time-series queries — the concepts transfer directly. This strengthens the "implement research models from papers into software" claim in your email.
 
 **Screening call talking point:** "I'm working through a quantitative backtesting course using DuckDB, Python, and PyTorch for time-series analysis — very similar patterns to what NextEra does with forecasting and optimization."
-<!-- agent:boundary:9c797e21 -->
+Should I mention that I sent an email on LinkedIn messenger?
+### Re: LinkedIn Follow-Up (HEAD)
+
+**Yes — good idea.** Lucas initiated on LinkedIn, so he's likely more active there. A short nudge ensures he sees the email:
+
+> Hi Lucas, just sent over my resume and rate confirmation via email. Let me know if you have any questions!
+
+Keep it brief — just a pointer to check his inbox. Don't repeat the email content. Copy-paste into the LinkedIn conversation.
+<!-- agent:boundary:599ee603 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -539,6 +547,7 @@ DuckDB and TimescaleDB are both optimized for analytical/time-series queries —
 - [x] Draft email via corky
 - [x] Update resume with latest info
 - [x] Send email to Lucas
+- [ ] Send LinkedIn follow-up message (copy-paste)
 - [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Mention factor-based backtesting + DuckDB/PyTorch on screening call

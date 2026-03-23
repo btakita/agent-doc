@@ -484,7 +484,7 @@ Updated the series overview post. Episode sections now link to individual blog p
 The playlist iframe is kept at the top of the series overview. Individual episode pages each have their own YouTube embed.
 
 Regarding posts not showing on localhost:4100 — the `post/index.ts` file has been updated with all 7 imports. If the dev server still doesn't show them, it may need a restart (`bun` or `make dev`).
-### Re: JSON-LD for Blog Posts (HEAD)
+### Re: JSON-LD for Blog Posts
 
 **Already handled by the layout.** The blog has comprehensive JSON-LD / RDFa structured data built into the layout template layer:
 
@@ -495,7 +495,7 @@ Regarding posts not showing on localhost:4100 — the `post/index.ts` file has b
 Individual posts don't need per-post JSON-LD because the frontmatter fields (`title`, `description`, `date`, `tags`) feed into the template's schema.org generation automatically. No changes needed.
 
 If you want **VideoObject** JSON-LD specifically for the YouTube videos (which would help Google discover the video content on your blog), that would be a layout-level enhancement — adding `schema.org/VideoObject` when a `video_url` frontmatter field is present.
-<!-- agent:boundary:c19dd3ec -->
+<!-- agent:boundary:6c96c830 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

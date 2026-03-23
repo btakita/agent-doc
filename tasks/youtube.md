@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Blog deployed to Cloudflare Pages. 7 posts published. LinkedIn post pending.
+YouTube comments posted on all 6 episodes. Blog deployed. LinkedIn post pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -513,15 +513,30 @@ Blog deployed:
 - [Ep6: Deterministic Primitives](https://briantakita.me/posts/skill-to-binary-ep6-deterministic-primitives)
 
 Posts should be live once CF Pages finishes building (typically 1-2 minutes).
-<!-- agent:boundary:e642c910 -->
+Pending:
+- Publish YouTube comment with link to the briantakita.me blog post. Describing that the post is a summary and analysis of the video.
+### Re: YouTube Comments with Blog Links (HEAD)
+
+Posted comments on all 6 episodes linking to their blog post analysis:
+
+| Ep | Comment ID | Pin Link |
+|----|-----------|----------|
+| 1 | Ugycz84-AfmlEejcnrt4AaABAg | [pin](https://www.youtube.com/watch?v=5m9rTJ-4Xbc&lc=Ugycz84-AfmlEejcnrt4AaABAg) |
+| 2 | UgxLMmdGD5vXsjew_Eh4AaABAg | [pin](https://www.youtube.com/watch?v=lEnOxyT5crY&lc=UgxLMmdGD5vXsjew_Eh4AaABAg) |
+| 3 | UgwruJB46gSrpVyH9Yt4AaABAg | [pin](https://www.youtube.com/watch?v=ntdcp2pH2qw&lc=UgwruJB46gSrpVyH9Yt4AaABAg) |
+| 4 | Ugxr_ttbYnkszj6Gx-d4AaABAg | [pin](https://www.youtube.com/watch?v=j0684b9NZ-o&lc=Ugxr_ttbYnkszj6Gx-d4AaABAg) |
+| 5 | UgzuOEn7SNL-hGICw6N4AaABAg | [pin](https://www.youtube.com/watch?v=DC1tAv-a_7E&lc=UgzuOEn7SNL-hGICw6N4AaABAg) |
+| 6 | UgwgbNP3bXAe3BCG7Mt4AaABAg | [pin](https://www.youtube.com/watch?v=xNBkZAJuUys&lc=UgwgbNP3bXAe3BCG7Mt4AaABAg) |
+
+Each comment includes: blog post link, topics covered, and series overview link. Pin manually via the links above.
+<!-- agent:boundary:0860ee9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify blog posts live on briantakita.me (CF Pages building)
+- [ ] Pin YouTube comments manually (6 videos — use pin links above)
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing
-- [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

@@ -742,7 +742,7 @@ update SPEC.md, README.md
 
 **522 tests pass.** 14 files changed, 216 insertions, 85 deletions.
 compact exchange
-### Re: Audit docs, update docs, compact exchange (HEAD)
+### Re: Audit docs, update docs, compact exchange
 
 **Audit docs:** 1 advisory remaining (large table in CLAUDE.md — pre-existing, not a blocker). All staleness warnings cleared.
 
@@ -753,7 +753,7 @@ compact exchange
 **Exchange compacted:** 590 lines archived to `.agent-doc/archives/`. Exchange is now clean.
 
 **Plugin v0.2.14 installed** — confirmed by user.
-<!-- agent:boundary:608626fc -->
+<!-- agent:boundary:7b70d431 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

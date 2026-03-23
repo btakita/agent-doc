@@ -53,7 +53,7 @@ Ready to tweak or send?
 Should we include agent-doc? I'm planning on MDX + Jupyter integration for realtime AI driven documents.
 
 Any gaps in the resume?
-### Re: agent-doc + Resume Gap Analysis (HEAD)
+### Re: agent-doc + Resume Gap Analysis
 
 **On agent-doc:** Keep it on the resume (already there under Open Source) but skip it in the LinkedIn reply — the JD's "AI-assisted coding tools" line is nice-to-have, not the core ask. The MDX + Jupyter integration story is a strong talking point for the screening call though. "Translating complex datasets into intuitive software solutions" maps directly to interactive AI-driven documents. Bring it up when Andrew asks about your approach to building data-driven applications.
 
@@ -75,7 +75,7 @@ Any gaps in the resume?
 **No critical gaps.** Two minor ones (data pipelines, regulated data) are covered by experience but not explicitly phrased on the resume. Best addressed as talking points on the screening call.
 
 Draft reply is ready to send as-is — want to proceed?
-<!-- agent:boundary:04be1ebe -->
+<!-- agent:boundary:5ddd11a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

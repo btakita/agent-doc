@@ -61,7 +61,7 @@ agent_doc_write: crdt
 - [x] Write destination + pull improvements — v0.19.2
 - [x] SPEC.md §6.8, §6.9, §18 — v0.19.1
 - [x] Metal GPU + audio resilience — v0.19.3
-- [x] YouTube playlist support — implemented (4 commands, pending commit)
+- [x] YouTube playlist management — v0.21.0
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -185,12 +185,26 @@ Sorted `YoutubeCommands` enum variants alphabetically in `cli.rs` — this contr
 Also sorted command lists in SPEC.md §17.6 and README.md to match.
 
 `make check` passes (13 tests), `audit-docs` clean.
-<!-- agent:boundary:9a34f19d -->
+release
+### Released v0.21.0 — YouTube Playlist Management (HEAD)
+
+**Committed** (`c160bfe` + `b65807f`):
+- 4 playlist CLI commands, 4 API functions + test variants
+- 5 new tests (13 total YouTube tests)
+- SPEC.md §17.6-17.7, README.md updated
+- All YouTube commands sorted alphabetically
+
+**Published:**
+- [crates.io](https://crates.io/crates/corky/0.21.0)
+- [PyPI](https://pypi.org/project/corky/0.21.0/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.21.0) (with CUDA binary)
+
+**Installed:** corky 0.21.0 locally with GPU (transcribe-cuda)
+<!-- agent:boundary:457d3b40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Commit playlist feature in corky submodule
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

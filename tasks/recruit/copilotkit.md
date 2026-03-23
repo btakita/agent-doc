@@ -1220,7 +1220,7 @@ Your message was cut off at "linking to crates." — I'll assume you mean linkin
 One parenthetical line, not a feature. It backs up your claim without expanding the email.
 
 Should I add that line to the draft, or keep the email as-is and send?
-<!-- agent:boundary:ffd12cd2 -->
+<!-- agent:boundary:7e913fc3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

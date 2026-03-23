@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created. Resume built. Draft reply ready for review.
+Resume gap analysis complete. No critical gaps. Draft reply ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -45,7 +45,37 @@ Draft a response. Make a custom resume.
 > Brian
 
 Ready to tweak or send?
-<!-- agent:boundary:9a40a937 -->
+
+> We are partnering with a leading organization focused on building advanced technology platforms that support large-scale data analysis and real-world decision-making. This team is developing mission-critical software systems that transform complex datasets into actionable insights across a highly impactful domain.
+>
+> Collaborate with cross-functional stakeholders to translate complex datasets into intuitive software solutions
+
+Should we include agent-doc? I'm planning on MDX + Jupyter integration for realtime AI driven documents.
+
+Any gaps in the resume?
+### Re: agent-doc + Resume Gap Analysis (HEAD)
+
+**On agent-doc:** Keep it on the resume (already there under Open Source) but skip it in the LinkedIn reply — the JD's "AI-assisted coding tools" line is nice-to-have, not the core ask. The MDX + Jupyter integration story is a strong talking point for the screening call though. "Translating complex datasets into intuitive software solutions" maps directly to interactive AI-driven documents. Bring it up when Andrew asks about your approach to building data-driven applications.
+
+**Resume gap analysis against JD:**
+
+| JD Requirement | Status | Notes |
+|---------------|--------|-------|
+| 6-8+ years full-stack | Covered | 20+ years |
+| Strong Python backend | Covered | FastAPI, Flask, SQLAlchemy, Django |
+| React/TypeScript | Covered | Presence AI, SocialChorus, Galler AI |
+| REST/GraphQL APIs | Covered | Presence AI (GraphQL/urql), TrueCar |
+| System design | Covered | Multi-service monorepo, pipeline architecture |
+| CI/CD + automated testing | Covered | BDD/TDD, CI/CD skill |
+| Cloud (AWS) + Docker/K8s | Covered | AWS, Docker, EC2, Lambda |
+| Data pipelines / large datasets | Light | Censible (10k+ rows), Presence AI pipeline — use the phrase on the call |
+| Regulated/sensitive data | Light | USAA security review at TrueCar covers this — mention on call |
+| Cross-functional collaboration | Covered | Pivotal Labs (20+ startups), Presence AI |
+
+**No critical gaps.** Two minor ones (data pipelines, regulated data) are covered by experience but not explicitly phrased on the resume. Best addressed as talking points on the screening call.
+
+Draft reply is ready to send as-is — want to proceed?
+<!-- agent:boundary:04be1ebe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -54,4 +84,5 @@ Ready to tweak or send?
 - Send LinkedIn reply to Andrew Curtis
 - Attach resume PDF when sending
 - Schedule screening call once times confirmed
+- Prep talking points: MDX+Jupyter data viz, USAA regulated data, data pipeline framing
 <!-- /agent:pending -->

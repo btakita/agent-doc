@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-6 videos merged: 2026-03-22-merged.mp4 (8:52:28, 19.5 GB). Ready for YouTube upload.
+Light edit in progress: silence detection running on 6 source files.
 <!-- /agent:status -->
 
 ## Exchange
@@ -112,13 +112,39 @@ Merged **6 videos** into a single file using MPEG-TS intermediate concat (lossle
 - Duration: 8:52:28
 - Size: 19.5 GB (lossless concat — no quality loss)
 - Method: MP4 → MPEG-TS → concat protocol → MP4 remux (handles timestamp discontinuities from edited2)
-<!-- agent:boundary:3e7499fd -->
+Let's do a light edit. Removing long pauses and other low quality content.
+This is very long video.
+Should I break it up into multiple youtube videos according to distinct subjects?
+### Re: Light Edit & Splitting Strategy (HEAD)
+
+**Yes, break it up.** 8:52 as a single video hurts retention and discoverability. The 6 source files already have natural session boundaries:
+
+| Part | Source | Duration | Time Window |
+|------|--------|----------|-------------|
+| 1 | 2026-03-21 17-04-37 | 2:02:57 | Afternoon |
+| 2 | 2026-03-21 19-11-06 | 1:40:51 | Evening |
+| 3 | 2026-03-22 00-07-18 | 2:19:22 | Late night |
+| 4 | 2026-03-22 09-19-30 | 0:49:00 | Morning |
+| 5 | 2026-03-22 10-27-48-edited2 | 1:29:26 | Mid-morning |
+| 6 | 2026-03-22 11-59-10 | 0:30:53 | Noon |
+
+**Recommended approach:**
+1. Light edit each source file separately (silence detection, -30dB threshold, 3s minimum)
+2. Upload as separate YouTube videos with subject-specific titles
+3. Group into a YouTube playlist for sequential viewing
+
+Running silence detection on all 6 files now. Once complete, I'll show how much dead air each has and produce trimmed versions.
+
+Do you know the topics of each session, or should I transcribe to identify subjects?
+<!-- agent:boundary:25344701 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Upload 2026-03-22-merged.mp4 to YouTube
+- [ ] Light edit 6 source videos (silence detection running)
+- [ ] Identify subjects per session (transcription or user input needed)
+- [ ] Upload to YouTube as separate videos + playlist
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

@@ -1152,7 +1152,7 @@ Good phrasing — "working from the agentic primitives upward." Let me weave tha
 Ready to send. Want me to push to Gmail drafts via corky now?
 Rewrite the draft with my updates.
 
-### Final Email Draft (revised) (HEAD)
+### Final Email Draft (revised)
 
 **To:** jordan@copilotkit.ai
 **From:** brian.takita@gmail.com
@@ -1180,7 +1180,7 @@ Rewrite the draft with my updates.
 > Brian
 
 Ready to send via corky to Gmail drafts. Say the word.
-<!-- agent:boundary:6cd60e48 -->
+<!-- agent:boundary:0ac66510 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

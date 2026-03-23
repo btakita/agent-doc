@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep complete. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). Company research + technical alignment mapped.
+Interview prep complete + AG-UI spec deep dive. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO).
 <!-- /agent:status -->
 
 ## Exchange
@@ -76,7 +76,44 @@ CopilotKit (Tawkit, Inc.) — open-source framework for building AI copilots and
 3. **"Pilots not mechanics"** — Your workflow is AI-native. You build WITH agents (Claude Code + agent-doc), not just tools for them. You live the product.
 4. **Protocol thinking** — AG-UI is an event protocol. agent-doc has its own (IPC patches, boundary markers, snapshot diffs). You think at the protocol level.
 5. **CloudCrowd history** — Jordan was CTO when you got the offer in 2010. Warm conversation.
-<!-- agent:boundary:2bbcae7b -->
+
+Tell me more about the ag-ui spec.
+### Re: AG-UI Spec Deep Dive (HEAD)
+
+**Transport:** Transport-agnostic, primarily HTTP+SSE. Agents implement `run(input: RunAgentInput) -> Observable<BaseEvent>`. Standard `HttpAgent` client sends POST with `RunAgentInput`, receives stream of typed `BaseEvent` objects. Also supports HTTP Binary Protocol (production perf) and WebSockets.
+
+**Event Types (16+ standardized):**
+
+| Category | Events | Key Fields |
+|----------|--------|------------|
+| **Lifecycle** | `RUN_STARTED` → `STEP_STARTED`/`STEP_FINISHED` → `RUN_FINISHED` \| `RUN_ERROR` | threadId, runId, parentRunId?, stepName |
+| **Text Messages** | `TEXT_MESSAGE_START` → `TEXT_MESSAGE_CONTENT` → `TEXT_MESSAGE_END` | messageId, role (developer/system/assistant/user/tool), delta |
+| **Tool Calls** | `TOOL_CALL_START` → `TOOL_CALL_ARGS` → `TOOL_CALL_END` + `TOOL_CALL_RESULT` | toolCallId, toolCallName, delta (streamed JSON args), content |
+| **State** | `STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT` | snapshot (full state), delta (RFC 6902 JSON Patch ops) |
+| **Reasoning** | `REASONING_START` → `REASONING_MESSAGE_*` → `REASONING_END` | delta (chain-of-thought chunks), encryptedValue |
+| **Activity** | `ACTIVITY_SNAPSHOT`, `ACTIVITY_DELTA` | activityType ("PLAN"/"SEARCH"/etc), RFC 6902 patches |
+| **Special** | `RAW`, `CUSTOM`, `META_EVENT` (draft) | Passthrough, custom name+value, annotations |
+
+**State Management (core innovation):**
+- `STATE_SNAPSHOT` — complete state object at init or recovery
+- `STATE_DELTA` — RFC 6902 JSON Patch operations: `add`, `remove`, `replace`, `move`, `copy`, `test` with JSON Pointer (RFC 6901) paths
+- Uses `fast-json-patch` for atomic immutable application
+- Bidirectional: agents read app state, emit deltas; frontend observes and reacts
+- Human-in-the-loop via state modification (approve/reject/modify agent proposals)
+
+**Direct parallels to agent-doc:**
+
+| AG-UI | agent-doc | Pattern |
+|-------|-----------|---------|
+| `STATE_DELTA` (JSON Patch) | `patch:component` blocks | Named region patching |
+| `STATE_SNAPSHOT` | Snapshot files | Full state baseline |
+| `RUN_STARTED`/`RUN_FINISHED` | Boundary markers | Session lifecycle |
+| SSE streaming | `--stream` CRDT merge | Real-time event delivery |
+| Human-in-the-loop (state mod) | Concurrent user editing | Bidirectional sync |
+| `TOOL_CALL_*` lifecycle | IPC patch system | Agent↔host communication |
+
+The mental model overlap is deep — AG-UI patches JSON state via RFC 6902, agent-doc patches document regions via named components. Both stream events, both handle concurrent human edits, both maintain snapshots for recovery. The difference is the medium (JSON state vs markdown document) and the transport (HTTP+SSE vs filesystem+IPC).
+<!-- agent:boundary:4c19e980 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

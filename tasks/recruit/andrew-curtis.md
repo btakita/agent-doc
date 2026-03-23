@@ -13,7 +13,12 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Make a contact for andrew-curtis.
+https://www.linkedin.com/in/andrew-curtis-022513b1/
 
+Read mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt
+
+Draft a response. Make a custom resume.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -544,7 +544,7 @@ So the poll:
 Are there any other events that we can hook into to avoid polling?
 
 I notice that focus change d
-### Re: Events to avoid polling (HEAD)
+### Re: Events to avoid polling
 
 Several event hooks that could replace or supplement polling:
 
@@ -607,7 +607,7 @@ Sources:
 - [Splitter.java source](https://github.com/JetBrains/intellij-community/blob/master/platform/util/ui/src/com/intellij/openapi/ui/Splitter.java) — `PROP_PROPORTION` and `PROP_ORIENTATION` events
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) — reference for programmatic tab movement
 - [API for moving tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362) — JetBrains platform discussion
-<!-- agent:boundary:af8ad27b -->
+<!-- agent:boundary:9226926c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -13,6 +13,18 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Recruiter is kevin-volk.
+CTO is Jordan Ritter https://www.linkedin.com/in/jordanritter/
+See tasks/recruit/kevin-volk.md
+See mail/contacts/kevin-volk
+
+https://www.copilotkit.ai/
+https://docs.copilotkit.ai/
+
+I have an interview tomorrow at 17:00 Eastern
+Please research.
+Give me a summary of the company.
+Technical alignment with what I have been doing.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

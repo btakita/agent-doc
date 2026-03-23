@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Build error fixed via yalc linking. Try dev server again.
+Yalc linked in all sub-packages. Try dev server again.
 <!-- /agent:status -->
 
 ## Exchange
@@ -654,7 +654,18 @@ bun install
 ```
 
 The `blog_post__video_url_` export is now available in the linked packages. Try `bun run dev` again.
-<!-- agent:boundary:69ad0fa7 -->
+
+Same error with `bun run dev`
+### Re: Yalc Fix for Sub-Packages (HEAD)
+
+The monorepo has multiple `package.json` files that each resolve `@rappstack/domain--server--blog` independently. Added yalc links to all three:
+
+1. Root `briantakita.me-dev/`
+2. `app/briantakita.me/`
+3. `lib/ui--server--briantakita/`
+
+All three now resolve to the yalc-published version with `blog_post__video_url_`. Try `bun run dev` again.
+<!-- agent:boundary:845d1fab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

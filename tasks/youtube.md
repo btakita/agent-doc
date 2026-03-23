@@ -470,20 +470,20 @@ Ep1-5 blog posts are created. Ep6 is being written by the last subagent now. Onc
 
 The dev server at localhost:4100 should show them after Ep6 is written. You may need to refresh or restart the dev server if it doesn't hot-reload new content files.
 /posts/skill-to-binary-agent-doc-live should link to the individual blog pages instead of the embedded youtube iframe.
-### Re: Series Post Links (HEAD)
+### Re: Series Post Links
 
 Updated the series overview post. Episode sections now link to individual blog pages instead of embedding YouTube iframes:
 
 ```markdown
-### [Ep 1: The CRDT Ordering Bug](/posts/skill-to-binary-ep1-crdt-ordering) (1:58:46) (HEAD)
-### [Ep 2: The Snowball Bug](/posts/skill-to-binary-ep2-snowball-bug) (1:31:49) (HEAD)
+### [Ep 1: The CRDT Ordering Bug](/posts/skill-to-binary-ep1-crdt-ordering) (1:58:46)
+### [Ep 2: The Snowball Bug](/posts/skill-to-binary-ep2-snowball-bug) (1:31:49)
 ...etc
 ```
 
 The playlist iframe is kept at the top of the series overview. Individual episode pages each have their own YouTube embed.
 
 Regarding posts not showing on localhost:4100 — the `post/index.ts` file has been updated with all 7 imports. If the dev server still doesn't show them, it may need a restart (`bun` or `make dev`).
-<!-- agent:boundary:e8ab2459 -->
+<!-- agent:boundary:da1e7ee5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

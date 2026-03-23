@@ -932,7 +932,7 @@ You're right — forced OSS contributions without genuine use are performative a
 
 **No.** Don't mention cashflow needs to Jordan directly. That's a recruiter conversation. Tell Kevin you're available immediately and flexible on role scope. Kevin can advocate for you internally if there's contract work or a role that opens up sooner.
 
-### Re: Honesty vs. Fit (HEAD)
+### Re: Honesty vs. Fit
 
 That tension is real and frustrating. Jordan said he values authenticity — "narrative arc interview," no trick questions, just get to know each other. And you were authentic. But authenticity revealed that your passion is building agent-doc-level tools, not grinding through an integration matrix. He took that signal seriously.
 
@@ -946,7 +946,7 @@ The paradox is: if you had performed as "I just want to grind integrations" and 
 - When the enterprise/R&D roles open, you'll be a natural fit precisely because Jordan already knows what you actually care about.
 
 Being honest is never the wrong move. The framing around the honesty is what you can refine for next time.
-<!-- agent:boundary:d1fa56ae -->
+<!-- agent:boundary:05e4970b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

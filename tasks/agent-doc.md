@@ -444,16 +444,42 @@ The `LayoutDetector` walks JetBrains' Swing Splitter tree to detect which `.md` 
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.15.zip`
 
 **Change:** One line added to `TerminalUtil.kt` — `SyncLayoutAction.syncLayout(project, notify = false)` after successful route.
-<!-- agent:boundary:d0b51a0b -->
+I liked Approach 2 better. But with optional `--col left_files --col right_files --focus active_file` cli arguments.
+### Re: Approach 2 — layout args on `agent-doc route` (HEAD)
+
+**Done.** `agent-doc route` now accepts optional layout args:
+
+```
+agent-doc route <file> [--col left_files] [--col right_files] [--focus active_file]
+```
+
+**Binary changes (`main.rs`, `route` command):**
+- Added `--col` (repeatable) and `--focus` args to the Route subcommand
+- After routing, if `--col` args are provided, calls `sync::run()` to sync tmux layout
+- Single CLI call handles both routing and layout sync
+
+**Plugin changes (`TerminalUtil.kt`):**
+- `sendToTerminal()` now detects the editor layout via `LayoutDetector`
+- Passes `--col` and `--focus` args directly to `agent-doc route`
+- Removed the separate `SyncLayoutAction.syncLayout()` call — it's now one command
+
+**Example command the plugin generates:**
+```
+agent-doc route tasks/agent-doc.md --col tasks/agent-doc.md --col tasks/recruit/lucas-noble.md --focus tasks/agent-doc.md
+```
+
+This tells the binary: left column has `agent-doc.md`, right column has `lucas-noble.md`, focus is on `agent-doc.md`.
+
+Plugin v0.2.15 rebuilt. Binary built and installed. 521 tests pass.
+<!-- agent:boundary:1f54e541 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [ ] **Install plugin v0.2.15** — IDEA → Plugins → Install from Disk
-- [ ] Investigate EditorSplitterListener for tab-drag-between-splits events
-- [ ] `agent-doc export --jupyter`
-- [ ] Interactive MDX viewer (Phase 1)
+- [ ] Test route + layout sync with multi-split editor
+- [ ] Investigate EditorSplitterListener for tab-drag events
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

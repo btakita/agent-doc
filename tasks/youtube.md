@@ -432,7 +432,7 @@ Should we have separate blog posts for each episode?
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
 Make the series post the featured post. Individual episodes won't be feature blog posts.
-### Re: Individual Episode Blog Posts (HEAD)
+### Re: Individual Episode Blog Posts
 
 All transcript analyses complete. 4 subagents now creating 6 individual blog posts:
 
@@ -446,7 +446,7 @@ All transcript analyses complete. 4 subagents now creating 6 individual blog pos
 | 6 | skill-to-binary-ep6-deterministic-primitives.md | Deterministic primitives, code review culture, firehouse effect |
 
 Series overview (`featured: true`) links to all episodes. Individual posts use `featured: false`.
-<!-- agent:boundary:0059c28a -->
+<!-- agent:boundary:84632e26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

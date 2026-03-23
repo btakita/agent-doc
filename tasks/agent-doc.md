@@ -1120,7 +1120,7 @@ For the v0.25.7 release, the current batch is:
 
 That's a solid feature release. Shall I proceed with all four?
 Yes
-### Re: v0.25.7 released (HEAD)
+### Re: v0.25.7 released
 
 **agent-doc v0.25.7 released** to all targets:
 - crates.io ✓ | PyPI ✓ | GitHub Release ✓ | Binary installed ✓
@@ -1133,7 +1133,7 @@ Yes
 5. **Plugin v0.2.19:** FFI debounce, conditional typing wait, layout-only sync
 
 **20 files changed, 290 insertions, 39 deletions.**
-<!-- agent:boundary:044a8f8e -->
+<!-- agent:boundary:9f611d81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

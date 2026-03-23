@@ -302,10 +302,10 @@ Add to pending:
   - Include corky 0.21.0 supporting youtube playlists
 - LinkedIn post with first comment showing links
   - Include corky 0.21.0 supporting youtube playlists
-### Re: Blog & LinkedIn Posts (HEAD)
+### Re: Blog & LinkedIn Posts
 
 Added to pending. Will draft after YouTube uploads are complete.
-<!-- agent:boundary:1e3001f7 -->
+<!-- agent:boundary:00ca4791 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

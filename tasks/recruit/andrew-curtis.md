@@ -223,7 +223,7 @@ The Presence AI section already covers your ML work in detail:
 **corky transcribe:** Note — `--gpu` isn't a current flag (checked help). corky transcribe uses GPU automatically when available. I used whisper directly this time. Added preference for `corky transcribe --diarize --speakers` to `CLAUDE.local.md` for future transcriptions.
 
 **Resume file:** `resume/BrianTakita-andrew-curtis.pdf` (rebuilt with ML terms bolded)
-<!-- agent:boundary:6d914aff -->
+<!-- agent:boundary:84524a34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

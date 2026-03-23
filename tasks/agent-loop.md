@@ -45,23 +45,20 @@ Created `DEV.md` files for the three most actively released submodules:
 
 Go through all of the submodules. Commit
 
-### Re: submodule commits (HEAD)
+### Re: submodule commits
 
-Went through all submodules, committed everything from the inside out:
+Committed all dirty submodules from the inside out:
 
-| Submodule | What was committed |
-|-----------|-------------------|
-| `src/instruction-files` | New `DEV.md` |
-| `src/tmux-router` | Focus-steal diagnosis logging in sync/tmux |
-| `src/rappstack-dev` | Blog submodule pointer updates (domain--any--blog, domain--server--blog) |
-| `src/briantakita.me-dev` | Nested: `app/briantakita.me` (blog posts + yalc), `lib/ui--server--briantakita` (post doc html + yalc), then parent pointer + deps |
-| `mail` | Full sync — contacts, conversations, drafts, social |
-| `resume` | 4 new PDFs + profiles (andrew-curtis, benjamin-becker, eci-solutions, guidehouse-sba) |
+| Submodule | Action | Commit |
+|-----------|--------|--------|
+| `rappstack-dev/lib/domain--any--blog` | feat: video_url + playlist_url fields | `b901a39` |
+| `rappstack-dev/lib/domain--server--blog` | feat: video_url + playlist_url schema/helpers | `4c6e539` |
+| `src/rappstack-dev` | chore: update blog submodule pointers | `a934c87` |
+| `mail` | chore: sync contacts, conversations, drafts, social (159 files) | `2c7b147` |
+| Parent pointers | mail, rappstack-dev, agent-resume, briantakita.me-dev, brookebrodack-dev, tmux-router | `8b476aa` |
 
-**Parent commit** `8b476aa`: Updated all 8 submodule pointers (mail, resume, agent-resume, briantakita.me-dev, brookebrodack-dev, instruction-files, rappstack-dev, tmux-router).
-
-All submodules are now clean.
-<!-- agent:boundary:b55c7be5 -->
+All submodules now clean — `git submodule status` shows no `+` or `m` prefixes.
+<!-- agent:boundary:824f3bf5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -608,7 +608,7 @@ Sources:
 - [Splitter.java source](https://github.com/JetBrains/intellij-community/blob/master/platform/util/ui/src/com/intellij/openapi/ui/Splitter.java) — `PROP_PROPORTION` and `PROP_ORIENTATION` events
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) — reference for programmatic tab movement
 - [API for moving tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362) — JetBrains platform discussion
-### Re: Implement hybrid layout detection (HEAD)
+### Re: Implement hybrid layout detection
 
 **Done.** New `LayoutChangeDetector` class implements the hybrid approach:
 
@@ -635,7 +635,7 @@ Sources:
 
 **Plugin v0.2.16 built** (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.16.zip`
-<!-- agent:boundary:03ab7f28 -->
+<!-- agent:boundary:017574ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

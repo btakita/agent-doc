@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume gap analysis complete. No critical gaps. Draft reply ready to send.
+Draft updated with remote question. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,16 +33,16 @@ Draft a response. Make a custom resume.
 
 **Draft LinkedIn reply:**
 
-> Hi Andrew,
->
-> Thanks for sending over the full JD — this looks like a strong fit. I have 20+ years of full-stack experience with deep Python backend expertise (FastAPI, Flask, SQLAlchemy) and extensive React/TypeScript frontend work. I've built and consumed REST and GraphQL APIs across multiple production systems, and have strong AWS and Docker experience.
->
-> I'm particularly interested in the data analysis/decision-making platform aspect — I've built data pipelines and large-scale analytics systems (ESG portfolio analytics at Censible, real-time multimodal AI pipeline at Presence AI).
->
-> Happy to schedule a screening call. I'm available this week — what times work for you?
->
-> Best,
-> Brian
+Hi Andrew,
+
+Thanks for sending over the full JD — this looks like a strong fit. I have 20+ years of full-stack experience with deep Python backend expertise (FastAPI, Flask, SQLAlchemy) and extensive React/TypeScript frontend work. I've built and consumed REST and GraphQL APIs across multiple production systems, and have strong AWS and Docker experience.
+
+I'm particularly interested in the data analysis/decision-making platform aspect — I've built data pipelines and large-scale analytics systems (ESG portfolio analytics at Censible, real-time multimodal AI pipeline at Presence AI).
+
+Happy to schedule a screening call. I'm available this week — what times work for you?
+
+Best,
+Brian
 
 Ready to tweak or send?
 
@@ -75,13 +75,32 @@ Any gaps in the resume?
 **No critical gaps.** Two minor ones (data pipelines, regulated data) are covered by experience but not explicitly phrased on the resume. Best addressed as talking points on the screening call.
 
 Draft reply is ready to send as-is — want to proceed?
-<!-- agent:boundary:5ddd11a8 -->
+Is this a 100% remote role?
+### Re: Remote Status (HEAD)
+
+The JD doesn't specify remote/hybrid/on-site. "Work Environment" section says "collaborative, cross-functional team environment" but no location details. Andrew's messages didn't mention it either.
+
+**Updated draft with remote question added:**
+
+Hi Andrew,
+
+Thanks for sending over the full JD — this looks like a strong fit. I have 20+ years of full-stack experience with deep Python backend expertise (FastAPI, Flask, SQLAlchemy) and extensive React/TypeScript frontend work. I've built and consumed REST and GraphQL APIs across multiple production systems, and have strong AWS and Docker experience.
+
+I'm particularly interested in the data analysis/decision-making platform aspect — I've built data pipelines and large-scale analytics systems (ESG portfolio analytics at Censible, real-time multimodal AI pipeline at Presence AI).
+
+One question — is this role fully remote?
+
+Happy to schedule a screening call. I'm available this week — what times work for you?
+
+Best,
+Brian
+<!-- agent:boundary:0c0cf8de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn reply to Andrew Curtis
+- Send LinkedIn reply to Andrew Curtis (with remote question)
 - Attach resume PDF when sending
 - Schedule screening call once times confirmed
 - Prep talking points: MDX+Jupyter data viz, USAA regulated data, data pipeline framing

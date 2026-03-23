@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep revised with annotations. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). Opening calibrated (prior meeting acknowledged). DX-first pitch strategy. Ready.
+30-min interview flow structured. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). Open-ended format, Brian drives. Ready.
 <!-- /agent:status -->
 
 ## Exchange
@@ -256,18 +256,20 @@ Don't lean on #1509 as proof of demand. Instead, frame it as: "I noticed this wa
 
 **Their Questions → Your Answers:**
 
-| They'll Ask | Your Answer |
-|-------------|-------------|
-| "Tell me about your recent work" | agent-doc (CRDT streaming, template patching, IPC), Presence AI (WebRTC multimodal on H100s), lazily (cross-language reactive signals) |
+| They'll Ask | Your Answer                                                                                                                                                                           |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| "Tell me about your recent work" | agent-doc (CRDT streaming, template patching, IPC), Presence AI (WebRTC multimodal on H100s), lazily (cross-language reactive signals)                                                |
 | "Frontend experience?" | Deeper than React — you build the primitives. rmemo, RelementJS, hyopjs (61-byte hydration). Vanilla JS, WebComponents, tiny payloads. Can build React-level infra or work within it. |
-| "State management?" | 15-year lineage: backbone-signal → ctx-core → rmemo → relysjs. CRDT merge for concurrent edits. Signal-based reactivity. This is what CoAgents needs. |
-| "Agent frameworks?" | agent-doc IS one. Human-in-the-loop, bidirectional state, persistence, streaming. Same problem as CoAgents, different medium. |
-| "Why CopilotKit?" | AG-UI is the right abstraction layer. The protocol stack (MCP + A2A + AG-UI) is the full picture. You want to build at the agent↔user layer. |
-| "Where should CopilotKit go next?" | Beyond chat into documents and notebooks. DX first (devs already work in markdown), enterprise knowledge work second. |
+| "State management?" | 15-year lineage: backbone-signal → ctx-core → rmemo → rappstack. CRDT merge for concurrent edits. Signal-based reactivity. This is what CoAgents needs.                               |
+| "Agent frameworks?" | agent-doc IS one. Human-in-the-loop, bidirectional state, persistence, streaming. Same problem as CoAgents, different medium.                                                         |
+| "Why CopilotKit?" | AG-UI is the right abstraction layer. The protocol stack (MCP + A2A + AG-UI) is the full picture. You want to build at the agent↔user layer. human-agent alignment.                   |
+| "Where should CopilotKit go next?" | Beyond chat into documents and notebooks. DX first (devs already work in markdown), enterprise knowledge work second.                                                                 |
+
+The interview is only scheduled for 30 minutes. I suspect there won't be many questions for me. So I will need to drive this in an open-ended format. Please help me with key points to discuss.
 
 **Your Questions for Jordan:**
 
-1. "CopilotTextarea's Markdown/Rich Text support was shelved. Is that an architecture limitation or a priority call? I have ideas on how to approach it."
+1. "CopilotTextarea's Markdown/Rich Text support was shelved. Is that an architecture limitation or a priority call? I have ideas on how to approach it.": I want to be careful not to be too pushy in case their priorities are different. This is a question of whether or not our interests align as well.
 2. "CoAgents sync state via snapshots and deltas. Have you explored CRDT-style conflict resolution for concurrent agent+user mutations?"
 3. "AG-UI has 16 event types. What's the philosophy — keep it minimal or expand for new interaction patterns like document-level events?"
 4. "What does the team structure look like? How much is protocol work vs. SDK vs. enterprise?"
@@ -278,14 +280,84 @@ Don't lean on #1509 as proof of demand. Instead, frame it as: "I noticed this wa
 - Position agent-doc as YOUR prototype, not as something CopilotKit should adopt. It validates the pattern; CopilotKit has the distribution to scale it.
 - Lead with DX, follow with enterprise. Don't pitch the whole vision at once.
 - Let Jordan steer into systems/Rust territory if he wants — that's where you'll both be most comfortable.
-<!-- agent:boundary:1ca0eedd -->
+Iterate on the prep docs with my annotations.
+
+### Re: 30-Minute Interview Flow — Key Points to Drive (HEAD)
+
+With only 30 minutes and likely an open-ended format, here's a structured flow you can drive:
+
+---
+
+**Minutes 1–3: Warm reconnect**
+"Jordan, good to see you again — we met back in the CloudCrowd days, you interviewed me around 2010. I ended up staying at Honk at the time. A lot has happened since then."
+
+Keep it brief. Don't dwell on the awkwardness — just acknowledge and move forward.
+
+---
+
+**Minutes 3–8: What you've been building (your pitch, not their questions)**
+
+Lead with agent-doc as a story, not a resume bullet:
+
+> "For the last two years I've been deep in AI tooling. The thing I'm most excited about is agent-doc — it's a system I built for human-agent collaboration through documents. The agent streams responses into named document regions using CRDT merge, the user edits concurrently, and state syncs bidirectionally. It's essentially the same problem AG-UI solves — keeping agents and humans synchronized in real-time — but through a document metaphor instead of UI components."
+
+Then bridge to CopilotKit:
+
+> "When I saw AG-UI, the pattern recognition was immediate. Same architecture: snapshots, deltas, streaming events, concurrent editing. Different medium. That's what drew me to CopilotKit — you're building the protocol layer for human-agent alignment, which is exactly where I want to work."
+
+---
+
+**Minutes 8–15: Technical depth (let Jordan steer)**
+
+Have these ready but let the conversation flow naturally:
+
+- **State sync lineage**: "I've been building reactive state systems for 15 years — backbone-signal through ctx-core, rmemo, rappstack. CRDT merge for concurrent edits. Signal-based reactivity. This maps directly to what CoAgents does with `useCoAgent` and state deltas."
+
+- **Cross-language work**: "lazily ships the same reactive signal semantics across TypeScript, Rust, and Python. Same concept as CopilotKit maintaining SDKs across languages."
+
+- **Presence AI**: "Most recently built a multimodal pipeline on H100 GPUs via WebRTC — real-time streaming at infrastructure scale."
+
+- **Vanilla JS / WebComponents depth**: "I work at the primitive level — 61-byte hydration runtime, WebComponents, tiny payloads. I can build React-level infrastructure, not just consume it."
+
+---
+
+**Minutes 15–22: Explore mutual alignment (not a sales pitch)**
+
+This is where you explore fit rather than push. Softer framing:
+
+> "I'm curious about where CopilotKit sees the interaction surface expanding. Chat, sidebar, popup, textarea — is there interest in richer surfaces like documents or notebooks? That's where my experience naturally leads, and I want to make sure our interests align."
+
+If Jordan engages with the document idea:
+> "I've been thinking about MDX notebooks where CopilotKit components are first-class — agents streaming into named regions, users editing inline. It's a DX play first — developers already work in markdown. But it extends to enterprise knowledge work too."
+
+If Jordan steers elsewhere, follow his lead. The goal is to surface alignment, not force a pitch.
+
+---
+
+**Minutes 22–28: Their side**
+
+Questions that show you understand CopilotKit deeply:
+
+1. "What's the biggest technical challenge the team is facing right now?"
+2. "How do you think about keeping AG-UI minimal vs. expanding for new interaction patterns?"
+3. "What does the engineering team structure look like — how much is protocol vs. SDK vs. enterprise?"
+
+---
+
+**Minutes 28–30: Close**
+
+> "This has been great. I'm genuinely excited about AG-UI as a protocol layer — it maps to patterns I've independently built. I'd love to continue the conversation."
+
+---
+
+**Key mindset: You're evaluating them too.** This is 30 minutes to determine if CopilotKit's direction aligns with where you want to build. Don't pitch too hard. Let the technical overlap speak for itself. Jordan is a systems engineer — he'll recognize the depth without you having to sell it.
+<!-- agent:boundary:e90ec836 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Rehearse opening + key talking points (interview at 5:00 PM ET today)
+- **NOW:** Rehearse 30-min flow — opening, pitch, depth, alignment, questions, close
 - Check for interview confirmation email from Cham Espanola
-- Confirm Kevin Volk that interview is locked in
 - Post-interview: debrief and next steps
 <!-- /agent:pending -->

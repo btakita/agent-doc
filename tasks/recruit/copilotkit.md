@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Kevin call transcribed. Contact file updated. Follow-up email to Jordan drafted. Next: send email + send recording to Kevin.
+Email draft file created. Awaiting push to Gmail drafts.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1220,13 +1220,29 @@ Your message was cut off at "linking to crates." — I'll assume you mean linkin
 One parenthetical line, not a feature. It backs up your claim without expanding the email.
 
 Should I add that line to the draft, or keep the email as-is and send?
-<!-- agent:boundary:7e913fc3 -->
+Is the draft in a file?
+Also
+
+### Re: Draft file (HEAD)
+
+Created the draft at:
+`mail/drafts/2026-03-23-thanks-for-the-conversation-demo-links-a-clarification.md`
+
+BCC includes kevin@staffingscience.io and dev@briantakita.me.
+
+To push to Gmail drafts:
+```
+corky draft push mail/drafts/2026-03-23-thanks-for-the-conversation-demo-links-a-clarification.md
+```
+
+Or I can run it for you — just say "push it."
+<!-- agent:boundary:bdde9b43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send follow-up email to Jordan (final draft — awaiting send approval)
+- Push email draft to Gmail (draft file created, awaiting push)
 - Send interview recording + transcript to Kevin Volk
 - Calendar: Kevin check-in in 2 weeks, Jordan check-in in 3 months (June 2026)
 <!-- /agent:pending -->

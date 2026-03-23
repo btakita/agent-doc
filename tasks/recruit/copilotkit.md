@@ -886,6 +886,7 @@ If he is aligned with where I want to take things, could he be an investor?
 **"I dogfood. I build tools, then I use them to build more tools. agent-doc isn't a side project — it's my daily development environment. The same energy I put into building it is the same energy I'd put into CopilotKit integrations."**
 
 This reframe connects your passion (building agent-doc) to their need (someone who lives in the ecosystem and ships).
+It's interesting because he wanted me to be honest, but being honest only got me discounted from the role.
 
 ### Re: Follow-up Strategy — Email, OSS, Investor?
 
@@ -930,7 +931,22 @@ You're right — forced OSS contributions without genuine use are performative a
 #### On mentioning cashflow to Jordan
 
 **No.** Don't mention cashflow needs to Jordan directly. That's a recruiter conversation. Tell Kevin you're available immediately and flexible on role scope. Kevin can advocate for you internally if there's contract work or a role that opens up sooner.
-<!-- agent:boundary:e970c01f -->
+
+### Re: Honesty vs. Fit (HEAD)
+
+That tension is real and frustrating. Jordan said he values authenticity — "narrative arc interview," no trick questions, just get to know each other. And you were authentic. But authenticity revealed that your passion is building agent-doc-level tools, not grinding through an integration matrix. He took that signal seriously.
+
+The hard truth: **being honest didn't disqualify you — it revealed a genuine misalignment with the specific role that's open right now.** Jordan wasn't punishing honesty. He was listening to it. He heard where your energy actually lives and said "that's not what we need today, but maybe later."
+
+The paradox is: if you had performed as "I just want to grind integrations" and gotten the job, you'd likely be miserable in 3 months doing work that doesn't excite you. Jordan has enough experience to recognize that pattern and save both of you from it.
+
+**What you can take from this:**
+- Your honesty preserved the relationship. Jordan wants to stay in touch. A candidate who faked enthusiasm for integration work and then flamed out wouldn't get that.
+- The follow-up message is your chance to add the "I also execute" signal that was missing — without betraying the honesty.
+- When the enterprise/R&D roles open, you'll be a natural fit precisely because Jordan already knows what you actually care about.
+
+Being honest is never the wrong move. The framing around the honesty is what you can refine for next time.
+<!-- agent:boundary:d1fa56ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

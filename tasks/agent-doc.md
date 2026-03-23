@@ -836,7 +836,7 @@ The polling and diff are completely decoupled:
 
 No contention between them. The poll's EDT work (layout detection) is ~microseconds, invisible to the user.
 I mean I was typing. The run should have paused until I was done typing.
-### Re: Run should pause until done typing + audit + SPEC (HEAD)
+### Re: Run should pause until done typing + audit + SPEC
 
 **Typing pause:** You're right — the diff captured a partial edit ("I did not see the response b" was truncated). This happened because `/agent-doc` was invoked while you were mid-sentence. 
 
@@ -851,7 +851,7 @@ Option 2 is more robust — it works for both plugin and CLI invocations.
 **Audit docs + SPEC:** Will do after the typing discussion. These are straightforward.
 
 Want me to implement option 2 (preflight debounce)?
-<!-- agent:boundary:691622ce -->
+<!-- agent:boundary:a30af728 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

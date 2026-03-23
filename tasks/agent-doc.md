@@ -952,14 +952,38 @@ yes
 
 **Plugin v0.2.18 built** (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.18.zip`
-<!-- agent:boundary:f283f454 -->
+Does this need to be implemented in VSCode as well?
+Should this be implemented in the shared object FFI library instead?
+### Re: VS Code + shared object FFI for debounce? (HEAD)
+
+**VS Code:** Yes, the same debounce behavior should exist in the VS Code extension. The logic is identical — track last `onDidChangeTextDocument` event, conditional delay on submit.
+
+**Shared object FFI: No — this must stay in the plugin.**
+
+The debounce depends on **editor-specific APIs** that the shared library can't access:
+- `DocumentListener` (JetBrains) / `onDidChangeTextDocument` (VS Code) — these are editor event APIs
+- The shared object has no access to the editor's document model or event system
+- The timing decision ("is the user typing?") requires real-time event observation, not a function call
+
+The shared object is for **document manipulation** (component parsing, patch application, CRDT merge, boundary management) — stateless, pure functions. The debounce is **editor state** — it needs the editor's event loop.
+
+**What CAN be shared:** The debounce *configuration* (timeout value, behavior settings) could come from a config file that both plugins read. But the debounce *logic* must be in each plugin natively.
+
+**Summary:**
+| Concern | Owner | Why |
+|---|---|---|
+| "Is user typing?" | Plugin (Kotlin/TS) | Requires editor event API |
+| "How long to wait?" | Config (shared) | Can be in `.agent-doc/config.toml` |
+| "Apply patch to document" | Shared object (Rust) | Stateless, testable |
+<!-- agent:boundary:691aecb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Conditional debounce implemented (TypingTracker + SubmitAction)
+- [x] Conditional debounce (JetBrains plugin v0.2.18)
 - [ ] **Install plugin v0.2.18** — test typing debounce
+- [ ] VS Code extension: implement same debounce pattern
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

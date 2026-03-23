@@ -344,7 +344,7 @@ Resume rebuilt: `resume/BrianTakita-nextera-analytics.pdf`
 All previous gaps are now covered. Your message about energy domain was cut off — "I'm also taking a course with quan" — want to finish that thought?
 
 Draft email is ready to send with the updated resume. Give the go-ahead when ready.
-<!-- agent:boundary:2a8a55fe -->
+<!-- agent:boundary:e229cae0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

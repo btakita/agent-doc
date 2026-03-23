@@ -791,14 +791,27 @@ Simple but hacky — `sleep(500ms)` between route and sync to let the pane stabi
 **Recommendation: Option A** — it's the cleanest. Sync should only auto-start when invoked standalone, not when called as part of a route.
 
 Want me to implement option A?
-<!-- agent:boundary:eee9893b -->
+Yes. Did auto-start also run the document?
+### Re: Did auto-start also run the document? (HEAD)
+
+**Yes.** `route::auto_start_in_session()` does the full sequence:
+1. Creates a new tmux pane (split-window or auto_start)
+2. Starts Claude via `agent-doc start <file>` (line 390-391)
+3. Waits for Claude to be ready (up to 30s polling)
+4. Sends `/agent-doc <file>` to the new pane (line 405)
+
+So the user got **double execution**:
+- `route` sent `/agent-doc benjamin-becker.md` to the existing pane (%65)
+- `sync` auto-started a NEW pane (%66), started Claude, and sent `/agent-doc benjamin-becker.md` again
+
+This confirms the fix should be `--no-auto-start` on the sync call from route. Let me implement it now.
+<!-- agent:boundary:30eaa03e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix route+sync race** — skip auto-start when sync is called from route
-- [ ] Test multi-file layout sync after fix
+- [ ] **Implement --no-auto-start for sync from route** — prevent duplicate pane + double execution
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -684,7 +684,7 @@ I can fix this if you want — wrap the `detectEditorLayout()` call in `invokeLa
 Want me to fix the threading or leave it as-is since it works?
 explain:
 - [ ] Optional: fix EDT threading for layout poll (invokeLater wrapper)
-### Re: Explain EDT threading fix (HEAD)
+### Re: Explain EDT threading fix
 
 Plugin v0.2.16 installed and tab-drag sync working — great!
 
@@ -719,7 +719,7 @@ Thread {
 **Cost:** The `invokeLater` adds ~1-2ms latency (queued to EDT's event queue). The layout detection itself is ~microseconds. The CLI call (`agent-doc sync`) runs on a separate thread so it never blocks the EDT.
 
 **Should you fix it?** It's low priority since it works. But it's the correct pattern for any JetBrains plugin accessing Swing components. If you want it fixed, I can update `LayoutChangeDetector` now.
-<!-- agent:boundary:4bb7ccf6 -->
+<!-- agent:boundary:5f4d9ddd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

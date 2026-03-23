@@ -1133,14 +1133,54 @@ Yes
 5. **Plugin v0.2.19:** FFI debounce, conditional typing wait, layout-only sync
 
 **20 files changed, 290 insertions, 39 deletions.**
-<!-- agent:boundary:9f611d81 -->
+Is tasks/recruit/copilotkit.md, I had 1 line cut off into 2 diffs that was not coherently recognized. See the following quotes.
+
+Final:
+> Show my release velocity by linking to crates.
+
+> **Your message was cut off at "Show my v" — complete it if you want me to address it.**
+
+> Your message was cut off at "linking to crates." — I'll assume you mean linking to your crates.io profile or agent-doc's crates.io page to show release frequency.
+
+It seems we have 2 issues.
+- The debounce didn't work properly or wasn't effective.
+- The diff relative to the rest of the content was not considered.
+### Re: Debounce didn't work + diff context issue (HEAD)
+
+Two separate issues:
+
+**1. Debounce didn't work — likely old plugin version**
+
+The FFI debounce was just released in v0.25.7 / plugin v0.2.19. If the `copilotkit.md` session was running with v0.2.18 or earlier, the debounce either:
+- Wasn't installed (v0.2.18 has Kotlin-only debounce, not FFI)
+- Or wasn't triggered because the submit came from Claude Code (`/agent-doc` in terminal), not the plugin's Run action
+
+**Key question:** Was the submit triggered via the JetBrains plugin (Run Agent Doc hotkey) or via `/agent-doc` typed in Claude Code? The debounce only applies to the **plugin's SubmitAction**. If you typed `/agent-doc` directly in Claude Code, there's no debounce — the CLI runs immediately.
+
+For CLI-triggered submits, the debounce would need to be in `agent-doc preflight` (mtime-based) or in the SKILL workflow (the skill could check file stability before proceeding). This is a gap — the FFI debounce only helps plugin-initiated runs.
+
+**2. Diff showed partial line without context**
+
+This is a SKILL-level issue, not a binary issue. The binary computes the diff correctly (showing what changed). The agent (Claude) saw the partial line and responded to it in isolation instead of reading it in context with the rest of the document.
+
+The fix is in the SKILL instructions: when a diff shows a partial/truncated line, the agent should:
+- Check if the line appears complete (ends with punctuation, has closing markup)
+- If incomplete, wait or ask the user instead of responding to the fragment
+- Always read the surrounding context from the full document (provided by preflight)
+
+**Action items:**
+1. Install plugin v0.2.19 to get FFI debounce for plugin-triggered runs
+2. Add mtime-based debounce to `agent-doc preflight` for CLI-triggered runs
+3. Update SKILL.md with guidance on handling partial/truncated diffs
+<!-- agent:boundary:e64dc4f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] agent-doc v0.25.7 released
-- [ ] **Install plugin v0.2.19** — test FFI debounce
+- [ ] **Install plugin v0.2.19** — FFI debounce for plugin-triggered runs
+- [ ] **Add preflight mtime debounce** — catch CLI-triggered runs mid-typing
+- [ ] **SKILL.md: partial diff guidance** — agent should detect truncated lines
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

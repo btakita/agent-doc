@@ -45,7 +45,7 @@ Fixed. `AGENTS.md` is now the canonical file, `CLAUDE.md` symlinks to it — for
 - `mail/contacts/lucas-noble/`
 - `mail/contacts/brooke-yates/`
 - `mail/contacts/benjamin-becker/`
-### Re: Status Update (HEAD)
+### Re: Status Update
 
 Reply was sent. Najmus responded (7:02 PM):
 
@@ -54,7 +54,7 @@ Reply was sent. Najmus responded (7:02 PM):
 **Next steps:**
 1. **Share resume** via LinkedIn message — tailored or standard?
 2. **Confirm Monday availability** — what times work for a phone call?
-<!-- agent:boundary:b10ecfa6 -->
+<!-- agent:boundary:9727c4fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

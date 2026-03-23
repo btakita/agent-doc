@@ -284,7 +284,7 @@ corky youtube auth
 ```
 Then re-run `/agent-doc tasks/youtube.md` to continue with publishing.
 Do we have Closed Captioning transcripts for each of the episodes?
-### Re: Closed Captioning (HEAD)
+### Re: Closed Captioning
 
 **Not yet — but in progress.** The original transcripts (`/tmp/transcript-{1-6}.md`) have timestamps from the pre-edit videos, so they don't match the light-edited versions.
 
@@ -297,7 +297,7 @@ Re-transcribing all 6 light-edited videos now (CUDA GPU, running in parallel). O
 4. Publish with captions included
 
 Also still need YouTube OAuth re-auth before publishing. Run `corky youtube auth` when ready.
-<!-- agent:boundary:c54f7b10 -->
+<!-- agent:boundary:9ba41581 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

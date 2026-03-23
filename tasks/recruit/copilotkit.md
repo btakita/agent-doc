@@ -625,7 +625,7 @@ Same signal, zero friction. If Jordan is genuinely interested and follows up, yo
 | agent-doc | Keep the name — it's your headline |
 Please format into easily scannable conversational snippets.
 
-### Pitch Snippets — Scannable, Conversational (HEAD)
+### Pitch Snippets — Scannable, Conversational
 
 Use these as modular beats. Each one stands alone. String them together or pull individually as the conversation flows.
 
@@ -702,7 +702,7 @@ Use these as modular beats. Each one stands alone. String them together or pull 
 If he engages:
 
 > "Think MDX notebooks where CopilotKit components are first-class — agents streaming into named regions, users editing inline. DX play first, enterprise knowledge work second."
-<!-- agent:boundary:f32d42d1 -->
+<!-- agent:boundary:cb469ca2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

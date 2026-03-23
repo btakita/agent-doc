@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Re-transcribing 6 light-edited videos for SRT captions. YouTube auth still needed.
+SRT captions: Ep4-6 done, Ep1-3 transcribing. YouTube auth still needed. Blog/LinkedIn posts queued.
 <!-- /agent:status -->
 
 ## Exchange
@@ -297,18 +297,28 @@ Re-transcribing all 6 light-edited videos now (CUDA GPU, running in parallel). O
 4. Publish with captions included
 
 Also still need YouTube OAuth re-auth before publishing. Run `corky youtube auth` when ready.
-<!-- agent:boundary:9ba41581 -->
+Add to pending:
+- Blog post on briantakita.me
+  - Include corky 0.21.0 supporting youtube playlists
+- LinkedIn post with first comment showing links
+  - Include corky 0.21.0 supporting youtube playlists
+### Re: Blog & LinkedIn Posts (HEAD)
+
+Added to pending. Will draft after YouTube uploads are complete.
+<!-- agent:boundary:1e3001f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Re-authenticate YouTube OAuth (`corky youtube auth`)
-- [ ] Complete re-transcription of edited videos (running)
-- [ ] Convert transcripts to SRT captions
+- [ ] Complete re-transcription Ep1-3 (running)
+- [ ] Convert remaining transcripts to SRT captions
 - [ ] Publish 6 episodes to YouTube
 - [ ] Create "Skill to Binary" playlist
 - [ ] Add all 6 videos to playlist
+- [ ] Blog post on briantakita.me (include corky 0.21.0 YouTube playlist support)
+- [ ] LinkedIn post with first comment links (include corky 0.21.0 YouTube playlist support)
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

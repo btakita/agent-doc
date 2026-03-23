@@ -1101,7 +1101,9 @@ Ready to send via corky to Gmail drafts when you give the go-ahead.
 My plan is to add live data components such as AG-UI compatible components when I have the markdown editing solid.
 
 Should I mention that I have a client and I am open for more clients to integrate?...So if he has any referrals, I would appreciate it? 
-BCC: Ke
+BCC: Kevin Volk + dev@briantakita.me
+
+I'm working from the agentic primitives upward. So I believe 
 
 ### Re: AG-UI Components Roadmap + Client Referrals + BCC
 
@@ -1137,7 +1139,18 @@ BCC: Ke
 > Brian
 
 Want me to push this to Gmail drafts via corky?
-<!-- agent:boundary:941bea8a -->
+
+### Re: BCC + "agentic primitives upward" (HEAD)
+
+BCC updated: Kevin Volk (kevin@staffingscience.io) + dev@briantakita.me
+
+Good phrasing — "working from the agentic primitives upward." Let me weave that into the AG-UI sentence:
+
+**Updated paragraph:**
+> The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface. I'm working from the agentic primitives upward — once the markdown editing layer is solid, the next step is live data components, including AG-UI compatible components.
+
+Ready to send. Want me to push to Gmail drafts via corky now?
+<!-- agent:boundary:d4709671 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

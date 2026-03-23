@@ -429,7 +429,7 @@ Why not include benefits such as?
 - multimodal knowledge capture
 - ontological + contextual meaning & knowledge transfer
 - correspondence
-### Re: Break Up Paragraph + Add Benefits (HEAD)
+### Re: Break Up Paragraph + Add Benefits
 
 Restructured into shorter paragraphs with a bulleted benefits section:
 
@@ -470,7 +470,7 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Much more scannable now. Approve to send?
-<!-- agent:boundary:20775f2f -->
+<!-- agent:boundary:f753fc52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1275,14 +1275,14 @@ Almost all of my interactions are with agent-doc.
 Push it to Gmail drafts?
 Send it
 
-### Email pushed to Gmail drafts (HEAD)
+### Email pushed to Gmail drafts
 
 Draft created in Gmail. Open your drafts to review and send.
 
 **To:** jordan@copilotkit.ai
 **BCC:** kevin@staffingscience.io, dev@briantakita.me
 **Subject:** Thanks for the conversation — demo links + a clarification
-<!-- agent:boundary:b4244fbe -->
+<!-- agent:boundary:f3febec9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

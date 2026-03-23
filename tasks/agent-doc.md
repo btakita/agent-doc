@@ -409,7 +409,7 @@ When you switch which editor tab is active (clicking on `agent-doc.md`), the plu
 The simplest fix is option 1 — if JetBrains exposes split change events, we can react immediately. Want me to investigate the JetBrains API for this?
 
 Yes. Also `Agent Doc Run` -> `agent-doc run` should have detected the layout. And moved the tmux pane accordingly.
-### Re: Run should detect layout and move tmux pane (HEAD)
+### Re: Run should detect layout and move tmux pane
 
 You're right. Currently:
 - **Claim** passes `--position` → tmux pane placed correctly
@@ -427,7 +427,7 @@ After `agent-doc route <path>` succeeds, the plugin calls `agent-doc layout <fil
 Approach 2 is cleaner. The `route` command already knows the pane (it looks it up from the registry); adding a layout step is straightforward.
 
 Want me to implement approach 2 — add `--position` to `agent-doc route` and have the plugin pass it?
-<!-- agent:boundary:65f3f67d -->
+<!-- agent:boundary:7652a53b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

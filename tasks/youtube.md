@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Frontmatter-driven VideoObject implemented in rappstack + briantakita. Needs publish + deploy.
+Build error fixed via yalc linking. Try dev server again.
 <!-- /agent:status -->
 
 ## Exchange
@@ -603,14 +603,66 @@ Implemented across the rappstack framework + briantakita site:
 Now any post with `video_url:` in frontmatter automatically gets VideoObject structured data. No inline JSON-LD needed.
 
 Needs: rappstack publish + briantakita rebuild + deploy to verify.
-<!-- agent:boundary:eae77de6 -->
+
+Error:
+```
+~/work/btakita/agent-loop/src/briantakita.me-dev main !2                                                                                                                                                                              08:22:09
+❯ bun run dev
+$ cd ./app/briantakita.me && bun dev
+$ bun ./bin/dev.ts
+build|done
+build|done
+browser__build|watch
+server__build|watch
+✘ [ERROR] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.1+a3faa6b32c6a8e20/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__video_url_"
+
+    ../../lib/ui--server--briantakita/post/post__doc_html.ts:7:1:
+      7 │   blog_post__video_url_,
+        ╵   ~~~~~~~~~~~~~~~~~~~~~
+
+✘ [ERROR] JSON Parse error: Unexpected EOF [plugin onEnd]
+
+    /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:47:
+      1202 │ ...sponse.metafile) result.metafile = parseJSON(response.metafile);
+           ╵                                       ^
+
+    at <parse> (:0)
+    at parse (unknown)
+    at buildResponseToResult (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:48)
+    at <anonymous> (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1217:9)
+    at new Promise (native:1:11)
+    at <anonymous> (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1216:58)
+    at <anonymous> (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:909:17)
+    at handleIncomingPacket (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:934:7)
+    at readFromStdout (/home/brian/work/btakita/agent-loop/src/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:862:7)
+    at emit (node:events:95:22)
+    at addChunk (internal:streams/readable:265:47)
+```
+### Re: Build Error Fixed
+
+The error was because briantakita.me-dev uses npm-published rappstack packages, not local source. Fixed via yalc:
+
+```sh
+# In rappstack-dev: (HEAD)
+yalc publish lib/domain--any--blog
+yalc publish lib/domain--server--blog
+
+# In briantakita.me-dev: (HEAD)
+yalc add @rappstack/domain--any--blog
+yalc add @rappstack/domain--server--blog
+bun install
+```
+
+The `blog_post__video_url_` export is now available in the linked packages. Try `bun run dev` again.
+<!-- agent:boundary:eda18a1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Publish rappstack changes (npm/local)
-- [ ] Rebuild + deploy briantakita.me
+- [ ] Verify dev server works with yalc-linked rappstack
+- [ ] Publish rappstack to npm (replace yalc with real publish)
+- [ ] Deploy briantakita.me to Cloudflare Pages
 - [ ] Pin YouTube comments manually (6 videos)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

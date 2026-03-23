@@ -95,7 +95,7 @@ Please merge the following videos together for a YouTube video
 [2026-03-22 09-19-30.mp4](../../../../Videos/2026-03-22%2009-19-30.mp4)
 [2026-03-22 10-27-48-edited2.mp4](../../../../Videos/2026-03-22%2010-27-48-edited2.mp4)
 [2026-03-22 11-59-10.mp4](../../../../Videos/2026-03-22%2011-59-10.mp4)
-### Re: Merge 6 Videos (HEAD)
+### Re: Merge 6 Videos
 
 Merged **6 videos** into a single file using MPEG-TS intermediate concat (lossless, no re-encode):
 
@@ -112,7 +112,7 @@ Merged **6 videos** into a single file using MPEG-TS intermediate concat (lossle
 - Duration: 8:52:28
 - Size: 19.5 GB (lossless concat — no quality loss)
 - Method: MP4 → MPEG-TS → concat protocol → MP4 remux (handles timestamp discontinuities from edited2)
-<!-- agent:boundary:cb8decc6 -->
+<!-- agent:boundary:3e7499fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

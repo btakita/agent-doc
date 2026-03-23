@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Blog index updated. 6/7 posts created, Ep6 in progress. Dev server should show posts after Ep6 completes.
+Series overview links to individual episode pages. All 7 blog posts created and indexed. Verify on localhost.
 <!-- /agent:status -->
 
 ## Exchange
@@ -452,7 +452,7 @@ All transcript analyses complete. 4 subagents now creating 6 individual blog pos
 
 Series overview (`featured: true`) links to all episodes. Individual posts use `featured: false`.
 Please update index pages.
-I don't see the the series featured on http://localhost:4100, nor do I see the individual pages.
+I don't see the series featured on http://localhost:4100, nor do I see the individual pages.
 ### Re: Blog Posts Not Showing
 
 Found the issue: blog posts need to be registered in `post/index.ts`. Added all 7 posts (series overview + 6 episodes) to the import list.
@@ -469,13 +469,26 @@ Ep1-5 blog posts are created. Ep6 is being written by the last subagent now. Onc
 - `2026-03-23-skill-to-binary-ep6-deterministic-primitives.md` (being created)
 
 The dev server at localhost:4100 should show them after Ep6 is written. You may need to refresh or restart the dev server if it doesn't hot-reload new content files.
-<!-- agent:boundary:358218db -->
+/posts/skill-to-binary-agent-doc-live should link to the individual blog pages instead of the embedded youtube iframe.
+### Re: Series Post Links (HEAD)
+
+Updated the series overview post. Episode sections now link to individual blog pages instead of embedding YouTube iframes:
+
+```markdown
+### [Ep 1: The CRDT Ordering Bug](/posts/skill-to-binary-ep1-crdt-ordering) (1:58:46) (HEAD)
+### [Ep 2: The Snowball Bug](/posts/skill-to-binary-ep2-snowball-bug) (1:31:49) (HEAD)
+...etc
+```
+
+The playlist iframe is kept at the top of the series overview. Individual episode pages each have their own YouTube embed.
+
+Regarding posts not showing on localhost:4100 — the `post/index.ts` file has been updated with all 7 imports. If the dev server still doesn't show them, it may need a restart (`bun` or `make dev`).
+<!-- agent:boundary:e8ab2459 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Complete Ep6 blog post (subagent writing)
 - [ ] Verify all posts render on localhost:4100
 - [ ] Deploy blog to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)

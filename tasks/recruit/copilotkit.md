@@ -26,7 +26,7 @@ I have an interview tomorrow at 17:00 Eastern
 Please research.
 Give me a summary of the company.
 Technical alignment with what I have been doing.
-### Re: CopilotKit Research & Interview Prep (HEAD)
+### Re: CopilotKit Research & Interview Prep
 
 **Interview:** Mon Mar 23, 5:00 PM ET / 2:00 PM PT — with Jordan Ritter (CTO)
 
@@ -76,7 +76,7 @@ CopilotKit (Tawkit, Inc.) — open-source framework for building AI copilots and
 3. **"Pilots not mechanics"** — Your workflow is AI-native. You build WITH agents (Claude Code + agent-doc), not just tools for them. You live the product.
 4. **Protocol thinking** — AG-UI is an event protocol. agent-doc has its own (IPC patches, boundary markers, snapshot diffs). You think at the protocol level.
 5. **CloudCrowd history** — Jordan was CTO when you got the offer in 2010. Warm conversation.
-<!-- agent:boundary:ee817598 -->
+<!-- agent:boundary:2bbcae7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -432,7 +432,7 @@ Should we have separate blog posts for each episode?
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
 Make the series post the featured post. Individual episodes won't be feature blog posts.
-### Re: Featured Post Settings (HEAD)
+### Re: Featured Post Settings
 
 Updated: series overview post stays `featured: true`, individual episode posts will use `featured: false`.
 
@@ -453,7 +453,7 @@ All transcript analyses complete. 4 subagents now creating 6 individual blog pos
 Series overview (`featured: true`) links to all episodes. Individual posts use `featured: false`.
 Please update index pages.
 I don't see the the series featured on http://localhost:4100, nor do I see the individual pages.
-### Re: Blog Posts Not Showing (HEAD)
+### Re: Blog Posts Not Showing
 
 Found the issue: blog posts need to be registered in `post/index.ts`. Added all 7 posts (series overview + 6 episodes) to the import list.
 
@@ -469,7 +469,7 @@ Ep1-5 blog posts are created. Ep6 is being written by the last subagent now. Onc
 - `2026-03-23-skill-to-binary-ep6-deterministic-primitives.md` (being created)
 
 The dev server at localhost:4100 should show them after Ep6 is written. You may need to refresh or restart the dev server if it doesn't hot-reload new content files.
-<!-- agent:boundary:50f9e535 -->
+<!-- agent:boundary:358218db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

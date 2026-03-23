@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-VideoObject JSON-LD deployed. Full pipeline complete.
+VideoObject added as inline JSON-LD. Frontmatter-driven approach would require rappstack framework change.
 <!-- /agent:status -->
 
 ## Exchange
@@ -568,12 +568,26 @@ Added structured data to all 7 blog posts:
 **Series overview** — `schema.org/ItemList` with all 6 videos as ListItems with positions.
 
 Committed and pushed. CF Pages will redeploy with the structured data.
-<!-- agent:boundary:877a9a7e -->
+
+Was this configured via the frontmatter on the blog posts?
+### Re: How VideoObject JSON-LD Was Added (HEAD)
+
+**No, not via frontmatter.** The blog framework's `Post` type doesn't support custom frontmatter fields like `video_url` — it has a fixed schema (`title`, `description`, `date`, `tags`, `featured`, etc.).
+
+Instead, I added inline `<script type="application/ld+json">` blocks directly in each blog post's markdown content, right after the frontmatter closing `---`. This is the standard approach for adding structured data when the CMS/framework doesn't natively support it.
+
+**What each post got:**
+- Episode posts: `schema.org/VideoObject` with name, description, thumbnailUrl, duration, contentUrl, embedUrl, author
+- Series overview: `schema.org/ItemList` with 6 ListItems pointing to each video
+
+**To make this frontmatter-driven** (so `video_url` in frontmatter auto-generates VideoObject), the `Post` interface in `@rappstack/domain--any--blog` would need to be extended with optional `video_url` and `playlist_url` fields, and the layout template would need to check for those fields and generate the JSON-LD. That's a rappstack framework change — doable but separate from this session.
+<!-- agent:boundary:d7d7f885 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Pin YouTube comments manually (6 videos)
+- [ ] Optional: extend rappstack Post type with video_url for frontmatter-driven VideoObject
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

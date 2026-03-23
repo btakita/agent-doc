@@ -501,11 +501,13 @@ Should I name drop rmemo + relementjs? He probably has not heard of it. I havn't
 
 **agent-doc (lead):**
 
-"The thing I'm most excited about right now is agent-doc — a system I built for human-agent collaboration through documents. The agent streams responses into named document regions using CRDT merge, the user edits concurrently, and state syncs bidirectionally. It's the same problem AG-UI solves — keeping agents and humans synchronized in real-time — but through a document metaphor instead of web UI components."
+"Right now, I'm excited about agent-doc — a system I built for human-agent collaboration through markdown documents. The agent streams responses into named document regions using CRDT merge, the user edits concurrently, and state syncs bidirectionally. It's the same problem AG-UI solves — keeping agents and humans synchronized in real-time — but through a document metaphor instead of web UI components."
 
 **lazily (cross-language signals):**
 
-"I also built lazily — a cross-platform reactive signals library that runs in production Python, and also compiles to Zig and Rust. Same signal semantics across languages. That cross-language SDK thinking maps directly to what CopilotKit does with its TypeScript and Python SDKs."
+"I also built lazily — a cross-platform reactive signals library that runs in production Python, and also compiles to Zig and Rust. Same signal semantics across languages. The Zig and Rust implementations use FFI for cross platform development. That cross-language SDK thinking maps directly to what CopilotKit does with its TypeScript and Python SDKs."
+
+agent-doc's plugin architecture also uses cross a platform FFI shared library for in-process support with multiple editors.
 
 **Framework-agnostic reactive libraries:**
 
@@ -517,7 +519,7 @@ Should I name drop rmemo + relementjs? He probably has not heard of it. I havn't
 
 **Building in public (closing beat):**
 
-"I've been posting demos on LinkedIn and livestreaming dev sessions — agent-doc in action, building with Claude Code in real-time. Happy to share links after the call if you want to see the workflow rather than just hear me describe it."
+"I've been posting demos on LinkedIn and livestreaming dev sessions — dogfooding agent-doc with Claude Code in real-time. Happy to share links after the call if you want to see the workflow rather than just hear me describe it."
 
 ---
 
@@ -621,12 +623,91 @@ Same signal, zero friction. If Jordan is genuinely interested and follows up, yo
 | Framework-agnostic | "I build reactive libraries that are framework-agnostic — they work with any renderer" |
 | Cross-language | "I built a cross-platform reactive signals library — production Python, compiles to Zig and Rust" |
 | agent-doc | Keep the name — it's your headline |
-<!-- agent:boundary:ed2c10e2 -->
+Please format into easily scannable conversational snippets.
+
+### Pitch Snippets — Scannable, Conversational (HEAD)
+
+Use these as modular beats. Each one stands alone. String them together or pull individually as the conversation flows.
+
+---
+
+**agent-doc (lead with this):**
+
+> "Right now I'm excited about agent-doc — a system I built for human-agent collaboration through markdown documents.
+>
+> The agent streams responses into named document regions using CRDT merge. The user edits concurrently. State syncs bidirectionally.
+>
+> It's the same problem AG-UI solves — keeping agents and humans synchronized in real-time — but through a document metaphor instead of web UI components."
+
+---
+
+**Cross-platform signals (lazily):**
+
+> "I also built a cross-platform reactive signals library. It runs in production Python and compiles to Zig and Rust via FFI — same signal semantics across all three languages.
+>
+> That cross-language SDK thinking maps directly to what CopilotKit does with its TypeScript and Python SDKs."
+
+---
+
+**FFI plugin architecture:**
+
+> "agent-doc's editor plugin uses the same approach — a cross-platform FFI shared library for in-process support. Right now it powers the JetBrains plugin, but the architecture supports multiple editors through the same native core."
+
+---
+
+**Framework-agnostic reactive libraries:**
+
+> "More broadly, I build reactive libraries that are framework-agnostic. They work with React, Svelte, vanilla JS, WebComponents — same primitives regardless of the rendering layer.
+>
+> That's how I think about CopilotKit's component surface — the protocol and state management are the real product. The UI framework is just the rendering target."
+
+---
+
+**AG-UI pattern recognition:**
+
+> "When I saw AG-UI, the pattern recognition was immediate. Snapshots, deltas, streaming events, concurrent editing — same architecture I built independently.
+>
+> That's what drew me to CopilotKit. You're building the protocol layer for human-agent alignment."
+
+---
+
+**Building in public:**
+
+> "I've been posting demos on LinkedIn and livestreaming dev sessions — dogfooding agent-doc with Claude Code in real-time.
+>
+> Happy to share links after the call if you want to see the workflow rather than just hear me describe it."
+
+---
+
+**State management depth (if asked):**
+
+> "I've been building reactive state systems for 15 years. Signal-based, framework-agnostic, CRDT merge for concurrent edits.
+>
+> This maps directly to what CoAgents does with `useCoAgent` and state deltas. The pattern is the same — snapshots for baselines, deltas for incremental updates, atomic application."
+
+---
+
+**Presence AI (if asked):**
+
+> "Most recently I built a multimodal pipeline on H100 GPUs via WebRTC — real-time audio, video, and screen streaming at infrastructure scale. Production Python."
+
+---
+
+**Document/notebook pitch (minute 15–22, only if alignment feels right):**
+
+> "I'm curious about where CopilotKit sees the interaction surface expanding. Chat, sidebar, popup, textarea — is there interest in richer surfaces like documents or notebooks?
+>
+> That's where my experience naturally leads. I want to make sure our interests align."
+
+If he engages:
+
+> "Think MDX notebooks where CopilotKit components are first-class — agents streaming into named regions, users editing inline. DX play first, enterprise knowledge work second."
+<!-- agent:boundary:f32d42d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Rehearse without library name-drops — describe capabilities, not names
-- Post-interview: debrief, send follow-up with named links
+- **NOW:** Read through snippets, rehearse transitions between them
+- Post-interview: debrief, send follow-up with video links
 <!-- /agent:pending -->

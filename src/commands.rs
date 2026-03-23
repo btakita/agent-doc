@@ -36,7 +36,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/agent-doc sync", "--col <FILES>", "Sync tmux panes to columnar layout"));
     cmds.push(cmd("/agent-doc layout", "<FILES>", "Arrange tmux panes to mirror editor"));
     cmds.push(cmd("/agent-doc patch", "<FILE> <COMPONENT>", "Replace content in a named component"));
-    cmds.push(cmd("/agent-doc watch", "", "Watch files for changes and auto-submit"));
+    cmds.push(cmd("/agent-doc watch", "", "Watch files for changes and auto-run"));
     cmds.push(cmd("/agent-doc outline", "<FILE>", "Display markdown outline with token counts"));
     cmds.push(cmd("/agent-doc resync", "", "Validate sessions.json, remove stale entries"));
     cmds.push(cmd("/agent-doc compact", "<FILE>", "Archive old exchanges to reduce document size"));

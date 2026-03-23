@@ -18,16 +18,16 @@ pub fn run(
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    eprintln!("[submit] starting for {}", file.display());
+    eprintln!("[run] starting for {}", file.display());
 
     // Compute diff
     let the_diff = match diff::compute(file)? {
         Some(d) => {
-            eprintln!("[submit] diff computed ({} bytes)", d.len());
+            eprintln!("[run] diff computed ({} bytes)", d.len());
             d
         }
         None => {
-            eprintln!("[submit] Nothing changed since last submit for {}", file.display());
+            eprintln!("[run] Nothing changed since last run for {}", file.display());
             return Ok(());
         }
     };
@@ -51,7 +51,7 @@ pub fn run(
     // Build prompt
     let prompt = if fm.resume.is_some() {
         format!(
-            "The user edited the session document. Here is the diff since the last submit:\n\n\
+            "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
@@ -111,14 +111,14 @@ pub fn run(
     // Editors ignore advisory locks, so this only serializes agent-doc writes.
     let doc_lock = acquire_doc_lock(file)?;
 
-    // Re-read file to check for user edits during submit
+    // Re-read file to check for user edits during run
     let content_current = std::fs::read_to_string(file)?;
 
     let final_content = if content_current == content_original {
-        // No edits during submit — use our version directly
+        // No edits during run — use our version directly
         content_ours.clone()
     } else {
-        eprintln!("File was modified during submit. Merging changes...");
+        eprintln!("File was modified during run. Merging changes...");
         merge::merge_contents(&content_original, &content_ours, &content_current)?
     };
 

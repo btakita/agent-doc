@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
-**v0.25.5** | JetBrains plugin v0.2.14 | VS Code extension v0.2.3
+**v0.25.7** | JetBrains plugin v0.2.19 | VS Code extension v0.2.3
 
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 

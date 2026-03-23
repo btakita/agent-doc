@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::{config::Config, frontmatter, sessions, stream, submit};
+use crate::{config::Config, frontmatter, sessions, stream, run};
 
 const PID_FILE: &str = ".agent-doc/watch.pid";
 
@@ -22,7 +22,7 @@ pub struct WatchConfig {
 
 /// Per-file state for loop prevention (file-watch mode).
 struct FileState {
-    last_submit: Option<Instant>,
+    last_run: Option<Instant>,
     cycle_count: u32,
     last_hash: Option<u64>,
 }
@@ -30,7 +30,7 @@ struct FileState {
 impl FileState {
     fn new() -> Self {
         Self {
-            last_submit: None,
+            last_run: None,
             cycle_count: 0,
             last_hash: None,
         }
@@ -143,7 +143,7 @@ pub fn ensure_running() -> Result<bool> {
 /// Start the watch daemon.
 ///
 /// Watches files registered in sessions.json for changes. On file change
-/// (after debounce), runs `submit::run()` on the changed file.
+/// (after debounce), runs `run::run()` on the changed file.
 /// For stream-mode documents, polls tmux panes and flushes new output.
 ///
 /// Loop prevention:
@@ -450,7 +450,7 @@ fn run_event_loop(
 
             // Check if this is an agent-triggered change
             let is_agent_change = state
-                .last_submit
+                .last_run
                 .is_some_and(|t| now.duration_since(t) < debounce * 3);
 
             if is_agent_change {
@@ -482,9 +482,9 @@ fn run_event_loop(
 
             // Submit
             eprintln!("Change detected: {}", path.display());
-            match submit::run(&path, false, None, None, false, false, config) {
+            match run::run(&path, false, None, None, false, false, config) {
                 Ok(()) => {
-                    state.last_submit = Some(Instant::now());
+                    state.last_run = Some(Instant::now());
                     eprintln!("Submit complete: {}", path.display());
                 }
                 Err(e) => {

@@ -378,7 +378,7 @@ pub fn run(file: &Path, wait: bool) -> Result<()> {
     }
     match compute(file)? {
         Some(diff) => print!("{}", diff),
-        None => eprintln!("No changes since last submit."),
+        None => eprintln!("No changes since last run."),
     }
     Ok(())
 }

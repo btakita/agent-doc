@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
 
@@ -12,6 +13,8 @@ import com.intellij.openapi.project.ProjectManagerListener
  */
 class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
+        // Track document changes for typing debounce in SubmitAction
+        EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
         // Detect editor layout changes (tab drags, new splits) and sync tmux

@@ -32,7 +32,7 @@ mod skill;
 mod snapshot;
 mod start;
 mod stream;
-mod submit;
+mod run;
 mod sync;
 mod terminal;
 mod undo;
@@ -497,7 +497,7 @@ fn main() -> anyhow::Result<()> {
             model,
             dry_run,
             no_git,
-        } => submit::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
+        } => run::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
         Commands::History { file, restore } => match restore {
             Some(commit) => history::restore(&file, &commit),
             None => history::list(&file),
@@ -515,9 +515,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Start { file } => start::run(&file),
         Commands::Route { file, pane, cols, focus } => {
             let result = route::run(&file, pane.as_deref());
-            // If layout columns provided, sync tmux layout after routing
+            // If layout columns provided, sync tmux layout after routing (no auto-start —
+            // route already handled the target file, auto-start would create duplicates)
             if !cols.is_empty()
-                && let Err(e) = sync::run(&cols, None, focus.as_deref())
+                && let Err(e) = sync::run_layout_only(&cols, None, focus.as_deref())
             {
                 eprintln!("[route] layout sync failed: {}", e);
             }

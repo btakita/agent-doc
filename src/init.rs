@@ -24,7 +24,7 @@ fn init_project() -> Result<()> {
     eprintln!("[init] Project initialized. Quick start:");
     eprintln!("[init]   agent-doc init <file.md>   # scaffold a session document");
     eprintln!("[init]   agent-doc run <file.md>     # run a session");
-    eprintln!("[init]   agent-doc watch             # watch for changes and auto-submit");
+    eprintln!("[init]   agent-doc watch             # watch for changes and auto-run");
 
     Ok(())
 }

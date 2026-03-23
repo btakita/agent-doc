@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Light edits in progress: Ep6 done, Ep1/2/4/5 encoding, Ep3 silence detection finishing.
+Light edits encoding (Ep4+6 done, Ep1/2/3/5 running). Corky supports per-video upload but not playlists yet.
 <!-- /agent:status -->
 
 ## Exchange
@@ -200,16 +200,39 @@ Approved! Silence detection complete for 5/6 videos. Light edits running in para
 Video 6 completed first (test run): 30:53 -> 19:35 after removing 11:18 of silence. Re-encoded x264 CRF23.
 
 Videos 1-2 and 4-5 encoding now. Video 3 will start once its silence detection finishes.
-<!-- agent:boundary:f603be0d -->
+Does Corky currently support "Upload 6 episodes to YouTube as playlist"?
+### Re: Corky YouTube Capabilities
+
+**Yes, corky supports individual video upload.** The workflow is:
+
+```sh
+corky youtube draft --author btakita --visibility public --tags "agent-doc,live-coding"
+# Edit the draft file with title, description, video path (HEAD)
+corky youtube publish <draft-file>
+```
+
+**Not yet supported:**
+- **Playlist creation/management** — no `corky youtube playlist` command exists
+- **Batch upload** — each video must be drafted and published individually
+
+**For 6 episodes, the workflow would be:**
+1. Create 6 drafts with `corky youtube draft` (one per episode)
+2. Edit each draft with title, description, video file path
+3. Publish each with `corky youtube publish`
+4. Create playlist manually in YouTube Studio (or I can build `corky youtube playlist` if needed)
+
+Want me to create the 6 drafts now while the light edits finish encoding?
+<!-- agent:boundary:83693ed4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Light edit Ep3 (silence detection finishing)
-- [ ] Complete encoding Ep1, Ep2, Ep4, Ep5 (running)
+- [ ] Complete encoding Ep1, Ep2, Ep3, Ep5 (running)
+- [ ] Create 6 YouTube drafts with corky
+- [ ] Upload 6 episodes to YouTube
+- [ ] Create YouTube playlist (manual or build corky playlist command)
 - [ ] Generate SRT closed captions from transcripts
-- [ ] Upload 6 episodes to YouTube as playlist
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

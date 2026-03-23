@@ -1065,13 +1065,45 @@ Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
 ### Re: Email sender noted
 
 Got it — sending from brian.takita@gmail.com. The draft is ready. Would you like me to send it via corky, or would you prefer to copy-paste it into Gmail yourself? Also, please provide the video/demo links to include.
-<!-- agent:boundary:4cb2407c -->
+Should I send him my most recent playlist https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
+
+Maybe add a short description over how I'm working with this?
+And how this workflow naturally would work with MDX, Notion, Jupyter, Word, Obsidian, or any other type of knowledge document software.
+
+### Re: Video Link + Description for Email (HEAD)
+
+Yes — send the playlist. But keep the description tight. Jordan is busy. One paragraph max.
+
+**Revised email draft (final):**
+
+**To:** jordan@copilotkit.ai
+**From:** brian.takita@gmail.com
+**Subject:** Thanks for the conversation — demo links + a clarification
+
+> Jordan,
+>
+> Great reconnecting today. I appreciate you being straight about where CopilotKit's needs are right now.
+>
+> Here are the demo videos I mentioned — agent-doc in action with Claude Code:
+> https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
+>
+> What you'll see: I work in a markdown document in JetBrains while Claude Code streams responses into named document regions via CRDT merge. I edit concurrently — the agent and I are collaborating in real-time through the document. Every interaction is a git commit. The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface. It's the document-level equivalent of what AG-UI does for UI components.
+>
+> I also wanted to clarify something from our call: I got excited talking about where this could go, and I think that overshadowed the execution side. My daily work is shipping — I release across crates.io, PyPI, and npm. agent-doc's editor plugin uses a cross-platform FFI architecture designed for multi-editor integration. That's integration engineering at the systems level.
+>
+> I hear you that the current need is people already embedded in the CopilotKit ecosystem. Taking you up on the 3-6 month check-in. In the meantime, I'll stay close to what you're building.
+>
+> Best,
+> Brian
+
+Ready to send via corky to Gmail drafts when you give the go-ahead.
+<!-- agent:boundary:f1cdc1f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send follow-up email to Jordan at jordan@copilotkit.ai (draft above — add video links)
+- Send follow-up email to Jordan (draft finalized — awaiting approval)
 - Send interview recording + transcript to Kevin Volk
 - Calendar: Kevin check-in in 2 weeks, Jordan check-in in 3 months (June 2026)
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Custom resume generated. Ready to send with reply.
+Investigation complete. Multiple red flags identified — recommend disengaging.
 <!-- /agent:status -->
 
 ## Exchange
@@ -119,7 +119,6 @@ File path: `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-benjam
 
 Attach this PDF when sending the reply. Ready to review the PDF and send?
 benjamin-becker responded
-<!-- agent:boundary:38d30dbc -->
 See the sms txt conversation in mail/contacts/benjamin-becker/*.txt
 
 It is a bit unusual to move the conversation over to Telegram.
@@ -127,11 +126,32 @@ LinkedIn considered the message "Potentially harmful".
 Please help me understand if this seems ok or now.
 His LinkedIn profile has ~180 contacts.
 Please investigate.
+### Re: Investigation — Red Flags Assessment (HEAD)
+
+**Several concerning signals — recommend disengaging:**
+
+1. **LinkedIn flagged his message as "Potentially harmful"** — LinkedIn's spam/scam detection triggered on his content. This is a significant signal from LinkedIn's own filters.
+
+2. **Moving off-platform to WhatsApp** (his message says WhatsApp, not Telegram — `(207) 410-0195`, Maine area code) — Classic recruitment scam tactic. Off LinkedIn = no platform oversight, no message history for disputes, no protection.
+
+3. **~180 connections** — Very low for an active recruiter. Legitimate recruiters typically have 500+. Suggests a new, fake, or inactive account.
+
+4. **Template-heavy scripted messaging** — His pitch ("engineers I work with take on 1 core contract... bring in additional engineering support on the execution side") matches a known staffing scam pattern:
+   - Land contracts using *your* resume/credentials
+   - Substitute cheaper labor for actual work
+   - "You stay client-facing" = they use your name while someone else delivers
+
+5. **No verifiable company** — Never names a firm, no LinkedIn company page, vague "model" description.
+
+6. **Resume already sent** — Main risk. With a detailed resume, they can submit you to roles without your knowledge or use your credentials to win contracts staffed by others.
+
+**Recommendation:** Do not move to WhatsApp. Do not engage further. The combination of LinkedIn's own warning + low connections + off-platform push + vague staffing model is a strong scam indicator. A legitimate recruiter would have a named company, a company LinkedIn page, and no reason to leave the platform.
+<!-- agent:boundary:52530944 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Review BrianTakita-benjamin-becker.pdf
-- Send resume + reply to Benjamin Becker via LinkedIn
+- ([done]) Investigate Benjamin Becker legitimacy
+- Do NOT send resume or continue engagement — scam risk
 <!-- /agent:pending -->

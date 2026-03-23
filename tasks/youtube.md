@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Creating 6 individual episode blog posts (4 subagents running). Series overview is featured post.
+Blog index updated. 6/7 posts created, Ep6 in progress. Dev server should show posts after Ep6 completes.
 <!-- /agent:status -->
 
 ## Exchange
@@ -432,6 +432,11 @@ Should we have separate blog posts for each episode?
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
 Make the series post the featured post. Individual episodes won't be feature blog posts.
+### Re: Featured Post Settings (HEAD)
+
+Updated: series overview post stays `featured: true`, individual episode posts will use `featured: false`.
+
+Deep transcript analysis still running (4 subagents reading all 6 transcripts). Will create individual episode blog posts with expanded topic analysis once complete.
 ### Re: Individual Episode Blog Posts
 
 All transcript analyses complete. 4 subagents now creating 6 individual blog posts:
@@ -446,14 +451,32 @@ All transcript analyses complete. 4 subagents now creating 6 individual blog pos
 | 6 | skill-to-binary-ep6-deterministic-primitives.md | Deterministic primitives, code review culture, firehouse effect |
 
 Series overview (`featured: true`) links to all episodes. Individual posts use `featured: false`.
-<!-- agent:boundary:84632e26 -->
+Please update index pages.
+I don't see the the series featured on http://localhost:4100, nor do I see the individual pages.
+### Re: Blog Posts Not Showing (HEAD)
+
+Found the issue: blog posts need to be registered in `post/index.ts`. Added all 7 posts (series overview + 6 episodes) to the import list.
+
+Ep1-5 blog posts are created. Ep6 is being written by the last subagent now. Once complete, the dev server should pick up all posts.
+
+**Files added to index:**
+- `2026-03-23-skill-to-binary-agent-doc-live.md` (series overview, featured)
+- `2026-03-23-skill-to-binary-ep1-crdt-ordering.md`
+- `2026-03-23-skill-to-binary-ep2-snowball-bug.md`
+- `2026-03-23-skill-to-binary-ep3-ast-gpu-transcription.md`
+- `2026-03-23-skill-to-binary-ep4-ipc-timeout.md`
+- `2026-03-23-skill-to-binary-ep5-preflight.md`
+- `2026-03-23-skill-to-binary-ep6-deterministic-primitives.md` (being created)
+
+The dev server at localhost:4100 should show them after Ep6 is written. You may need to refresh or restart the dev server if it doesn't hot-reload new content files.
+<!-- agent:boundary:50f9e535 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Complete 6 individual blog posts (subagents running)
-- [ ] Update series overview with episode links
+- [ ] Complete Ep6 blog post (subagent writing)
+- [ ] Verify all posts render on localhost:4100
 - [ ] Deploy blog to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing

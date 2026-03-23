@@ -147,7 +147,7 @@ Please investigate.
 
 **Recommendation:** Do not move to WhatsApp. Do not engage further. The combination of LinkedIn's own warning + low connections + off-platform push + vague staffing model is a strong scam indicator. A legitimate recruiter would have a named company, a company LinkedIn page, and no reason to leave the platform.
 Since he has my resume, what is my recourse. If he is going to use it?
-### Re: Resume Recourse (HEAD)
+### Re: Resume Recourse
 
 **What he can do with your resume:**
 - Submit you to companies without your knowledge (unauthorized representation)
@@ -167,7 +167,7 @@ Since he has my resume, what is my recourse. If he is going to use it?
 5. **If he misuses it** — File a complaint with the FTC (ftc.gov/complaint) for deceptive business practices, and with your state AG's consumer protection division.
 
 **Practical reality:** The resume you sent is a custom version (benjamin-becker profile). It doesn't contain SSN, bank info, or anything beyond what's already on your LinkedIn. The main risk is unauthorized job submissions — annoying but manageable. The cease-and-desist message is your strongest immediate move — it removes plausible deniability on his part.
-<!-- agent:boundary:4b320c35 -->
+<!-- agent:boundary:a118110d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

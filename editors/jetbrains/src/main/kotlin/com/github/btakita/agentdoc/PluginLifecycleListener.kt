@@ -14,6 +14,8 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
+        // Detect editor layout changes (tab drags, new splits) and sync tmux
+        LayoutChangeDetector.getInstance(project)
         // Clean up wrong-session/stale panes left from previous IDE sessions
         runResyncFix(project)
     }
@@ -54,5 +56,6 @@ class PluginLifecycleListener : ProjectManagerListener {
         PromptPanel.dismiss(project)
         PromptPoller.disposeProject(project)
         PatchWatcher.disposeProject(project)
+        LayoutChangeDetector.disposeProject(project)
     }
 }

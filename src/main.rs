@@ -161,6 +161,12 @@ enum Commands {
         /// Tmux pane ID for lazy claiming (auto-claims if existing claim is stale)
         #[arg(long)]
         pane: Option<String>,
+        /// Editor layout columns (comma-separated files per column, repeatable)
+        #[arg(long = "col")]
+        cols: Vec<String>,
+        /// Focused file in the editor (for tmux pane focus)
+        #[arg(long)]
+        focus: Option<String>,
     },
     /// Detect permission prompts from a Claude Code session
     Prompt {
@@ -507,7 +513,16 @@ fn main() -> anyhow::Result<()> {
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
-        Commands::Route { file, pane } => route::run(&file, pane.as_deref()),
+        Commands::Route { file, pane, cols, focus } => {
+            let result = route::run(&file, pane.as_deref());
+            // If layout columns provided, sync tmux layout after routing
+            if !cols.is_empty()
+                && let Err(e) = sync::run(&cols, None, focus.as_deref())
+            {
+                eprintln!("[route] layout sync failed: {}", e);
+            }
+            result
+        }
         Commands::Prompt { file, answer, all } => {
             if all {
                 return prompt::run_all();

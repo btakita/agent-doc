@@ -41,7 +41,38 @@ object TerminalUtil {
 
         val agentDoc = resolveAgentDoc()
         try {
-            val process = ProcessBuilder(agentDoc, "route", relativePath)
+            // Build route command with optional layout args
+            val cmd = mutableListOf(agentDoc, "route", relativePath)
+
+            // Detect editor layout and pass as --col/--focus args
+            val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+            val visibleMdFiles = manager.selectedFiles
+                .filter { it.name.endsWith(".md") }
+                .map { relativePath(project, it) }
+                .distinct()
+
+            if (visibleMdFiles.size > 1) {
+                val editorLayout = LayoutDetector.detectEditorLayout(project)
+                if (editorLayout != null && editorLayout.columns.size > 1) {
+                    for (col in editorLayout.columns) {
+                        cmd.addAll(listOf("--col", col.files.joinToString(",")))
+                    }
+                } else {
+                    cmd.addAll(listOf("--col", visibleMdFiles.joinToString(",")))
+                }
+            } else if (visibleMdFiles.size == 1) {
+                cmd.addAll(listOf("--col", visibleMdFiles[0]))
+            }
+
+            // Pass focused file
+            val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
+                if (it.name.endsWith(".md")) relativePath(project, it) else null
+            }
+            if (focusedFile != null) {
+                cmd.addAll(listOf("--focus", focusedFile))
+            }
+
+            val process = ProcessBuilder(cmd)
                 .directory(java.io.File(basePath))
                 .redirectErrorStream(true)
                 .start()
@@ -57,7 +88,6 @@ object TerminalUtil {
                     if (exitCode != 0) {
                         notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
                     } else {
-                        // Log route output for debugging (visible in idea.log)
                         System.err.println("[agent-doc] route succeeded:\n$output")
                     }
                 } finally {

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-JSON-LD handled by layout. Series overview updated with episode links. All 7 blog posts indexed.
+Blog deployed to Cloudflare Pages. 7 posts published. LinkedIn post pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -495,17 +495,33 @@ Regarding posts not showing on localhost:4100 — the `post/index.ts` file has b
 Individual posts don't need per-post JSON-LD because the frontmatter fields (`title`, `description`, `date`, `tags`) feed into the template's schema.org generation automatically. No changes needed.
 
 If you want **VideoObject** JSON-LD specifically for the YouTube videos (which would help Google discover the video content on your blog), that would be a layout-level enhancement — adding `schema.org/VideoObject` when a `video_url` frontmatter field is present.
-<!-- agent:boundary:6c96c830 -->
+Looks good. Publish
+### Re: Published to Cloudflare Pages (HEAD)
+
+Blog deployed:
+- Inner submodule (briantakita.me): pushed
+- Outer submodule (briantakita.me-dev): pushed
+- Cloudflare Pages auto-deploy triggered
+
+**7 blog posts live:**
+- [Series overview](https://briantakita.me/posts/skill-to-binary-agent-doc-live) (featured)
+- [Ep1: The CRDT Ordering Bug](https://briantakita.me/posts/skill-to-binary-ep1-crdt-ordering)
+- [Ep2: The Snowball Bug](https://briantakita.me/posts/skill-to-binary-ep2-snowball-bug)
+- [Ep3: AST Parsing & GPU Transcription](https://briantakita.me/posts/skill-to-binary-ep3-ast-gpu-transcription)
+- [Ep4: IPC Timeout Deep Dive](https://briantakita.me/posts/skill-to-binary-ep4-ipc-timeout)
+- [Ep5: Preflight & Browser Extension](https://briantakita.me/posts/skill-to-binary-ep5-preflight)
+- [Ep6: Deterministic Primitives](https://briantakita.me/posts/skill-to-binary-ep6-deterministic-primitives)
+
+Posts should be live once CF Pages finishes building (typically 1-2 minutes).
+<!-- agent:boundary:60cd8791 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify all posts render on localhost:4100 (restart dev server if needed)
-- [ ] Deploy blog to Cloudflare Pages
+- [ ] Verify blog posts live on briantakita.me (CF Pages building)
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing
-- [ ] Optional: Add VideoObject JSON-LD for posts with video_url frontmatter
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

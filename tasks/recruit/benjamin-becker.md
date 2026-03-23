@@ -126,7 +126,7 @@ LinkedIn considered the message "Potentially harmful".
 Please help me understand if this seems ok or now.
 His LinkedIn profile has ~180 contacts.
 Please investigate.
-### Re: Investigation — Red Flags Assessment (HEAD)
+### Re: Investigation — Red Flags Assessment
 
 **Several concerning signals — recommend disengaging:**
 
@@ -146,7 +146,7 @@ Please investigate.
 6. **Resume already sent** — Main risk. With a detailed resume, they can submit you to roles without your knowledge or use your credentials to win contracts staffed by others.
 
 **Recommendation:** Do not move to WhatsApp. Do not engage further. The combination of LinkedIn's own warning + low connections + off-platform push + vague staffing model is a strong scam indicator. A legitimate recruiter would have a named company, a company LinkedIn page, and no reason to leave the platform.
-<!-- agent:boundary:52530944 -->
+<!-- agent:boundary:481c9d8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

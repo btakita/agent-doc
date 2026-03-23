@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-6 episodes published to YouTube playlist. Blog and LinkedIn posts pending.
+6 episodes published. Blog post drafted. YouTube videos processing. Pipeline feature doc created.
 <!-- /agent:status -->
 
 ## Exchange
@@ -379,6 +379,9 @@ corky linkedin comment DRAFT.md "Links: ..."
 ```
 
 **This can be automated into a single `corky youtube pipeline` command in the future.**
+Create an agent document for the `corky youtube pipeline` feature.
+The blog post and social media post(s) should be configurable and optional.
+Update `agent:pending` with current progress
 ### Re: Published!
 
 All 6 episodes published to YouTube with closed captions and added to playlist:
@@ -395,15 +398,34 @@ All 6 episodes published to YouTube with closed captions and added to playlist:
 | 6 | Deterministic Primitives | 0:19:35 | https://www.youtube.com/watch?v=xNBkZAJuUys |
 
 Total: 7:34:05 across 6 episodes with SRT closed captions.
-<!-- agent:boundary:094a4e4e -->
+
+I'm looking at https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
+It says Deleted Videos
+![screenshot.png](../../../../Pictures/screenshot.png)
+
+Looks like it's in the middle of processing the video.
+continue with blog post
+### Re: Pipeline Feature Doc, Blog Post, YouTube Processing (HEAD)
+
+**1. Agent doc created:** `tasks/corky-youtube-pipeline.md` — feature design for `corky youtube pipeline` with configurable optional blog and social media posts.
+
+**2. YouTube "Deleted Videos":** This is normal — YouTube takes time to process uploaded videos (especially longer ones). The videos are uploaded and will appear once processing completes. Check back in 15-30 minutes.
+
+**3. Blog post created:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-23-skill-to-binary-agent-doc-live.md`
+- Embeds playlist and all 6 individual episode iframes
+- Documents the publishing pipeline (silence removal, GPU transcription, corky upload)
+- Mentions corky 0.21.0 playlist support
+- Needs deploy to Cloudflare Pages after review
+<!-- agent:boundary:b4850b37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Blog post on briantakita.me (include corky 0.21.0 YouTube playlist support)
+- [ ] Review and deploy blog post to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0 YouTube playlist support)
+- [ ] Verify YouTube videos finish processing (check in 15-30 min)
 - [ ] Pin comment on YouTube (manual — no API support)
+- [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
-- [ ] Automate pipeline into `corky youtube pipeline` command (future)
 <!-- /agent:pending -->

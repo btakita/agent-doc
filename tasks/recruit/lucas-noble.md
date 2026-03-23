@@ -295,7 +295,7 @@ Should we include agent-doc, corky, existence-lang and my recent videos?
 
 Keep the email tight for Lucas. Let the resume carry the open source story. Ready to send as-is?
 Any gaps in the resume?
-### Re: Resume Gaps (HEAD)
+### Re: Resume Gaps
 
 Checked against the JD:
 
@@ -313,7 +313,7 @@ Checked against the JD:
 | **"Enterprise" framing** | Low — experience shows it implicitly | Not worth restructuring for |
 
 **Recommendation:** Adding **Grafana** and **TimescaleDB** to Skills is the highest-impact quick fix — recruiters ctrl+F for JD keywords. Want me to update the resume profile?
-<!-- agent:boundary:c5c6f493 -->
+<!-- agent:boundary:f2aba6d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

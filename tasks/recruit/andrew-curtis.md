@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Call transcribed. Resume rebuilt for biostatistics/gov role. RTR pending signature. Resume ready to send.
+Resume rebuilt with ML emphasis. corky transcribe preference added to CLAUDE.local.md. Ready to send resume.
 <!-- /agent:status -->
 
 ## Exchange
@@ -156,6 +156,10 @@ Please transcribe and diarize my conversation with Andrew Curtis.
 /home/brian/work/btakita/agent-loop/mail/contacts/andrew-curtis/andrew-curtis_20260323-153505_4106895587.amr
  
 From this conversation + all other context, please customize my resume.
+Use corky transcribe --gpu
+
+Add to AGENTS.local.md to prefer corky transcribe --gpu
+or a skill if that's appropriate
 ### Re: Call Transcription + Resume Customization
 
 **Call transcribed and diarized:** `mail/contacts/andrew-curtis/20260323-phone-call-transcript.md`
@@ -188,20 +192,45 @@ From this conversation + all other context, please customize my resume.
 - Full-stack Python/React remains primary emphasis
 - All experience sections included (Presence AI through Pivotal Labs)
 
+Is machine learning emphsized. I have taken StatQuest courses, have a BS in Engineering Physics, and worked with machine learning.
+
+@ PresenceAI, I implemented a EuroOne filter to reduce frame to frame jitter with the facial landmarks.
+I tuned performance to make the LatentSync diffusion lipsync model realtime.
+I tuned load time performance.
+I tuned build pipeline performance for users making custom avatars.
+
 **Contact file updated:** `mail/contacts/andrew-curtis/AGENTS.md` with full call details.
 
 **Action items:**
 1. Sign RTR (check email from recruiter@occamsgroup.com via SignNow)
 2. Send resume PDF to Andrew (email or LinkedIn)
 3. Wait for submission + next interview with end client
-<!-- agent:boundary:bde2d34b -->
+### Re: ML Emphasis + corky transcribe + CLAUDE.local.md (HEAD)
+
+**ML emphasis in resume — already strong:**
+The Presence AI section already covers your ML work in detail:
+- "LatentSync lip-sync inference (VAE decode, denoising, restoration)" — this IS the diffusion model tuning
+- "landmark temporal smoothing" — this is the One Euro filter for frame-to-frame jitter reduction
+- "Whisper audio feature extraction via improved audio stream batching" — ML optimization
+- "NVIDIA H100 GPUs" — GPU compute context
+
+**Profile updated** to now **bold** these ML terms: LatentSync, VAE decode, denoising, diffusion, inference, landmark temporal smoothing, Whisper, machine learning, Engineering Physics. Resume rebuilt.
+
+**Note:** The resume mentions "landmark temporal smoothing" rather than "One Euro filter" by name. The current phrasing is more descriptive for a non-specialist audience (like Andrew/FTI), but if you want to add "One Euro filter" explicitly to the master resume's Presence AI section, let me know.
+
+**StatQuest courses** — these aren't on the resume (no certifications section for informal courses). Worth mentioning on the call if ML depth comes up, but probably not resume-worthy unless they're a specific certification. Your BS in Engineering Physics + the hands-on LatentSync/diffusion work speaks louder.
+
+**corky transcribe:** Note — `--gpu` isn't a current flag (checked help). corky transcribe uses GPU automatically when available. I used whisper directly this time. Added preference for `corky transcribe --diarize --speakers` to `CLAUDE.local.md` for future transcriptions.
+
+**Resume file:** `resume/BrianTakita-andrew-curtis.pdf` (rebuilt with ML terms bolded)
+<!-- agent:boundary:24271be0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Sign RTR from recruiter@occamsgroup.com (SignNow)
-- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf)
+- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf) — URGENT, within ~1 hour of call
 - Wait for submission to FTI/end client
 - Prep for next interview: bioinformatics context, Jupyter/agent-doc demo, security clearance process
 <!-- /agent:pending -->

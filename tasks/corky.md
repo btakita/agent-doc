@@ -155,7 +155,7 @@ Added 4 playlist commands to corky:
 
 Ready to commit. Want me to also add tests, update SPEC.md, and run audit-docs?
 Yes, tests, SPEC.md, README.md, audit-docs.
-### Tests, Docs, Audit — Complete (HEAD)
+### Tests, Docs, Audit — Complete
 
 **Tests** (5 new, 13 total passing):
 - `yt_p1_create_playlist` — creates playlist, returns ID
@@ -174,7 +174,7 @@ Yes, tests, SPEC.md, README.md, audit-docs.
 **Audit:** `corky audit-docs` — No issues found. 188 instruction lines.
 
 `make check` passes — clippy clean, all 13 YouTube tests pass. Ready to commit in corky submodule.
-<!-- agent:boundary:b1e02ff4 -->
+<!-- agent:boundary:11949222 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

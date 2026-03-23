@@ -1062,10 +1062,10 @@ Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
 - Doesn't beg for the current role — accepts the timeline
 - Short enough that Jordan will actually read it
 
-### Re: Email sender noted (HEAD)
+### Re: Email sender noted
 
 Got it — sending from brian.takita@gmail.com. The draft is ready. Would you like me to send it via corky, or would you prefer to copy-paste it into Gmail yourself? Also, please provide the video/demo links to include.
-<!-- agent:boundary:7061f2f5 -->
+<!-- agent:boundary:4cb2407c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

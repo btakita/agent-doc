@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-6 episodes published. Blog post drafted. YouTube videos processing. Pipeline feature doc created.
+Deep transcript analysis running (4 subagents). Blog posts will be expanded with topic analysis.
 <!-- /agent:status -->
 
 ## Exchange
@@ -416,16 +416,33 @@ continue with blog post
 - Documents the publishing pipeline (silence removal, GPU transcription, corky upload)
 - Mentions corky 0.21.0 playlist support
 - Needs deploy to Cloudflare Pages after review
-<!-- agent:boundary:0b55cd9a -->
+Go through the transcripts of each video.
+Summarize, analyze, and expand on all of the interesting topics.
+Add to blog post.
+Should we have separate blog posts for each episode?
+### Re: Deep Topic Analysis for Blog Posts (HEAD)
+
+**Recommended approach: Series overview + individual episode posts.**
+
+4 subagents analyzing all 6 transcripts now:
+- Agent 1: Ep1 deep analysis (CRDT ordering, vibe coder philosophy, IPC caching)
+- Agent 2: Ep2 deep analysis (snowball bug, probabilistic agents, context optimization)
+- Agent 3: Ep3 deep analysis (AST refactor, CUDA feature flags, publishing pipeline)
+- Agent 4: Ep4-6 combined analysis (IPC timeout, preflight, deterministic primitives)
+
+Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
+<!-- agent:boundary:37d962c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Review and deploy blog post to Cloudflare Pages
-- [ ] LinkedIn post with first comment links (include corky 0.21.0 YouTube playlist support)
-- [ ] Verify YouTube videos finish processing (check in 15-30 min)
+- [ ] Complete transcript deep analysis (4 subagents running)
+- [ ] Create individual blog posts per episode
+- [ ] Update series overview post with episode links
+- [ ] Deploy blog to Cloudflare Pages
+- [ ] LinkedIn post with first comment links (include corky 0.21.0)
+- [ ] Verify YouTube videos finish processing
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
-- [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

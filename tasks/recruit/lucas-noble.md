@@ -539,7 +539,7 @@ Should I mention that I sent an email on LinkedIn messenger?
 
 Keep it brief — just a pointer to check his inbox. Don't repeat the email content. Copy-paste into the LinkedIn conversation.
 Has resume/data.toml been updated from work in this session?
-### Re: data.toml Updates (HEAD)
+### Re: data.toml Updates
 
 Yes — `resume/data.toml` was updated this session with 4 changes:
 
@@ -562,7 +562,7 @@ Yes — `resume/data.toml` was updated this session with 4 changes:
    - Added "gives agents and humans a consistent vocabulary across code, correspondence, and data contexts"
 
 The master template (`BrianTakita.md`) was also updated with: Grafana monitoring bullet at Presence AI, USAA security review bullet at TrueCar, and updated Skills line. These changes are not yet committed in the resume submodule.
-<!-- agent:boundary:33c30b11 -->
+<!-- agent:boundary:6d6c1ab6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

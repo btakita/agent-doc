@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Offer timing strategy discussed. Screening call pending — pace with other interviews.
+JD received and analyzed. Draft reply + custom resume ready for review. Awaiting send confirmation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -177,11 +177,73 @@ Smart strategy. Having competing offers is the strongest negotiating position yo
 
 For now, your conversation with Lucas is in good shape. He's waiting for you to schedule the screening call. No urgency to change anything you've already said — just be mindful of pacing as your other processes advance.
 
-Look at the email from lucas noble
-<!-- agent:boundary:4a4089e7 -->
+Look at the email from lucas noble subject: Job Description - Questions - Rate/Resume
+
+Please analyze and draft a response. Include a custom resume for this role.
+Research https://www.nexteraanalytics.com/ and the parent company https://www.nexteraenergy.com/.
+### Re: Job Description — Analysis & Draft Response (HEAD)
+
+**Email from Lucas (2026-03-20):** Sent the JD for NextEra Analytics, requesting:
+1. Confirm $140/hr 1099
+2. Send updated resume
+3. A few sentences on why you're a good fit
+
+**JD Analysis:**
+
+| Requirement | Your Match |
+|---|---|
+| Python + Vue.js | Python (10 yrs), Vue.js experience |
+| AWS serverless | AWS (10 yrs), serverless, ECS, EC2 |
+| Rust | Rust (5 yrs) — corky, agent-doc, tagpath, agent-kit |
+| TimescaleDB / Grafana | PostgreSQL (15 yrs), time-series data experience |
+| Full-stack SDE | 20+ years full-stack |
+| Work with data/research scientists | Censible (8 yr analytics), Presence AI (ML pipeline) |
+| 15+ years enterprise experience | 20+ years |
+| DevOps, CI/CD, microservices | Extensive — Docker, Terraform, Chef, CI/CD pipelines |
+| Agile / Scrum | Pivotal Labs (XP/TDD origin), Presence AI, every role |
+| SOX compliance | Awareness from enterprise work |
+
+**Company context:**
+- **NextEra Analytics** — builds forecasting & optimization solutions (NextEra 360 platform) for the energy industry
+- **NextEra Energy** — world's largest clean energy company, 76 GW portfolio, 16K employees, $120B planned infrastructure investment, Google Cloud AI partnership
+
+**Rate check:** $140/hr x 2,080 = ~$291K/yr — within the $200K-$315K range. Reasonable for 1099 at your level. Note: no benefits, self-employment tax (~15.3%), and you handle your own insurance.
+
+**JD discrepancy:** JD says "onsite work schedule" but Lucas confirmed remote. Worth clarifying on the call — could be outdated JD language or hybrid expectations.
+
+**Custom resume built:** `resume/BrianTakita-nextera-analytics.pdf` — profile emphasizes Python, Rust, AWS, Vue.js, analytics, and full-stack experience. Filtered to most relevant roles.
+
+**Draft email reply:**
+
+---
+
+Hi Lucas,
+
+Thanks for sending over the JD — the role looks like a great fit. Working alongside data and research scientists on forecasting and optimization solutions is right in my wheelhouse.
+
+I'm confirming $140/hr 1099.
+
+**Why I'm a strong fit:**
+
+I bring 20+ years of full-stack experience with deep expertise in the exact stack they're using — Python, Rust, AWS (including serverless), and Vue.js. At Presence AI, I architected a real-time AI pipeline working closely with ML researchers, which maps directly to collaborating with NextEra's data science team. My 8 years building analytics tools at Censible (ESG rating algorithms, data visualization, report generation) demonstrates sustained experience turning complex data into actionable products. I'm also comfortable leading small teams and mentoring — I did both at Pivotal Labs across 20+ startups.
+
+Updated resume attached.
+
+Best,
+Brian
+
+---
+
+**Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
+
+Want me to adjust the draft, tweak the resume profile, or send via corky?
+<!-- agent:boundary:17fe0a1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Send reply to Lucas with resume (awaiting approval)
+- [ ] Clarify onsite vs remote on screening call
+- [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

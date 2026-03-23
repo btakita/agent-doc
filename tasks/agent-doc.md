@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.6 | **Tests:** 521 (168 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.7 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.17 (layout detection + EDT fix) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 9 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
+**Plugins:** JetBrains v0.2.19 (FFI debounce + layout sync) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 11 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
 ## Architecture
@@ -1110,6 +1110,7 @@ Good
 - CLAUDE.md module layout table
 
 This is a mechanical rename — no logic changes. Want me to do this now as part of the v0.25.7 release, or separately?
+part of release
 
 For the v0.25.7 release, the current batch is:
 1. Route + sync race fix (`run_layout_only`)
@@ -1118,17 +1119,28 @@ For the v0.25.7 release, the current batch is:
 4. Audit docs + SPEC update
 
 That's a solid feature release. Shall I proceed with all four?
-<!-- agent:boundary:4323bff3 -->
+Yes
+### Re: v0.25.7 released (HEAD)
+
+**agent-doc v0.25.7 released** to all targets:
+- crates.io ✓ | PyPI ✓ | GitHub Release ✓ | Binary installed ✓
+
+**What's in this release:**
+1. **Submit → Run rename:** `submit.rs` → `run.rs`, all internal "submit" → "run" terminology
+2. **FFI debounce:** New `debounce.rs` module with `document_changed()` + `await_idle()`, exported via C ABI
+3. **Plugin FFI debounce:** `TypingTracker` forwards events to FFI, `SubmitAction` uses `await_idle()` for conditional debounce
+4. **Route+sync race fix:** `sync::run_layout_only()` prevents auto-start during route
+5. **Plugin v0.2.19:** FFI debounce, conditional typing wait, layout-only sync
+
+**20 files changed, 290 insertions, 39 deletions.**
+<!-- agent:boundary:044a8f8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement FFI debounce** — `document_changed` + `await_idle`
-- [ ] **Rename submit → run** across codebase
-- [ ] Update JetBrains plugin to use FFI debounce
-- [ ] Audit docs + update SPEC.md
-- [ ] Release v0.25.7
+- [x] agent-doc v0.25.7 released
+- [ ] **Install plugin v0.2.19** — test FFI debounce
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

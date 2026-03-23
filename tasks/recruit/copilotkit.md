@@ -794,7 +794,7 @@ Basically, I need cashflow. Is there a way to pivot the conversation toward that
 Help me with further communication. I only have his LinkedIn. I don't have his email.
 Should I ask for his email for a follow up?
 
-### Re: Processing the Interview + Next Steps (HEAD)
+### Re: Processing the Interview + Next Steps
 
 ---
 
@@ -873,7 +873,7 @@ Be direct with Kevin: "I need work. The enterprise/R&D roles Jordan mentioned ar
 **"I dogfood. I build tools, then I use them to build more tools. agent-doc isn't a side project — it's my daily development environment. The same energy I put into building it is the same energy I'd put into CopilotKit integrations."**
 
 This reframe connects your passion (building agent-doc) to their need (someone who lives in the ecosystem and ships).
-<!-- agent:boundary:2518134c -->
+<!-- agent:boundary:a7e025d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

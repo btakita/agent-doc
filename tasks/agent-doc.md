@@ -166,7 +166,7 @@ claude_args: --dangerously-skip-permissions
 
 **Plugin v0.2.14 installed** — confirmed by user.
 Would agent-doc benefit from using AG-UI?
-### Re: Would agent-doc benefit from AG-UI? (HEAD)
+### Re: Would agent-doc benefit from AG-UI?
 
 **Short answer: Not yet, but it's worth watching.**
 
@@ -199,7 +199,7 @@ If you ever want a browser-based interface for agent-doc sessions (e.g., for use
 This is a significant architectural shift for uncertain benefit. The current IPC-first model works well for the editor-centric workflow.
 
 **Recommendation:** Monitor AG-UI for ideas (their state snapshot model is interesting), but don't adopt it unless you want a web UI. The file-native, editor-plugin architecture is agent-doc's differentiator.
-<!-- agent:boundary:d02469ae -->
+<!-- agent:boundary:bc0d3493 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

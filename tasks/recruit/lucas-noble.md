@@ -516,7 +516,7 @@ The
 - **Resume:** Once you complete more of the course, add under Education/Certifications: "Factor-Based Backtesting — quantscience.io (in progress)"
 
 Your message was cut off ("The ") — want to finish that thought?
-<!-- agent:boundary:01764876 -->
+<!-- agent:boundary:3ae2444f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

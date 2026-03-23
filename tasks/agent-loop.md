@@ -20,7 +20,7 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: go (HEAD)
+### Re: go
 
 Created `DEV.md` files for the three most actively released submodules:
 
@@ -42,6 +42,7 @@ Created `DEV.md` files for the three most actively released submodules:
 - JS/TS app DEV.md files — deploy workflows not yet established
 
 **Remaining future iteration: integration testing.** We could do a dry-run of `/dev agent-doc release` to validate the full workflow end-to-end. Want to try that, or move on?
+<!-- agent:boundary:eef5a7b6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:input -->

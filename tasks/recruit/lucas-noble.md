@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Email draft pushed to Gmail Drafts. Resume updated with all JD keywords. Awaiting user send from Gmail.
+Email sent to Lucas Noble with resume. Awaiting screening call scheduling.
 <!-- /agent:status -->
 
 ## Exchange
@@ -490,15 +490,25 @@ Open your Gmail Drafts to review and send.
 - Custom profile bolding all JD-relevant keywords
 
 Resume PDF is attached to the draft and ready to go.
-<!-- agent:boundary:b92281de -->
+send
+### Re: Sent (HEAD)
+
+Email sent to lnoble@true-source.com with resume attached. Draft status updated to 'sent'.
+
+Next steps:
+1. Wait for Lucas to confirm receipt and schedule the screening call
+2. On the call, clarify onsite vs remote (JD says onsite, Lucas said remote)
+3. Pace the process alongside your other interviews
+<!-- agent:boundary:197bb408 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Draft email via corky (pushed to Gmail Drafts)
+- [x] Draft email via corky
 - [x] Update resume with latest info
-- [ ] Send from Gmail (user action)
+- [x] Send email to Lucas
+- [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

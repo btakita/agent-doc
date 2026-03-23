@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft reply v2 revised per feedback. Custom resume ready. Awaiting send confirmation.
+Draft v2 finalized. Decided against adding agent-doc/corky/videos to email (save for team intro). Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -278,7 +278,23 @@ Brian
 ---
 
 Ready to send, or further tweaks?
-<!-- agent:boundary:430f5d90 -->
+
+Should we include agent-doc, corky, existence-lang and my recent videos?
+### Re: Including Agent-Doc / Corky / Videos (HEAD)
+
+**Recommendation: No — keep this email lean.** Here's why:
+
+- **Lucas is a staffing recruiter**, not an engineering hiring manager. He's pattern-matching your resume against a JD — he won't evaluate open source projects deeply.
+- **agent-doc, corky, existence-lang** are developer tooling / ontology projects that don't map to the NextEra JD (forecasting/optimization for energy). They'd add noise to the email.
+- **Videos** could work but save them for the 30-min intro with the engineering team — that's where you'd articulate technical depth.
+
+**Where these DO shine (save for later):**
+- **Resume** already lists agent-doc, corky, and open source work — the hiring team will see them
+- **30-min intro call** — mention Rust projects (they use Rust!) and your engineering approach
+- **Code samples** if asked — point to your GitHub repos
+
+Keep the email tight for Lucas. Let the resume carry the open source story. Ready to send as-is?
+<!-- agent:boundary:352e68c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

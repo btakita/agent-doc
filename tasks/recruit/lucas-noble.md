@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Email sent to Lucas Noble with resume. Awaiting screening call scheduling.
+Email sent. Factor-based backtesting course noted for screening call talking points. Awaiting Lucas response.
 <!-- /agent:status -->
 
 ## Exchange
@@ -499,7 +499,24 @@ Next steps:
 1. Wait for Lucas to confirm receipt and schedule the screening call
 2. On the call, clarify onsite vs remote (JD says onsite, Lucas said remote)
 3. Pace the process alongside your other interviews
-<!-- agent:boundary:6fcc3825 -->
+I'm learning factor-based backtesting in my quantscience.io course.
+Should we include this in the resume?
+The
+### Re: Factor-Based Backtesting Course (HEAD)
+
+**Yes — highly relevant to NextEra, but save for the screening call rather than updating the resume now.** The email is already sent.
+
+**Why it matters for this role:**
+- Factor-based backtesting maps directly to NextEra's forecasting and optimization work
+- Combined with your Engineering Physics degree, it signals you can engage with data scientists on the modeling side — not just build the UI
+- Shows you're actively investing in quantitative skills
+
+**How to use it:**
+- **Screening call:** Mention naturally — "I'm actively deepening my quantitative analysis skills through factor-based backtesting coursework at quantscience.io, which aligns well with NextEra's forecasting work."
+- **Resume:** Once you complete more of the course, add under Education/Certifications: "Factor-Based Backtesting — quantscience.io (in progress)"
+
+Your message was cut off ("The ") — want to finish that thought?
+<!-- agent:boundary:456888b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -510,5 +527,6 @@ Next steps:
 - [x] Send email to Lucas
 - [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
+- [ ] Mention factor-based backtesting course on screening call
 - [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

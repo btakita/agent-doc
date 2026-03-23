@@ -1017,7 +1017,7 @@ It's possible but requires the shared object to become **stateful** — currentl
 I will be supporting neovim and zed editors at least. Possibly more.
 So there will be more instances of the duplicated logic.
 Granted the FFI hooks also requires the logic, but at least it's a declarative api.
-### Re: Neovim + Zed support → FFI debounce makes sense (HEAD)
+### Re: Neovim + Zed support → FFI debounce makes sense
 
 With 4+ editors (JetBrains, VS Code, Neovim, Zed), the calculus changes. You're right — even though each plugin still wires editor events to the FFI, a **declarative API** means:
 
@@ -1057,7 +1057,7 @@ saveAndRoute()
 ```
 
 Want me to implement this now?
-<!-- agent:boundary:4f1a62dc -->
+<!-- agent:boundary:4b007825 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

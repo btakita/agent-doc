@@ -471,15 +471,56 @@ agent-doc route tasks/agent-doc.md --col tasks/agent-doc.md --col tasks/recruit/
 This tells the binary: left column has `agent-doc.md`, right column has `lucas-noble.md`, focus is on `agent-doc.md`.
 
 Plugin v0.2.15 rebuilt. Binary built and installed. 521 tests pass.
-<!-- agent:boundary:b8496e65 -->
+continue:
+- [ ] Test route + layout sync with multi-split editor
+- [ ] Investigate EditorSplitterListener for tab-drag events
+### Re: Test layout sync + EditorSplitterListener investigation (HEAD)
+
+**Testing route + layout sync:**
+
+With plugin v0.2.15 installed, the Run action now passes `--col` and `--focus` args to `agent-doc route`. To test:
+
+1. Open two `.md` files in a left/right split
+2. Click "Run Agent Doc" on the right-side file
+3. The tmux pane should move to match the right-side position
+
+The plugin generates a command like:
+```
+agent-doc route tasks/file.md --col tasks/left-file.md --col tasks/right-file.md --focus tasks/right-file.md
+```
+
+**EditorSplitterListener investigation results:**
+
+**No public API exists** for detecting tab-drag-between-splits events. Findings:
+
+- `FileEditorManagerListener` provides: `fileOpened`, `fileClosed`, `selectionChanged` — no split/move event
+- `selectionChanged` fires on focus change (clicking a tab) but NOT on dragging a tab to another split
+- JetBrains acknowledged the gap: [IJPL-200433](https://youtrack.jetbrains.com/issue/IJPL-200433) requests promoting `SplitterService` to public API — not yet done
+- The [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) by dkandalov works around this by hooking into action execution rather than listening for events
+
+**Workaround options:**
+
+1. **Timer-based poll** (simplest): Every 2-3 seconds, run `LayoutDetector.detectEditorLayout()` and compare with the last known layout. If it changed, sync. Low CPU cost (just walking the Swing tree), catches all layout changes including drag.
+
+2. **PropertyChangeListener on Splitter** (fragile): Attach listeners to `Splitter.proportion` property changes. This detects when splits are resized or created, but not tab moves between existing splits.
+
+3. **Action listener** (targeted): Listen for `MoveEditorToOppositeTabGroup` and similar actions via `ActionManager.addAnActionListener`. Catches keyboard-triggered moves but misses mouse drags.
+
+**Recommendation:** Option 1 (timer poll) is the most reliable. The existing `EditorTabSyncListener` already debounces layout syncs — adding a 2-3 second periodic check would catch all layout changes without depending on unstable internal APIs.
+
+Sources:
+- [API for moving editor tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362)
+- [How to track file editors](https://www.plugin-dev.com/intellij/editor/editor-open-close/)
+- [tab-shifter plugin](https://github.com/dkandalov/tab-shifter)
+<!-- agent:boundary:a16deabe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Install plugin v0.2.15** — IDEA → Plugins → Install from Disk
+- [x] Plugin v0.2.15 installed
 - [ ] Test route + layout sync with multi-split editor
-- [ ] Investigate EditorSplitterListener for tab-drag events
+- [ ] Implement timer-based layout poll (2-3s interval) for tab-drag detection
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

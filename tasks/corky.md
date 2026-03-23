@@ -175,7 +175,7 @@ Please sort the command list in the documentation and --help output
 **Audit:** `corky audit-docs` — No issues found. 188 instruction lines.
 
 `make check` passes — clippy clean, all 13 YouTube tests pass. Ready to commit in corky submodule.
-### Sorted YouTube Commands (HEAD)
+### Sorted YouTube Commands
 
 Sorted `YoutubeCommands` enum variants alphabetically in `cli.rs` — this controls `--help` output order:
 
@@ -185,7 +185,7 @@ Sorted `YoutubeCommands` enum variants alphabetically in `cli.rs` — this contr
 Also sorted command lists in SPEC.md §17.6 and README.md to match.
 
 `make check` passes (13 tests), `audit-docs` clean.
-<!-- agent:boundary:9fa944bb -->
+<!-- agent:boundary:9a34f19d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -420,7 +420,7 @@ Go through the transcripts of each video.
 Summarize, analyze, and expand on all of the interesting topics.
 Add to blog post.
 Should we have separate blog posts for each episode?
-### Re: Deep Topic Analysis for Blog Posts (HEAD)
+### Re: Deep Topic Analysis for Blog Posts
 
 **Recommended approach: Series overview + individual episode posts.**
 
@@ -431,7 +431,7 @@ Should we have separate blog posts for each episode?
 - Agent 4: Ep4-6 combined analysis (IPC timeout, preflight, deterministic primitives)
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
-<!-- agent:boundary:37d962c9 -->
+<!-- agent:boundary:f760e739 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

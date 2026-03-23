@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-JD received and analyzed. Draft reply + custom resume ready for review. Awaiting send confirmation.
+Draft reply v2 revised per feedback. Custom resume ready. Awaiting send confirmation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -233,11 +233,52 @@ Best,
 Brian
 
 ---
+> and Vue.js
+
+Something like "various reactive web component libraries including Vue.js". Make it shorter.
+
+> which maps directly to collaborating with NextEra's data science team
+
+I have a degree in Engineering Physics and can implement research models from papers into software.
+
+> ESG rating algorithms, data visualization, report generation
+
+Include esg factor screener and portfolio rebalancer.
 
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Want me to adjust the draft, tweak the resume profile, or send via corky?
-<!-- agent:boundary:5993f7bb -->
+### Re: Revised Draft (v2) (HEAD)
+
+Incorporated all three edits:
+
+1. **Vue.js** → "various reactive frontend frameworks including Vue.js"
+2. **Data science** → Engineering Physics degree + implementing research models from papers
+3. **Censible** → added factor screener and portfolio rebalancer
+
+**Revised draft:**
+
+---
+
+Hi Lucas,
+
+Thanks for sending over the JD — the role looks like a great fit. Working alongside data and research scientists on forecasting and optimization solutions is right in my wheelhouse.
+
+I'm confirming $140/hr 1099.
+
+**Why I'm a strong fit:**
+
+I bring 20+ years of full-stack experience with deep expertise in the stack they're using — Python, Rust, AWS (including serverless), and various reactive frontend frameworks including Vue.js. I have a degree in Engineering Physics and can implement research models from papers into software — at Presence AI, I built a real-time AI pipeline translating ML research into production systems. My 8 years at Censible building an ESG analytics platform (factor screener, portfolio rebalancer, data visualization, report generation) demonstrates sustained experience turning complex data into actionable products. I'm also comfortable leading small teams and mentoring — I did both at Pivotal Labs across 20+ startups.
+
+Updated resume attached.
+
+Best,
+Brian
+
+---
+
+Ready to send, or further tweaks?
+<!-- agent:boundary:41ed421a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

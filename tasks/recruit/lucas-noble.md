@@ -391,7 +391,7 @@ I can enhance knowledge work automation by creating tools to support:
 - multimodal knowledge capture
 - ontological + contextual meaning & knowledge transfer
 - correspondence
-### Re: Adding Agentic Tooling (HEAD)
+### Re: Adding Agentic Tooling
 
 Good call — this differentiates you from a standard full-stack SDE. Revised the "Why I'm a strong fit" section to include it naturally:
 
@@ -421,7 +421,7 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 The agentic tools sentence keeps it concrete without over-explaining — positions you as someone who builds tools that multiply team productivity, not just writes features. Approve to send?
-<!-- agent:boundary:9b101529 -->
+<!-- agent:boundary:6b6cf8bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

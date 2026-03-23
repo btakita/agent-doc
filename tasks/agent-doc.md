@@ -1175,7 +1175,7 @@ The fix is in the SKILL instructions: when a diff shows a partial/truncated line
 1. Install plugin v0.2.19 to get FFI debounce for plugin-triggered runs: The action was run using v0.2.19
 2. Add mtime-based debounce to `agent-doc preflight` for CLI-triggered runs: That wasn't the case here. Only do so if it the debounce does not cause a delay if not needed. The plugin has an event to track the last edit, which allows it to not delay. Perhaps we can have a `--debounce` flag so it's opt-in?
 3. Update SKILL.md with guidance on handling partial/truncated diffs: Yes
-### Re: Debounce failed with v0.2.19 + preflight opt-in + SKILL partial diff (HEAD)
+### Re: Debounce failed with v0.2.19 + preflight opt-in + SKILL partial diff
 
 **Debounce failure with v0.2.19 — root cause investigation needed.**
 
@@ -1205,7 +1205,7 @@ Want me to:
 1. Add `--debounce` to `agent-doc route`
 2. Update SKILL.md for partial diffs
 3. Investigate the debounce failure in idea.log
-<!-- agent:boundary:e2135cac -->
+<!-- agent:boundary:b255bf57 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

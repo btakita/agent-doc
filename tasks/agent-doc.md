@@ -407,14 +407,36 @@ When you switch which editor tab is active (clicking on `agent-doc.md`), the plu
 3. **Tab drag listener** — JetBrains has `DockManager` and `EditorTabDragOutEvent` for detecting drag operations. Hooking into these could catch the move.
 
 The simplest fix is option 1 — if JetBrains exposes split change events, we can react immediately. Want me to investigate the JetBrains API for this?
-<!-- agent:boundary:8155be53 -->
+
+Yes. Also `Agent Doc Run` -> `agent-doc run` should have detected the layout. And moved the tmux pane accordingly.
+### Re: Run should detect layout and move tmux pane (HEAD)
+
+You're right. Currently:
+- **Claim** passes `--position` → tmux pane placed correctly
+- **Run (route)** does NOT pass position → tmux pane stays wherever it was
+- **Focus/Layout** (tab switch) syncs position → but only on focus change
+
+The Run action should sync the layout as part of routing. Two approaches:
+
+**Approach 1 — Plugin calls layout after route:**
+After `agent-doc route <path>` succeeds, the plugin calls `agent-doc layout <files...> --split h|v` with the current editor positions. Simple, two CLI calls.
+
+**Approach 2 — Add `--position` to `agent-doc route`:**
+`agent-doc route <path> --position right` would route the command AND reposition the tmux pane. Single call, less latency.
+
+Approach 2 is cleaner. The `route` command already knows the pane (it looks it up from the registry); adding a layout step is straightforward.
+
+Want me to implement approach 2 — add `--position` to `agent-doc route` and have the plugin pass it?
+<!-- agent:boundary:65f3f67d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Investigate JetBrains EditorSplitterListener API** for tab-move-between-splits events
-- [ ] `agent-doc export --jupyter` — convert template docs to `.ipynb`
+- [ ] **Add `--position` to `agent-doc route`** — sync tmux layout on Run
+- [ ] **Plugin: pass position in sendToTerminal()** — detect split side, pass to route
+- [ ] Investigate JetBrains EditorSplitterListener for tab-move events
+- [ ] `agent-doc export --jupyter`
 - [ ] Interactive MDX viewer (Phase 1)
 <!-- /agent:pending -->
 

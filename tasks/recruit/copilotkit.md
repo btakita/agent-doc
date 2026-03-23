@@ -1262,7 +1262,7 @@ Draft file updated. Ready to push to Gmail drafts.
 Also, should I mention that I barely use the web anymore?
 Almost all of my interactions are with agent-doc.
 
-### Re: Mentioning you barely use the web anymore (HEAD)
+### Re: Mentioning you barely use the web anymore
 
 **No.** Don't add this to the email. Here's why:
 
@@ -1273,7 +1273,7 @@ Almost all of my interactions are with agent-doc.
 3. **The email is done.** Every addition at this point is anxiety, not improvement. The draft has three clean beats. Send it.
 
 Push it to Gmail drafts?
-<!-- agent:boundary:83861c88 -->
+<!-- agent:boundary:ff0c1967 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

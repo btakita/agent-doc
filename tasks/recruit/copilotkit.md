@@ -1185,7 +1185,7 @@ I also want to express the realtime markdown dashboard direction as well.
 
 Show my v
 
-### Re: Additional Videos + Dashboard Direction (HEAD)
+### Re: Additional Videos + Dashboard Direction
 
 **Keep it to one link.** The playlist is enough. Here's why:
 
@@ -1206,7 +1206,7 @@ Adding a fourth (showcase every project) weakens all three.
 **Your message was cut off at "Show my v" — complete it if you want me to address it.**
 
 The draft is ready as-is. Want me to send it?
-<!-- agent:boundary:766d014b -->
+<!-- agent:boundary:803266fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

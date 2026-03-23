@@ -354,7 +354,7 @@ This is actually a strong differentiator for NextEra — they work with time-ser
 
 Ready to send the email to Lucas?
 Show me the email draft.
-### Re: Email Draft (HEAD)
+### Re: Email Draft
 
 Here's the final version ready to send:
 
@@ -382,7 +382,7 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Approve to send via corky, or copy-paste manually?
-<!-- agent:boundary:bbaf57b5 -->
+<!-- agent:boundary:126b1928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

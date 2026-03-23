@@ -570,7 +570,7 @@ Added structured data to all 7 blog posts:
 Committed and pushed. CF Pages will redeploy with the structured data.
 
 Was this configured via the frontmatter on the blog posts?
-### Re: How VideoObject JSON-LD Was Added (HEAD)
+### Re: How VideoObject JSON-LD Was Added
 
 **No, not via frontmatter.** The blog framework's `Post` type doesn't support custom frontmatter fields like `video_url` — it has a fixed schema (`title`, `description`, `date`, `tags`, `featured`, etc.).
 
@@ -581,7 +581,7 @@ Instead, I added inline `<script type="application/ld+json">` blocks directly in
 - Series overview: `schema.org/ItemList` with 6 ListItems pointing to each video
 
 **To make this frontmatter-driven** (so `video_url` in frontmatter auto-generates VideoObject), the `Post` interface in `@rappstack/domain--any--blog` would need to be extended with optional `video_url` and `playlist_url` fields, and the layout template would need to check for those fields and generate the JSON-LD. That's a rappstack framework change — doable but separate from this session.
-<!-- agent:boundary:d7d7f885 -->
+<!-- agent:boundary:4bbc0d9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

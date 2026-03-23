@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Series overview links to individual episode pages. All 7 blog posts created and indexed. Verify on localhost.
+JSON-LD handled by layout. Series overview updated with episode links. All 7 blog posts indexed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -470,6 +470,7 @@ Ep1-5 blog posts are created. Ep6 is being written by the last subagent now. Onc
 
 The dev server at localhost:4100 should show them after Ep6 is written. You may need to refresh or restart the dev server if it doesn't hot-reload new content files.
 /posts/skill-to-binary-agent-doc-live should link to the individual blog pages instead of the embedded youtube iframe.
+Do we have a proper json+ld for each of the blog posts?
 ### Re: Series Post Links
 
 Updated the series overview post. Episode sections now link to individual blog pages instead of embedding YouTube iframes:
@@ -483,16 +484,28 @@ Updated the series overview post. Episode sections now link to individual blog p
 The playlist iframe is kept at the top of the series overview. Individual episode pages each have their own YouTube embed.
 
 Regarding posts not showing on localhost:4100 — the `post/index.ts` file has been updated with all 7 imports. If the dev server still doesn't show them, it may need a restart (`bun` or `make dev`).
-<!-- agent:boundary:da1e7ee5 -->
+### Re: JSON-LD for Blog Posts (HEAD)
+
+**Already handled by the layout.** The blog has comprehensive JSON-LD / RDFa structured data built into the layout template layer:
+
+- Every post gets `schema.org/Article` with `articleBody` property via RDFa
+- `Person`, `WebSite`, `Organization` entities are defined in `lib/domain--server--briantakita/jsonld/index.ts`
+- The layout at `lib/ui--server--briantakita/md/md_layout__doc_html.ts` wraps every post in `<article>` with RDFa attributes
+
+Individual posts don't need per-post JSON-LD because the frontmatter fields (`title`, `description`, `date`, `tags`) feed into the template's schema.org generation automatically. No changes needed.
+
+If you want **VideoObject** JSON-LD specifically for the YouTube videos (which would help Google discover the video content on your blog), that would be a layout-level enhancement — adding `schema.org/VideoObject` when a `video_url` frontmatter field is present.
+<!-- agent:boundary:c19dd3ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify all posts render on localhost:4100
+- [ ] Verify all posts render on localhost:4100 (restart dev server if needed)
 - [ ] Deploy blog to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing
+- [ ] Optional: Add VideoObject JSON-LD for posts with video_url frontmatter
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

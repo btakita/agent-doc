@@ -89,7 +89,7 @@ Added 14 missing entries (v0.9.5–v0.18.0) from git history. All 47 releases no
 - §6.9 Doctor — `corky doctor [PROVIDER]`, per-provider checks, exit codes
 - §18 Self-Hosted Deployment — credential modes, privacy model, scope list
 
-### Audit Docs (v0.18.0) (HEAD)
+### Audit Docs (v0.18.0)
 
 Ran `corky audit-docs` after v0.18.0 — fixed stale AGENTS.md/README.md (built-in GCP OAuth not documented). 68 insertions across 4 files. Re-ran clean.
 
@@ -119,7 +119,7 @@ Three bugs fixed:
 Compacted exchange from 1062 lines to 50 lines. Removed verbose conversation (watch output logs, debug discussions, implementation details, claude-mem context dumps) and kept only the release summaries.
 Can we support creating a playlist using the YouTube api in Corky?
 See tasks/youtube.md
-### Re: YouTube Playlist Support (HEAD)
+### Re: YouTube Playlist Support
 
 Yes — YouTube Data API v3 supports full playlist CRUD. The existing `youtube.force-ssl` OAuth scope already covers it, so no re-auth needed.
 
@@ -134,7 +134,7 @@ Yes — YouTube Data API v3 supports full playlist CRUD. The existing `youtube.f
 **Implementation estimate:** ~200 lines total across `youtube.rs` (4 API functions), `cli.rs` (subcommand enum + args), `main.rs` (dispatch). Follows existing `upload_video`/`insert_comment` patterns.
 
 Ready to implement when you approve.
-<!-- agent:boundary:b854090d -->
+<!-- agent:boundary:db371d44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

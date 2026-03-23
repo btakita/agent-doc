@@ -501,7 +501,6 @@ Next steps:
 3. Pace the process alongside your other interviews
 I'm learning factor-based backtesting in my quantscience.io course.
 Should we include this in the resume?
-The
 ### Re: Factor-Based Backtesting Course
 
 **Yes — highly relevant to NextEra, but save for the screening call rather than updating the resume now.** The email is already sent.
@@ -516,7 +515,22 @@ The
 - **Resume:** Once you complete more of the course, add under Education/Certifications: "Factor-Based Backtesting — quantscience.io (in progress)"
 
 Your message was cut off ("The ") — want to finish that thought?
-<!-- agent:boundary:3ae2444f -->
+The backtesting uses a time series database written in duckdb & python + pytorch.
+### Re: DuckDB + Python + PyTorch (HEAD)
+
+That's a great detail. The stack maps almost perfectly to NextEra's:
+
+| Your Course | NextEra |
+|---|---|
+| DuckDB (columnar/analytical) | TimescaleDB (time-series PostgreSQL) |
+| Python | Python |
+| PyTorch | Their ML/forecasting models |
+| Factor-based backtesting | Energy forecasting & optimization |
+
+DuckDB and TimescaleDB are both optimized for analytical/time-series queries — the concepts transfer directly. This strengthens the "implement research models from papers into software" claim in your email.
+
+**Screening call talking point:** "I'm working through a quantitative backtesting course using DuckDB, Python, and PyTorch for time-series analysis — very similar patterns to what NextEra does with forecasting and optimization."
+<!-- agent:boundary:c3d8fbea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -527,6 +541,6 @@ Your message was cut off ("The ") — want to finish that thought?
 - [x] Send email to Lucas
 - [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
-- [ ] Mention factor-based backtesting course on screening call
+- [ ] Mention factor-based backtesting + DuckDB/PyTorch on screening call
 - [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

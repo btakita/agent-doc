@@ -20,7 +20,7 @@ https://www.linkedin.com/in/andrew-curtis-022513b1/
 Read mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt
 
 Draft a response. Make a custom resume.
-### Re: Contact + Resume + Draft Reply (HEAD)
+### Re: Contact + Resume + Draft Reply
 
 **Contact created:** `mail/contacts/andrew-curtis/AGENTS.md` (with `CLAUDE.md` symlink)
 
@@ -45,7 +45,7 @@ Draft a response. Make a custom resume.
 > Brian
 
 Ready to tweak or send?
-<!-- agent:boundary:37a467e4 -->
+<!-- agent:boundary:9a40a937 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume rebuilt with ML emphasis. corky transcribe preference added to CLAUDE.local.md. Ready to send resume.
+One Euro filter added to master resume. Resume rebuilt. Ready to send to Andrew.
 <!-- /agent:status -->
 
 ## Exchange
@@ -218,19 +218,31 @@ The Presence AI section already covers your ML work in detail:
 
 **Note:** The resume mentions "landmark temporal smoothing" rather than "One Euro filter" by name. The current phrasing is more descriptive for a non-specialist audience (like Andrew/FTI), but if you want to add "One Euro filter" explicitly to the master resume's Presence AI section, let me know.
 
+Yes...add to master database.
+
 **StatQuest courses** — these aren't on the resume (no certifications section for informal courses). Worth mentioning on the call if ML depth comes up, but probably not resume-worthy unless they're a specific certification. Your BS in Engineering Physics + the hands-on LatentSync/diffusion work speaks louder.
 
 **corky transcribe:** Note — `--gpu` isn't a current flag (checked help). corky transcribe uses GPU automatically when available. I used whisper directly this time. Added preference for `corky transcribe --diarize --speakers` to `CLAUDE.local.md` for future transcriptions.
 
 **Resume file:** `resume/BrianTakita-andrew-curtis.pdf` (rebuilt with ML terms bolded)
-<!-- agent:boundary:84524a34 -->
+Please draft a LinkedIn message for my updated resume. Should we include changes or keep it simple?
+### Re: One Euro Filter Added to Master Resume (HEAD)
+
+Updated `resume/BrianTakita.md` line 56:
+- Before: "landmark temporal smoothing"
+- After: "One Euro filter landmark temporal smoothing"
+
+Resume rebuilt: `resume/BrianTakita-andrew-curtis.pdf` — "One Euro filter" now bolded in the Presence AI section.
+
+This change is in the master template, so all future profile builds will include it.
+<!-- agent:boundary:498d216d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Sign RTR from recruiter@occamsgroup.com (SignNow)
-- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf) — URGENT, within ~1 hour of call
+- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf) — URGENT
 - Wait for submission to FTI/end client
 - Prep for next interview: bioinformatics context, Jupyter/agent-doc demo, security clearance process
 <!-- /agent:pending -->

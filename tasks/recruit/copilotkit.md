@@ -594,7 +594,7 @@ Have these ready. Don't dump them all — let the conversation pull what's relev
 | Building in public | "Livestreaming dev sessions, demos on LinkedIn — happy to share links" |
 | Why CopilotKit | "Protocol layer for human-agent alignment — where I want to build" |
 
-### Re: Name-dropping rmemo + relementjs (HEAD)
+### Re: Name-dropping rmemo + relementjs
 
 **Skip the names. Describe the capability.**
 
@@ -621,7 +621,7 @@ Same signal, zero friction. If Jordan is genuinely interested and follows up, yo
 | Framework-agnostic | "I build reactive libraries that are framework-agnostic — they work with any renderer" |
 | Cross-language | "I built a cross-platform reactive signals library — production Python, compiles to Zig and Rust" |
 | agent-doc | Keep the name — it's your headline |
-<!-- agent:boundary:143271ca -->
+<!-- agent:boundary:ed2c10e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -512,15 +512,43 @@ Sources:
 - [API for moving editor tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362)
 - [How to track file editors](https://www.plugin-dev.com/intellij/editor/editor-open-close/)
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter)
-<!-- agent:boundary:0f21488f -->
+Will the poll send continous messages even if the layout does not change?
+Or will it save the last layout and send when the layout changes?
+### Re: Poll behavior — continuous or change-only? (HEAD)
+
+**Change-only.** The poll would save the last known layout and only send a sync command when the layout actually changes. No continuous messages.
+
+The `EditorTabSyncListener` already has this pattern — it computes a dedup key from the visible files and skips if unchanged:
+
+```kotlin
+// Pseudocode for the layout poll
+var lastLayoutHash: String? = null
+
+timer(interval = 2000) {
+    val layout = LayoutDetector.detectEditorLayout(project)
+    val hash = layout?.columns?.map { it.files }?.toString()
+    if (hash != lastLayoutHash) {
+        lastLayoutHash = hash
+        // Layout changed — sync
+        syncLayout(project, notify = false)
+    }
+}
+```
+
+So the poll:
+- Runs every 2-3 seconds (lightweight — just walks the Swing component tree)
+- Computes a hash of the current editor layout (which files in which columns)
+- Compares with the last known hash
+- Only calls `agent-doc sync` when the hash differs
+- Typical cost when nothing changed: microseconds (no CLI call, no tmux interaction)
+<!-- agent:boundary:7e41dadd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Plugin v0.2.15 installed
+- [ ] Implement timer-based layout poll with change detection
 - [ ] Test route + layout sync with multi-split editor
-- [ ] Implement timer-based layout poll (2-3s interval) for tab-drag detection
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

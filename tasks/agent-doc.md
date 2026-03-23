@@ -851,13 +851,60 @@ Option 2 is more robust — it works for both plugin and CLI invocations.
 **Audit docs + SPEC:** Will do after the typing discussion. These are straightforward.
 
 Want me to implement option 2 (preflight debounce)?
-<!-- agent:boundary:a30af728 -->
+mtime does not work...because the editor does not save the file until I leave focus or explicitly save.
+The plugin needs to handle the debouncing.
+### Re: Plugin must handle debounce (mtime won't work) (HEAD)
+
+You're right — the editor buffers changes in memory until save. The file mtime doesn't change while typing. The debounce must happen at the plugin level, where the plugin knows the Document is being modified.
+
+**Plugin debounce approach:**
+
+The plugin's `SubmitAction` (Run Agent Doc) should:
+1. Save the file (`FileDocumentManager.saveDocument`)
+2. Start a 1.5s timer
+3. Listen for `DocumentListener.documentChanged` during the timer
+4. If the document changes during the timer (user is still typing), reset the timer
+5. When the timer completes without changes, proceed with `agent-doc route`
+
+```kotlin
+// In SubmitAction.actionPerformed():
+val document = editor.document
+FileDocumentManager.getInstance().saveDocument(document)
+
+// Debounce: wait for typing to settle
+val debounceMs = 1500L
+val generation = AtomicLong(0)
+val myGen = generation.incrementAndGet()
+
+val listener = object : DocumentListener {
+    override fun documentChanged(event: DocumentEvent) {
+        generation.incrementAndGet() // Reset timer
+        FileDocumentManager.getInstance().saveDocument(document)
+    }
+}
+document.addDocumentListener(listener)
+
+Thread {
+    Thread.sleep(debounceMs)
+    document.removeDocumentListener(listener)
+    if (generation.get() == myGen) {
+        // User stopped typing — proceed
+        TerminalUtil.sendToTerminal(project, relativePath)
+    } else {
+        // Typing continued — wait again
+        // (recursive or loop with generation check)
+    }
+}.start()
+```
+
+This ensures the file is saved and the user has stopped typing before the route command fires. Want me to implement this in `SubmitAction`?
+<!-- agent:boundary:ff01e9c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement typing debounce** — preflight waits for file to stabilize before diffing
+- [ ] **Implement plugin typing debounce** in SubmitAction (DocumentListener + timer)
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

@@ -345,14 +345,14 @@ All previous gaps are now covered. Your message about energy domain was cut off 
 
 Draft email is ready to send with the updated resume. Give the go-ahead when ready.
 I also have experience with creating functional reactive systems.
-### Re: Functional Reactive Systems (HEAD)
+### Re: Functional Reactive Systems
 
 Already covered in the resume — your 15-year reactive framework lineage (backbone-signal → ctx-core → rmemo → relysjs) is listed in Career Highlights and Open Source experience. The profile bolds "reactive programming" and "event-driven" throughout. Unison (event-driven relational algebra at Pivotal Labs) is also listed.
 
 This is actually a strong differentiator for NextEra — they work with time-series forecasting and real-time optimization, which maps directly to reactive/event-driven patterns. Worth highlighting on the intro call.
 
 Ready to send the email to Lucas?
-<!-- agent:boundary:be787615 -->
+<!-- agent:boundary:7f98a53c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

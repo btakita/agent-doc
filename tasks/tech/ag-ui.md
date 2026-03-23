@@ -81,7 +81,7 @@ The `useCoAgent` hook creates real-time read/write access to agent state. `copil
 **Note:** Your message was cut off at "Does th" — please complete the question and I'll answer it.
 Describe RFC 6902. Show some examples of messages.
 
-### Re: RFC 6902 & AG-UI Message Examples (HEAD)
+### Re: RFC 6902 & AG-UI Message Examples
 
 #### RFC 6902 — JSON Patch
 
@@ -199,7 +199,7 @@ The `test` ensures status is still "researching" before marking complete — if 
 #### Answer: Backend State Sync
 
 Yes — the backend agent maintains its own state object, and AG-UI syncs it to the UI via these SSE events. The agent emits `STATE_SNAPSHOT` or `STATE_DELTA` events as it works. The frontend applies them to its local copy. The frontend can also push state changes back to the agent (via `useCoAgent`'s `setState`), making it truly bidirectional.
-<!-- agent:boundary:90c010c8 -->
+<!-- agent:boundary:555dbc87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

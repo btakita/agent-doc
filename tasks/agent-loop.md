@@ -20,41 +20,28 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: Are we complete?
+### Re: go (HEAD)
 
-Yes — the `/dev` skill is complete as a v1. Here's what we built this session:
+Created `DEV.md` files for the three most actively released submodules:
 
-**Deliverables:**
-| File | Lines | Purpose |
-|------|-------|---------|
-| `.claude/skills/dev/SKILL.md` | 270 | Workspace-specific skill (agent-loop) |
-| `.claude/skills/dev/SPEC.md` | 403 | Portable behavioral contract |
+| File | Type | Key Overrides |
+|------|------|---------------|
+| `src/agent-doc/DEV.md` | rust-maturin | post-release `cargo install`, skill update reminder, lib target testing |
+| `src/corky/DEV.md` | rust-maturin | GCP OAuth build-time injection, YouTube public default warning, two-repo model |
+| `src/instruction-files/DEV.md` | rust-lib | No Makefile, no audit-docs, dependency chain note |
 
-**SKILL.md covers:**
-- 5 commands: `check`, `release`, `status`, `changelog` + workspace-wide `status`
-- 4 project types: Rust+Maturin, Rust lib, Python, JS/TS apps
-- 9-point pre-release verification checklist (tests, audit-docs, README, VERSIONS, SPEC, test coverage, architecture drift, version bump, clean tree)
-- Release workflows per project type with secret handling via `pass`
-- Dependency ordering (instruction-files → agent-doc → corky)
-- Composability hierarchy (SKILL.md → DEV.md → DEV.local.md)
-- Meta-cognition self-update protocol
+**What each DEV.md captures** (beyond SKILL.md defaults):
+- Project-specific gotchas learned from past releases (e.g., stale binary, GCP creds)
+- Secret paths including corky's extra GCP secrets
+- Post-release steps (cargo install, release build)
+- Dependency chain awareness
 
-**SPEC.md covers:**
-- 11 sections (all modular — adopt individually)
-- Project type detection via marker files
-- Generic release workflow + publication target table
-- Secret handling protocol
-- Composability with merge semantics
-- Human-driven SPEC evolution + borrowing from other repos
+**Not yet created** (low release frequency, defaults suffice for now):
+- `tmux-router/DEV.md` — simple Rust lib, no special patterns yet
+- `tagpath/DEV.md` — same
+- JS/TS app DEV.md files — deploy workflows not yet established
 
-**Ready to use:** `/dev agent-doc check` or `/dev corky release` will work now. The skill is live in the skills list.
-
-**Future iterations** (when needed, not now):
-- `DEV.overrides.md` for cross-cutting overrides
-- `DEV.md` files for individual submodules as release patterns emerge
-- Integration testing the full release workflow end-to-end
-
-go
+**Remaining future iteration: integration testing.** We could do a dry-run of `/dev agent-doc release` to validate the full workflow end-to-end. Want to try that, or move on?
 <!-- /agent:exchange -->
 
 <!-- agent:input -->

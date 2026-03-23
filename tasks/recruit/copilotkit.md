@@ -1103,7 +1103,7 @@ My plan is to add live data components such as AG-UI compatible components when 
 Should I mention that I have a client and I am open for more clients to integrate?...So if he has any referrals, I would appreciate it? 
 BCC: Ke
 
-### Re: AG-UI Components Roadmap + Client Referrals + BCC (HEAD)
+### Re: AG-UI Components Roadmap + Client Referrals + BCC
 
 **AG-UI components roadmap:** Yes, mention it — but briefly. It connects your work directly to CopilotKit's ecosystem and shows you're heading toward their stack naturally. One sentence.
 
@@ -1137,7 +1137,7 @@ BCC: Ke
 > Brian
 
 Want me to push this to Gmail drafts via corky?
-<!-- agent:boundary:f726b508 -->
+<!-- agent:boundary:941bea8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

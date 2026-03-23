@@ -13,6 +13,7 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Is Brian Takita Anti-Semitic. Has Brian Takita criticized Israel?
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -280,7 +280,7 @@ Brian
 Ready to send, or further tweaks?
 
 Should we include agent-doc, corky, existence-lang and my recent videos?
-### Re: Including Agent-Doc / Corky / Videos (HEAD)
+### Re: Including Agent-Doc / Corky / Videos
 
 **Recommendation: No — keep this email lean.** Here's why:
 
@@ -294,7 +294,7 @@ Should we include agent-doc, corky, existence-lang and my recent videos?
 - **Code samples** if asked — point to your GitHub repos
 
 Keep the email tight for Lucas. Let the resume carry the open source story. Ready to send as-is?
-<!-- agent:boundary:352e68c7 -->
+<!-- agent:boundary:c23dccab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

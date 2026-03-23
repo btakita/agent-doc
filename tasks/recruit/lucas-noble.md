@@ -516,7 +516,7 @@ Should we include this in the resume?
 
 Your message was cut off ("The ") — want to finish that thought?
 The backtesting uses a time series database written in duckdb & python + pytorch.
-### Re: DuckDB + Python + PyTorch (HEAD)
+### Re: DuckDB + Python + PyTorch
 
 That's a great detail. The stack maps almost perfectly to NextEra's:
 
@@ -530,7 +530,7 @@ That's a great detail. The stack maps almost perfectly to NextEra's:
 DuckDB and TimescaleDB are both optimized for analytical/time-series queries — the concepts transfer directly. This strengthens the "implement research models from papers into software" claim in your email.
 
 **Screening call talking point:** "I'm working through a quantitative backtesting course using DuckDB, Python, and PyTorch for time-series analysis — very similar patterns to what NextEra does with forecasting and optimization."
-<!-- agent:boundary:c3d8fbea -->
+<!-- agent:boundary:9c797e21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

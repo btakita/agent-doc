@@ -205,7 +205,7 @@ I tuned build pipeline performance for users making custom avatars.
 1. Sign RTR (check email from recruiter@occamsgroup.com via SignNow)
 2. Send resume PDF to Andrew (email or LinkedIn)
 3. Wait for submission + next interview with end client
-### Re: ML Emphasis + corky transcribe + CLAUDE.local.md (HEAD)
+### Re: ML Emphasis + corky transcribe + CLAUDE.local.md
 
 **ML emphasis in resume — already strong:**
 The Presence AI section already covers your ML work in detail:
@@ -223,7 +223,7 @@ The Presence AI section already covers your ML work in detail:
 **corky transcribe:** Note — `--gpu` isn't a current flag (checked help). corky transcribe uses GPU automatically when available. I used whisper directly this time. Added preference for `corky transcribe --diarize --speakers` to `CLAUDE.local.md` for future transcriptions.
 
 **Resume file:** `resume/BrianTakita-andrew-curtis.pdf` (rebuilt with ML terms bolded)
-<!-- agent:boundary:24271be0 -->
+<!-- agent:boundary:6d914aff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

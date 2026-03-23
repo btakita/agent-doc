@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume complete. All gaps addressed. Draft email ready to send with updated resume.
+Draft v3 with agentic tooling angle. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -382,7 +382,46 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 Approve to send via corky, or copy-paste manually?
-<!-- agent:boundary:126b1928 -->
+> **Why I'm a strong fit:**
+
+Include my agentic harness + context engineering using agent-doc + corky.
+I can enhance knowledge work automation by creating tools to support:
+- human-agentic alignment
+- dogfooding
+- multimodal knowledge capture
+- ontological + contextual meaning & knowledge transfer
+- correspondence
+### Re: Adding Agentic Tooling (HEAD)
+
+Good call — this differentiates you from a standard full-stack SDE. Revised the "Why I'm a strong fit" section to include it naturally:
+
+**Updated draft:**
+
+---
+
+Hi Lucas,
+
+Thanks for sending over the JD — the role looks like a great fit. Working alongside data and research scientists on forecasting and optimization solutions is right in my wheelhouse.
+
+I'm confirming $140/hr 1099.
+
+**Why I'm a strong fit:**
+
+I bring 20+ years of full-stack experience with deep expertise in the stack they're using — Python, Rust, AWS (including serverless), and various reactive frontend frameworks including Vue.js. I have a degree in Engineering Physics and can implement research models from papers into software — at Presence AI, I built a real-time AI pipeline translating ML research into production systems. My 8 years at Censible building an ESG analytics platform (factor screener, portfolio rebalancer, data visualization, report generation) demonstrates sustained experience turning complex data into actionable products. I'm also building agentic development tools in Rust — a context engineering harness for human-AI alignment, multimodal knowledge capture, and knowledge transfer across teams — which I use daily to accelerate my own workflow. I'm comfortable leading small teams and mentoring — I did both at Pivotal Labs across 20+ startups.
+
+Updated resume attached.
+
+Best,
+Brian
+
+---
+
+**To:** lnoble@true-source.com
+**Subject:** Re: Job Description - Questions - Rate/Resume
+**Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
+
+The agentic tools sentence keeps it concrete without over-explaining — positions you as someone who builds tools that multiply team productivity, not just writes features. Approve to send?
+<!-- agent:boundary:9b101529 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -132,7 +132,7 @@ Brian
 /home/brian/work/btakita/agent-loop/mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt
 
 I am ok with a hybrid role in the short term. But I plan on moving away from the area in the new few months.
-### Re: Updated Reply with Hybrid Position (HEAD)
+### Re: Updated Reply with Hybrid Position
 
 The LinkedIn transcript confirms Andrew's last messages (line 92-96):
 - Role is hybrid/Boston — client wants someone local/on-site as needed
@@ -152,7 +152,7 @@ Best,
 Brian
 
 This is upfront about the timeline: available for the 6-month contract hybrid, remote question only applies to hire conversion. Adjust or send?
-<!-- agent:boundary:d72b2dcb -->
+<!-- agent:boundary:46e980ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

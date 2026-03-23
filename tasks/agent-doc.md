@@ -319,15 +319,75 @@ User clicks "Approve" in JSX → write to &lt;!-- agent:pending --&gt; → agent
 This is where AG-UI's state model becomes relevant — the JSX components could maintain a structured JSON state object (AG-UI StateSnapshot), and incremental updates from the agent could be expressed as JSON Patch deltas (AG-UI StateDelta). The document stays as the persistent layer; the state object is the ephemeral runtime layer for rich UI.
 
 **Verdict:** Highly feasible. The component model is already there. The main work is building the MDX renderer + component registry + file watcher. Phase 1 (read-only viewer) could be a weekend project. Phase 3 (bidirectional) is where the real value lives.
-<!-- agent:boundary:9cead441 -->
+Discuss feasibility of agent-doc + Jupyter.
+### Re: agent-doc + Jupyter feasibility (HEAD)
+
+**Concept:** Jupyter notebooks as agent-doc session documents — cells as components, kernel execution as live evaluation, agent writes code/markdown cells, user runs them interactively.
+
+**Natural mapping:**
+
+| agent-doc | Jupyter |
+|---|---|
+| `&lt;!-- agent:exchange --&gt;` | Markdown cells (conversation) |
+| `&lt;!-- agent:code --&gt;` | Code cells (executable) |
+| `&lt;!-- agent:output --&gt;` | Output cells (rendered results) |
+| Template components | Cell metadata tags |
+| IPC patches | Notebook kernel messages |
+| Snapshot | `.ipynb` checkpoint |
+| CRDT merge | Real-time collaboration (JupyterLab RTC) |
+
+**Two integration strategies:**
+
+**Strategy A — Jupyter as viewer (lightweight):**
+agent-doc generates a `.ipynb` from the session document. Each `&lt;!-- agent:name --&gt;` component maps to a cell. The agent writes code cells that the user can execute. The notebook is a rendered view of the document, not the source of truth.
+
+- Pros: No kernel dependency, document stays markdown, agent-doc binary unchanged
+- Cons: Bidirectional sync is complex (notebook edits must propagate back to `.md`)
+
+**Strategy B — `.ipynb` as session document (native):**
+agent-doc natively supports `.ipynb` files as session documents. The diff/patch/snapshot cycle operates on notebook JSON. Components map to tagged cells (via cell metadata). The agent writes both markdown and code cells.
+
+- Pros: Full Jupyter ecosystem (kernels, widgets, visualizations), native execution
+- Cons: `.ipynb` is JSON not markdown (harder to edit in plain text editors), requires notebook-aware diffing
+
+**What Jupyter adds over plain markdown:**
+
+1. **Live code execution** — Agent writes a data analysis cell, user runs it, sees the plot. Agent sees the output in the next diff cycle and iterates.
+2. **Rich output** — Charts, tables, images, interactive widgets (ipywidgets). Goes far beyond markdown rendering.
+3. **Kernel state** — Variables persist across cells. Agent can build up a computation incrementally: define data → transform → visualize → iterate.
+4. **Language-agnostic** — Python, R, Julia, Rust (via evcxr). The session document becomes a polyglot notebook.
+
+**Technical considerations:**
+
+- **Notebook diffing:** `.ipynb` is JSON with embedded base64 outputs. agent-doc's `similar`-based diff would need a notebook-aware mode that diffs cell sources (not outputs) and ignores execution counts. `nbdime` (Jupyter's diff tool) could be integrated.
+- **Cell-level patches:** Instead of component-level patches, the binary would emit cell-level patches: insert cell at index, replace cell source, append output. This maps well to the existing `PatchBlock` model.
+- **Execution as side effect:** When the agent writes a code cell, the user decides when to execute it. But an "auto-execute" mode could run trusted cells automatically (similar to `agent-doc stream` but with kernel execution).
+- **JupyterLab extension:** Replaces the JetBrains/VS Code plugin. JupyterLab has a rich extension API (TypeScript/React), document model, real-time collaboration, and cell-level rendering. The IPC patch mechanism would work via JupyterLab's `DocumentModel`.
+- **Kernel gateway:** For headless execution (agent runs code without a browser), Jupyter provides `jupyter_client` and `papermill`. agent-doc could spawn a kernel, execute cells, and capture outputs programmatically.
+
+**Simplest useful integration:**
+
+`agent-doc export --jupyter <FILE>` — converts a template-mode document to `.ipynb`:
+- Markdown components → markdown cells
+- Fenced code blocks → code cells (with language from info string)
+- Component metadata preserved in cell tags
+
+This is a one-way export (Phase 0) that gives users a Jupyter view of any session document without changing agent-doc's core architecture.
+
+**Phase 1:** Bidirectional sync — watch the `.ipynb` for changes, diff against the `.md` source, merge back. Use `nbdime` for smart diffing.
+
+**Phase 2:** Native `.ipynb` support — agent-doc reads/writes notebook JSON directly. Components are cells. The diff engine understands cell structure.
+
+**Verdict:** High feasibility, especially the export path. Strategy A (Jupyter as viewer) is achievable with minimal binary changes. Strategy B (native `.ipynb`) is a larger effort but unlocks the full Jupyter ecosystem. The most practical first step is the `export --jupyter` command.
+<!-- agent:boundary:fd1b64f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Interactive MDX viewer — Phase 1 (read-only) as VS Code webview or local dev server
-- [ ] Remark plugin for `&lt;!-- agent:name --&gt;` → JSX component transformation
-- [ ] Consider AG-UI state model for JSX component runtime state
+- [ ] `agent-doc export --jupyter` — convert template docs to `.ipynb`
+- [ ] Interactive MDX viewer (Phase 1)
+- [ ] Consider native `.ipynb` support (Strategy B) for full Jupyter integration
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

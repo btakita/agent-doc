@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v3 with agentic tooling angle. Ready to send.
+Draft v4 — broken into paragraphs with agentic benefits bullets. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -421,7 +421,56 @@ Brian
 **Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
 
 The agentic tools sentence keeps it concrete without over-explaining — positions you as someone who builds tools that multiply team productivity, not just writes features. Approve to send?
-<!-- agent:boundary:6b6cf8bb -->
+The paragraph is dense. So break it up.
+
+Why not include benefits such as?
+- human-agentic alignment
+- dogfooding
+- multimodal knowledge capture
+- ontological + contextual meaning & knowledge transfer
+- correspondence
+### Re: Break Up Paragraph + Add Benefits (HEAD)
+
+Restructured into shorter paragraphs with a bulleted benefits section:
+
+**Updated draft:**
+
+---
+
+Hi Lucas,
+
+Thanks for sending over the JD — the role looks like a great fit. Working alongside data and research scientists on forecasting and optimization solutions is right in my wheelhouse.
+
+I'm confirming $140/hr 1099.
+
+**Why I'm a strong fit:**
+
+I bring 20+ years of full-stack experience with deep expertise in the stack they're using — Python, Rust, AWS (including serverless), and various reactive frontend frameworks including Vue.js.
+
+I have a degree in Engineering Physics and can implement research models from papers into software. At Presence AI, I built a real-time AI pipeline translating ML research into production systems. My 8 years at Censible building an ESG analytics platform (factor screener, portfolio rebalancer, data visualization, report generation) demonstrates sustained experience turning complex data into actionable products.
+
+I'm also building agentic development tools in Rust that I dogfood daily to accelerate knowledge work:
+
+- Human-agentic alignment — tools for productive human+AI collaboration
+- Multimodal knowledge capture — structured capture across text, audio, and video
+- Ontological and contextual knowledge transfer — consistent meaning across teams and codebases
+- Correspondence automation — git-native email, messaging, and social media integration
+
+I'm comfortable leading small teams and mentoring — I did both at Pivotal Labs across 20+ startups.
+
+Updated resume attached.
+
+Best,
+Brian
+
+---
+
+**To:** lnoble@true-source.com
+**Subject:** Re: Job Description - Questions - Rate/Resume
+**Attachment:** `resume/BrianTakita-nextera-analytics.pdf`
+
+Much more scannable now. Approve to send?
+<!-- agent:boundary:20775f2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

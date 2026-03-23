@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Post-interview debrief complete. Follow-up strategy: LinkedIn message to Jordan + email Kevin Volk + contribute to CopilotKit OSS. Reframe from ideator to executor.
+Follow-up strategy finalized. LinkedIn message drafted. Investor angle tabled for 2-3 months. Next: send message + update Kevin.
 <!-- /agent:status -->
 
 ## Exchange
@@ -852,9 +852,15 @@ Completely understandable. The possibility was exciting, the chemistry was good,
 >
 > Thanks for the real talk. It landed.
 
+I actually have multiple releases across multiple projects every day.
+I'm working on my social media presence & marketing...with the help of agents.
+Should I ask for his email?
+
 **2. Email Kevin Volk (through existing channel):**
 
 Let Kevin know the outcome and that Jordan suggested staying in touch. Kevin can keep you in the pipeline for future roles. Ask Kevin if he can share Jordan's email for a follow-up — that's his job as the recruiter bridge.
+
+Please draft an email.
 
 **3. Contribute to CopilotKit repos:**
 
@@ -862,9 +868,16 @@ This is the highest-leverage move. Pick 2-3 issues, submit quality PRs. This doe
 - Proves you can do integration work
 - Puts your name in front of the team organically
 
+I don't have a natural reason to contribute yet. I don't use their components. I may in the future.
+Perhaps with Judith Krug's project.
+But I need to have a job to use their components before it's worthwhile for me to take the time to contribute to their Open Source.
+
 **4. On cashflow:**
 
 Be direct with Kevin: "I need work. The enterprise/R&D roles Jordan mentioned aren't open yet, but I'm available for contract work, integration work, whatever is needed now. Is there flexibility?" Recruiters understand cash flow urgency. Jordan may not know you need income soon — Kevin should.
+
+I agree. Should I mention that to Jordan?
+If he is aligned with where I want to take things, could he be an investor?
 
 ---
 
@@ -873,14 +886,58 @@ Be direct with Kevin: "I need work. The enterprise/R&D roles Jordan mentioned ar
 **"I dogfood. I build tools, then I use them to build more tools. agent-doc isn't a side project — it's my daily development environment. The same energy I put into building it is the same energy I'd put into CopilotKit integrations."**
 
 This reframe connects your passion (building agent-doc) to their need (someone who lives in the ecosystem and ships).
-<!-- agent:boundary:a7e025d6 -->
+
+### Re: Follow-up Strategy — Email, OSS, Investor? (HEAD)
+
+---
+
+#### Should you ask for his email?
+
+**No — go through Kevin Volk.** Ask Kevin: "Can you share Jordan's email so I can send a follow-up with the demo links he asked for?" That's a normal recruiter request. If Kevin can't, use LinkedIn messaging directly to Jordan — he's already engaged there.
+
+#### On OSS contributions
+
+You're right — forced OSS contributions without genuine use are performative and Jordan would see through that. Don't contribute just to be visible. If Judith Krug's project or another real use case brings you into CopilotKit components naturally, then contribute authentically. Otherwise, skip it.
+
+#### Should you pitch Jordan as an investor?
+
+**Not in this follow-up. Not yet.** Here's why:
+
+- Jordan just told you "this isn't a fit for the roles we have." Immediately pivoting to "invest in me" would feel like you're not listening.
+- He DID say "I've never seen a better time to be a founder" — that's an opening, but it needs to mature. Let the relationship breathe.
+- The right sequence: (1) send follow-up with demos, (2) stay in touch over the next month, (3) if he engages with your content and the conversation deepens, THEN explore whether he'd be interested in advising or investing.
+- Jordan has startup investor instincts (CloudCrowd, Napster, Servio, now CopilotKit). If agent-doc gains traction and he sees it, he may bring it up himself.
+
+**Future framing (not now, maybe month 2-3):**
+> "You mentioned it's a great time to be a founder. I've been taking that seriously. agent-doc is gaining traction — [metrics]. Would you be open to a conversation about advising?"
+
+---
+
+#### Draft LinkedIn Message to Jordan
+
+> Jordan — great reconnecting today. I appreciate the candor.
+>
+> I want to be clear about something: I got excited talking about the vision, but I should have been more direct — I'm a builder who ships daily. I release across crates.io, PyPI, and npm regularly. I built a cross-platform FFI plugin system for editor integration. I maintain a JetBrains plugin with real-time IPC patching. 40k+ commits.
+>
+> I understand the current need is filling the integration matrix. That's execution work I do as part of my daily workflow — shipping packages across ecosystems and integrating with external tools.
+>
+> Here are the demo videos I mentioned: [links]
+>
+> Staying in touch as you suggested. Thanks for the real talk.
+
+**Keep it on LinkedIn** unless Kevin provides the email. LinkedIn is fine for this — it's where the relationship already lives.
+
+#### On mentioning cashflow to Jordan
+
+**No.** Don't mention cashflow needs to Jordan directly. That's a recruiter conversation. Tell Kevin you're available immediately and flexible on role scope. Kevin can advocate for you internally if there's contract work or a role that opens up sooner.
+<!-- agent:boundary:b39cb7f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Draft LinkedIn message to Jordan (share video links + reframe as executor)
-- Email Kevin Volk: outcome update + ask about contract flexibility + request Jordan's email
-- Identify 2-3 CopilotKit issues to contribute to
-- Calendar: 3-month check-in (June 2026)
+- Send LinkedIn message to Jordan with video links
+- Email Kevin Volk: outcome update, ask for Jordan's email, mention availability for any role
+- Explore Judith Krug project as natural CopilotKit integration path
+- Calendar: revisit investor conversation in 2-3 months if traction warrants
 <!-- /agent:pending -->

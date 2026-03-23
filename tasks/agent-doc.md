@@ -807,7 +807,7 @@ So the user got **double execution**:
 This confirms the fix should be `--no-auto-start` on the sync call from route. Let me implement it now.
 continue
 I did not see the response btw
-### Re: Continue + missed response (HEAD)
+### Re: Continue + missed response
 
 **Summary of what was done (may have been missed):**
 
@@ -822,7 +822,7 @@ This prevents:
 - Double execution (command sent to original pane + new pane)
 
 Ready to release as v0.25.7 or test first?
-<!-- agent:boundary:b479549f -->
+<!-- agent:boundary:07025a0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -156,7 +156,7 @@ Please transcribe and diarize my conversation with Andrew Curtis.
 /home/brian/work/btakita/agent-loop/mail/contacts/andrew-curtis/andrew-curtis_20260323-153505_4106895587.amr
  
 From this conversation + all other context, please customize my resume.
-### Re: Call Transcription + Resume Customization (HEAD)
+### Re: Call Transcription + Resume Customization
 
 **Call transcribed and diarized:** `mail/contacts/andrew-curtis/20260323-phone-call-transcript.md`
 16-minute screening call with full speaker attribution.
@@ -194,7 +194,7 @@ From this conversation + all other context, please customize my resume.
 1. Sign RTR (check email from recruiter@occamsgroup.com via SignNow)
 2. Send resume PDF to Andrew (email or LinkedIn)
 3. Wait for submission + next interview with end client
-<!-- agent:boundary:29d6dc61 -->
+<!-- agent:boundary:bde2d34b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

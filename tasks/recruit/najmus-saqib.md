@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Symlinks fixed. Draft reply still ready for review.
+Reply sent. Najmus requesting resume + Monday call availability. Awaiting Brian's input.
 <!-- /agent:status -->
 
 ## Exchange
@@ -38,7 +38,6 @@ Brian
 Want to tweak, or ready to send?
 
 AGENTS.md should be the canonical file. CLAUDE.md should symlink to AGENTS.md
-<!-- agent:boundary:8e800b85-e6a2-4bc7-998e-91eb2a8a1728 -->
 ### Re: Symlink Fix
 
 Fixed. `AGENTS.md` is now the canonical file, `CLAUDE.md` symlinks to it — for all contacts created this session:
@@ -46,12 +45,22 @@ Fixed. `AGENTS.md` is now the canonical file, `CLAUDE.md` symlinks to it — for
 - `mail/contacts/lucas-noble/`
 - `mail/contacts/brooke-yates/`
 - `mail/contacts/benjamin-becker/`
-<!-- agent:boundary:e4d1cf65-8577-47cf-a873-dcc9c989e72f -->
+### Re: Status Update (HEAD)
+
+Reply was sent. Najmus responded (7:02 PM):
+
+> Thanks for showing interest. Kindly share your resume and let me know the best time to reach you over phone on Monday for a quick call. We'll discuss in detail and then move forward.
+
+**Next steps:**
+1. **Share resume** via LinkedIn message — tailored or standard?
+2. **Confirm Monday availability** — what times work for a phone call?
+<!-- agent:boundary:b10ecfa6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send reply to Najmus Saqib via LinkedIn
-- Generate custom resume if requested
+- Share resume with Najmus via LinkedIn
+- Confirm Monday phone call availability
+- Generate tailored resume if requested
 <!-- /agent:pending -->

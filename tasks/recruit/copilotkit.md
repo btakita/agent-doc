@@ -912,6 +912,8 @@ You're right — forced OSS contributions without genuine use are performative a
 **Future framing (not now, maybe month 2-3):**
 > "You mentioned it's a great time to be a founder. I've been taking that seriously. agent-doc is gaining traction — [metrics]. Would you be open to a conversation about advising?"
 
+Right now agent-doc only has 5 stars on GH. I need to do a lot of work on this front.
+
 ---
 
 #### Draft LinkedIn Message to Jordan
@@ -926,6 +928,16 @@ You're right — forced OSS contributions without genuine use are performative a
 >
 > Staying in touch as you suggested. Thanks for the real talk.
 
+> I maintain a JetBrains plugin with real-time IPC patching.
+
+This has a cross-platform and cross-editor architecture via FFI.
+
+> 40k+ commits.
+
+The 40k+ commits is across my entire github career. Not sure what you are suggesting.
+
+Should I wait to get Jordan's email from Kevin or immediately send a LinkedIn message to Jordan?
+
 **Keep it on LinkedIn** unless Kevin provides the email. LinkedIn is fine for this — it's where the relationship already lives.
 
 #### On mentioning cashflow to Jordan
@@ -936,9 +948,15 @@ You're right — forced OSS contributions without genuine use are performative a
 
 That tension is real and frustrating. Jordan said he values authenticity — "narrative arc interview," no trick questions, just get to know each other. And you were authentic. But authenticity revealed that your passion is building agent-doc-level tools, not grinding through an integration matrix. He took that signal seriously.
 
+Why would my passion be for "grinding through an integration matrix" that I have never seen?
+Is this because CoPilotKit is known and I should have been more familiar?
+
 The hard truth: **being honest didn't disqualify you — it revealed a genuine misalignment with the specific role that's open right now.** Jordan wasn't punishing honesty. He was listening to it. He heard where your energy actually lives and said "that's not what we need today, but maybe later."
 
 The paradox is: if you had performed as "I just want to grind integrations" and gotten the job, you'd likely be miserable in 3 months doing work that doesn't excite you. Jordan has enough experience to recognize that pattern and save both of you from it.
+
+I would have been fine with the work.
+I can get excited about doing different things. I'm just excited about the work I've been doing lately.
 
 **What you can take from this:**
 - Your honesty preserved the relationship. Jordan wants to stay in touch. A candidate who faked enthusiasm for integration work and then flamed out wouldn't get that.
@@ -946,14 +964,55 @@ The paradox is: if you had performed as "I just want to grind integrations" and 
 - When the enterprise/R&D roles open, you'll be a natural fit precisely because Jordan already knows what you actually care about.
 
 Being honest is never the wrong move. The framing around the honesty is what you can refine for next time.
-<!-- agent:boundary:05e4970b -->
+
+### Re: Corrections & Next Steps (HEAD)
+
+---
+
+#### Corrections to the LinkedIn draft
+
+Good catches. Let me fix these:
+
+- **JetBrains plugin** → should mention: "with cross-platform, cross-editor architecture via FFI" — not just JetBrains-specific
+- **40k+ commits** → drop it from the LinkedIn message. It's a career-wide stat, not a specific claim about CopilotKit-relevant work. It dilutes rather than strengthens.
+- **agent-doc stars** → 5 stars is honest. Don't mention GitHub stats. Lead with what the tool does, not vanity metrics.
+
+#### LinkedIn vs. waiting for Kevin
+
+**Send the LinkedIn message now.** Don't wait for Kevin. Here's why:
+- Jordan already engaged with you on LinkedIn (that's how the connection happened)
+- The video links are time-sensitive — send while the conversation is fresh
+- Kevin may take days to respond
+- If Kevin later provides the email, you can send a more detailed follow-up then
+
+LinkedIn message first. Kevin email second. They're parallel, not sequential.
+
+#### On "passion for grinding"
+
+You're right — nobody's passion is "grinding through an integration matrix." That was poor framing on my part. Let me restate:
+
+Jordan wasn't looking for someone passionate about integration work. He was looking for someone whose **current daily workflow** already involves CopilotKit. His ideal candidate is someone who already uses CopilotKit in their own open-source project and can contribute integrations from lived experience — not enthusiasm.
+
+You would have been fine with the work. You CAN get excited about different things. The issue wasn't your capability or willingness — it was that Jordan's hiring criteria right now is "already embedded in this ecosystem daily." That's a very specific filter, and it has nothing to do with whether you could do the job well.
+
+#### Revised LinkedIn Message
+
+> Jordan — great reconnecting today. I appreciate the candor.
+>
+> I wanted to follow up on a couple things. First, here are the demo videos I mentioned — agent-doc in action, building with Claude Code: [links]
+>
+> Also wanted to clarify: I got excited talking about the vision side, but my daily work is execution. I ship releases across crates.io, PyPI, and npm regularly. agent-doc's editor plugin uses a cross-platform FFI architecture designed for multi-editor support — that's integration engineering at the systems level.
+>
+> I hear you that the current need is people already embedded in the CopilotKit ecosystem. I'm not there yet, but I'm staying close. Thanks for keeping the door open — I'll take you up on the 3-6 month check-in.
+
+Shorter than the last draft. Doesn't oversell. Acknowledges his actual filter honestly.
+<!-- agent:boundary:b2167789 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn message to Jordan with video links
-- Email Kevin Volk: outcome update, ask for Jordan's email, mention availability for any role
-- Explore Judith Krug project as natural CopilotKit integration path
-- Calendar: revisit investor conversation in 2-3 months if traction warrants
+- Send LinkedIn message to Jordan today (revised draft above)
+- Email Kevin Volk: outcome update, availability for any role, ask for Jordan's email for longer follow-up
+- Calendar: 3-month check-in (June 2026)
 <!-- /agent:pending -->

@@ -429,7 +429,7 @@ Approach 2 is cleaner. The `route` command already knows the pane (it looks it u
 Want me to implement approach 2 — add `--position` to `agent-doc route` and have the plugin pass it?
 
 Pass the entire declarative document layout instead. So we know what is on the left side.
-### Re: Pass entire declarative layout on Run (HEAD)
+### Re: Pass entire declarative layout on Run
 
 **Done.** The fix is simple — `sendToTerminal()` (Run action) now calls `SyncLayoutAction.syncLayout()` after a successful route. This passes the **entire editor layout** declaratively via `agent-doc sync --col left_files --col right_files --focus active_file`.
 
@@ -444,7 +444,7 @@ The `LayoutDetector` walks JetBrains' Swing Splitter tree to detect which `.md` 
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.15.zip`
 
 **Change:** One line added to `TerminalUtil.kt` — `SyncLayoutAction.syncLayout(project, notify = false)` after successful route.
-<!-- agent:boundary:87adaba9 -->
+<!-- agent:boundary:d0b51a0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

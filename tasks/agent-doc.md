@@ -1068,6 +1068,8 @@ Good naming suggestions. Let me think through the semantics:
 
 **`agent_doc_should_run`** — Better than `should_submit`. "Run" matches the user-facing action name ("Run Agent Doc"). Though `should_submit` matches the internal terminology (`submit.rs`). I'd lean toward `should_run` since the FFI is a plugin-facing API, and plugins know "Run", not "submit".
 
+Re should rename the internal terminology from `submit.rs` to `run.rs`. I want to rename all usages of `submit` when it should be `run`.
+
 **`agent_doc_wait_for_debounce_settle`** — More general than `wait_for_typing_settle`. Correctly abstracts away the *reason* for the debounce — it's not just typing, it could be any document change.
 
 **Alternative consideration:**
@@ -1093,13 +1095,37 @@ bool agent_doc_await_idle(const char* file_path, int64_t debounce_ms, int64_t ti
 | `agent_doc_await_idle(file, debounce_ms, timeout_ms)` | Blocks until idle, returns bool |
 
 Two functions, one fire-and-forget + one blocking query. Clean.
-<!-- agent:boundary:d76ff60a -->
+Good
+### Re: Rename submit → run + naming approved (HEAD)
+
+**Naming approved:** `agent_doc_document_changed` + `agent_doc_await_idle`.
+
+**Submit → Run rename:** Noted. This is a broader refactor — `submit.rs` → `run.rs`, all internal references to "submit" become "run". This aligns with the user-facing action name ("Run Agent Doc") and the CLI command (`agent-doc route`, which triggers a "run").
+
+**Scope of the rename:**
+- `src/submit.rs` → `src/run.rs`
+- `submit::run()` → `run::execute()` (or `run::run()` — though `run::run` is redundant)
+- References in `main.rs`, `watch.rs`, `stream.rs`, `route.rs`
+- SPEC.md references
+- CLAUDE.md module layout table
+
+This is a mechanical rename — no logic changes. Want me to do this now as part of the v0.25.7 release, or separately?
+
+For the v0.25.7 release, the current batch is:
+1. Route + sync race fix (`run_layout_only`)
+2. FFI debounce (`document_changed` + `await_idle`)
+3. Submit → run rename
+4. Audit docs + SPEC update
+
+That's a solid feature release. Shall I proceed with all four?
+<!-- agent:boundary:f88785f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [ ] **Implement FFI debounce** — `document_changed` + `await_idle`
+- [ ] **Rename submit → run** across codebase
 - [ ] Update JetBrains plugin to use FFI debounce
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7

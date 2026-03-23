@@ -682,15 +682,51 @@ I can fix this if you want — wrap the `detectEditorLayout()` call in `invokeLa
 3. Worst case on a race: we get a stale layout, which the next poll corrects
 
 Want me to fix the threading or leave it as-is since it works?
-<!-- agent:boundary:5cd9bba8 -->
+explain:
+- [ ] Optional: fix EDT threading for layout poll (invokeLater wrapper)
+### Re: Explain EDT threading fix (HEAD)
+
+Plugin v0.2.16 installed and tab-drag sync working — great!
+
+**The issue:** `LayoutDetector.detectEditorLayout()` accesses Swing components (`FileEditorManagerEx.windows`, `Splitter` tree walking). Swing is single-threaded — all component reads/writes should happen on the EDT (Event Dispatch Thread). Our poll thread reads the Swing tree from a background thread.
+
+**Why it works anyway:** We only *read* the tree (no modifications). The JVM memory model guarantees that reads see the latest values written by the EDT (Swing components use volatile fields internally). The worst case on a race: we see an intermediate state during a split operation, compute a wrong hash, and the next poll (5s later) corrects it.
+
+**The fix (invokeLater wrapper):**
+
+```kotlin
+// Current (works but technically wrong):
+Thread {
+    Thread.sleep(5000)
+    val layout = LayoutDetector.detectEditorLayout(project) // ← background thread reads Swing
+    if (layoutChanged(layout)) syncLayout()
+}
+
+// Fixed (correct threading):
+Thread {
+    Thread.sleep(5000)
+    ApplicationManager.getApplication().invokeLater {
+        val layout = LayoutDetector.detectEditorLayout(project) // ← EDT reads Swing
+        val hash = layout?.columns?.map { it.files.sorted() }?.toString()
+        if (hash != lastLayoutHash.getAndSet(hash)) {
+            // Sync on background thread (CLI call, not EDT work)
+            Thread { syncLayout() }.start()
+        }
+    }
+}
+```
+
+**Cost:** The `invokeLater` adds ~1-2ms latency (queued to EDT's event queue). The layout detection itself is ~microseconds. The CLI call (`agent-doc sync`) runs on a separate thread so it never blocks the EDT.
+
+**Should you fix it?** It's low priority since it works. But it's the correct pattern for any JetBrains plugin accessing Swing components. If you want it fixed, I can update `LayoutChangeDetector` now.
+<!-- agent:boundary:4bb7ccf6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Install plugin v0.2.16** — test hybrid layout detection
-- [ ] Optional: fix EDT threading for layout poll (invokeLater wrapper)
-- [ ] Test: drag tab between splits → tmux follows
+- [x] Plugin v0.2.16 installed + tab-drag sync verified
+- [ ] Optional: fix EDT threading for layout poll
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

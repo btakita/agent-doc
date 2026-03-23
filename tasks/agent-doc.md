@@ -251,16 +251,83 @@ Sources:
 - [AG-UI State Management](https://docs.ag-ui.com/concepts/state)
 - [AG-UI Events](https://docs.ag-ui.com/concepts/events)
 - [Building Real-Time AI Agent UIs with AG-UI](https://itsayushgupta.medium.com/building-real-time-ai-agent-uis-with-the-ag-ui-protocol-and-agui-hooks-14a78a8f7002)
-<!-- agent:boundary:83d4e2c5 -->
+Discuss feasibility of an interactive MDX document. Where live JSX components are embedded in Markdown.
+### Re: Interactive MDX documents with live JSX components (HEAD)
+
+**Concept:** An agent-doc session document rendered as MDX, where `&lt;!-- agent:name --&gt;` components become live React components — progress bars, approval buttons, diff viewers, task boards — updated in real-time by the agent via IPC patches.
+
+**Feasibility: High, with clear layering.**
+
+The key insight: agent-doc's component model (`&lt;!-- agent:name --&gt;...&lt;!-- /agent:name --&gt;`) already maps directly to JSX component slots. An MDX renderer would:
+
+1. **Parse** the document's HTML comments as component boundaries (same as the binary does today)
+2. **Map** each `agent:name` to a React component: `<AgentExchange />`, `<AgentPending />`, `<AgentStatus />`
+3. **Subscribe** to IPC patches (via filesystem watcher or WebSocket bridge) for real-time updates
+4. **Render** the component content as markdown (default) or structured UI (when the component has a registered JSX renderer)
+
+**Architecture layers:**
+
+```
+┌─────────────────────────────────────┐
+│  MDX Document (source of truth)     │  ← agent-doc write/commit
+├─────────────────────────────────────┤
+│  MDX Compiler (mdx-js/next-mdx)    │  ← parses MD + JSX
+├─────────────────────────────────────┤
+│  Component Registry                 │  ← maps agent:name → React component
+├─────────────────────────────────────┤
+│  Live Update Layer                  │  ← watches IPC patches, re-renders
+├─────────────────────────────────────┤
+│  Browser / Electron / VS Code panel │  ← renders the live MDX
+└─────────────────────────────────────┘
+```
+
+**What this enables:**
+
+- **`&lt;!-- agent:pending --&gt;`** → `<TaskBoard items={pending} onCheck={markDone} />` — interactive checkbox list that writes back to the document when the user clicks
+- **`&lt;!-- agent:exchange --&gt;`** → `<ChatSurface messages={exchange} />` — rich chat UI with code highlighting, collapsible sections, inline images
+- **`&lt;!-- agent:status --&gt;`** → `<StatusBar version="v0.25.5" tests={522} />` — compact metadata badge
+- **`&lt;!-- agent:diff --&gt;`** → `<DiffViewer patches={patches} />` — side-by-side code diff
+- **Custom components** → `<ApprovalButton onApprove={...} />`, `<ProgressRing percent={75} />`
+
+**Bidirectional flow:**
+
+The critical feature: user interactions in JSX components (clicking approve, checking a task, typing in a form) write back to the document. This closes the loop — the document remains the source of truth, but the UI provides richer interaction than raw markdown editing.
+
+```
+User clicks "Approve" in JSX → write to &lt;!-- agent:pending --&gt; → agent sees diff → responds
+```
+
+**Implementation path (incremental):**
+
+1. **Phase 1 — Read-only MDX viewer:** Render the current document as MDX with basic component mapping. No live updates, just a nicer view. Could be a VS Code webview panel or a local dev server.
+
+2. **Phase 2 — Live updates via file watcher:** Watch the document file for changes, re-parse and re-render. The agent writes via IPC, the MDX viewer picks up the change. This is the AG-UI snapshot-delta model but over the filesystem.
+
+3. **Phase 3 — Bidirectional JSX → document:** User interactions in JSX components write back to the document (via `agent-doc write` or direct file edit). The agent sees these as diffs in the next cycle.
+
+4. **Phase 4 — WebSocket bridge:** Replace file-watching with a WebSocket connection between the binary and the MDX viewer. This enables true real-time streaming (no filesystem polling latency).
+
+**Technical considerations:**
+
+- **MDX compilation:** `@mdx-js/mdx` compiles MDX to JSX at build time. For live updates, you'd need runtime compilation (slower) or a hot-reload setup. Next.js MDX or Astro MDX could work.
+- **Component boundary detection:** The `&lt;!-- agent:name --&gt;` syntax is an HTML comment, which MDX passes through as-is. You'd need a remark plugin to detect these and transform them into JSX component boundaries.
+- **Conflict resolution:** If the user modifies the document via the JSX UI *and* via the editor simultaneously, the CRDT merge (yrs) handles it — but the JSX UI needs to be a CRDT client too.
+- **Portable document:** The MDX document must still be valid markdown when rendered without the JSX runtime (degraded mode). The `&lt;!-- agent:name --&gt;` comments are invisible in plain markdown, so the document degrades gracefully.
+
+**What AG-UI contributes here:**
+
+This is where AG-UI's state model becomes relevant — the JSX components could maintain a structured JSON state object (AG-UI StateSnapshot), and incremental updates from the agent could be expressed as JSON Patch deltas (AG-UI StateDelta). The document stays as the persistent layer; the state object is the ephemeral runtime layer for rich UI.
+
+**Verdict:** Highly feasible. The component model is already there. The main work is building the MDX renderer + component registry + file watcher. Phase 1 (read-only viewer) could be a weekend project. Phase 3 (bidirectional) is where the real value lives.
+<!-- agent:boundary:94446860 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] agent-doc v0.25.5 released
-- [x] Plugin v0.2.14 installed
-- [ ] Consider JSON Patch (RFC 6902) for component-level deltas
-- [ ] Consider structured `agent:state` component for rich plugin rendering
+- [ ] Interactive MDX viewer — Phase 1 (read-only) as VS Code webview or local dev server
+- [ ] Remark plugin for `&lt;!-- agent:name --&gt;` → JSX component transformation
+- [ ] Consider AG-UI state model for JSX component runtime state
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

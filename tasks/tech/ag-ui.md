@@ -16,7 +16,7 @@ agent_doc_write: crdt
 Explain how the shared state works https://docs.copilotkit.ai/built-in-agent/shared-state
 Does the backend ai model or harness have state
 
-### Re: AG-UI Shared State (HEAD)
+### Re: AG-UI Shared State
 
 AG-UI's shared state creates a **bidirectional synchronization channel** between agent backends and frontend UIs. Here's how it works:
 
@@ -79,7 +79,7 @@ The `useCoAgent` hook creates real-time read/write access to agent state. `copil
 ---
 
 **Note:** Your message was cut off at "Does th" — please complete the question and I'll answer it.
-<!-- agent:boundary:c3944007 -->
+<!-- agent:boundary:caf89b87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

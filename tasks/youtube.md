@@ -555,7 +555,7 @@ First comment with all links posted (comment ID: `7441817705332125697`):
 8. LinkedIn post with first comment links
 
 I want **VideoObject** in the json+ld where applicable.
-### Re: VideoObject JSON-LD Added (HEAD)
+### Re: VideoObject JSON-LD Added
 
 Added structured data to all 7 blog posts:
 
@@ -568,7 +568,7 @@ Added structured data to all 7 blog posts:
 **Series overview** — `schema.org/ItemList` with all 6 videos as ListItems with positions.
 
 Committed and pushed. CF Pages will redeploy with the structured data.
-<!-- agent:boundary:f59d3368 -->
+<!-- agent:boundary:877a9a7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

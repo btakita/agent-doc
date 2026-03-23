@@ -38,7 +38,24 @@ To share a calendar from Account A to Account B:
    - Or: In Google Calendar, click **+** next to "Other calendars" then **Subscribe to calendar** and enter Account A's email
 
 The shared calendar will appear under "Other calendars" in Account B's sidebar.
-<!-- agent:boundary:d84d9738 -->
+I don't see the 3 dots or **Settings and sharing**
+See /home/brian/work/btakita/agent-loop/tasks/screenshot.png
+
+**Re: can't find three dots**
+
+I can see your calendar in the screenshot. The three dots only appear **on hover**:
+
+1. Move your mouse over **"Brian Takita"** in the left sidebar under "My calendars"
+2. A three-dot menu icon (⋮) will appear to the right of the calendar name
+3. Click it → select **Settings and sharing**
+
+If hovering doesn't reveal it, you can also:
+- Click the **gear icon** (⚙️) in the top-right toolbar → **Settings**
+- In the left sidebar of settings, expand your calendar name under "Settings for my calendars"
+- Click **Share with specific people or groups**
+
+I can also see you have an interview at 5 PM Monday — good luck!
+<!-- agent:boundary:44af2101 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

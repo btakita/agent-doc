@@ -136,7 +136,7 @@ Should I break it up into multiple youtube videos according to distinct subjects
 Running silence detection on all 6 files now. Once complete, I'll show how much dead air each has and produce trimmed versions.
 
 Do you know the topics of each session, or should I transcribe to identify subjects?
-<!-- agent:boundary:00bf5a04 -->
+<!-- agent:boundary:76a2cd2c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All 6 episodes light-edited and quality-verified. Silence removal confirmed safe — only dead air cut.
+6 YouTube drafts ready. Blocked: YouTube OAuth token expired — run `corky youtube auth`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -262,15 +262,37 @@ I checked the top 5 longest silence gaps in Ep5 (the highest cut rate at 30.4%) 
 Active coding with any keyboard/mouse sound stays above -30dB and is preserved. The 3s minimum also prevents cutting natural pauses between sentences.
 
 **Bottom line:** The light edit removes waiting-for-agent downtime and true idle periods. Active coding and commentary are preserved.
-<!-- agent:boundary:97fe67e1 -->
+I updated corky to support youtube playlists. See tasks/corky.md.
+Let's create a playlist of these episodes.
+Go
+### Re: YouTube Drafts & Playlist (HEAD)
+
+**6 YouTube drafts created** with video paths, titles, and descriptions. All set to `ready` status.
+
+| Ep | Draft File | Title |
+|----|-----------|-------|
+| 1 | 20260323-072607-youtube.md | Skill to Binary Ep1: The CRDT Ordering Bug |
+| 2 | 20260323-072636-youtube.md | Skill to Binary Ep2: The Snowball Bug |
+| 3 | 20260323-072638-youtube.md | Skill to Binary Ep3: AST Parsing & GPU Transcription |
+| 4 | 20260323-072640-youtube.md | Skill to Binary Ep4: IPC Timeout Deep Dive |
+| 5 | 20260323-072620-youtube.md | Skill to Binary Ep5: Preflight & Browser Extension |
+| 6 | 20260323-072621-youtube.md | Skill to Binary Ep6: Deterministic Primitives |
+
+**Blocker:** YouTube OAuth token expired. Please run:
+```sh
+corky youtube auth
+```
+Then re-run `/agent-doc tasks/youtube.md` to continue with publishing.
+<!-- agent:boundary:47a055ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Create 6 YouTube drafts with corky
-- [ ] Upload 6 episodes to YouTube
-- [ ] Create YouTube playlist (manual or build corky playlist command)
+- [ ] Re-authenticate YouTube OAuth (`corky youtube auth`)
+- [ ] Publish 6 episodes to YouTube
+- [ ] Create "Skill to Binary" playlist
+- [ ] Add all 6 videos to playlist
 - [ ] Generate SRT closed captions from transcripts
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)

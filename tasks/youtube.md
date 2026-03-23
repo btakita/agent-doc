@@ -534,7 +534,7 @@ Posted comments on all 6 episodes linking to their blog post analysis:
 Each comment includes: blog post link, topics covered, and series overview link. Pin manually via the links above.
 Continue:
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
-### Re: LinkedIn Post Published (HEAD)
+### Re: LinkedIn Post Published
 
 **LinkedIn post:** https://www.linkedin.com/feed/update/urn:li:share:7441817651577786369
 
@@ -553,7 +553,7 @@ First comment with all links posted (comment ID: `7441817705332125697`):
 6. Blog deployed to Cloudflare Pages
 7. YouTube comments with blog links on all 6 videos
 8. LinkedIn post with first comment links
-<!-- agent:boundary:e9974003 -->
+<!-- agent:boundary:1164d531 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

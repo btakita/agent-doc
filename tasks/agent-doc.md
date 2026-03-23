@@ -719,14 +719,27 @@ Thread {
 **Cost:** The `invokeLater` adds ~1-2ms latency (queued to EDT's event queue). The layout detection itself is ~microseconds. The CLI call (`agent-doc sync`) runs on a separate thread so it never blocks the EDT.
 
 **Should you fix it?** It's low priority since it works. But it's the correct pattern for any JetBrains plugin accessing Swing components. If you want it fixed, I can update `LayoutChangeDetector` now.
-<!-- agent:boundary:5f4d9ddd -->
+
+Implement
+### Re: Implement EDT threading fix (HEAD)
+
+**Done.** `LayoutChangeDetector` now uses correct threading:
+
+- **`attachContainerListener()`** — wrapped in `invokeLater`, Swing tree access on EDT
+- **`checkAndSync()`** — layout detection on EDT via `invokeLater`, CLI sync call on background daemon thread
+- **Disposed/project checks** — added `project.isDisposed` guard inside `invokeLater` blocks
+
+Plugin v0.2.17 built (unsigned + signed). Install from:
+`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.17.zip`
+<!-- agent:boundary:509224cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Plugin v0.2.16 installed + tab-drag sync verified
-- [ ] Optional: fix EDT threading for layout poll
+- [x] EDT threading fix for layout poll
+- [ ] **Install plugin v0.2.17**
+- [ ] Commit plugin changes to agent-doc repo
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

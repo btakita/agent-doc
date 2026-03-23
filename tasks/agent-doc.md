@@ -853,7 +853,7 @@ Option 2 is more robust — it works for both plugin and CLI invocations.
 Want me to implement option 2 (preflight debounce)?
 mtime does not work...because the editor does not save the file until I leave focus or explicitly save.
 The plugin needs to handle the debouncing.
-### Re: Plugin must handle debounce (mtime won't work) (HEAD)
+### Re: Plugin must handle debounce (mtime won't work)
 
 You're right — the editor buffers changes in memory until save. The file mtime doesn't change while typing. The debounce must happen at the plugin level, where the plugin knows the Document is being modified.
 
@@ -898,7 +898,7 @@ Thread {
 ```
 
 This ensures the file is saved and the user has stopped typing before the route command fires. Want me to implement this in `SubmitAction`?
-<!-- agent:boundary:ff01e9c1 -->
+<!-- agent:boundary:9125bf79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

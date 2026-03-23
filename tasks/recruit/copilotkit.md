@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep complete + AG-UI spec deep dive. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO).
+Interview prep complete. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). MDX/Jupyter pitch framed. Ready.
 <!-- /agent:status -->
 
 ## Exchange
@@ -78,6 +78,7 @@ CopilotKit (Tawkit, Inc.) — open-source framework for building AI copilots and
 5. **CloudCrowd history** — Jordan was CTO when you got the offer in 2010. Warm conversation.
 
 Tell me more about the ag-ui spec.
+
 ### Re: AG-UI Spec Deep Dive
 
 **Transport:** Transport-agnostic, primarily HTTP+SSE. Agents implement `run(input: RunAgentInput) -> Observable<BaseEvent>`. Standard `HttpAgent` client sends POST with `RunAgentInput`, receives stream of typed `BaseEvent` objects. Also supports HTTP Binary Protocol (production perf) and WebSockets.
@@ -113,14 +114,102 @@ Tell me more about the ag-ui spec.
 | `TOOL_CALL_*` lifecycle | IPC patch system | Agent↔host communication |
 
 The mental model overlap is deep — AG-UI patches JSON state via RFC 6902, agent-doc patches document regions via named components. Both stream events, both handle concurrent human edits, both maintain snapshots for recovery. The difference is the medium (JSON state vs markdown document) and the transport (HTTP+SSE vs filesystem+IPC).
-<!-- agent:boundary:c76d05f4 -->
+Help me prep for the interview.
+I am thinking of proposing that my agent-doc work could be a good fit for MDX + Jupyter integration...Using CopilotKit components.
+
+How likely is it that they would consider the markdown document as an agentic interface?
+
+This may be a good idea to explore, but I also need prep on CopilotKit's offerings as well, so I'm well rounded for the discussion.
+
+### Re: Interview Prep — CopilotKit Offerings + MDX/Jupyter Pitch (HEAD)
+
+---
+
+#### Part 1: CopilotKit Product Knowledge (Know Their World)
+
+**Frontend Components (React-first, expanding to Vue/Angular):**
+- `CopilotChat` / `CopilotSidebar` / `CopilotPopup` — chat UIs with different layout modes
+- `CopilotTextarea` — drop-in AI-powered textarea replacement (autocompletion, suggestions). *Notable: there's a feature request for Markdown/Rich Text support ([#1509](https://github.com/CopilotKit/CopilotKit/issues/1509)) — directly relevant to your pitch*
+- Generative UI — agents can render arbitrary React components in the chat stream
+
+**Key React Hooks (their API surface):**
+- `useCoAgent` — bidirectional state sync between app and agent (the AG-UI shared state hook)
+- `useCopilotReadable` — push app context to the agent (one-way: app → agent)
+- `useFrontendTool` — register client-side tool handlers with optional UI rendering
+- `useComponent` / `useRenderTool` — register React components as tool renderers (generative UI)
+- `useHumanInTheLoop` / `useInterrupt` — pause agent for user approval/input
+- `useCopilotAdditionalInstructions` — inject contextual system prompts
+
+**Backend (Copilot Runtime):**
+- Auth, middleware, routing layer sitting between frontend and agent backends
+- Agent adapters: LangGraph, CrewAI, Google ADK, or raw AG-UI
+- `copilotkit_emit_state()` — push state updates from agent to frontend
+- MCP server connectivity for tool integration
+
+**Business Model:**
+- Open-source core (MIT) + cloud hosted runtime + enterprise features (observability, CLHF, self-hosted)
+- Revenue from cloud runtime usage and enterprise licenses
+
+---
+
+#### Part 2: MDX + Jupyter Pitch — Honest Assessment
+
+**How likely they'd consider markdown documents as an agentic interface: Medium-High, with caveats.**
+
+**Why it could land well:**
+1. **CopilotTextarea already exists** — they've already invested in "AI-enhanced text surfaces." A document/notebook is the natural next step from a textarea.
+2. **Feature request [#1509]** — Markdown/Rich Text support for CopilotTextarea is an open community ask. Your pitch connects to real demand.
+3. **MDX = React + Markdown** — MDX components ARE React components. CopilotKit's entire stack is React. An MDX document with CopilotKit components embedded is technically coherent.
+4. **Jupyter notebooks are agentic documents** — cells execute code, render output, maintain state. An AG-UI-powered notebook where agents can stream into cells, modify state, render generative UI — that's a compelling demo.
+5. **Differentiation** — No one else in the AG-UI/CopilotKit ecosystem is doing document-native agent interaction. It's a whitespace opportunity.
+
+**Why to be careful:**
+1. **CopilotKit is UI-component-first, not document-first.** Their mental model is "embed AI in your React app." Proposing documents as the primary surface could feel orthogonal to their core thesis.
+2. **Jordan is a systems engineer** (Napster, distributed systems). He'll appreciate the architectural elegance but will ask "what's the market?" Frame it as an expansion surface, not a pivot.
+3. **Don't oversell agent-doc as a competitor.** Position it as "I built a prototype of what a CopilotKit-powered document could look like" — your prior art validates the pattern, CopilotKit has the distribution.
+
+**Recommended pitch framing:**
+> "CopilotKit has chat, sidebar, popup, textarea — what about documents? MDX notebooks where CopilotKit components are first-class citizens. Think: Jupyter meets AG-UI. Agents stream into named document regions, users edit inline, state syncs bidirectionally. I built a prototype of this pattern with agent-doc — CRDT merge, template patching, concurrent editing. The agent-doc experience proves the pattern works. CopilotKit has the ecosystem to scale it."
+
+---
+
+#### Part 3: Interview Prep Cheat Sheet
+
+**Opening (2 min):**
+- "Jordan, great to connect. I understand you were at CloudCrowd around 2010 — I actually received an offer from CloudCrowd that year, so we almost crossed paths."
+- Brief: 20+ years, full-stack systems, last 2 years deep in AI tooling
+
+**Their Questions → Your Answers:**
+
+| They'll Ask | Your Answer |
+|-------------|-------------|
+| "Tell me about your recent work" | agent-doc (CRDT streaming, template patching, IPC), Presence AI (WebRTC multimodal on H100s), lazily (cross-language reactive signals) |
+| "Experience with React?" | rmemo, RelementJS, hyopjs (61-byte hydration). Deep reactive systems, not just React apps — you build the primitives |
+| "How do you think about state management?" | 15-year lineage: backbone-signal → ctx-core → rmemo → relysjs. CRDT merge for concurrent edits. Signal-based reactivity. |
+| "Agent frameworks?" | agent-doc IS one. Human-in-the-loop, bidirectional state, persistence, streaming. Directly parallel to CoAgents |
+| "Why CopilotKit?" | AG-UI is the right abstraction layer — agent↔user protocol. Combined with MCP (agent↔tool) and A2A (agent↔agent), this is the full stack. You want to build at this layer. |
+| "Where do you see AG-UI going?" | Beyond chat — into documents, notebooks, collaborative editing. Agent-native surfaces that aren't just chatbots. |
+
+**Your Questions for Jordan:**
+
+1. "AG-UI has 16 event types today. What's the philosophy on adding new ones vs. keeping the protocol minimal?"
+2. "CoAgents sync state via snapshots and deltas. Have you explored CRDT-style conflict resolution for cases where both agent and user mutate state concurrently?"
+3. "CopilotTextarea seems like a bridge toward richer text surfaces. Is there a roadmap toward document-level or notebook-level agent interaction?"
+4. "What does the engineering team structure look like? How much is protocol work vs. SDK work vs. enterprise features?"
+5. "What's the biggest technical challenge you're facing right now that you'd want a new engineer to tackle?"
+
+**Things to avoid:**
+- Don't position agent-doc as something CopilotKit should adopt wholesale — position it as validation of patterns they could build on
+- Don't go too deep into Rust/systems unless Jordan steers there (he probably will given his background)
+- Don't criticize their current architecture — show you understand it before suggesting extensions
+<!-- agent:boundary:d9d24965 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Review and refine talking points before interview
-- Check for "Interview Prep + Confirmation" email from Cham Espanola (may have prep instructions)
+- **NOW:** Review prep, rehearse key talking points (interview at 5:00 PM ET)
+- Check for interview confirmation email from Cham Espanola
 - Confirm Kevin Volk that interview is locked in
 - Post-interview: debrief and next steps
 <!-- /agent:pending -->

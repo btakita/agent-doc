@@ -933,7 +933,7 @@ The `DocumentListener` only fires on actual content changes (not cursor moves or
 
 Want me to implement this?
 yes
-### Re: Implement conditional debounce (HEAD)
+### Re: Implement conditional debounce
 
 **Done.** Two new files + updated SubmitAction:
 
@@ -952,7 +952,7 @@ yes
 
 **Plugin v0.2.18 built** (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.18.zip`
-<!-- agent:boundary:9ba99dae -->
+<!-- agent:boundary:f283f454 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

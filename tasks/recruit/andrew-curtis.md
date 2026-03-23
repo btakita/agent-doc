@@ -76,7 +76,7 @@ Any gaps in the resume?
 
 Draft reply is ready to send as-is — want to proceed?
 Is this a 100% remote role?
-### Re: Remote Status (HEAD)
+### Re: Remote Status
 
 The JD doesn't specify remote/hybrid/on-site. "Work Environment" section says "collaborative, cross-functional team environment" but no location details. Andrew's messages didn't mention it either.
 
@@ -94,7 +94,7 @@ Happy to schedule a screening call. I'm available this week — what times work 
 
 Best,
 Brian
-<!-- agent:boundary:0c0cf8de -->
+<!-- agent:boundary:b732a250 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

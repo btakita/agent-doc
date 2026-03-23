@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-VideoObject added as inline JSON-LD. Frontmatter-driven approach would require rappstack framework change.
+Frontmatter-driven VideoObject implemented in rappstack + briantakita. Needs publish + deploy.
 <!-- /agent:status -->
 
 ## Exchange
@@ -581,13 +581,36 @@ Instead, I added inline `<script type="application/ld+json">` blocks directly in
 - Series overview: `schema.org/ItemList` with 6 ListItems pointing to each video
 
 **To make this frontmatter-driven** (so `video_url` in frontmatter auto-generates VideoObject), the `Post` interface in `@rappstack/domain--any--blog` would need to be extended with optional `video_url` and `playlist_url` fields, and the layout template would need to check for those fields and generate the JSON-LD. That's a rappstack framework change — doable but separate from this session.
-<!-- agent:boundary:4bbc0d9a -->
+
+Do it here
+### Re: Frontmatter-Driven VideoObject (HEAD)
+
+Implemented across the rappstack framework + briantakita site:
+
+**rappstack changes (4 files):**
+- `domain--any--blog/post/Post.ts` — added `video_url?` and `playlist_url?` to `Post.data`
+- `domain--any--blog/post/post_meta.ts` — added to `dehydrated_post_meta_T` and `post_meta_T`
+- `domain--server--blog/post/blog_post.ts` — added `blog_post__video_url_` and `blog_post__playlist_url_` accessors
+- `domain--server--blog/post/post_meta.ts` — added to `in_dehydrated_post_meta_T`
+- `domain--server--blog/post/Post__schema.ts` — added Zod validation for both fields
+
+**briantakita site changes (1 file):**
+- `ui--server--briantakita/post/post__doc_html.ts` — when `video_url` is present in frontmatter, auto-generates `schema.org/VideoObject` with name, description, thumbnailUrl, uploadDate, contentUrl, embedUrl, and author — added to the JSON-LD graph
+
+**Cleanup:**
+- Removed inline `<script type="application/ld+json">` blocks from all 7 blog posts (now redundant since the layout generates them)
+
+Now any post with `video_url:` in frontmatter automatically gets VideoObject structured data. No inline JSON-LD needed.
+
+Needs: rappstack publish + briantakita rebuild + deploy to verify.
+<!-- agent:boundary:e799d34f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Publish rappstack changes (npm/local)
+- [ ] Rebuild + deploy briantakita.me
 - [ ] Pin YouTube comments manually (6 videos)
-- [ ] Optional: extend rappstack Post type with video_url for frontmatter-driven VideoObject
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

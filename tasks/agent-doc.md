@@ -608,6 +608,9 @@ Sources:
 - [Splitter.java source](https://github.com/JetBrains/intellij-community/blob/master/platform/util/ui/src/com/intellij/openapi/ui/Splitter.java) — `PROP_PROPORTION` and `PROP_ORIENTATION` events
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) — reference for programmatic tab movement
 - [API for moving tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362) — JetBrains platform discussion
+> **4. `AnActionListener` for move actions**
+
+Would this be helpful?
 ### Re: Implement hybrid layout detection
 
 **Done.** New `LayoutChangeDetector` class implements the hybrid approach:
@@ -635,15 +638,26 @@ Sources:
 
 **Plugin v0.2.16 built** (unsigned + signed). Install from:
 `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.16.zip`
-<!-- agent:boundary:017574ea -->
+### Re: AnActionListener for move actions — helpful? (HEAD)
+
+**Not needed now.** The `ContainerListener` already catches the result of all move actions (keyboard and mouse), because moving a tab between splits changes the Swing component tree — which triggers `componentAdded`/`componentRemoved`.
+
+`AnActionListener` would add value only if:
+- You wanted to react *before* the move completes (pre-action hook)
+- The ContainerListener misses some move operations in practice
+
+Since we have both ContainerListener (immediate) and the 5s poll (safety net), the AnActionListener is redundant. If testing reveals edge cases where tabs move without triggering container events, we can add it then.
+
+**TL;DR:** Skip for now. The hybrid approach covers it. Add AnActionListener only if testing reveals gaps.
+<!-- agent:boundary:afdd0352 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Install plugin v0.2.16** — IDEA → Plugins → Install from Disk
-- [ ] Test: drag tab between splits → tmux pane should follow within ~300ms
-- [ ] Test: close a split → tmux panes should rearrange within ~300ms
+- [ ] **Install plugin v0.2.16** — test hybrid layout detection
+- [ ] Test: drag tab between splits → tmux follows within ~300ms
+- [ ] Test: keyboard move (Ctrl+Shift+Alt+→) → tmux follows
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

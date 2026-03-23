@@ -222,7 +222,7 @@ corky youtube publish <draft-file>
 4. Create playlist manually in YouTube Studio (or I can build `corky youtube playlist` if needed)
 
 Want me to create the 6 drafts now while the light edits finish encoding?
-### Re: All Light Edits Complete (HEAD)
+### Re: All Light Edits Complete
 
 All 6 episodes light-edited (silence removal at -30dB, 3s threshold):
 
@@ -239,7 +239,7 @@ All 6 episodes light-edited (silence removal at -30dB, 3s threshold):
 Total series: 7:34 across 6 episodes (down from 8:52). All re-encoded x264 CRF23, total 1.9 GB (down from 19.5 GB raw).
 
 Ready for YouTube drafts and upload. Want me to create the 6 drafts now?
-<!-- agent:boundary:2e7df8ce -->
+<!-- agent:boundary:7dd7a8f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

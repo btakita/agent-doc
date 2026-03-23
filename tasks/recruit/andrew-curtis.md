@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft updated with remote question. Ready to send.
+No SMS transcript found. Awaiting user direction.
 <!-- /agent:status -->
 
 ## Exchange
@@ -94,7 +94,13 @@ Happy to schedule a screening call. I'm available this week — what times work 
 
 Best,
 Brian
-<!-- agent:boundary:ec0cc48a -->
+Reread the sms transcript
+### Re: SMS Transcript (HEAD)
+
+No SMS transcript found for Andrew Curtis. The only communication on file is the LinkedIn conversation (`mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt`). There's no phone number in the contact record either.
+
+If there's an SMS thread, it may need to be exported first — do you have his number? I can search PulseSMS exports if you point me to it.
+<!-- agent:boundary:3ade1aa2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

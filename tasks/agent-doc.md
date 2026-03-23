@@ -749,7 +749,7 @@ release
 - Plugin v0.2.17 (layout detection + EDT fix)
 
 **8 files changed, 223 insertions, 7 deletions.**
-<!-- agent:boundary:d17d1584 -->
+<!-- agent:boundary:c5d04aef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -424,12 +424,39 @@ If he engages → DX first, enterprise knowledge work second. If not → follow 
 **Minutes 28–30: Close**
 
 > "This has been great. I'm genuinely excited about AG-UI as a protocol layer — it maps to patterns I've independently built. I'd love to continue the conversation."
-<!-- agent:boundary:5977eaf0 -->
+Should I mention my recent LinkedIn posts and videos to demonstrate what I'm working on and how I work?
+
+### Re: Mentioning LinkedIn Posts & Videos (HEAD)
+
+**Yes, but strategically — don't lead with it.** Here's when and how:
+
+**Don't proactively offer it in the first 15 minutes.** The opening and pitch should stand on their own — agent-doc, lazily, reactive lineage. You want Jordan to be interested in what you built, not what you posted about.
+
+**Natural moment to drop it (minutes 15–22, alignment exploration):**
+
+If Jordan seems engaged and you're discussing the document/notebook direction or your workflow:
+
+> "I've actually been posting about this on LinkedIn — demos of agent-doc in action, the CRDT streaming, how I work with Claude Code day-to-day. I can share the links after if you're curious. It shows the workflow better than I can describe it in a call."
+
+**Why this works:**
+- Shows you're actively building in public, not just interviewing
+- Demonstrates confidence — you're not hiding your work
+- Gives Jordan something concrete to review after the call (extends your 30 minutes)
+- "I can share after" keeps the conversation flowing rather than derailing into "let me pull up a video"
+
+**If he asks what you've been working on and seems to want more detail:**
+> "I've been livestreaming my development sessions — building with Claude Code and agent-doc in real-time. It's all on LinkedIn and YouTube. Happy to send links."
+
+**Don't:**
+- Pull up videos during the call (wastes the 30 minutes)
+- List specific post titles or view counts
+- Frame it as "content creation" — frame it as "building in public"
+<!-- agent:boundary:4768da2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Rehearse revised flow — opening, lazily mention, framework-agnostic angle
-- Post-interview: debrief and next steps
+- **NOW:** Rehearse flow — know when to drop the LinkedIn/video mention naturally
+- Post-interview: debrief, send follow-up with video links if appropriate
 <!-- /agent:pending -->

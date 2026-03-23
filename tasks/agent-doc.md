@@ -541,13 +541,79 @@ So the poll:
 - Compares with the last known hash
 - Only calls `agent-doc sync` when the hash differs
 - Typical cost when nothing changed: microseconds (no CLI call, no tmux interaction)
-<!-- agent:boundary:5248b09b -->
+Are there any other events that we can hook into to avoid polling?
+
+I notice that focus change d
+### Re: Events to avoid polling (HEAD)
+
+Several event hooks that could replace or supplement polling:
+
+**1. `ContainerListener` on the EditorsSplitters root (best candidate)**
+
+Java Swing's `ContainerListener` fires `componentAdded`/`componentRemoved` when the component tree changes. When a tab is dragged to a new split, the Swing tree is restructured — new `Splitter` instances are created, old ones removed. Attaching a recursive `ContainerListener` to the `EditorsSplitters` root component would catch:
+- New splits created (tab dragged to create a split)
+- Splits removed (last tab closed in a split)
+- Tab moved between existing splits (component removed from one, added to another)
+
+```kotlin
+val splitters = FileEditorManagerEx.getInstanceEx(project).splitters
+(splitters as? Container)?.addContainerListener(object : ContainerListener {
+    override fun componentAdded(e: ContainerEvent) = scheduleLayoutSync()
+    override fun componentRemoved(e: ContainerEvent) = scheduleLayoutSync()
+})
+```
+
+Caveat: may fire for non-split changes (toolbars, decorations). Need to filter events and debounce.
+
+**2. `Splitter.PROP_PROPORTION` PropertyChangeListener**
+
+The `Splitter` class fires `PROP_PROPORTION` when the split ratio changes and `PROP_ORIENTATION` when the orientation flips. Attaching to all `Splitter` instances in the tree would catch resize events — not directly useful for tab moves, but catches split creation/destruction side effects.
+
+**3. `FileEditorManagerListener.FILE_EDITOR_MANAGER` message bus**
+
+Already used by `EditorTabSyncListener`. Fires for:
+- `fileOpened` / `fileClosed` — catches new splits (opening a file in a new split)
+- `selectionChanged` — catches focus changes
+
+Doesn't fire for tab drags within existing splits, but covers most scenarios.
+
+**4. `AnActionListener` for move actions**
+
+Listen for actions like `MoveEditorToOppositeTabGroup`, `SplitVertically`, `SplitHorizontally`, `Unsplit`, `UnsplitAll`:
+
+```kotlin
+ActionManager.getInstance().addAnActionListener(object : AnActionListener {
+    override fun afterActionPerformed(action: AnAction, event: AnActionEvent, result: AnActionResult) {
+        if (action.templateText in splitActions) scheduleLayoutSync()
+    }
+})
+```
+
+Catches keyboard-triggered moves but misses mouse drags.
+
+**Recommended: Hybrid approach (events + fallback poll)**
+
+Combine #1 (ContainerListener) + #3 (FileEditorManagerListener) for immediate detection of most layout changes, with a 5-second fallback poll as a safety net for edge cases. The poll rarely fires (only when events miss something), keeping the system responsive without relying solely on polling.
+
+```
+ContainerListener → immediate sync (split tree changes)
+FileEditorManagerListener → immediate sync (file open/close/focus)
+Fallback poll (5s) → safety net (catches anything events miss)
+```
+
+Want me to implement the hybrid approach?
+
+Sources:
+- [Splitter.java source](https://github.com/JetBrains/intellij-community/blob/master/platform/util/ui/src/com/intellij/openapi/ui/Splitter.java) — `PROP_PROPORTION` and `PROP_ORIENTATION` events
+- [tab-shifter plugin](https://github.com/dkandalov/tab-shifter) — reference for programmatic tab movement
+- [API for moving tabs between splits](https://platform.jetbrains.com/t/api-for-moving-editor-tabs-between-splits/2362) — JetBrains platform discussion
+<!-- agent:boundary:af8ad27b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Implement timer-based layout poll with change detection
+- [ ] Implement hybrid layout detection (ContainerListener + events + fallback poll)
 - [ ] Test route + layout sync with multi-split editor
 <!-- /agent:pending -->
 

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-6 YouTube drafts ready. Blocked: YouTube OAuth token expired — run `corky youtube auth`.
+Re-transcribing 6 light-edited videos for SRT captions. YouTube auth still needed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -283,17 +283,32 @@ Go
 corky youtube auth
 ```
 Then re-run `/agent-doc tasks/youtube.md` to continue with publishing.
-<!-- agent:boundary:ef028607 -->
+Do we have Closed Captioning transcripts for each of the episodes?
+### Re: Closed Captioning (HEAD)
+
+**Not yet — but in progress.** The original transcripts (`/tmp/transcript-{1-6}.md`) have timestamps from the pre-edit videos, so they don't match the light-edited versions.
+
+Re-transcribing all 6 light-edited videos now (CUDA GPU, running in parallel). Once complete, I'll convert to SRT format and add as `captions:` in each YouTube draft.
+
+**Pipeline:**
+1. Re-transcribe edited videos (running now)
+2. Convert corky format → SRT
+3. Add `captions: /path/to/ep{N}.srt` to each draft
+4. Publish with captions included
+
+Also still need YouTube OAuth re-auth before publishing. Run `corky youtube auth` when ready.
+<!-- agent:boundary:c54f7b10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Re-authenticate YouTube OAuth (`corky youtube auth`)
+- [ ] Complete re-transcription of edited videos (running)
+- [ ] Convert transcripts to SRT captions
 - [ ] Publish 6 episodes to YouTube
 - [ ] Create "Skill to Binary" playlist
 - [ ] Add all 6 videos to playlist
-- [ ] Generate SRT closed captions from transcripts
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

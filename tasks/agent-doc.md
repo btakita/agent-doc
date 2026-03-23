@@ -1093,7 +1093,7 @@ bool agent_doc_await_idle(const char* file_path, int64_t debounce_ms, int64_t ti
 | `agent_doc_await_idle(file, debounce_ms, timeout_ms)` | Blocks until idle, returns bool |
 
 Two functions, one fire-and-forget + one blocking query. Clean.
-<!-- agent:boundary:ac1cd811 -->
+<!-- agent:boundary:d76ff60a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

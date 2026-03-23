@@ -61,7 +61,7 @@ agent_doc_write: crdt
 - [x] Write destination + pull improvements — v0.19.2
 - [x] SPEC.md §6.8, §6.9, §18 — v0.19.1
 - [x] Metal GPU + audio resilience — v0.19.3
-- [ ] YouTube playlist support — proposed (4 commands, ~200 lines)
+- [x] YouTube playlist support — implemented (4 commands, pending commit)
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -134,11 +134,32 @@ Yes — YouTube Data API v3 supports full playlist CRUD. The existing `youtube.f
 **Implementation estimate:** ~200 lines total across `youtube.rs` (4 API functions), `cli.rs` (subcommand enum + args), `main.rs` (dispatch). Follows existing `upload_video`/`insert_comment` patterns.
 
 Ready to implement when you approve.
-<!-- agent:boundary:db371d44 -->
+implement
+### Implemented YouTube Playlist Support (HEAD)
+
+Added 4 playlist commands to corky:
+
+**New CLI commands:**
+- `corky youtube playlist create <TITLE> [--description TEXT] [--visibility public|unlisted|private]`
+- `corky youtube playlist add <PLAYLIST_ID> <VIDEO_ID> [--position N]`
+- `corky youtube playlist list`
+- `corky youtube playlist remove <PLAYLIST_ID> <VIDEO_ID>`
+
+**Files changed (3):**
+- `src/social/youtube.rs` — 4 API functions + 4 `_at` variants for testing: `create_playlist`, `add_to_playlist`, `list_playlists`, `remove_from_playlist`
+- `src/cli.rs` — `PlaylistCommands` enum with `Create`, `Add`, `List`, `Remove` variants
+- `src/social/mod.rs` — `get_youtube_token()` helper + 4 runner functions
+- `src/main.rs` — dispatch for `YoutubeCommands::Playlist`
+
+**Build:** `make check` passes — clippy clean, all 8 YouTube tests pass. No new OAuth scope needed (`youtube.force-ssl` covers playlists).
+
+Ready to commit. Want me to also add tests, update SPEC.md, and run audit-docs?
+<!-- agent:boundary:2d1898d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] YouTube playlist: commit, tests, SPEC.md, audit-docs
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

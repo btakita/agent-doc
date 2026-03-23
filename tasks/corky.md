@@ -135,7 +135,7 @@ Yes — YouTube Data API v3 supports full playlist CRUD. The existing `youtube.f
 
 Ready to implement when you approve.
 implement
-### Implemented YouTube Playlist Support (HEAD)
+### Implemented YouTube Playlist Support
 
 Added 4 playlist commands to corky:
 
@@ -154,7 +154,7 @@ Added 4 playlist commands to corky:
 **Build:** `make check` passes — clippy clean, all 8 YouTube tests pass. No new OAuth scope needed (`youtube.force-ssl` covers playlists).
 
 Ready to commit. Want me to also add tests, update SPEC.md, and run audit-docs?
-<!-- agent:boundary:2d1898d9 -->
+<!-- agent:boundary:f2d0b6a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

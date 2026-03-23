@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Light edit in progress: silence detection running on 6 source files.
+Transcription running on 6 files (CUDA GPU). Silence detection also in progress.
 <!-- /agent:status -->
 
 ## Exchange
@@ -136,15 +136,36 @@ Should I break it up into multiple youtube videos according to distinct subjects
 Running silence detection on all 6 files now. Once complete, I'll show how much dead air each has and produce trimmed versions.
 
 Do you know the topics of each session, or should I transcribe to identify subjects?
-<!-- agent:boundary:76a2cd2c -->
+Transcribe and identify subjects.
+Should this be a mini-series around this particular issue of moving from the Skill into binary logic?
+### Re: Transcription & Mini-Series (HEAD)
+
+**Transcription started** on all 6 source files (CUDA GPU, running in parallel). Once complete, I'll analyze the content to identify distinct subjects and recommend episode boundaries.
+
+**On the mini-series question:** Yes, a mini-series makes more sense than a single 8:52 video. Benefits:
+- Better YouTube retention metrics (shorter videos hold attention)
+- Each part gets its own SEO title/description
+- Viewers can jump to the topic they care about
+- Natural session boundaries already exist
+
+**Approach:**
+1. Transcribe all 6 files (running now)
+2. Analyze transcripts for subject matter and topic shifts
+3. Propose episode titles and boundaries
+4. Light edit each episode (silence removal)
+5. Upload as a YouTube playlist
+
+Will report back with transcript analysis and episode recommendations once transcription completes.
+<!-- agent:boundary:ea673b91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Light edit 6 source videos (silence detection running)
-- [ ] Identify subjects per session (transcription or user input needed)
-- [ ] Upload to YouTube as separate videos + playlist
+- [ ] Transcribe 6 source videos (running — CUDA GPU)
+- [ ] Analyze transcripts for subject/episode boundaries
+- [ ] Light edit each episode (silence removal — detection running)
+- [ ] Upload to YouTube as mini-series + playlist
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

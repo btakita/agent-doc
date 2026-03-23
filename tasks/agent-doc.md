@@ -1014,13 +1014,57 @@ It's possible but requires the shared object to become **stateful** — currentl
 **When it makes sense:** If you have 3+ plugins (JetBrains, VS Code, Neovim, Emacs) and the debounce behavior needs to be *identical* across all of them (same timing algorithm, same edge cases). For 2 plugins, the duplication cost is low.
 
 **Verdict:** Not worth it yet. When a third plugin is added, revisit.
-<!-- agent:boundary:c51b48c4 -->
+I will be supporting neovim and zed editors at least. Possibly more.
+So there will be more instances of the duplicated logic.
+Granted the FFI hooks also requires the logic, but at least it's a declarative api.
+### Re: Neovim + Zed support → FFI debounce makes sense (HEAD)
+
+With 4+ editors (JetBrains, VS Code, Neovim, Zed), the calculus changes. You're right — even though each plugin still wires editor events to the FFI, a **declarative API** means:
+
+- Each plugin calls `typing_event()` on change and `should_submit()` before routing — 2 FFI calls
+- All timing logic, edge cases, and configuration live in one place (Rust)
+- New editors only need to implement "forward events + check before submit"
+- Bug fixes to debounce logic ship once (shared object), not 4 times
+
+**Plan: Add to the FFI library.**
+
+Three new exports:
+
+```c
+// Call on every document change (plugin wires editor events to this)
+void agent_doc_typing_event(const char* file_path, int64_t timestamp_ms);
+
+// Check if submission should proceed (returns true if typing has settled)
+bool agent_doc_should_submit(const char* file_path, int64_t debounce_ms);
+
+// Blocking wait until typing settles (alternative to polling should_submit)
+// Returns true if settled, false if timed out
+bool agent_doc_wait_for_typing_settle(const char* file_path, int64_t debounce_ms, int64_t timeout_ms);
+```
+
+The library maintains a `HashMap<PathBuf, Instant>` (last edit per file) behind a `Mutex`. Thread-safe, minimal state.
+
+Each plugin's integration:
+```
+// On document change:
+agent_doc_typing_event(filePath, System.currentTimeMillis())
+
+// Before routing:
+if (!agent_doc_should_submit(filePath, 1500)) {
+    agent_doc_wait_for_typing_settle(filePath, 1500, 30000)
+}
+saveAndRoute()
+```
+
+Want me to implement this now?
+<!-- agent:boundary:4f1a62dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Install plugin v0.2.18** — test typing debounce
+- [ ] **Implement FFI debounce** — `typing_event`, `should_submit`, `wait_for_typing_settle`
+- [ ] Update JetBrains plugin to use FFI debounce instead of Kotlin impl
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

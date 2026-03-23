@@ -932,13 +932,34 @@ Otherwise we immediately invoke the agent-doc run.
 The `DocumentListener` only fires on actual content changes (not cursor moves or selections), so it's the right signal.
 
 Want me to implement this?
-<!-- agent:boundary:4beb253f -->
+yes
+### Re: Implement conditional debounce (HEAD)
+
+**Done.** Two new files + updated SubmitAction:
+
+**`TypingTracker.kt`** — global DocumentListener that records the last `.md` document change timestamp:
+- Registered via `EditorFactory.eventMulticaster` in `PluginLifecycleListener`
+- `isRecentlyTyping()` → true if last change was within 1.5s
+- `msSinceLastChange()` → milliseconds since last edit
+- Only tracks `.md` files
+
+**`SubmitAction.kt`** — conditional debounce:
+- If `TypingTracker.isRecentlyTyping()` → shows "Waiting for typing to settle...", enters debounce loop
+- If not recently typing → immediate save + route (no delay)
+- Debounce loop: sleeps 1.5s, checks if editing stopped. If still typing, waits again (max 20 attempts = 30s)
+- During debounce, a local `DocumentListener` tracks edits and auto-saves on each change
+- Listener removed after debounce completes
+
+**Plugin v0.2.18 built** (unsigned + signed). Install from:
+`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.18.zip`
+<!-- agent:boundary:9ba99dae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement conditional debounce** — keypress tracker + debounce only when recent typing detected
+- [x] Conditional debounce implemented (TypingTracker + SubmitAction)
+- [ ] **Install plugin v0.2.18** — test typing debounce
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

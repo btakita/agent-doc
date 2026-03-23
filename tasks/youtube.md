@@ -496,7 +496,7 @@ Individual posts don't need per-post JSON-LD because the frontmatter fields (`ti
 
 If you want **VideoObject** JSON-LD specifically for the YouTube videos (which would help Google discover the video content on your blog), that would be a layout-level enhancement — adding `schema.org/VideoObject` when a `video_url` frontmatter field is present.
 Looks good. Publish
-### Re: Published to Cloudflare Pages (HEAD)
+### Re: Published to Cloudflare Pages
 
 Blog deployed:
 - Inner submodule (briantakita.me): pushed
@@ -513,7 +513,7 @@ Blog deployed:
 - [Ep6: Deterministic Primitives](https://briantakita.me/posts/skill-to-binary-ep6-deterministic-primitives)
 
 Posts should be live once CF Pages finishes building (typically 1-2 minutes).
-<!-- agent:boundary:60cd8791 -->
+<!-- agent:boundary:e642c910 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1140,7 +1140,7 @@ I'm working from the agentic primitives upward. So I believe
 
 Want me to push this to Gmail drafts via corky?
 
-### Re: BCC + "agentic primitives upward" (HEAD)
+### Re: BCC + "agentic primitives upward"
 
 BCC updated: Kevin Volk (kevin@staffingscience.io) + dev@briantakita.me
 
@@ -1150,7 +1150,7 @@ Good phrasing — "working from the agentic primitives upward." Let me weave tha
 > The architecture is transport-agnostic — the same pattern works with MDX, Notion, Jupyter, Word, Obsidian, or any document surface. I'm working from the agentic primitives upward — once the markdown editing layer is solid, the next step is live data components, including AG-UI compatible components.
 
 Ready to send. Want me to push to Gmail drafts via corky now?
-<!-- agent:boundary:d4709671 -->
+<!-- agent:boundary:082330b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

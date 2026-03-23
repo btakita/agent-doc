@@ -1221,7 +1221,10 @@ One parenthetical line, not a feature. It backs up your claim without expanding 
 
 Should I add that line to the draft, or keep the email as-is and send?
 Is the draft in a file?
-Also
+Should I include the fact that I publish blog posts from the video? Jordan didn't seem very interested.
+
+He seems more interested in the infrastructure and position play.
+At least for this role...but he may be supportive of how I can help propagate AG-UI perhaps?
 
 ### Re: Draft file
 
@@ -1236,7 +1239,17 @@ corky draft push mail/drafts/2026-03-23-thanks-for-the-conversation-demo-links-a
 ```
 
 Or I can run it for you — just say "push it."
-<!-- agent:boundary:97e59c31 -->
+
+### Re: Blog posts + AG-UI propagation (HEAD)
+
+**Blog posts: No.** Jordan didn't show interest in content creation during the call. Adding it would feel like you're selling something he didn't ask for.
+
+**AG-UI propagation: Also not for this email.** That's a conversation for later — once you actually have AG-UI components working in agent-doc. Right now it's a future plan, not a deliverable. Jordan is focused on the here-and-now.
+
+**The email is good as-is.** The playlist link, the execution reframe, and the referral ask — that's three clean beats. Every addition you're considering (blog posts, crates.io link, AG-UI propagation) makes it longer without making it more effective.
+
+The draft file is ready. Should I push it to Gmail drafts now?
+<!-- agent:boundary:4441a42d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

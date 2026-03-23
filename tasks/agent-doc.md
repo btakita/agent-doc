@@ -514,7 +514,7 @@ Sources:
 - [tab-shifter plugin](https://github.com/dkandalov/tab-shifter)
 Will the poll send continous messages even if the layout does not change?
 Or will it save the last layout and send when the layout changes?
-### Re: Poll behavior — continuous or change-only? (HEAD)
+### Re: Poll behavior — continuous or change-only?
 
 **Change-only.** The poll would save the last known layout and only send a sync command when the layout actually changes. No continuous messages.
 
@@ -541,7 +541,7 @@ So the poll:
 - Compares with the last known hash
 - Only calls `agent-doc sync` when the hash differs
 - Typical cost when nothing changed: microseconds (no CLI call, no tmux interaction)
-<!-- agent:boundary:7e41dadd -->
+<!-- agent:boundary:5248b09b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

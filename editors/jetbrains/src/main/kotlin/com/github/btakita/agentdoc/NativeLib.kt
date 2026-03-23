@@ -85,6 +85,12 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_parse_components(doc: String): FfiComponentList
 
+    /** Record a document change event for debounce tracking. */
+    fun agent_doc_document_changed(file_path: String)
+
+    /** Block until document is idle for debounce_ms, or timeout_ms expires. Returns true if idle. */
+    fun agent_doc_await_idle(file_path: String, debounce_ms: Long, timeout_ms: Long): Boolean
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

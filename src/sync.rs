@@ -18,13 +18,29 @@ use crate::{frontmatter, resync, route, sessions};
 use tmux_router::FileResolution;
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
-    run_with_tmux(col_args, window, focus, &Tmux::default_server())
+    run_with_options(col_args, window, focus, true, &Tmux::default_server())
+}
+
+/// Run sync without auto-starting sessions. Used when called from route
+/// (route already handled the target file — auto-start would create duplicates).
+pub fn run_layout_only(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
+    run_with_options(col_args, window, focus, false, &Tmux::default_server())
 }
 
 pub fn run_with_tmux(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
+    tmux: &Tmux,
+) -> Result<()> {
+    run_with_options(col_args, window, focus, true, tmux)
+}
+
+fn run_with_options(
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    auto_start: bool,
     tmux: &Tmux,
 ) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before layout calculation
@@ -55,8 +71,8 @@ pub fn run_with_tmux(
 
     // Pre-sync: auto-start Claude sessions for files that have session UUIDs
     // but no alive panes. This ensures sync has panes to arrange.
-    // We parse file paths from col_args directly (before tmux_router::sync calls resolve_file).
-    {
+    // Skipped when auto_start=false (e.g., when called from route which already handled the file).
+    if auto_start {
         // Parse file paths from col_args (each arg is "file1.md,file2.md")
         let all_files: Vec<PathBuf> = col_args
             .iter()

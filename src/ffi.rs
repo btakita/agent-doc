@@ -455,6 +455,42 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end(
     }
 }
 
+/// Record a document change event for debounce tracking.
+///
+/// Plugins call this on every document modification (typing, paste, undo).
+/// Used by [`agent_doc_await_idle`] to determine if the user is still editing.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
+    if let Ok(path) = unsafe { CStr::from_ptr(file_path) }.to_str() {
+        crate::debounce::document_changed(path);
+    }
+}
+
+/// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
+///
+/// Returns `true` if idle was reached (safe to run), `false` if timed out.
+/// If no changes have been recorded for this file, returns `true` immediately.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_await_idle(
+    file_path: *const c_char,
+    debounce_ms: i64,
+    timeout_ms: i64,
+) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return true, // Invalid path — don't block
+    };
+    crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety

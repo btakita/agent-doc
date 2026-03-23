@@ -67,7 +67,7 @@ pub fn run(
             d
         }
         None => {
-            eprintln!("[stream] Nothing changed since last submit for {}", file.display());
+            eprintln!("[stream] Nothing changed since last run for {}", file.display());
             return Ok(());
         }
     };
@@ -389,7 +389,7 @@ pub(crate) fn flush_to_document(
 fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) -> String {
     if fm.resume.is_some() {
         format!(
-            "The user edited the session document. Here is the diff since the last submit:\n\n\
+            "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\

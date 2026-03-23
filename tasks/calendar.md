@@ -38,7 +38,7 @@ To share a calendar from Account A to Account B:
    - Or: In Google Calendar, click **+** next to "Other calendars" then **Subscribe to calendar** and enter Account A's email
 
 The shared calendar will appear under "Other calendars" in Account B's sidebar.
-<!-- agent:boundary:85a50126 -->
+<!-- agent:boundary:d84d9738 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -155,6 +155,7 @@ Added 4 playlist commands to corky:
 
 Ready to commit. Want me to also add tests, update SPEC.md, and run audit-docs?
 Yes, tests, SPEC.md, README.md, audit-docs.
+Please sort the command list in the documentation and --help output
 ### Tests, Docs, Audit — Complete
 
 **Tests** (5 new, 13 total passing):
@@ -174,7 +175,17 @@ Yes, tests, SPEC.md, README.md, audit-docs.
 **Audit:** `corky audit-docs` — No issues found. 188 instruction lines.
 
 `make check` passes — clippy clean, all 13 YouTube tests pass. Ready to commit in corky submodule.
-<!-- agent:boundary:11949222 -->
+### Sorted YouTube Commands (HEAD)
+
+Sorted `YoutubeCommands` enum variants alphabetically in `cli.rs` — this controls `--help` output order:
+
+**Before:** Auth, Draft, Publish, Edit, Comment, Playlist, Check, List
+**After:** Auth, Check, Comment, Draft, Edit, List, Playlist, Publish
+
+Also sorted command lists in SPEC.md §17.6 and README.md to match.
+
+`make check` passes (13 tests), `audit-docs` clean.
+<!-- agent:boundary:9fa944bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

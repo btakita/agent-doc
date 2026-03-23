@@ -96,7 +96,7 @@ Best,
 Brian
 Reread the sms transcript 
 I am ok with a hybrid role. But I plan on moving away fr
-### Re: SMS Transcript Review (HEAD)
+### Re: SMS Transcript Review
 
 Andrew responded (after your message was sent):
 
@@ -125,7 +125,7 @@ Let me know — I'd still love to connect.
 
 Best,
 Brian
-<!-- agent:boundary:97ac5113 -->
+<!-- agent:boundary:cd3b217b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1250,6 +1250,7 @@ Or I can run it for you — just say "push it."
 
 The draft file is ready. Should I push it to Gmail drafts now?
 In my request for a referral...please include that I am interested in integrating AG-UI components.
+Al
 
 ### Re: AG-UI integration in referral ask
 
@@ -1258,7 +1259,21 @@ Updated the draft. The referral line now reads:
 > "On a separate note — I'm currently doing client work and am open to taking on more, particularly projects involving AG-UI integration. If you come across anyone in your network who could use someone with my background, I'd appreciate the referral."
 
 Draft file updated. Ready to push to Gmail drafts.
-<!-- agent:boundary:9fcf4e35 -->
+Also, should I mention that I barely use the web anymore?
+Almost all of my interactions are with agent-doc.
+
+### Re: Mentioning you barely use the web anymore (HEAD)
+
+**No.** Don't add this to the email. Here's why:
+
+1. **It sounds like a brag that doesn't land.** Jordan said he hasn't used an editor in 3 months — that's his version of the same claim. He won't be impressed; he'll just think you're mirroring his talking point.
+
+2. **It could read as "I don't use web UIs"** — which is CopilotKit's entire product. You don't want Jordan thinking "this person doesn't even use the kind of thing we build."
+
+3. **The email is done.** Every addition at this point is anxiety, not improvement. The draft has three clean beats. Send it.
+
+Push it to Gmail drafts?
+<!-- agent:boundary:83861c88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

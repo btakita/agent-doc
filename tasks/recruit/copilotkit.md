@@ -483,6 +483,7 @@ You're right — Jordan will almost certainly ask "what have you been working on
 
 The LinkedIn mention moved from minute 22 to the end of your pitch block (minute 7–8). Everything else stays the same.
 Please render the detail document for the call. Not just the summary.
+Should I name drop rmemo + relementjs? He probably has not heard of it. I havn't had anyone ask more about it.
 
 ### Interview Script — CopilotKit CTO Call, Mon Mar 23, 5:00 PM ET
 
@@ -592,12 +593,40 @@ Have these ready. Don't dump them all — let the conversation pull what's relev
 | Document pitch | "MDX notebooks with CopilotKit components — DX first, enterprise knowledge work second" |
 | Building in public | "Livestreaming dev sessions, demos on LinkedIn — happy to share links" |
 | Why CopilotKit | "Protocol layer for human-agent alignment — where I want to build" |
-<!-- agent:boundary:e6240409 -->
+
+### Re: Name-dropping rmemo + relementjs (HEAD)
+
+**Skip the names. Describe the capability.**
+
+Jordan hasn't heard of them and won't ask. Dropping unfamiliar library names in a 30-minute call creates cognitive load without payoff — he has to decide whether to ask about them or let them pass, and either way it breaks flow.
+
+**Instead, say the same thing without the names:**
+
+Before (name-heavy):
+> "rmemo and relementjs work with React, Svelte, vanilla JS, WebComponents"
+
+After (capability-focused):
+> "I build reactive libraries that are framework-agnostic — they work with React, Svelte, vanilla JS, WebComponents. Same primitives regardless of the rendering layer."
+
+Same signal, zero friction. If Jordan is genuinely interested and follows up, you can name them then. The names are for follow-up links, not the call itself.
+
+**Same applies to lazily** — you can say "a cross-platform reactive signals library I built" rather than leading with the name. The name matters in a README, not in a pitch.
+
+**Exception: agent-doc.** Keep naming agent-doc — it's your headline project and you'll reference it multiple times. One named project is memorable. Three is noise.
+
+**Updated quick reference:**
+
+| Topic | Say This |
+|-------|----------|
+| Framework-agnostic | "I build reactive libraries that are framework-agnostic — they work with any renderer" |
+| Cross-language | "I built a cross-platform reactive signals library — production Python, compiles to Zig and Rust" |
+| agent-doc | Keep the name — it's your headline |
+<!-- agent:boundary:143271ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Read through full script, rehearse key transitions
-- Post-interview: debrief, send follow-up with video links
+- **NOW:** Rehearse without library name-drops — describe capabilities, not names
+- Post-interview: debrief, send follow-up with named links
 <!-- /agent:pending -->

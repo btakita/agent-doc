@@ -1057,14 +1057,50 @@ saveAndRoute()
 ```
 
 Want me to implement this now?
-<!-- agent:boundary:4b007825 -->
+`agent_doc_typing_event` should be something like `agent_doc_document_change_event`
+`agent_doc_should_submit` should be `agent_doc_should_run`
+`agent_doc_wait_for_typing_settle` should be something like `agent_doc_wait_for_debounce_settle`discuss names
+### Re: FFI debounce naming (HEAD)
+
+Good naming suggestions. Let me think through the semantics:
+
+**`agent_doc_document_change_event`** — Better than `typing_event`. "Document change" is accurate because it covers typing, paste, undo, programmatic edits. It's what the event actually represents. The `_event` suffix clearly marks it as a notification (fire-and-forget), not a query.
+
+**`agent_doc_should_run`** — Better than `should_submit`. "Run" matches the user-facing action name ("Run Agent Doc"). Though `should_submit` matches the internal terminology (`submit.rs`). I'd lean toward `should_run` since the FFI is a plugin-facing API, and plugins know "Run", not "submit".
+
+**`agent_doc_wait_for_debounce_settle`** — More general than `wait_for_typing_settle`. Correctly abstracts away the *reason* for the debounce — it's not just typing, it could be any document change.
+
+**Alternative consideration:**
+
+Could simplify to just two functions:
+
+```c
+// Notify: document changed
+void agent_doc_document_changed(const char* file_path);
+
+// Query + wait: should I run? (blocks until debounce settles or timeout)
+// Returns true if safe to run, false if timed out
+bool agent_doc_await_idle(const char* file_path, int64_t debounce_ms, int64_t timeout_ms);
+```
+
+`await_idle` combines `should_run` + `wait_for_debounce_settle` — if no recent changes, returns immediately (like `should_run`); if recent changes, waits (like `wait_for_debounce_settle`). One function instead of two, simpler plugin integration.
+
+**Proposed final API:**
+
+| Function | Purpose |
+|---|---|
+| `agent_doc_document_changed(file)` | Plugin calls on every document change |
+| `agent_doc_await_idle(file, debounce_ms, timeout_ms)` | Blocks until idle, returns bool |
+
+Two functions, one fire-and-forget + one blocking query. Clean.
+<!-- agent:boundary:b8da14f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement FFI debounce** — `typing_event`, `should_submit`, `wait_for_typing_settle`
-- [ ] Update JetBrains plugin to use FFI debounce instead of Kotlin impl
+- [ ] **Implement FFI debounce** — `document_changed` + `await_idle`
+- [ ] Update JetBrains plugin to use FFI debounce
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

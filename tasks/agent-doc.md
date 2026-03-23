@@ -825,7 +825,7 @@ This prevents:
 Ready to release as v0.25.7 or test first?
 test
 audit
-### Re: Polling did not pause diff construction (HEAD)
+### Re: Polling did not pause diff construction
 
 Good observation. The polling runs on a separate daemon thread and only reads the Swing component tree (via `invokeLater` on EDT, which takes microseconds). It never touches the document, file system, or diff engine. The diff is constructed by `agent-doc preflight` which reads the file independently.
 
@@ -834,7 +834,7 @@ The polling and diff are completely decoupled:
 - **Preflight:** reads document file → compares with snapshot → computes diff
 
 No contention between them. The poll's EDT work (layout detection) is ~microseconds, invisible to the user.
-<!-- agent:boundary:2d95fadf -->
+<!-- agent:boundary:718802af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

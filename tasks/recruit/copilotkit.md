@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep final revision. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). Opening rephrased, lazily + framework-agnostic angle integrated. Ready.
+Full interview script rendered. Mon Mar 23, 5:00 PM ET with Jordan Ritter (CTO). 30-min flow with scripted talking points, conditional branches, and quick reference card. Ready.
 <!-- /agent:status -->
 
 ## Exchange
@@ -482,12 +482,122 @@ You're right — Jordan will almost certainly ask "what have you been working on
 | 28–30 | Close | "Genuinely excited, love to continue" |
 
 The LinkedIn mention moved from minute 22 to the end of your pitch block (minute 7–8). Everything else stays the same.
-<!-- agent:boundary:5d79f211 -->
+Please render the detail document for the call. Not just the summary.
+
+### Interview Script — CopilotKit CTO Call, Mon Mar 23, 5:00 PM ET (HEAD)
+
+**Jordan Ritter, CTO — 30 minutes, open-ended format**
+
+---
+
+#### Minutes 1–3: Reconnect
+
+"Jordan, good to connect again — you interviewed me back in the CloudCrowd days around 2010. It's been a while. I've been building distributed systems and reactive tooling since, and the last couple years have been all AI infrastructure."
+
+---
+
+#### Minutes 3–8: Your Pitch — What You've Been Building
+
+**agent-doc (lead):**
+
+"The thing I'm most excited about right now is agent-doc — a system I built for human-agent collaboration through documents. The agent streams responses into named document regions using CRDT merge, the user edits concurrently, and state syncs bidirectionally. It's the same problem AG-UI solves — keeping agents and humans synchronized in real-time — but through a document metaphor instead of web UI components."
+
+**lazily (cross-language signals):**
+
+"I also built lazily — a cross-platform reactive signals library that runs in production Python, and also compiles to Zig and Rust. Same signal semantics across languages. That cross-language SDK thinking maps directly to what CopilotKit does with its TypeScript and Python SDKs."
+
+**Framework-agnostic reactive libraries:**
+
+"More broadly, I build reactive libraries that are frontend-framework-agnostic — rmemo and relementjs work with React, Svelte, vanilla JS, WebComponents, whatever. The primitives are the same regardless of the rendering layer. That's how I think about CopilotKit's component surface too — the protocol and state management are the real product, the UI framework is just the rendering target."
+
+**Bridge to CopilotKit:**
+
+"When I saw AG-UI, the pattern recognition was immediate. Snapshots, deltas, streaming events, concurrent editing — same architecture I built independently. That's what drew me to CopilotKit. You're building the protocol layer for human-agent alignment."
+
+**Building in public (closing beat):**
+
+"I've been posting demos on LinkedIn and livestreaming dev sessions — agent-doc in action, building with Claude Code in real-time. Happy to share links after the call if you want to see the workflow rather than just hear me describe it."
+
+---
+
+#### Minutes 8–15: Technical Depth — Let Jordan Steer
+
+Have these ready. Don't dump them all — let the conversation pull what's relevant.
+
+**If he asks about state management:**
+
+"I've been building reactive state systems for 15 years — backbone-signal through ctx-core, rmemo, rappstack. Signal-based, framework-agnostic. CRDT merge for concurrent edits. This maps directly to what CoAgents does with `useCoAgent` and state deltas. The pattern is the same: snapshots for baselines, deltas for incremental updates, atomic application."
+
+**If he asks about agent-doc's architecture:**
+
+"agent-doc uses named document components — `&lt;!-- agent:exchange --&gt;`, `&lt;!-- agent:status --&gt;` — similar to AG-UI's component model. The agent emits patch blocks targeting specific components, applied via CRDT merge so the user can edit concurrently without conflicts. Snapshots track state between sessions. IPC patches let the editor (JetBrains plugin) react to agent writes in real-time. On the wire it's filesystem + IPC instead of HTTP + SSE, but the event architecture is structurally identical to AG-UI."
+
+**If he asks about Presence AI:**
+
+"Most recently I built a multimodal pipeline on H100 GPUs via WebRTC — real-time audio/video/screen streaming at infrastructure scale. Production Python with lazily for reactive state management."
+
+**If he asks about frontend depth:**
+
+"I work at the primitive level — hyopjs is a 61-byte hydration runtime. WebComponents, vanilla JS, tiny payloads. I can build React-level infrastructure, not just consume it. rmemo and relementjs are framework-agnostic — they work with any renderer. That means I can contribute to CopilotKit's React SDK today and help extend to Vue, Angular, or WebComponents tomorrow."
+
+**If he asks about open source:**
+
+"RSpec core contributor in the early days — helped build the testing framework Ruby developers still use. SvelteJS contributor, Nano Stores contributor. 40k+ commits. 15+ published packages across npm, PyPI, crates.io."
+
+---
+
+#### Minutes 15–22: Explore Alignment — Soft, Not a Sales Pitch
+
+**Opening question:**
+
+"I'm curious about where CopilotKit sees the interaction surface expanding. Chat, sidebar, popup, textarea — is there interest in richer surfaces like documents or notebooks? That's where my experience naturally leads, and I want to make sure our interests align."
+
+**If Jordan engages with the document idea:**
+
+"I've been thinking about MDX notebooks where CopilotKit components are first-class citizens — agents streaming into named regions, users editing inline. It's a DX play first — developers already work in markdown. But it extends to enterprise knowledge work too — legal documents, research notebooks, compliance workflows. The document IS the agentic interface."
+
+"I noticed CopilotTextarea's Markdown/Rich Text support was shelved. I'm curious whether that's an architecture question or a priority question — I have thoughts on how to approach it if it's ever on the table."
+
+**If Jordan steers elsewhere — follow his lead.** The goal is to surface alignment, not force a pitch.
+
+**If he asks "what's the market?":**
+
+"Developer experience first — your own community and team would use it. Then enterprise knowledge work — think OpenClaw-style personal and enterprise knowledge management where AI agents are embedded in the document itself."
+
+---
+
+#### Minutes 22–28: Your Questions for Jordan
+
+1. "What's the biggest technical challenge the team is facing right now?"
+2. "How do you think about keeping AG-UI minimal vs. expanding for new interaction patterns?"
+3. "What does the engineering team structure look like — how much is protocol work vs. SDK vs. enterprise features?"
+4. *(If time)* "CoAgents sync state via snapshots and deltas. Have you explored CRDT-style conflict resolution for cases where both agent and user mutate state concurrently?"
+
+---
+
+#### Minutes 28–30: Close
+
+"This has been great. I'm genuinely excited about AG-UI as a protocol layer — it maps to patterns I've independently built. I'd love to continue the conversation."
+
+---
+
+#### Quick Reference Card
+
+| Topic | Key Phrase |
+|-------|-----------|
+| agent-doc | "CRDT streaming, named document regions, bidirectional state sync — same problem as AG-UI" |
+| lazily | "Cross-platform reactive signals — production Python, compiles to Zig and Rust" |
+| Framework-agnostic | "I build the reactive layer underneath — rmemo + relementjs work with any renderer" |
+| AG-UI connection | "Pattern recognition was immediate — snapshots, deltas, streaming, concurrent editing" |
+| Document pitch | "MDX notebooks with CopilotKit components — DX first, enterprise knowledge work second" |
+| Building in public | "Livestreaming dev sessions, demos on LinkedIn — happy to share links" |
+| Why CopilotKit | "Protocol layer for human-agent alignment — where I want to build" |
+<!-- agent:boundary:82cc1cc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Rehearse with updated timing — LinkedIn mention at end of pitch, not minute 22
+- **NOW:** Read through full script, rehearse key transitions
 - Post-interview: debrief, send follow-up with video links
 <!-- /agent:pending -->

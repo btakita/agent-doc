@@ -408,7 +408,7 @@ When you switch which editor tab is active (clicking on `agent-doc.md`), the plu
 
 The simplest fix is option 1 — if JetBrains exposes split change events, we can react immediately. Want me to investigate the JetBrains API for this?
 
-Yes. Also `Agent Doc Run` -> `agent-doc run` should have detected the layout. And moved the tmux pane accordingly.
+Yes. Also `Agent Doc Run` -> `agent-doc run` should have detected the layout. And moved the tmux pane accordingly. 
 ### Re: Run should detect layout and move tmux pane
 
 You're right. Currently:
@@ -427,15 +427,31 @@ After `agent-doc route <path>` succeeds, the plugin calls `agent-doc layout <fil
 Approach 2 is cleaner. The `route` command already knows the pane (it looks it up from the registry); adding a layout step is straightforward.
 
 Want me to implement approach 2 — add `--position` to `agent-doc route` and have the plugin pass it?
-<!-- agent:boundary:7652a53b -->
+
+Pass the entire declarative document layout instead. So we know what is on the left side.
+### Re: Pass entire declarative layout on Run (HEAD)
+
+**Done.** The fix is simple — `sendToTerminal()` (Run action) now calls `SyncLayoutAction.syncLayout()` after a successful route. This passes the **entire editor layout** declaratively via `agent-doc sync --col left_files --col right_files --focus active_file`.
+
+**What happens now on Run:**
+1. `agent-doc route <file>` → routes the command to the correct tmux pane
+2. On success → `syncLayout()` detects the full 2D editor layout via `LayoutDetector`
+3. Calls `agent-doc sync --col <left> --col <right> --focus <file>` → tmux panes rearrange to match
+
+The `LayoutDetector` walks JetBrains' Swing Splitter tree to detect which `.md` files are in which column (left/right split). So the binary gets the complete layout picture — not just one file's position.
+
+**Plugin v0.2.15 built** (unsigned + signed). Install from:
+`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.15.zip`
+
+**Change:** One line added to `TerminalUtil.kt` — `SyncLayoutAction.syncLayout(project, notify = false)` after successful route.
+<!-- agent:boundary:87adaba9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Add `--position` to `agent-doc route`** — sync tmux layout on Run
-- [ ] **Plugin: pass position in sendToTerminal()** — detect split side, pass to route
-- [ ] Investigate JetBrains EditorSplitterListener for tab-move events
+- [ ] **Install plugin v0.2.15** — IDEA → Plugins → Install from Disk
+- [ ] Investigate EditorSplitterListener for tab-drag-between-splits events
 - [ ] `agent-doc export --jupyter`
 - [ ] Interactive MDX viewer (Phase 1)
 <!-- /agent:pending -->

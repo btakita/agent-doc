@@ -538,7 +538,31 @@ Should I mention that I sent an email on LinkedIn messenger?
 > Hi Lucas, just sent over my resume and rate confirmation via email. Let me know if you have any questions!
 
 Keep it brief — just a pointer to check his inbox. Don't repeat the email content. Copy-paste into the LinkedIn conversation.
-<!-- agent:boundary:980ef23a -->
+Has resume/data.toml been updated from work in this session?
+### Re: data.toml Updates (HEAD)
+
+Yes — `resume/data.toml` was updated this session with 4 changes:
+
+1. **New skills added:**
+   - `AWS Lambda` (serverless, cloud)
+   - `AWS CDK` (IaC, cloud)
+   - `Grafana` (monitoring, observability)
+   - `TimescaleDB` (time-series, PostgreSQL)
+
+2. **Menu.com accomplishment updated:**
+   - Before: "Administered .NET API instances on AWS ECS with IAM"
+   - After: "Developed AWS CDK + Lambda serverless functions integrated with AWS Fargate Windows .NET API instances on ECS"
+   - Tags added: Lambda, CDK, serverless
+
+3. **Presence AI accomplishment updated:**
+   - Added "image generation, and live video/audio/text avatars" to multimodal pipeline description
+
+4. **Domain ontology accomplishment updated:**
+   - Renamed "philosophy" to "existence-lang, formerly philosophy"
+   - Added "gives agents and humans a consistent vocabulary across code, correspondence, and data contexts"
+
+The master template (`BrianTakita.md`) was also updated with: Grafana monitoring bullet at Presence AI, USAA security review bullet at TrueCar, and updated Skills line. These changes are not yet committed in the resume submodule.
+<!-- agent:boundary:33c30b11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -548,6 +572,7 @@ Keep it brief — just a pointer to check his inbox. Don't repeat the email cont
 - [x] Update resume with latest info
 - [x] Send email to Lucas
 - [ ] Send LinkedIn follow-up message (copy-paste)
+- [ ] Commit resume submodule changes
 - [ ] Await Lucas response / screening call scheduling
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Mention factor-based backtesting + DuckDB/PyTorch on screening call

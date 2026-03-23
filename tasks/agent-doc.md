@@ -1157,6 +1157,9 @@ The FFI debounce was just released in v0.25.7 / plugin v0.2.19. If the `copilotk
 
 **Key question:** Was the submit triggered via the JetBrains plugin (Run Agent Doc hotkey) or via `/agent-doc` typed in Claude Code? The debounce only applies to the **plugin's SubmitAction**. If you typed `/agent-doc` directly in Claude Code, there's no debounce — the CLI runs immediately.
 
+`Run Agent Doc` hotkey.
+plugin v0.2.19
+
 For CLI-triggered submits, the debounce would need to be in `agent-doc preflight` (mtime-based) or in the SKILL workflow (the skill could check file stability before proceeding). This is a gap — the FFI debounce only helps plugin-initiated runs.
 
 **2. Diff showed partial line without context**
@@ -1169,18 +1172,49 @@ The fix is in the SKILL instructions: when a diff shows a partial/truncated line
 - Always read the surrounding context from the full document (provided by preflight)
 
 **Action items:**
-1. Install plugin v0.2.19 to get FFI debounce for plugin-triggered runs
-2. Add mtime-based debounce to `agent-doc preflight` for CLI-triggered runs
-3. Update SKILL.md with guidance on handling partial/truncated diffs
-<!-- agent:boundary:cafa2886 -->
+1. Install plugin v0.2.19 to get FFI debounce for plugin-triggered runs: The action was run using v0.2.19
+2. Add mtime-based debounce to `agent-doc preflight` for CLI-triggered runs: That wasn't the case here. Only do so if it the debounce does not cause a delay if not needed. The plugin has an event to track the last edit, which allows it to not delay. Perhaps we can have a `--debounce` flag so it's opt-in?
+3. Update SKILL.md with guidance on handling partial/truncated diffs: Yes
+### Re: Debounce failed with v0.2.19 + preflight opt-in + SKILL partial diff (HEAD)
+
+**Debounce failure with v0.2.19 — root cause investigation needed.**
+
+If the plugin was v0.2.19 and the Run was triggered via hotkey, the debounce should have worked. Possible failure modes:
+
+1. **TypingTracker not receiving events** — `EditorFactory.eventMulticaster.addDocumentListener(TypingTracker, project)` may not have fired. This registration happens in `projectOpened()` — if the plugin was hot-reloaded, the listener might not have been re-registered.
+
+2. **FFI library not loaded** — `AgentDocLib.get()` returns null (binary not found), causing fallback to local tracking. The local fallback uses `System.currentTimeMillis()` which might have a different timestamp than when the hotkey was pressed.
+
+3. **Debounce window too short** — 1.5s may not be enough if the user types slowly (pausing >1.5s between words). The debounce resets on each edit, but if the user pauses mid-sentence for >1.5s, the window expires.
+
+4. **Auto-save timing** — JetBrains auto-saves before route. If the save happens before the debounce check, the `documentChanged` event from the save itself could reset the timer.
+
+**To diagnose:** Check `idea.log` for `[run]` and `[native]` log entries from the copilotkit session. These would show whether the debounce was triggered and what the FFI calls returned.
+
+**Preflight `--debounce` flag:** Good approach. The plugin passes `--debounce` via the route args (since it has event data). CLI users who don't pass `--debounce` get no delay.
+
+```
+agent-doc route tasks/copilotkit.md --debounce 1500 --col ...
+```
+
+The route command would call `debounce::await_idle()` before proceeding.
+
+**SKILL.md partial diff update:** Will add now.
+
+Want me to:
+1. Add `--debounce` to `agent-doc route`
+2. Update SKILL.md for partial diffs
+3. Investigate the debounce failure in idea.log
+<!-- agent:boundary:e2135cac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Install plugin v0.2.19** — FFI debounce for plugin-triggered runs
-- [ ] **Add preflight mtime debounce** — catch CLI-triggered runs mid-typing
-- [ ] **SKILL.md: partial diff guidance** — agent should detect truncated lines
+- [x] Plugin v0.2.19 installed
+- [ ] **Diagnose debounce failure** — check idea.log for timing details
+- [ ] **Add `--debounce` to route** — opt-in for plugin and CLI
+- [ ] **SKILL.md: partial diff guidance**
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -650,7 +650,7 @@ Since we have both ContainerListener (immediate) and the 5s poll (safety net), t
 
 **TL;DR:** Skip for now. The hybrid approach covers it. Add AnActionListener only if testing reveals gaps.
 Would polling risk performance degradation in the editor's main loop? Or is it running on a separate thread or is in an event loop?
-### Re: Polling performance — editor main loop risk? (HEAD)
+### Re: Polling performance — editor main loop risk?
 
 **No risk.** The poll runs on a **separate daemon thread**, not the EDT (Event Dispatch Thread).
 
@@ -682,7 +682,7 @@ I can fix this if you want — wrap the `detectEditorLayout()` call in `invokeLa
 3. Worst case on a race: we get a stale layout, which the next poll corrects
 
 Want me to fix the threading or leave it as-is since it works?
-<!-- agent:boundary:03af6899 -->
+<!-- agent:boundary:5cd9bba8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

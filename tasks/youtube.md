@@ -80,7 +80,7 @@ Cut **3 ranges** (~11.5s total) from `2026-03-22 10-27-48.mp4`:
 - 4 segments kept via ffmpeg trim+concat filter
 
 On the edited video, cut from 40:29.6 to 41:30
-### Re: Additional Cut on Edited Video (HEAD)
+### Re: Additional Cut on Edited Video
 
 Cut **40:29.6 to 41:30** (60.4s) from `2026-03-22 10-27-48-edited.mp4`.
 

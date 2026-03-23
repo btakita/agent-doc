@@ -178,7 +178,7 @@ Smart strategy. Having competing offers is the strongest negotiating position yo
 For now, your conversation with Lucas is in good shape. He's waiting for you to schedule the screening call. No urgency to change anything you've already said — just be mindful of pacing as your other processes advance.
 
 Look at the email from lucas noble
-<!-- agent:boundary:42216d3e:lucas-noble -->
+<!-- agent:boundary:4a4089e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

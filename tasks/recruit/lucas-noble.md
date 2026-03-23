@@ -531,14 +531,14 @@ DuckDB and TimescaleDB are both optimized for analytical/time-series queries —
 
 **Screening call talking point:** "I'm working through a quantitative backtesting course using DuckDB, Python, and PyTorch for time-series analysis — very similar patterns to what NextEra does with forecasting and optimization."
 Should I mention that I sent an email on LinkedIn messenger?
-### Re: LinkedIn Follow-Up (HEAD)
+### Re: LinkedIn Follow-Up
 
 **Yes — good idea.** Lucas initiated on LinkedIn, so he's likely more active there. A short nudge ensures he sees the email:
 
 > Hi Lucas, just sent over my resume and rate confirmation via email. Let me know if you have any questions!
 
 Keep it brief — just a pointer to check his inbox. Don't repeat the email content. Copy-paste into the LinkedIn conversation.
-<!-- agent:boundary:599ee603 -->
+<!-- agent:boundary:980ef23a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

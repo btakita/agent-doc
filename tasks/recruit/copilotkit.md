@@ -1249,7 +1249,16 @@ Or I can run it for you — just say "push it."
 **The email is good as-is.** The playlist link, the execution reframe, and the referral ask — that's three clean beats. Every addition you're considering (blog posts, crates.io link, AG-UI propagation) makes it longer without making it more effective.
 
 The draft file is ready. Should I push it to Gmail drafts now?
-<!-- agent:boundary:34314036 -->
+In my request for a referral...please include that I am interested in integrating AG-UI components.
+
+### Re: AG-UI integration in referral ask (HEAD)
+
+Updated the draft. The referral line now reads:
+
+> "On a separate note — I'm currently doing client work and am open to taking on more, particularly projects involving AG-UI integration. If you come across anyone in your network who could use someone with my background, I'd appreciate the referral."
+
+Draft file updated. Ready to push to Gmail drafts.
+<!-- agent:boundary:b8e6ccfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

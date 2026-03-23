@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Andrew replied: role is hybrid/Boston. Awaiting your decision on location before responding.
+Draft updated: hybrid short-term + relocation disclosure. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -95,7 +95,11 @@ Happy to schedule a screening call. I'm available this week — what times work 
 Best,
 Brian
 Reread the sms transcript 
-I am ok with a hybrid role. But I plan on moving away fr
+### Re: SMS Transcript
+
+No SMS transcript found for Andrew Curtis. The only communication on file is the LinkedIn conversation (`mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt`). There's no phone number in the contact record either.
+
+If there's an SMS thread, it may need to be exported first — do you have his number? I can search PulseSMS exports if you point me to it.
 ### Re: SMS Transcript Review
 
 Andrew responded (after your message was sent):
@@ -125,14 +129,36 @@ Let me know — I'd still love to connect.
 
 Best,
 Brian
-<!-- agent:boundary:cd3b217b -->
+/home/brian/work/btakita/agent-loop/mail/contacts/andrew-curtis/20260323-linkedin-andrew-curtis.txt
+
+I am ok with a hybrid role in the short term. But I plan on moving away from the area in the new few months.
+### Re: Updated Reply with Hybrid Position (HEAD)
+
+The LinkedIn transcript confirms Andrew's last messages (line 92-96):
+- Role is hybrid/Boston — client wants someone local/on-site as needed
+- Andrew offered to connect that afternoon
+
+Your position: hybrid OK short-term, planning to move away in a few months. Important to disclose — affects contract-to-hire conversion.
+
+**Updated draft reply:**
+
+Hi Andrew,
+
+That works — I'm in the Boston area and can do hybrid for the contract period. One thing to flag: I'm planning to relocate away from the area in the next few months, so the long-term hire conversion would likely need to be remote. Is that something the client would be open to?
+
+Either way, I'd love to connect and learn more. I'm available for a screening call this week — what times work for you?
+
+Best,
+Brian
+
+This is upfront about the timeline: available for the 6-month contract hybrid, remote question only applies to hire conversion. Adjust or send?
+<!-- agent:boundary:d72b2dcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **BLOCKER:** Decide on Boston hybrid — decline, negotiate remote, or accept
-- Draft and send reply to Andrew based on location decision
+- Send LinkedIn reply to Andrew Curtis (hybrid + relocation disclosure)
 - Attach resume PDF when sending
 - Schedule screening call once times confirmed
 - Prep talking points: MDX+Jupyter data viz, USAA regulated data, data pipeline framing

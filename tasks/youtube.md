@@ -138,7 +138,7 @@ Running silence detection on all 6 files now. Once complete, I'll show how much 
 Do you know the topics of each session, or should I transcribe to identify subjects?
 Transcribe and identify subjects.
 Should this be a mini-series around this particular issue of moving from the Skill into binary logic?
-### Re: Transcript Analysis & Mini-Series Plan (HEAD)
+### Re: Transcript Analysis & Mini-Series Plan
 
 All 6 transcriptions complete. The sessions have a clear narrative arc:
 
@@ -164,7 +164,7 @@ All 6 transcriptions complete. The sessions have a clear narrative arc:
 4. Upload as YouTube playlist
 
 Does this split look right? Want to adjust any titles or merge/split episodes?
-<!-- agent:boundary:f6f2e5eb -->
+<!-- agent:boundary:35ed5293 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

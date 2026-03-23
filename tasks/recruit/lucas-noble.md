@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume updated with Grafana, AWS Lambda/CDK, TimescaleDB, USAA security review. All JD gaps closed. Ready to send.
+Resume complete. All gaps addressed. Draft email ready to send with updated resume.
 <!-- /agent:status -->
 
 ## Exchange
@@ -326,7 +326,7 @@ While at Menu.com, I developed AWS CDK + Lambda integrated with AWS Fargate Wind
 
 > | **Energy domain** | Low — they're hiring generalist SDEs | Engineering Physics degree helps here |
 
-Yes. I'm also taking a financial 
+Yes. I'm also taking a algorithmic trading course with quantscience.io. Censible + Martin Investments ESG factor investment analysis is also relevant.
 
 **Recommendation:** Adding **Grafana** and **TimescaleDB** to Skills is the highest-impact quick fix — recruiters ctrl+F for JD keywords. Want me to update the resume profile?
 ### Re: Resume Updates
@@ -344,7 +344,15 @@ Resume rebuilt: `resume/BrianTakita-nextera-analytics.pdf`
 All previous gaps are now covered. Your message about energy domain was cut off — "I'm also taking a course with quan" — want to finish that thought?
 
 Draft email is ready to send with the updated resume. Give the go-ahead when ready.
-<!-- agent:boundary:e229cae0 -->
+I also have experience with creating functional reactive systems.
+### Re: Functional Reactive Systems (HEAD)
+
+Already covered in the resume — your 15-year reactive framework lineage (backbone-signal → ctx-core → rmemo → relysjs) is listed in Career Highlights and Open Source experience. The profile bolds "reactive programming" and "event-driven" throughout. Unison (event-driven relational algebra at Pivotal Labs) is also listed.
+
+This is actually a strong differentiator for NextEra — they work with time-series forecasting and real-time optimization, which maps directly to reactive/event-driven patterns. Worth highlighting on the intro call.
+
+Ready to send the email to Lucas?
+<!-- agent:boundary:be787615 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

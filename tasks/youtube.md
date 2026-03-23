@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Complete. 6 YouTube episodes, 7 blog posts, LinkedIn post — all published.
+VideoObject JSON-LD deployed. Full pipeline complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -553,12 +553,27 @@ First comment with all links posted (comment ID: `7441817705332125697`):
 6. Blog deployed to Cloudflare Pages
 7. YouTube comments with blog links on all 6 videos
 8. LinkedIn post with first comment links
-<!-- agent:boundary:1164d531 -->
+
+I want **VideoObject** in the json+ld where applicable.
+### Re: VideoObject JSON-LD Added (HEAD)
+
+Added structured data to all 7 blog posts:
+
+**Individual episodes** — `schema.org/VideoObject` with:
+- name, description, thumbnailUrl (YouTube maxres)
+- uploadDate, duration (ISO 8601)
+- contentUrl, embedUrl
+- author (Person)
+
+**Series overview** — `schema.org/ItemList` with all 6 videos as ListItems with positions.
+
+Committed and pushed. CF Pages will redeploy with the structured data.
+<!-- agent:boundary:f59d3368 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Pin YouTube comments manually (6 videos — use pin links in exchange above)
+- [ ] Pin YouTube comments manually (6 videos)
 - [ ] Implement `corky youtube pipeline` (see tasks/corky-youtube-pipeline.md)
 <!-- /agent:pending -->

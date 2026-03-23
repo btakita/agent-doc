@@ -42,12 +42,27 @@ Created `DEV.md` files for the three most actively released submodules:
 - JS/TS app DEV.md files — deploy workflows not yet established
 
 **Remaining future iteration: integration testing.** We could do a dry-run of `/dev agent-doc release` to validate the full workflow end-to-end. Want to try that, or move on?
-<!-- agent:boundary:eef5a7b6 -->
+
+Go through all of the submodules. Commit
+
+### Re: submodule commits (HEAD)
+
+Went through all submodules, committed everything from the inside out:
+
+| Submodule | What was committed |
+|-----------|-------------------|
+| `src/instruction-files` | New `DEV.md` |
+| `src/tmux-router` | Focus-steal diagnosis logging in sync/tmux |
+| `src/rappstack-dev` | Blog submodule pointer updates (domain--any--blog, domain--server--blog) |
+| `src/briantakita.me-dev` | Nested: `app/briantakita.me` (blog posts + yalc), `lib/ui--server--briantakita` (post doc html + yalc), then parent pointer + deps |
+| `mail` | Full sync — contacts, conversations, drafts, social |
+| `resume` | 4 new PDFs + profiles (andrew-curtis, benjamin-becker, eci-solutions, guidehouse-sba) |
+
+**Parent commit** `8b476aa`: Updated all 8 submodule pointers (mail, resume, agent-resume, briantakita.me-dev, brookebrodack-dev, instruction-files, rappstack-dev, tmux-router).
+
+All submodules are now clean.
+<!-- agent:boundary:b55c7be5 -->
 <!-- /agent:exchange -->
-
-<!-- agent:input -->
-
-<!-- /agent:input -->
 
 <!-- agent:pending patch=replace -->
 

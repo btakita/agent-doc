@@ -445,7 +445,7 @@ The `LayoutDetector` walks JetBrains' Swing Splitter tree to detect which `.md` 
 
 **Change:** One line added to `TerminalUtil.kt` — `SyncLayoutAction.syncLayout(project, notify = false)` after successful route.
 I liked Approach 2 better. But with optional `--col left_files --col right_files --focus active_file` cli arguments.
-### Re: Approach 2 — layout args on `agent-doc route` (HEAD)
+### Re: Approach 2 — layout args on `agent-doc route`
 
 **Done.** `agent-doc route` now accepts optional layout args:
 
@@ -471,7 +471,7 @@ agent-doc route tasks/agent-doc.md --col tasks/agent-doc.md --col tasks/recruit/
 This tells the binary: left column has `agent-doc.md`, right column has `lucas-noble.md`, focus is on `agent-doc.md`.
 
 Plugin v0.2.15 rebuilt. Binary built and installed. 521 tests pass.
-<!-- agent:boundary:1f54e541 -->
+<!-- agent:boundary:b8496e65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

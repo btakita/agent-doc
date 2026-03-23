@@ -379,7 +379,7 @@ corky linkedin comment DRAFT.md "Links: ..."
 ```
 
 **This can be automated into a single `corky youtube pipeline` command in the future.**
-### Re: Published! (HEAD)
+### Re: Published!
 
 All 6 episodes published to YouTube with closed captions and added to playlist:
 
@@ -395,7 +395,7 @@ All 6 episodes published to YouTube with closed captions and added to playlist:
 | 6 | Deterministic Primitives | 0:19:35 | https://www.youtube.com/watch?v=xNBkZAJuUys |
 
 Total: 7:34:05 across 6 episodes with SRT closed captions.
-<!-- agent:boundary:9dfc6b14 -->
+<!-- agent:boundary:094a4e4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -753,7 +753,7 @@ I navigated to tasks/recruit/benjamin-becker.md. The right tmux pane split into 
 When I switched the editor focus to tasks/agent-doc.md, the pane layout corrected itself.
 
 Please diagnose the issue(s) that caused the 3 pane layout.
-### Re: 3-pane layout diagnosis (HEAD)
+### Re: 3-pane layout diagnosis
 
 **Root cause: race between `route` and `sync` auto-start.**
 
@@ -791,7 +791,7 @@ Simple but hacky — `sleep(500ms)` between route and sync to let the pane stabi
 **Recommendation: Option A** — it's the cleanest. Sync should only auto-start when invoked standalone, not when called as part of a route.
 
 Want me to implement option A?
-<!-- agent:boundary:b962c86a -->
+<!-- agent:boundary:eee9893b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -824,7 +824,8 @@ This prevents:
 
 Ready to release as v0.25.7 or test first?
 test
-audit
+audit docs
+SPEC
 ### Re: Polling did not pause diff construction
 
 Good observation. The polling runs on a separate daemon thread and only reads the Swing component tree (via `invokeLater` on EDT, which takes microseconds). It never touches the document, file system, or diff engine. The diff is constructed by `agent-doc preflight` which reads the file independently.
@@ -834,13 +835,30 @@ The polling and diff are completely decoupled:
 - **Preflight:** reads document file → compares with snapshot → computes diff
 
 No contention between them. The poll's EDT work (layout detection) is ~microseconds, invisible to the user.
-<!-- agent:boundary:718802af -->
+I mean I was typing. The run should have paused until I was done typing.
+### Re: Run should pause until done typing + audit + SPEC (HEAD)
+
+**Typing pause:** You're right — the diff captured a partial edit ("I did not see the response b" was truncated). This happened because `/agent-doc` was invoked while you were mid-sentence. 
+
+The current workflow has no typing debounce — when you invoke `/agent-doc` (via Claude Code or the plugin), it runs immediately. Two options:
+
+1. **Plugin debounce on Run:** The plugin saves the file, then waits 1-2 seconds for typing to settle before calling `agent-doc route`. If the file changes during the wait, reset the timer.
+
+2. **Preflight debounce:** `agent-doc preflight` checks the file's mtime, waits 1s, checks again. If the file changed, waits another 1s. This catches in-progress typing regardless of how preflight was invoked.
+
+Option 2 is more robust — it works for both plugin and CLI invocations.
+
+**Audit docs + SPEC:** Will do after the typing discussion. These are straightforward.
+
+Want me to implement option 2 (preflight debounce)?
+<!-- agent:boundary:691622ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Route+sync race fix implemented (`run_layout_only`)
+- [ ] **Implement typing debounce** — preflight waits for file to stabilize before diffing
+- [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->
 

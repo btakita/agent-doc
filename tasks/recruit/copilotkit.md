@@ -1183,7 +1183,7 @@ Should I include other YouTube videos such as the resume to show my corky integr
 Ready to send via corky to Gmail drafts. Say the word.
 I also want to express the realtime markdown dashboard direction as well.
 
-Show my v
+Show my release velocity by linking to crates.
 
 ### Re: Additional Videos + Dashboard Direction
 
@@ -1206,7 +1206,21 @@ Adding a fourth (showcase every project) weakens all three.
 **Your message was cut off at "Show my v" — complete it if you want me to address it.**
 
 The draft is ready as-is. Want me to send it?
-<!-- agent:boundary:803266fa -->
+
+### Re: Link to crates.io for release velocity (HEAD)
+
+Your message was cut off at "linking to crates." — I'll assume you mean linking to your crates.io profile or agent-doc's crates.io page to show release frequency.
+
+**My recommendation: don't add it to this email.** Same reasoning — every link you add dilutes the one that matters (the playlist he asked for). The email already says "I release across crates.io, PyPI, and npm" — that's the claim. If Jordan is curious, he can search crates.io himself.
+
+**But if you want to include it:** Add it as a single line after the execution paragraph, not as another section:
+
+> (You can see the release cadence at https://crates.io/crates/agent-doc)
+
+One parenthetical line, not a feature. It backs up your claim without expanding the email.
+
+Should I add that line to the draft, or keep the email as-is and send?
+<!-- agent:boundary:f9461021 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

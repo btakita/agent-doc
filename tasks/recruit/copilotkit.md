@@ -204,7 +204,7 @@ This may be a good idea to explore, but I also need prep on CopilotKit's offerin
 - Don't criticize their current architecture — show you understand it before suggesting extensions
 With my annotation prompts, please regeneratne the prep document.
 
-### Re: Revised Interview Prep (with annotations incorporated) (HEAD)
+### Re: Revised Interview Prep (with annotations incorporated)
 
 ---
 
@@ -278,7 +278,7 @@ Don't lean on #1509 as proof of demand. Instead, frame it as: "I noticed this wa
 - Position agent-doc as YOUR prototype, not as something CopilotKit should adopt. It validates the pattern; CopilotKit has the distribution to scale it.
 - Lead with DX, follow with enterprise. Don't pitch the whole vision at once.
 - Let Jordan steer into systems/Rust territory if he wants — that's where you'll both be most comfortable.
-<!-- agent:boundary:470d696d -->
+<!-- agent:boundary:1ca0eedd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

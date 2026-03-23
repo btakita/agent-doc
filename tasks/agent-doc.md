@@ -1145,7 +1145,7 @@ Final:
 It seems we have 2 issues.
 - The debounce didn't work properly or wasn't effective.
 - The diff relative to the rest of the content was not considered.
-### Re: Debounce didn't work + diff context issue (HEAD)
+### Re: Debounce didn't work + diff context issue
 
 Two separate issues:
 
@@ -1172,7 +1172,7 @@ The fix is in the SKILL instructions: when a diff shows a partial/truncated line
 1. Install plugin v0.2.19 to get FFI debounce for plugin-triggered runs
 2. Add mtime-based debounce to `agent-doc preflight` for CLI-triggered runs
 3. Update SKILL.md with guidance on handling partial/truncated diffs
-<!-- agent:boundary:e64dc4f0 -->
+<!-- agent:boundary:cafa2886 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

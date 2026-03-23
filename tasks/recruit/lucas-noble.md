@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v2 finalized. Decided against adding agent-doc/corky/videos to email (save for team intro). Ready to send.
+Resume gap analysis complete. Two quick keyword additions recommended (Grafana, TimescaleDB). Draft reply ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -294,13 +294,33 @@ Should we include agent-doc, corky, existence-lang and my recent videos?
 - **Code samples** if asked — point to your GitHub repos
 
 Keep the email tight for Lucas. Let the resume carry the open source story. Ready to send as-is?
-<!-- agent:boundary:c23dccab -->
+Any gaps in the resume?
+### Re: Resume Gaps (HEAD)
+
+Checked against the JD:
+
+**Covered well:** Python, Rust, AWS, Vue.js, full-stack 20+ yrs, Agile/Scrum, CI/CD, DevOps, team leadership, working with data scientists.
+
+**Gaps:**
+
+| Gap | Impact | Fix |
+|---|---|---|
+| **TimescaleDB** not mentioned | Medium — JD lists it as recent project tech | Add to Skills if you have exposure (it's a PostgreSQL extension, trivial for you) |
+| **Grafana** not mentioned | Medium — same | Add to Skills if you've used it (monitoring at Presence AI?) |
+| **AWS Serverless** not called out specifically | Low — "AWS" is there broadly | Could add Lambda/API Gateway to Skills or Presence AI bullets |
+| **SOX compliance** | Low — SDE role, not compliance officer | Mention on the call if relevant experience exists |
+| **Energy domain** | Low — they're hiring generalist SDEs | Engineering Physics degree helps here |
+| **"Enterprise" framing** | Low — experience shows it implicitly | Not worth restructuring for |
+
+**Recommendation:** Adding **Grafana** and **TimescaleDB** to Skills is the highest-impact quick fix — recruiters ctrl+F for JD keywords. Want me to update the resume profile?
+<!-- agent:boundary:c5c6f493 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Send reply to Lucas with resume (awaiting approval)
+- [ ] Optionally add Grafana/TimescaleDB to resume Skills
 - [ ] Clarify onsite vs remote on screening call
 - [ ] Schedule screening call (pace with other interviews)
 <!-- /agent:pending -->

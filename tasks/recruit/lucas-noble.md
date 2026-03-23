@@ -472,7 +472,7 @@ Brian
 
 Much more scannable now. Approve to send?
 Draft email. Update resume latest info.
-### Re: Draft Email + Resume Update (HEAD)
+### Re: Draft Email + Resume Update
 
 **Email drafted and pushed to Gmail Drafts:**
 - **To:** lnoble@true-source.com
@@ -490,7 +490,7 @@ Open your Gmail Drafts to review and send.
 - Custom profile bolding all JD-relevant keywords
 
 Resume PDF is attached to the draft and ready to go.
-<!-- agent:boundary:8969ad82 -->
+<!-- agent:boundary:b92281de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

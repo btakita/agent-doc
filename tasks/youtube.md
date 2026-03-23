@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Publishing pipeline documented. All 6 episodes ready with SRT captions. Awaiting YouTube auth.
+6 episodes published to YouTube playlist. Blog and LinkedIn posts pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -297,6 +297,7 @@ Re-transcribing all 6 light-edited videos now (CUDA GPU, running in parallel). O
 4. Publish with captions included
 
 Also still need YouTube OAuth re-auth before publishing. Run `corky youtube auth` when ready.
+authorized
 Add to pending:
 - Blog post on briantakita.me
   - Include corky 0.21.0 supporting youtube playlists
@@ -378,16 +379,28 @@ corky linkedin comment DRAFT.md "Links: ..."
 ```
 
 **This can be automated into a single `corky youtube pipeline` command in the future.**
-<!-- agent:boundary:6045d913 -->
+### Re: Published! (HEAD)
+
+All 6 episodes published to YouTube with closed captions and added to playlist:
+
+**Playlist:** [Skill to Binary — Debugging agent-doc Live](https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI)
+
+| Ep | Title | Duration | URL |
+|----|-------|----------|-----|
+| 1 | The CRDT Ordering Bug | 1:58:46 | https://www.youtube.com/watch?v=5m9rTJ-4Xbc |
+| 2 | The Snowball Bug | 1:31:49 | https://www.youtube.com/watch?v=lEnOxyT5crY |
+| 3 | AST Parsing & GPU Transcription | 1:59:39 | https://www.youtube.com/watch?v=ntdcp2pH2qw |
+| 4 | IPC Timeout Deep Dive | 0:42:00 | https://www.youtube.com/watch?v=j0684b9NZ-o |
+| 5 | Preflight & Browser Extension | 1:02:17 | https://www.youtube.com/watch?v=DC1tAv-a_7E |
+| 6 | Deterministic Primitives | 0:19:35 | https://www.youtube.com/watch?v=xNBkZAJuUys |
+
+Total: 7:34:05 across 6 episodes with SRT closed captions.
+<!-- agent:boundary:9dfc6b14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Re-authenticate YouTube OAuth (`corky youtube auth`)
-- [ ] Publish 6 episodes to YouTube
-- [ ] Create "Skill to Binary" playlist
-- [ ] Add all 6 videos to playlist
 - [ ] Blog post on briantakita.me (include corky 0.21.0 YouTube playlist support)
 - [ ] LinkedIn post with first comment links (include corky 0.21.0 YouTube playlist support)
 - [ ] Pin comment on YouTube (manual — no API support)

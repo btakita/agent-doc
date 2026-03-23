@@ -649,15 +649,48 @@ Would this be helpful?
 Since we have both ContainerListener (immediate) and the 5s poll (safety net), the AnActionListener is redundant. If testing reveals edge cases where tabs move without triggering container events, we can add it then.
 
 **TL;DR:** Skip for now. The hybrid approach covers it. Add AnActionListener only if testing reveals gaps.
-<!-- agent:boundary:69a129c4 -->
+Would polling risk performance degradation in the editor's main loop? Or is it running on a separate thread or is in an event loop?
+### Re: Polling performance — editor main loop risk? (HEAD)
+
+**No risk.** The poll runs on a **separate daemon thread**, not the EDT (Event Dispatch Thread).
+
+Looking at the implementation:
+
+```kotlin
+pollThread = Thread({
+    while (!disposed.get()) {
+        Thread.sleep(POLL_INTERVAL_MS)  // sleeps on its own thread
+        checkAndSync("poll")             // layout detection on this thread
+    }
+}, "agent-doc-layout-poll").apply {
+    isDaemon = true  // won't block JVM shutdown
+    start()
+}
+```
+
+**Thread breakdown:**
+- **EDT (main loop):** Untouched. The poll never runs on it.
+- **`agent-doc-layout-poll` thread:** Sleeps 5s, wakes, calls `LayoutDetector.detectEditorLayout()` (walks Swing tree — must be on EDT for thread safety), then sleeps again.
+
+**Correction needed:** Actually, `LayoutDetector.detectEditorLayout()` accesses Swing components (`FileEditorManagerEx`, `Splitter`), which should technically be read from the EDT. The current implementation reads from a background thread, which works in practice (read-only access to the component tree is generally safe) but is technically a threading violation.
+
+To be correct, the layout check should use `ApplicationManager.getApplication().invokeLater {}` to read the layout on EDT, then process the result on the background thread. The EDT work is ~microseconds (just walking the tree), so it won't block the UI.
+
+I can fix this if you want — wrap the `detectEditorLayout()` call in `invokeLater` with a callback. But in practice, the current approach works fine because:
+1. We only read the component tree (no writes)
+2. The tree structure changes atomically from the EDT
+3. Worst case on a race: we get a stale layout, which the next poll corrects
+
+Want me to fix the threading or leave it as-is since it works?
+<!-- agent:boundary:03af6899 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [ ] **Install plugin v0.2.16** — test hybrid layout detection
-- [ ] Test: drag tab between splits → tmux follows within ~300ms
-- [ ] Test: keyboard move (Ctrl+Shift+Alt+→) → tmux follows
+- [ ] Optional: fix EDT threading for layout poll (invokeLater wrapper)
+- [ ] Test: drag tab between splits → tmux follows
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

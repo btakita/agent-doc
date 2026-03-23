@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Email draft file created. Awaiting push to Gmail drafts.
+Follow-up email pushed to Gmail drafts. Review and send from Gmail.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1273,13 +1273,22 @@ Almost all of my interactions are with agent-doc.
 3. **The email is done.** Every addition at this point is anxiety, not improvement. The draft has three clean beats. Send it.
 
 Push it to Gmail drafts?
-<!-- agent:boundary:ff0c1967 -->
+Send it
+
+### Email pushed to Gmail drafts (HEAD)
+
+Draft created in Gmail. Open your drafts to review and send.
+
+**To:** jordan@copilotkit.ai
+**BCC:** kevin@staffingscience.io, dev@briantakita.me
+**Subject:** Thanks for the conversation — demo links + a clarification
+<!-- agent:boundary:b4244fbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Push email draft to Gmail (draft file created, awaiting push)
+- Review and send email from Gmail drafts ([done] pushed)
 - Send interview recording + transcript to Kevin Volk
 - Calendar: Kevin check-in in 2 weeks, Jordan check-in in 3 months (June 2026)
 <!-- /agent:pending -->

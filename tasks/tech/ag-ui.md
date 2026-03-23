@@ -14,7 +14,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 Explain how the shared state works https://docs.copilotkit.ai/built-in-agent/shared-state
-Does the backend ai model or harness have state
+Does the backend ai model or harness have state that can be synced with the UI?
 
 ### Re: AG-UI Shared State
 
@@ -79,7 +79,127 @@ The `useCoAgent` hook creates real-time read/write access to agent state. `copil
 ---
 
 **Note:** Your message was cut off at "Does th" — please complete the question and I'll answer it.
-<!-- agent:boundary:caf89b87 -->
+Describe RFC 6902. Show some examples of messages.
+
+### Re: RFC 6902 & AG-UI Message Examples (HEAD)
+
+#### RFC 6902 — JSON Patch
+
+RFC 6902 defines a format for expressing a sequence of operations to apply to a JSON document. It's a standard way to describe mutations without sending the entire document.
+
+**Core concepts:**
+- A patch is an **array of operation objects**, applied in order
+- Each operation has an `op` (operation type), a `path` (JSON Pointer per RFC 6901), and optionally `value` or `from`
+- Paths use `/` separators: `/foo/bar/0` means `obj.foo.bar[0]`
+- Operations are atomic — if any fails, the whole patch should be rejected
+
+**The 6 operations:**
+
+| Op | Purpose | Required fields |
+|---|---|---|
+| `add` | Insert value at path (creates or appends to arrays) | `path`, `value` |
+| `remove` | Delete value at path | `path` |
+| `replace` | Overwrite value at path (must exist) | `path`, `value` |
+| `move` | Remove from `from`, add at `path` | `path`, `from` |
+| `copy` | Copy from `from` to `path` | `path`, `from` |
+| `test` | Assert value at path equals `value` (fails patch if not) | `path`, `value` |
+
+#### AG-UI SSE Message Examples
+
+Here's what the actual Server-Sent Events look like on the wire between an AG-UI agent backend and the frontend:
+
+**1. State Snapshot — initial state delivery:**
+```
+event: STATE_SNAPSHOT
+data: {
+  "type": "STATE_SNAPSHOT",
+  "snapshot": {
+    "messages": [],
+    "research": {
+      "title": "",
+      "outline": {},
+      "sections": [],
+      "status": "idle"
+    }
+  }
+}
+```
+
+**2. State Delta — agent starts researching (replace status):**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "replace", "path": "/research/status", "value": "researching" },
+    { "op": "replace", "path": "/research/title", "value": "AG-UI Protocol Analysis" }
+  ]
+}
+```
+
+**3. State Delta — agent adds outline sections (add to array):**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "add", "path": "/research/sections/-", "value": { "title": "Architecture", "content": "" } },
+    { "op": "add", "path": "/research/sections/-", "value": { "title": "Events", "content": "" } }
+  ]
+}
+```
+Note: `/-` is JSON Pointer syntax for "append to array."
+
+**4. State Delta — agent fills in section content (replace):**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "replace", "path": "/research/sections/0/content", "value": "AG-UI uses an event-based SSE architecture..." }
+  ]
+}
+```
+
+**5. State Delta — move an item between lists:**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "move", "path": "/completed_items/0", "from": "/pending_items/0" }
+  ]
+}
+```
+
+**6. State Delta — remove temporary data:**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "remove", "path": "/research/scratch_notes" }
+  ]
+}
+```
+
+**7. Test operation — guard before mutation:**
+```
+event: STATE_DELTA
+data: {
+  "type": "STATE_DELTA",
+  "delta": [
+    { "op": "test", "path": "/research/status", "value": "researching" },
+    { "op": "replace", "path": "/research/status", "value": "complete" }
+  ]
+}
+```
+The `test` ensures status is still "researching" before marking complete — if another update already changed it, the whole patch is rejected.
+
+#### Answer: Backend State Sync
+
+Yes — the backend agent maintains its own state object, and AG-UI syncs it to the UI via these SSE events. The agent emits `STATE_SNAPSHOT` or `STATE_DELTA` events as it works. The frontend applies them to its local copy. The frontend can also push state changes back to the agent (via `useCoAgent`'s `setState`), making it truly bidirectional.
+<!-- agent:boundary:90c010c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

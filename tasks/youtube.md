@@ -115,7 +115,7 @@ Merged **6 videos** into a single file using MPEG-TS intermediate concat (lossle
 Let's do a light edit. Removing long pauses and other low quality content.
 This is very long video.
 Should I break it up into multiple youtube videos according to distinct subjects?
-### Re: Light Edit & Splitting Strategy (HEAD)
+### Re: Light Edit & Splitting Strategy
 
 **Yes, break it up.** 8:52 as a single video hurts retention and discoverability. The 6 source files already have natural session boundaries:
 
@@ -136,7 +136,7 @@ Should I break it up into multiple youtube videos according to distinct subjects
 Running silence detection on all 6 files now. Once complete, I'll show how much dead air each has and produce trimmed versions.
 
 Do you know the topics of each session, or should I transcribe to identify subjects?
-<!-- agent:boundary:25344701 -->
+<!-- agent:boundary:00bf5a04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

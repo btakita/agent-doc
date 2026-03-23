@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Subagents analyzing transcripts for individual blog posts. Series post is featured, episodes won't be.
+Creating 6 individual episode blog posts (4 subagents running). Series overview is featured post.
 <!-- /agent:status -->
 
 ## Exchange
@@ -432,19 +432,28 @@ Should we have separate blog posts for each episode?
 
 Once complete, I'll create individual blog posts per episode with expanded topic analysis, then update the series overview to link them all.
 Make the series post the featured post. Individual episodes won't be feature blog posts.
-### Re: Featured Post Settings (HEAD)
+### Re: Individual Episode Blog Posts (HEAD)
 
-Updated: series overview post stays `featured: true`, individual episode posts will use `featured: false`.
+All transcript analyses complete. 4 subagents now creating 6 individual blog posts:
 
-Deep transcript analysis still running (4 subagents reading all 6 transcripts). Will create individual episode blog posts with expanded topic analysis once complete.
-<!-- agent:boundary:c0e307da -->
+| Ep | Blog Post File | Key Topics |
+|----|---------------|------------|
+| 1 | skill-to-binary-ep1-crdt-ordering.md | CRDT ordering, vibe coder labels, IPC caching |
+| 2 | skill-to-binary-ep2-snowball-bug.md | Snowball bug, probabilistic agents, context optimization |
+| 3 | skill-to-binary-ep3-ast-gpu-transcription.md | AST refactor, CUDA flags, Whisper hallucinations |
+| 4 | skill-to-binary-ep4-ipc-timeout.md | IPC timeout, polling vs events, scrollable terminal |
+| 5 | skill-to-binary-ep5-preflight.md | YouTube automation, preflight design, browser extension |
+| 6 | skill-to-binary-ep6-deterministic-primitives.md | Deterministic primitives, code review culture, firehouse effect |
+
+Series overview (`featured: true`) links to all episodes. Individual posts use `featured: false`.
+<!-- agent:boundary:0059c28a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Complete transcript deep analysis (4 subagents running)
-- [ ] Create individual episode blog posts (featured: false)
+- [ ] Complete 6 individual blog posts (subagents running)
+- [ ] Update series overview with episode links
 - [ ] Deploy blog to Cloudflare Pages
 - [ ] LinkedIn post with first comment links (include corky 0.21.0)
 - [ ] Verify YouTube videos finish processing

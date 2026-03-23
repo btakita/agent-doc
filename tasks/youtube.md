@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Second cut complete: 40:29.6-41:30 removed from edited video. Output: edited2.mp4 (1:29:26, 397 MB).
+6 videos merged: 2026-03-22-merged.mp4 (8:52:28, 19.5 GB). Ready for YouTube upload.
 <!-- /agent:status -->
 
 ## Exchange
@@ -83,16 +83,42 @@ On the edited video, cut from 40:29.6 to 41:30
 ### Re: Additional Cut on Edited Video
 
 Cut **40:29.6 to 41:30** (60.4s) from `2026-03-22 10-27-48-edited.mp4`.
-
+ 
 **Output:** [`2026-03-22 10-27-48-edited2.mp4`](../../../../Videos/2026-03-22%2010-27-48-edited2.mp4)
 - Duration: 1:29:26 (removed ~1 min)
 - Size: 397 MB
-<!-- agent:boundary:0a0a13f1-07a3-4a4a-ac3d-058948f8dc1f -->
+Please merge the following videos together for a YouTube video
+
+[2026-03-21 17-04-37.mp4](../../../../Videos/2026-03-21%2017-04-37.mp4)
+[2026-03-21 19-11-06.mp4](../../../../Videos/2026-03-21%2019-11-06.mp4)
+[2026-03-22 00-07-18.mp4](../../../../Videos/2026-03-22%2000-07-18.mp4)
+[2026-03-22 09-19-30.mp4](../../../../Videos/2026-03-22%2009-19-30.mp4)
+[2026-03-22 10-27-48-edited2.mp4](../../../../Videos/2026-03-22%2010-27-48-edited2.mp4)
+[2026-03-22 11-59-10.mp4](../../../../Videos/2026-03-22%2011-59-10.mp4)
+### Re: Merge 6 Videos (HEAD)
+
+Merged **6 videos** into a single file using MPEG-TS intermediate concat (lossless, no re-encode):
+
+| # | File | Duration |
+|---|------|----------|
+| 1 | 2026-03-21 17-04-37.mp4 | 2:02:57 |
+| 2 | 2026-03-21 19-11-06.mp4 | 1:40:51 |
+| 3 | 2026-03-22 00-07-18.mp4 | 2:19:22 |
+| 4 | 2026-03-22 09-19-30.mp4 | 0:49:00 |
+| 5 | 2026-03-22 10-27-48-edited2.mp4 | 1:29:26 |
+| 6 | 2026-03-22 11-59-10.mp4 | 0:30:53 |
+
+**Output:** [`2026-03-22-merged.mp4`](../../../../Videos/2026-03-22-merged.mp4)
+- Duration: 8:52:28
+- Size: 19.5 GB (lossless concat — no quality loss)
+- Method: MP4 → MPEG-TS → concat protocol → MP4 remux (handles timestamp discontinuities from edited2)
+<!-- agent:boundary:cb8decc6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Upload 2026-03-22-merged.mp4 to YouTube
 - [ ] Pin comment on YouTube (manual — no API support)
 - [ ] Agent-doc Chrome Extension for YouTube Studio automation (future)
 <!-- /agent:pending -->

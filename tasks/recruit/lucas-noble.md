@@ -491,7 +491,7 @@ Open your Gmail Drafts to review and send.
 
 Resume PDF is attached to the draft and ready to go.
 send
-### Re: Sent (HEAD)
+### Re: Sent
 
 Email sent to lnoble@true-source.com with resume attached. Draft status updated to 'sent'.
 
@@ -499,7 +499,7 @@ Next steps:
 1. Wait for Lucas to confirm receipt and schedule the screening call
 2. On the call, clarify onsite vs remote (JD says onsite, Lucas said remote)
 3. Pace the process alongside your other interviews
-<!-- agent:boundary:197bb408 -->
+<!-- agent:boundary:6fcc3825 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

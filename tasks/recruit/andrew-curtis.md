@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-One Euro filter added to master resume. Resume rebuilt. Ready to send to Andrew.
+LinkedIn message drafted for resume delivery. Ready to send with PDF attachment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -226,7 +226,7 @@ Yes...add to master database.
 
 **Resume file:** `resume/BrianTakita-andrew-curtis.pdf` (rebuilt with ML terms bolded)
 Please draft a LinkedIn message for my updated resume. Should we include changes or keep it simple?
-### Re: One Euro Filter Added to Master Resume (HEAD)
+### Re: One Euro Filter Added to Master Resume
 
 Updated `resume/BrianTakita.md` line 56:
 - Before: "landmark temporal smoothing"
@@ -235,14 +235,32 @@ Updated `resume/BrianTakita.md` line 56:
 Resume rebuilt: `resume/BrianTakita-andrew-curtis.pdf` — "One Euro filter" now bolded in the Presence AI section.
 
 This change is in the master template, so all future profile builds will include it.
-<!-- agent:boundary:498d216d -->
+### Re: LinkedIn Message for Resume (HEAD)
+
+Keep it simple — Andrew already screened you, he just needs the PDF to submit. No re-selling needed.
+
+**Draft LinkedIn message:**
+
+Hi Andrew,
+
+Here's my updated resume tailored for this role. I highlighted the full-stack Python/React depth and my ML pipeline work (One Euro filter, LatentSync optimization, Whisper tuning) at Presence AI. My Engineering Physics background is also noted.
+
+Let me know if you need anything else for the submission.
+
+Best,
+Brian
+
+**Attach:** `BrianTakita-andrew-curtis.pdf` (from `resume/BrianTakita-andrew-curtis.pdf`)
+
+Short and professional. Adjust or send?
+<!-- agent:boundary:cd5130cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Sign RTR from recruiter@occamsgroup.com (SignNow)
-- Send resume PDF to Andrew (BrianTakita-andrew-curtis.pdf) — URGENT
+- Send resume PDF + LinkedIn message to Andrew — URGENT
 - Wait for submission to FTI/end client
 - Prep for next interview: bioinformatics context, Jupyter/agent-doc demo, security clearance process
 <!-- /agent:pending -->

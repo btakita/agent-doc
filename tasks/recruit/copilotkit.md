@@ -282,7 +282,7 @@ The interview is only scheduled for 30 minutes. I suspect there won't be many qu
 - Let Jordan steer into systems/Rust territory if he wants — that's where you'll both be most comfortable.
 Iterate on the prep docs with my annotations.
 
-### Re: 30-Minute Interview Flow — Key Points to Drive (HEAD)
+### Re: 30-Minute Interview Flow — Key Points to Drive
 
 With only 30 minutes and likely an open-ended format, here's a structured flow you can drive:
 
@@ -351,7 +351,7 @@ Questions that show you understand CopilotKit deeply:
 ---
 
 **Key mindset: You're evaluating them too.** This is 30 minutes to determine if CopilotKit's direction aligns with where you want to build. Don't pitch too hard. Let the technical overlap speak for itself. Jordan is a systems engineer — he'll recognize the depth without you having to sell it.
-<!-- agent:boundary:e90ec836 -->
+<!-- agent:boundary:d621f8f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

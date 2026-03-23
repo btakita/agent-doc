@@ -898,13 +898,47 @@ Thread {
 ```
 
 This ensures the file is saved and the user has stopped typing before the route command fires. Want me to implement this in `SubmitAction`?
-<!-- agent:boundary:9125bf79 -->
+Is it possible to remove the delay in the debounce? Can we track the last keypress?
+We may also want to track whether or not the keypress changed the document.
+If `Run Agent Doc` was run within 1.5s of the last keypress (potentially document change), the we use the debounce loop.
+Otherwise we immediately invoke the agent-doc run.
+### Re: Keypress tracking + conditional debounce (HEAD)
+
+**Yes — this is a better design.** Track the last document change timestamp, and only debounce when recent typing is detected.
+
+**Implementation:**
+
+1. **Global timestamp tracker:** A `DocumentListener` that records `System.currentTimeMillis()` on every `.md` document change. Always active (low cost — just updates a `Long`).
+
+2. **Conditional debounce in SubmitAction:**
+   ```kotlin
+   val timeSinceLastEdit = System.currentTimeMillis() - lastDocChangeTimestamp
+   if (timeSinceLastEdit < 1500) {
+       // Recent typing — wait for it to settle
+       debounceAndRoute(document, project, relativePath)
+   } else {
+       // No recent typing — immediate route
+       saveAndRoute(project, relativePath)
+   }
+   ```
+
+3. **Debounce loop:** Only enters the loop when `timeSinceLastEdit < 1500ms`. Watches for further changes, resets timer on each one. Exits immediately when 1.5s passes without changes.
+
+**Benefits:**
+- **No delay** when user types, pauses, then clicks Run (>1.5s since last edit)
+- **Smart wait** when user clicks Run mid-typing (common when using hotkey while still thinking)
+- **Tracks document changes**, not just keypresses — so clipboard pastes and other edits are caught too
+
+The `DocumentListener` only fires on actual content changes (not cursor moves or selections), so it's the right signal.
+
+Want me to implement this?
+<!-- agent:boundary:cd7f95f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement plugin typing debounce** in SubmitAction (DocumentListener + timer)
+- [ ] **Implement conditional debounce** — keypress tracker + debounce only when recent typing detected
 - [ ] Audit docs + update SPEC.md
 - [ ] Release v0.25.7
 <!-- /agent:pending -->

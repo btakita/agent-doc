@@ -1013,7 +1013,7 @@ Also update kevin-volk/AGENTS.md and any other related context.
 Jordan's email is jordan@copilotkit.ai
 Please draft a followup email
 
-### Kevin Volk Call Summary (Mar 23) (HEAD)
+### Kevin Volk Call Summary (Mar 23)
 
 - Kevin will send Jordan's email (jordan@copilotkit.ai — you already have it)
 - Kevin wants the interview recording + transcript — send to him
@@ -1026,7 +1026,7 @@ Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
 
 ---
 
-### Draft Follow-Up Email to Jordan (HEAD)
+### Draft Follow-Up Email to Jordan
 
 **To:** jordan@copilotkit.ai
 **Subject:** Thanks for the conversation — demo links + a clarification
@@ -1060,7 +1060,7 @@ Updated `mail/contacts/kevin-volk/CLAUDE.md` with full timeline and intel.
 - The "clarification" reframes without being defensive — acknowledges the vision lean, then states execution credentials
 - Doesn't beg for the current role — accepts the timeline
 - Short enough that Jordan will actually read it
-<!-- agent:boundary:666ce33a -->
+<!-- agent:boundary:92c576ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

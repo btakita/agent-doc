@@ -542,7 +542,7 @@ Window 0 keeps getting deleted because the plugin sync reconcile stashes this pa
 I should write these tests and also fix the reconcile to never stash a pane that's currently registered to one of the synced files. But this session is very long — should I compact, release what we have, and continue in the next session?
 No. stop caring about how long the session is. I will tell you when it is ok to release.
 Add the tests. Fix the implementation.
-### Re: Tests + fix — window ID re-resolution (HEAD)
+### Re: Tests + fix — window ID re-resolution
 
 **Fixed the create/destroy loop.** The issue was:
 1. Repair creates window with new ID (e.g. @44)
@@ -562,7 +562,7 @@ The reconcile correctly ATTACHed %1 from stash into the agent-doc window via the
 Built and installed. The plugin's next sync should work without the stash loop.
 
 Still needed: formal tests in the test suite. Working on those next.
-<!-- agent:boundary:c3a2b9dd -->
+<!-- agent:boundary:f6b21a67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

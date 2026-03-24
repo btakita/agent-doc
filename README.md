@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
-**v0.25.7** | JetBrains plugin v0.2.19 | VS Code extension v0.2.3
+**v0.25.10** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
 
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
@@ -30,6 +30,11 @@ sees your edits as diffs, so every change carries intent.
 - **Stash window routing** — failed `split-window` calls land in a stash window instead of creating visible throwaway windows; resync purges idle stash windows
 - **Streaming** — real-time CRDT write-back loop with chain-of-thought routing
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session
+- **Preflight mtime debounce** — 500ms idle gate prevents duplicate preflight runs from rapid file saves
+- **Unified diff with context** — 5-line context radius for clearer diffs sent to the agent
+- **Route --debounce** — configurable debounce flag on `route` to coalesce rapid editor triggers
+- **is_tracked FFI export** — `agent_doc_is_tracked()` C ABI function for editor plugins to check session tracking
+- **Sync no-wait auto-start** — `auto_start_no_wait` for the sync path avoids blocking on prompt detection
 - **521 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
 
 ## Install
@@ -367,7 +372,7 @@ Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plu
 
 ## Editor Integration
 
-### JetBrains (v0.2.12)
+### JetBrains (v0.2.21)
 
 External Tool: Program=`agent-doc`, Args=`run $FilePath$`,
 Working dir=`$ProjectFileDir$`, Output paths=`$FilePath$`. Assign keyboard shortcut.

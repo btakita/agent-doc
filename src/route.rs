@@ -119,7 +119,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
-    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session)?;
+    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session, false)?;
     Ok(())
 }
 
@@ -273,12 +273,36 @@ fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane
 /// (e.g., the sync target session). Used when frontmatter has no `tmux_session`
 /// to avoid falling back to `current_tmux_session()`, which returns whichever
 /// session the user's terminal is viewing — not necessarily the correct one.
+#[allow(dead_code)]
 pub fn auto_start(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
     file_path: &str,
     context_session: Option<&str>,
+) -> Result<()> {
+    auto_start_ext(tmux, file, session_id, file_path, context_session, false)
+}
+
+/// Auto-start without waiting for Claude or sending commands.
+/// Used by sync when it just needs the pane to exist.
+pub fn auto_start_no_wait(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+) -> Result<()> {
+    auto_start_ext(tmux, file, session_id, file_path, context_session, true)
+}
+
+fn auto_start_ext(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+    skip_wait: bool,
 ) -> Result<()> {
     // Read tmux_session from frontmatter, validate it exists, fall back if not
     let session_name = if let Ok(content) = std::fs::read_to_string(file) {
@@ -308,7 +332,7 @@ pub fn auto_start(
     } else {
         TMUX_SESSION_NAME.to_string()
     };
-    auto_start_in_session(tmux, file, session_id, file_path, &session_name)
+    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait)
 }
 
 /// Auto-start a new Claude session in a specific tmux session.
@@ -318,7 +342,10 @@ pub fn auto_start(
 /// 2. If found: `split-window` directly in that pane's window (avoids creating
 ///    a throwaway window then failing to join due to minimum pane size)
 /// 3. If not found: create a new window via `auto_start` (session may not exist yet)
-fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str) -> Result<()> {
+///
+/// When `skip_wait` is true, skips `wait_for_claude_ready` and `send_command`.
+/// Used by sync which only needs the pane to exist with Claude starting.
+fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     // Resolve the agent-doc binary path (same binary that's currently running)
@@ -403,17 +430,21 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         &session_id[..std::cmp::min(8, session_id.len())]
     );
 
-    // Poll until Claude is ready, then send the /agent-doc command
-    eprintln!("[route] Waiting for Claude to initialize...");
-    if wait_for_claude_ready(tmux, &new_pane, std::time::Duration::from_secs(30)) {
-        eprintln!("[route] Claude is ready, sending /agent-doc command");
-        // send_command now includes Enter verification + retry
-        send_command(tmux, &new_pane, file_path)?;
+    if skip_wait {
+        eprintln!("[route] skip_wait=true — pane created, Claude starting (sync path)");
     } else {
-        eprintln!(
-            "[route] Timed out waiting for Claude. Run `agent-doc route {}` to retry.",
-            file_path
-        );
+        // Poll until Claude is ready, then send the /agent-doc command
+        eprintln!("[route] Waiting for Claude to initialize...");
+        if wait_for_claude_ready(tmux, &new_pane, std::time::Duration::from_secs(30)) {
+            eprintln!("[route] Claude is ready, sending /agent-doc command");
+            // send_command now includes Enter verification + retry
+            send_command(tmux, &new_pane, file_path)?;
+        } else {
+            eprintln!(
+                "[route] Timed out waiting for Claude. Run `agent-doc route {}` to retry.",
+                file_path
+            );
+        }
     }
 
     let _ = file; // suppress unused warning

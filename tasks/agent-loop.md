@@ -109,13 +109,24 @@ All three crates are committed, tagged, and pushed to GitHub:
 - `tagpath` v0.5.1 → `c73139d`, tag pushed
 
 **Blocked:** crates.io token in `~/.cargo/credentials.toml` is expired (403 Forbidden). Need a new token from https://crates.io/settings/tokens — run `cargo login` to set it, then I'll publish all three.
-<!-- agent:boundary:3f7620a1 -->
+
+try again
+
+### Re: try again (HEAD)
+
+Root cause: `CARGO_REGISTRY_TOKEN` was set as a **literal** `(pass btak/CARGO_REGISTRY_TOKEN)` in the environment (not shell-expanded). Fixed by passing `"$(pass btak/CARGO_REGISTRY_TOKEN)"` explicitly.
+
+**All three crates published to crates.io:**
+- `instruction-files` v0.1.5
+- `tmux-router` v0.2.9
+- `tagpath` v0.5.1
+
+**Parent commit** `f8fcce2`: Updated 6 submodule pointers (mail, resume, agent-doc, instruction-files, tmux-router, tagpath).
+
+All done — submodules committed, releases published, parent pointers updated.
+<!-- agent:boundary:e86ee0dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [blocked] Publish instruction-files v0.1.5 to crates.io (need new token)
-- [blocked] Publish tmux-router v0.2.9 to crates.io
-- [blocked] Publish tagpath v0.5.1 to crates.io
-- Update parent submodule pointers
-- Commit agent-loop
+
 <!-- /agent:pending -->

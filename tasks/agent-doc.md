@@ -396,7 +396,7 @@ Ready to release v0.25.12?
 audit docs
 update SPEC.md, README.md
 release
-### Re: audit + update + release — v0.25.12 done (HEAD)
+### Re: audit + update + release — v0.25.12 done
 
 **v0.25.12 published:**
 - crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
@@ -411,7 +411,7 @@ release
 7. Debounce: preflight mtime, unified diff context, route --debounce, is_tracked FFI
 
 README, SPEC updated. Clippy warnings fixed. All 526 tests pass.
-<!-- agent:boundary:dc8ebcbf -->
+<!-- agent:boundary:668b36ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

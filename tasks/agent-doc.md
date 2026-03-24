@@ -909,16 +909,53 @@ On it. I'll implement:
 3. **parallel.rs** basic test coverage
 
 Starting now — will stream progress as sections complete.
-<!-- agent:boundary:71dd0c71 -->
+In tmux session 0, window 0:agent-doc, left tmux pane does not have claude running.
+
+This window originated from tmux session 1 due to the swap bug.
+
+```
+❯
+~/work/manufacturingchina/factory-search-mvp main *1 !1
+~/work/manufacturingchina/factory-search-mvp main *1 !1                                                                                                                                                                                18:19:21
+❯ /agent-doc tasks/agent-doc.md
+zsh: no such file or directory: /agent-doc
+~/work/manufacturingchina/factory-search-mvp main *1 !1                                                                                                                                                                                18:19:37
+❯
+~/work/manufacturingchina/factory-search-mvp main *1 !1
+~/work/manufacturingchina/factory-search-mvp main *1 !1                                                                                                                                                                                18:19:37
+❯ /agent-doc tasks/agent-doc.md
+zsh: no such file or directory: /agent-doc
+~/work/manufacturingchina/factory-search-mvp main *1 !1                                                                                                                                                                                18:23:22
+❯
+~/work/manufacturingchina/factory-search-mvp main *1 !1
+~/work/manufacturingchina/factory-search-mvp main *1 !1                                                        18:23:23
+```
+
+I then deleted the pane on the incorrect directory.
+When calling `Run Agent Doc` on the left editor document, the window was split into 2 panes.
+However, the new tmux pane was on the right side. It should have been on the left side.
+### Re: Cross-session swap + wrong pane side (HEAD)
+
+**Issue 1: Cross-session swap** — `swap-pane` in route.rs swapped a pane from session 1 into session 0. The stash rescue code used `swap-pane` without checking that the target pane was in the SAME session. A pane from session 1's stash was swapped into session 0's agent-doc window.
+
+**Fix needed:** `swap-pane` in route.rs must verify both panes are in the same session before swapping.
+
+**Issue 2: New pane on wrong side** — When `Run Agent Doc` creates a new pane via `split-window`, it uses `-dh` (horizontal split right). For the LEFT editor document, the pane should be on the LEFT. The split direction should match the editor column position.
+
+**Fix needed:** The sync/route should use the column position from `--col` args to determine split direction. Left column → `-bh` (split before), right column → `-h` (split after).
+
+**Issue 3: Pane order** — The reconcile should ensure pane order matches the `--col` order (left-to-right).
+
+These are real bugs in the swap-pane and auto-start logic. Want me to fix them now?
+<!-- agent:boundary:9fc10de5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **tmux_session fully ignored** — all reads removed
-- [x] **tmux_session write-back removed** — sync.rs no longer inserts tmux_session
-- [x] **terminal.rs frontmatter read removed** — session targeting uses registry only
-- [x] **logging confirmed** — route.rs already logs wrong-session pane placement
+- [ ] **Cross-session swap guard** — verify same session before swap-pane
+- [ ] **Split direction from column position** — left column = split before
+- [ ] **Release v0.25.16** — swap guard + split direction
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

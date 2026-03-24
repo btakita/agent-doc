@@ -332,7 +332,7 @@ Fix
 These are significant self-healing gaps. Want me to implement the fixes now, or document them as issues for the next session? We've done a lot this session and it's getting late.
 
 Implement now.
-### Re: Self-healing implemented (HEAD)
+### Re: Self-healing implemented
 
 **resync.rs:**
 - New `Issue::InStash` variant — detects registered panes in stash windows
@@ -344,7 +344,7 @@ Implement now.
 - If pane is in a stash window → treated as dead → auto-start creates fresh pane in visible window
 
 All tests pass. Want me to release v0.25.14?
-<!-- agent:boundary:14432907 -->
+<!-- agent:boundary:c1f181e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

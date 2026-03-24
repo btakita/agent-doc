@@ -490,7 +490,7 @@ Good spec. I'll implement this as an `agent-doc repair` subcommand (also callabl
 
 This is the right approach — a single `repair()` function that can fix ANY incorrect state back to the desired layout. I'll implement it now.
 Let's have testing with many different likely scenarios to assert that the layout repair works correctly
-### Re: repair_layout() implemented (HEAD)
+### Re: repair_layout() implemented
 
 `repair_layout()` added to sync.rs — runs before every sync:
 
@@ -506,7 +506,7 @@ Let's have testing with many different likely scenarios to assert that the layou
 - If no alive panes: skips (sync auto-starts later)
 
 Built and installed. The next sync from the plugin will run repair_layout() automatically, fixing any stash/window issues before reconciliation.
-<!-- agent:boundary:ed3b8e13 -->
+<!-- agent:boundary:249ca76d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

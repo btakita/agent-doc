@@ -212,15 +212,29 @@ This is a separate issue from the sync fix — the sync correctly creates and pl
 **The sync cross-session fix is confirmed working.** The remaining issue is that `agent-doc start` needs valid Claude CLI args to launch successfully.
 
 Does email.md need `claude_args: --dangerously-skip-permissions` in its frontmatter?
-<!-- agent:boundary:2cf059ac -->
+Yes.
+Have you installed the latest build with the fix?
+Issue is still happening.
+### Re: claude_args added + start failure analysis (HEAD)
+
+Added `claude_args: --dangerously-skip-permissions` to `tasks/email.md` frontmatter.
+
+The `start` command runs bare `claude` when no `claude_args` are set. The `--print` error suggests Claude CLI detects a non-interactive TTY in the tmux split-window pane and falls back to `--print` mode, which requires stdin input.
+
+With `claude_args: --dangerously-skip-permissions`, the command becomes `claude --dangerously-skip-permissions` which forces interactive mode regardless of TTY detection.
+
+The build you installed already has the cross-session fix. Try switching to email.md again — now that the frontmatter has `claude_args`, the start should succeed.
+
+(Note: the latest build was already installed at v0.25.12 — no rebuild needed. Only the email.md frontmatter needed the `claude_args` line.)
+<!-- agent:boundary:7c9efa1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Cross-session sync fix** — confirmed working (pane created in correct session)
-- [ ] **email.md start failure** — Claude CLI invocation error, needs `claude_args` or fix to start command
-- [ ] **Release v0.25.12** — after start issue resolved
+- [x] **email.md claude_args** — added `--dangerously-skip-permissions` to frontmatter
+- [ ] **Test email.md sync** — try switching to email.md again
+- [ ] **Release v0.25.12** — pending test confirmation
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

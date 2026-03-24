@@ -10,10 +10,10 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.8 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.9 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.19 (FFI debounce + layout sync) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 11 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
+**Plugins:** JetBrains v0.2.20 (is_tracked + FFI logging) + VS Code v0.2.3
+**Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
 ## Architecture
@@ -1377,15 +1377,29 @@ Explain:
 4. `EditorTabSyncListener` already has its own 500ms debounce + concurrency guard (`AtomicBoolean running`).
 
 **Bottom line:** It doesn't need typing debounce because it never submits documents. It only arranges panes. The "bypass" label was misleading — I've updated the pending to reflect this.
-<!-- agent:boundary:b41268e2 -->
+release
+### Re: release — v0.25.9 (HEAD)
+
+**v0.25.9 published:**
+- crates.io ✓
+- PyPI ✓
+- GitHub Release ✓ (with binary)
+- `cargo install` ✓
+
+**Changes:**
+- `is_tracked()` FFI export — conservative debounce for untracked files
+- Untracked file fix — falls back to local tracking instead of assuming idle
+- `[native]` debug logging in TypingTracker
+- Plugin v0.2.20 (built, you've already installed)
+<!-- agent:boundary:7b4f8be4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] All debounce improvements shipped in v0.25.8
-- [x] Plugin v0.2.20 built (is_tracked + FFI logging)
-- [ ] **Install plugin v0.2.20** — restart IDE to activate
+- [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
+- [x] Plugin v0.2.20 installed
+- [x] v0.25.9 released to all targets
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

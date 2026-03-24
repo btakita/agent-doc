@@ -226,15 +226,24 @@ With `claude_args: --dangerously-skip-permissions`, the command becomes `claude 
 The build you installed already has the cross-session fix. Try switching to email.md again — now that the frontmatter has `claude_args`, the start should succeed.
 
 (Note: the latest build was already installed at v0.25.12 — no rebuild needed. Only the email.md frontmatter needed the `claude_args` line.)
-<!-- agent:boundary:ce92c314 -->
+Selecting tasks/email.md briefly selects 1:stash tmux window, then switches to 0:agent-doc tmux window.
+But 0:agent-doc is still 1 pane.
+### Re: pane created in stash — fixed (HEAD)
+
+**Root cause:** `auto_start_in_session` was splitting alongside ANY registered pane in the session — including stash panes. The email pane was born in the stash window (`@2`), invisible.
+
+**Fix:** When `skip_wait=true` (sync path), now prefers panes in the `agent-doc` window over stash panes. Split-window targets the first pane in `session:agent-doc` window, creating the new pane in the visible window.
+
+Rebuilt and installed. Try switching to email.md again.
+<!-- agent:boundary:f9b5005b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **email.md claude_args** — added `--dangerously-skip-permissions` to frontmatter
-- [ ] **Test email.md sync** — try switching to email.md again
-- [ ] **Release v0.25.12** — pending test confirmation
+- [x] **Split in stash fix** — sync auto-start now targets visible window, not stash
+- [ ] **Test email.md sync** — try again with latest build
+- [ ] **Release v0.25.12** — pending test
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

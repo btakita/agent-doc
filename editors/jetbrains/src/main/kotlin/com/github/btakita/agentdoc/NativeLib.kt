@@ -91,6 +91,9 @@ interface AgentDocLib : Library {
     /** Block until document is idle for debounce_ms, or timeout_ms expires. Returns true if idle. */
     fun agent_doc_await_idle(file_path: String, debounce_ms: Long, timeout_ms: Long): Boolean
 
+    /** Check if the document has been tracked (at least one document_changed call). */
+    fun agent_doc_is_tracked(file_path: String): Boolean
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 
@@ -114,7 +117,7 @@ interface AgentDocLib : Library {
                     return null
                 }
                 instance = Native.load(libPath, AgentDocLib::class.java)
-                LOG.info("[native] loaded libagent_doc from $libPath")
+                LOG.info("[native] loaded libagent_doc from $libPath (is_tracked + await_idle available)")
             } catch (e: Exception) {
                 loadError = "Failed to load libagent_doc: ${e.message}"
                 LOG.warn(loadError!!)

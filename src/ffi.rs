@@ -470,6 +470,25 @@ pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
     }
 }
 
+/// Check if the document has been tracked (at least one `document_changed` call recorded).
+///
+/// Returns `true` if the file has been tracked, `false` if never seen.
+/// Plugins use this to decide whether `await_idle` results are trustworthy:
+/// an untracked file returns idle=true from `await_idle`, but that's because
+/// no changes were recorded, not because the user isn't typing.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    crate::debounce::is_tracked(path)
+}
+
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
 ///
 /// Returns `true` if idle was reached (safe to run), `false` if timed out.

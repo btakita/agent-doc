@@ -801,10 +801,10 @@ Is `tmux_session` 100% ignored in the frontmatter? Are there any edge cases that
 **To make it 100% ignored:** Need to change `route.rs` to use `current_tmux_session()` instead of frontmatter, and `claim.rs` to stop writing it. This is the full deprecation — removing the last functional dependencies. Want me to do this?
 
 Yes
-### Re: tmux_session fully ignored (HEAD)
+### Re: tmux_session fully ignored
 
 All functional reads removed from route.rs, claim.rs, parallel.rs, sync.rs. The field deserializes for backward compat but is never used for any decision. Built and installed.
-<!-- agent:boundary:4ec005af -->
+<!-- agent:boundary:1e7377f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1470,7 +1470,25 @@ Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
 | [#35](https://github.com/btakita/agent-doc/issues/35) | MDX support |
 | [#36](https://github.com/btakita/agent-doc/issues/36) | Jupyter notebook support |
 | [#37](https://github.com/btakita/agent-doc/issues/37) | Notion integration |
-<!-- agent:boundary:4ff26b09 -->
+Review this document.
+Add the content as context to the relevant github issue.
+Such as MDX and Jupyter notebook support
+### Re: Add context to GitHub issues (HEAD)
+
+Updated 5 issues with architecture context from this document:
+
+- **[#35 MDX](https://github.com/btakita/agent-doc/issues/35)** — Added format detection, comment stripping (`{/* */}`), component parsing (JSX alternative), plugin filter changes. Phased: extension filter → JSX comments → JSX components.
+
+- **[#36 Jupyter](https://github.com/btakita/agent-doc/issues/36)** — Added JSON structure challenges, cell-level diff strategies, component mapping, snapshot approach, write-back path. Phased: read-only → cell-level → kernel integration.
+
+- **[#37 Notion](https://github.com/btakita/agent-doc/issues/37)** — Added sync model options (pull-push vs webhook), block↔component mapping, conflict resolution, authentication. Phased: one-way read → bidirectional → real-time.
+
+- **[#30 Install script](https://github.com/btakita/agent-doc/issues/30)** — Added platform/arch detection, install paths, current alternatives context.
+
+- **[#33 /btw support](https://github.com/btakita/agent-doc/issues/33)** — Added preemption use cases, side-channel mechanism, claims-based injection approach.
+
+The remaining issues (#31 Homebrew, #32 lazily-rs, #34 ClawTeam) are straightforward and don't need additional architecture context.
+<!-- agent:boundary:20cade7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1479,7 +1497,8 @@ Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
 - [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
 - [x] Plugin v0.2.20 installed
 - [x] v0.25.9 released
-- [x] GitHub issues created (#30–#37) for todo items
+- [x] GitHub issues created (#30–#37)
+- [x] Architecture context added to issues #30, #33, #35, #36, #37
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

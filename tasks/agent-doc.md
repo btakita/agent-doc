@@ -215,7 +215,7 @@ Does email.md need `claude_args: --dangerously-skip-permissions` in its frontmat
 Yes.
 Have you installed the latest build with the fix?
 Issue is still happening.
-### Re: claude_args added + start failure analysis (HEAD)
+### Re: claude_args added + start failure analysis
 
 Added `claude_args: --dangerously-skip-permissions` to `tasks/email.md` frontmatter.
 
@@ -226,7 +226,7 @@ With `claude_args: --dangerously-skip-permissions`, the command becomes `claude 
 The build you installed already has the cross-session fix. Try switching to email.md again — now that the frontmatter has `claude_args`, the start should succeed.
 
 (Note: the latest build was already installed at v0.25.12 — no rebuild needed. Only the email.md frontmatter needed the `claude_args` line.)
-<!-- agent:boundary:7c9efa1d -->
+<!-- agent:boundary:ce92c314 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -74,7 +74,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
                     val windowId = TerminalUtil.projectWindowId(project)
-                    val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
+                    // Always pass --window: use resolved ID, or fall back to "agent-doc" name
+                    val windowArgs = listOf("--window", windowId ?: "agent-doc")
                     // Always use sync --col (never focus) so that unwanted panes
                     // are broken out and the entire window layout is managed.
                     val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {

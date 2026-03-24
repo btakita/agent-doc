@@ -18,7 +18,7 @@ Why is gmail suddenly saying I'm out of storage?
 How can I tell if my credit card had an issue?
 ![img_1.png](img_1.png)
 
-### Re: Storage & Credit Card (HEAD)
+### Re: Storage & Credit Card
 
 I can see from the screenshot: **81.62 GB of 15 GB used** — you're way over the free tier. Emails stop on **Apr 22, 2026**.
 
@@ -31,7 +31,7 @@ I can see from the screenshot: **81.62 GB of 15 GB used** — you're way over th
 3. **[play.google.com/store/account/subscriptions](https://play.google.com/store/account/subscriptions)** — check if Google One shows expired/paused
 
 **Quick fix:** If the card was declined, update it and resubscribe. The **$1.99/mo for 100 GB** plan (shown in the banner) covers your 81.62 GB usage.
-<!-- agent:boundary:7b144a53 -->
+<!-- agent:boundary:961d19df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

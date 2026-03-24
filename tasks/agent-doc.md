@@ -1029,7 +1029,59 @@ Additionally, `target_session` was derived from `--window` BEFORE checking wante
 **Result:** 73/73 tmux-router tests pass, 38/38 agent-doc tests pass.
 
 Ready to build release and install?
-<!-- agent:boundary:85b93c6b -->
+
+What have we learned from this session?
+How can we refactor or SPEC the pipelines to avoid issues with implementation changes and bug fixes in the future?
+The right side of tmux window 0:agent-doc is now an empty shell.
+It swapped with tmux session 1.
+
+I had to c
+### Re: Lessons learned + preventing this class of bugs (HEAD)
+
+**Why it happened again:** The fix was only in dev build — the installed binary was still v0.25.15 without the cross-session guard. Just installed the patched binary. The fix is now live.
+
+**What we learned from this session:**
+
+1. **Session boundaries are a hard invariant.** Any tmux operation that moves panes (swap, join, break) must validate session boundaries. We had it on swap but not join — incomplete defense.
+
+2. **Derivation order matters.** `target_session` was derived from `--window` (an external hint) before checking the actual wanted panes. External hints should validate against ground truth, not override it.
+
+3. **Fallback paths need the same guards as fast paths.** The swap→join fallback bypassed the session check because it was treated as a "safe" alternative. Every path that moves a pane needs the same invariant check.
+
+**How to prevent this class of bug — SPEC approach:**
+
+The core issue is that **tmux operations have implicit cross-boundary side effects** that aren't caught at compile time. Here's how to spec this:
+
+**1. Session-scoped operation types:**
+```rust
+// Type-safe session scope — operations can only target panes within scope
+struct SessionScope { session: String }
+impl SessionScope {
+    fn validate_pane(&self, tmux: &Tmux, pane: &str) -> Result<ValidatedPane>;
+    fn join_pane(&self, tmux: &Tmux, src: ValidatedPane, dst: ValidatedPane) -> Result<()>;
+    fn swap_pane(&self, tmux: &Tmux, a: ValidatedPane, b: ValidatedPane) -> Result<()>;
+}
+```
+Every pane operation goes through `SessionScope` which validates before executing. Cross-session moves become a compile-time error (can't get a `ValidatedPane` for the wrong session).
+
+**2. Reconcile contract (invariant spec):**
+```
+PRE:  all wanted panes ∈ target_session OR are dead
+POST: all panes in target_window ⊂ wanted ∧ same session
+INV:  no pane crosses session boundary during reconcile
+```
+Add an assertion at the end of reconcile that verifies the post-condition. This catches any new code paths that bypass guards.
+
+**3. Integration test pattern — "session firewall":**
+Every new pane-movement feature gets a cross-session test as a gate. Template:
+- Create sessions A and B
+- Attempt the operation with a pane from B targeting A
+- Assert the pane stays in B
+
+This is now the pattern with `test_cross_session_join_blocked_entirely`.
+
+**Immediate next step:** Want me to implement the `SessionScope` type wrapper? It would make cross-session bugs impossible at the type level rather than relying on runtime checks scattered across code paths.
+<!-- agent:boundary:07e456f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1038,6 +1090,8 @@ Ready to build release and install?
 - [x] **Cross-session swap guard** — verify same session before swap-pane
 - [x] **Cross-session join guard** — verify same session before join-pane
 - [x] **Window session validation** — ignore --window from wrong session
+- [x] **Install patched binary** — fix is now live in ~/.cargo/bin/agent-doc
+- [ ] **SessionScope type wrapper** — compile-time cross-session prevention
 - [ ] **Split direction from column position** — left column = split before
 - [ ] **Release v0.25.16** — swap guard + join guard + split direction
 <!-- /agent:pending -->

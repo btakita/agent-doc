@@ -33,6 +33,8 @@ pub fn document_changed(file: &str) {
 /// Check if the document has been idle (no changes) for at least `debounce_ms`.
 ///
 /// Returns `true` if no recent changes (safe to run), `false` if still active.
+/// For untracked files (no `document_changed` ever called), returns `true` —
+/// the blocking `await_idle` relies on this to not wait forever.
 pub fn is_idle(file: &str, debounce_ms: u64) -> bool {
     let path = PathBuf::from(file);
     with_state(|map| {
@@ -41,6 +43,15 @@ pub fn is_idle(file: &str, debounce_ms: u64) -> bool {
             Some(last) => last.elapsed().as_millis() >= debounce_ms as u128,
         }
     })
+}
+
+/// Check if the document has been tracked (at least one `document_changed` call recorded).
+///
+/// Used by non-blocking probes to distinguish "never tracked" from "tracked and idle".
+/// If a file is untracked, the probe should be conservative (assume not idle).
+pub fn is_tracked(file: &str) -> bool {
+    let path = PathBuf::from(file);
+    with_state(|map| map.contains_key(&path))
 }
 
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.

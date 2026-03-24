@@ -16,6 +16,7 @@ object TypingTracker : DocumentListener {
 
     const val DEBOUNCE_MS = 1500L
     private const val TIMEOUT_MS = 30000L
+    private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
 
     override fun documentChanged(event: DocumentEvent) {
         val vFile = FileDocumentManager.getInstance().getFile(event.document) ?: return
@@ -25,9 +26,11 @@ object TypingTracker : DocumentListener {
         val lib = AgentDocLib.get()
         if (lib != null) {
             lib.agent_doc_document_changed(vFile.path)
+            LOG.debug("[native] document_changed: ${vFile.name}")
         } else {
             // Fallback: track locally if FFI unavailable
             lastChangeMs = System.currentTimeMillis()
+            LOG.debug("[fallback] document_changed: ${vFile.name}")
         }
     }
 
@@ -35,7 +38,10 @@ object TypingTracker : DocumentListener {
     fun awaitIdle(filePath: String): Boolean {
         val lib = AgentDocLib.get()
         return if (lib != null) {
-            lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, TIMEOUT_MS)
+            LOG.info("[native] awaitIdle: waiting for idle (${DEBOUNCE_MS}ms debounce, ${TIMEOUT_MS}ms timeout)")
+            val result = lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, TIMEOUT_MS)
+            LOG.info("[native] awaitIdle: result=$result")
+            result
         } else {
             // Fallback: simple local check
             val elapsed = System.currentTimeMillis() - lastChangeMs
@@ -49,14 +55,25 @@ object TypingTracker : DocumentListener {
     fun isRecentlyTyping(filePath: String): Boolean {
         val lib = AgentDocLib.get()
         return if (lib != null) {
+            // Check if file is tracked — if not, fall back to local tracking
+            // (untracked files return idle=true from await_idle, which is misleading)
+            if (!lib.agent_doc_is_tracked(filePath)) {
+                val local = (System.currentTimeMillis() - lastChangeMs) < DEBOUNCE_MS
+                LOG.info("[native] isRecentlyTyping: file untracked, fallback local=$local")
+                return local
+            }
             // await_idle with 0 timeout = non-blocking check
-            !lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, 0)
+            val idle = lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, 0)
+            LOG.info("[native] isRecentlyTyping: idle=$idle → recentlyTyping=${!idle}")
+            !idle
         } else {
-            (System.currentTimeMillis() - lastChangeMs) < DEBOUNCE_MS
+            val result = (System.currentTimeMillis() - lastChangeMs) < DEBOUNCE_MS
+            LOG.info("[fallback] isRecentlyTyping: result=$result")
+            result
         }
     }
 
-    // Fallback local tracking (used when FFI unavailable)
+    // Fallback local tracking (used when FFI unavailable or file untracked)
     @Volatile
     private var lastChangeMs: Long = 0
 }

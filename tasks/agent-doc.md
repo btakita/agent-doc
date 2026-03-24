@@ -634,7 +634,7 @@ Still see 2:agent-doc instead of 0:agent-doc.
 Add tests.
 Fix.
 Do not stop until we end up in this state.
-### Re: Window index fix verified (HEAD)
+### Re: Window index fix verified
 
 **Fixed:** Phase 3 was being skipped by the fast-path. Now Phases 1+2 can be skipped when layout is structurally correct, but Phase 3 (index normalization) always runs.
 
@@ -650,7 +650,7 @@ Layout verified correct:
 - Active: `0:agent-doc`
 
 Built and installed.
-<!-- agent:boundary:b0cdb22f -->
+<!-- agent:boundary:6a586530 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

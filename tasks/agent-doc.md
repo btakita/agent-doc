@@ -1378,7 +1378,7 @@ Explain:
 
 **Bottom line:** It doesn't need typing debounce because it never submits documents. It only arranges panes. The "bypass" label was misleading — I've updated the pending to reflect this.
 release
-### Re: release — v0.25.9 (HEAD)
+### Re: release — v0.25.9
 
 **v0.25.9 published:**
 - crates.io ✓
@@ -1391,7 +1391,7 @@ release
 - Untracked file fix — falls back to local tracking instead of assuming idle
 - `[native]` debug logging in TypingTracker
 - Plugin v0.2.20 (built, you've already installed)
-<!-- agent:boundary:7b4f8be4 -->
+<!-- agent:boundary:fa857f88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

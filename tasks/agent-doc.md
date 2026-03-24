@@ -226,6 +226,12 @@ You're right on all three points. The current design conflates two concerns:
 
 Currently `sync` calls `auto_start` inline when it encounters a file with no alive pane. This blocks the layout operation for 8+ seconds and shows intermediate states.
 
+Why would there be intermediate states?
+If there is no active tmux pane for the document, then start and show the tmux pane with the command that starts the claude session.
+There should be no flicker. Just the tmux pane with claude starting.
+
+If another document is selected while claude is loading, then show the tmux pane for the newly selected document...start the tmux pane + claude session if necessary.
+
 **The fix:**
 
 1. **Sync should only manage panes that already exist.** If a file has no pane, sync should:
@@ -240,13 +246,32 @@ Currently `sync` calls `auto_start` inline when it encounters a file with no ali
 This separates the fast path (layout sync, <100ms) from the slow path (session start, 5-30s) and eliminates visual disruption.
 
 Want me to implement this? It's a change in `sync.rs` — remove the inline `auto_start` call and replace with a background spawn.
-<!-- agent:boundary:596af1a7 -->
+### Re: simpler — just show the right pane (HEAD)
+
+You're right, I overcomplicated it. The desired behavior is straightforward:
+
+**Select file → show its pane.** If no pane exists, create one (Claude starts loading in it — that's fine). If another file is selected mid-load, show that file's pane instead.
+
+**The 3-pane bug:** The current code creates the new pane via `split-window` in the visible window BEFORE stashing the old pane. The correct sequence should be:
+
+1. Stash the old pane (now window has 1 pane)
+2. Create/join the new pane (now window has 2 panes)
+
+Or even simpler: `split-window` in stash, then `join-pane` to the visible window — atomic swap.
+
+**Why it's currently 3 panes:** The sync follows ATTACH-before-DETACH (lesson #3), which makes sense for *existing* panes (join first to avoid losing focus). But for *auto-start* (creating new panes), the order should be reversed — stash first, then create. The ATTACH-before-DETACH rule applies to pane *movement*, not pane *creation*.
+
+**The actual fix is small:**
+In `sync.rs`, when `auto_start` is needed, stash the unwanted pane first, then split-window in the visible window. No background process needed. No waiting needed. Claude loading in the pane is visible to the user as expected.
+
+Want me to implement this? It's a reorder of operations in the sync reconciliation path.
+<!-- agent:boundary:fb97e441 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Decouple sync from auto-start** — sync manages layout only, auto-start runs in background
+- [ ] **Fix sync pane order** — stash old pane before creating new one (eliminates 3-pane state)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

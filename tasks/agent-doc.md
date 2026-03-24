@@ -322,7 +322,7 @@ Try switching to email.md — it should work now with both the data fix and the 
 
 I switched back to `tmux_session: '1'`.
 Please make agent-doc "repair" tasks/email.md to use the correct tmux_session based on the running agent-doc project.
-### Re: auto-repair tmux_session (HEAD)
+### Re: auto-repair tmux_session
 
 Implemented. When `auto_start` detects a context_session override (sync path), it now automatically updates the frontmatter `tmux_session` to match:
 
@@ -337,7 +337,7 @@ So if email.md has `tmux_session: '1'` but the sync targets session `0`, the bin
 3. Future syncs see the correct value — no more conflicts
 
 Rebuilt and installed. You can switch back to `tmux_session: '1'` in email.md and test — the sync should auto-repair it to `'0'`.
-<!-- agent:boundary:464587ae -->
+<!-- agent:boundary:b51f8abf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

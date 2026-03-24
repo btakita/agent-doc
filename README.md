@@ -114,6 +114,7 @@ Follow-up. You can also annotate inline:
 | `agent_doc_format` | no | `template` | Document format: `inline` (canonical) or `template`. `append` accepted as backward-compat alias for `inline`. |
 | `agent_doc_write` | no | `crdt` | Write strategy: `merge` or `crdt` |
 | `agent_doc_mode` | no | — | **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead |
+| `tmux_session` | no | — | **Deprecated.** Session is now determined at runtime by `--window` (sync) or `current_tmux_session()` (route/start). Still written for backward compatibility; auto-repaired by sync. |
 | `resume` | no | (none) | Claude conversation ID for `--resume` |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |

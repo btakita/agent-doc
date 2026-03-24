@@ -1330,21 +1330,54 @@ continue
 5. Recheck interval increased from 200ms to 400ms
 
 Note: the unified diff format is now live — this cycle's preflight used it. You can see the focused output with `@@` hunk markers and surrounding context instead of the entire document.
-<!-- agent:boundary:e3579431 -->
+continue on pending
+### Re: continue on pending (HEAD)
+
+Both remaining pending items done.
+
+**1. FFI debounce logging — done (plugin v0.2.20)**
+
+Added `[native]` and `[fallback]` log tags to `TypingTracker`:
+- `[native] document_changed: <file>` — every document edit via FFI
+- `[native] isRecentlyTyping: idle=<bool>` — pre-submit check result
+- `[native] isRecentlyTyping: file untracked, fallback local=<bool>` — untracked file fallback
+- `[native] awaitIdle: waiting/result` — blocking wait lifecycle
+- `[fallback] *` — local tracking when FFI unavailable
+
+Also updated `NativeLib.get()` log to confirm `is_tracked` availability on load.
+
+Enable debug logging: IDEA → `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`. The `[native]` tags will appear in `idea.log`.
+
+**2. Untracked file debounce fix — done**
+
+Root cause: `is_idle()` returned `true` for files with no entry in the debounce map. When the plugin called `await_idle(path, 1500, 0)` (non-blocking probe), an untracked file appeared idle, bypassing debounce.
+
+Fix: Added `is_tracked()` function (Rust + FFI export). `TypingTracker.isRecentlyTyping()` now checks `is_tracked()` first — if the file has never had a `document_changed` call, it falls back to local `lastChangeMs` tracking instead of trusting the FFI result.
+
+This means:
+- FFI loaded + file tracked → FFI `await_idle` (accurate per-file timing)
+- FFI loaded + file untracked → local `lastChangeMs` fallback (conservative)
+- FFI unavailable → local `lastChangeMs` fallback (as before)
+
+**Plugin install:** `agent-doc-jetbrains-0.2.20.zip` built. Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk..."
+
+All tests pass. `libagent_doc.so` rebuilt with `is_tracked` export.
+<!-- agent:boundary:c7227a23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Plugin v0.2.19 installed
+- [x] Plugin v0.2.19 installed → **v0.2.20 ready** (is_tracked + logging)
 - [x] **Add `--debounce` to route** — mtime-based `await_idle()`
-- [x] **SKILL.md: partial diff guidance** — added to step 1 (Respond)
 - [x] **Preflight mtime debounce** — 500ms idle check before diff
 - [x] **Fix `looks_truncated`** — improved dot handling, doubled recheck interval
 - [x] **Unified diff with context** — 5-line context radius
 - [x] **v0.25.8 released** — all targets published
-- [ ] **EditorTabSyncListener debounce** — layout sync bypasses SubmitAction debounce
-- [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin
+- [x] **FFI debounce logging** — `[native]` tags in TypingTracker + NativeLib
+- [x] **Untracked file debounce** — is_tracked() FFI + local fallback
+- [ ] **Install plugin v0.2.20** — restart IDE to activate
+- [ ] **EditorTabSyncListener** — layout sync routes bypass SubmitAction (low priority: sync doesn't send /agent-doc commands)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

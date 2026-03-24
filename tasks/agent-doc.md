@@ -603,7 +603,7 @@ Finds the "agent-doc" window by NAME, returns its current ID. Window names are s
 **Plugin v0.2.22 built.** Install from: `agent-doc-jetbrains-0.2.22.zip`
 
 After installing, the plugin will always find the correct window ID regardless of recreation.
-<!-- agent:boundary:7ac89b30 -->
+<!-- agent:boundary:694c5546 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

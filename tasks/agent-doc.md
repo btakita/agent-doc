@@ -1252,7 +1252,7 @@ The next issue occurred when I tried `Run Agent Doc` again.
 The plugin side debounce did not seem to work.
 
 Also, the entire line should have been read by `agent-doc run`...even if only part of the line was typed in the diff.
-### Re: debounce didn't work + full line should be read (HEAD)
+### Re: debounce didn't work + full line should be read
 
 You're right on both counts. Let me clarify what the logs actually show and what the real issues are.
 
@@ -1276,7 +1276,7 @@ The `looks_truncated` heuristic in `diff.rs` tries to catch this but has two fal
 Add mtime-based idle check to `agent-doc preflight` itself (not just route). If the file was modified within N ms of the preflight call, wait for it to settle before computing the diff. This is the last line of defense and catches all trigger paths (plugin, CLI, watch daemon).
 
 Want me to implement preflight mtime debounce?
-<!-- agent:boundary:f9befb91 -->
+<!-- agent:boundary:a6da5fc7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

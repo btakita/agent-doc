@@ -1397,7 +1397,7 @@ Put mdx, Jupyter, and Notion support into the todo list
 Added to the todo list.
 I renamed tasks/agent-doc/todo.md to tasks/agent-doc/queue.md.
 In tmux session 0, it switched to window 1:stash for a few seconds then corrected back to window 0:agent-doc.
-### Re: file rename + tmux window flicker (HEAD)
+### Re: file rename + tmux window flicker
 
 **File rename noted.** `tasks/agent-doc/todo.md` → `tasks/agent-doc/queue.md` — acknowledged.
 
@@ -1410,7 +1410,7 @@ This happens at the tmux CLI level (not in the plugin logs — hence no break/jo
 2. **Batch break operations:** Do all breaks before the final `select-pane` focus
 
 Want me to investigate whether `tmux-router` already uses `-d` on break-pane?
-<!-- agent:boundary:44d6e187 -->
+<!-- agent:boundary:348f5680 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

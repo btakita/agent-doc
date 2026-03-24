@@ -45,6 +45,13 @@ enum Issue {
         actual_window: String,
         expected_window: String,
     },
+    /// Pane is alive but in a stash window (not the active workspace).
+    InStash {
+        key: String,
+        file: String,
+        pane: String,
+        window_name: String,
+    },
 }
 
 impl std::fmt::Display for Issue {
@@ -81,6 +88,16 @@ impl std::fmt::Display for Issue {
                 f,
                 "{} (pane {}) in window '{}', expected '{}'",
                 file, pane, actual_window, expected_window
+            ),
+            Issue::InStash {
+                file,
+                pane,
+                window_name,
+                ..
+            } => write!(
+                f,
+                "{} (pane {}) is in stash window '{}'",
+                file, pane, window_name
             ),
         }
     }
@@ -273,6 +290,21 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
             entry.file.as_str()
         };
 
+        // Check 0: Is the pane in a stash window?
+        // Stash panes are alive but not in the active workspace — deregister them
+        // so that sync/route can auto-start a fresh pane in the correct window.
+        if let Some(ref wname) = pane_window_name(tmux, &entry.pane)
+            && is_stash_window_name(wname)
+        {
+            issues.push(Issue::InStash {
+                key: key.clone(),
+                file: label.to_string(),
+                pane: entry.pane.clone(),
+                window_name: wname.clone(),
+            });
+            continue; // Don't run further checks on stash panes
+        }
+
         // Check 1: Is the pane running an agent-doc/claude process?
         let pane_cmd = pane_current_command(tmux, &entry.pane);
         if let Some(ref cmd) = pane_cmd
@@ -464,6 +496,14 @@ fn apply_fixes_to_registry(
                 // Just deregister — don't kill the foreign process
                 registry.remove(key);
                 eprintln!("  fixed: {}", issue);
+                fixed += 1;
+            }
+            Issue::InStash { key, pane, .. } => {
+                // Deregister — the pane is in the stash, not the active workspace.
+                // Don't kill it; just remove the registry entry so auto-start can
+                // create a fresh pane in the correct window.
+                eprintln!("  [resync] pane {} for {} is in stash window, deregistering", pane, key);
+                registry.remove(key);
                 fixed += 1;
             }
             Issue::WrongWindow { pane, .. } => {

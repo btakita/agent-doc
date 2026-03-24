@@ -934,7 +934,7 @@ zsh: no such file or directory: /agent-doc
 I then deleted the pane on the incorrect directory.
 When calling `Run Agent Doc` on the left editor document, the window was split into 2 panes.
 However, the new tmux pane was on the right side. It should have been on the left side.
-### Re: Cross-session swap + wrong pane side (HEAD)
+### Re: Cross-session swap + wrong pane side
 
 **Issue 1: Cross-session swap** — `swap-pane` in route.rs swapped a pane from session 1 into session 0. The stash rescue code used `swap-pane` without checking that the target pane was in the SAME session. A pane from session 1's stash was swapped into session 0's agent-doc window.
 
@@ -947,7 +947,7 @@ However, the new tmux pane was on the right side. It should have been on the lef
 **Issue 3: Pane order** — The reconcile should ensure pane order matches the `--col` order (left-to-right).
 
 These are real bugs in the swap-pane and auto-start logic. Want me to fix them now?
-<!-- agent:boundary:9fc10de5 -->
+<!-- agent:boundary:7da7a471 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

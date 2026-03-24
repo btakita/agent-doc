@@ -191,14 +191,18 @@ When sync calls `auto_start_no_wait` with a context_session (derived from the `-
 This means email.md (bound to session `1`) will get a pane in session `0` when the editor layout sync requests it. The pane will be visible in the correct window.
 
 All 526 tests pass. Build successful. Want me to release?
-<!-- agent:boundary:2921a27a -->
+install build so I can manually test
+### Re: install build (HEAD)
+
+Installed. `~/.cargo/bin/agent-doc` is now v0.25.12 (unreleased) with the cross-session fix. Test by switching to a file with a different `tmux_session` in the editor split.
+<!-- agent:boundary:7be5d607 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Cross-session sync fix** — context_session overrides frontmatter in sync path
-- [ ] **Release** — cross-session fix
+- [x] **Cross-session sync fix** — installed for manual testing
+- [ ] **Release v0.25.12** — after manual testing confirms the fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

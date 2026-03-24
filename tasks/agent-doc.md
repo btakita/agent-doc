@@ -1392,10 +1392,10 @@ release
 - `[native]` debug logging in TypingTracker
 - Plugin v0.2.20 (built, you've already installed)
 Put mdx, Jupyter, and Notion support into the todo list
-### Re: mdx, Jupyter, Notion → todo (HEAD)
+### Re: mdx, Jupyter, Notion → todo
 
 Added to the todo list.
-<!-- agent:boundary:dac740ba -->
+<!-- agent:boundary:89f06bb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

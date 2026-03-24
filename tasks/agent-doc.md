@@ -360,13 +360,45 @@ The flicker happens during step 1. Even with `-d` on `stash_pane`/`break_pane`, 
 **Realistic options:**
 1. **Accept ~100ms flicker** during pane swaps (current state)
 2. **Investigate `swap-pane`** — tmux has a `swap-pane` command that might do an atomic swap without intermediate states
-<!-- agent:boundary:edae2238 -->
+Do:
+- [ ] **Investigate tmux `swap-pane`** — might eliminate flicker by atomic swap instead of stash+join
+### Re: swap-pane investigation (HEAD)
+
+**`swap-pane` is the right solution.** It's a single tmux command that atomically swaps two panes, even across windows.
+
+```
+tmux swap-pane -s %stash_pane -t %visible_pane -d
+```
+
+`-d` prevents focus change. The old pane goes to the stash position, the new pane appears in the visible window. No intermediate 1-pane or 3-pane state.
+
+**Current flow (ATTACH then DETACH):**
+```
+join_pane(stash→visible)  → 3 panes briefly
+stash_pane(old→stash)     → 2 panes
+```
+
+**With swap-pane:**
+```
+swap_pane(stash↔visible)  → always 2 panes
+```
+
+**Where it fits in tmux-router:**
+The `reconcile()` function in `sync.rs` does ATTACH → DETACH in sequence. For the common case of 1:1 replacement (one pane out, one pane in), it can use `swap-pane` instead. Multi-pane changes (2→3 columns) would still use the current join+stash approach.
+
+**Implementation plan:**
+1. Add `swap_pane(&self, src: &str, dst: &str) -> Result<()>` to `Tmux` struct
+2. In `reconcile()`, detect 1:1 swap case: exactly one pane to ATTACH and one to DETACH
+3. Use `swap-pane -d` for the 1:1 case, fall back to join+stash for complex changes
+
+This change is in `tmux-router` (the library crate), not `agent-doc`. Want me to implement it?
+<!-- agent:boundary:21e45818 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Investigate tmux `swap-pane`** — might eliminate flicker by atomic swap instead of stash+join
+- [ ] **Implement swap-pane in tmux-router** — atomic pane swap for 1:1 replacements, eliminates flicker
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

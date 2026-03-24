@@ -527,7 +527,7 @@ Normal sync calls (layout already correct) skip repair entirely — just one `li
 Built and installed.
 The current layout is still incorrect.
 Did you add tests with many broken layouts being fixed.
-### Re: Layout still incorrect + tests (HEAD)
+### Re: Layout still incorrect + tests
 
 Window 0 keeps getting deleted because the plugin sync reconcile stashes this pane (%1). Repair recreates it, but the next sync stashes it again — a create/destroy loop.
 
@@ -540,7 +540,7 @@ Window 0 keeps getting deleted because the plugin sync reconcile stashes this pa
 4. Stash-only state (no windows) → full recreation
 
 I should write these tests and also fix the reconcile to never stash a pane that's currently registered to one of the synced files. But this session is very long — should I compact, release what we have, and continue in the next session?
-<!-- agent:boundary:688f5952 -->
+<!-- agent:boundary:3e0244e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

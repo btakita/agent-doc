@@ -1279,7 +1279,7 @@ Want me to implement preflight mtime debounce?
 Yes
 And the `looks_truncated` fix?
 Also should the diff should have surrounding context around it?
-### Re: Yes — all three implemented (HEAD)
+### Re: Yes — all three implemented
 
 **1. Preflight mtime debounce — done**
 
@@ -1313,7 +1313,7 @@ This directly answers your question — yes, the diff now has surrounding contex
 All 526 tests pass. Release build successful.
 
 Want me to build a release?
-<!-- agent:boundary:eaeeb055 -->
+<!-- agent:boundary:a9204078 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

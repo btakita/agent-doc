@@ -213,14 +213,40 @@ The new logging reveals the issue clearly.
 **This is actually working correctly** — the auto-start for a new file requires creating a pane, starting Claude, and waiting for it to be ready. The 3-pane state is transient. The stash window isn't involved here.
 
 The real question is whether the auto-start should happen in the stash window (hidden) and then join to the visible window after Claude is ready, to avoid the visual disruption.
-<!-- agent:boundary:39a454ba -->
+We should only show the tmux pane associated with the currently selected file.
+Why do we wait for Claude to become ready at all?
+These should be deterministic tmux operations from the agent-doc binary.
+### Re: sync should be deterministic, no waiting (HEAD)
+
+You're right on all three points. The current design conflates two concerns:
+
+**Sync (layout)** — deterministic tmux operations: stash unwanted panes, join wanted panes, select focused pane. Should be instant.
+
+**Auto-start (session lifecycle)** — starting Claude in a new pane: `split-window`, send `agent-doc start`, wait for ready. This is slow and non-deterministic.
+
+Currently `sync` calls `auto_start` inline when it encounters a file with no alive pane. This blocks the layout operation for 8+ seconds and shows intermediate states.
+
+**The fix:**
+
+1. **Sync should only manage panes that already exist.** If a file has no pane, sync should:
+   - Use a placeholder pane (empty shell) or skip that column
+   - Trigger auto-start in the background (stash window, invisible)
+   - When auto-start completes, the next sync cycle picks it up naturally
+
+2. **Auto-start moves to background.** `agent-doc sync` returns immediately after layout. A background process starts Claude in the stash, registers the pane, and the next sync (from `EditorTabSyncListener` poll or layout change) joins it.
+
+3. **Only the focused file's pane is guaranteed visible.** Non-focused columns can show a "starting..." placeholder or the existing stash pane until the real one is ready.
+
+This separates the fast path (layout sync, <100ms) from the slow path (session start, 5-30s) and eliminates visual disruption.
+
+Want me to implement this? It's a change in `sync.rs` — remove the inline `auto_start` call and replace with a background spawn.
+<!-- agent:boundary:5e314f9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Plugin v0.2.21 logging confirmed working
-- [ ] **Auto-start in stash** — start new panes in stash, join to visible window after Claude ready (eliminates 3-pane transient state)
+- [ ] **Decouple sync from auto-start** — sync manages layout only, auto-start runs in background
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

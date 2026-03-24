@@ -112,7 +112,7 @@ All three crates are committed, tagged, and pushed to GitHub:
 
 try again
 
-### Re: try again (HEAD)
+### Re: try again
 
 Root cause: `CARGO_REGISTRY_TOKEN` was set as a **literal** `(pass btak/CARGO_REGISTRY_TOKEN)` in the environment (not shell-expanded). Fixed by passing `"$(pass btak/CARGO_REGISTRY_TOKEN)"` explicitly.
 
@@ -124,7 +124,7 @@ Root cause: `CARGO_REGISTRY_TOKEN` was set as a **literal** `(pass btak/CARGO_RE
 **Parent commit** `f8fcce2`: Updated 6 submodule pointers (mail, resume, agent-doc, instruction-files, tmux-router, tagpath).
 
 All done — submodules committed, releases published, parent pointers updated.
-<!-- agent:boundary:e86ee0dc -->
+<!-- agent:boundary:f0f52be4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -48,7 +48,8 @@ class SyncLayoutAction : AnAction() {
             Thread {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc()
-                    val windowArgs = if (windowId != null) listOf("--window", windowId) else emptyList()
+                    // Always pass --window: use resolved ID, or fall back to "agent-doc" name
+                    val windowArgs = listOf("--window", windowId ?: "agent-doc")
                     val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
                     // Always use sync --col (never focus) so that unwanted panes
                     // are broken out and the entire window layout is managed.

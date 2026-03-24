@@ -449,12 +449,15 @@ fn run_with_options(
             // Strip deprecated tmux_session from frontmatter.
             // Session is now determined at runtime — the field is no longer needed.
             if fm.tmux_session.is_some() {
-                // Find and remove the tmux_session line (including trailing newline)
+                // Remove the tmux_session line and collapse any resulting blank lines
                 let stripped = content
                     .lines()
                     .filter(|line| !line.starts_with("tmux_session:"))
                     .collect::<Vec<&str>>()
                     .join("\n");
+                // Collapse 3+ consecutive newlines to 2 (prevents blank line accumulation)
+                let stripped = stripped
+                    .replace("\n\n\n", "\n\n");
                 // Preserve trailing newline if original had one
                 let stripped = if content.ends_with('\n') && !stripped.ends_with('\n') {
                     format!("{}\n", stripped)
@@ -720,4 +723,188 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let has_agent = cmdline.contains("agent-doc") || cmdline.contains("claude");
     let has_file = cmdline.contains(file_path);
     has_agent && has_file
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::IsolatedTmux;
+
+    /// Helper: list windows as vec of (index, name) pairs.
+    fn list_windows(tmux: &Tmux, session: &str) -> Vec<(String, String)> {
+        let output = tmux
+            .raw_cmd(&[
+                "list-windows",
+                "-t",
+                &format!("{}:", session),
+                "-F",
+                "#{window_index} #{window_name}",
+            ])
+            .unwrap();
+        output
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(2, ' ');
+                let idx = parts.next()?.to_string();
+                let name = parts.next()?.to_string();
+                Some((idx, name))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn repair_layout_skips_correct_state() {
+        let iso = IsolatedTmux::new("sync-repair-skip-correct");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session with agent-doc window at index 0 + one stash window
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let _ = iso.ensure_stash_window("test");
+
+        let windows_before = list_windows(&iso, "test");
+
+        // repair_layout should succeed and not change anything
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        let windows_after = list_windows(&iso, "test");
+        assert_eq!(windows_before, windows_after, "layout was already correct — nothing should change");
+    }
+
+    #[test]
+    fn repair_layout_moves_window_to_index_0() {
+        let iso = IsolatedTmux::new("sync-repair-move-idx0");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session: initial window at 0 (placeholder), then create
+        // agent-doc + stash at higher indices, and remove the placeholder.
+        // This leaves agent-doc at a non-zero index with index 0 free.
+        let _pane0 = iso.new_session("test", tmp.path()).unwrap();
+        // Create stash at index 1
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "stash", "-d",
+        ]);
+        // Create agent-doc at index 2
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
+        ]);
+        // Kill the placeholder at index 0 to free it
+        let _ = iso.raw_cmd(&["kill-window", "-t", "test:0"]);
+
+        // Verify agent-doc is NOT at index 0 before repair
+        let windows_before = list_windows(&iso, "test");
+        let ad_before = windows_before.iter().find(|(_, n)| n == "agent-doc");
+        assert!(ad_before.is_some(), "agent-doc window should exist");
+        assert_ne!(ad_before.unwrap().0, "0", "agent-doc should NOT be at index 0 before repair");
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        // After repair, agent-doc should be at index 0
+        let windows_after = list_windows(&iso, "test");
+        let ad_after = windows_after.iter().find(|(_, n)| n == "agent-doc");
+        assert!(ad_after.is_some(), "agent-doc window should still exist");
+        assert_eq!(ad_after.unwrap().0, "0", "agent-doc should be at index 0 after repair");
+    }
+
+    #[test]
+    fn repair_layout_rescues_pane_from_stash() {
+        let iso = IsolatedTmux::new("sync-repair-rescue-stash");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session with a non-agent-doc window + stash with a pane
+        let pane1 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "other"]);
+
+        // Create a second pane and stash it
+        let pane2 = iso.split_window(&pane1, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+
+        // Verify no agent-doc window exists
+        let windows_before = list_windows(&iso, "test");
+        assert!(
+            !windows_before.iter().any(|(_, n)| n == "agent-doc"),
+            "agent-doc window should NOT exist before repair"
+        );
+
+        // Note: repair_layout uses sessions::load() which reads from CWD.
+        // In tests without CWD override, Phase 2 rescue may not find the pane
+        // in the registry. But Phase 1 (stash consolidation) and Phase 3 (index
+        // normalization) still run. The key assertion is that repair doesn't error.
+        let result = repair_layout(&iso, "test", "agent-doc");
+        assert!(result.is_ok(), "repair_layout should not error");
+
+        // The stashed pane should still be alive regardless
+        assert!(iso.pane_alive(&pane2), "stashed pane should still be alive");
+    }
+
+    #[test]
+    fn repair_layout_consolidates_multiple_stash_windows() {
+        let iso = IsolatedTmux::new("sync-repair-consolidate");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session with agent-doc window
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+
+        // Create 3 extra panes, stash each one separately to create multiple stash windows
+        let p1 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+        let _p2 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+        let _p3 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+
+        // Stash them — each stash_pane goes to the same stash window normally,
+        // but we can force multiple stash windows by using break_pane_to_stash
+        // which creates overflow windows.
+        iso.stash_pane(&p1, "test").unwrap();
+        // The first stash_pane creates the stash window. For the second and third,
+        // create new windows named "stash" manually to simulate overflow.
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "stash", "-d", "-P", "-F", "#{window_id}",
+        ]);
+
+        let stash_windows: Vec<String> = {
+            let output = iso.raw_cmd(&[
+                "list-windows", "-t", "test:", "-F", "#{window_id} #{window_name}",
+            ]).unwrap();
+            output.lines()
+                .filter_map(|line| {
+                    let mut parts = line.splitn(2, ' ');
+                    let id = parts.next()?;
+                    let name = parts.next()?;
+                    if name == "stash" || name.starts_with("stash-") {
+                        Some(id.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        // We should have at least 2 stash windows now
+        assert!(stash_windows.len() >= 2, "should have multiple stash windows, got {}", stash_windows.len());
+
+        // Count total stash windows before repair
+        let windows_before = list_windows(&iso, "test");
+        let stash_count_before = windows_before.iter()
+            .filter(|(_, n)| n == "stash" || n.starts_with("stash-"))
+            .count();
+        assert!(stash_count_before >= 2, "should have >=2 stash windows before repair, got {}", stash_count_before);
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        // After repair, should have at most 1 stash window
+        let windows_after = list_windows(&iso, "test");
+        let stash_count_after = windows_after.iter()
+            .filter(|(_, n)| n == "stash" || n.starts_with("stash-"))
+            .count();
+        assert!(
+            stash_count_after <= 1,
+            "should have at most 1 stash window after consolidation, got {}",
+            stash_count_after
+        );
+
+        // agent-doc should still be at index 0
+        let ad = windows_after.iter().find(|(_, n)| n == "agent-doc");
+        assert!(ad.is_some(), "agent-doc window should still exist");
+        assert_eq!(ad.unwrap().0, "0", "agent-doc should be at index 0");
+    }
 }

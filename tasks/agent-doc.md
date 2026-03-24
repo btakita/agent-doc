@@ -1,10 +1,11 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: ''
+tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
+
 
 
 
@@ -580,7 +581,7 @@ Built and installed. The repair now ensures:
 2. Agent-doc window exists (rescue from stash)
 3. Agent-doc at index 0 (move-window)
 I only see 1:stash. Please don't stop until you can verify the correct layout.
-### Re: Still broken — root cause identified (HEAD)
+### Re: Still broken — root cause identified
 
 **The real problem:** The plugin passes `--window @0` (window ID) but after repair recreates the window, it gets a new ID (e.g. @45). The sync receives `--window @0`, can't find it, and the reconcile targets an empty/wrong window. All panes end up in stash.
 
@@ -589,15 +590,28 @@ I only see 1:stash. Please don't stop until you can verify the correct layout.
 Alternatively: the sync should resolve `--window` by name when the ID doesn't exist. I already added re-resolution, but it's not working because `display-message -t @0` fails when @0 doesn't exist, so session_name is empty and repair doesn't run.
 
 **Immediate fix:** Change the fallback to use current session when the window ID is invalid. Let me fix this now.
-<!-- agent:boundary:79dbe781 -->
+### Re: Root cause fixed — plugin window ID lookup (HEAD)
+
+**Root cause:** The plugin's `projectWindowId()` read stale `"window": "@0"` from sessions.json. When windows are recreated, the ID changes (e.g. @46) but sessions.json still says @0. So the plugin passes `--window @0` which doesn't exist.
+
+**Fix (plugin v0.2.22):** Replaced sessions.json-based window lookup with direct tmux query:
+```kotlin
+tmux list-windows -a -F "#{window_id} #{window_name}"
+```
+Finds the "agent-doc" window by NAME, returns its current ID. Window names are stable; IDs are not.
+
+**Plugin v0.2.22 built.** Install from: `agent-doc-jetbrains-0.2.22.zip`
+
+After installing, the plugin will always find the correct window ID regardless of recreation.
+<!-- agent:boundary:baa8ff1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix window resolution fallback** — use current session when window ID invalid
-- [ ] **Plugin: pass window by name** — `0:agent-doc` instead of `@0`
-- [ ] **Release v0.25.14** — after layout is stable
+- [x] **Plugin window ID fix** — lookup by name instead of sessions.json ID
+- [ ] **Install plugin v0.2.22** — required for stable layout
+- [ ] **Release v0.25.14** — after plugin installed and verified
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

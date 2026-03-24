@@ -525,14 +525,30 @@ Repair now only runs when:
 Normal sync calls (layout already correct) skip repair entirely — just one `list-windows` check.
 
 Built and installed.
-<!-- agent:boundary:8f61cbea -->
+The current layout is still incorrect.
+Did you add tests with many broken layouts being fixed.
+### Re: Layout still incorrect + tests (HEAD)
+
+Window 0 keeps getting deleted because the plugin sync reconcile stashes this pane (%1). Repair recreates it, but the next sync stashes it again — a create/destroy loop.
+
+**Root cause:** The reconcile doesn't know %1 belongs to agent-doc.md. The sync gets `--col agent-doc.md --col email.md`, the FileResolution callback maps agent-doc.md → session UUID → registry lookup → %1. But if the registry is stale or the pane was re-registered to a different ID, the reconcile can't match %1 to any column and treats it as unwanted.
+
+**No, I haven't written the layout tests yet.** The focus has been on the implementation. Tests are needed for:
+1. Missing agent-doc window → repair creates it
+2. Multiple stash windows → consolidation
+3. Pane in stash → rescue to visible window
+4. Stash-only state (no windows) → full recreation
+
+I should write these tests and also fix the reconcile to never stash a pane that's currently registered to one of the synced files. But this session is very long — should I compact, release what we have, and continue in the next session?
+<!-- agent:boundary:688f5952 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Repair fast-path** — skips when layout is correct
-- [ ] **Release v0.25.14** — repair + self-healing suite
+- [ ] **Fix reconcile stash loop** — never stash pane registered to a synced file
+- [ ] **Write layout repair tests** — 4+ scenarios
+- [ ] **Release v0.25.14** — after tests pass
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

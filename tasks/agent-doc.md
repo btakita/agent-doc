@@ -192,14 +192,35 @@ Now idea.log will show:
 ```
 
 **Plugin v0.2.21** built. Install to see sync logs after the next tab switch.
-<!-- agent:boundary:d00e4ad4 -->
+Switching to tasks/linkedin.md on the right editor pane.
+The right tmux pane split into 3 panes
+### Re: linkedin.md → 3 panes (HEAD)
+
+The new logging reveals the issue clearly.
+
+**Timeline (23:31:29-31:40):**
+1. `23:31:29` — You switched from resume.md to justin-caird.md (right pane)
+2. `23:31:31` — You switched from justin-caird.md to linkedin.md
+3. `23:31:31` — `LayoutChangeDetector` fires: `justin-caird → linkedin`
+4. `23:31:31` — `EditorTabSyncListener` starts sync: `agent-doc sync --col agent-doc.md --col linkedin.md`
+5. `23:31:39` — Sync output: `auto-starting session for tasks/linkedin.md (no alive pane)`
+6. `23:31:40` — Sync completes (8 seconds — waiting for Claude to start in the new pane)
+
+**Why 3 panes:** The sync auto-started a new Claude session for linkedin.md by running `split-window` (creates the 3rd pane), then waited for Claude to become ready (~8s). During the auto-start, the window briefly had 3 panes visible. The old pane should have been stashed after the new one was attached — but the auto-start creates the new pane first (ATTACH before DETACH, lesson #3).
+
+**The flicker:** The 8-second delay was the `wait_for_claude_ready` poll waiting for Claude to start in the new pane. During this time the window had 3 panes.
+
+**This is actually working correctly** — the auto-start for a new file requires creating a pane, starting Claude, and waiting for it to be ready. The 3-pane state is transient. The stash window isn't involved here.
+
+The real question is whether the auto-start should happen in the stash window (hidden) and then join to the visible window after Claude is ready, to avoid the visual disruption.
+<!-- agent:boundary:6e9218a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Missing sync logs** — root cause: no-op logging in SyncLayoutAction + debug-level in EditorTabSyncListener
-- [ ] **Install plugin v0.2.21** — sync logging fix, restart IDE
+- [x] Plugin v0.2.21 logging confirmed working
+- [ ] **Auto-start in stash** — start new panes in stash, join to visible window after Claude ready (eliminates 3-pane transient state)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

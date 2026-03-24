@@ -390,7 +390,7 @@ To test: trigger `Run Agent Doc` on this file from the plugin — the route shou
 Still messed up.
 Please detect why.
 What is the desired state tmux session 0 windows, and pane layout for each window in this particular editor configuration.
-### Re: Still messed up — diagnosis (HEAD)
+### Re: Still messed up — diagnosis
 
 **Current state:**
 - Window `0:agent-doc` **doesn't exist** — it was deleted
@@ -412,7 +412,7 @@ Window 1:stash (remaining panes)
 **Immediate fix:** Recreate window 0 and join %1 into it.
 
 The deeper fix needs to prevent sync from stashing the pane that's currently processing a command. This is a "never stash the active pane" invariant.
-<!-- agent:boundary:134a18e1 -->
+<!-- agent:boundary:7f681977 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

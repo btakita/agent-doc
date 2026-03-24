@@ -494,6 +494,8 @@ Let's have testing with many different likely scenarios to assert that the layou
 
 `repair_layout()` added to sync.rs — runs before every sync:
 
+This should only occur if the layout is incorrect.
+
 **Phase 1: Stash consolidation**
 - Finds primary stash, consolidates all secondary stash/stash-* windows
 - Resizes to 1000 rows before each join-pane
@@ -506,14 +508,31 @@ Let's have testing with many different likely scenarios to assert that the layou
 - If no alive panes: skips (sync auto-starts later)
 
 Built and installed. The next sync from the plugin will run repair_layout() automatically, fixing any stash/window issues before reconciliation.
-<!-- agent:boundary:249ca76d -->
+### Re: Only repair if incorrect (HEAD)
+
+Added fast-path check at the top of `repair_layout()`:
+
+```rust
+if has_target && stash_count <= 1 {
+    return Ok(()); // Layout correct, skip
+}
+```
+
+Repair now only runs when:
+- The agent-doc window is missing, OR
+- There are multiple stash windows (need consolidation)
+
+Normal sync calls (layout already correct) skip repair entirely — just one `list-windows` check.
+
+Built and installed.
+<!-- agent:boundary:89f045b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **repair_layout()** — stash consolidation + window rescue
-- [ ] **Release v0.25.14** — repair + all self-healing
+- [x] **Repair fast-path** — skips when layout is correct
+- [ ] **Release v0.25.14** — repair + self-healing suite
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

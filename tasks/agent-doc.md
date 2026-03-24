@@ -418,7 +418,7 @@ Falls back to normal join+stash if swap fails or if the change involves multiple
 
 All 526 tests pass. Build successful. Want me to release?
 release
-### Re: release — v0.25.11 done (HEAD)
+### Re: release — v0.25.11 done
 
 **v0.25.11 published:**
 - crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
@@ -426,7 +426,7 @@ release
 **Key change:** `swap-pane -d` for atomic 1:1 pane replacement in tmux-router reconcile(). Tab switches that replace one pane with another now use a single tmux command — no intermediate states.
 
 Also includes all v0.25.10 changes (sync no-wait, plugin logging, debounce improvements).
-<!-- agent:boundary:b8c1505f -->
+<!-- agent:boundary:c16b6c19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -676,7 +676,7 @@ Issues:
 I only see 1 tmux window...1:stash
 Layout is not correct. But you detected the layout as correct. Why?
 ![img_4.png](img_4.png)
-### Re: Root cause — no --window when agent-doc window missing (HEAD)
+### Re: Root cause — no --window when agent-doc window missing
 
 **Found it:** The plugin passes `--window` only when `projectWindowId()` returns non-null. When the agent-doc window doesn't exist, `windowId` is null → no `--window` → sync runs without a target → repair doesn't trigger → reconcile creates random panes → stash loop.
 
@@ -690,7 +690,7 @@ tmux resolves "agent-doc" as a window name target. `display-message -t agent-doc
 Fixed in both `EditorTabSyncListener` and `SyncLayoutAction`. Plugin v0.2.23 built.
 
 **Install v0.2.23 to fix the stash loop.** This was the missing piece — without `--window`, repair never ran.
-<!-- agent:boundary:3fcd77f4 -->
+<!-- agent:boundary:36aae87c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

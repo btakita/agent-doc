@@ -1276,20 +1276,58 @@ The `looks_truncated` heuristic in `diff.rs` tries to catch this but has two fal
 Add mtime-based idle check to `agent-doc preflight` itself (not just route). If the file was modified within N ms of the preflight call, wait for it to settle before computing the diff. This is the last line of defense and catches all trigger paths (plugin, CLI, watch daemon).
 
 Want me to implement preflight mtime debounce?
-<!-- agent:boundary:a6da5fc7 -->
+Yes
+And the `looks_truncated` fix?
+Also should the diff should have surrounding context around it?
+### Re: Yes — all three implemented (HEAD)
+
+**1. Preflight mtime debounce — done**
+
+Added to `preflight.rs` between step 3 (claims) and step 4 (diff). Before computing the diff, preflight now checks the file's mtime and waits up to 2s for the file to be idle for at least 500ms. This is the last line of defense — catches all trigger paths (plugin hotkey, CLI, watch daemon, layout sync).
+
+```
+[preflight] step 3: claims
+→ mtime check: file modified 200ms ago, waiting...
+→ mtime check: file idle for 500ms, proceeding
+[preflight] step 4: diff
+```
+
+**2. `looks_truncated` fix — done**
+
+Two changes:
+- **Dot handling improved**: `.` is now terminal for multi-word lines (normal sentences like "Fixed the bug.") but for single words ending in `.`, checks if it looks like a domain fragment (e.g., `"crates."` where the word contains existing dots or follows URL patterns → truncated).
+- **Recheck interval doubled**: 200ms → 400ms (12 rechecks × 400ms = ~5s max). More time for the editor to flush content between rechecks.
+
+The preflight mtime debounce is the primary defense now — `looks_truncated` is a secondary catch for edge cases that slip through.
+
+**3. Diff now uses unified format with 5 lines of context — done**
+
+Switched from `iter_all_changes()` (dumps entire document) to `unified_diff().context_radius(5)`. The diff now shows:
+- Standard `---`/`+++` header
+- `@@` hunk markers with line numbers
+- 5 lines of surrounding context around each change
+- Much smaller output for large documents
+
+This directly answers your question — yes, the diff now has surrounding context. The SKILL also has the full `document` field for when it needs to read beyond the 5-line window.
+
+All 526 tests pass. Release build successful.
+
+Want me to build a release?
+<!-- agent:boundary:eaeeb055 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Plugin v0.2.19 installed
-- [x] **Add `--debounce` to route** — implemented with mtime-based `await_idle()`
+- [x] **Add `--debounce` to route** — mtime-based `await_idle()`, 30 tests pass
 - [x] **SKILL.md: partial diff guidance** — added to step 1 (Respond)
-- [x] **Diagnose debounce failure** — plugin debounce fires correctly; issue is pipeline timing
-- [ ] **Preflight mtime debounce** — add file idle check before diff computation in preflight
-- [ ] **Fix `looks_truncated` false negatives** — `.` ending and 200ms window bugs
-- [ ] **EditorTabSyncListener debounce** — layout sync triggers bypass SubmitAction debounce
-- [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin for debuggability
+- [x] **Diagnose debounce failure** — plugin debounce fires correctly; pipeline timing is the issue
+- [x] **Preflight mtime debounce** — 500ms idle check before diff computation
+- [x] **Fix `looks_truncated`** — improved dot handling, doubled recheck interval
+- [x] **Unified diff with context** — 5-line context radius, standard format
+- [ ] **EditorTabSyncListener debounce** — layout sync bypasses SubmitAction debounce
+- [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

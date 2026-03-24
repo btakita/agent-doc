@@ -782,14 +782,14 @@ Same cause — the tmux_session stripping runs on ALL files in the sync batch, n
 This file is externally changing and I'm losing my edit.
 tmux_session in the frontmatter needs to go away. It's confusing matters. We use the agent-doc project binding to the tmux_session as the canonical binding.
 Please add tests.
-### Re: External edits + SPEC secrecy + tmux_session (HEAD)
+### Re: External edits + SPEC secrecy + tmux_session
 
 **tmux_session stripping DISABLED.** No more external edit dialogs. The field is ignored at runtime. Built and installed.
 
 **SPEC.md:** Documents architecture, not implementation. Making it secret removes a marketing asset. The real moat is engineering depth (530 tests, 15k LOC) and speed of iteration.
 
 **Moat grows with adoption:** network effects, ecosystem lock-in, iteration speed, community.
-<!-- agent:boundary:e5926d56 -->
+<!-- agent:boundary:26fa9644 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

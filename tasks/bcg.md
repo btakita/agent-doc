@@ -232,4 +232,27 @@ Dave replied:
 **Next move: no response needed.** Dave acknowledged your message, there's nothing to reply to. The ball is in BCG's court. Check back with Dave mid-next week (Wednesday/Thursday) only if you haven't heard anything.
 
 **Focus energy on the other interviews next week.** BCG will either come through or it won't — you've done everything right on this channel.
+
+What is the email cadence at bcg.
+What is Anil Podduturi's email address?
+### Email cadence at BCG (HEAD)
+
+BCG's hiring cadence has been slow based on your experience:
+- **Week 1 (early March):** Initial recruiter screen with Dave, resume submitted
+- **Week 2-3:** Spring break delays, multiple "still waiting" updates from Dave
+- **Week 3+:** Still no direct BCG contact or interview scheduled
+
+There's no published "standard" BCG email cadence — enterprise consulting hiring timelines vary by project urgency. For Project Helix specifically, BCG has been moving at a glacial pace (3+ weeks with no interview scheduled). This isn't unusual for Big 3 firms where multiple stakeholders need to align.
+
+### Anil Podduturi's email address (HEAD)
+
+**Not available in your contacts.** The only contact info on file is his LinkedIn: https://www.linkedin.com/in/anilpod/
+
+His personal site is anilpod.com — you could check there for a contact email. Common BCG email formats are `firstname.lastname@bcg.com`, so likely `anil.podduturi@bcg.com`, but this is unconfirmed.
+
+**Options to find his email:**
+1. Check anilpod.com for a public email
+2. Ask Tony Tomai if he has Anil's direct email
+3. Try the BCG email pattern (`anil.podduturi@bcg.com`) as a last resort
+<!-- agent:boundary:d3fc3735 -->
 <!-- /agent:exchange -->

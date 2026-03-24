@@ -190,38 +190,21 @@ object TerminalUtil {
      * no window is recorded or sessions.json doesn't exist.
      */
     fun projectWindowId(project: Project): String? {
-        val basePath = project.basePath ?: return null
-        val sessionsFile = java.io.File(basePath, ".agent-doc/sessions.json")
-        if (!sessionsFile.exists()) return null
+        // Find the "agent-doc" window by name in any tmux session.
+        // This is more reliable than reading window IDs from sessions.json,
+        // which become stale when windows are recreated.
         try {
-            val text = sessionsFile.readText()
-            // Simple JSON parsing — look for "window": "@N" in entries with matching cwd
-            // Use a lightweight approach to avoid adding a JSON dependency
-            val windowPattern = Regex(""""window"\s*:\s*"(@\d+)"""")
-            val cwdPattern = Regex(""""cwd"\s*:\s*"([^"]+)"""")
-
-            // Collect all candidate windows, then return the first alive one
-            val candidates = mutableSetOf<String>()
-            val entries = text.split(Regex(""""[0-9a-f-]{36}"\s*:\s*\{"""))
-            for (entry in entries) {
-                val cwdMatch = cwdPattern.find(entry)
-                val windowMatch = windowPattern.find(entry)
-                if (cwdMatch != null && windowMatch != null) {
-                    val cwd = cwdMatch.groupValues[1]
-                    val window = windowMatch.groupValues[1]
-                    if (cwd == basePath && window.isNotEmpty()) {
-                        candidates.add(window)
-                    }
+            val process = ProcessBuilder(
+                "tmux", "list-windows", "-a",
+                "-F", "#{window_id} #{window_name}"
+            ).redirectErrorStream(false).start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            for (line in output.lines()) {
+                val parts = line.split(" ", limit = 2)
+                if (parts.size == 2 && parts[1] == "agent-doc") {
+                    return parts[0] // e.g. "@46"
                 }
-            }
-            // Validate each candidate — return the first alive tmux window
-            // Sort for deterministic ordering (mutableSetOf has no guaranteed order)
-            for (window in candidates.sorted()) {
-                val alive = ProcessBuilder("tmux", "list-panes", "-t", window, "-F", "#{pane_id}")
-                    .redirectErrorStream(true)
-                    .start()
-                    .let { it.inputStream.readBytes(); it.waitFor() == 0 }
-                if (alive) return window
             }
         } catch (_: Exception) {
             // Fall through

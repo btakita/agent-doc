@@ -83,6 +83,42 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
                 .unwrap_or_default();
 
             if pane_session == target_session {
+                // Check if pane is in a stash window — if so, rescue it
+                let pane_win_name = tmux.pane_window(registered_pane).ok()
+                    .and_then(|wid| {
+                        tmux.cmd()
+                            .args(["display-message", "-t", &wid, "-p", "#{window_name}"])
+                            .output().ok()
+                            .filter(|o| o.status.success())
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    })
+                    .unwrap_or_default();
+
+                if pane_win_name == "stash" || pane_win_name.starts_with("stash-") {
+                    eprintln!(
+                        "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
+                        registered_pane, pane_win_name
+                    );
+                    // Find the agent-doc window and join the pane back
+                    let agent_doc_window = format!("{}:agent-doc", target_session);
+                    let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
+                    if let Some(target) = target_panes.first() {
+                        match tmux.swap_pane(registered_pane, target) {
+                            Ok(()) => {
+                                eprintln!("[route] Rescued pane {} via swap-pane", registered_pane);
+                            }
+                            Err(e) => {
+                                eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);
+                                let _ = tmux.join_pane(registered_pane, target, "-dh");
+                            }
+                        }
+                    }
+                    // Update registry window
+                    if let Err(e) = sessions::register(&session_id, registered_pane, &file_path) {
+                        eprintln!("[route] warning: re-register failed: {}", e);
+                    }
+                }
+
                 eprintln!("[route] Pane {} is alive in session '{}'", registered_pane, pane_session);
                 return send_command(tmux, registered_pane, &file_path);
             }

@@ -772,7 +772,7 @@ compact exchange
 - **Label rename**: Rename INBOX label for btak.dev@gmail.com to btak.dev; rename all labels in emails to/from btak.dev@gmail.com
 Help me fix the error in /home/brian/Downloads/btak-dev/adp_Delivery_Status_Notification_Failure.eml
 
-### Re: DMARC Delivery Failure for dev@briantakita.me (HEAD)
+### Re: DMARC Delivery Failure for dev@briantakita.me
 
 The `.eml` file itself is valid — it's a **bounce notification** from Gmail's Mail Delivery Subsystem. The actual error:
 
@@ -803,7 +803,7 @@ The `.eml` file itself is valid — it's a **bounce notification** from Gmail's 
 3. **Skip the Gmail `+caf` forwarding** — have Cloudflare route `dev@briantakita.me` directly to your Gmail inbox without the intermediate forwarding hop.
 
 Which approach would you prefer? Option 3 is the cleanest if you can configure the Cloudflare routing directly.
-<!-- agent:boundary:f90fc08d -->
+<!-- agent:boundary:d02181f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

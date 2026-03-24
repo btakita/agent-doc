@@ -254,7 +254,7 @@ The window renaming to `0:tmux` happens because tmux names windows after the mos
 Want me to release v0.25.12 or continue investigating the timing issue?
 agent-doc sync is causing the switch to 1 pane.
 Plugin shows `Sync: --col tasks/agent-doc.md --col tasks/email.md [focus: tasks/email.md]`
-### Re: sync itself causes 1 pane (HEAD)
+### Re: sync itself causes 1 pane
 
 The manual sync works perfectly — `FAST_PATH`, both panes alive, layout correct. The issue is **plugin-triggered rapid consecutive syncs**.
 
@@ -270,7 +270,7 @@ Actually — looking at the full sync output: `desired=["%1", "%82"]` and `FAST_
 The issue is that between sync #1 (which succeeds) and sync #2, the pane may die (Claude failing to start) or something else changes the layout. The repeated `auto-starting session for tasks/email.md (no alive pane)` messages in the logs suggest the pane keeps dying.
 
 Let me check if pane %82 is still alive right now.
-<!-- agent:boundary:7c5ac84d -->
+<!-- agent:boundary:4e347a10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -169,7 +169,7 @@ Since he has my resume, what is my recourse. If he is going to use it?
 **Practical reality:** The resume you sent is a custom version (benjamin-becker profile). It doesn't contain SSN, bank info, or anything beyond what's already on your LinkedIn. The main risk is unauthorized job submissions — annoying but manageable. The cease-and-desist message is your strongest immediate move — it removes plausible deniability on his part.
 I liked that this was part time work. But you raise a good point.
 How would he benefit by submitting my resume without representing me?
-### Re: How He Benefits From Your Resume (HEAD)
+### Re: How He Benefits From Your Resume
 
 The scam model works like this:
 
@@ -187,7 +187,7 @@ Your resume + contact info gets sold to other recruiters/staffing firms. This is
 **On the part-time appeal:** That's exactly what makes this pitch effective. "Stack a few smaller contracts through your LLC" is genuinely attractive to senior engineers. Legitimate versions of this model do exist (e.g., Toptal, Gun.io, established staffing firms with named companies). The difference is those firms have verifiable identities, company pages, and don't need to leave LinkedIn to talk to you.
 
 **Bottom line:** If he were legitimate, the part-time contract stacking model would be worth exploring — just not with someone who triggers LinkedIn's scam filters, has no company name, and immediately wants off-platform.
-<!-- agent:boundary:3e9b398e -->
+<!-- agent:boundary:56d89aec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

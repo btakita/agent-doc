@@ -158,7 +158,7 @@ Exchange compacted. 260 lines archived.
 Implement:
 - [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
 - [ ] Homebrew formula (`brew tap btakita/agent-doc`) ([#31](https://github.com/btakita/agent-doc/issues/31))
-### Re: Implement #30 + #31 (HEAD)
+### Re: Implement #30 + #31
 
 **#30 — Install script** (`install.sh`):
 - Platform detection (linux/macos) + arch (x86_64/aarch64)
@@ -179,7 +179,7 @@ Usage: `curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/inst
 To publish: copy to `homebrew-agent-doc` repo, fill checksums, push. Users install with `brew install btakita/agent-doc/agent-doc`.
 
 Both files need to be committed and the install.sh needs to be included in the next release. Want me to commit and release v0.25.13?
-<!-- agent:boundary:54eb86e2 -->
+<!-- agent:boundary:9ac6cf9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -656,14 +656,13 @@ Layout verified correct:
 
 Built and installed.
 release
-### Re: v0.25.14 released (HEAD)
+### Re: v0.25.14 released
 
 **v0.25.14 published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | cargo install ✓
 
 Session summary: v0.25.8–v0.25.14 shipped. Key improvements: debounce, unified diff, swap-pane sync, repair_layout, self-healing (stash detection, window recreation, index normalization), install.sh, Homebrew formula, plugin v0.2.22.
 
 Remaining: stash selection bug (plugin keeps selecting stash window on sync).
-<!-- agent:boundary:3f0172fc -->
 d
 Issues:
 - 1 pane
@@ -674,7 +673,7 @@ Issues:
 - Fix
 - Don't stop until we have the correct state
 - Intermediate states should also be correct
-<!-- agent:boundary:64fac205:agent-doc -->
+<!-- agent:boundary:0c2c8914 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

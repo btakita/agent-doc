@@ -171,7 +171,7 @@ On the right editor pane, I switched to tasks/resume.md. The tmux session 0 swit
 
 **Next step:** Add logging to confirm the sync command actually runs after LayoutChangeDetector events. The EditorTabSyncListener delegates to `agent-doc sync` via ProcessBuilder — if the process fails to start or outputs to a different stream, we'd miss it.
 continue
-### Re: continue — missing sync logs found and fixed (HEAD)
+### Re: continue — missing sync logs found and fixed
 
 **Root cause:** `SyncLayoutAction.syncLayout()` captured process output but **never logged it on success**. It only logged on failure (`exitCode != 0`). When called from `LayoutChangeDetector`, `notify = false`, so even failure output was swallowed.
 
@@ -192,7 +192,7 @@ Now idea.log will show:
 ```
 
 **Plugin v0.2.21** built. Install to see sync logs after the next tab switch.
-<!-- agent:boundary:32994321 -->
+<!-- agent:boundary:d00e4ad4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

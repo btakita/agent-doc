@@ -289,12 +289,12 @@ Options:
 Option 1 is cleanest — resync --fix is a safety net, not needed during sync which already does its own reconciliation. I'll disable the resync --fix call in the sync code path.
 
 go
-### Re: go — resync --fix disabled in sync (HEAD)
+### Re: go — resync --fix disabled in sync
 
 Changed `resync::run(true)` → `resync::run(false)` in `sync.rs`. The post-sync resync now reports issues but doesn't kill panes. Auto_start's context_session override is no longer undone by resync.
 
 Rebuilt and installed. Try switching to email.md.
-<!-- agent:boundary:686cb99d -->
+<!-- agent:boundary:bababbd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -435,7 +435,7 @@ Write implementation to self-healing from current state to desired state.
 The self-healing code in route.rs should prevent this from happening again — when route detects the pane is in stash, it breaks it out into a new window. But the deeper issue is: **sync should never stash the last pane in the agent-doc window**, because that deletes the window entirely.
 
 This needs a guard in tmux-router's reconcile: if a pane is the last one in the target window, don't stash it.
-### Re: Self-healing from stash to desired state — implemented (HEAD)
+### Re: Self-healing from stash to desired state — implemented
 
 Added window recreation to `sync.rs`. When `--window @0` is specified but the window doesn't exist:
 
@@ -455,7 +455,7 @@ Combined with the earlier fixes:
 - **stash_pane**: kills on join failure instead of creating orphan windows
 
 All 526 tests pass. Built and installed. Ready for v0.25.14 release.
-<!-- agent:boundary:2352e4ee -->
+<!-- agent:boundary:a78fc16d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

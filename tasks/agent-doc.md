@@ -787,7 +787,7 @@ Please add tests.
 
 **Moat grows with adoption:** network effects, ecosystem lock-in, iteration speed, community.
 Is `tmux_session` 100% ignored in the frontmatter? Are there any edge cases that uses `tmux_session` in the frontmatter?
-### Re: Is tmux_session 100% ignored? (HEAD)
+### Re: Is tmux_session 100% ignored?
 
 **No — it's still read in several places:**
 
@@ -799,7 +799,7 @@ Is `tmux_session` 100% ignored in the frontmatter? Are there any edge cases that
 **The context_session override in sync** means the sync path ignores frontmatter `tmux_session`. But the **route path** (direct hotkey `Run Agent Doc`) still uses it as the primary session target.
 
 **To make it 100% ignored:** Need to change `route.rs` to use `current_tmux_session()` instead of frontmatter, and `claim.rs` to stop writing it. This is the full deprecation — removing the last functional dependencies. Want me to do this?
-<!-- agent:boundary:335d54b7 -->
+<!-- agent:boundary:b6898cbb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

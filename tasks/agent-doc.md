@@ -347,7 +347,7 @@ All tests pass. Want me to release v0.25.14?
 No. The current state of the tmux session is incorrect.
 Please self describe the issue and report what exactly is wrong.
 Please add tests to self-heal from this issue.
-### Re: Current tmux state diagnosis (HEAD)
+### Re: Current tmux state diagnosis
 
 **What's wrong:**
 
@@ -366,7 +366,7 @@ Please add tests to self-heal from this issue.
 **For now:** I'll move `%1` back to window 0 and fix the registry.
 
 Want me to implement the self-healing in the binary, or just fix the current state manually?
-<!-- agent:boundary:9e7cfe9a -->
+<!-- agent:boundary:dbc0a9af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

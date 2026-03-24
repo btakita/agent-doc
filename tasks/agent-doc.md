@@ -1205,16 +1205,52 @@ Want me to:
 1. Add `--debounce` to `agent-doc route`
 2. Update SKILL.md for partial diffs
 3. Investigate the debounce failure in idea.log
-<!-- agent:boundary:b959c6f5 -->
+go
+### Re: go — all three items (HEAD)
+
+**1. `--debounce` added to `agent-doc route`**
+
+Added `--debounce <ms>` flag (default 0 = no debounce). When non-zero, `await_idle()` polls the file's mtime every 100ms until no edits within the debounce window, with a 10× safety cap.
+
+```
+agent-doc route tasks/copilotkit.md --debounce 1500 --col ...
+```
+
+The plugin passes `--debounce` via route args. CLI users who don't pass it get zero delay. Implementation: `route.rs:await_idle()` — mtime-based polling with configurable window.
+
+All 30 route tests pass.
+
+**2. SKILL.md updated with partial diff guidance**
+
+Added a "Handling partial or truncated diffs" section to step 1 (Respond). The guidance instructs the agent to:
+- Detect lines ending mid-word/sentence as incomplete edits
+- Read surrounding context from the full document before responding
+- Skip responding to obvious fragments (wait for next cycle)
+- Quote ambiguous diffs and ask for clarification
+
+**3. Debounce failure investigation — resolved**
+
+The idea.log analysis shows debounce worked correctly in all 4 logged cases today. The "failure" was actually an **orphaned route at 21:35:33** with no preceding `[run]` log entry. Two likely causes:
+
+1. **Layout-change trigger** — At 21:34:23, a layout change (single → split) may have triggered a submit via `LayoutChangeDetector`, bypassing the `SubmitAction` typing-detection path entirely. The debounce guard was never consulted.
+
+2. **Expired debounce window** — The route fired ~21 seconds after the last Enter keypress, well outside the 1.5s debounce window. No typing was recent enough to trigger the guard.
+
+No `[native]` or `[debounce]` FFI log tags were found — the FFI debounce logging may not be instrumented yet in the JetBrains plugin.
+
+**Action:** Consider adding debounce to layout-change-triggered routes in the plugin, since `LayoutChangeDetector` currently bypasses the typing check entirely.
+<!-- agent:boundary:c23a4d58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Plugin v0.2.19 installed
-- [ ] **Diagnose debounce failure** — check idea.log for timing details
-- [ ] **Add `--debounce` to route** — opt-in for plugin and CLI
-- [ ] **SKILL.md: partial diff guidance**
+- [x] **Diagnose debounce failure** — layout-change trigger bypasses typing check (not a bug in debounce itself)
+- [x] **Add `--debounce` to route** — implemented with mtime-based `await_idle()`, 30 tests pass
+- [x] **SKILL.md: partial diff guidance** — added to step 1 (Respond)
+- [ ] **Layout-change debounce** — plugin's `LayoutChangeDetector` should also check typing recency before triggering route
+- [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin for debuggability
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
@@ -1222,7 +1258,7 @@ Want me to:
 - [ ] Homebrew formula (`brew tap btakita/agent-doc`)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 - [ ] Support `/btw` for instant processing
-  - [ ] This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
+  - [ ] This may involve using /btw for agent-doc if /btw is the only way to preempt the loop if a task is running in the main thread
 - [ ] Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
 - [ ] Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - [ ] Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))

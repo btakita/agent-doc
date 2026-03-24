@@ -16,7 +16,7 @@ Profile created for Don DeSando
 <!-- agent:exchange patch=append -->
 Create a profile for don-desando
 https://www.linkedin.com/in/dondesando/
-### Re: Don DeSando Profile (HEAD)
+### Re: Don DeSando Profile
 
 **Don DeSando**
 - **Location:** San Francisco Bay Area
@@ -39,7 +39,7 @@ https://www.linkedin.com/in/dondesando/
 **Notes:** Public profile details are limited. Work history dates/titles are partially redacted on the public view. Currently at brokermatic.ai (insurance/brokerage AI). Has connections to First American (title/escrow industry).
 
 Is there specific context for this connection — networking, recruiting, business development? That would help me tailor any outreach suggestions.
-<!-- agent:boundary:2e0a4c85 -->
+<!-- agent:boundary:a118c3cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

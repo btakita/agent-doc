@@ -334,7 +334,7 @@ I switched from tasks/resume.md to tasks/calendar.md
 
 The tmux session briefly switched to window 1:stash then back to 0:agent-doc.
 Why?
-### Re: stash flicker on calendar switch — still happening but faster (HEAD)
+### Re: stash flicker on calendar switch — still happening but faster
 
 The `auto_start_no_wait` fix IS working — the calendar sync completed in **~600ms** (vs 8 seconds before). But the stash flicker still occurs during the sync reconciliation itself.
 
@@ -360,7 +360,7 @@ The flicker happens during step 1. Even with `-d` on `stash_pane`/`break_pane`, 
 **Realistic options:**
 1. **Accept ~100ms flicker** during pane swaps (current state)
 2. **Investigate `swap-pane`** — tmux has a `swap-pane` command that might do an atomic swap without intermediate states
-<!-- agent:boundary:caf65128 -->
+<!-- agent:boundary:edae2238 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

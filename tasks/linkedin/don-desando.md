@@ -121,7 +121,7 @@ https://www.virustotal.com/gui/domain/briantakita.me
 is all clear.
 
 Please draft a message to ask Don for more details. If he is running any plugins
-### Re: Schema.org Fix & Draft Message (HEAD)
+### Re: Schema.org Fix & Draft Message
 
 **Schema.org fix:** The `http://schema.org` reference lives in two places outside this repo:
 - `briantakita.me-dev/lib/domain--server/rdfa/index.ts:9` — `schema_org_rdfa_vocab = 'http://schema.org/'`
@@ -140,7 +140,7 @@ Change `http://schema.org/` → `https://schema.org/` in those files. Note: this
 > Appreciate you taking the time to let me know either way.
 
 This keeps it friendly, shows you investigated, and asks the right diagnostic questions without being dismissive.
-<!-- agent:boundary:6294adfc -->
+<!-- agent:boundary:787a6c65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

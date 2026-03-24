@@ -20,111 +20,35 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 
-### Re: go
+**Compacted** (details in git history, commits `f80f524`..`f8fcce2`):
 
-Created `DEV.md` files for the three most actively released submodules:
+1. **DEV.md files** created for agent-doc, corky, instruction-files (project-specific release gotchas, secret paths, post-release steps)
+2. **Submodule commits** — two rounds of inside-out commits across all dirty submodules (instruction-files, tmux-router, rappstack-dev, briantakita.me-dev, mail, resume) + parent pointer updates
+3. **Crate releases** published to crates.io:
+   - `instruction-files` v0.1.5 (`87945e5`)
+   - `tmux-router` v0.2.9 (`21b2033`) — includes swap-pane atomic transitions + test fix
+   - `tagpath` v0.5.1 (`c73139d`)
+4. **Parent commit** `f8fcce2`: Updated 6 submodule pointers
 
-| File | Type | Key Overrides |
-|------|------|---------------|
-| `src/agent-doc/DEV.md` | rust-maturin | post-release `cargo install`, skill update reminder, lib target testing |
-| `src/corky/DEV.md` | rust-maturin | GCP OAuth build-time injection, YouTube public default warning, two-repo model |
-| `src/instruction-files/DEV.md` | rust-lib | No Makefile, no audit-docs, dependency chain note |
-
-**What each DEV.md captures** (beyond SKILL.md defaults):
-- Project-specific gotchas learned from past releases (e.g., stale binary, GCP creds)
-- Secret paths including corky's extra GCP secrets
-- Post-release steps (cargo install, release build)
-- Dependency chain awareness
-
-**Not yet created** (low release frequency, defaults suffice for now):
-- `tmux-router/DEV.md` — simple Rust lib, no special patterns yet
-- `tagpath/DEV.md` — same
-- JS/TS app DEV.md files — deploy workflows not yet established
-
-**Remaining future iteration: integration testing.** We could do a dry-run of `/dev agent-doc release` to validate the full workflow end-to-end. Want to try that, or move on?
-
-Go through all of the submodules. Commit. Release anything unreleased.
-
-### Re: submodule commits
-
-Went through all submodules, committed everything from the inside out:
-
-| Submodule | What was committed |
-|-----------|-------------------|
-| `src/instruction-files` | New `DEV.md` |
-| `src/tmux-router` | Focus-steal diagnosis logging in sync/tmux |
-| `src/rappstack-dev` | Blog submodule pointer updates (domain--any--blog, domain--server--blog) |
-| `src/briantakita.me-dev` | Nested: `app/briantakita.me` (blog posts + yalc), `lib/ui--server--briantakita` (post doc html + yalc), then parent pointer + deps |
-| `mail` | Full sync — contacts, conversations, drafts, social |
-| `resume` | 4 new PDFs + profiles (andrew-curtis, benjamin-becker, eci-solutions, guidehouse-sba) |
-
-**Parent commit** `8b476aa`: Updated all 8 submodule pointers (mail, resume, agent-resume, briantakita.me-dev, brookebrodack-dev, instruction-files, rappstack-dev, tmux-router).
-
-All submodules are now clean.
-
-### Re: submodule commits
-
-Committed all dirty submodules from the inside out:
-
-| Submodule | Action | Commit |
-|-----------|--------|--------|
-| `rappstack-dev/lib/domain--any--blog` | feat: video_url + playlist_url fields | `b901a39` |
-| `rappstack-dev/lib/domain--server--blog` | feat: video_url + playlist_url schema/helpers | `4c6e539` |
-| `src/rappstack-dev` | chore: update blog submodule pointers | `a934c87` |
-| `mail` | chore: sync contacts, conversations, drafts, social (159 files) | `2c7b147` |
-| Parent pointers | mail, rappstack-dev, agent-resume, briantakita.me-dev, brookebrodack-dev, tmux-router | `8b476aa` |
-
-All submodules now clean — `git submodule status` shows no `+` or `m` prefixes.
+**Open question:** Should agent-doc and corky get releases too (they depend on tmux-router and instruction-files)?
+yes
 commit all submodules
-release anything pending
-commit agent-loop
 
-### Re: commit & release
+### Re: release agent-doc & corky + commit all (HEAD)
 
-**Submodule commits done:**
+**agent-doc v0.25.12** released:
+- Bumped tmux-router dep `0.2.8` → `0.2.9` (swap-pane atomic transitions)
+- Published: crates.io, PyPI, GitHub Release
+- Binary installed via `cargo install` + release build
 
-| Submodule | Action | Commit |
-|-----------|--------|--------|
-| `mail` | sync contacts, conversations, drafts (32 files) | `912be4c` |
-| `resume` | update resume + andrew-curtis profile | `78a2a07` |
+**corky v0.21.1** released:
+- Bumped instruction-files dep lock to v0.1.5
+- Published: crates.io (with GCP build-time vars), PyPI, GitHub Release
 
-**Pending releases identified** (unreleased commits since last tag):
+**Parent commit** `50bec72`: Updated agent-doc + corky submodule pointers.
 
-| Submodule | Current Tag | Unreleased Commits | Bump To |
-|-----------|-------------|-------------------|---------|
-| `src/instruction-files` | v0.1.4 | 4 (DEV.md, .gitignore, JetBrains module, Cargo.lock) | v0.1.5 |
-| `src/tmux-router` | v0.2.8 | 2 (swap_pane feat, focus-steal logging) | v0.2.9 |
-| `src/tagpath` | v0.5.0 | 2 (.gitignore, Claude Code skill) | v0.5.1 |
-
-`src/agent-doc` (v0.25.11) and `src/corky` (v0.21.0) are already at HEAD.
-
-Publishing all three to crates.io now, then committing agent-loop parent pointers.
-Should we release agent-doc and corky due to tmux-router and instruction-files releases?
-
-**Release progress:**
-
-All three crates are committed, tagged, and pushed to GitHub:
-- `instruction-files` v0.1.5 → `87945e5`, tag pushed
-- `tmux-router` v0.2.9 → `21b2033`, tag pushed (fixed failing test from swap-pane fast path)
-- `tagpath` v0.5.1 → `c73139d`, tag pushed
-
-**Blocked:** crates.io token in `~/.cargo/credentials.toml` is expired (403 Forbidden). Need a new token from https://crates.io/settings/tokens — run `cargo login` to set it, then I'll publish all three.
-
-try again
-
-### Re: try again
-
-Root cause: `CARGO_REGISTRY_TOKEN` was set as a **literal** `(pass btak/CARGO_REGISTRY_TOKEN)` in the environment (not shell-expanded). Fixed by passing `"$(pass btak/CARGO_REGISTRY_TOKEN)"` explicitly.
-
-**All three crates published to crates.io:**
-- `instruction-files` v0.1.5
-- `tmux-router` v0.2.9
-- `tagpath` v0.5.1
-
-**Parent commit** `f8fcce2`: Updated 6 submodule pointers (mail, resume, agent-doc, instruction-files, tmux-router, tagpath).
-
-All done — submodules committed, releases published, parent pointers updated.
-<!-- agent:boundary:35d90669 -->
+All submodules clean, all releases published.
+<!-- agent:boundary:ebe2c5d3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -11,7 +11,8 @@ agent_doc_write: crdt
 - [x] Draft follow-up reply with resume & availability
 - [x] Update resume to close gaps (existence-lang, avatars, highlights)
 - [x] Rebuild PDF
-- [ ] Review and send
+- [x] Review and send
+- [x] Interview preparation
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -405,9 +406,161 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:5c9b98dd -->
+Help me prepare for the interview tomorrow morning.
+https://www.ecisolutions.com/
+### Re: Interview Preparation — ECI Solutions
+
+Here's your comprehensive interview prep for tomorrow morning.
+
+---
+
+## Company Deep Dive (HEAD)
+
+**ECI Software Solutions** — 30-year-old cloud ERP provider for SMBs. 25,000+ customers, 90+ countries, ~2,100 employees, HQ in Westlake/Fort Worth, TX. Backed by Leonard Green & Partners (majority, Feb 2025), Apax Partners (minority co-control), and GIC (Singapore sovereign wealth fund).
+
+**Verticals:** Manufacturing, Residential Construction, Distribution, Building Supply, Office Technology, Field Service.
+
+**Products:** Massive portfolio of acquired vertical ERPs — JobBOSS2, M1, Deacom (manufacturing), MarkSystems/Lasso CRM (construction), DDMSPLUS/EvolutionX (distribution), Spruce/RockSolid MAX (building supply), e-automate/Printanista (office tech), Davisware (field service, acquired April 2025).
+
+**Tech stack:** C#/.NET, JavaScript, Python, cloud-first. Job postings mention OpenAI, Azure OpenAI, and **Anthropic APIs**.
+
+---
+
+## The AI Strategy (Critical Context) (HEAD)
+
+ECI has a **three-phase AI roadmap:**
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1. Automated Awareness | Rule-based systems, dashboards, alerts | Done |
+| 2. Assisted Intelligence | AI as intelligent assistant, human oversight | Current |
+| 3. Fully Agentic Operations | AI as trusted strategic teammate, performs routine tasks, escalates when human judgment needed | **Building now — this is the role** |
+
+Their mantra is **"Practical AI"** — embedded in existing workflows, not flashy demos. CEO Gruenewald: *"AI is most powerful when it's practical, secure, and embedded in the workflows our customers rely on."*
+
+**Recent AI moves:**
+- Ecommerce AI Agent launched (Nov 2025) — built into EvolutionX
+- FormedAI partnership for AP automation (Feb 2026) — cutting manual accounting by 80%
+- AI-driven Homebuilder Sales & Marketing Suite (Feb 2026)
+- Frost & Sullivan named them North American ERP Product Leader for SMB manufacturing
+- AI Readiness Report (March 2026) — 550+ SMB leaders surveyed; 60% want AI for data analysis/reporting, top barrier is lack of in-house expertise
+
+---
+
+## CTO Jack Wood (Your Ultimate Audience) (HEAD)
+
+**Appointed March 3, 2026** — hired specifically to "scale practical AI innovation."
+
+**Background:**
+- **NASA JPL** and **Bell Labs** (early career)
+- **Capital One** — engineering leadership
+- **Wayfair** — engineering through hyper-growth ($450M → $2.8B revenue)
+- **Symetra** — SVP/Head of Engineering, 350+ engineers, platform modernization and AI/automation
+
+**His philosophy:** *"We've proven how practical AI can create real value for customers"* — aims to scale workflow-native AI across the entire portfolio.
+
+**What this means for you:** Jack understands platform modernization at massive scale. Speak his language about engineering infrastructure, tooling, and practical AI that ships.
+
+---
+
+## Justin Caird (Tomorrow's Call) (HEAD)
+
+**Role:** Sr. Technical Recruiter & Co-Owner at ProSearch (Portland, ME). Working directly with CTO Jack Wood.
+
+**Background:** 10+ years in talent acquisition. Philips (6.5 years), Brightcove (Sr. Manager TA for Product Engineering), now ProSearch co-owner.
+
+**Style:** Direct, transparent, relationship-oriented. Looks for passion and builder mentality over checkbox qualifications.
+
+**Likely call structure (~30 min):**
+
+### Questions He'll Probably Ask
+
+**1. Motivation & Fit**
+- "What drew you to this opportunity?"
+- "Tell me about your experience with AI and agentic systems"
+- "Do you run models locally? What tools do you use day-to-day?"
+
+**2. Technical Depth (conversational)**
+- "Walk me through what you've been building"
+- "What's your experience with legacy system modernization?"
+- "How do you think about agents writing and maintaining code in production?"
+
+**3. Work Style & Culture**
+- "How do you feel about shipping fast vs. perfection?" (his pitch: "ship daily, worry about perfection later")
+- "Describe extensive ownership over a technical project"
+
+**4. Logistics**
+- Salary expectations / comp range
+- Start date availability
+- Other processes you're in
+
+---
+
+## Your Talking Points (Mapped to Their Needs) (HEAD)
+
+### "Agents that write and maintain code" → agent-doc
+- agent-doc IS this. Production tool where AI agents write and maintain code through markdown-as-interface with CRDT-based human-agent co-editing.
+- Maps directly to Phase 3: "AI as trusted strategic teammate" with human oversight.
+- Dashboard-as-interface = bi-directional real-time updates, conflict-free merging.
+
+### "Modernize 20-year-old ERP systems" → Legacy modernization track record
+- SocialChorus: Backbone → Svelte/React migration
+- CrystalCommerce: Rails modernization
+- NASPP: .NET/CRM systems
+- The pattern: done this multiple times across different stacks and eras
+
+### "True builders" → Your stack is the proof
+- agent-doc (Rust + FFI + CRDT + JetBrains/VS Code plugins)
+- corky (git-native correspondence, diarized transcription, audio/video knowledge capture)
+- existence-lang (domain ontology — shared vocabulary for agents and humans)
+- These aren't side projects — production infrastructure used daily
+
+### "Practical AI" → Presence AI pipeline
+- Defined agentic development methodology at Presence AI
+- Shipped real-time multimodal pipeline: live video avatars, audio avatars, text avatars, image generation on NVIDIA H100 GPUs via WebRTC
+
+### "They use Anthropic APIs" → Deep in the ecosystem
+- agent-doc runs on Claude (Opus, Sonnet)
+- You understand prompt architecture from the inside — context engineering, spec-driven development, tool-use patterns
+
+---
+
+## Questions You Should Ask (HEAD)
+
+1. **"How is Jack thinking about the AI Foundry team structure? Centralized platform team or embedded across verticals?"** — Shows org design understanding.
+
+2. **"What does 'Prompt Architect' mean in practice at ECI? Agent systems or prompt templates?"** — Clarifies scope.
+
+3. **"Which systems are first for agentic modernization? M1? Deacom? e-automate?"** — Shows homework.
+
+4. **"How does the team think about Phase 2 → Phase 3 transition?"** — Strategic thinking.
+
+5. **"What's the tech stack for the AI layer? Model-agnostic or preference?"** — Ready to build.
+
+---
+
+## Potential Concerns to Address (HEAD)
+
+| Concern | Your Response |
+|---------|---------------|
+| C#/.NET isn't primary | "I've worked with .NET at NASPP and SafeSchoolz. These roles are about building agents — patterns transfer across languages. I've shipped in Rust, TypeScript, Python, Ruby, and C#." |
+| Solo builder vs. team | "At Presence AI I defined methodology for the engineering team. At SocialChorus I led architecture across multiple teams. agent-doc is solo, but corky and the toolchain are designed for team workflows." |
+| Startup tools vs. enterprise | "Jack Wood scaled Wayfair from $450M to $2.8B. I've worked both ends — startups to enterprise (TrueCar, SocialChorus/Firstup). The agentic patterns I've built are designed to scale." |
+
+---
+
+## Day-of Checklist (HEAD)
+
+- [ ] Have resume PDF open: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
+- [ ] Have agent-doc demo ready to screen-share if asked
+- [ ] Know the three-phase AI roadmap cold
+- [ ] Know Jack Wood's background (JPL, Bell Labs, Wayfair, Symetra)
+- [ ] Prepare 2-minute pitch: "Here's what I've been building and why it maps to what ECI needs"
+- [ ] Have salary range ready
+<!-- agent:boundary:b5e34693 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Review final draft reply (v8) and updated resume PDF, then send via LinkedIn
+- Interview with Justin Caird — Tuesday 3/25 morning ET
+- Post-interview debrief and next steps
 <!-- /agent:pending -->

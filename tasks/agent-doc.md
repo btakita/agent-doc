@@ -899,7 +899,17 @@ Add tests to simulate root cause.
 | 6 | `parallel_spawn_session_isolation` | parallel.rs (currently 0 tests) |
 
 Want me to implement the session validation fix and/or write these tests?
-<!-- agent:boundary:06c6340c -->
+Let's try to get 100% test coverage.
+### Re: 100% Coverage Push (HEAD)
+
+On it. I'll implement:
+
+1. **Session validation fix** — add same-session check before `swap_pane()` calls in sync.rs and route.rs
+2. **All 6 test cases** from the table above
+3. **parallel.rs** basic test coverage
+
+Starting now — will stream progress as sections complete.
+<!-- agent:boundary:75720bde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

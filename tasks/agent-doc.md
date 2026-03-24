@@ -979,7 +979,7 @@ zsh: no such file or directory: /agent-doc
 
 Still swapping with session 1.
 I had to `Claim for Tmux Pane`
-### Re: Cross-session swap still happening (HEAD)
+### Re: Cross-session swap still happening
 
 Investigated. The previous fix at the SWAP validation level (lines 668-682) is correct in isolation — it checks both panes are in the expected session. But the **root cause is upstream**: `target_session` itself is derived from the wrong source.
 
@@ -1000,7 +1000,7 @@ If `--window` points to a window in session "1", then `target_session="1"`. The 
 Want me to implement the fix? The changes would be:
 1. Reorder session derivation to prefer wanted panes over `--window`
 2. Add session validation for `--window` before accepting it as `target_window`
-<!-- agent:boundary:f329cccd -->
+<!-- agent:boundary:e38c191d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

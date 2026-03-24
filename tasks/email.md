@@ -824,13 +824,27 @@ The bounce happened on that **third hop** — when `btak.dev@gmail.com` forwarde
 **The fix:** Remove the Gmail-to-Gmail forwarding rule. Instead, configure Cloudflare Email Routing to deliver `dev@briantakita.me` directly to `brian.takita@gmail.com` (or keep it at `btak.dev@gmail.com` and just read mail there). This eliminates the `+caf` hop entirely.
 
 Alternatively, if you want all mail consolidated in one inbox, set up Cloudflare to route directly to your primary Gmail — no need for the `btak.dev` intermediary.
-<!-- agent:boundary:ebbb7c4e -->
+btak.dev was suspended by Google. The suspension is under appeal.
+
+### Re: btak.dev suspended (HEAD)
+
+That explains the delivery failure — the bounce wasn't just DMARC, it's because the account can't receive mail at all while suspended.
+
+**Immediate fix:** Update Cloudflare Email Routing so `dev@briantakita.me` routes directly to `brian.takita@gmail.com` instead of going through `btak.dev@gmail.com`. This bypasses the suspended account entirely.
+
+**If the appeal succeeds:** You can either keep the direct routing (simpler) or restore the btak.dev intermediary. The direct route is cleaner either way.
+
+**For corky sync:** The `btak.dev` account in `.corky.toml` won't be able to sync (OAuth and IMAP both require an active account). You may want to temporarily disable it to avoid sync errors. Once the appeal resolves, re-enable it.
+
+Want me to update the Cloudflare routing config? (I'd need access to `src/cloudflare/` or the dashboard.)
+<!-- agent:boundary:cc86e6cc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Fix DMARC delivery failure — remove Gmail forwarding rule from btak.dev → brian.takita, route via Cloudflare directly
+- [ ] Update Cloudflare Email Routing: dev@briantakita.me → brian.takita@gmail.com (bypass suspended btak.dev)
+- [ ] Temporarily disable btak.dev account in .corky.toml (suspended)
 - [ ] Release corky (new version)
 - [ ] Implement label alias feature (future syncs write "btak.dev" not "INBOX")
 - [ ] Rename remaining labels in btak.dev emails
-- [ ] Verify sync with btak.dev@gmail.com
+- [ ] Verify sync with btak.dev@gmail.com (blocked until appeal resolves)
 <!-- /agent:pending -->

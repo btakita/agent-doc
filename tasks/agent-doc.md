@@ -155,13 +155,39 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange patch=append -->
 Session 3: v0.25.12 — sync swap-pane, no-wait auto-start, cross-session auto-repair, tmux_session frontmatter repair, resync --fix disabled, split in visible window, (HEAD) marker investigation, GitHub Actions CI fix, plugin v0.2.21 sync logging.
 Exchange compacted. 260 lines archived.
-<!-- agent:boundary:4424c3d2 -->
+Implement:
+- [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
+- [ ] Homebrew formula (`brew tap btakita/agent-doc`) ([#31](https://github.com/btakita/agent-doc/issues/31))
+### Re: Implement #30 + #31 (HEAD)
+
+**#30 — Install script** (`install.sh`):
+- Platform detection (linux/macos) + arch (x86_64/aarch64)
+- Fetches latest release tag from GitHub API
+- Downloads binary directly (no tar extraction)
+- Installs to `~/.cargo/bin/` or `~/.local/bin/`
+- Verifies with `agent-doc --version`
+- PATH instructions if needed
+
+Usage: `curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh`
+
+**#31 — Homebrew formula** (`Formula/agent-doc.rb`):
+- `on_macos` (Intel + ARM) + `on_linux` platform blocks
+- Downloads prebuilt binary from GitHub Releases
+- SHA256 checksums placeholder (`FIXME` — need actual checksums per release)
+- Version: 0.25.12
+
+To publish: copy to `homebrew-agent-doc` repo, fill checksums, push. Users install with `brew install btakita/agent-doc/agent-doc`.
+
+Both files need to be committed and the install.sh needs to be included in the next release. Want me to commit and release v0.25.13?
+<!-- agent:boundary:54eb86e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.25.12 released + exchange compacted
+- [x] **#30 install.sh** — created, needs commit
+- [x] **#31 Homebrew formula** — created, needs homebrew-agent-doc repo + checksums
+- [ ] **Commit + release v0.25.13** — install script + formula
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

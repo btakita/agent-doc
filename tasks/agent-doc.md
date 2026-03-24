@@ -287,7 +287,7 @@ I don't share my documents with anyone. So it's ok to strip.
 **On the stash fix:** I'll implement more aggressive stash resize in tmux-router now. The issue is `stash_pane` falls back to `break_pane_to_stash` when `join-pane` fails due to "pane too small". The fix: resize the stash window to a larger height before attempting the join.
 
 Let me check the current stash resize logic and make it more robust.
-### Re: Stash join fix — done (HEAD)
+### Re: Stash join fix — done
 
 Changed `stash_pane` in tmux-router:
 1. Resize from 200 → 1000 rows (prevents "pane too small")
@@ -296,7 +296,7 @@ Changed `stash_pane` in tmux-router:
 The tradeoff: if join fails, the pane is lost instead of creating an orphan window. This is the right choice — an unwanted pane that can't be stashed should be killed, not scattered into new windows.
 
 All 526 tests pass. Ready for v0.25.13 release.
-<!-- agent:boundary:704c4285 -->
+<!-- agent:boundary:015f4254 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

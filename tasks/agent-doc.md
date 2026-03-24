@@ -297,7 +297,7 @@ The tradeoff: if join fails, the pane is lost instead of creating an orphan wind
 
 All 526 tests pass. Ready for v0.25.13 release.
 /btw Is SPEC loaded into every context?
-### Re: v0.25.13 released (HEAD)
+### Re: v0.25.13 released
 
 **v0.25.13 published:**
 - crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
@@ -308,7 +308,7 @@ All 526 tests pass. Ready for v0.25.13 release.
 3. `tmux_session` stripping — sync removes deprecated field from frontmatter
 4. Stash join fix — kill on failure instead of orphan window creation (1000 row resize)
 5. `tmux_session` deprecation — docs/comments updated
-<!-- agent:boundary:c4a2b5bd -->
+<!-- agent:boundary:7aed09bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

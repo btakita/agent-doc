@@ -196,7 +196,7 @@ install build so I can manually test
 
 Installed. `~/.cargo/bin/agent-doc` is now v0.25.12 (unreleased) with the cross-session fix. Test by switching to a file with a different `tmux_session` in the editor split.
 I switch to tasks/email.md. The split pane briefly appears but the tmux window goes back to a single pane.
-### Re: pane briefly appears then dies (HEAD)
+### Re: pane briefly appears then dies
 
 **The cross-session fix worked** — the pane IS being created in session `0` now. But the pane dies because `agent-doc start` fails for email.md.
 
@@ -212,7 +212,7 @@ This is a separate issue from the sync fix — the sync correctly creates and pl
 **The sync cross-session fix is confirmed working.** The remaining issue is that `agent-doc start` needs valid Claude CLI args to launch successfully.
 
 Does email.md need `claude_args: --dangerously-skip-permissions` in its frontmatter?
-<!-- agent:boundary:3e26906e -->
+<!-- agent:boundary:2cf059ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -235,7 +235,7 @@ But 0:agent-doc is still 1 pane.
 **Fix:** When `skip_wait=true` (sync path), now prefers panes in the `agent-doc` window over stash panes. Split-window targets the first pane in `session:agent-doc` window, creating the new pane in the visible window.
 
 Rebuilt and installed. Try switching to email.md again.
-Tmux window 0:agent-doc changes name to 0:tmux. 2 panes briefly appear but it then goes back to 1 pane.
+Tmux window 0:agent-doc changes name to 0:tmux. 2 panes briefly appear but it then goes back to 1 pane. 
 ### Re: window renamed to tmux, 2 panes briefly → 1
 
 The manual test just now shows the fix IS working:
@@ -252,16 +252,32 @@ The window renaming to `0:tmux` happens because tmux names windows after the mos
 **Current state:** The sync with the latest build is working. Both panes are alive and running. The bug may have been a timing issue with rapid consecutive syncs — the fix needs the pane to survive long enough for the next sync to recognize it.
 
 Want me to release v0.25.12 or continue investigating the timing issue?
-<!-- agent:boundary:f0c45d8e -->
+agent-doc sync is causing the switch to 1 pane.
+Plugin shows `Sync: --col tasks/agent-doc.md --col tasks/email.md [focus: tasks/email.md]`
+### Re: sync itself causes 1 pane (HEAD)
+
+The manual sync works perfectly — `FAST_PATH`, both panes alive, layout correct. The issue is **plugin-triggered rapid consecutive syncs**.
+
+The sequence:
+1. Plugin fires sync #1 (from `LayoutChangeDetector`) → creates pane, returns
+2. Plugin fires sync #2 (from `EditorTabSyncListener`, 500ms later) → pane is alive but `agent-doc start` is still loading Claude. The reconcile sees the pane but the `FileResolution` callback can't map it yet because Claude hasn't claimed it
+3. Sync #2's reconcile treats the unclaimed pane as "unwanted" → stashes it
+
+The fix: the auto-start registers the pane in sessions.json BEFORE the sync returns. The reconcile should see it via the registry lookup. Let me check if the FileResolution callback in tmux-router is checking the registry.
+
+Actually — looking at the full sync output: `desired=["%1", "%82"]` and `FAST_PATH`. The reconcile DOES see the new pane correctly. So the stashing is happening in a DIFFERENT subsequent sync call, not this one.
+
+The issue is that between sync #1 (which succeeds) and sync #2, the pane may die (Claude failing to start) or something else changes the layout. The repeated `auto-starting session for tasks/email.md (no alive pane)` messages in the logs suggest the pane keeps dying.
+
+Let me check if pane %82 is still alive right now.
+<!-- agent:boundary:7c5ac84d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Split in visible window** — confirmed working (pane created in @0)
-- [x] **Claude starting in new pane** — both panes running agent-doc
-- [ ] **Possible timing issue** — rapid consecutive syncs may stash the new pane before it's recognized
-- [ ] **Release v0.25.12** — sync fixes ready
+- [ ] **Investigate why pane dies between syncs** — pane created successfully but dies before next sync
+- [ ] **Release v0.25.12** — after pane persistence confirmed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

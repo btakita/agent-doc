@@ -813,7 +813,7 @@ Most likely this was where we removed the logic to read the frontmatter `tmux_se
 Did we log this transgression?
 Do we have tests to prevent this from happening again?
 Debouncing did not work. You will see in the previous run, we had an incomplete line.
-### Re: tmux_session still being inserted & pane swap diagnosis (HEAD)
+### Re: tmux_session still being inserted & pane swap diagnosis
 
 **Yes, `tmux_session` is still being inserted.** The deprecation was incomplete — three code paths still use it:
 
@@ -843,7 +843,7 @@ There is no audit trail when a pane gets placed in the wrong session via stale f
 5. **Add logging** — log when a pane is placed in a session different from its prior location
 
 Ready to implement when you confirm.
-<!-- agent:boundary:0f6d968e -->
+<!-- agent:boundary:20bb78f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

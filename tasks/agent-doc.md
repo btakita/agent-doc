@@ -608,7 +608,7 @@ Finds the "agent-doc" window by NAME, returns its current ID. Window names are s
 After installing, the plugin will always find the correct window ID regardless of recreation.
 I got an external file request.
 Debouncing did not work when I was typing.
-### Re: External file request + debounce + blank lines (HEAD)
+### Re: External file request + debounce + blank lines
 
 **Three issues:**
 
@@ -621,7 +621,7 @@ Debouncing did not work when I was typing.
 Also: `tmux_session: '0'` keeps reappearing because `claim.rs` writes it on every claim. Need to update claim to not write tmux_session since it's deprecated.
 
 Install plugin v0.2.22 to fix the window ID issue — that should resolve the stash loop which causes most of these cascading problems.
-<!-- agent:boundary:069e6608 -->
+<!-- agent:boundary:54735039 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

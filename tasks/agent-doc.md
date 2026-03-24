@@ -965,7 +965,7 @@ Added same-session check before `swap_pane()` in `reconcile()`. When `session_na
 **route.rs rescue path:** Already safe — `pane_session == target_session` is validated at line 67 before any swap, and target panes come from `format!("{}:agent-doc", target_session)`. No change needed.
 
 **Why panes were swapping to session "1":** The SWAP fast path in `sync.rs:reconcile()` had no session check — if a pane from stash (which could be in any session) was the 1:1 swap candidate, it swapped across session boundaries. Now blocked.
-<!-- agent:boundary:f2707bfc -->
+<!-- agent:boundary:794ebca1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -29,7 +29,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun log(msg: String) {
-        LOG.debug(msg)
+        LOG.info("[layout-sync] $msg")
     }
 
     override fun selectionChanged(event: FileEditorManagerEvent) {

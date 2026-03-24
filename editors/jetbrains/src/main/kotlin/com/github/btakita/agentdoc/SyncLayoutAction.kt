@@ -19,6 +19,8 @@ import java.awt.Component
 class SyncLayoutAction : AnAction() {
 
     companion object {
+        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
+
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).
@@ -73,6 +75,11 @@ class SyncLayoutAction : AnAction() {
                         .start()
                     val output = process.inputStream.bufferedReader().readText().trim()
                     val exitCode = process.waitFor()
+                    LOG.info("[sync] exit=$exitCode cmd=${cmd.joinToString(" ")}")
+                    if (output.isNotEmpty()) {
+                        // Log first 500 chars of output for debugging
+                        LOG.info("[sync] output: ${output.take(500)}")
+                    }
                     if (notify && exitCode != 0) {
                         TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
                     }

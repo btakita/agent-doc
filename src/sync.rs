@@ -186,7 +186,7 @@ fn run_with_options(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
             );
-            if let Err(e) = route::auto_start(tmux, file_path, &session_id, &file_str, context_session.as_deref()) {
+            if let Err(e) = route::auto_start_no_wait(tmux, file_path, &session_id, &file_str, context_session.as_deref()) {
                 eprintln!(
                     "[sync] warning: auto-start failed for {}: {}",
                     file_path.display(),

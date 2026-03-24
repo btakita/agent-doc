@@ -506,6 +506,26 @@ Combines recover, commit, claims-log check, diff, and document HEAD read into a 
 - `document` always contains the current HEAD content
 - Progress/diagnostic messages go to stderr
 
+## 7.27 Preflight Mtime Debounce
+
+The `preflight` command applies a 500ms mtime debounce gate: if the document's filesystem mtime is less than 500ms old, preflight waits until the file has been idle for at least 500ms. This prevents duplicate preflight runs caused by rapid sequential file saves from the editor.
+
+## 7.28 Unified Diff Context Radius
+
+Diff output now uses a 5-line context radius (unified diff with 5 lines of surrounding context around each hunk). This gives the agent better surrounding context to understand changes.
+
+## 7.29 Route --debounce
+
+`agent-doc route <FILE> [--debounce MS]` — optional debounce flag to coalesce rapid editor triggers. When set, route will skip execution if another route call for the same file completed within the debounce window.
+
+## 7.30 is_tracked FFI Export
+
+`agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.
+
+## 7.31 Sync auto_start_no_wait
+
+The sync path uses `auto_start_no_wait` instead of the standard auto-start. This variant spawns the Claude session but does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s). This avoids sync blocking on slow Claude startup when arranging multiple panes.
+
 ## 8. Session Routing
 
 ### 8.1 Registry

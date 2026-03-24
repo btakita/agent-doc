@@ -263,6 +263,8 @@ This simplifies things significantly. But it's a bigger refactor — for now, th
 
 **On the stash fix:** The `stash_pane` function in tmux-router already uses `join-pane -dv` (line 532 of tmux.rs) to join the existing stash. The `break_pane -d` fallback only triggers when `join-pane` fails (stash window too small, join error). The orphan windows came from the `break_pane_to_stash` fallback path. I'll look at making the stash window resize more aggressive to prevent the join failure, but this is a tmux-router change. Tabling for the next session.
 
+Implement now
+
 Should I compact and release what we have?
 ### Re: Deprecate tmux_session — done
 
@@ -273,15 +275,24 @@ Deprecated `tmux_session` in frontmatter:
 
 No code behavior changes — the auto-repair and context_session override continue to work. The field is still read/written for backward compatibility. `make check` passes.
 
+Should we have the current agent-doc release delete tmux_session in the frontmatter?
+
 Ready to release?
-<!-- agent:boundary:bda46926 -->
+### Re: Implement stash fix + strip tmux_session? (HEAD)
+
+**On stripping tmux_session:** No — don't delete it yet. The sync auto-repair already writes the correct value, so existing files work. Stripping would be a breaking change for users on older binaries that still need the field. Better to just ignore it at runtime (which we already do via context_session priority) and let it decay naturally as files get rewritten.
+
+**On the stash fix:** I'll implement more aggressive stash resize in tmux-router now. The issue is `stash_pane` falls back to `break_pane_to_stash` when `join-pane` fails due to "pane too small". The fix: resize the stash window to a larger height before attempting the join.
+
+Let me check the current stash resize logic and make it more robust.
+<!-- agent:boundary:87a7897b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Deprecate tmux_session** — docs + comments updated, backward compat preserved
-- [ ] **Release v0.25.13** — install.sh + formula + tmux_session deprecation + stash fixes
+- [ ] **Stash join resilience** — implementing now
+- [ ] **Release v0.25.13** — after stash fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

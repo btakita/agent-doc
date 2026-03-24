@@ -130,8 +130,11 @@ pub struct Frontmatter {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
-    /// Tmux session name for pane affinity (e.g., "claude").
-    /// Set by `claim` or `sync` on first use; used to keep panes in the same session.
+    /// **Deprecated.** Tmux session name for pane affinity (e.g., "claude").
+    /// Session is now determined at runtime by `--window` argument (sync) or
+    /// `current_tmux_session()` (route/start). Still read for backward compatibility
+    /// and auto-repaired by sync when it differs from the context session.
+    /// Will be removed in a future version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
     /// **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead.
@@ -317,6 +320,10 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
 }
 
 /// Update the tmux_session name in a document string.
+///
+/// **Deprecated.** `tmux_session` in frontmatter is deprecated — session is now
+/// determined at runtime. This function is retained for backward compatibility
+/// (claim and sync still write it so older binaries can read it).
 pub fn set_tmux_session(content: &str, session_name: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.tmux_session = Some(session_name.to_string());

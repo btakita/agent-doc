@@ -188,6 +188,8 @@ Two modes:
 
 **Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning and falls back to the default session. It does NOT create new tmux sessions. The fallback order is: current tmux session (if running inside tmux) → default `claude` session.
 
+> **Deprecation note:** `tmux_session` in frontmatter is deprecated. The tmux session is now determined at runtime: `--window` argument (sync), `current_tmux_session()` (route/start), or future `.agent-doc/config.toml` settings. The field is still read for backward compatibility and auto-repaired by sync. It will be removed in a future version.
+
 **Auto-start algorithm (`auto_start_in_session`):**
 1. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
 2. Search `sessions.json` for a registered pane that is alive and in the target tmux session
@@ -530,7 +532,9 @@ The sync path uses `auto_start_no_wait` instead of the standard auto-start. This
 
 The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `auto_start_no_wait` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
 
-## 7.33 Sync tmux_session Auto-Repair
+## 7.33 Sync tmux_session Auto-Repair (Deprecated Field)
+
+> **Note:** `tmux_session` in frontmatter is deprecated. This auto-repair mechanism exists for backward compatibility during the deprecation period and will be removed when the field is removed.
 
 When `context_session` (from `sync --window`) differs from the document's `tmux_session` frontmatter value, both `auto_start` and the sync loop automatically repair the frontmatter via direct string replacement. This avoids frontmatter round-trip issues (extra newlines) and ensures the document reflects the actual session assignment after cross-session moves.
 

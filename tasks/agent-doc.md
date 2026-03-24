@@ -13,8 +13,8 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.14 | **Tests:** 526 | **Published:** all targets ✓
-**Plugins:** JetBrains v0.2.22 + VS Code v0.2.3
+**Version:** v0.25.15 | **Tests:** 530 | **Published:** all targets ✓
+**Plugins:** JetBrains v0.2.23 + VS Code v0.2.3
 <!-- /agent:status -->
 
 ## Architecture
@@ -715,19 +715,28 @@ External change. Why?
 ![2026-03-24_17-23.png](../../../../Pictures/agent-loop/2026-03-24_17-23.png)
 
 tasks/recruit/benjamin-becker.md has multiple spaces added after the frontmatter.
-### Re: Blank line accumulation fixed (HEAD)
+### Re: Blank line accumulation fixed
 
-The tmux_session stripping now collapses `\n\n\n` to `\n\n` after removing the line, preventing blank line accumulation. Also fixed existing blank lines in the document.
+The tmux_session stripping now collapses `\
+\
+\
+` to `\
+\
+` after removing the line, preventing blank line accumulation. Also fixed existing blank lines in the document.
 
 Built and installed. Now releasing v0.25.15 with all fixes + tests + plugin v0.2.23.
-<!-- agent:boundary:377f0c1a -->
+### Re: v0.25.15 released (HEAD)
+
+**v0.25.15 published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | cargo install ✓
+
+Changes: repair_layout tests (4 scenarios), SPEC.md section 7.36, blank line accumulation fix, plugin v0.2.23 (always-pass --window).
+<!-- agent:boundary:35691dcf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Blank line accumulation** — fixed with collapse after strip
-- [ ] **Release v0.25.15** — tests + plugin + blank line fix
+- [x] v0.25.15 released
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

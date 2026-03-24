@@ -590,7 +590,7 @@ I only see 1:stash. Please don't stop until you can verify the correct layout.
 Alternatively: the sync should resolve `--window` by name when the ID doesn't exist. I already added re-resolution, but it's not working because `display-message -t @0` fails when @0 doesn't exist, so session_name is empty and repair doesn't run.
 
 **Immediate fix:** Change the fallback to use current session when the window ID is invalid. Let me fix this now.
-### Re: Root cause fixed — plugin window ID lookup (HEAD)
+### Re: Root cause fixed — plugin window ID lookup
 
 **Root cause:** The plugin's `projectWindowId()` read stale `"window": "@0"` from sessions.json. When windows are recreated, the ID changes (e.g. @46) but sessions.json still says @0. So the plugin passes `--window @0` which doesn't exist.
 
@@ -603,7 +603,7 @@ Finds the "agent-doc" window by NAME, returns its current ID. Window names are s
 **Plugin v0.2.22 built.** Install from: `agent-doc-jetbrains-0.2.22.zip`
 
 After installing, the plugin will always find the correct window ID regardless of recreation.
-<!-- agent:boundary:baa8ff1e -->
+<!-- agent:boundary:7ac89b30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -290,13 +290,32 @@ Currently `auto_start_in_session()` in `route.rs` does:
 Steps 1-2 are instant. Step 3 is the blocker. The sync path doesn't need to wait — it just needs the pane to exist with Claude starting in it. The user sees Claude loading, which is expected.
 
 I'll remove the wait from the sync-initiated auto-start path. The `route` command (plugin hotkey) can keep the wait because it needs to send `/agent-doc` after Claude is ready.
-<!-- agent:boundary:42f613ac -->
+continue
+### Re: continue — implemented (HEAD)
+
+Done. Added `auto_start_no_wait()` to `route.rs` and switched `sync.rs` to use it.
+
+**What changed:**
+- `route.rs`: Split `auto_start_in_session` into two paths via `skip_wait` flag
+  - `auto_start()` — full path with wait + send command (route hotkey)
+  - `auto_start_no_wait()` — pane creation + Claude start only (sync)
+- `sync.rs`: Changed `route::auto_start()` → `route::auto_start_no_wait()`
+
+**What the user sees now when sync auto-starts:**
+1. Sync stashes unwanted pane + creates new pane (fast tmux ops, ~50ms)
+2. New pane shows Claude loading prompt
+3. Sync returns immediately — no 8-second wait
+4. User sees Claude initializing in the pane
+
+All 526 tests pass. Release build successful. Want me to release v0.25.10?
+<!-- agent:boundary:d560a807 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Remove wait_for_claude_ready from sync auto-start** — split-window + send start is enough, no blocking wait needed
+- [x] **Remove wait_for_claude_ready from sync** — implemented via `auto_start_no_wait()`
+- [ ] **Release v0.25.10** — sync no-wait + plugin v0.2.21 logging
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

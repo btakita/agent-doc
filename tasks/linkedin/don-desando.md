@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-VirusTotal clear — drafting reply to Don
+Draft reply updated — ready to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -133,14 +133,30 @@ Change `http://schema.org/` → `https://schema.org/` in those files. Note: this
 
 **Draft message to Don:**
 
-> Hey Don — thanks for flagging that. I checked the site on my end and everything looks clean: valid SSL cert, no Google Safe Browsing flags, and VirusTotal comes back all clear across 70+ vendors.
->
-> Curious — are you running any browser security extensions (Norton, McAfee, Avast, etc.)? Those sometimes flag sites aggressively based on heuristics. Also, which browser were you using? That would help me track down what's triggering the warning.
->
-> Appreciate you taking the time to let me know either way.
+Hey Don — thanks for flagging that. I checked the site on my end and everything looks clean: valid SSL cert, no Google Safe Browsing flags, and VirusTotal comes back all clear across 70+ vendors.
+
+Curious — are you running any browser security extensions (Norton, McAfee, Avast, etc.)? Those sometimes flag sites aggressively based on heuristics. Also, which browser were you using? That would help me track down what's triggering the warning.
+
+Appreciate you taking the time to let me know either way.
 
 This keeps it friendly, shows you investigated, and asks the right diagnostic questions without being dismissive.
-<!-- agent:boundary:787a6c65 -->
+Also respond to his:
+
+> Laughing with you at your post
+
+> I've been called worse.
+### Re: Updated Draft (HEAD)
+
+Got it — you want to acknowledge his "I've been called worse" line (which was responding to your "Laughing with you at your post" connection note). Updated draft:
+
+Hey Don — ha, well at least the bar is set low then. Glad you got a laugh out of it. The comments section on that one got lively.
+
+Thanks for flagging the site warning though. I checked on my end and everything looks clean: valid SSL cert, no Google Safe Browsing flags, and VirusTotal comes back all clear across 70+ vendors.
+
+Curious — are you running any browser security extensions (Norton, McAfee, Avast, etc.)? Those sometimes flag sites aggressively. Also, which browser were you using? That would help me narrow it down.
+
+Either way, appreciate you letting me know.
+<!-- agent:boundary:de5598aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

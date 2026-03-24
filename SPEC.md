@@ -526,6 +526,22 @@ Diff output now uses a 5-line context radius (unified diff with 5 lines of surro
 
 The sync path uses `auto_start_no_wait` instead of the standard auto-start. This variant spawns the Claude session but does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s). This avoids sync blocking on slow Claude startup when arranging multiple panes.
 
+## 7.32 Sync Swap-Pane Atomic Reconcile
+
+The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `auto_start_no_wait` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
+
+## 7.33 Sync tmux_session Auto-Repair
+
+When `context_session` (from `sync --window`) differs from the document's `tmux_session` frontmatter value, both `auto_start` and the sync loop automatically repair the frontmatter via direct string replacement. This avoids frontmatter round-trip issues (extra newlines) and ensures the document reflects the actual session assignment after cross-session moves.
+
+## 7.34 Sync Resync Report-Only
+
+The post-sync `resync` call runs with `--fix` disabled (report only). `auto_start` with `context_session` intentionally places panes in a different session than the frontmatter originally specified — `resync --fix` would incorrectly kill these cross-session panes. The resync still reports anomalies for operator awareness.
+
+## 7.35 Sync Visible-Window Split
+
+When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in the visible `agent-doc` window of the target session rather than falling back to any registered pane (which may be in a stash window). This ensures new panes appear where the user can see them. Falls back to `find_registered_pane_in_session` if no panes exist in the agent-doc window.
+
 ## 8. Session Routing
 
 ### 8.1 Registry

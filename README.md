@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
-**v0.25.10** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
+**v0.25.12** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
 
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
@@ -35,7 +35,12 @@ sees your edits as diffs, so every change carries intent.
 - **Route --debounce** — configurable debounce flag on `route` to coalesce rapid editor triggers
 - **is_tracked FFI export** — `agent_doc_is_tracked()` C ABI function for editor plugins to check session tracking
 - **Sync no-wait auto-start** — `auto_start_no_wait` for the sync path avoids blocking on prompt detection
-- **521 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
+- **Sync swap-pane atomic reconcile** — swap-pane transitions with atomic reconcile, `auto_start_no_wait`, and cross-session context override
+- **Sync tmux_session auto-repair** — frontmatter `tmux_session` automatically corrected when context session differs
+- **Sync resync report-only** — `resync --fix` disabled in sync path to avoid killing cross-session panes; report only
+- **Sync visible-window split** — new panes split in the visible agent-doc window instead of stash
+- **Plugin v0.2.21** — sync logging at INFO level
+- **526 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
 
 ## Install
 

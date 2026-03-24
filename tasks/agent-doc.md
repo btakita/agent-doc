@@ -366,15 +366,24 @@ Please add tests to self-heal from this issue.
 **For now:** I'll move `%1` back to window 0 and fix the registry.
 
 Want me to implement the self-healing in the binary, or just fix the current state manually?
-<!-- agent:boundary:dbc0a9af -->
+implement in the binary and test in this session.
+Self-healing should detect the bad st
+### Re: implement + test self-healing (HEAD)
+
+The self-healing for stash panes is already implemented in resync.rs and sync.rs (from the previous subagent). The code detects panes in stash windows and treats them as dead.
+
+What's still missing: **the `route` command should rescue a stash pane back to the visible window** instead of creating a new one. Currently route checks if the pane is "alive" but not if it's in the stash. If the registered pane is in the stash, route should use `join-pane` to move it back to the agent-doc window.
+
+Let me implement this in route.rs, rebuild, install, and test with the current state (pane %1 in stash).
+<!-- agent:boundary:a956cabc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix current state** — move %1 back to visible window or re-register to %94
-- [ ] **Self-healing: route detects stash panes** — moves or re-registers
-- [ ] **Release v0.25.14** — self-healing fixes
+- [ ] **Route: rescue stash panes** — join-pane back to visible window instead of creating new
+- [ ] **Test with current state** — pane %1 is in stash, should be rescued
+- [ ] **Release v0.25.14** — all self-healing
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

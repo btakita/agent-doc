@@ -753,13 +753,34 @@ What do you recommend
 5. **Community** — Discord/Slack for users, share in AI dev communities
 
 If you later want the dual-license model, you can relicense since you're the sole author. But switching to AGPL now won't drive adoption — it just adds friction for potential users.
-<!-- agent:boundary:3566ca77 -->
+Should I be worried about someone "borrowing" my idea and building on top of it...with better marketing?
+Or adding it into their product?
+External edit on this file. Why?
+tasks/recruit/namjus-saqib.md has an extra space added after frontmatter. Why?
+### Re: Idea borrowing + external edit + extra space (HEAD)
+
+**Should you worry about idea borrowing?**
+The document-as-interface pattern isn't patentable — it's an approach. Your advantage is the deep implementation (CRDT, tmux routing, IDE plugins, 530 tests). Someone can copy the concept but not the engineering. The real moat is:
+- First-mover depth (25+ versions of battle-tested edge cases)
+- Plugin ecosystem (JetBrains + VS Code)
+- Your personal brand using it daily on livestream
+
+AGPL wouldn't prevent someone from building their own implementation of the same idea — it only prevents them from using YOUR code. If they build their own, no license stops that.
+
+**External edit on this file:**
+The `tmux_session` stripping code in sync.rs is modifying the file on disk during sync pre-scan. Each sync that detects `tmux_session:` in the frontmatter rewrites the file, triggering the IDE's external modification dialog.
+
+**tasks/recruit/najmus-saqib.md extra space:**
+Same cause — the tmux_session stripping runs on ALL files in the sync batch, not just the target file. If najmus-saqib.md was in the `--col` args, its frontmatter was also rewritten.
+
+**Fix needed:** The tmux_session stripping should only run on files that actually HAVE `tmux_session` in frontmatter AND the content changed. Currently it rewrites even when stripping produces the same content. Let me add a guard.
+<!-- agent:boundary:177fa717 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.25.15 released
+- [ ] **Fix tmux_session stripping** — only write when content actually changed, stop external edit triggers
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

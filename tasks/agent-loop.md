@@ -43,7 +43,24 @@ Created `DEV.md` files for the three most actively released submodules:
 
 **Remaining future iteration: integration testing.** We could do a dry-run of `/dev agent-doc release` to validate the full workflow end-to-end. Want to try that, or move on?
 
-Go through all of the submodules. Commit
+Go through all of the submodules. Commit. Release anything unreleased.
+
+### Re: submodule commits
+
+Went through all submodules, committed everything from the inside out:
+
+| Submodule | What was committed |
+|-----------|-------------------|
+| `src/instruction-files` | New `DEV.md` |
+| `src/tmux-router` | Focus-steal diagnosis logging in sync/tmux |
+| `src/rappstack-dev` | Blog submodule pointer updates (domain--any--blog, domain--server--blog) |
+| `src/briantakita.me-dev` | Nested: `app/briantakita.me` (blog posts + yalc), `lib/ui--server--briantakita` (post doc html + yalc), then parent pointer + deps |
+| `mail` | Full sync — contacts, conversations, drafts, social |
+| `resume` | 4 new PDFs + profiles (andrew-curtis, benjamin-becker, eci-solutions, guidehouse-sba) |
+
+**Parent commit** `8b476aa`: Updated all 8 submodule pointers (mail, resume, agent-resume, briantakita.me-dev, brookebrodack-dev, instruction-files, rappstack-dev, tmux-router).
+
+All submodules are now clean.
 
 ### Re: submodule commits
 
@@ -58,9 +75,37 @@ Committed all dirty submodules from the inside out:
 | Parent pointers | mail, rappstack-dev, agent-resume, briantakita.me-dev, brookebrodack-dev, tmux-router | `8b476aa` |
 
 All submodules now clean — `git submodule status` shows no `+` or `m` prefixes.
-<!-- agent:boundary:d0aae4b2 -->
+commit all submodules
+release anything pending
+commit agent-loop
+
+### Re: commit & release (HEAD)
+
+**Submodule commits done:**
+
+| Submodule | Action | Commit |
+|-----------|--------|--------|
+| `mail` | sync contacts, conversations, drafts (32 files) | `912be4c` |
+| `resume` | update resume + andrew-curtis profile | `78a2a07` |
+
+**Pending releases identified** (unreleased commits since last tag):
+
+| Submodule | Current Tag | Unreleased Commits | Bump To |
+|-----------|-------------|-------------------|---------|
+| `src/instruction-files` | v0.1.4 | 4 (DEV.md, .gitignore, JetBrains module, Cargo.lock) | v0.1.5 |
+| `src/tmux-router` | v0.2.8 | 2 (swap_pane feat, focus-steal logging) | v0.2.9 |
+| `src/tagpath` | v0.5.0 | 2 (.gitignore, Claude Code skill) | v0.5.1 |
+
+`src/agent-doc` (v0.25.11) and `src/corky` (v0.21.0) are already at HEAD.
+
+Publishing all three to crates.io now, then committing agent-loop parent pointers.
+<!-- agent:boundary:1d779d97 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
+- Release instruction-files v0.1.5
+- Release tmux-router v0.2.9
+- Release tagpath v0.5.1
+- Update parent submodule pointers
+- Commit agent-loop
 <!-- /agent:pending -->

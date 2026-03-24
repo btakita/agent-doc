@@ -356,14 +356,14 @@ Fixed. Switched from `frontmatter::set_tmux_session()` (which round-trips the wh
 
 Tested: email.md now has exactly one blank line after `---` (no extra). Rebuilt and installed.
 I called `Run Agent Doc` on tasks/email.md with no new changes and the ` (HEAD)` suffix was added to all `###` h3 tags.
-### Re: (HEAD) suffix on all h3 tags (HEAD)
+### Re: (HEAD) suffix on all h3 tags
 
 This is a known issue — the `(HEAD)` marker is being applied too broadly. It should only mark the boundary between committed content and new user input, but it's being added to all `###` headings. This is a bug in the boundary reposition logic, separate from the sync fixes.
 
 I'll file this as a bug to fix in the next session. For now, the sync/auto-repair changes are ready for release.
 
 Want me to proceed with the v0.25.12 release, or fix the (HEAD) marker bug first?
-<!-- agent:boundary:4e8bffb0 -->
+<!-- agent:boundary:006e36d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

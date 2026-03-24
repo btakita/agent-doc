@@ -426,13 +426,83 @@ release
 **Key change:** `swap-pane -d` for atomic 1:1 pane replacement in tmux-router reconcile(). Tab switches that replace one pane with another now use a single tmux command — no intermediate states.
 
 Also includes all v0.25.10 changes (sync no-wait, plugin logging, debounce improvements).
-<!-- agent:boundary:c16b6c19 -->
+github actions sdist is failing
+```
+5s
+Run PyO3/maturin-action@v1
+Found maturin version requirement maturin>=1.9,<2.0 specified in pyproject.toml
+Found maturin release from manifest: v1.12.6
+Install Rust target
+Install maturin
+/home/runner/work/_temp/0ffa2904-ed98-4998-a675-882d60b11cf5/maturin sdist --out dist
+error: failed to get `agent-kit` as a dependency of package `agent-doc v0.25.11 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `agent-kit`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/agent-kit
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/agent-kit/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+error: failed to get `agent-kit` as a dependency of package `agent-doc v0.25.11 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `agent-kit`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/agent-kit
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/agent-kit/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+💥 maturin failed
+  Caused by: Cargo metadata failed. Does your crate compile with `cargo build`?
+  Caused by: `cargo metadata` exited with an error: 
+Error: The process '/home/runner/work/_temp/0ffa2904-ed98-4998-a675-882d60b11cf5/maturin' failed with exit code 1
+    at ExecState._setResult (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44149:25)
+    at ExecState.CheckComplete (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44132:18)
+    at ChildProcess.<anonymous> (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44028:27)
+    at ChildProcess.emit (node:events:508:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:305:5)
+Error: The process '/home/runner/work/_temp/0ffa2904-ed98-4998-a675-882d60b11cf5/maturin' failed with exit code 1
+```
+
+Please fix other failing gh actions as well.
+### Re: GitHub Actions fix (HEAD)
+
+**Root cause:** All three workflows (ci.yml, release.yml, pypi.yml) only cloned `instruction-files` as a path dependency, but `agent-kit` and `tmux-router` are also path dependencies in Cargo.toml.
+
+**Fix:** Updated all three workflows to clone all path deps:
+```yaml
+- name: Clone path dependencies
+  run: |
+    git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
+    git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
+    git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
+```
+
+Also fixed `before-script-linux` in pypi.yml (manylinux container needs deps too).
+
+**Status:**
+- CI ✓ (passing)
+- Release — running (tag moved to include fix)
+- PyPI — re-running with fix
+- Book ✓ | mdBook Pages ✓
+<!-- agent:boundary:652e34bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.25.11 released — swap-pane atomic sync
+- [x] **GitHub Actions CI fix** — all path deps cloned
+- [ ] **Verify Release + PyPI workflows pass** — running now
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

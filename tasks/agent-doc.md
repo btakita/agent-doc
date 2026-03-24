@@ -1444,9 +1444,9 @@ The closest tmux has is `set -g visual-activity off` and `set -g visual-bell off
 `tmux wait-for` is a synchronization primitive — one command blocks until another signals. The idea would be:
 
 ```bash
-# Before sync: (HEAD)
+# Before sync:
 tmux wait-for -L sync-lock    # acquire lock
-# ... do all break/join/select operations ... (HEAD)
+# ... do all break/join/select operations ...
 tmux wait-for -U sync-lock    # release lock
 ```
 
@@ -1455,7 +1455,7 @@ But this serializes tmux *command execution*, not *rendering*. tmux renders to t
 **The real answer:** tmux has no "transaction" or "batch rendering" mode. Each command is visually atomic, but a multi-command sequence will render intermediate states. The `-d` flags already prevent *focus changes* — the flicker is purely a rendering artifact where tmux briefly shows the new active pane of the stash window before the next `select-window` command runs.
 
 **Most practical fix:** Accept the flicker (it's <100ms) or investigate whether `tmux-router`'s `TmuxBatch` can combine the detach+reattach into fewer tmux invocations, reducing the render window.
-<!-- agent:boundary:55ea3694 -->
+<!-- agent:boundary:57e217c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

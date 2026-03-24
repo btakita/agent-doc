@@ -392,13 +392,39 @@ The `reconcile()` function in `sync.rs` does ATTACH → DETACH in sequence. For 
 3. Use `swap-pane -d` for the 1:1 case, fall back to join+stash for complex changes
 
 This change is in `tmux-router` (the library crate), not `agent-doc`. Want me to implement it?
-<!-- agent:boundary:65548265 -->
+yes
+### Re: yes — swap-pane implemented (HEAD)
+
+Done. Two changes:
+
+**1. `tmux-router` — `Tmux::swap_pane()`** (`tmux.rs`)
+```rust
+pub fn swap_pane(&self, src: &str, dst: &str) -> Result<()>
+    // tmux swap-pane -s src -t dst -d
+```
+
+**2. `tmux-router` — `reconcile()` SWAP fast path** (`sync.rs`)
+
+Before the ATTACH/DETACH phases, detects 1:1 replacement (exactly one pane in, one pane out) and uses `swap-pane -d` for an atomic transition:
+
+```
+SWAP %new ↔ %old (atomic)
+SELECT focused %pane
+```
+
+Falls back to normal join+stash if swap fails or if the change involves multiple panes.
+
+**What the user sees:** When switching one editor tab, the tmux pane swap is a single command — no intermediate 1-pane or 3-pane state. For multi-pane layout changes (2→3 columns), the existing ATTACH/DETACH logic still applies.
+
+All 526 tests pass. Build successful. Want me to release?
+<!-- agent:boundary:ae70a921 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Implement swap-pane in tmux-router** — atomic pane swap for 1:1 replacements, eliminates flicker
+- [x] **swap-pane implemented** — atomic 1:1 pane replacement in reconcile()
+- [ ] **Release** — swap-pane + no-wait sync + plugin v0.2.21 logging
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

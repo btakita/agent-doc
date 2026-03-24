@@ -200,7 +200,29 @@ Interrupt the currently running Claude process and inject a message. This would 
 - Or: a signal mechanism that causes Claude to check the btw file mid-generation
 
 Level 1 is implementable now. Level 2 depends on Claude Code's capabilities. Which level do you want?
-<!-- agent:boundary:7897d99f -->
+Can level 2 be solved with the agent-doc binary parsing the document?
+### Re: Can the binary solve level 2? (HEAD)
+
+Yes — here's how:
+
+**The binary watches the document file.** While Claude is processing, the user edits the document (adds a `/btw` line or writes in the exchange component). The binary detects the file change and:
+
+1. `agent-doc watch` (already exists) detects the file change
+2. Instead of triggering a new `/agent-doc` submission, it writes the new content to a **btw file** (`.agent-doc/btw/<hash>.txt`)
+3. The **SKILL checks the btw file at streaming checkpoints** (during `agent-doc write --stream` calls)
+4. If btw content exists, the agent reads it and adjusts the response
+
+**The key insight:** The document IS the btw channel. The user types in the document while Claude is responding. The CRDT merge preserves both the user's edits and the agent's response. The agent just needs to READ the document at checkpoints to see if the user added new content.
+
+**Simplest implementation:**
+- During streaming checkpoints (step 1 in SKILL), re-read the document to check for new user edits since the baseline
+- If new content was added below the boundary marker, incorporate it as a btw message
+- This works because `--stream` (CRDT) already handles concurrent edits — no data loss
+
+This means `/btw` is essentially **the document itself** — the user types while the agent is responding, and the agent sees it at the next checkpoint. No new binary feature needed — just a SKILL instruction to re-read the document at checkpoints.
+
+The binary role: ensure `agent-doc write --stream` merges correctly (already does via CRDT).
+<!-- agent:boundary:c78c4070 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -208,8 +230,8 @@ Level 1 is implementable now. Level 2 depends on Claude Code's capabilities. Whi
 <!-- agent:pending -->
 - [x] **#30 install.sh** — created
 - [x] **#31 Homebrew formula** — created
-- [ ] **#33 /btw** — design ready, awaiting level decision (side-channel vs preemption)
-- [ ] **Commit + release** — install.sh + formula + btw
+- [x] **#33 /btw** — solved: document IS the btw channel, CRDT handles concurrent edits, SKILL checks at checkpoints
+- [ ] **Commit + release v0.25.13** — install.sh + formula
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -1130,18 +1130,43 @@ Logs `SCOPE_VIOLATION` if any pane in the target window doesn't belong to the sc
 All log phases unified to `SCOPE_BLOCK` (was split across `SWAP_SKIP`/`ATTACH_SKIP`).
 
 **Test results:** 73/73 tmux-router, 537/537 agent-doc (all suites). Binary installed.
-<!-- agent:boundary:b0dfa4cd -->
+`Sync Tmux Layout` is not working.
+Please look at the current tmux state and print it out.
+Please look at the desired tmux state and print it out.
+### Re: Sync Tmux Layout not working — diagnostics (HEAD)
+
+**Current tmux state:**
+
+| Session | Window | Pane | Command | Notes |
+|---------|--------|------|---------|-------|
+| 0 | agent-doc (@48) | %97 | agent-doc | benjamin-becker session — ONLY pane in agent-doc window |
+| 0 | stash (@2) | %93, %99, %103, %95, %1, %17, %98, %105, %94, %101, %100, %3, %102, %29, %96, %20, %18, %19 | mixed | 18 panes in stash! |
+| 3 | agent-doc (@50) | %22 | agent-doc | THIS session (tasks/agent-doc.md) |
+
+**The problem:** Session 0's agent-doc window has only 1 pane. The Claude pane for `tasks/agent-doc.md` is `%22` in session 3 (window @50). When `Sync Tmux Layout` runs, it tries to pull `%22` into session 0's window, but our new `SessionScope` correctly blocks the cross-session join.
+
+**This is the SessionScope working as intended** — it prevents the bug you reported earlier. But the *desired* behavior is unclear:
+
+1. Should the sync run in session 3 (where %22 lives)?
+2. Should %22 be moved to session 0 (which is what the old buggy code did)?
+3. Is the layout plugin sending `--session 0` when it should send `--session 3`?
+
+Can you clarify: which session is the editor connected to? When you click `Sync Tmux Layout`, what session/window should it target?
+
+Also — the stash has 18 panes. Many look like old agent-doc sessions. Want me to clean those up?
+<!-- agent:boundary:d03c54a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **SessionScope type wrapper** — compile-time cross-session prevention
+- [x] **SessionScope type wrapper** — implemented
 - [x] **Reconcile post-condition** — session boundary check at VERIFY
 - [x] **Session firewall tests** — standardized cross-session test template
 - [x] **Install patched binary** — release binary with SessionScope
+- [ ] **Sync layout cross-session diagnosis** — sync not working due to session mismatch
 - [ ] **Split direction from column position** — left column = split before
-- [ ] **Release v0.25.16** — SessionScope + swap guard + split direction
+- [ ] **Release v0.25.16**
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -6,9 +6,6 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
-
-
-
 # agent-doc
 
 <!-- agent:status -->
@@ -789,13 +786,26 @@ Please add tests.
 **SPEC.md:** Documents architecture, not implementation. Making it secret removes a marketing asset. The real moat is engineering depth (530 tests, 15k LOC) and speed of iteration.
 
 **Moat grows with adoption:** network effects, ecosystem lock-in, iteration speed, community.
-<!-- agent:boundary:26fa9644 -->
+Is `tmux_session` 100% ignored in the frontmatter? Are there any edge cases that uses `tmux_session` in the frontmatter?
+### Re: Is tmux_session 100% ignored? (HEAD)
+
+**No — it's still read in several places:**
+
+1. **`route.rs:48-65`** — reads `tmux_session` to determine target session for route commands. If set and exists, uses it. This is the main usage.
+2. **`claim.rs:83-105`** — writes `tmux_session` on every claim. Reads it to warn about session mismatches.
+3. **`route.rs:350-372`** — `auto_start_ext` reads it (but context_session overrides when coming from sync).
+4. **`parallel.rs:78`** — reads for parallel session targeting.
+
+**The context_session override in sync** means the sync path ignores frontmatter `tmux_session`. But the **route path** (direct hotkey `Run Agent Doc`) still uses it as the primary session target.
+
+**To make it 100% ignored:** Need to change `route.rs` to use `current_tmux_session()` instead of frontmatter, and `claim.rs` to stop writing it. This is the full deprecation — removing the last functional dependencies. Want me to do this?
+<!-- agent:boundary:335d54b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **tmux_session stripping disabled** — no more external edits
+- [ ] **Fully ignore tmux_session** — remove route/claim/parallel reads
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

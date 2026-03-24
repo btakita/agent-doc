@@ -663,7 +663,7 @@ release
 Session summary: v0.25.8–v0.25.14 shipped. Key improvements: debounce, unified diff, swap-pane sync, repair_layout, self-healing (stash detection, window recreation, index normalization), install.sh, Homebrew formula, plugin v0.2.22.
 
 Remaining: stash selection bug (plugin keeps selecting stash window on sync).
-d
+
 Issues:
 - 1 pane
 - 1:stash was selected (incorrect)
@@ -673,14 +673,31 @@ Issues:
 - Fix
 - Don't stop until we have the correct state
 - Intermediate states should also be correct
-<!-- agent:boundary:0c2c8914 -->
+I only see 1 tmux window...1:stash
+Layout is not correct. But you detected the layout as correct. Why?
+![img_4.png](img_4.png)
+### Re: Root cause — no --window when agent-doc window missing (HEAD)
+
+**Found it:** The plugin passes `--window` only when `projectWindowId()` returns non-null. When the agent-doc window doesn't exist, `windowId` is null → no `--window` → sync runs without a target → repair doesn't trigger → reconcile creates random panes → stash loop.
+
+**Fix (plugin v0.2.23):** Always pass `--window`. Fallback to "agent-doc" (window name) when ID is null:
+```kotlin
+val windowArgs = listOf("--window", windowId ?: "agent-doc")
+```
+
+tmux resolves "agent-doc" as a window name target. `display-message -t agent-doc` works.
+
+Fixed in both `EditorTabSyncListener` and `SyncLayoutAction`. Plugin v0.2.23 built.
+
+**Install v0.2.23 to fix the stash loop.** This was the missing piece — without `--window`, repair never ran.
+<!-- agent:boundary:3fcd77f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.25.14 released
-- [ ] **Stash selection bug** — for next session
+- [x] **Root cause: missing --window** — plugin now always passes it
+- [ ] **Install plugin v0.2.23** — required for stable layout
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

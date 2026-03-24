@@ -358,7 +358,7 @@ Yes
 
 **Recommendation:** Update the resume to close gaps 1-3, then rebuild the PDF. Want me to proceed?
 go
-### Re: Resume updates complete (HEAD)
+### Re: Resume updates complete
 
 Done. Updated all three files and rebuilt the PDF:
 
@@ -405,7 +405,7 @@ I'm available:
 Happy to work around your schedule. Looking forward to it!
 
 Brian
-<!-- agent:boundary:d66a4bc3 -->
+<!-- agent:boundary:5c9b98dd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

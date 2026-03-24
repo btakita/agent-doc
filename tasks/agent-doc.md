@@ -799,13 +799,18 @@ Is `tmux_session` 100% ignored in the frontmatter? Are there any edge cases that
 **The context_session override in sync** means the sync path ignores frontmatter `tmux_session`. But the **route path** (direct hotkey `Run Agent Doc`) still uses it as the primary session target.
 
 **To make it 100% ignored:** Need to change `route.rs` to use `current_tmux_session()` instead of frontmatter, and `claim.rs` to stop writing it. This is the full deprecation — removing the last functional dependencies. Want me to do this?
-<!-- agent:boundary:b6898cbb -->
+
+Yes
+### Re: tmux_session fully ignored (HEAD)
+
+All functional reads removed from route.rs, claim.rs, parallel.rs, sync.rs. The field deserializes for backward compat but is never used for any decision. Built and installed.
+<!-- agent:boundary:4ec005af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fully ignore tmux_session** — remove route/claim/parallel reads
+- [x] **tmux_session fully ignored** — all reads removed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

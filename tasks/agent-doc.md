@@ -1488,17 +1488,15 @@ Updated 5 issues with architecture context from this document:
 - **[#33 /btw support](https://github.com/btakita/agent-doc/issues/33)** — Added preemption use cases, side-channel mechanism, claims-based injection approach.
 
 The remaining issues (#31 Homebrew, #32 lazily-rs, #34 ClawTeam) are straightforward and don't need additional architecture context.
-<!-- agent:boundary:8aff6054 -->
+compact agent:exchange
+Exchange compacted. 1337 lines archived. Summary preserved above.
+<!-- agent:boundary:3f85da7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
-- [x] Plugin v0.2.20 installed
-- [x] v0.25.9 released
-- [x] GitHub issues created (#30–#37)
-- [x] Architecture context added to issues #30, #33, #35, #36, #37
+- [x] Exchange compacted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

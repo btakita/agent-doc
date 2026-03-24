@@ -1205,7 +1205,7 @@ Want me to:
 1. Add `--debounce` to `agent-doc route`
 2. Update SKILL.md for partial diffs
 3. Investigate the debounce failure in idea.log
-<!-- agent:boundary:b255bf57 -->
+<!-- agent:boundary:b959c6f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

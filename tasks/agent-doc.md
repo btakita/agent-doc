@@ -1153,18 +1153,47 @@ Please look at the desired tmux state and print it out.
 
 Can you clarify: which session is the editor connected to? When you click `Sync Tmux Layout`, what session/window should it target?
 
+We should already know that the desired tmux session is 0.
+This should be in the agent-doc project configuration.
+Why are you confused?
+This should be implemented as an agent-doc command. If we have multiple agent-doc projects running at the same time, how can we distinguish between them?
+`agent-doc <cmd> .` perhaps?
+
 Also — the stash has 18 panes. Many look like old agent-doc sessions. Want me to clean those up?
-<!-- agent:boundary:faa7bd0e -->
+### Re: tmux_session deprecation was wrong (HEAD)
+
+You're right — I should have known. The frontmatter literally says `tmux_session: '0'` and I deprecated reading it in the previous session. That deprecation broke multi-session setups where Claude runs in a different session than the editor.
+
+**Root cause:** `route.rs` line 64 uses `current_tmux_session()` which returns session "3" (where this Claude process runs), ignoring the frontmatter `tmux_session: '0'` (where the editor is).
+
+**The fix has two parts:**
+
+**Part 1 (immediate): Un-deprecate `tmux_session` in route.rs**
+- Read `tmux_session` from frontmatter in `route()`
+- Use it as the primary source for `target_session`
+- Fall back to `current_tmux_session()` only when frontmatter doesn't specify it
+
+**Part 2 (project-level config): `agent-doc` project config**
+Add `.agent-doc/config.toml` for project-wide settings:
+```toml
+tmux_session = "0"
+```
+This way individual documents don't each need `tmux_session` in their frontmatter — the project config covers all files. Frontmatter overrides project config when present.
+
+**For multi-project support:** `agent-doc <cmd> .` would resolve `.` to the nearest `.agent-doc/` directory, which uniquely identifies the project. Different projects in different directories get different configs.
+
+Implementing Part 1 now — un-deprecating `tmux_session` in route.rs and sync.rs.
+<!-- agent:boundary:94431da6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **Un-deprecate tmux_session** — read from frontmatter in route.rs + sync.rs
+- [ ] **Project config** — `.agent-doc/config.toml` with tmux_session
 - [x] **SessionScope type wrapper** — implemented
 - [x] **Reconcile post-condition** — session boundary check at VERIFY
 - [x] **Session firewall tests** — standardized cross-session test template
-- [x] **Install patched binary** — release binary with SessionScope
-- [ ] **Sync layout cross-session diagnosis** — sync not working due to session mismatch
 - [ ] **Split direction from column position** — left column = split before
 - [ ] **Release v0.25.16**
 <!-- /agent:pending -->

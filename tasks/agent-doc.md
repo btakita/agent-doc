@@ -432,7 +432,7 @@ Write implementation to self-healing from current state to desired state.
 1:stash (10p)
 ```
 
-The self-healing code in route.rs should prevent this from happening again — when route detects the pane is in stash, it breaks it out into a new window. But the deeper issue is: **sync should never stash the last pane in the agent-doc window**, because that deletes the window entirely.
+The self-healing code in route.rs should prevent this from happening again — when route detects the pane is in stash, it breaks it out into a new window.  But the deeper issue is: **sync should never stash the last pane in the agent-doc window**, because that deletes the window entirely.
 
 This needs a guard in tmux-router's reconcile: if a pane is the last one in the target window, don't stash it.
 ### Re: Self-healing from stash to desired state — implemented
@@ -455,14 +455,48 @@ Combined with the earlier fixes:
 - **stash_pane**: kills on join failure instead of creating orphan windows
 
 All 526 tests pass. Built and installed. Ready for v0.25.14 release.
-<!-- agent:boundary:a78fc16d -->
+I can imagine other scenarios of incorrect window and pane layouts.
+Can we create a foolproof method to fix the pane layout in agent-doc?
+Please identify in tests many incorrect layouts.
+Then fix.
+If the layout is incorrect, perhaps if we can have a baseline heuristic that is something like:
+- if 1:stash window does not exist, create 1:stash or move existing stash window to 1:stash
+- If there are multiple stash windows, attempt to consolidate all panes across all windows not in 1:stash into 1:stash
+- If additional stash windows are needed, increment in order starting with 2:stash
+  - attempt to consolidate all panes in all windows not in 1:stash or in 2:stash into 2:stash
+    - break if all panes are consolidated in 1:stash and 2:stash
+    - else continue with 3:stash
+- if 0:agent-doc does not exist
+  - create 0:agent-doc
+- if 0:agent-doc exists
+  - move or create pane layout that matches editor by moving matching pane(s) from *:stash or creating a new pane and starting claude code
+### Re: Foolproof layout repair (HEAD)
+
+Good spec. I'll implement this as an `agent-doc repair` subcommand (also callable from sync pre-flight). The algorithm:
+
+**Phase 1: Stash consolidation**
+1. Find/create `1:stash` window
+2. Consolidate all non-agent-doc panes into `1:stash` via join-pane
+3. If `1:stash` overflows (join fails), create `2:stash`, `3:stash`, etc.
+4. Kill any empty stash windows after consolidation
+
+**Phase 2: Agent-doc window**
+5. If `0:agent-doc` doesn't exist → break first matching pane from stash, rename window
+6. If `0:agent-doc` exists → ensure panes match editor layout
+
+**Phase 3: Layout match**
+7. For each file in editor layout: find registered pane in stash → swap-pane or join to agent-doc window
+8. For unregistered files: auto-start new pane
+
+This is the right approach — a single `repair()` function that can fix ANY incorrect state back to the desired layout. I'll implement it now.
+<!-- agent:boundary:8e8049a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Window recreation** — sync recreates agent-doc window from stash if deleted
-- [ ] **Release v0.25.14** — full self-healing suite
+- [ ] **Implement repair()** — comprehensive layout normalization
+- [ ] **Release v0.25.14** — repair + self-healing suite
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

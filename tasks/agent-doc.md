@@ -732,7 +732,7 @@ Changes: repair_layout tests (4 scenarios), SPEC.md section 7.36, blank line acc
 I'm considering making agent-doc AGPL
 I'm not getting much adoption with the MIT license
 What do you recommend
-### Re: AGPL vs MIT licensing (HEAD)
+### Re: AGPL vs MIT licensing
 
 **Short answer:** AGPL won't help adoption. It might actually hurt it.
 
@@ -753,7 +753,7 @@ What do you recommend
 5. **Community** — Discord/Slack for users, share in AI dev communities
 
 If you later want the dual-license model, you can relicense since you're the sole author. But switching to AGPL now won't drive adoption — it just adds friction for potential users.
-<!-- agent:boundary:90e26932 -->
+<!-- agent:boundary:3566ca77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

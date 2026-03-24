@@ -175,7 +175,7 @@ Option 2 is the pragmatic fix — the sync window argument should override the f
 
 Want me to implement option 2?
 implement Option 2
-### Re: implement Option 2 — done (HEAD)
+### Re: implement Option 2 — done
 
 Fixed `auto_start_ext` in `route.rs`. The session priority is now:
 
@@ -191,7 +191,7 @@ When sync calls `auto_start_no_wait` with a context_session (derived from the `-
 This means email.md (bound to session `1`) will get a pane in session `0` when the editor layout sync requests it. The pane will be visible in the correct window.
 
 All 526 tests pass. Build successful. Want me to release?
-<!-- agent:boundary:75ba0e60 -->
+<!-- agent:boundary:2921a27a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

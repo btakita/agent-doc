@@ -95,13 +95,31 @@ I checked your site and it looks clean from my end:
 > Ha — appreciate the heads up on the site warning. I just checked and it looks clean on my end (valid SSL, no Safe Browsing flags). Might be a browser extension on your side? Either way, thanks for flagging it.
 >
 > Saw your comment came from the vibe coding post — curious what your take is on the agentic tooling side. Your post about Claude Code mapping API surfaces was spot-on.
-<!-- agent:boundary:9f687bf3 -->
+Could it have something to do with my Google Cloud Storage expiring for some unknown reason?
+### Re: Google Cloud Storage (HEAD)
+
+**Unlikely to be GCS-related.** Here's what I found:
+
+- Your site has **no references to `storage.googleapis.com`** — no GCS assets are loaded
+- DNS points to **Cloudflare IPs** (172.67.139.162, 104.21.33.12), not GCS
+- The site itself serves fine with a 200 OK
+
+However, if you previously had a GCS bucket serving assets (images, fonts, etc.) and the billing expired, those resources would return 403/404 errors. Browsers wouldn't show a "dangerous content" warning for that though — they'd just show broken images/missing resources.
+
+**What I did find:** Your site has one `http://schema.org` reference (not https), which is technically mixed content but is just a JSON-LD schema declaration — browsers don't flag that as dangerous.
+
+**The "dangerous content" warning is almost certainly browser-specific to Don.** Common causes:
+1. **Security browser extension** (Norton, McAfee, Avast Safe Browser) — these are aggressive and flag sites based on heuristics
+2. **Corporate network proxy** — if he's on a company VPN, their security gateway might flag unfamiliar domains
+3. **Transient Google Safe Browsing flag** — can happen if any linked domain on your page got flagged (you link to 60+ external profiles)
+
+**Recommendation:** Check Google Safe Browsing transparency report yourself, and if clean, just tell Don it's likely on his end. Don't spend much time debugging what's probably his browser config.
+<!-- agent:boundary:d828858b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Verify briantakita.me on Google Safe Browsing transparency report (user action)
-- Verify on VirusTotal (user action)
 - Awaiting user direction on reply to Don
 <!-- /agent:pending -->

@@ -297,14 +297,14 @@ Rebuilt and installed. Try switching to email.md.
 > tmux_session: '1'
 
 tasks/email.md tmux_session should be updated to the correct value
-### Re: update tmux_session (HEAD)
+### Re: update tmux_session
 
 Updated `tasks/email.md` frontmatter: `tmux_session: '1'` → `tmux_session: '0'`.
 
 This is the right fix — the file's session binding should match where it's actually used. The context_session override was a workaround for a misconfigured frontmatter value.
 
 Try switching to email.md now.
-<!-- agent:boundary:0ac05626 -->
+<!-- agent:boundary:91ec976a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

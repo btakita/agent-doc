@@ -947,7 +947,7 @@ However, the new tmux pane was on the right side. It should have been on the lef
 **Issue 3: Pane order** — The reconcile should ensure pane order matches the `--col` order (left-to-right).
 
 These are real bugs in the swap-pane and auto-start logic. Want me to fix them now?
-### Re: Implementation Complete (HEAD)
+### Re: Implementation Complete
 
 **Session validation fix (sync.rs):**
 Added same-session check before `swap_pane()` in `reconcile()`. When `session_name` is provided, both incoming and outgoing panes must be in that session or the swap is skipped with a `SWAP_SKIP` log entry. Falls through to join+stash path instead.
@@ -965,7 +965,7 @@ Added same-session check before `swap_pane()` in `reconcile()`. When `session_na
 **route.rs rescue path:** Already safe — `pane_session == target_session` is validated at line 67 before any swap, and target panes come from `format!("{}:agent-doc", target_session)`. No change needed.
 
 **Why panes were swapping to session "1":** The SWAP fast path in `sync.rs:reconcile()` had no session check — if a pane from stash (which could be in any session) was the 1:1 swap candidate, it swapped across session boundaries. Now blocked.
-<!-- agent:boundary:9cf711b2 -->
+<!-- agent:boundary:f2707bfc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

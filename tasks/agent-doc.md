@@ -179,15 +179,37 @@ Usage: `curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/inst
 To publish: copy to `homebrew-agent-doc` repo, fill checksums, push. Users install with `brew install btakita/agent-doc/agent-doc`.
 
 Both files need to be committed and the install.sh needs to be included in the next release. Want me to commit and release v0.25.13?
-<!-- agent:boundary:9ac6cf9a -->
+Implement:
+- [ ] Support `/btw` for instant processing ([#33](https://github.com/btakita/agent-doc/issues/33))
+### Re: #33 /btw — design analysis (HEAD)
+
+`/btw` for instant processing requires two levels:
+
+**Level 1: Side-channel messaging (achievable now)**
+Write urgent messages to `.agent-doc/btw/<session-hash>.txt`. The SKILL checks this during response generation (at streaming checkpoints). If a btw message exists, the agent incorporates it into the current response.
+
+Implementation:
+- `agent-doc btw <file> "message"` — writes to the btw file
+- SKILL step 1 checks for btw messages before/during response
+- Claims log already does something similar but only at preflight
+
+**Level 2: True preemption (requires Claude Code support)**
+Interrupt the currently running Claude process and inject a message. This would need:
+- Claude Code's `/btw` slash command (if available)
+- Or: `tmux send-keys` to inject text into the Claude pane's input while it's thinking
+- Or: a signal mechanism that causes Claude to check the btw file mid-generation
+
+Level 1 is implementable now. Level 2 depends on Claude Code's capabilities. Which level do you want?
+<!-- agent:boundary:e972216d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **#30 install.sh** — created, needs commit
-- [x] **#31 Homebrew formula** — created, needs homebrew-agent-doc repo + checksums
-- [ ] **Commit + release v0.25.13** — install script + formula
+- [x] **#30 install.sh** — created
+- [x] **#31 Homebrew formula** — created
+- [ ] **#33 /btw** — design ready, awaiting level decision (side-channel vs preemption)
+- [ ] **Commit + release** — install.sh + formula + btw
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

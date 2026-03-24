@@ -466,3 +466,7 @@ agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philoso
 ## License
 
 MIT
+
+## Links
+
+[![Hypercommit](https://img.shields.io/badge/Hypercommit-DB2475)](https://hypercommit.com/agent-doc)

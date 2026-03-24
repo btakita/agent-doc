@@ -79,7 +79,7 @@ commit all submodules
 release anything pending
 commit agent-loop
 
-### Re: commit & release (HEAD)
+### Re: commit & release
 
 **Submodule commits done:**
 
@@ -99,13 +99,23 @@ commit agent-loop
 `src/agent-doc` (v0.25.11) and `src/corky` (v0.21.0) are already at HEAD.
 
 Publishing all three to crates.io now, then committing agent-loop parent pointers.
-<!-- agent:boundary:1d779d97 -->
+Should we release agent-doc and corky due to tmux-router and instruction-files releases?
+
+**Release progress:**
+
+All three crates are committed, tagged, and pushed to GitHub:
+- `instruction-files` v0.1.5 → `87945e5`, tag pushed
+- `tmux-router` v0.2.9 → `21b2033`, tag pushed (fixed failing test from swap-pane fast path)
+- `tagpath` v0.5.1 → `c73139d`, tag pushed
+
+**Blocked:** crates.io token in `~/.cargo/credentials.toml` is expired (403 Forbidden). Need a new token from https://crates.io/settings/tokens — run `cargo login` to set it, then I'll publish all three.
+<!-- agent:boundary:b51cca00 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- Release instruction-files v0.1.5
-- Release tmux-router v0.2.9
-- Release tagpath v0.5.1
+- [blocked] Publish instruction-files v0.1.5 to crates.io (need new token)
+- [blocked] Publish tmux-router v0.2.9 to crates.io
+- [blocked] Publish tagpath v0.5.1 to crates.io
 - Update parent submodule pointers
 - Commit agent-loop
 <!-- /agent:pending -->

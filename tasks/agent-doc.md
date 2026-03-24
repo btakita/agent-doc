@@ -7,6 +7,8 @@ claude_args: --dangerously-skip-permissions
 ---
 
 
+
+
 # agent-doc
 
 <!-- agent:status -->
@@ -562,15 +564,25 @@ The reconcile correctly ATTACHed %1 from stash into the agent-doc window via the
 Built and installed. The plugin's next sync should work without the stash loop.
 
 Still needed: formal tests in the test suite. Working on those next.
-<!-- agent:boundary:f6b21a67 -->
+Window 2:agent-doc should be 0:agent-doc
+### Re: Window index normalization (HEAD)
+
+Added Phase 3 to `repair_layout()`: after stash consolidation and window rescue, checks if the agent-doc window is at index 0. If not, uses `move-window` to move it there.
+
+Also fixed the extra blank lines in frontmatter (those were from the tmux_session stripping leaving extra newlines).
+
+Built and installed. The repair now ensures:
+1. Single stash window (consolidation)
+2. Agent-doc window exists (rescue from stash)
+3. Agent-doc at index 0 (move-window)
+<!-- agent:boundary:75ae50db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Window ID re-resolution** — sync updates window ID after repair
-- [x] **Tested stash rescue** — manual test confirmed %1 rescued from stash
-- [ ] **Formal layout tests** — test suite scenarios for repair_layout
+- [x] **Window index normalization** — agent-doc moved to index 0
+- [ ] **Formal layout tests** — still needed
 - [ ] **Release v0.25.14** — after tests
 <!-- /agent:pending -->
 

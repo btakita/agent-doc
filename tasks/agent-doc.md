@@ -235,14 +235,14 @@ The currently selected window is 1:stash
 The stash window `1:stash` with 11 panes is from legitimately stashed sessions — those are fine.
 Why where there failed attempts?
 And why would the failed attempt create a new stash window?
-### Re: Why failed attempts? Why new stash windows? (HEAD)
+### Re: Why failed attempts? Why new stash windows?
 
 **Why failed attempts:** The `resync --fix` was killing the pane immediately after auto-start created it (see earlier root cause: cross-session mismatch between frontmatter `tmux_session: '1'` and the sync's target session `0`). Each plugin tab-switch triggered a sync → auto-start → pane created → resync killed it → next sync sees no pane → auto-start again. Infinite loop.
 
 **Why new stash windows:** When `auto_start_in_session` uses `split-window` to create a new pane, it splits alongside an existing pane. After the new pane dies, the shell from `split-window` remains briefly. The next sync reconcile sees this shell as "unwanted" and stashes it. But instead of joining the existing stash window (`1:stash`), `break_pane -d` creates a NEW detached window (which tmux names "stash" because it inherits the window-naming pattern). Each failed attempt → one orphan shell → one new stash window.
 
 **The fix (already applied):** `resync --fix` is now disabled in sync path (`resync::run(false)`), and tmux_session is auto-repaired in frontmatter. The cycle is broken. But the stash window proliferation bug remains if panes die for other reasons. The `stash_pane` function should always target the existing stash window via `join-pane`, not `break_pane` (which creates new windows).
-<!-- agent:boundary:65f9f92e -->
+<!-- agent:boundary:faeaa9d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

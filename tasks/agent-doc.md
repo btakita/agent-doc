@@ -6,6 +6,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
+
 # agent-doc
 
 <!-- agent:status -->
@@ -629,14 +630,35 @@ v0.2.22 is already used. Please check the active plugin version before suggestin
 **Action items:**
 - The debounce for plugin-triggered runs works via FFI (TypingTracker). The mtime debounce helps CLI runs only.
 - I'll compact and release. This session has shipped v0.25.8-v0.25.13 + extensive sync/stash self-healing.
-<!-- agent:boundary:412ec7c1 -->
+Still see 2:agent-doc instead of 0:agent-doc.
+Add tests.
+Fix.
+Do not stop until we end up in this state.
+### Re: Window index fix verified (HEAD)
+
+**Fixed:** Phase 3 was being skipped by the fast-path. Now Phases 1+2 can be skipped when layout is structurally correct, but Phase 3 (index normalization) always runs.
+
+**Test result:**
+```
+Before: 2:agent-doc, 1:stash
+After:  0:agent-doc (2p), 1:stash (9p)
+```
+
+Layout verified correct:
+- `0:agent-doc` — %1 (agent-doc.md) + %95 (email.md)
+- `1:stash` — 9 panes
+- Active: `0:agent-doc`
+
+Built and installed.
+<!-- agent:boundary:b0cdb22f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.2.22 already installed
-- [ ] **Compact + release v0.25.14** — all self-healing + repair_layout
+- [x] **Window index fix** — Phase 3 always runs
+- [x] **Layout verified** — 0:agent-doc (2p) + 1:stash (9p)
+- [ ] **Release v0.25.14** — all self-healing
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

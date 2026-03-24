@@ -757,7 +757,7 @@ Should I be worried about someone "borrowing" my idea and building on top of it.
 Or adding it into their product?
 External edit on this file. Why?
 tasks/recruit/namjus-saqib.md has an extra space added after frontmatter. Why?
-### Re: Idea borrowing + external edit + extra space (HEAD)
+### Re: Idea borrowing + external edit + extra space
 
 **Should you worry about idea borrowing?**
 The document-as-interface pattern isn't patentable — it's an approach. Your advantage is the deep implementation (CRDT, tmux routing, IDE plugins, 530 tests). Someone can copy the concept but not the engineering. The real moat is:
@@ -774,7 +774,7 @@ The `tmux_session` stripping code in sync.rs is modifying the file on disk durin
 Same cause — the tmux_session stripping runs on ALL files in the sync batch, not just the target file. If najmus-saqib.md was in the `--col` args, its frontmatter was also rewritten.
 
 **Fix needed:** The tmux_session stripping should only run on files that actually HAVE `tmux_session` in frontmatter AND the content changed. Currently it rewrites even when stripping produces the same content. Let me add a guard.
-<!-- agent:boundary:177fa717 -->
+<!-- agent:boundary:dde57e30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

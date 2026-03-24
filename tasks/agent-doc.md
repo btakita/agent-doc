@@ -495,14 +495,15 @@ Also fixed `before-script-linux` in pypi.yml (manylinux container needs deps too
 - Release — running (tag moved to include fix)
 - PyPI — re-running with fix
 - Book ✓ | mdBook Pages ✓
-<!-- agent:boundary:b13225ac -->
+compact exchange
+Exchange compacted. 344 lines archived.
+<!-- agent:boundary:2f91f8a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **GitHub Actions CI fix** — all path deps cloned
-- [ ] **Verify Release + PyPI workflows pass** — running now
+- [x] Exchange compacted
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -194,7 +194,7 @@ Now idea.log will show:
 **Plugin v0.2.21** built. Install to see sync logs after the next tab switch.
 Switching to tasks/linkedin.md on the right editor pane.
 The right tmux pane split into 3 panes
-### Re: linkedin.md → 3 panes (HEAD)
+### Re: linkedin.md → 3 panes
 
 The new logging reveals the issue clearly.
 
@@ -213,7 +213,7 @@ The new logging reveals the issue clearly.
 **This is actually working correctly** — the auto-start for a new file requires creating a pane, starting Claude, and waiting for it to be ready. The 3-pane state is transient. The stash window isn't involved here.
 
 The real question is whether the auto-start should happen in the stash window (hidden) and then join to the visible window after Claude is ready, to avoid the visual disruption.
-<!-- agent:boundary:6e9218a4 -->
+<!-- agent:boundary:39a454ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

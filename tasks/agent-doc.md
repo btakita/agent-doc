@@ -1473,7 +1473,7 @@ Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
 Review this document.
 Add the content as context to the relevant github issue.
 Such as MDX and Jupyter notebook support
-### Re: Add context to GitHub issues (HEAD)
+### Re: Add context to GitHub issues
 
 Updated 5 issues with architecture context from this document:
 
@@ -1488,7 +1488,7 @@ Updated 5 issues with architecture context from this document:
 - **[#33 /btw support](https://github.com/btakita/agent-doc/issues/33)** — Added preemption use cases, side-channel mechanism, claims-based injection approach.
 
 The remaining issues (#31 Homebrew, #32 lazily-rs, #34 ClawTeam) are straightforward and don't need additional architecture context.
-<!-- agent:boundary:20cade7a -->
+<!-- agent:boundary:8aff6054 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

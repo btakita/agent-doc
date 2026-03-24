@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.7 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.8 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.19 (FFI debounce + layout sync) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 11 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -1313,19 +1313,36 @@ This directly answers your question — yes, the diff now has surrounding contex
 All 526 tests pass. Release build successful.
 
 Want me to build a release?
-<!-- agent:boundary:a9204078 -->
+continue
+### Re: continue — v0.25.8 released (HEAD)
+
+**v0.25.8 published to all targets:**
+- crates.io ✓
+- PyPI ✓
+- GitHub Release ✓ (with prebuilt binary)
+- `cargo install` ✓ (binary updated)
+
+**Changes in v0.25.8:**
+1. Preflight mtime debounce (500ms idle gate before diff)
+2. Unified diff with 5-line context radius (replaces full-document dump)
+3. `--debounce` flag on `agent-doc route` (opt-in mtime polling)
+4. Smarter `looks_truncated` dot handling for domain fragments
+5. Recheck interval increased from 200ms to 400ms
+
+Note: the unified diff format is now live — this cycle's preflight used it. You can see the focused output with `@@` hunk markers and surrounding context instead of the entire document.
+<!-- agent:boundary:39ce4f59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Plugin v0.2.19 installed
-- [x] **Add `--debounce` to route** — mtime-based `await_idle()`, 30 tests pass
+- [x] **Add `--debounce` to route** — mtime-based `await_idle()`
 - [x] **SKILL.md: partial diff guidance** — added to step 1 (Respond)
-- [x] **Diagnose debounce failure** — plugin debounce fires correctly; pipeline timing is the issue
-- [x] **Preflight mtime debounce** — 500ms idle check before diff computation
+- [x] **Preflight mtime debounce** — 500ms idle check before diff
 - [x] **Fix `looks_truncated`** — improved dot handling, doubled recheck interval
-- [x] **Unified diff with context** — 5-line context radius, standard format
+- [x] **Unified diff with context** — 5-line context radius
+- [x] **v0.25.8 released** — all targets published
 - [ ] **EditorTabSyncListener debounce** — layout sync bypasses SubmitAction debounce
 - [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin
 <!-- /agent:pending -->

@@ -270,14 +270,30 @@ Actually — looking at the full sync output: `desired=["%1", "%82"]` and `FAST_
 The issue is that between sync #1 (which succeeds) and sync #2, the pane may die (Claude failing to start) or something else changes the layout. The repeated `auto-starting session for tasks/email.md (no alive pane)` messages in the logs suggest the pane keeps dying.
 
 Let me check if pane %82 is still alive right now.
-<!-- agent:boundary:4e347a10 -->
+
+Issue is still happening. Why?
+I see it after you created it.
+### Re: found root cause — resync --fix kills the pane (HEAD)
+
+**Root cause:** `resync --fix` runs at the end of every sync. It checks each registered pane's session against the frontmatter `tmux_session`. Since email.md says `tmux_session: '1'` but the pane is in session `0` (from context_session override), resync considers it "wrong session" and **kills** the pane.
+
+The fix created the pane in the right place, but the same sync that created it immediately killed it via resync.
+
+**The fix is simple:** The `resync --fix` "wrong session" check needs to be skipped when the pane was intentionally placed in a different session by the sync's context_session override.
+
+Options:
+1. Skip resync --fix entirely when running from sync (sync already manages layout)
+2. Pass the context_session to resync so it can exclude overridden files
+3. Have auto_start_no_wait update the frontmatter tmux_session to match the context
+
+Option 1 is cleanest — resync --fix is a safety net, not needed during sync which already does its own reconciliation. I'll disable the resync --fix call in the sync code path.
+<!-- agent:boundary:474bdfca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Investigate why pane dies between syncs** — pane created successfully but dies before next sync
-- [ ] **Release v0.25.12** — after pane persistence confirmed
+- [ ] **Disable resync --fix in sync** — it kills panes that auto_start just created
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

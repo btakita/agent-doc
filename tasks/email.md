@@ -803,11 +803,32 @@ The `.eml` file itself is valid — it's a **bounce notification** from Gmail's 
 3. **Skip the Gmail `+caf` forwarding** — have Cloudflare route `dev@briantakita.me` directly to your Gmail inbox without the intermediate forwarding hop.
 
 Which approach would you prefer? Option 3 is the cleanest if you can configure the Cloudflare routing directly.
-<!-- agent:boundary:d02181f8 -->
+
+> **Skip the Gmail `+caf` forwarding**
+
+What caused the +caf forwarding?
+
+### Re: What caused +caf forwarding? (HEAD)
+
+`+caf` = **Content Addressed Forwarding** — Gmail adds this automatically when forwarding between Gmail accounts. The `+caf_=dev=briantakita.me` encodes the original recipient address.
+
+**Your current mail chain:**
+```
+ADP → dev@briantakita.me
+  → Cloudflare Email Routing → btak.dev@gmail.com
+    → Gmail forwarding rule → brian.takita@gmail.com (the +caf hop)
+```
+
+The bounce happened on that **third hop** — when `btak.dev@gmail.com` forwarded to `brian.takita@gmail.com`, the DMARC alignment broke because the `From:` domain's DKIM signature doesn't match the forwarding server.
+
+**The fix:** Remove the Gmail-to-Gmail forwarding rule. Instead, configure Cloudflare Email Routing to deliver `dev@briantakita.me` directly to `brian.takita@gmail.com` (or keep it at `btak.dev@gmail.com` and just read mail there). This eliminates the `+caf` hop entirely.
+
+Alternatively, if you want all mail consolidated in one inbox, set up Cloudflare to route directly to your primary Gmail — no need for the `btak.dev` intermediary.
+<!-- agent:boundary:b6aaf11e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Fix DMARC delivery failure for dev@briantakita.me forwarding
+- [ ] Fix DMARC delivery failure — remove Gmail forwarding rule from btak.dev → brian.takita, route via Cloudflare directly
 - [ ] Release corky (new version)
 - [ ] Implement label alias feature (future syncs write "btak.dev" not "INBOX")
 - [ ] Rename remaining labels in btak.dev emails

@@ -725,12 +725,12 @@ The tmux_session stripping now collapses `\
 ` after removing the line, preventing blank line accumulation. Also fixed existing blank lines in the document.
 
 Built and installed. Now releasing v0.25.15 with all fixes + tests + plugin v0.2.23.
-### Re: v0.25.15 released (HEAD)
+### Re: v0.25.15 released
 
 **v0.25.15 published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | cargo install ✓
 
 Changes: repair_layout tests (4 scenarios), SPEC.md section 7.36, blank line accumulation fix, plugin v0.2.23 (always-pass --window).
-<!-- agent:boundary:35691dcf -->
+<!-- agent:boundary:ecac5888 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

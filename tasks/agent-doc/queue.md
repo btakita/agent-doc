@@ -8,11 +8,33 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Queue initialized. 2 pending items. Awaiting task selection.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+
+### Agent (initial review) (HEAD)
+
+**Pending items:**
+1. **install nvidia_greenboost** — ready to pick up. What's the install method? (pip, cargo, apt?)
+2. **agent-doc task queue** — the design below is solid
+
+**Task Queue Design feedback:**
+
+The MVP approach is smart — use existing primitives (`&lt;!-- agent:pending --&gt;` as queue, tmux-router for pane spawning, watch-mode for auto-submit) before building new binary features.
+
+Progression:
+- **Phase 1 (MVP):** SKILL.md workflow only. Orchestrator is a Claude Code session watching the queue doc, spawning tmux panes with `agent-doc claim`, monitoring `&lt;!-- agent:status --&gt;` in task docs.
+- **Phase 2:** Queue semantics in agent-doc binary — task assignment locking, completion detection, cross-document signaling.
+- **Phase 3:** Full orchestrator mode — `agent-doc orchestrate queue.md`.
+
+**Open questions:**
+- Task assignment locking: flock or claims log?
+- Completion signaling: status component value, or removal from pending?
+- Git conflicts: do parallel agents need isolated branches/worktrees?
+<!-- agent:boundary:b6689b28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

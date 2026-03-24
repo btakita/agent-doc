@@ -305,7 +305,7 @@ This is the right fix — the file's session binding should match where it's act
 
 Try switching to email.md now.
 Is this fix implemented in agent-doc?
-### Re: is the fix in agent-doc? (HEAD)
+### Re: is the fix in agent-doc?
 
 The `tmux_session` fix is a **data change** — I edited `tasks/email.md` directly (changed `'1'` → `'0'`). No binary change needed for this.
 
@@ -319,7 +319,7 @@ The binary fixes that ARE already installed (v0.25.12 unreleased):
 All of these are in the build you're running. The email.md `tmux_session: '0'` change just means the frontmatter now matches your actual tmux session, so the sync won't have cross-session conflicts.
 
 Try switching to email.md — it should work now with both the data fix and the binary fixes.
-<!-- agent:boundary:216fd249 -->
+<!-- agent:boundary:473b2d28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

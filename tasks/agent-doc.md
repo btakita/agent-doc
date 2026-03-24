@@ -236,7 +236,7 @@ But 0:agent-doc is still 1 pane.
 
 Rebuilt and installed. Try switching to email.md again.
 Tmux window 0:agent-doc changes name to 0:tmux. 2 panes briefly appear but it then goes back to 1 pane.
-### Re: window renamed to tmux, 2 panes briefly → 1 (HEAD)
+### Re: window renamed to tmux, 2 panes briefly → 1
 
 The manual test just now shows the fix IS working:
 - Pane `%78` created in window `@0` (visible) alongside `%1`
@@ -252,7 +252,7 @@ The window renaming to `0:tmux` happens because tmux names windows after the mos
 **Current state:** The sync with the latest build is working. Both panes are alive and running. The bug may have been a timing issue with rapid consecutive syncs — the fix needs the pane to survive long enough for the next sync to recognize it.
 
 Want me to release v0.25.12 or continue investigating the timing issue?
-<!-- agent:boundary:34255152 -->
+<!-- agent:boundary:f0c45d8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

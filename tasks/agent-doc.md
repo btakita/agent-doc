@@ -1427,8 +1427,35 @@ yes
 2. **Use `tmux wait-for` lock:** Serialize rendering around the detach+reattach phase
 3. **Accept the ~50ms flicker** — it's rare and corrects immediately
 
+Would **Suppress rendering during sync:** remove all flicker?
+How would **Use `tmux wait-for` lock:** work...by making detach+reattach serial?
+
 Given the code already does the right thing (detached flags, FOCUS STEAL detection, batch operations), this is a low-impact cosmetic issue. The flicker only happens during 2D layout reconciliation when panes are moved between windows.
-<!-- agent:boundary:18117a5d -->
+### Re: suppress rendering vs wait-for lock
+
+**"Would suppress rendering during sync remove all flicker?"**
+
+No — `tmux set -g status off/on` only hides the status bar, not the window content. The flicker you see is the *pane content* changing (stash window's shell prompt briefly appears), not the status bar. There's no tmux option to freeze rendering during a multi-command sequence. tmux processes each command atomically, but the terminal renders between commands.
+
+The closest tmux has is `set -g visual-activity off` and `set -g visual-bell off`, but those control notification popups, not window content.
+
+**"How would `tmux wait-for` lock work?"**
+
+`tmux wait-for` is a synchronization primitive — one command blocks until another signals. The idea would be:
+
+```bash
+# Before sync: (HEAD)
+tmux wait-for -L sync-lock    # acquire lock
+# ... do all break/join/select operations ... (HEAD)
+tmux wait-for -U sync-lock    # release lock
+```
+
+But this serializes tmux *command execution*, not *rendering*. tmux renders to the terminal between each command regardless of locks. `wait-for` is designed for inter-process coordination (e.g., waiting for a pane to start), not for batching visual updates.
+
+**The real answer:** tmux has no "transaction" or "batch rendering" mode. Each command is visually atomic, but a multi-command sequence will render intermediate states. The `-d` flags already prevent *focus changes* — the flicker is purely a rendering artifact where tmux briefly shows the new active pane of the stash window before the next `select-window` command runs.
+
+**Most practical fix:** Accept the flicker (it's <100ms) or investigate whether `tmux-router`'s `TmuxBatch` can combine the detach+reattach into fewer tmux invocations, reducing the render window.
+<!-- agent:boundary:55ea3694 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1437,7 +1464,7 @@ Given the code already does the right thing (detached flags, FOCUS STEAL detecti
 - [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
 - [x] Plugin v0.2.20 installed
 - [x] v0.25.9 released
-- [x] **Tmux window flicker** — investigated: code already uses `-d` flags and FOCUS STEAL detection. Cosmetic tmux rendering race, not a bug.
+- [x] **Tmux flicker** — cosmetic, no fix available in tmux protocol
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

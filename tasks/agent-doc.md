@@ -350,12 +350,12 @@ Tested:
 
 email.md frontmatter now shows `tmux_session: '0'`. Rebuilt and installed. The repair triggers on every sync that detects a mismatch.
 In extra newline was added. See line 8 in tasks/email.md
-### Re: extra newline fix (HEAD)
+### Re: extra newline fix
 
 Fixed. Switched from `frontmatter::set_tmux_session()` (which round-trips the whole frontmatter via serde_yaml, adding an extra newline) to a direct string replace: `content.replacen("tmux_session: '1'", "tmux_session: '0'", 1)`.
 
 Tested: email.md now has exactly one blank line after `---` (no extra). Rebuilt and installed.
-<!-- agent:boundary:3d75ed99 -->
+<!-- agent:boundary:36a33c1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

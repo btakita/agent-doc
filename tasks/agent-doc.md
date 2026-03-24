@@ -376,7 +376,7 @@ What's still missing: **the `route` command should rescue a stash pane back to t
 
 Let me implement this in route.rs, rebuild, install, and test with the current state (pane %1 in stash).
 Add self-healing into SPEC.md
-### Re: Route stash rescue — implemented (HEAD)
+### Re: Route stash rescue — implemented
 
 Added stash rescue to `route.rs`. When a registered pane is alive and in the correct session but in a stash window:
 
@@ -388,7 +388,7 @@ Added stash rescue to `route.rs`. When a registered pane is alive and in the cor
 Built, tested (526 pass), installed. The next time `Run Agent Doc` is triggered for a file whose pane is in the stash, the route will rescue it back to the agent-doc window automatically.
 
 To test: trigger `Run Agent Doc` on this file from the plugin — the route should detect pane %1 in stash and swap it back to window 0.
-<!-- agent:boundary:c189db3d -->
+<!-- agent:boundary:8ecc9a5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

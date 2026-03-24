@@ -965,7 +965,42 @@ Added same-session check before `swap_pane()` in `reconcile()`. When `session_na
 **route.rs rescue path:** Already safe — `pane_session == target_session` is validated at line 67 before any swap, and target panes come from `format!("{}:agent-doc", target_session)`. No change needed.
 
 **Why panes were swapping to session "1":** The SWAP fast path in `sync.rs:reconcile()` had no session check — if a pane from stash (which could be in any session) was the 1:1 swap candidate, it swapped across session boundaries. Now blocked.
-<!-- agent:boundary:794ebca1 -->
+continue
+
+This happen on the left tmux pane
+
+```
+~/work/btakita/agent-loop main ⇡67 !41 ?8                                                                                                                                                                                           5s 18:26:40
+❯ /agent-doc tasks/agent-doc.md
+zsh: no such file or directory: /agent-doc
+~/work/btakita/agent-loop main ⇡70 !41 ?8
+~/work/btakita/agent-loop main ⇡70 !41 ?8                                                                      18:30:23
+```
+
+Still swapping with session 1.
+I had to `Claim for Tmux Pane`
+### Re: Cross-session swap still happening (HEAD)
+
+Investigated. The previous fix at the SWAP validation level (lines 668-682) is correct in isolation — it checks both panes are in the expected session. But the **root cause is upstream**: `target_session` itself is derived from the wrong source.
+
+**The bug (sync.rs lines 507-508):**
+
+When `--window` is provided, `target_session` is set to the window's session:
+```rust
+} else if let Some(w) = window {
+    tmux.pane_session(w).ok()  // ← derives session from --window
+```
+
+If `--window` points to a window in session "1", then `target_session="1"`. The swap validation then checks both panes are in session "1" — which they are, since the outgoing pane is already in that window. So the swap proceeds, pulling your wanted pane INTO session "1".
+
+**The fix:** `target_session` should always be derived from the **wanted panes first**, falling back to `--window` only if no wanted panes exist yet. The `--window` should also be validated against `target_session` — if it's in a different session, fall back to `find_best_window()`.
+
+**About the `/agent-doc` path error:** That's a zsh issue — `/agent-doc` is interpreted as an absolute path. In Claude Code, use the slash command `/agent-doc` which routes through the skill system, not the shell.
+
+Want me to implement the fix? The changes would be:
+1. Reorder session derivation to prefer wanted panes over `--window`
+2. Add session validation for `--window` before accepting it as `target_window`
+<!-- agent:boundary:f329cccd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

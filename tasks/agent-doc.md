@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.11 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.9, instruction-files v0.1
+**Version:** v0.25.12 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.9, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.21 (sync logging + is_tracked) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -393,14 +393,31 @@ The "all h3 tags" you reported earlier may have been from a different file state
 **Current state:** The (HEAD) marker is working correctly — only one heading is marked, creating the intended blue gutter boundary.
 
 Ready to release v0.25.12?
-<!-- agent:boundary:1b4bf968 -->
+audit docs
+update SPEC.md, README.md
+release
+### Re: audit + update + release — v0.25.12 done (HEAD)
+
+**v0.25.12 published:**
+- crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
+
+**Changes in v0.25.12:**
+1. Sync: swap-pane atomic reconcile (no intermediate pane states)
+2. Sync: auto_start_no_wait (no 8s Claude wait blocking)
+3. Sync: cross-session context override + tmux_session auto-repair
+4. Sync: resync --fix disabled in sync path (report only)
+5. Sync: split in visible window (not stash) for new panes
+6. Plugin v0.2.21: sync logging at INFO level
+7. Debounce: preflight mtime, unified diff context, route --debounce, is_tracked FFI
+
+README, SPEC updated. Clippy warnings fixed. All 526 tests pass.
+<!-- agent:boundary:dc8ebcbf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **(HEAD) marker** — investigated, working correctly (single heading marked)
-- [ ] **Release v0.25.12** — all sync fixes ready
+- [x] v0.25.12 released — all sync + debounce improvements
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

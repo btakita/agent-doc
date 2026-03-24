@@ -339,7 +339,7 @@ So if email.md has `tmux_session: '1'` but the sync targets session `0`, the bin
 Rebuilt and installed. You can switch back to `tmux_session: '1'` in email.md and test — the sync should auto-repair it to `'0'`.
 
 `tmux_session: '1'` still there
-### Re: tmux_session still '1' — fixed (HEAD)
+### Re: tmux_session still '1' — fixed
 
 The repair was only in the auto_start path (which only runs when no pane exists). Added repair to the **sync pre-scan** — it now checks every file's `tmux_session` against the context session and repairs mismatches regardless of whether the pane is alive.
 
@@ -349,7 +349,7 @@ Tested:
 ```
 
 email.md frontmatter now shows `tmux_session: '0'`. Rebuilt and installed. The repair triggers on every sync that detects a mismatch.
-<!-- agent:boundary:9f88ca33 -->
+<!-- agent:boundary:402a822c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

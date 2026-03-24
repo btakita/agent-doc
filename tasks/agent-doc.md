@@ -156,7 +156,7 @@ claude_args: --dangerously-skip-permissions
 Session: debounce improvements, unified diff, release v0.25.8+v0.25.9, plugin v0.2.20, tmux flicker investigation, GitHub issues #30-#37 created with architecture context.
 Exchange compacted. 1337 lines archived. Summary preserved above.
 On the right editor pane, I switched to tasks/resume.md. The tmux session 0 switched to tmux window 1:stash for a few seconds, then back to tmux window 0:agent-doc.
-### Re: tmux flicker when switching to resume.md (HEAD)
+### Re: tmux flicker when switching to resume.md
 
 **What happened:** At 23:15:04, `LayoutChangeDetector` detected the right pane change: `[[agent-doc.md], [justin-caird.md]]` → `[[agent-doc.md], [resume.md]]`. This triggered a sync that needed to stash the justin-caird pane and bring in (or create) a resume pane.
 
@@ -170,7 +170,7 @@ On the right editor pane, I switched to tasks/resume.md. The tmux session 0 swit
 **The flicker itself** — the brief switch to stash — most likely happened during the unlogged sync at ~23:15:05. During that sync, the old justin-caird pane was stashed (moved to @2:stash) and the resume pane was attached. Even with `-d` flags, this transition can produce a visual flicker as discussed earlier.
 
 **Next step:** Add logging to confirm the sync command actually runs after LayoutChangeDetector events. The EditorTabSyncListener delegates to `agent-doc sync` via ProcessBuilder — if the process fails to start or outputs to a different stream, we'd miss it.
-<!-- agent:boundary:4e09c3c5 -->
+<!-- agent:boundary:27ac6b4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.10 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.11 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.9, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.21 (sync logging + is_tracked) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -417,14 +417,22 @@ Falls back to normal join+stash if swap fails or if the change involves multiple
 **What the user sees:** When switching one editor tab, the tmux pane swap is a single command — no intermediate 1-pane or 3-pane state. For multi-pane layout changes (2→3 columns), the existing ATTACH/DETACH logic still applies.
 
 All 526 tests pass. Build successful. Want me to release?
-<!-- agent:boundary:90baf19c -->
+release
+### Re: release — v0.25.11 done (HEAD)
+
+**v0.25.11 published:**
+- crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
+
+**Key change:** `swap-pane -d` for atomic 1:1 pane replacement in tmux-router reconcile(). Tab switches that replace one pane with another now use a single tmux command — no intermediate states.
+
+Also includes all v0.25.10 changes (sync no-wait, plugin logging, debounce improvements).
+<!-- agent:boundary:b8c1505f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **swap-pane implemented** — atomic 1:1 pane replacement in reconcile()
-- [ ] **Release** — swap-pane + no-wait sync + plugin v0.2.21 logging
+- [x] v0.25.11 released — swap-pane atomic sync
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

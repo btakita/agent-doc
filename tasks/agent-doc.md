@@ -1003,7 +1003,7 @@ Want me to implement the fix? The changes would be:
 
 Still messed up. Please detect what went wrong. Add tests. I had to run `Claim For Tmux Pane`
 ![img_6.png](img_6.png)
-### Re: Still messed up — root cause + fix (HEAD)
+### Re: Still messed up — root cause + fix
 
 **Root cause found:** The previous fix only blocked **swap-pane** across sessions, but the **join-pane fallback** still moved panes across session boundaries. When swap was blocked, the code fell through to `join_pane()` which happily pulled panes from session "other" into session "main".
 
@@ -1029,7 +1029,7 @@ Additionally, `target_session` was derived from `--window` BEFORE checking wante
 **Result:** 73/73 tmux-router tests pass, 38/38 agent-doc tests pass.
 
 Ready to build release and install?
-<!-- agent:boundary:b3afd1b5 -->
+<!-- agent:boundary:85b93c6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

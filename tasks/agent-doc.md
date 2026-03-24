@@ -393,7 +393,7 @@ The `reconcile()` function in `sync.rs` does ATTACH → DETACH in sequence. For 
 
 This change is in `tmux-router` (the library crate), not `agent-doc`. Want me to implement it?
 yes
-### Re: yes — swap-pane implemented (HEAD)
+### Re: yes — swap-pane implemented
 
 Done. Two changes:
 
@@ -417,7 +417,7 @@ Falls back to normal join+stash if swap fails or if the change involves multiple
 **What the user sees:** When switching one editor tab, the tmux pane swap is a single command — no intermediate 1-pane or 3-pane state. For multi-pane layout changes (2→3 columns), the existing ATTACH/DETACH logic still applies.
 
 All 526 tests pass. Build successful. Want me to release?
-<!-- agent:boundary:ae70a921 -->
+<!-- agent:boundary:90baf19c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

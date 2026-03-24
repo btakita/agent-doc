@@ -10,9 +10,9 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.9 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
+**Version:** v0.25.10 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.8, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.20 (is_tracked + FFI logging) + VS Code v0.2.3
+**Plugins:** JetBrains v0.2.21 (sync logging + is_tracked) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
 <!-- /agent:status -->
 
@@ -308,14 +308,34 @@ Done. Added `auto_start_no_wait()` to `route.rs` and switched `sync.rs` to use i
 4. User sees Claude initializing in the pane
 
 All 526 tests pass. Release build successful. Want me to release v0.25.10?
-<!-- agent:boundary:9ec5aec0 -->
+update SPEC.md, README.md
+audit docs
+release
+### Re: update docs + audit + release — v0.25.10 done (HEAD)
+
+**v0.25.10 published to all targets:**
+- crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
+
+**Docs updated:**
+- README.md: version line → v0.25.10 / JetBrains v0.2.21, added 5 feature bullets
+- SPEC.md: sections 7.27-7.31 for new features
+- Audit docs: clean
+
+**Changes in v0.25.10:**
+1. Preflight mtime debounce (500ms idle gate)
+2. Unified diff with 5-line context radius
+3. `--debounce` flag on route
+4. `is_tracked()` FFI export + untracked file debounce fix
+5. `auto_start_no_wait()` — sync no longer blocks on Claude ready
+6. Plugin v0.2.21 — sync logging at INFO level
+7. `looks_truncated` improvements + recheck interval doubled
+<!-- agent:boundary:2d08f429 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Remove wait_for_claude_ready from sync** — implemented via `auto_start_no_wait()`
-- [ ] **Release v0.25.10** — sync no-wait + plugin v0.2.21 logging
+- [x] v0.25.10 released — SPEC, README, audit, all targets published
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

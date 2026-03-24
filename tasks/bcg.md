@@ -214,7 +214,7 @@ And draft a followup if recommended.
 
 I updated dave_franklin_sms.txt
 Please note his response
-### Dave's response — reading the signal (HEAD)
+### Dave's response — reading the signal
 
 Dave replied:
 > "Hi Brian, not yet on feedback from BCG. I wish you all the best on your interviews and will keep you posted when we do get something."

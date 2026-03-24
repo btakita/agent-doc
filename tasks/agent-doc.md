@@ -287,13 +287,21 @@ Options:
 3. Have auto_start_no_wait update the frontmatter tmux_session to match the context
 
 Option 1 is cleanest — resync --fix is a safety net, not needed during sync which already does its own reconciliation. I'll disable the resync --fix call in the sync code path.
-<!-- agent:boundary:6fb002cd -->
+
+go
+### Re: go — resync --fix disabled in sync (HEAD)
+
+Changed `resync::run(true)` → `resync::run(false)` in `sync.rs`. The post-sync resync now reports issues but doesn't kill panes. Auto_start's context_session override is no longer undone by resync.
+
+Rebuilt and installed. Try switching to email.md.
+<!-- agent:boundary:686cb99d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Disable resync --fix in sync** — it kills panes that auto_start just created
+- [x] **Disable resync --fix in sync** — changed to report-only mode
+- [ ] **Test email.md** — switch to email.md in editor split
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

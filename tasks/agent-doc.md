@@ -1206,7 +1206,7 @@ Want me to:
 2. Update SKILL.md for partial diffs
 3. Investigate the debounce failure in idea.log
 go
-### Re: go — all three items (HEAD)
+### Re: go — all three items
 
 **1. `--debounce` added to `agent-doc route`**
 
@@ -1239,7 +1239,7 @@ The idea.log analysis shows debounce worked correctly in all 4 logged cases toda
 No `[native]` or `[debounce]` FFI log tags were found — the FFI debounce logging may not be instrumented yet in the JetBrains plugin.
 
 **Action:** Consider adding debounce to layout-change-triggered routes in the plugin, since `LayoutChangeDetector` currently bypasses the typing check entirely.
-<!-- agent:boundary:c23a4d58 -->
+<!-- agent:boundary:dd303663 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -377,7 +377,6 @@ What's still missing: **the `route` command should rescue a stash pane back to t
 Let me implement this in route.rs, rebuild, install, and test with the current state (pane %1 in stash).
 Add self-healing into SPEC.md
 ### Re: Route stash rescue — implemented
-
 Added stash rescue to `route.rs`. When a registered pane is alive and in the correct session but in a stash window:
 
 1. Detects stash window via `pane_window()` + window name check
@@ -388,15 +387,40 @@ Added stash rescue to `route.rs`. When a registered pane is alive and in the cor
 Built, tested (526 pass), installed. The next time `Run Agent Doc` is triggered for a file whose pane is in the stash, the route will rescue it back to the agent-doc window automatically.
 
 To test: trigger `Run Agent Doc` on this file from the plugin — the route should detect pane %1 in stash and swap it back to window 0.
-<!-- agent:boundary:8ecc9a5b -->
+Still messed up.
+Please detect why.
+What is the desired state tmux session 0 windows, and pane layout for each window in this particular editor configuration.
+### Re: Still messed up — diagnosis (HEAD)
+
+**Current state:**
+- Window `0:agent-doc` **doesn't exist** — it was deleted
+- Window `1:stash` has ALL 11 panes (including %94 which was the agent-doc window pane and %1 which is THIS session)
+- Active window: `1:stash`
+- This Claude session (%1) is running in the stash
+
+**Desired state for editor layout `[[agent-doc.md], [email.md]]`:**
+```
+Window 0:agent-doc (2 panes)
+  %1 (agent-doc.md, left)
+  %?? (email.md, right)
+Window 1:stash (remaining panes)
+  %0, %2, %3, %7, %8, %9, %24, %29, %93, %94
+```
+
+**Why this happened:** A sync reconciliation stashed all panes and deleted window 0. This session has been running the entire time in a stash pane. When the sync created %94 and the old window had only 1 pane, the subsequent stash of %94 left window 0 empty, and tmux auto-deleted it.
+
+**Immediate fix:** Recreate window 0 and join %1 into it.
+
+The deeper fix needs to prevent sync from stashing the pane that's currently processing a command. This is a "never stash the active pane" invariant.
+<!-- agent:boundary:134a18e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Route stash rescue** — swap-pane rescues panes from stash to visible window
-- [ ] **Test stash rescue** — trigger Run Agent Doc to verify
-- [ ] **Release v0.25.14** — all self-healing fixes
+- [ ] **Recreate window 0** — join %1 from stash to new agent-doc window
+- [ ] **Never stash active pane** — sync invariant to prevent stashing the pane that triggered the command
+- [ ] **Release v0.25.14** — self-healing fixes
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

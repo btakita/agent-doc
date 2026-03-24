@@ -1085,7 +1085,7 @@ This is now the pattern with `test_cross_session_join_blocked_entirely`.
 Yes. I like all 3 recommendations.
 Note that the current claude session is running on tmux session 1.
 Please add self-healing.
-### Re: Implementing all 3 recommendations (HEAD)
+### Re: Implementing all 3 recommendations
 
 Implementing now:
 
@@ -1099,7 +1099,7 @@ tmux sync should check the current tmux state if different from the desired stat
 This includes the bound claude session being in another tmux session from the agent-doc project tmux session.
 
 Now 0:agent-doc is 1 pane. The claude session pane is for this run is still in tmux session 1 window 0.
-### Re: All 3 recommendations implemented (HEAD)
+### Re: All 3 recommendations implemented
 
 **1. SessionScope type wrapper** (`sync.rs`):
 ```rust
@@ -1130,7 +1130,7 @@ Logs `SCOPE_VIOLATION` if any pane in the target window doesn't belong to the sc
 All log phases unified to `SCOPE_BLOCK` (was split across `SWAP_SKIP`/`ATTACH_SKIP`).
 
 **Test results:** 73/73 tmux-router, 537/537 agent-doc (all suites). Binary installed.
-<!-- agent:boundary:32890c66 -->
+<!-- agent:boundary:6040dbcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

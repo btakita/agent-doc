@@ -900,7 +900,7 @@ Add tests to simulate root cause.
 
 Want me to implement the session validation fix and/or write these tests?
 Let's try to get 100% test coverage.
-### Re: 100% Coverage Push (HEAD)
+### Re: 100% Coverage Push
 
 On it. I'll implement:
 
@@ -909,7 +909,7 @@ On it. I'll implement:
 3. **parallel.rs** basic test coverage
 
 Starting now — will stream progress as sections complete.
-<!-- agent:boundary:75720bde -->
+<!-- agent:boundary:71dd0c71 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

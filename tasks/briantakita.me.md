@@ -129,8 +129,28 @@ Acknowledged the compacted exchange. The open items from prior sessions are:
 5. **`rappstack-dev` `blog__header.ts`** changes are separate from briantakita.me-dev
 
 Which would you like to tackle, or is there new work to start?
-<!-- agent:boundary:2684fed1 -->
+1 and 2
+### Re: 1 and 2 (HEAD)
+
+**1. JSON-LD VideoObject — already done.** `post__doc_html.ts` already injects `VideoObject` structured data when `video_url` is present in frontmatter. All 13 video posts have it. Sitemap `<video:video>` entries are also generated. No work needed — closing this item.
+
+**2. `@source` absolute path fix.** The problem is in `app/briantakita.me/app/index.css.ts`:
+\`\`\`css
+@source "/home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/**/*.ts";
+\`\`\`
+This hardcoded path won't exist on CI (GitHub Actions uses `/home/runner/work/...`). Options:
+
+| Option | Approach | Pros | Cons |
+|--------|----------|------|------|
+| **A. Safelist** | List rappstack Tailwind classes explicitly | Fast builds, no scanning, works everywhere | Manual maintenance |
+| **B. Env var** | `RAPPSTACK_DEV_ROOT` build-time var | Flexible, works anywhere | Build complexity |
+| **C. Symlink** | `ln -s` rappstack-dev into project tree | Portable, simple relative path | Git + CI symlink setup |
+| **D. Fix esmcss** | Resolve `@source` relative to CSS file, not temp dir | Root cause fix | Deeper change |
+
+Which approach do you prefer?
+<!-- agent:boundary:303bff93 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- `@source` absolute path CI fix — awaiting approach decision
 <!-- /agent:pending -->

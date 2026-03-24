@@ -246,7 +246,7 @@ If another document is selected while claude is loading, then show the tmux pane
 This separates the fast path (layout sync, <100ms) from the slow path (session start, 5-30s) and eliminates visual disruption.
 
 Want me to implement this? It's a change in `sync.rs` — remove the inline `auto_start` call and replace with a background spawn.
-### Re: simpler — just show the right pane (HEAD)
+### Re: simpler — just show the right pane
 
 You're right, I overcomplicated it. The desired behavior is straightforward:
 
@@ -265,7 +265,7 @@ Or even simpler: `split-window` in stash, then `join-pane` to the visible window
 In `sync.rs`, when `auto_start` is needed, stash the unwanted pane first, then split-window in the visible window. No background process needed. No waiting needed. Claude loading in the pane is visible to the user as expected.
 
 Want me to implement this? It's a reorder of operations in the sync reconciliation path.
-<!-- agent:boundary:fb97e441 -->
+<!-- agent:boundary:1460f3a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,13 +7,18 @@ claude_args: --dangerously-skip-permissions
 ---
 
 
+
+
+
+
+
+
+
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.13 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.10, instruction-files v0.1
-**Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
-**Plugins:** JetBrains v0.2.21 (sync logging + is_tracked) + VS Code v0.2.3
-**Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
+**Version:** v0.25.14 | **Tests:** 526 | **Published:** all targets ✓
+**Plugins:** JetBrains v0.2.22 + VS Code v0.2.3
 <!-- /agent:status -->
 
 ## Architecture
@@ -650,15 +655,33 @@ Layout verified correct:
 - Active: `0:agent-doc`
 
 Built and installed.
-<!-- agent:boundary:6a586530 -->
+release
+### Re: v0.25.14 released (HEAD)
+
+**v0.25.14 published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | cargo install ✓
+
+Session summary: v0.25.8–v0.25.14 shipped. Key improvements: debounce, unified diff, swap-pane sync, repair_layout, self-healing (stash detection, window recreation, index normalization), install.sh, Homebrew formula, plugin v0.2.22.
+
+Remaining: stash selection bug (plugin keeps selecting stash window on sync).
+<!-- agent:boundary:3f0172fc -->
+d
+Issues:
+- 1 pane
+- 1:stash was selected (incorrect)
+- 0:agent-doc selected (correct)
+ 
+- Add tests
+- Fix
+- Don't stop until we have the correct state
+- Intermediate states should also be correct
+<!-- agent:boundary:64fac205:agent-doc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Window index fix** — Phase 3 always runs
-- [x] **Layout verified** — 0:agent-doc (2p) + 1:stash (9p)
-- [ ] **Release v0.25.14** — all self-healing
+- [x] v0.25.14 released
+- [ ] **Stash selection bug** — for next session
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

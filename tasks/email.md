@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 6c57ef6d-db13-43df-a68d-0e9c4372110b
-tmux_session: '1'
+tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -770,10 +770,44 @@ compact exchange
 ### Pending User Requests
 - **Release**: corky release requested
 - **Label rename**: Rename INBOX label for btak.dev@gmail.com to btak.dev; rename all labels in emails to/from btak.dev@gmail.com
-<!-- agent:boundary:03865de5 -->
+Help me fix the error in /home/brian/Downloads/btak-dev/adp_Delivery_Status_Notification_Failure.eml
+
+### Re: DMARC Delivery Failure for dev@briantakita.me (HEAD)
+
+The `.eml` file itself is valid — it's a **bounce notification** from Gmail's Mail Delivery Subsystem. The actual error:
+
+```
+550 5.7.1 DMARC checks failed. K7FEUz2ci2TD
+```
+
+**What happened:** An ADP email was forwarded via Gmail's `+caf` address rewriting (`brian.takita+caf_=dev=briantakita.me@gmail.com`) to `dev@briantakita.me`. Cloudflare Email Routing (your MX) then tried to forward it, but the receiving server rejected it because:
+
+1. The `From:` header says `googlemail.com` (bounce notification)
+2. When Cloudflare forwards, the SPF/DKIM alignment breaks
+3. `briantakita.me` has `p=quarantine` DMARC policy — the downstream server enforced it
+
+**Your current DNS:**
+- MX → Cloudflare Email Routing
+- SPF → `include:_spf.mx.cloudflare.net ~all`
+- DMARC → `v=DMARC1; p=quarantine`
+
+**Fix options:**
+
+1. **Relax DMARC to `p=none`** (quick fix, less protection):
+   ```
+   _dmarc.briantakita.me TXT "v=DMARC1; p=none"
+   ```
+
+2. **Use SRS (Sender Rewriting Scheme)** — Cloudflare Email Routing should handle this automatically. If it's not, the issue may be on the downstream receiving server's side.
+
+3. **Skip the Gmail `+caf` forwarding** — have Cloudflare route `dev@briantakita.me` directly to your Gmail inbox without the intermediate forwarding hop.
+
+Which approach would you prefer? Option 3 is the cleanest if you can configure the Cloudflare routing directly.
+<!-- agent:boundary:f90fc08d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- [ ] Fix DMARC delivery failure for dev@briantakita.me forwarding
 - [ ] Release corky (new version)
 - [ ] Implement label alias feature (future syncs write "btak.dev" not "INBOX")
 - [ ] Rename remaining labels in btak.dev emails

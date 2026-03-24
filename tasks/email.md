@@ -23,9 +23,11 @@ agent_doc_write: crdt
 - [x] Ctrl+C cancellation token
 - [x] README Gmail API setup instructions
 - [x] Todo: public Google app (tasks/todo/)
-- [ ] Add btak.dev as test user in Cloud Console
+- [x] btak.dev added as test user in Cloud Console
+- [x] v0.18.0 released (crates.io, PyPI, GitHub)
+- [x] Renamed INBOX → btak.dev in 291 existing email files
+- [ ] Label alias feature (so future syncs write "btak.dev" not "INBOX")
 - [ ] Verify sync with btak.dev@gmail.com
-- [ ] Release 0.17.0
 <!-- /agent:status -->
 
 ## Exchange

@@ -1364,7 +1364,7 @@ This means:
 All tests pass. `libagent_doc.so` rebuilt with `is_tracked` export.
 Explain:
 - [ ] **EditorTabSyncListener** — layout sync routes bypass SubmitAction (low priority: sync doesn't send /agent-doc commands)
-### Re: Explain EditorTabSyncListener (HEAD)
+### Re: Explain EditorTabSyncListener
 
 **What it is:** `EditorTabSyncListener` is a `FileEditorManagerListener` in the JetBrains plugin. It fires when you switch editor tabs or change the split layout. It calls `agent-doc sync --col ... --focus ...` to rearrange tmux panes to mirror the editor layout.
 
@@ -1377,7 +1377,7 @@ Explain:
 4. `EditorTabSyncListener` already has its own 500ms debounce + concurrency guard (`AtomicBoolean running`).
 
 **Bottom line:** It doesn't need typing debounce because it never submits documents. It only arranges panes. The "bypass" label was misleading — I've updated the pending to reflect this.
-<!-- agent:boundary:beb9c485 -->
+<!-- agent:boundary:b41268e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

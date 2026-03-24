@@ -1130,7 +1130,7 @@ Logs `SCOPE_VIOLATION` if any pane in the target window doesn't belong to the sc
 All log phases unified to `SCOPE_BLOCK` (was split across `SWAP_SKIP`/`ATTACH_SKIP`).
 
 **Test results:** 73/73 tmux-router, 537/537 agent-doc (all suites). Binary installed.
-<!-- agent:boundary:076cf193 -->
+<!-- agent:boundary:b0dfa4cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -311,7 +311,7 @@ All 526 tests pass. Release build successful. Want me to release v0.25.10?
 update SPEC.md, README.md
 audit docs
 release
-### Re: update docs + audit + release — v0.25.10 done (HEAD)
+### Re: update docs + audit + release — v0.25.10 done
 
 **v0.25.10 published to all targets:**
 - crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
@@ -329,7 +329,7 @@ release
 5. `auto_start_no_wait()` — sync no longer blocks on Claude ready
 6. Plugin v0.2.21 — sync logging at INFO level
 7. `looks_truncated` improvements + recheck interval doubled
-<!-- agent:boundary:2d08f429 -->
+<!-- agent:boundary:15ab397d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

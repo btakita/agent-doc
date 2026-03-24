@@ -848,7 +848,7 @@ Add logging.
 
 Ready to implement when you confirm.
 go
-### Re: Implement full tmux_session deprecation (HEAD)
+### Re: Implement full tmux_session deprecation
 
 Done. Three changes made:
 
@@ -870,7 +870,7 @@ Done. Three changes made:
 - `route.rs:50` — `[route] target tmux session: {}`
 
 **Build & test:** All 38 tests pass. Binary installed.
-<!-- agent:boundary:78143886 -->
+<!-- agent:boundary:d924c0f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

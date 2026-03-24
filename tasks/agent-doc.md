@@ -10,7 +10,7 @@ claude_args: --dangerously-skip-permissions
 # agent-doc
 
 <!-- agent:status -->
-**Version:** v0.25.12 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.9, instruction-files v0.1
+**Version:** v0.25.13 | **Tests:** 526 (173 lib + 315 bin + 38 CLI) | **Dependencies:** tmux-router v0.2.10, instruction-files v0.1
 **Published:** GitHub Release ✓ | crates.io ✓ | PyPI ✓
 **Plugins:** JetBrains v0.2.21 (sync logging + is_tracked) + VS Code v0.2.3
 **Library:** `libagent_doc.so` — 12 FFI exports | **SKILL.md:** preflight + IPC boundary reposition
@@ -282,7 +282,7 @@ Ready to release?
 
 **On stripping tmux_session:** No — don't delete it yet. The sync auto-repair already writes the correct value, so existing files work. Stripping would be a breaking change for users on older binaries that still need the field. Better to just ignore it at runtime (which we already do via context_session priority) and let it decay naturally as files get rewritten.
 
-I don't share my documents with anyone. So it's ok to strip.
+I don't share my documents with anyone. Not many users. So it's ok to strip.
 
 **On the stash fix:** I'll implement more aggressive stash resize in tmux-router now. The issue is `stash_pane` falls back to `break_pane_to_stash` when `join-pane` fails due to "pane too small". The fix: resize the stash window to a larger height before attempting the join.
 
@@ -296,14 +296,25 @@ Changed `stash_pane` in tmux-router:
 The tradeoff: if join fails, the pane is lost instead of creating an orphan window. This is the right choice — an unwanted pane that can't be stashed should be killed, not scattered into new windows.
 
 All 526 tests pass. Ready for v0.25.13 release.
-<!-- agent:boundary:015f4254 -->
+/btw Is SPEC loaded into every context?
+### Re: v0.25.13 released (HEAD)
+
+**v0.25.13 published:**
+- crates.io ✓ | PyPI ✓ | GitHub Release ✓ | `cargo install` ✓
+
+**Changes:**
+1. `install.sh` — curl | sh installer (#30)
+2. `Formula/agent-doc.rb` — Homebrew formula (#31)
+3. `tmux_session` stripping — sync removes deprecated field from frontmatter
+4. Stash join fix — kill on failure instead of orphan window creation (1000 row resize)
+5. `tmux_session` deprecation — docs/comments updated
+<!-- agent:boundary:c4a2b5bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Stash join fix** — kill on failure instead of orphan window creation
-- [ ] **Release v0.25.13** — install.sh + formula + tmux_session deprecation + stash fix
+- [x] v0.25.13 released — install.sh + formula + tmux_session strip + stash fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

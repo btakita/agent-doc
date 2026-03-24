@@ -1391,7 +1391,11 @@ release
 - Untracked file fix — falls back to local tracking instead of assuming idle
 - `[native]` debug logging in TypingTracker
 - Plugin v0.2.20 (built, you've already installed)
-<!-- agent:boundary:fa857f88 -->
+Put mdx, Jupyter, and Notion support into the todo list
+### Re: mdx, Jupyter, Notion → todo (HEAD)
+
+Added to the todo list.
+<!-- agent:boundary:dac740ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1407,7 +1411,7 @@ release
 - [ ] Homebrew formula (`brew tap btakita/agent-doc`)
 - [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
 - [ ] Support `/btw` for instant processing
-  - [ ] This may involve using /btw for agent-doc if /btw is the only way to preempt the loop if a task is running in the main thread
+  - [ ] This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
 - [ ] Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
 - [ ] Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - [ ] Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
@@ -1422,4 +1426,7 @@ release
 - [ ] Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
 - [ ] Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
 - [ ] `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
+- [ ] **MDX support** — `.mdx` file format with JSX component parsing
+- [ ] **Jupyter notebook support** — `.ipynb` cell-level sessions
+- [ ] **Notion integration** — sync agent-doc sessions with Notion pages
 <!-- /agent:todo -->

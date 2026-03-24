@@ -1455,7 +1455,22 @@ But this serializes tmux *command execution*, not *rendering*. tmux renders to t
 **The real answer:** tmux has no "transaction" or "batch rendering" mode. Each command is visually atomic, but a multi-command sequence will render intermediate states. The `-d` flags already prevent *focus changes* — the flicker is purely a rendering artifact where tmux briefly shows the new active pane of the stash window before the next `select-window` command runs.
 
 **Most practical fix:** Accept the flicker (it's <100ms) or investigate whether `tmux-router`'s `TmuxBatch` can combine the detach+reattach into fewer tmux invocations, reducing the render window.
-<!-- agent:boundary:57e217c5 -->
+Create github.com issues for each of the todo items
+### Re: Create GitHub issues for todo items (HEAD)
+
+Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
+
+| # | Title |
+|---|-------|
+| [#30](https://github.com/btakita/agent-doc/issues/30) | Install script (curl \| sh) |
+| [#31](https://github.com/btakita/agent-doc/issues/31) | Homebrew formula |
+| [#32](https://github.com/btakita/agent-doc/issues/32) | lazily-rs DocContext cache |
+| [#33](https://github.com/btakita/agent-doc/issues/33) | Support /btw for instant processing |
+| [#34](https://github.com/btakita/agent-doc/issues/34) | Investigate ClawTeam |
+| [#35](https://github.com/btakita/agent-doc/issues/35) | MDX support |
+| [#36](https://github.com/btakita/agent-doc/issues/36) | Jupyter notebook support |
+| [#37](https://github.com/btakita/agent-doc/issues/37) | Notion integration |
+<!-- agent:boundary:7bafcf59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1464,16 +1479,15 @@ But this serializes tmux *command execution*, not *rendering*. tmux renders to t
 - [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
 - [x] Plugin v0.2.20 installed
 - [x] v0.25.9 released
-- [x] **Tmux flicker** — cosmetic, no fix available in tmux protocol
+- [x] GitHub issues created (#30–#37) for todo items
 <!-- /agent:pending -->
 
 <!-- agent:todo -->
-- [ ] Install script (`curl | sh`) for binary download
-- [ ] Homebrew formula (`brew tap btakita/agent-doc`)
-- [ ] **lazily-rs DocContext** -- cache find_code_ranges() (sub-ms, not needed yet)
-- [ ] Support `/btw` for instant processing
-  - [ ] This may involve using /btw for agent-doc if /btw is the only way to prempt the loop if a task is running in the main thread
-- [ ] Investigate https://github.com/HKUDS/ClawTeam to see if it would help agent-doc
+- [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
+- [ ] Homebrew formula (`brew tap btakita/agent-doc`) ([#31](https://github.com/btakita/agent-doc/issues/31))
+- [ ] **lazily-rs DocContext** -- cache find_code_ranges() ([#32](https://github.com/btakita/agent-doc/issues/32))
+- [ ] Support `/btw` for instant processing ([#33](https://github.com/btakita/agent-doc/issues/33))
+- [ ] Investigate ClawTeam for agent-doc integration ([#34](https://github.com/btakita/agent-doc/issues/34))
 - [ ] Multi-tmux-session per editor ([#17](https://github.com/btakita/agent-doc/issues/17))
 - [ ] Multi-editor per tmux session ([#18](https://github.com/btakita/agent-doc/issues/18))
 - [ ] Plugin phases 5-7 — component folding, gutter icons, structure view ([#19](https://github.com/btakita/agent-doc/issues/19))
@@ -1487,7 +1501,7 @@ But this serializes tmux *command execution*, not *rendering*. tmux renders to t
 - [ ] Capture/log skill workflow ([#27](https://github.com/btakita/agent-doc/issues/27))
 - [ ] Blog post: document modes with screencast ([#28](https://github.com/btakita/agent-doc/issues/28))
 - [ ] `agent-doc stream` — bridge terminal to components ([#29](https://github.com/btakita/agent-doc/issues/29))
-- [ ] **MDX support** — `.mdx` file format with JSX component parsing
-- [ ] **Jupyter notebook support** — `.ipynb` cell-level sessions
-- [ ] **Notion integration** — sync agent-doc sessions with Notion pages
+- [ ] **MDX support** — `.mdx` file format with JSX component parsing ([#35](https://github.com/btakita/agent-doc/issues/35))
+- [ ] **Jupyter notebook support** — `.ipynb` cell-level sessions ([#36](https://github.com/btakita/agent-doc/issues/36))
+- [ ] **Notion integration** — sync agent-doc sessions with Notion pages ([#37](https://github.com/btakita/agent-doc/issues/37))
 <!-- /agent:todo -->

@@ -355,7 +355,7 @@ In extra newline was added. See line 8 in tasks/email.md
 Fixed. Switched from `frontmatter::set_tmux_session()` (which round-trips the whole frontmatter via serde_yaml, adding an extra newline) to a direct string replace: `content.replacen("tmux_session: '1'", "tmux_session: '0'", 1)`.
 
 Tested: email.md now has exactly one blank line after `---` (no extra). Rebuilt and installed.
-<!-- agent:boundary:36a33c1b -->
+<!-- agent:boundary:19805e31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

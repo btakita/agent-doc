@@ -235,7 +235,7 @@ Dave replied:
 
 What is the email cadence at bcg.
 What is Anil Podduturi's email address?
-### Email cadence at BCG (HEAD)
+### Email cadence at BCG
 
 BCG's hiring cadence has been slow based on your experience:
 - **Week 1 (early March):** Initial recruiter screen with Dave, resume submitted
@@ -244,7 +244,7 @@ BCG's hiring cadence has been slow based on your experience:
 
 There's no published "standard" BCG email cadence — enterprise consulting hiring timelines vary by project urgency. For Project Helix specifically, BCG has been moving at a glacial pace (3+ weeks with no interview scheduled). This isn't unusual for Big 3 firms where multiple stakeholders need to align.
 
-### Anil Podduturi's email address (HEAD)
+### Anil Podduturi's email address
 
 **Not available in your contacts.** The only contact info on file is his LinkedIn: https://www.linkedin.com/in/anilpod/
 
@@ -254,5 +254,5 @@ His personal site is anilpod.com — you could check there for a contact email. 
 1. Check anilpod.com for a public email
 2. Ask Tony Tomai if he has Anil's direct email
 3. Try the BCG email pattern (`anil.podduturi@bcg.com`) as a last resort
-<!-- agent:boundary:d3fc3735 -->
+<!-- agent:boundary:8850292d -->
 <!-- /agent:exchange -->

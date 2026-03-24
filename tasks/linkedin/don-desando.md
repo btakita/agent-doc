@@ -65,7 +65,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7440756026619940864/
 > navigating to https://briantakita.me throws a "dangerous content" warning.
 
 How can I detect if my site has the "dangerous content" warning? I don't see it myself.
-### Re: LinkedIn Post & Site Warning (HEAD)
+### Re: LinkedIn Post & Site Warning
 
 **The LinkedIn post** (urn:li:activity:7440756026619940864) is your "Vibe Coding" post from Mar 20 — 121 likes, 45 comments. Don likely saw it and connected from there. His "I've been called worse" quip is probably riffing on the post's theme (people calling vibe coders "sub-human" on YouTube). Good context — he's engaging with your AI/developer stance, not just random networking.
 
@@ -95,7 +95,7 @@ I checked your site and it looks clean from my end:
 > Ha — appreciate the heads up on the site warning. I just checked and it looks clean on my end (valid SSL, no Safe Browsing flags). Might be a browser extension on your side? Either way, thanks for flagging it.
 >
 > Saw your comment came from the vibe coding post — curious what your take is on the agentic tooling side. Your post about Claude Code mapping API surfaces was spot-on.
-<!-- agent:boundary:00c998ee -->
+<!-- agent:boundary:9f687bf3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

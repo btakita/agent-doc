@@ -216,7 +216,7 @@ The real question is whether the auto-start should happen in the stash window (h
 We should only show the tmux pane associated with the currently selected file.
 Why do we wait for Claude to become ready at all?
 These should be deterministic tmux operations from the agent-doc binary.
-### Re: sync should be deterministic, no waiting (HEAD)
+### Re: sync should be deterministic, no waiting
 
 You're right on all three points. The current design conflates two concerns:
 
@@ -240,7 +240,7 @@ Currently `sync` calls `auto_start` inline when it encounters a file with no ali
 This separates the fast path (layout sync, <100ms) from the slow path (session start, 5-30s) and eliminates visual disruption.
 
 Want me to implement this? It's a change in `sync.rs` — remove the inline `auto_start` call and replace with a background spawn.
-<!-- agent:boundary:5e314f9b -->
+<!-- agent:boundary:596af1a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

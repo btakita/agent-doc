@@ -264,7 +264,7 @@ This simplifies things significantly. But it's a bigger refactor — for now, th
 **On the stash fix:** The `stash_pane` function in tmux-router already uses `join-pane -dv` (line 532 of tmux.rs) to join the existing stash. The `break_pane -d` fallback only triggers when `join-pane` fails (stash window too small, join error). The orphan windows came from the `break_pane_to_stash` fallback path. I'll look at making the stash window resize more aggressive to prevent the join failure, but this is a tmux-router change. Tabling for the next session.
 
 Should I compact and release what we have?
-### Re: Deprecate tmux_session — done (HEAD)
+### Re: Deprecate tmux_session — done
 
 Deprecated `tmux_session` in frontmatter:
 - `frontmatter.rs`: Field marked deprecated in doc comments, `set_tmux_session()` deprecated
@@ -274,7 +274,7 @@ Deprecated `tmux_session` in frontmatter:
 No code behavior changes — the auto-repair and context_session override continue to work. The field is still read/written for backward compatibility. `make check` passes.
 
 Ready to release?
-<!-- agent:boundary:c7cbef14 -->
+<!-- agent:boundary:bda46926 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

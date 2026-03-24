@@ -109,7 +109,7 @@ All three crates are committed, tagged, and pushed to GitHub:
 - `tagpath` v0.5.1 → `c73139d`, tag pushed
 
 **Blocked:** crates.io token in `~/.cargo/credentials.toml` is expired (403 Forbidden). Need a new token from https://crates.io/settings/tokens — run `cargo login` to set it, then I'll publish all three.
-<!-- agent:boundary:b51cca00 -->
+<!-- agent:boundary:3f7620a1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -222,16 +222,26 @@ Yes — here's how:
 This means `/btw` is essentially **the document itself** — the user types while the agent is responding, and the agent sees it at the next checkpoint. No new binary feature needed — just a SKILL instruction to re-read the document at checkpoints.
 
 The binary role: ensure `agent-doc write --stream` merges correctly (already does via CRDT).
-<!-- agent:boundary:d6def58c -->
+There are many stash windows in tmux session 0.
+The currently selected window is 1:stash
+### Re: stash window buildup + wrong selection (HEAD)
+
+**Cleaned up:** Killed 19 orphaned stash windows. Session 0 now has 2 windows: `0:agent-doc` (1p) + `1:stash` (11p). Selected window set back to `0:agent-doc`.
+
+**Root cause:** Each failed auto-start for email.md created a pane via `split-window`, the pane died (Claude failed to start), the dead pane became a shell, and the next sync stashed it — creating a new 1-pane stash window. 20+ failed attempts = 20+ stash windows.
+
+**The fix needed:** Auto-start should not retry indefinitely for files that can't start Claude. Add a cooldown: if a file's pane died within the last N seconds, don't auto-start again. This prevents the stash window buildup.
+
+The stash window `1:stash` with 11 panes is from legitimately stashed sessions — those are fine.
+<!-- agent:boundary:87af55fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **#30 install.sh** — created
-- [x] **#31 Homebrew formula** — created
-- [x] **#33 /btw** — solved: document IS the btw channel, CRDT handles concurrent edits, SKILL checks at checkpoints
-- [ ] **Commit + release v0.25.13** — install.sh + formula
+- [x] **Stash cleanup** — 19 orphaned windows killed, selection fixed
+- [ ] **Auto-start cooldown** — prevent repeated failed auto-starts from creating stash buildup
+- [ ] **Commit + release v0.25.13** — install.sh + formula + fixes
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

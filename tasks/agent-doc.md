@@ -155,7 +155,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange patch=append -->
 Session 3: v0.25.12 — sync swap-pane, no-wait auto-start, cross-session auto-repair, tmux_session frontmatter repair, resync --fix disabled, split in visible window, (HEAD) marker investigation, GitHub Actions CI fix, plugin v0.2.21 sync logging.
 Exchange compacted. 260 lines archived.
-<!-- agent:boundary:5236a485 -->
+<!-- agent:boundary:4424c3d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

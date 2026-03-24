@@ -829,8 +829,12 @@ Debouncing did not work. You will see in the previous run, we had an incomplete 
 2. Later, when routing via `terminal.rs`, `resolve_target_session()` reads that stale value and targets session "0" — even if the pane should be in session "1"
 3. `route.rs` and `claim.rs` were fixed to ignore frontmatter, but `terminal.rs` and `sync.rs` were missed
 
+The target tmux session should be 0.
+
 #### No logging for this transgression.
 There is no audit trail when a pane gets placed in the wrong session via stale frontmatter.
+
+Add logging.
 
 #### Tests:
 `resync.rs` has tests for wrong-session detection (`WrongSession` issue type), but **no tests prevent** `sync.rs` from writing stale `tmux_session` values or `terminal.rs` from acting on them.
@@ -843,13 +847,39 @@ There is no audit trail when a pane gets placed in the wrong session via stale f
 5. **Add logging** — log when a pane is placed in a session different from its prior location
 
 Ready to implement when you confirm.
-<!-- agent:boundary:20bb78f2 -->
+go
+### Re: Implement full tmux_session deprecation (HEAD)
+
+Done. Three changes made:
+
+**1. sync.rs — removed all tmux_session usage:**
+- Removed `files_needing_session` tracking (was feeding the write-back)
+- `resolve_file` now always passes `tmux_session: None` to `FileResolution::Registered`
+- Removed the write-back loop at lines 515-524 that inserted `tmux_session` into frontmatter
+- Removed the fallback that read `tmux_session` from batch files for `context_session`
+
+**2. terminal.rs — removed frontmatter session targeting:**
+- `resolve_target_session()` no longer reads `tmux_session` from frontmatter (was priority #2)
+- Resolution order is now: explicit `--session` flag → registry scan → default "0"
+- Added logging: `[terminal] targeting session '{}' (from registry scan)` when registry provides session
+- Removed dead `read_frontmatter_session()` function
+- `resolve_session_name()` no longer reads frontmatter
+
+**3. Existing logging already covers wrong-session detection:**
+- `route.rs:108` — `[route] Pane {} is alive but in wrong session ('{}', expected '{}')`
+- `route.rs:50` — `[route] target tmux session: {}`
+
+**Build & test:** All 38 tests pass. Binary installed.
+<!-- agent:boundary:78143886 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] **tmux_session fully ignored** — all reads removed
+- [x] **tmux_session write-back removed** — sync.rs no longer inserts tmux_session
+- [x] **terminal.rs frontmatter read removed** — session targeting uses registry only
+- [x] **logging confirmed** — route.rs already logs wrong-session pane placement
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

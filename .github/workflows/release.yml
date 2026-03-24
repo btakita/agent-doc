@@ -34,8 +34,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone instruction-files (path dependency)
-        run: git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
+      - name: Clone path dependencies
+        run: |
+          git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
+          git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
+          git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
 
       - uses: dtolnay/rust-toolchain@stable
         with:

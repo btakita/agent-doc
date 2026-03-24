@@ -239,18 +239,37 @@ And why would the failed attempt create a new stash window?
 
 **Why failed attempts:** The `resync --fix` was killing the pane immediately after auto-start created it (see earlier root cause: cross-session mismatch between frontmatter `tmux_session: '1'` and the sync's target session `0`). Each plugin tab-switch triggered a sync → auto-start → pane created → resync killed it → next sync sees no pane → auto-start again. Infinite loop.
 
+It should have "self-healed" the tmux_session in the document. I'm also wondering if it even makes sense to configure a tmux_session since we always want to use the bound tmux session for the agent-doc project.
+
 **Why new stash windows:** When `auto_start_in_session` uses `split-window` to create a new pane, it splits alongside an existing pane. After the new pane dies, the shell from `split-window` remains briefly. The next sync reconcile sees this shell as "unwanted" and stashes it. But instead of joining the existing stash window (`1:stash`), `break_pane -d` creates a NEW detached window (which tmux names "stash" because it inherits the window-naming pattern). Each failed attempt → one orphan shell → one new stash window.
 
 **The fix (already applied):** `resync --fix` is now disabled in sync path (`resync::run(false)`), and tmux_session is auto-repaired in frontmatter. The cycle is broken. But the stash window proliferation bug remains if panes die for other reasons. The `stash_pane` function should always target the existing stash window via `join-pane`, not `break_pane` (which creates new windows).
-<!-- agent:boundary:faeaa9d1 -->
+
+yes
+### Re: self-heal + remove tmux_session? + stash fix (HEAD)
+
+**On `tmux_session` as a frontmatter field:**
+You're right — the project's `.agent-doc/` directory already defines where sessions live. The `tmux_session` field was originally for multi-session support (#17), but in practice every file in a project uses the same session. The auto-repair we just added effectively makes `tmux_session` in frontmatter redundant — the sync always overrides it with the project's session anyway.
+
+**Proposal:** Deprecate `tmux_session` in frontmatter. Instead:
+1. The project session is determined by the `--window` argument (from sync) or `current_tmux_session()` (from route)
+2. Remove `tmux_session` from frontmatter entirely — the binary handles session binding at runtime
+3. For the multi-session use case (#17), add a project-level config in `.agent-doc/config.toml` instead
+
+This simplifies things significantly. But it's a bigger refactor — for now, the auto-repair ensures it works correctly.
+
+**On the stash fix:** The `stash_pane` function in tmux-router already uses `join-pane -dv` (line 532 of tmux.rs) to join the existing stash. The `break_pane -d` fallback only triggers when `join-pane` fails (stash window too small, join error). The orphan windows came from the `break_pane_to_stash` fallback path. I'll look at making the stash window resize more aggressive to prevent the join failure, but this is a tmux-router change. Tabling for the next session.
+
+Should I compact and release what we have?
+<!-- agent:boundary:83bb5828 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Root cause explained** — resync --fix killed panes, break_pane created new windows
-- [ ] **Fix stash_pane to always use join-pane** — prevents new stash windows
-- [ ] **Commit + release v0.25.13** — install.sh + formula + stash fix
+- [ ] **Deprecate tmux_session in frontmatter** — use project-level session binding instead
+- [ ] **Stash join resilience** — make stash resize more aggressive to prevent break_pane fallback
+- [ ] **Commit + release v0.25.13** — install.sh + formula + current fixes
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

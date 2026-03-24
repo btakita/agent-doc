@@ -170,13 +170,36 @@ On the right editor pane, I switched to tasks/resume.md. The tmux session 0 swit
 **The flicker itself** — the brief switch to stash — most likely happened during the unlogged sync at ~23:15:05. During that sync, the old justin-caird pane was stashed (moved to @2:stash) and the resume pane was attached. Even with `-d` flags, this transition can produce a visual flicker as discussed earlier.
 
 **Next step:** Add logging to confirm the sync command actually runs after LayoutChangeDetector events. The EditorTabSyncListener delegates to `agent-doc sync` via ProcessBuilder — if the process fails to start or outputs to a different stream, we'd miss it.
-<!-- agent:boundary:27ac6b4f -->
+continue
+### Re: continue — missing sync logs found and fixed (HEAD)
+
+**Root cause:** `SyncLayoutAction.syncLayout()` captured process output but **never logged it on success**. It only logged on failure (`exitCode != 0`). When called from `LayoutChangeDetector`, `notify = false`, so even failure output was swallowed.
+
+Additionally, `EditorTabSyncListener.log()` used `LOG.debug()` — invisible unless debug logging is explicitly enabled.
+
+**Fixes (plugin v0.2.21):**
+
+1. **`SyncLayoutAction`:** Added `LOG.info("[sync] exit=... cmd=...")` and first 500 chars of output on every sync call — success or failure.
+
+2. **`EditorTabSyncListener`:** Changed `LOG.debug()` → `LOG.info("[layout-sync] ...")` so tab-switch events are always visible in idea.log.
+
+Now idea.log will show:
+```
+[layout] change detected via containerAdd: ... → ...     ← LayoutChangeDetector
+[layout-sync] selectionChanged: ...                       ← EditorTabSyncListener
+[sync] exit=0 cmd=agent-doc sync --col ...                ← SyncLayoutAction
+[sync] output: [sync:GLOBAL] [sync-start] ...             ← process output
+```
+
+**Plugin v0.2.21** built. Install to see sync logs after the next tab switch.
+<!-- agent:boundary:32994321 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Investigate missing sync logs** — LayoutChangeDetector fired but no sync STDERR appears in idea.log
+- [x] **Missing sync logs** — root cause: no-op logging in SyncLayoutAction + debug-level in EditorTabSyncListener
+- [ ] **Install plugin v0.2.21** — sync logging fix, restart IDE
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

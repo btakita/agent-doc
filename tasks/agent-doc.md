@@ -362,7 +362,7 @@ The flicker happens during step 1. Even with `-d` on `stash_pane`/`break_pane`, 
 2. **Investigate `swap-pane`** — tmux has a `swap-pane` command that might do an atomic swap without intermediate states
 Do:
 - [ ] **Investigate tmux `swap-pane`** — might eliminate flicker by atomic swap instead of stash+join
-### Re: swap-pane investigation (HEAD)
+### Re: swap-pane investigation
 
 **`swap-pane` is the right solution.** It's a single tmux command that atomically swaps two panes, even across windows.
 
@@ -392,7 +392,7 @@ The `reconcile()` function in `sync.rs` does ATTACH → DETACH in sequence. For 
 3. Use `swap-pane -d` for the 1:1 case, fall back to join+stash for complex changes
 
 This change is in `tmux-router` (the library crate), not `agent-doc`. Want me to implement it?
-<!-- agent:boundary:21e45818 -->
+<!-- agent:boundary:65548265 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

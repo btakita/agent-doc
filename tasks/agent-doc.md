@@ -273,7 +273,7 @@ Let me check if pane %82 is still alive right now.
 
 Issue is still happening. Why?
 I see it after you created it.
-### Re: found root cause — resync --fix kills the pane (HEAD)
+### Re: found root cause — resync --fix kills the pane
 
 **Root cause:** `resync --fix` runs at the end of every sync. It checks each registered pane's session against the frontmatter `tmux_session`. Since email.md says `tmux_session: '1'` but the pane is in session `0` (from context_session override), resync considers it "wrong session" and **kills** the pane.
 
@@ -287,7 +287,7 @@ Options:
 3. Have auto_start_no_wait update the frontmatter tmux_session to match the context
 
 Option 1 is cleanest — resync --fix is a safety net, not needed during sync which already does its own reconciliation. I'll disable the resync --fix call in the sync code path.
-<!-- agent:boundary:474bdfca -->
+<!-- agent:boundary:6fb002cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

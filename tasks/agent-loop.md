@@ -58,7 +58,7 @@ Committed all dirty submodules from the inside out:
 | Parent pointers | mail, rappstack-dev, agent-resume, briantakita.me-dev, brookebrodack-dev, tmux-router | `8b476aa` |
 
 All submodules now clean — `git submodule status` shows no `+` or `m` prefixes.
-<!-- agent:boundary:824f3bf5 -->
+<!-- agent:boundary:d0aae4b2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

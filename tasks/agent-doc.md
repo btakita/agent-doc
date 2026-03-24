@@ -1314,7 +1314,7 @@ All 526 tests pass. Release build successful.
 
 Want me to build a release?
 continue
-### Re: continue — v0.25.8 released (HEAD)
+### Re: continue — v0.25.8 released
 
 **v0.25.8 published to all targets:**
 - crates.io ✓
@@ -1330,7 +1330,7 @@ continue
 5. Recheck interval increased from 200ms to 400ms
 
 Note: the unified diff format is now live — this cycle's preflight used it. You can see the focused output with `@@` hunk markers and surrounding context instead of the entire document.
-<!-- agent:boundary:39ce4f59 -->
+<!-- agent:boundary:e3579431 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3,6 +3,7 @@ agent_doc_session: 6c57ef6d-db13-43df-a68d-0e9c4372110b
 tmux_session: '1'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 # Email Management
@@ -32,7 +33,7 @@ agent_doc_write: crdt
 
 ## Exchange
 
-<!-- agent:output mode=append -->
+<!-- agent:exchange mode=append -->
 Converted to template mode and compacted conversation history. The document now uses `<!-- agent:input -->` / `<!-- agent:output -->` components.
 
 Pending from last session: adding `btak-dev` (btak.dev@gmail.com) account to `mail/.corky.toml`. Want me to proceed with that?
@@ -731,4 +732,50 @@ release
 
 Let's rename the INBOX label for btak.dev@gmail.com to btak.dev.
 Rename all of the labels in the emails to/from btak.dev@gmail.com
-<!-- /agent:output -->
+
+compact exchange
+**Compacted exchange** — prior conversation covered:
+
+### Account Setup (btak.dev) (HEAD)
+- Added `btak.dev` account to `mail/.corky.toml` with `provider = "gmail-api"`, OAuth2 auth
+- Password stored at `pass email/btak.dev`
+- Added `btak.dev@gmail.com` as OAuth test user in Google Cloud Console
+
+### Gmail API Sync Provider
+- Implemented full Gmail API sync backend (`gmail-api` provider) alongside existing IMAP
+- Provider dispatch in `sync/mod.rs` routes based on `account.provider`
+- Uses Gmail `threadId` for threading (better than IMAP subject-based heuristic)
+- OAuth2 with `gmail.readonly` scope, `login_hint` pre-selects correct account
+- Post-auth email verification safeguard (detects account mismatch)
+- Cancellation token (Option 2) for clean Ctrl+C during sync — checked between pages and messages
+
+### Gmail Filters (HEAD)
+- Pushed 2 filters: **correspondence** (17 addresses → importance) and **for-lucas** (14 addresses → forward + star)
+- Gmail Filters API has no retroactive apply — web UI only for existing messages
+- `match_fields` from+to is AND not OR — use `query` with OR logic (fixed in v0.11.5)
+
+### Label Rename (HEAD)
+- Renamed INBOX → btak.dev in 291 existing email files
+- Label alias feature still pending (so future syncs write "btak.dev" not "INBOX")
+
+### Infrastructure (HEAD)
+- README: Added Gmail API setup instructions (OAuth credentials, .corky.toml config, first sync)
+- Created `tasks/todo/corky-public-google-app.md` for future published OAuth app
+- `corky watch` Ctrl+C: implemented cancellation token through full call chain
+- Gmail threading uses native `threadId` instead of subject heuristic
+
+### Releases (HEAD)
+- v0.18.0 released (crates.io, PyPI, GitHub)
+
+### Pending User Requests (HEAD)
+- **Release**: corky release requested
+- **Label rename**: Rename INBOX label for btak.dev@gmail.com to btak.dev; rename all labels in emails to/from btak.dev@gmail.com
+<!-- agent:boundary:e3a59956 -->
+<!-- /agent:exchange -->
+
+<!-- agent:pending -->
+- [ ] Release corky (new version)
+- [ ] Implement label alias feature (future syncs write "btak.dev" not "INBOX")
+- [ ] Rename remaining labels in btak.dev emails
+- [ ] Verify sync with btak.dev@gmail.com
+<!-- /agent:pending -->

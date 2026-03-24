@@ -181,7 +181,7 @@ To publish: copy to `homebrew-agent-doc` repo, fill checksums, push. Users insta
 Both files need to be committed and the install.sh needs to be included in the next release. Want me to commit and release v0.25.13?
 Implement:
 - [ ] Support `/btw` for instant processing ([#33](https://github.com/btakita/agent-doc/issues/33))
-### Re: #33 /btw — design analysis (HEAD)
+### Re: #33 /btw — design analysis
 
 `/btw` for instant processing requires two levels:
 
@@ -200,7 +200,7 @@ Interrupt the currently running Claude process and inject a message. This would 
 - Or: a signal mechanism that causes Claude to check the btw file mid-generation
 
 Level 1 is implementable now. Level 2 depends on Claude Code's capabilities. Which level do you want?
-<!-- agent:boundary:e972216d -->
+<!-- agent:boundary:7897d99f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

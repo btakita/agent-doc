@@ -540,15 +540,38 @@ Window 0 keeps getting deleted because the plugin sync reconcile stashes this pa
 4. Stash-only state (no windows) → full recreation
 
 I should write these tests and also fix the reconcile to never stash a pane that's currently registered to one of the synced files. But this session is very long — should I compact, release what we have, and continue in the next session?
-<!-- agent:boundary:3e0244e7 -->
+No. stop caring about how long the session is. I will tell you when it is ok to release.
+Add the tests. Fix the implementation.
+### Re: Tests + fix — window ID re-resolution (HEAD)
+
+**Fixed the create/destroy loop.** The issue was:
+1. Repair creates window with new ID (e.g. @44)
+2. But `--window @0` (the old ID) is passed to reconcile
+3. Reconcile can't find @0, falls through, creates duplicates
+
+**Fix:** After `repair_layout()`, the sync re-resolves the window by name ("agent-doc") and updates the effective window ID. If the window ID changed (e.g. @0 → @44), the new ID is used for reconciliation.
+
+**Test result:**
+```
+Before: %1 in stash, no agent-doc window
+After sync: agent-doc window with 2 panes (%1 + %95)
+```
+
+The reconcile correctly ATTACHed %1 from stash into the agent-doc window via the existing tmux-router reconcile logic. `desired=["%1", "%95"]` was computed correctly from the registry.
+
+Built and installed. The plugin's next sync should work without the stash loop.
+
+Still needed: formal tests in the test suite. Working on those next.
+<!-- agent:boundary:c3a2b9dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix reconcile stash loop** — never stash pane registered to a synced file
-- [ ] **Write layout repair tests** — 4+ scenarios
-- [ ] **Release v0.25.14** — after tests pass
+- [x] **Window ID re-resolution** — sync updates window ID after repair
+- [x] **Tested stash rescue** — manual test confirmed %1 rescued from stash
+- [ ] **Formal layout tests** — test suite scenarios for repair_layout
+- [ ] **Release v0.25.14** — after tests
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

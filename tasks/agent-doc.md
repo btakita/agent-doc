@@ -475,7 +475,7 @@ Error: The process '/home/runner/work/_temp/0ffa2904-ed98-4998-a675-882d60b11cf5
 ```
 
 Please fix other failing gh actions as well.
-### Re: GitHub Actions fix (HEAD)
+### Re: GitHub Actions fix
 
 **Root cause:** All three workflows (ci.yml, release.yml, pypi.yml) only cloned `instruction-files` as a path dependency, but `agent-kit` and `tmux-router` are also path dependencies in Cargo.toml.
 
@@ -495,7 +495,7 @@ Also fixed `before-script-linux` in pypi.yml (manylinux container needs deps too
 - Release — running (tag moved to include fix)
 - PyPI — re-running with fix
 - Book ✓ | mdBook Pages ✓
-<!-- agent:boundary:652e34bb -->
+<!-- agent:boundary:b13225ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

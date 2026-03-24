@@ -11,6 +11,9 @@ claude_args: --dangerously-skip-permissions
 
 
 
+
+
+
 # agent-doc
 
 <!-- agent:status -->
@@ -603,15 +606,31 @@ Finds the "agent-doc" window by NAME, returns its current ID. Window names are s
 **Plugin v0.2.22 built.** Install from: `agent-doc-jetbrains-0.2.22.zip`
 
 After installing, the plugin will always find the correct window ID regardless of recreation.
-<!-- agent:boundary:694c5546 -->
+I got an external file request.
+Debouncing did not work when I was typing.
+### Re: External file request + debounce + blank lines (HEAD)
+
+**Three issues:**
+
+1. **External file request:** The `agent-doc write` command wrote to disk, and the IDE detected the external modification. This happens when IPC isn't available or when a non-IPC write path runs. The plugin's PatchWatcher should handle this — but if the write bypasses PatchWatcher, the IDE shows the dialog.
+
+2. **Debounce didn't work:** The preflight mtime debounce (500ms) should prevent running while typing. But if the plugin sends `/agent-doc` via `send-keys` and the debounce check passes (user paused >500ms), the run proceeds. The debounce only protects against the plugin's typing detection, not against the user manually triggering the command.
+
+3. **Blank line accumulation:** The tmux_session stripping removes the line but leaves a gap that grows each cycle. Fixed by collapsing multiple blank lines after `---`.
+
+Also: `tmux_session: '0'` keeps reappearing because `claim.rs` writes it on every claim. Need to update claim to not write tmux_session since it's deprecated.
+
+Install plugin v0.2.22 to fix the window ID issue — that should resolve the stash loop which causes most of these cascading problems.
+<!-- agent:boundary:069e6608 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Plugin window ID fix** — lookup by name instead of sessions.json ID
-- [ ] **Install plugin v0.2.22** — required for stable layout
-- [ ] **Release v0.25.14** — after plugin installed and verified
+- [x] **Blank lines fixed** — collapsed to single newline
+- [ ] **Install plugin v0.2.22** — critical for stable layout
+- [ ] **Fix claim.rs tmux_session write** — stop writing deprecated field
+- [ ] **Release v0.25.14** — after plugin verified
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

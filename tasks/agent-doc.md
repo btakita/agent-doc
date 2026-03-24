@@ -706,7 +706,7 @@ Add to SKILL to not release unless I explicitly ask for a release.
 
 Incorrect layout
 ![img_5.png](img_5.png)
-### Re: Tests + SPEC added (HEAD)
+### Re: Tests + SPEC added
 
 **4 repair_layout tests added to sync.rs:**
 1. `repair_layout_skips_correct_state` — fast path verification
@@ -717,7 +717,7 @@ Incorrect layout
 **SPEC.md section 7.36** — repair_layout documentation with all three phases + fast path + plugin fallback.
 
 `make check` passes (319 tests, clippy clean). Ready for v0.25.15 release with plugin v0.2.23.
-<!-- agent:boundary:686a7f6f -->
+<!-- agent:boundary:e108cb58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

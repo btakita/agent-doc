@@ -270,7 +270,7 @@ This should be quick sequence of running the tmux commands. No waiting for Claud
 In `sync.rs`, when `auto_start` is needed, stash the unwanted pane first, then split-window in the visible window. No background process needed. No waiting needed. Claude loading in the pane is visible to the user as expected.
 
 Want me to implement this? It's a reorder of operations in the sync reconciliation path.
-### Re: 2→3→2 is fine, just no waiting (HEAD)
+### Re: 2→3→2 is fine, just no waiting
 
 You're right — tmux doesn't have an atomic swap. The choices are:
 
@@ -290,7 +290,7 @@ Currently `auto_start_in_session()` in `route.rs` does:
 Steps 1-2 are instant. Step 3 is the blocker. The sync path doesn't need to wait — it just needs the pane to exist with Claude starting in it. The user sees Claude loading, which is expected.
 
 I'll remove the wait from the sync-initiated auto-start path. The `route` command (plugin hotkey) can keep the wait because it needs to send `/agent-doc` after Claude is ready.
-<!-- agent:boundary:d9767f34 -->
+<!-- agent:boundary:42f613ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

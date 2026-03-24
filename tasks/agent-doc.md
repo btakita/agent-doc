@@ -998,17 +998,48 @@ If `--window` points to a window in session "1", then `target_session="1"`. The 
 **About the `/agent-doc` path error:** That's a zsh issue — `/agent-doc` is interpreted as an absolute path. In Claude Code, use the slash command `/agent-doc` which routes through the skill system, not the shell.
 
 Want me to implement the fix? The changes would be:
-1. Reorder session derivation to prefer wanted panes over `--window`
-2. Add session validation for `--window` before accepting it as `target_window`
-<!-- agent:boundary:e38c191d -->
+1. Reorder session derivation to prefer wanted panes over `--window`: yes
+2. Add session validation for `--window` before accepting it as `target_window`: yes
+
+Still messed up. Please detect what went wrong. Add tests. I had to run `Claim For Tmux Pane`
+![img_6.png](img_6.png)
+### Re: Still messed up — root cause + fix (HEAD)
+
+**Root cause found:** The previous fix only blocked **swap-pane** across sessions, but the **join-pane fallback** still moved panes across session boundaries. When swap was blocked, the code fell through to `join_pane()` which happily pulled panes from session "other" into session "main".
+
+Additionally, `target_session` was derived from `--window` BEFORE checking wanted panes — so if `--window` pointed to a window in session "1", `target_session` became "1" and all operations targeted the wrong session.
+
+**Three-layer fix applied:**
+
+1. **Phase 4 rewrite (sync.rs):** `target_session` now derives from **wanted panes first**, falling back to `--window` only when no wanted panes exist. This is the correct priority order.
+
+2. **Window validation (sync.rs):** `--window` is now validated against `target_session`. If `--window` is in a different session, it's **ignored** with a warning log, and `find_best_window()` is used instead.
+
+3. **Join guard (reconcile):** Added `pane_in_session()` check before every `join_pane()` call. Cross-session joins are now blocked with `ATTACH_SKIP` log entries, not just cross-session swaps.
+
+**Tests added/updated:**
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_swap_pane_validates_same_session` | Updated: now verifies BOTH swap AND join are blocked cross-session |
+| `test_cross_session_join_blocked_entirely` | **New:** pane in "other" session cannot be joined into "main" session window |
+| `test_swap_same_session_uses_fast_path` | Unchanged: same-session swap still works |
+| `test_swap_no_session_constraint_allows_swap` | Unchanged: None session = no constraint |
+
+**Result:** 73/73 tmux-router tests pass, 38/38 agent-doc tests pass.
+
+Ready to build release and install?
+<!-- agent:boundary:b3afd1b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Cross-session swap guard** — verify same session before swap-pane
+- [x] **Cross-session swap guard** — verify same session before swap-pane
+- [x] **Cross-session join guard** — verify same session before join-pane
+- [x] **Window session validation** — ignore --window from wrong session
 - [ ] **Split direction from column position** — left column = split before
-- [ ] **Release v0.25.16** — swap guard + split direction
+- [ ] **Release v0.25.16** — swap guard + join guard + split direction
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -736,7 +736,7 @@ Rename all of the labels in the emails to/from btak.dev@gmail.com
 compact exchange
 **Compacted exchange** — prior conversation covered:
 
-### Account Setup (btak.dev) (HEAD)
+### Account Setup (btak.dev)
 - Added `btak.dev` account to `mail/.corky.toml` with `provider = "gmail-api"`, OAuth2 auth
 - Password stored at `pass email/btak.dev`
 - Added `btak.dev@gmail.com` as OAuth test user in Google Cloud Console
@@ -749,28 +749,28 @@ compact exchange
 - Post-auth email verification safeguard (detects account mismatch)
 - Cancellation token (Option 2) for clean Ctrl+C during sync — checked between pages and messages
 
-### Gmail Filters (HEAD)
+### Gmail Filters
 - Pushed 2 filters: **correspondence** (17 addresses → importance) and **for-lucas** (14 addresses → forward + star)
 - Gmail Filters API has no retroactive apply — web UI only for existing messages
 - `match_fields` from+to is AND not OR — use `query` with OR logic (fixed in v0.11.5)
 
-### Label Rename (HEAD)
+### Label Rename
 - Renamed INBOX → btak.dev in 291 existing email files
 - Label alias feature still pending (so future syncs write "btak.dev" not "INBOX")
 
-### Infrastructure (HEAD)
+### Infrastructure
 - README: Added Gmail API setup instructions (OAuth credentials, .corky.toml config, first sync)
 - Created `tasks/todo/corky-public-google-app.md` for future published OAuth app
 - `corky watch` Ctrl+C: implemented cancellation token through full call chain
 - Gmail threading uses native `threadId` instead of subject heuristic
 
-### Releases (HEAD)
+### Releases
 - v0.18.0 released (crates.io, PyPI, GitHub)
 
-### Pending User Requests (HEAD)
+### Pending User Requests
 - **Release**: corky release requested
 - **Label rename**: Rename INBOX label for btak.dev@gmail.com to btak.dev; rename all labels in emails to/from btak.dev@gmail.com
-<!-- agent:boundary:e3a59956 -->
+<!-- agent:boundary:36ecd900 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

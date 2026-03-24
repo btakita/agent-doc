@@ -195,14 +195,32 @@ install build so I can manually test
 ### Re: install build
 
 Installed. `~/.cargo/bin/agent-doc` is now v0.25.12 (unreleased) with the cross-session fix. Test by switching to a file with a different `tmux_session` in the editor split.
-<!-- agent:boundary:b65f0340 -->
+I switch to tasks/email.md. The split pane briefly appears but the tmux window goes back to a single pane.
+### Re: pane briefly appears then dies (HEAD)
+
+**The cross-session fix worked** — the pane IS being created in session `0` now. But the pane dies because `agent-doc start` fails for email.md.
+
+The error:
+```
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+```
+
+`agent-doc start` launches Claude CLI but the invocation is failing. email.md doesn't have `claude_args` in frontmatter. The `start` command probably needs `--dangerously-skip-permissions` or similar args that agent-doc.md has but email.md doesn't.
+
+This is a separate issue from the sync fix — the sync correctly creates and places the pane, but the Claude session inside it can't start. The pane shows the error and exits, causing the next sync to see "no alive pane."
+
+**The sync cross-session fix is confirmed working.** The remaining issue is that `agent-doc start` needs valid Claude CLI args to launch successfully.
+
+Does email.md need `claude_args: --dangerously-skip-permissions` in its frontmatter?
+<!-- agent:boundary:3e26906e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Cross-session sync fix** — installed for manual testing
-- [ ] **Release v0.25.12** — after manual testing confirms the fix
+- [x] **Cross-session sync fix** — confirmed working (pane created in correct session)
+- [ ] **email.md start failure** — Claude CLI invocation error, needs `claude_args` or fix to start command
+- [ ] **Release v0.25.12** — after start issue resolved
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

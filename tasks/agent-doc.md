@@ -10,12 +10,6 @@ claude_args: --dangerously-skip-permissions
 
 
 
-
-
-
-
-
-
 # agent-doc
 
 <!-- agent:status -->
@@ -717,15 +711,23 @@ Incorrect layout
 **SPEC.md section 7.36** — repair_layout documentation with all three phases + fast path + plugin fallback.
 
 `make check` passes (319 tests, clippy clean). Ready for v0.25.15 release with plugin v0.2.23.
-<!-- agent:boundary:e108cb58 -->
+External change. Why?
+![2026-03-24_17-23.png](../../../../Pictures/agent-loop/2026-03-24_17-23.png)
+
+tasks/recruit/benjamin-becker.md has multiple spaces added after the frontmatter.
+### Re: Blank line accumulation fixed (HEAD)
+
+The tmux_session stripping now collapses `\n\n\n` to `\n\n` after removing the line, preventing blank line accumulation. Also fixed existing blank lines in the document.
+
+Built and installed. Now releasing v0.25.15 with all fixes + tests + plugin v0.2.23.
+<!-- agent:boundary:377f0c1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Repair layout tests** — 4 scenarios
-- [x] **SPEC.md updated** — section 7.36
-- [ ] **Release v0.25.15** — tests + plugin v0.2.23
+- [x] **Blank line accumulation** — fixed with collapse after strip
+- [ ] **Release v0.25.15** — tests + plugin + blank line fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

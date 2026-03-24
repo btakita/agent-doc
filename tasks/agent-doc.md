@@ -201,7 +201,7 @@ Interrupt the currently running Claude process and inject a message. This would 
 
 Level 1 is implementable now. Level 2 depends on Claude Code's capabilities. Which level do you want?
 Can level 2 be solved with the agent-doc binary parsing the document?
-### Re: Can the binary solve level 2? (HEAD)
+### Re: Can the binary solve level 2?
 
 Yes — here's how:
 
@@ -222,7 +222,7 @@ Yes — here's how:
 This means `/btw` is essentially **the document itself** — the user types while the agent is responding, and the agent sees it at the next checkpoint. No new binary feature needed — just a SKILL instruction to re-read the document at checkpoints.
 
 The binary role: ensure `agent-doc write --stream` merges correctly (already does via CRDT).
-<!-- agent:boundary:c78c4070 -->
+<!-- agent:boundary:d6def58c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

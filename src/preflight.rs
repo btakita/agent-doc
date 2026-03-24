@@ -78,6 +78,33 @@ pub fn run(file: &Path) -> Result<()> {
     eprintln!("[preflight] step 3: claims");
     let claims = read_and_truncate_claims(file);
 
+    // Step 3b: Wait for file to settle (mtime debounce).
+    // If the file was modified very recently, the user may still be typing.
+    // Wait up to 2s for the file to be idle for at least 500ms.
+    {
+        let debounce = std::time::Duration::from_millis(500);
+        let max_wait = std::time::Duration::from_secs(2);
+        let poll = std::time::Duration::from_millis(100);
+        let start = std::time::Instant::now();
+
+        loop {
+            let idle_for = std::fs::metadata(file)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .unwrap_or(debounce);
+
+            if idle_for >= debounce {
+                break;
+            }
+            if start.elapsed() >= max_wait {
+                eprintln!("[preflight] mtime debounce timeout after {:.1}s — proceeding", start.elapsed().as_secs_f64());
+                break;
+            }
+            std::thread::sleep(poll);
+        }
+    }
+
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     let diff_result = diff::compute(file)?;

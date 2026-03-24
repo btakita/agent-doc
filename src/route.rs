@@ -12,18 +12,24 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::time::Duration;
 
 use crate::sessions::Tmux;
 use crate::{frontmatter, prompt, resync, sessions, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
-pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
-    run_with_tmux(file, &Tmux::default_server(), pane)
+pub fn run(file: &Path, pane: Option<&str>, debounce_ms: u64) -> Result<()> {
+    run_with_tmux(file, &Tmux::default_server(), pane, debounce_ms)
 }
 
-pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>) -> Result<()> {
+pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: u64) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before lookup
+
+    // Debounce: wait for file mtime to settle before proceeding
+    if debounce_ms > 0 {
+        await_idle(file, Duration::from_millis(debounce_ms))?;
+    }
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -511,6 +517,41 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str) {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
         eprintln!("[route] Auto-synced {} files in window {}", file_count, window_id);
+    }
+}
+
+/// Wait for the file's mtime to settle (no modifications within the debounce window).
+/// Polls every 100ms, up to 10× the debounce duration as a safety cap.
+fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
+    use std::time::Instant;
+
+    let max_wait = debounce * 10;
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let mtime = std::fs::metadata(file)
+            .and_then(|m| m.modified())
+            .with_context(|| format!("failed to stat {}", file.display()))?;
+        let elapsed_since_edit = mtime.elapsed().unwrap_or(Duration::ZERO);
+
+        if elapsed_since_edit >= debounce {
+            eprintln!(
+                "[route] debounce OK — file idle for {:.1}s",
+                elapsed_since_edit.as_secs_f64()
+            );
+            return Ok(());
+        }
+
+        if start.elapsed() >= max_wait {
+            eprintln!(
+                "[route] debounce timeout after {:.1}s — proceeding anyway",
+                start.elapsed().as_secs_f64()
+            );
+            return Ok(());
+        }
+
+        std::thread::sleep(poll_interval);
     }
 }
 
@@ -1071,7 +1112,7 @@ mod tests {
         // but we can verify the session was never created
         // SAFETY: test is single-threaded; env var is removed immediately after use
         unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
-        let result = run_with_tmux(&file, &iso, None);
+        let result = run_with_tmux(&file, &iso, None, 0);
         unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
 
         // The ghost session should still not exist (route fell back, didn't create it)
@@ -1112,7 +1153,7 @@ mod tests {
         // but we can inspect the validation behavior
         // SAFETY: test is single-threaded; env var is removed immediately after use
         unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
-        let _result = run_with_tmux(&file, &iso, None);
+        let _result = run_with_tmux(&file, &iso, None, 0);
         unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
 
         // The ghost session should NOT have been created

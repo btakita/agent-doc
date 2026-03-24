@@ -171,16 +171,13 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 
     eprintln!("[diff] changes detected, computing unified diff");
 
-    let mut output = String::new();
-    for change in diff.iter_all_changes() {
-        let prefix = match change.tag() {
-            ChangeTag::Delete => "-",
-            ChangeTag::Insert => "+",
-            ChangeTag::Equal => " ",
-        };
-        output.push_str(prefix);
-        output.push_str(change.value());
-    }
+    // Use unified diff with 5 lines of context around each change.
+    // This provides surrounding context while keeping the diff focused.
+    let output = diff
+        .unified_diff()
+        .context_radius(5)
+        .header("snapshot", "document")
+        .to_string();
 
     let elapsed_total = t_total.elapsed().as_millis();
     if elapsed_total > 0 {
@@ -200,8 +197,8 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 ///
 /// Returns the stable file content.
 pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
-    const RECHECK_DELAY_MS: u64 = 200;
-    const MAX_RECHECKS: u32 = 25; // 5 seconds max
+    const RECHECK_DELAY_MS: u64 = 400;
+    const MAX_RECHECKS: u32 = 12; // ~5 seconds max
 
     let mut current = std::fs::read_to_string(doc)?;
 
@@ -287,13 +284,40 @@ fn looks_truncated(line: &str) -> bool {
     }
 
     // Single word that looks like a command/keyword (e.g., "go", "ok", "release")
+    // But NOT if the word contains a dot mid-word (could be partial URL like "crates.")
     if !trimmed.contains(' ') && trimmed.len() >= 2 {
+        // Words ending with '.' that look like partial domains/URLs are truncated
+        if trimmed.ends_with('.') && trimmed.chars().filter(|&c| c == '.').count() >= 1 {
+            let before_dot = &trimmed[..trimmed.len() - 1];
+            // Common TLD/domain fragments: if there's a word before the dot that looks
+            // like a domain component, it's likely truncated (e.g., "crates." → "crates.io")
+            if !before_dot.is_empty() && before_dot.chars().all(|c| c.is_alphanumeric() || c == '-') {
+                return true;
+            }
+        }
         return false;
     }
 
     // Check last character for terminal punctuation
     let last_char = trimmed.chars().last().unwrap();
-    let terminal = matches!(last_char, '.' | '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|');
+
+    // Dot needs special handling: "Fixed the bug." is complete, but "linking to crates." may not be.
+    // Treat '.' as terminal UNLESS the last word before '.' looks like a domain/URL fragment
+    // (no spaces, all alphanumeric/hyphens, suggesting something like "crates." → "crates.io").
+    if last_char == '.' {
+        let before_dot = &trimmed[..trimmed.len() - 1];
+        // Find the last word (after last space)
+        let last_word = before_dot.rsplit_once(' ').map(|(_, w)| w).unwrap_or(before_dot);
+        // If last word contains dots already (e.g., "www.example.") or is a known domain-like
+        // pattern, treat as potentially truncated
+        if last_word.contains('.') || last_word.ends_with("http") || last_word.ends_with("https") {
+            return true;
+        }
+        // Otherwise, '.' is terminal (normal sentence ending)
+        return false;
+    }
+
+    let terminal = matches!(last_char, '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|');
 
     !terminal
 }

@@ -167,6 +167,9 @@ enum Commands {
         /// Focused file in the editor (for tmux pane focus)
         #[arg(long)]
         focus: Option<String>,
+        /// Wait for typing to settle before routing (milliseconds, 0 = no debounce)
+        #[arg(long, default_value_t = 0)]
+        debounce: u64,
     },
     /// Detect permission prompts from a Claude Code session
     Prompt {
@@ -513,8 +516,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
-        Commands::Route { file, pane, cols, focus } => {
-            let result = route::run(&file, pane.as_deref());
+        Commands::Route { file, pane, cols, focus, debounce } => {
+            let result = route::run(&file, pane.as_deref(), debounce);
             // If layout columns provided, sync tmux layout after routing (no auto-start —
             // route already handled the target file, auto-start would create duplicates)
             if !cols.is_empty()

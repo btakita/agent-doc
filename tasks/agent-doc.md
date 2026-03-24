@@ -224,7 +224,7 @@ This means `/btw` is essentially **the document itself** — the user types whil
 The binary role: ensure `agent-doc write --stream` merges correctly (already does via CRDT).
 There are many stash windows in tmux session 0.
 The currently selected window is 1:stash
-### Re: stash window buildup + wrong selection (HEAD)
+### Re: stash window buildup + wrong selection
 
 **Cleaned up:** Killed 19 orphaned stash windows. Session 0 now has 2 windows: `0:agent-doc` (1p) + `1:stash` (11p). Selected window set back to `0:agent-doc`.
 
@@ -233,7 +233,7 @@ The currently selected window is 1:stash
 **The fix needed:** Auto-start should not retry indefinitely for files that can't start Claude. Add a cooldown: if a file's pane died within the last N seconds, don't auto-start again. This prevents the stash window buildup.
 
 The stash window `1:stash` with 11 panes is from legitimately stashed sessions — those are fine.
-<!-- agent:boundary:87af55fe -->
+<!-- agent:boundary:417146ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

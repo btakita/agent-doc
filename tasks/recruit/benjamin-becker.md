@@ -5,6 +5,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
+
 ## Status
 
 <!-- agent:status patch=replace -->
@@ -187,13 +188,45 @@ Your resume + contact info gets sold to other recruiters/staffing firms. This is
 **On the part-time appeal:** That's exactly what makes this pitch effective. "Stack a few smaller contracts through your LLC" is genuinely attractive to senior engineers. Legitimate versions of this model do exist (e.g., Toptal, Gun.io, established staffing firms with named companies). The difference is those firms have verifiable identities, company pages, and don't need to leave LinkedIn to talk to you.
 
 **Bottom line:** If he were legitimate, the part-time contract stacking model would be worth exploring — just not with someone who triggers LinkedIn's scam filters, has no company name, and immediately wants off-platform.
-<!-- agent:boundary:56d89aec -->
+
+Please read the benjamin-becker/*_sms.txt
+I am curious about what he can offer. Please help me draft a text to see how he works and whether or not it align with my goal for short term projects.
+### Re: SMS review + draft text (HEAD)
+
+**SMS content:** Benjamin texted from +1 831-515-8284 (California area code — different from the 207 Maine WhatsApp number he gave on LinkedIn). His LinkedIn account was "restricted" — which confirms LinkedIn flagged him. He's now contacting via SMS.
+
+**More red flags:**
+- LinkedIn restricted his account (not just a message flag — the whole account)
+- Different phone number than what he gave on LinkedIn (207 vs 831)
+- "As we discussed on LinkedIn" — pressure to continue off-platform
+- Misspells "LinkedIn" as "Linkedn"
+
+**However — you want to explore what he offers.** Here's a cautious draft that probes his model without committing:
+
+---
+
+**Draft text:**
+
+Hi Benjamin. Yes, I'm still interested in exploring this. Before we move forward, a few questions:
+
+1. What's the name of your company or staffing firm?
+2. Can you share an example of the types of contracts you've placed recently?
+3. What's your typical rate structure — do you take a percentage, or is it a flat placement fee?
+4. For the part-time contract stacking model, how many hours/week are the typical engagements?
+
+I'm looking for short-term projects (1-3 months) in agent infra and AI tooling. If that aligns with what you're sourcing, I'd like to learn more.
+
+Brian
+
+---
+
+This keeps things professional, asks verifiable questions (company name, examples, rate structure), and states your goal clearly. His answers will quickly reveal if he's legitimate or not. A real recruiter will have immediate answers to all four questions.
+<!-- agent:boundary:03ee0677 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Decide whether to send cease-and-desist or just disengage silently
-- Report Benjamin Becker profile on LinkedIn (optional)
-- Monitor for unauthorized resume submissions
+- [ ] Send text to Benjamin with qualifying questions
+- [ ] Evaluate his response — company name + examples = legitimate; vague = disengage
 <!-- /agent:pending -->

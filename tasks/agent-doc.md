@@ -1036,7 +1036,7 @@ The right side of tmux window 0:agent-doc is now an empty shell.
 It swapped with tmux session 1.
 
 I had to c
-### Re: Lessons learned + preventing this class of bugs (HEAD)
+### Re: Lessons learned + preventing this class of bugs
 
 **Why it happened again:** The fix was only in dev build — the installed binary was still v0.25.15 without the cross-session guard. Just installed the patched binary. The fix is now live.
 
@@ -1081,7 +1081,7 @@ Every new pane-movement feature gets a cross-session test as a gate. Template:
 This is now the pattern with `test_cross_session_join_blocked_entirely`.
 
 **Immediate next step:** Want me to implement the `SessionScope` type wrapper? It would make cross-session bugs impossible at the type level rather than relying on runtime checks scattered across code paths.
-<!-- agent:boundary:07e456f3 -->
+<!-- agent:boundary:11240a82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

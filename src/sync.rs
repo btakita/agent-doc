@@ -133,24 +133,29 @@ fn run_with_options(
                 .map(|pane| tmux.pane_alive(pane))
                 .unwrap_or(false);
 
-            // Repair tmux_session in frontmatter if it doesn't match the target session.
-            // This ensures cross-session files get corrected on first sync.
-            if let Some(ref ctx) = context_session
-                && let Some(ref fm_session) = fm.tmux_session
-                && fm_session != ctx
-            {
-                eprintln!(
-                    "[sync] repairing tmux_session in {} ('{}' → '{}')",
-                    file_path.display(), fm_session, ctx
-                );
-                // Direct string replace to avoid frontmatter round-trip (which can add extra newlines)
-                let old = format!("tmux_session: '{}'", fm_session);
-                let new = format!("tmux_session: '{}'", ctx);
-                let updated = content.replacen(&old, &new, 1);
-                if updated != content
-                    && let Err(e) = std::fs::write(file_path, &updated)
-                {
-                    eprintln!("[sync] warning: failed to repair tmux_session: {}", e);
+            // Strip deprecated tmux_session from frontmatter.
+            // Session is now determined at runtime — the field is no longer needed.
+            if fm.tmux_session.is_some() {
+                // Find and remove the tmux_session line (including trailing newline)
+                let stripped = content
+                    .lines()
+                    .filter(|line| !line.starts_with("tmux_session:"))
+                    .collect::<Vec<&str>>()
+                    .join("\n");
+                // Preserve trailing newline if original had one
+                let stripped = if content.ends_with('\n') && !stripped.ends_with('\n') {
+                    format!("{}\n", stripped)
+                } else {
+                    stripped
+                };
+                if stripped != content {
+                    eprintln!(
+                        "[sync] stripping deprecated tmux_session from {}",
+                        file_path.display()
+                    );
+                    if let Err(e) = std::fs::write(file_path, &stripped) {
+                        eprintln!("[sync] warning: failed to strip tmux_session: {}", e);
+                    }
                 }
             }
 

@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="agent-doc logo" width="128">
 </p>
 
-**v0.25.12** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
+**v0.25.13** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
 
 > **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
 
@@ -39,6 +39,10 @@ sees your edits as diffs, so every change carries intent.
 - **Sync tmux_session auto-repair** — frontmatter `tmux_session` automatically corrected when context session differs
 - **Sync resync report-only** — `resync --fix` disabled in sync path to avoid killing cross-session panes; report only
 - **Sync visible-window split** — new panes split in the visible agent-doc window instead of stash
+- **install.sh** — rewritten installer with platform detection, Homebrew formula support
+- **Homebrew formula** — `Formula/agent-doc.rb` for `brew install btakita/tap/agent-doc`
+- **tmux_session stripping** — deprecated `tmux_session` frontmatter field auto-removed on sync instead of repaired
+- **Stash join fix** — failed stash join-pane kills the pane instead of creating orphan stash windows
 - **Plugin v0.2.21** — sync logging at INFO level
 - **526 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
 

@@ -316,26 +316,11 @@ fn auto_start_ext(
                 let (fm, _) = frontmatter::parse(&c).ok()?;
                 fm.tmux_session
             });
-        if let Some(ref fm) = fm_session
-            && fm != ctx
-        {
+        if let Some(ref fm) = fm_session {
             eprintln!(
-                "[auto_start] context_session '{}' overrides frontmatter tmux_session '{}' — repairing frontmatter",
+                "[auto_start] context_session '{}' overrides deprecated frontmatter tmux_session '{}'",
                 ctx, fm
             );
-            // Repair: direct string replace to avoid frontmatter round-trip extra newline
-            if let Ok(content) = std::fs::read_to_string(file) {
-                let old = format!("tmux_session: '{}'", fm);
-                let new = format!("tmux_session: '{}'", ctx);
-                let updated = content.replacen(&old, &new, 1);
-                if updated != content {
-                    if let Err(e) = std::fs::write(file, &updated) {
-                        eprintln!("[auto_start] warning: failed to repair tmux_session: {}", e);
-                    } else {
-                        eprintln!("[auto_start] repaired tmux_session in {}", file.display());
-                    }
-                }
-            }
         }
         ctx.to_string()
     } else if let Ok(content) = std::fs::read_to_string(file) {

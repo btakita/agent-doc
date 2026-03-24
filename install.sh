@@ -1,126 +1,169 @@
 #!/bin/sh
-# agent-doc installer — downloads prebuilt binary from GitHub Releases
+# install.sh — agent-doc installer
+#
+# Downloads the latest prebuilt binary from GitHub Releases and installs it
+# to ~/.cargo/bin/ (if it exists) or ~/.local/bin/ (created if needed).
 #
 # Usage:
-#   curl -sSf https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
-#   curl -sSf ... | sh -s -- --system          # install to /usr/local/bin
-#   curl -sSf ... | sh -s -- --version 0.1.0   # specific version
-set -eu
+#   curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
+
+set -euo pipefail
 
 REPO="btakita/agent-doc"
-INSTALL_DIR="$HOME/.local/bin"
-USE_SUDO=""
-VERSION=""
+GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+GITHUB_DL="https://github.com/${REPO}/releases/download"
 
-usage() {
-    cat <<EOF
-Usage: install.sh [OPTIONS]
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
 
-Options:
-  --system          Install to /usr/local/bin (requires sudo)
-  --version VER     Install a specific version (e.g. 0.1.0)
-  --help            Show this help
-EOF
-    exit 0
+detect_platform() {
+  case "$(uname -s)" in
+    Linux)  echo "linux" ;;
+    Darwin) echo "macos" ;;
+    *)
+      echo "ERROR: Unsupported OS: $(uname -s)" >&2
+      echo "  See https://github.com/${REPO}/releases for manual download." >&2
+      exit 1
+      ;;
+  esac
 }
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --system)
-            INSTALL_DIR="/usr/local/bin"
-            USE_SUDO="sudo"
-            shift
-            ;;
-        --version)
-            VERSION="$2"
-            shift 2
-            ;;
-        --help)
-            usage
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            usage
-            ;;
-    esac
-done
-
-# Detect OS
-OS="$(uname -s)"
-case "$OS" in
-    Linux)  OS_TARGET="unknown-linux-gnu" ;;
-    Darwin) OS_TARGET="apple-darwin" ;;
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64 | amd64)  echo "x86_64" ;;
+    aarch64 | arm64) echo "aarch64" ;;
     *)
-        echo "Unsupported OS: $OS" >&2
-        echo "See https://github.com/$REPO/releases for manual download." >&2
-        exit 1
-        ;;
-esac
+      echo "ERROR: Unsupported architecture: $(uname -m)" >&2
+      echo "  See https://github.com/${REPO}/releases for manual download." >&2
+      exit 1
+      ;;
+  esac
+}
 
-# Detect architecture
-ARCH="$(uname -m)"
-case "$ARCH" in
-    x86_64|amd64)   ARCH_TARGET="x86_64" ;;
-    aarch64|arm64)   ARCH_TARGET="aarch64" ;;
-    *)
-        echo "Unsupported architecture: $ARCH" >&2
-        echo "See https://github.com/$REPO/releases for manual download." >&2
-        exit 1
-        ;;
-esac
+# ---------------------------------------------------------------------------
+# Install directory selection
+# ---------------------------------------------------------------------------
 
-TARGET="${ARCH_TARGET}-${OS_TARGET}"
+select_install_dir() {
+  if [ -d "${HOME}/.cargo/bin" ]; then
+    echo "${HOME}/.cargo/bin"
+  else
+    echo "${HOME}/.local/bin"
+  fi
+}
 
-# Resolve version
-if [ -z "$VERSION" ]; then
-    echo "Fetching latest release..."
-    VERSION="$(curl -sSf "https://api.github.com/repos/$REPO/releases/latest" \
-        | grep '"tag_name"' \
-        | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
-    if [ -z "$VERSION" ]; then
-        echo "Failed to determine latest version." >&2
-        exit 1
-    fi
+# ---------------------------------------------------------------------------
+# Dependency checks
+# ---------------------------------------------------------------------------
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+need_cmd curl
+need_cmd grep
+need_cmd sed
+
+# ---------------------------------------------------------------------------
+# Resolve latest release tag from GitHub API
+# ---------------------------------------------------------------------------
+
+echo "Fetching latest agent-doc release..."
+
+TAG="$(curl -s "${GITHUB_API}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+
+if [ -z "${TAG}" ]; then
+  echo "ERROR: Could not determine latest release tag." >&2
+  echo "  Check your internet connection or visit: https://github.com/${REPO}/releases" >&2
+  exit 1
 fi
 
-TAG="v$VERSION"
-ARCHIVE="agent-doc-${TARGET}.tar.gz"
-URL="https://github.com/$REPO/releases/download/$TAG/$ARCHIVE"
+echo "Latest release: ${TAG}"
 
-echo "Installing agent-doc $VERSION for $TARGET..."
-echo "  From: $URL"
-echo "  To:   $INSTALL_DIR/agent-doc"
+# ---------------------------------------------------------------------------
+# Build download URL
+# Binary name pattern: agent-doc-{tag}-{platform}-{arch}
+# e.g. agent-doc-v0.25.12-linux-x86_64
+# ---------------------------------------------------------------------------
 
-# Create temp directory
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+PLATFORM="$(detect_platform)"
+ARCH="$(detect_arch)"
 
-# Download and extract
-curl -sSfL "$URL" -o "$TMPDIR/$ARCHIVE"
-tar xzf "$TMPDIR/$ARCHIVE" -C "$TMPDIR"
+BINARY_NAME="agent-doc-${TAG}-${PLATFORM}-${ARCH}"
+DOWNLOAD_URL="${GITHUB_DL}/${TAG}/${BINARY_NAME}"
 
-# Install binary
-mkdir -p "$INSTALL_DIR"
-$USE_SUDO install -m 755 "$TMPDIR/agent-doc" "$INSTALL_DIR/agent-doc"
+echo "Platform : ${PLATFORM}"
+echo "Arch     : ${ARCH}"
+echo "Binary   : ${BINARY_NAME}"
+echo "URL      : ${DOWNLOAD_URL}"
 
-# Verify
-if "$INSTALL_DIR/agent-doc" --version >/dev/null 2>&1; then
-    echo "agent-doc $VERSION installed successfully."
-    "$INSTALL_DIR/agent-doc" --version
+# ---------------------------------------------------------------------------
+# Select and prepare install directory
+# ---------------------------------------------------------------------------
+
+INSTALL_DIR="$(select_install_dir)"
+
+if [ ! -d "${INSTALL_DIR}" ]; then
+  echo "Creating install directory: ${INSTALL_DIR}"
+  mkdir -p "${INSTALL_DIR}"
+fi
+
+INSTALL_PATH="${INSTALL_DIR}/agent-doc"
+
+# ---------------------------------------------------------------------------
+# Download binary
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Downloading to ${INSTALL_PATH}..."
+curl -fSL --progress-bar "${DOWNLOAD_URL}" -o "${INSTALL_PATH}"
+
+# ---------------------------------------------------------------------------
+# Make executable
+# ---------------------------------------------------------------------------
+
+chmod +x "${INSTALL_PATH}"
+
+# ---------------------------------------------------------------------------
+# Verify installation
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Verifying installation..."
+if "${INSTALL_PATH}" --version; then
+  echo ""
+  echo "agent-doc installed successfully to ${INSTALL_PATH}"
 else
-    echo "Warning: agent-doc installed but failed to run." >&2
-    echo "Check that $INSTALL_DIR/agent-doc is executable." >&2
+  echo "ERROR: Installed binary failed to run." >&2
+  echo "  The downloaded binary may not be compatible with this system." >&2
+  exit 1
 fi
 
-# PATH hint
-case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
-    *)
-        echo ""
-        echo "Note: $INSTALL_DIR is not in your PATH."
-        echo "Add it with:"
-        echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-        echo ""
-        echo "To make this permanent, add the line above to your ~/.bashrc or ~/.zshrc."
-        ;;
+# ---------------------------------------------------------------------------
+# PATH guidance (only shown when install dir is not already on PATH)
+# ---------------------------------------------------------------------------
+
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*)
+    # Already on PATH — nothing to print
+    ;;
+  *)
+    echo ""
+    echo "NOTE: ${INSTALL_DIR} is not in your PATH."
+    echo "      To use agent-doc from any directory, add it to your PATH:"
+    echo ""
+    echo "        export PATH=\"${INSTALL_DIR}:\$PATH\""
+    echo ""
+    echo "      Add that line to your shell profile to make it permanent:"
+    echo "        ~/.bashrc   (Bash)"
+    echo "        ~/.zshrc    (Zsh)"
+    echo ""
+    echo "      Then reload your shell or run:"
+    echo ""
+    echo "        source ~/.bashrc   # or ~/.zshrc"
+    ;;
 esac

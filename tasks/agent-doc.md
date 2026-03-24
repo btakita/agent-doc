@@ -620,7 +620,7 @@ Yes
 
 Install plugin v0.2.22 to fix the window ID issue — that should resolve the stash loop which causes most of these cascading problems.
 v0.2.22 is already used. Please check the active plugin version before suggesting that I upgrade. Update the relevant SKILL or AGENTS.md
-### Re: mtime debounce + plugin version check (HEAD)
+### Re: mtime debounce + plugin version check
 
 **mtime debounce limitation:** You're right — the editor buffers keystrokes and only flushes to disk periodically (not every keystroke). The mtime-based debounce in preflight only catches the disk flush timing, not the actual typing. The real debounce is the FFI plugin's `TypingTracker` + `is_tracked()` which fires on every `documentChanged` event in the editor. The preflight mtime debounce is a secondary defense for CLI-triggered runs, not the primary debounce path.
 
@@ -629,7 +629,7 @@ v0.2.22 is already used. Please check the active plugin version before suggestin
 **Action items:**
 - The debounce for plugin-triggered runs works via FFI (TypingTracker). The mtime debounce helps CLI runs only.
 - I'll compact and release. This session has shipped v0.25.8-v0.25.13 + extensive sync/stash self-healing.
-<!-- agent:boundary:6cf0d9ac -->
+<!-- agent:boundary:412ec7c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

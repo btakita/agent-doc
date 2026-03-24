@@ -304,15 +304,31 @@ Updated `tasks/email.md` frontmatter: `tmux_session: '1'` → `tmux_session: '0'
 This is the right fix — the file's session binding should match where it's actually used. The context_session override was a workaround for a misconfigured frontmatter value.
 
 Try switching to email.md now.
-<!-- agent:boundary:91ec976a -->
+Is this fix implemented in agent-doc?
+### Re: is the fix in agent-doc? (HEAD)
+
+The `tmux_session` fix is a **data change** — I edited `tasks/email.md` directly (changed `'1'` → `'0'`). No binary change needed for this.
+
+The binary fixes that ARE already installed (v0.25.12 unreleased):
+- `context_session` override in auto_start (route.rs)
+- `resync --fix` disabled in sync path (sync.rs)
+- Split in visible window, not stash (route.rs)
+- `swap-pane` atomic reconcile (tmux-router sync.rs)
+- `auto_start_no_wait` for sync (route.rs)
+
+All of these are in the build you're running. The email.md `tmux_session: '0'` change just means the frontmatter now matches your actual tmux session, so the sync won't have cross-session conflicts.
+
+Try switching to email.md — it should work now with both the data fix and the binary fixes.
+<!-- agent:boundary:216fd249 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **email.md tmux_session fixed** — changed from '1' to '0'
-- [ ] **Test email.md** — switch to email.md in editor split
-- [ ] **Release v0.25.12** — all sync fixes ready
+- [x] **email.md tmux_session** — data fix, '1' → '0'
+- [x] **Binary fixes installed** — all sync improvements in v0.25.12
+- [ ] **Test email.md sync** — switch to email.md to confirm
+- [ ] **Release v0.25.12** — after test
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

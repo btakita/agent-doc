@@ -1331,7 +1331,7 @@ continue
 
 Note: the unified diff format is now live — this cycle's preflight used it. You can see the focused output with `@@` hunk markers and surrounding context instead of the entire document.
 continue on pending
-### Re: continue on pending (HEAD)
+### Re: continue on pending
 
 Both remaining pending items done.
 
@@ -1362,7 +1362,7 @@ This means:
 **Plugin install:** `agent-doc-jetbrains-0.2.20.zip` built. Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk..."
 
 All tests pass. `libagent_doc.so` rebuilt with `is_tracked` export.
-<!-- agent:boundary:c7227a23 -->
+<!-- agent:boundary:15829140 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

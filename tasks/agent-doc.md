@@ -421,7 +421,7 @@ This seems correct.
 The deeper fix needs to prevent sync from stashing the pane that's currently processing a command. This is a "never stash the active pane" invariant.
 Please add tests with the current state.
 Write
-### Re: Why wrong + fix (HEAD)
+### Re: Why wrong + fix
 
 **Why my diagnostic was wrong:** The state changed between my first check (which showed window 0 with %94) and when you checked. A plugin sync ran in between and stashed %94, deleting window 0.
 
@@ -435,7 +435,7 @@ Write
 The self-healing code in route.rs should prevent this from happening again — when route detects the pane is in stash, it breaks it out into a new window. But the deeper issue is: **sync should never stash the last pane in the agent-doc window**, because that deletes the window entirely.
 
 This needs a guard in tmux-router's reconcile: if a pane is the last one in the target window, don't stash it.
-<!-- agent:boundary:9446045f -->
+<!-- agent:boundary:73c14084 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -565,7 +565,7 @@ Built and installed. The plugin's next sync should work without the stash loop.
 
 Still needed: formal tests in the test suite. Working on those next.
 Window 2:agent-doc should be 0:agent-doc
-### Re: Window index normalization (HEAD)
+### Re: Window index normalization
 
 Added Phase 3 to `repair_layout()`: after stash consolidation and window rescue, checks if the agent-doc window is at index 0. If not, uses `move-window` to move it there.
 
@@ -575,7 +575,7 @@ Built and installed. The repair now ensures:
 1. Single stash window (consolidation)
 2. Agent-doc window exists (rescue from stash)
 3. Agent-doc at index 0 (move-window)
-<!-- agent:boundary:75ae50db -->
+<!-- agent:boundary:5c9829d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

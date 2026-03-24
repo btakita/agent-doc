@@ -1456,7 +1456,7 @@ But this serializes tmux *command execution*, not *rendering*. tmux renders to t
 
 **Most practical fix:** Accept the flicker (it's <100ms) or investigate whether `tmux-router`'s `TmuxBatch` can combine the detach+reattach into fewer tmux invocations, reducing the render window.
 Create github.com issues for each of the todo items
-### Re: Create GitHub issues for todo items (HEAD)
+### Re: Create GitHub issues for todo items
 
 Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
 
@@ -1470,7 +1470,7 @@ Created 8 new issues (#30–#37). All todo items now have GitHub issue links.
 | [#35](https://github.com/btakita/agent-doc/issues/35) | MDX support |
 | [#36](https://github.com/btakita/agent-doc/issues/36) | Jupyter notebook support |
 | [#37](https://github.com/btakita/agent-doc/issues/37) | Notion integration |
-<!-- agent:boundary:7bafcf59 -->
+<!-- agent:boundary:4ff26b09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

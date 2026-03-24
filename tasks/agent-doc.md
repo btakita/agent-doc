@@ -156,7 +156,7 @@ claude_args: --dangerously-skip-permissions
 Session 2: v0.25.8-v0.25.11 — debounce (preflight mtime, unified diff context, route --debounce, is_tracked FFI), sync improvements (no-wait auto-start, swap-pane atomic reconcile, plugin v0.2.21 logging), tmux flicker investigation, GitHub issues #30-#37, CI fix (all path deps).
 Exchange compacted. 344 lines archived.
 I switched to tasks/email.md. Now tmux window 0:agent-doc only has 1 pane.
-### Re: email.md → 1 pane (HEAD)
+### Re: email.md → 1 pane
 
 **Root cause: tmux_session mismatch.**
 
@@ -174,7 +174,7 @@ The old pane (agent-loop.md) gets stashed during reconciliation, and the email p
 Option 2 is the pragmatic fix — the sync window argument should override the frontmatter session binding for layout purposes.
 
 Want me to implement option 2?
-<!-- agent:boundary:8c76c2a7 -->
+<!-- agent:boundary:7a868505 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

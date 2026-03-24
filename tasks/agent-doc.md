@@ -261,17 +261,42 @@ Or even simpler: `split-window` in stash, then `join-pane` to the visible window
 
 **Why it's currently 3 panes:** The sync follows ATTACH-before-DETACH (lesson #3), which makes sense for *existing* panes (join first to avoid losing focus). But for *auto-start* (creating new panes), the order should be reversed — stash first, then create. The ATTACH-before-DETACH rule applies to pane *movement*, not pane *creation*.
 
+Is it better to have a true atomic swap with tmux? 2 -> 2 panes?
+If not...It's better to have 2 -> 3 -> 2 than 2 -> 1 -> 2 panes.
+
+This should be quick sequence of running the tmux commands. No waiting for Claude to start.
+
 **The actual fix is small:**
 In `sync.rs`, when `auto_start` is needed, stash the unwanted pane first, then split-window in the visible window. No background process needed. No waiting needed. Claude loading in the pane is visible to the user as expected.
 
 Want me to implement this? It's a reorder of operations in the sync reconciliation path.
-<!-- agent:boundary:1460f3a8 -->
+### Re: 2→3→2 is fine, just no waiting (HEAD)
+
+You're right — tmux doesn't have an atomic swap. The choices are:
+
+- **2→3→2** (current ATTACH-before-DETACH): split-window creates pane 3, then stash old pane. Brief 3-pane flash.
+- **2→1→2** (DETACH-before-ATTACH): stash old pane first, then split-window. Brief 1-pane flash.
+
+Both are fine if the sequence is fast (~50ms of tmux commands). The real problem is the **8-second `wait_for_claude_ready`** blocking between the split-window and the stash.
+
+**The fix: remove `wait_for_claude_ready` from the sync path.**
+
+Currently `auto_start_in_session()` in `route.rs` does:
+1. `split-window` (create pane)
+2. Send `agent-doc start <file>` (launches Claude)
+3. `wait_for_claude_ready` ← **8 seconds blocking**
+4. Return pane ID
+
+Steps 1-2 are instant. Step 3 is the blocker. The sync path doesn't need to wait — it just needs the pane to exist with Claude starting in it. The user sees Claude loading, which is expected.
+
+I'll remove the wait from the sync-initiated auto-start path. The `route` command (plugin hotkey) can keep the wait because it needs to send `/agent-doc` after Claude is ready.
+<!-- agent:boundary:d9767f34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix sync pane order** — stash old pane before creating new one (eliminates 3-pane state)
+- [ ] **Remove wait_for_claude_ready from sync auto-start** — split-window + send start is enough, no blocking wait needed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

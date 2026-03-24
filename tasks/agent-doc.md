@@ -382,7 +382,7 @@ For now — it's a cosmetic bug that doesn't affect functionality. Should I proc
 
 Do:
 - [ ] **(HEAD) marker bug** — needs investigation with exact trigger state, documented for next session
-### Re: (HEAD) marker investigation (HEAD)
+### Re: (HEAD) marker investigation
 
 I reproduced the commit on email.md and the (HEAD) marker is applied to **only one** heading: `### Account Setup (btak.dev) (HEAD)`. This is actually correct behavior — the marker creates a blue gutter boundary between committed content and new user input.
 
@@ -393,7 +393,7 @@ The "all h3 tags" you reported earlier may have been from a different file state
 **Current state:** The (HEAD) marker is working correctly — only one heading is marked, creating the intended blue gutter boundary.
 
 Ready to release v0.25.12?
-<!-- agent:boundary:b1b0a915 -->
+<!-- agent:boundary:1b4bf968 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

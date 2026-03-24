@@ -1160,7 +1160,7 @@ This should be implemented as an agent-doc command. If we have multiple agent-do
 `agent-doc <cmd> .` perhaps?
 
 Also — the stash has 18 panes. Many look like old agent-doc sessions. Want me to clean those up?
-### Re: tmux_session deprecation was wrong (HEAD)
+### Re: tmux_session deprecation was wrong
 
 You're right — I should have known. The frontmatter literally says `tmux_session: '0'` and I deprecated reading it in the previous session. That deprecation broke multi-session setups where Claude runs in a different session than the editor.
 
@@ -1183,7 +1183,7 @@ This way individual documents don't each need `tmux_session` in their frontmatte
 **For multi-project support:** `agent-doc <cmd> .` would resolve `.` to the nearest `.agent-doc/` directory, which uniquely identifies the project. Different projects in different directories get different configs.
 
 Implementing Part 1 now — un-deprecating `tmux_session` in route.rs and sync.rs.
-<!-- agent:boundary:94431da6 -->
+<!-- agent:boundary:8ae4f37c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

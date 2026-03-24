@@ -329,13 +329,44 @@ release
 5. `auto_start_no_wait()` — sync no longer blocks on Claude ready
 6. Plugin v0.2.21 — sync logging at INFO level
 7. `looks_truncated` improvements + recheck interval doubled
-<!-- agent:boundary:15ab397d -->
+On the right editor pane:
+I switched from tasks/resume.md to tasks/calendar.md
+
+The tmux session briefly switched to window 1:stash then back to 0:agent-doc.
+Why?
+### Re: stash flicker on calendar switch — still happening but faster (HEAD)
+
+The `auto_start_no_wait` fix IS working — the calendar sync completed in **~600ms** (vs 8 seconds before). But the stash flicker still occurs during the sync reconciliation itself.
+
+**What the logs show:**
+```
+00:19:17.857  [layout] resume → calendar detected
+00:19:18.069  [layout-sync] exec: sync --col agent-doc.md --col calendar.md
+00:19:18.680  [sync] exit=0, output: auto-starting calendar.md
+00:19:18.883  [layout-sync] result: exit=0
+```
+
+~600ms total, no 8-second block. But during those 600ms, the sync does:
+1. Stash the resume pane → `-d` flag, but tmux briefly renders stash
+2. Auto-start calendar pane (split-window + send start)
+3. Reconcile layout
+
+The flicker happens during step 1. Even with `-d` on `stash_pane`/`break_pane`, tmux renders the stash window for a frame before the next command selects the agent-doc window back.
+
+**This is the tmux rendering race we identified earlier.** The code is correct — `-d` flags prevent focus *changes* but not the rendering of intermediate states between commands.
+
+**Current sync output is truncated at 500 chars.** I should increase that limit to capture the full DETACH/ATTACH logs for definitive diagnosis. But the root cause is clear: tmux has no batch-rendering mode.
+
+**Realistic options:**
+1. **Accept ~100ms flicker** during pane swaps (current state)
+2. **Investigate `swap-pane`** — tmux has a `swap-pane` command that might do an atomic swap without intermediate states
+<!-- agent:boundary:caf65128 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] v0.25.10 released — SPEC, README, audit, all targets published
+- [ ] **Investigate tmux `swap-pane`** — might eliminate flicker by atomic swap instead of stash+join
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -319,16 +319,33 @@ The binary fixes that ARE already installed (v0.25.12 unreleased):
 All of these are in the build you're running. The email.md `tmux_session: '0'` change just means the frontmatter now matches your actual tmux session, so the sync won't have cross-session conflicts.
 
 Try switching to email.md — it should work now with both the data fix and the binary fixes.
-<!-- agent:boundary:473b2d28 -->
+
+I switched back to `tmux_session: '1'`.
+Please make agent-doc "repair" tasks/email.md to use the correct tmux_session based on the running agent-doc project.
+### Re: auto-repair tmux_session (HEAD)
+
+Implemented. When `auto_start` detects a context_session override (sync path), it now automatically updates the frontmatter `tmux_session` to match:
+
+```
+[auto_start] context_session '0' overrides frontmatter tmux_session '1' — repairing frontmatter
+[auto_start] repaired tmux_session in tasks/email.md
+```
+
+So if email.md has `tmux_session: '1'` but the sync targets session `0`, the binary:
+1. Creates the pane in session `0` (context override)
+2. Writes `tmux_session: '0'` back to email.md (repair)
+3. Future syncs see the correct value — no more conflicts
+
+Rebuilt and installed. You can switch back to `tmux_session: '1'` in email.md and test — the sync should auto-repair it to `'0'`.
+<!-- agent:boundary:464587ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **email.md tmux_session** — data fix, '1' → '0'
-- [x] **Binary fixes installed** — all sync improvements in v0.25.12
-- [ ] **Test email.md sync** — switch to email.md to confirm
-- [ ] **Release v0.25.12** — after test
+- [x] **Auto-repair tmux_session** — binary now fixes frontmatter on context_session override
+- [ ] **Test email.md with tmux_session: '1'** — should auto-repair to '0'
+- [ ] **Release v0.25.12** — all sync fixes + auto-repair
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

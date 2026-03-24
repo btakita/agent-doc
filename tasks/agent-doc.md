@@ -1395,7 +1395,22 @@ Put mdx, Jupyter, and Notion support into the todo list
 ### Re: mdx, Jupyter, Notion → todo
 
 Added to the todo list.
-<!-- agent:boundary:89f06bb8 -->
+I renamed tasks/agent-doc/todo.md to tasks/agent-doc/queue.md.
+In tmux session 0, it switched to window 1:stash for a few seconds then corrected back to window 0:agent-doc.
+### Re: file rename + tmux window flicker (HEAD)
+
+**File rename noted.** `tasks/agent-doc/todo.md` → `tasks/agent-doc/queue.md` — acknowledged.
+
+**Tmux window flicker:** The brief switch to `1:stash` and back to `0:agent-doc` is a known artifact of `tmux-router` sync. During 2D reconciliation, `sync` may `break-pane` excess panes to the stash window. If a stash pane is briefly selected during the break operation, tmux switches the visible window to stash for a frame before `select-window` returns focus to the agent-doc window.
+
+This happens at the tmux CLI level (not in the plugin logs — hence no break/join events in idea.log). The `select_pane %1 → session:window 0:0` calls confirm the final focus is correct.
+
+**Mitigation options:**
+1. **Suppress window switch during break-pane:** Use `tmux break-pane -d` (detached) to prevent focus from following the pane to stash
+2. **Batch break operations:** Do all breaks before the final `select-pane` focus
+
+Want me to investigate whether `tmux-router` already uses `-d` on break-pane?
+<!-- agent:boundary:44d6e187 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1403,7 +1418,8 @@ Added to the todo list.
 <!-- agent:pending -->
 - [x] All debounce improvements shipped (v0.25.8 + v0.25.9)
 - [x] Plugin v0.2.20 installed
-- [x] v0.25.9 released to all targets
+- [x] v0.25.9 released
+- [ ] **Tmux window flicker** — break-pane briefly steals focus to stash
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

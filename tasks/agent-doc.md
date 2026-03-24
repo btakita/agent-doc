@@ -1411,7 +1411,7 @@ This happens at the tmux CLI level (not in the plugin logs — hence no break/jo
 
 Want me to investigate whether `tmux-router` already uses `-d` on break-pane?
 yes
-### Re: yes — tmux-router already uses `-d` (HEAD)
+### Re: yes — tmux-router already uses `-d`
 
 **Good news:** `tmux-router` already uses detached flags everywhere:
 - `break_pane()` → `break-pane -s <pane> -d` (tmux.rs:227)
@@ -1428,7 +1428,7 @@ yes
 3. **Accept the ~50ms flicker** — it's rare and corrects immediately
 
 Given the code already does the right thing (detached flags, FOCUS STEAL detection, batch operations), this is a low-impact cosmetic issue. The flicker only happens during 2D layout reconciliation when panes are moved between windows.
-<!-- agent:boundary:9e737092 -->
+<!-- agent:boundary:18117a5d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

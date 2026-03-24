@@ -1490,7 +1490,7 @@ Updated 5 issues with architecture context from this document:
 The remaining issues (#31 Homebrew, #32 lazily-rs, #34 ClawTeam) are straightforward and don't need additional architecture context.
 compact agent:exchange
 Exchange compacted. 1337 lines archived. Summary preserved above.
-<!-- agent:boundary:3f85da7a -->
+<!-- agent:boundary:beecd26e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

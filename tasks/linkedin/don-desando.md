@@ -96,7 +96,7 @@ I checked your site and it looks clean from my end:
 >
 > Saw your comment came from the vibe coding post — curious what your take is on the agentic tooling side. Your post about Claude Code mapping API surfaces was spot-on.
 Could it have something to do with my Google Cloud Storage expiring for some unknown reason?
-### Re: Google Cloud Storage (HEAD)
+### Re: Google Cloud Storage
 
 **Unlikely to be GCS-related.** Here's what I found:
 
@@ -114,7 +114,7 @@ However, if you previously had a GCS bucket serving assets (images, fonts, etc.)
 3. **Transient Google Safe Browsing flag** — can happen if any linked domain on your page got flagged (you link to 60+ external profiles)
 
 **Recommendation:** Check Google Safe Browsing transparency report yourself, and if clean, just tell Don it's likely on his end. Don't spend much time debugging what's probably his browser config.
-<!-- agent:boundary:d828858b -->
+<!-- agent:boundary:e304b80c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -192,10 +192,10 @@ This means email.md (bound to session `1`) will get a pane in session `0` when t
 
 All 526 tests pass. Build successful. Want me to release?
 install build so I can manually test
-### Re: install build (HEAD)
+### Re: install build
 
 Installed. `~/.cargo/bin/agent-doc` is now v0.25.12 (unreleased) with the cross-session fix. Test by switching to a file with a different `tmux_session` in the editor split.
-<!-- agent:boundary:7be5d607 -->
+<!-- agent:boundary:b65f0340 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

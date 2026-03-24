@@ -124,7 +124,7 @@ Root cause: `CARGO_REGISTRY_TOKEN` was set as a **literal** `(pass btak/CARGO_RE
 **Parent commit** `f8fcce2`: Updated 6 submodule pointers (mail, resume, agent-doc, instruction-files, tmux-router, tagpath).
 
 All done — submodules committed, releases published, parent pointers updated.
-<!-- agent:boundary:b35df217 -->
+<!-- agent:boundary:35d90669 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

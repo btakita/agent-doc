@@ -9,7 +9,6 @@ claude_args: --dangerously-skip-permissions
 
 
 
-
 # agent-doc
 
 <!-- agent:status -->
@@ -730,7 +729,31 @@ Built and installed. Now releasing v0.25.15 with all fixes + tests + plugin v0.2
 **v0.25.15 published:** crates.io ✓ | PyPI ✓ | GitHub Release ✓ | cargo install ✓
 
 Changes: repair_layout tests (4 scenarios), SPEC.md section 7.36, blank line accumulation fix, plugin v0.2.23 (always-pass --window).
-<!-- agent:boundary:ecac5888 -->
+I'm considering making agent-doc AGPL
+I'm not getting much adoption with the MIT license
+What do you recommend
+### Re: AGPL vs MIT licensing (HEAD)
+
+**Short answer:** AGPL won't help adoption. It might actually hurt it.
+
+**Why AGPL doesn't solve low adoption:**
+- Low adoption for a CLI tool like agent-doc is usually about **awareness** (people don't know it exists) and **ease of use** (installation friction, documentation), not licensing
+- AGPL's copyleft scares off companies and enterprise users — the exact audience that would deploy agent-doc at scale
+- Most successful dev tools are MIT/Apache (cargo, ripgrep, starship, delta, bat) — permissive licenses lower the barrier
+
+**Why you might want AGPL:**
+- If you're worried about companies taking your work and building proprietary products on it without contributing back
+- If you want to offer dual licensing (AGPL for open source, commercial license for enterprises) — this is a real business model (e.g., MongoDB, Grafana)
+
+**My recommendation:** Keep MIT. Focus adoption efforts on:
+1. **Content marketing** — blog posts, YouTube demos (you already have the screencast todo #28)
+2. **GitHub README** — great first impression, GIF demo, clear value proposition
+3. **Install friction** — install.sh is done (#30), Homebrew is ready (#31)
+4. **Integrations** — the CopilotKit connection you explored, AG-UI protocol
+5. **Community** — Discord/Slack for users, share in AI dev communities
+
+If you later want the dual-license model, you can relicense since you're the sole author. But switching to AGPL now won't drive adoption — it just adds friction for potential users.
+<!-- agent:boundary:90e26932 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

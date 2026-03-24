@@ -1239,17 +1239,56 @@ The idea.log analysis shows debounce worked correctly in all 4 logged cases toda
 No `[native]` or `[debounce]` FFI log tags were found — the FFI debounce logging may not be instrumented yet in the JetBrains plugin.
 
 **Action:** Consider adding debounce to layout-change-triggered routes in the plugin, since `LayoutChangeDetector` currently bypasses the typing check entirely.
-<!-- agent:boundary:dd303663 -->
+Sure.
+But I did not change the layout.
+The first issue occurred while a agent-doc run was going and I was typing.
+
+> **Your message was cut off at "Show my v" — complete it if you want me to address it.**
+
+The next issue occurred when I tried `Run Agent Doc` again.
+
+> Your message was cut off at "linking to crates." — I'll assume you mean linking to your crates.io profile or agent-doc's crates.io page to show release frequency.
+
+The plugin side debounce did not seem to work.
+
+Also, the entire line should have been read by `agent-doc run`...even if only part of the line was typed in the diff.
+### Re: debounce didn't work + full line should be read (HEAD)
+
+You're right on both counts. Let me clarify what the logs actually show and what the real issues are.
+
+**The plugin debounce IS firing** — idea.log shows `[run] recent typing detected, debouncing` on every single SubmitAction invocation today (6 out of 6). The orphaned routes at 21:35:33 and 21:35:39 came from `EditorTabSyncListener` layout sync (not SubmitAction), which explains the missing `[run]` log — those bypass debounce entirely.
+
+**But that doesn't solve your problem.** There are two real issues:
+
+**Issue 1: Debounce fires too early in the pipeline.**
+The plugin waits 1.5s for idle, then fires `agent-doc route`. But by the time Claude receives `/agent-doc`, computes the diff, and reads the file — the user may have resumed typing. The debounce window is on the *plugin side*, not the *diff computation side*. The `--debounce` flag I just added to `agent-doc route` adds a second mtime-based gate right before routing, but the real fix needs to be in `preflight` — checking file mtime right before computing the diff.
+
+**Issue 2: Partial line content — "the entire line should have been read."**
+You're right. The diff is line-level (`TextDiff::from_lines`), so it always shows complete lines. But if the file on disk contained "Show my v" because the editor flushed a partial save, the diff faithfully shows that partial line. The diff itself is correct — the file content was wrong at snapshot time.
+
+The `looks_truncated` heuristic in `diff.rs` tries to catch this but has two false-negative bugs:
+1. Lines ending in `.` are classified as "complete" — so `"linking to crates."` passes even though the user was typing `"linking to crates.io"`
+2. The single 200ms stable-content check can pass if the user pauses mid-word
+
+**Root cause: the debounce should prevent the diff from ever seeing partial content.** The SKILL.md guidance I added helps the agent detect fragments, but the real fix is defensive debounce at the binary level.
+
+**Proposed fix — preflight mtime debounce:**
+Add mtime-based idle check to `agent-doc preflight` itself (not just route). If the file was modified within N ms of the preflight call, wait for it to settle before computing the diff. This is the last line of defense and catches all trigger paths (plugin, CLI, watch daemon).
+
+Want me to implement preflight mtime debounce?
+<!-- agent:boundary:f9befb91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Plugin v0.2.19 installed
-- [x] **Diagnose debounce failure** — layout-change trigger bypasses typing check (not a bug in debounce itself)
-- [x] **Add `--debounce` to route** — implemented with mtime-based `await_idle()`, 30 tests pass
+- [x] **Add `--debounce` to route** — implemented with mtime-based `await_idle()`
 - [x] **SKILL.md: partial diff guidance** — added to step 1 (Respond)
-- [ ] **Layout-change debounce** — plugin's `LayoutChangeDetector` should also check typing recency before triggering route
+- [x] **Diagnose debounce failure** — plugin debounce fires correctly; issue is pipeline timing
+- [ ] **Preflight mtime debounce** — add file idle check before diff computation in preflight
+- [ ] **Fix `looks_truncated` false negatives** — `.` ending and 200ms window bugs
+- [ ] **EditorTabSyncListener debounce** — layout sync triggers bypass SubmitAction debounce
 - [ ] **FFI debounce logging** — add `[native]` log tags in JetBrains plugin for debuggability
 <!-- /agent:pending -->
 

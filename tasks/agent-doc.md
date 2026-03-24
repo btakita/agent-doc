@@ -508,7 +508,7 @@ This should only occur if the layout is incorrect.
 - If no alive panes: skips (sync auto-starts later)
 
 Built and installed. The next sync from the plugin will run repair_layout() automatically, fixing any stash/window issues before reconciliation.
-### Re: Only repair if incorrect (HEAD)
+### Re: Only repair if incorrect
 
 Added fast-path check at the top of `repair_layout()`:
 
@@ -525,7 +525,7 @@ Repair now only runs when:
 Normal sync calls (layout already correct) skip repair entirely — just one `list-windows` check.
 
 Built and installed.
-<!-- agent:boundary:89f045b0 -->
+<!-- agent:boundary:8f61cbea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

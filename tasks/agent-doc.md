@@ -174,13 +174,31 @@ The old pane (agent-loop.md) gets stashed during reconciliation, and the email p
 Option 2 is the pragmatic fix — the sync window argument should override the frontmatter session binding for layout purposes.
 
 Want me to implement option 2?
-<!-- agent:boundary:7a868505 -->
+implement Option 2
+### Re: implement Option 2 — done (HEAD)
+
+Fixed `auto_start_ext` in `route.rs`. The session priority is now:
+
+1. **`context_session`** (from sync `--window`) — wins when provided
+2. **`tmux_session` from frontmatter** — used when no context (route hotkey)
+3. **`current_tmux_session()`** — first-claim fallback
+
+When sync calls `auto_start_no_wait` with a context_session (derived from the `--window @0` argument), the pane is now created in session `0` regardless of what the frontmatter says. A log message notes the override:
+```
+[auto_start] context_session '0' overrides frontmatter tmux_session '1' (sync path)
+```
+
+This means email.md (bound to session `1`) will get a pane in session `0` when the editor layout sync requests it. The pane will be visible in the correct window.
+
+All 526 tests pass. Build successful. Want me to release?
+<!-- agent:boundary:75ba0e60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Fix cross-session sync** — auto-start from sync should use the target window's session, not frontmatter tmux_session
+- [x] **Cross-session sync fix** — context_session overrides frontmatter in sync path
+- [ ] **Release** — cross-session fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

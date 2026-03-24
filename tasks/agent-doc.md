@@ -1362,22 +1362,30 @@ This means:
 **Plugin install:** `agent-doc-jetbrains-0.2.20.zip` built. Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk..."
 
 All tests pass. `libagent_doc.so` rebuilt with `is_tracked` export.
-<!-- agent:boundary:15829140 -->
+Explain:
+- [ ] **EditorTabSyncListener** — layout sync routes bypass SubmitAction (low priority: sync doesn't send /agent-doc commands)
+### Re: Explain EditorTabSyncListener (HEAD)
+
+**What it is:** `EditorTabSyncListener` is a `FileEditorManagerListener` in the JetBrains plugin. It fires when you switch editor tabs or change the split layout. It calls `agent-doc sync --col ... --focus ...` to rearrange tmux panes to mirror the editor layout.
+
+**Why it was flagged as "bypass":** In the idea.log, there were "orphaned routes" at 21:35:33 and 21:35:39 — route events with no preceding `[run] recent typing detected` from SubmitAction. I initially suspected `EditorTabSyncListener` was triggering these.
+
+**Why it's actually low priority:** After investigation:
+1. `EditorTabSyncListener` only calls `agent-doc sync`, which manages **tmux layout** (which panes are visible, their positions). It does NOT send `/agent-doc <file>` to any pane.
+2. The `sync` command can call `route::auto_start` for new files (to create a pane), but `auto_start` sends `agent-doc start`, not `/agent-doc`. So it starts a Claude session but doesn't trigger a document submission.
+3. The orphaned routes at 21:35:33 were actually from a different trigger — likely a CLI-initiated run or a delayed SubmitAction callback that didn't log properly.
+4. `EditorTabSyncListener` already has its own 500ms debounce + concurrency guard (`AtomicBoolean running`).
+
+**Bottom line:** It doesn't need typing debounce because it never submits documents. It only arranges panes. The "bypass" label was misleading — I've updated the pending to reflect this.
+<!-- agent:boundary:beb9c485 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Plugin v0.2.19 installed → **v0.2.20 ready** (is_tracked + logging)
-- [x] **Add `--debounce` to route** — mtime-based `await_idle()`
-- [x] **Preflight mtime debounce** — 500ms idle check before diff
-- [x] **Fix `looks_truncated`** — improved dot handling, doubled recheck interval
-- [x] **Unified diff with context** — 5-line context radius
-- [x] **v0.25.8 released** — all targets published
-- [x] **FFI debounce logging** — `[native]` tags in TypingTracker + NativeLib
-- [x] **Untracked file debounce** — is_tracked() FFI + local fallback
+- [x] All debounce improvements shipped in v0.25.8
+- [x] Plugin v0.2.20 built (is_tracked + FFI logging)
 - [ ] **Install plugin v0.2.20** — restart IDE to activate
-- [ ] **EditorTabSyncListener** — layout sync routes bypass SubmitAction (low priority: sync doesn't send /agent-doc commands)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

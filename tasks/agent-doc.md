@@ -1133,7 +1133,7 @@ All log phases unified to `SCOPE_BLOCK` (was split across `SWAP_SKIP`/`ATTACH_SK
 `Sync Tmux Layout` is not working.
 Please look at the current tmux state and print it out.
 Please look at the desired tmux state and print it out.
-### Re: Sync Tmux Layout not working — diagnostics (HEAD)
+### Re: Sync Tmux Layout not working — diagnostics
 
 **Current tmux state:**
 
@@ -1154,7 +1154,7 @@ Please look at the desired tmux state and print it out.
 Can you clarify: which session is the editor connected to? When you click `Sync Tmux Layout`, what session/window should it target?
 
 Also — the stash has 18 panes. Many look like old agent-doc sessions. Want me to clean those up?
-<!-- agent:boundary:d03c54a0 -->
+<!-- agent:boundary:faa7bd0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

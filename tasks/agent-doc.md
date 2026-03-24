@@ -294,14 +294,25 @@ go
 Changed `resync::run(true)` → `resync::run(false)` in `sync.rs`. The post-sync resync now reports issues but doesn't kill panes. Auto_start's context_session override is no longer undone by resync.
 
 Rebuilt and installed. Try switching to email.md.
-<!-- agent:boundary:bababbd3 -->
+> tmux_session: '1'
+
+tasks/email.md tmux_session should be updated to the correct value
+### Re: update tmux_session (HEAD)
+
+Updated `tasks/email.md` frontmatter: `tmux_session: '1'` → `tmux_session: '0'`.
+
+This is the right fix — the file's session binding should match where it's actually used. The context_session override was a workaround for a misconfigured frontmatter value.
+
+Try switching to email.md now.
+<!-- agent:boundary:0ac05626 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Disable resync --fix in sync** — changed to report-only mode
+- [x] **email.md tmux_session fixed** — changed from '1' to '0'
 - [ ] **Test email.md** — switch to email.md in editor split
+- [ ] **Release v0.25.12** — all sync fixes ready
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

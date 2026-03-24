@@ -250,9 +250,37 @@ There's no published "standard" BCG email cadence — enterprise consulting hiri
 
 His personal site is anilpod.com — you could check there for a contact email. Common BCG email formats are `firstname.lastname@bcg.com`, so likely `anil.podduturi@bcg.com`, but this is unconfirmed.
 
+Dave Franklin mentioned that he is seeing lastname.firstname@bcg.com. He suggested trying both.
+
 **Options to find his email:**
 1. Check anilpod.com for a public email
 2. Ask Tony Tomai if he has Anil's direct email
 3. Try the BCG email pattern (`anil.podduturi@bcg.com`) as a last resort
-<!-- agent:boundary:8850292d -->
+### Updated: Anil's BCG email (HEAD)
+
+Good intel from Dave. Two BCG email formats to try:
+
+1. `anil.podduturi@bcg.com` (firstname.lastname)
+2. `podduturi.anil@bcg.com` (lastname.firstname)
+
+**Recommendation:** Send to both — one will bounce, the other should land.
+
+**Draft email:**
+
+> **Subject:** Catching up — Neo Innovation / Tenfore days
+>
+> Hi Anil,
+>
+> Brian Takita here — we crossed paths at Neo Innovation on the Tenfore project. I've been building AI tooling (document-as-interface agents, correspondence automation in Rust) and saw you're leading AI products at BCG.
+>
+> I'm also in the pipeline for Project Helix through Inspyr Solutions (Tony Tomai suggested I reach out). Would love to reconnect if you have a few minutes.
+>
+> Best,
+> Brian
+
+**Notes:**
+- Mirrors the LinkedIn message but adds Project Helix + Tony's name (since this is a direct channel, not cold outreach)
+- Corporate email is more likely to get seen than LinkedIn InMail sitting in "Other"
+- Keep it to one email — don't follow up for at least a week
+<!-- agent:boundary:e0c6cd4d -->
 <!-- /agent:exchange -->

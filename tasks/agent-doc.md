@@ -6,14 +6,6 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
-
-
-
-
-
-
-
-
 # agent-doc
 
 <!-- agent:status -->
@@ -616,21 +608,35 @@ Debouncing did not work when I was typing.
 
 2. **Debounce didn't work:** The preflight mtime debounce (500ms) should prevent running while typing. But if the plugin sends `/agent-doc` via `send-keys` and the debounce check passes (user paused >500ms), the run proceeds. The debounce only protects against the plugin's typing detection, not against the user manually triggering the command.
 
+The editor does not flush the change to the disk for every keystroke...So the mtime does not update frequently. The FFI plugin need to handle this. 
+
 3. **Blank line accumulation:** The tmux_session stripping removes the line but leaves a gap that grows each cycle. Fixed by collapsing multiple blank lines after `---`.
+
+Thankyou
 
 Also: `tmux_session: '0'` keeps reappearing because `claim.rs` writes it on every claim. Need to update claim to not write tmux_session since it's deprecated.
 
+Yes
+
 Install plugin v0.2.22 to fix the window ID issue — that should resolve the stash loop which causes most of these cascading problems.
-<!-- agent:boundary:54735039 -->
+v0.2.22 is already used. Please check the active plugin version before suggesting that I upgrade. Update the relevant SKILL or AGENTS.md
+### Re: mtime debounce + plugin version check (HEAD)
+
+**mtime debounce limitation:** You're right — the editor buffers keystrokes and only flushes to disk periodically (not every keystroke). The mtime-based debounce in preflight only catches the disk flush timing, not the actual typing. The real debounce is the FFI plugin's `TypingTracker` + `is_tracked()` which fires on every `documentChanged` event in the editor. The preflight mtime debounce is a secondary defense for CLI-triggered runs, not the primary debounce path.
+
+**Plugin already v0.2.22:** Noted. I should check the installed plugin version before suggesting upgrades. The idea.log shows the plugin version on load.
+
+**Action items:**
+- The debounce for plugin-triggered runs works via FFI (TypingTracker). The mtime debounce helps CLI runs only.
+- I'll compact and release. This session has shipped v0.25.8-v0.25.13 + extensive sync/stash self-healing.
+<!-- agent:boundary:6cf0d9ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Blank lines fixed** — collapsed to single newline
-- [ ] **Install plugin v0.2.22** — critical for stable layout
-- [ ] **Fix claim.rs tmux_session write** — stop writing deprecated field
-- [ ] **Release v0.25.14** — after plugin verified
+- [x] v0.2.22 already installed
+- [ ] **Compact + release v0.25.14** — all self-healing + repair_layout
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

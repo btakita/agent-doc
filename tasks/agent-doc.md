@@ -278,21 +278,32 @@ No code behavior changes — the auto-repair and context_session override contin
 Should we have the current agent-doc release delete tmux_session in the frontmatter?
 
 Ready to release?
-### Re: Implement stash fix + strip tmux_session? (HEAD)
+### Re: Implement stash fix + strip tmux_session?
 
 **On stripping tmux_session:** No — don't delete it yet. The sync auto-repair already writes the correct value, so existing files work. Stripping would be a breaking change for users on older binaries that still need the field. Better to just ignore it at runtime (which we already do via context_session priority) and let it decay naturally as files get rewritten.
+
+I don't share my documents with anyone. So it's ok to strip.
 
 **On the stash fix:** I'll implement more aggressive stash resize in tmux-router now. The issue is `stash_pane` falls back to `break_pane_to_stash` when `join-pane` fails due to "pane too small". The fix: resize the stash window to a larger height before attempting the join.
 
 Let me check the current stash resize logic and make it more robust.
-<!-- agent:boundary:87a7897b -->
+### Re: Stash join fix — done (HEAD)
+
+Changed `stash_pane` in tmux-router:
+1. Resize from 200 → 1000 rows (prevents "pane too small")
+2. On join failure: **kill the pane** instead of `break_pane_to_stash` (prevents orphan stash windows)
+
+The tradeoff: if join fails, the pane is lost instead of creating an orphan window. This is the right choice — an unwanted pane that can't be stashed should be killed, not scattered into new windows.
+
+All 526 tests pass. Ready for v0.25.13 release.
+<!-- agent:boundary:704c4285 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **Stash join resilience** — implementing now
-- [ ] **Release v0.25.13** — after stash fix
+- [x] **Stash join fix** — kill on failure instead of orphan window creation
+- [ ] **Release v0.25.13** — install.sh + formula + tmux_session deprecation + stash fix
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

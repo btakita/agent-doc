@@ -40,7 +40,7 @@ https://www.linkedin.com/in/dondesando/
 
 Is there specific context for this connection — networking, recruiting, business development? That would help me tailor any outreach suggestions.
 Read his message history with me at mail/contacts/don-desando/*.txt
-### Re: Message History (HEAD)
+### Re: Message History
 
 Read `mail/contacts/don-desando/20260323-linkedin-don-desando.txt`. Just one message from Don (7:10 PM today):
 
@@ -61,7 +61,7 @@ Or if you want to lean into the banter:
 > Ha, fair enough. And thanks for the heads up on the site — I'll get that sorted. What were you trying to check out?
 
 Both keep the conversation going and address the site issue without being defensive. What's the context of your initial message to him — was it a comment on his AI/API security post?
-<!-- agent:boundary:0854dcbb -->
+<!-- agent:boundary:c95a37f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -304,8 +304,41 @@ fn auto_start_ext(
     context_session: Option<&str>,
     skip_wait: bool,
 ) -> Result<()> {
-    // Read tmux_session from frontmatter, validate it exists, fall back if not
-    let session_name = if let Ok(content) = std::fs::read_to_string(file) {
+    // Determine target session. Priority:
+    // 1. context_session (from sync --window) — sync knows which session it's managing
+    // 2. tmux_session from frontmatter — document's preferred session
+    // 3. current_tmux_session() — first-claim fallback
+    let session_name = if let Some(ctx) = context_session {
+        // Context session from sync overrides frontmatter — sync is managing
+        // a specific window/session and needs the pane there, not elsewhere.
+        let fm_session = std::fs::read_to_string(file).ok()
+            .and_then(|c| {
+                let (fm, _) = frontmatter::parse(&c).ok()?;
+                fm.tmux_session
+            });
+        if let Some(ref fm) = fm_session
+            && fm != ctx
+        {
+            eprintln!(
+                "[auto_start] context_session '{}' overrides frontmatter tmux_session '{}' — repairing frontmatter",
+                ctx, fm
+            );
+            // Repair: direct string replace to avoid frontmatter round-trip extra newline
+            if let Ok(content) = std::fs::read_to_string(file) {
+                let old = format!("tmux_session: '{}'", fm);
+                let new = format!("tmux_session: '{}'", ctx);
+                let updated = content.replacen(&old, &new, 1);
+                if updated != content {
+                    if let Err(e) = std::fs::write(file, &updated) {
+                        eprintln!("[auto_start] warning: failed to repair tmux_session: {}", e);
+                    } else {
+                        eprintln!("[auto_start] repaired tmux_session in {}", file.display());
+                    }
+                }
+            }
+        }
+        ctx.to_string()
+    } else if let Ok(content) = std::fs::read_to_string(file) {
         let requested = frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.tmux_session);
@@ -320,10 +353,6 @@ fn auto_start_ext(
                     name, name
                 );
             }
-        } else if let Some(ctx) = context_session {
-            // No tmux_session in frontmatter — use context session from sync
-            eprintln!("[auto_start] no tmux_session in frontmatter, using context session '{}'", ctx);
-            ctx.to_string()
         } else {
             // No tmux_session and no context — use current session (first claim sets it)
             current_tmux_session(tmux)
@@ -354,10 +383,19 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         .to_string_lossy()
         .to_string();
 
-    // Try to split directly in an existing window that has registered agent-doc panes.
-    // This avoids creating a new window then trying to join_pane (which can fail
-    // when the target window is at minimum pane size or in a different window).
-    let existing_pane = find_registered_pane_in_session(tmux, session_name, "");
+    // Try to split directly in an existing pane.
+    // When skip_wait=true (sync path), prefer panes in the target window (agent-doc window)
+    // over stash panes — splitting in the stash creates invisible panes.
+    let existing_pane = if skip_wait {
+        // Sync path: find a pane in the agent-doc window (not stash)
+        let window_panes = tmux.list_window_panes(
+            &format!("{}:agent-doc", session_name)
+        ).unwrap_or_default();
+        window_panes.into_iter().next()
+            .or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
+    } else {
+        find_registered_pane_in_session(tmux, session_name, "")
+    };
     let new_pane = if let Some(ref target) = existing_pane {
         match tmux.split_window(target, &cwd, "-dh") {
             Ok(pane) => {

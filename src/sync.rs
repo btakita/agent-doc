@@ -133,6 +133,27 @@ fn run_with_options(
                 .map(|pane| tmux.pane_alive(pane))
                 .unwrap_or(false);
 
+            // Repair tmux_session in frontmatter if it doesn't match the target session.
+            // This ensures cross-session files get corrected on first sync.
+            if let Some(ref ctx) = context_session
+                && let Some(ref fm_session) = fm.tmux_session
+                && fm_session != ctx
+            {
+                eprintln!(
+                    "[sync] repairing tmux_session in {} ('{}' → '{}')",
+                    file_path.display(), fm_session, ctx
+                );
+                // Direct string replace to avoid frontmatter round-trip (which can add extra newlines)
+                let old = format!("tmux_session: '{}'", fm_session);
+                let new = format!("tmux_session: '{}'", ctx);
+                let updated = content.replacen(&old, &new, 1);
+                if updated != content
+                    && let Err(e) = std::fs::write(file_path, &updated)
+                {
+                    eprintln!("[sync] warning: failed to repair tmux_session: {}", e);
+                }
+            }
+
             if has_alive_pane {
                 // Pane is alive, but check if the registered file still exists.
                 // After a rename, the pane shows an error for the old path.
@@ -216,9 +237,10 @@ fn run_with_options(
     // for files arranged by sync, even if they were never individually claimed.
     register_synced_files(&session_files.borrow(), &result.file_panes);
 
-    // Post-sync: validate and auto-fix session state.
-    // Catches wrong-session panes early and fixes them before the user notices.
-    if let Err(e) = resync::run(true) {
+    // Post-sync: validate session state (report only, no kill).
+    // Disabled --fix because auto_start with context_session intentionally places
+    // cross-session panes — resync --fix would kill them (lesson: context_session override).
+    if let Err(e) = resync::run(false) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
 

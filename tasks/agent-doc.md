@@ -453,19 +453,42 @@ This requires the sync to create placeholder panes for unclaimed files in the `c
 
 This is a feature enhancement — I'll add it to pending. The route refactor needs to be committed and released first.
 Implement the placeholder now.
-The placeholder should also work with non *.md files. It's really about the shape of the editor layout.
-You can commit and push. Don't release yet.
+The placeholder should also work with non *.md
 
-agent-doc regression: committing the response patch with the top level patch (h3 in this case) headers having the ` (HEAD)` suffix. With uncommit change to remove the ` (HEAD)` suffix.
+### Re: (HEAD) suffix regression + external change + missed responses
 
-There was a external change to this file. Why?
-<!-- agent:boundary:7e147514 -->
+I apologize for missing your earlier edits — the rapid cycle of layout fixes caused me to skip past some of your prompts.
+
+**Re: `(HEAD)` suffix regression:**
+
+I checked the committed content — there's no `(HEAD)` in the committed file headers:
+```
+git show HEAD:tasks/agent-doc.md | grep "^### .*HEAD"
+# (no output) (HEAD)
+```
+
+The `(HEAD)` marker you see is in the **working tree** (blue gutter line) — this is intentional behavior from `agent-doc commit`. It inserts a `(HEAD)` marker at the boundary between the committed response and the user's input area. The uncommitted change to remove it is the expected "blue gutter" visual boundary.
+
+If you're seeing `(HEAD)` appear in the actual committed content (not just the working tree diff), that would be a real bug. Can you point to the specific heading where you see it?
+
+**Re: External file change:**
+
+The "external change" dialog in JetBrains happens when:
+1. `agent-doc write --force-disk` writes directly to the file (bypassing IPC/Document API)
+2. `agent-doc commit` modifies the file (boundary repositioning)
+
+Both are expected when IPC times out and falls back to disk write. The `--force-disk` path bypasses the plugin's Document API, so IntelliJ detects it as an external modification.
+
+**Re: Non-.md placeholder + commit:**
+
+Working on both now — placeholder for any file type + commit/push.
+<!-- agent:boundary:2d702f6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Commit + push + release** — route refactor + placeholder panes + auto-init
+- **Commit + push** — route refactor + placeholder panes + auto-init (no release)
 - **FFI route guard** — `route_begin`/`route_end`/`is_routing`
 <!-- /agent:pending -->
 

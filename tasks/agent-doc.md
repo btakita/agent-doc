@@ -2439,7 +2439,7 @@ Each term follows the existence-lang node format (Ontology/Axiology/Epistemology
 
 dev dep...because the syntax of the module harness may change and we want to be in sync
 
-### Re: module-harness as dev-dep (HEAD)
+### Re: module-harness as dev-dep
 
 Added to `src/agent-doc/Cargo.toml`:
 
@@ -2451,7 +2451,7 @@ module-harness = { path = "../module-harness" }
 Using a path dependency for now (not yet on crates.io). This ensures agent-doc's test builds stay in sync with module-harness syntax changes. When module-harness is published, we can switch to a version pin.
 
 Compilation verified — no errors.
-<!-- agent:boundary:b8836cbe -->
+<!-- agent:boundary:08100976 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

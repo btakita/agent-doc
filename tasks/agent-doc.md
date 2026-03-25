@@ -1733,7 +1733,7 @@ What are the gaps in the agent-doc binary commands?
 This should be deterministically fixed.
 Add tests.
 Update SPEC.md
-audit
+audit docs
 
 ### Re: window 0, evals session, corky watch, and detection gaps
 
@@ -1741,12 +1741,12 @@ audit
 
 1. **Window 0 restored** — moved `agent-doc` from `0:2` to `0:0`. Session 0 now has only `0:agent-doc`.
 2. **Corky watch returned** — moved from `0:1:stash` back to session 3. Session 3 now shows `0:corky` with both zsh and corky watch panes.
-3. **Stash window gone** — session 0 no longer has a stash window.
+3. **Stash window gone** — session 0 no longer has a stash window.: We should have 1:stash now. The `agent-doc` binary should have created it with the health check and repair.
 4. **Root cause fixed** — removed the `-a` flag from `tmux_router::Tmux::new_window()`. This flag caused windows to be created *after* the current index instead of at the lowest available slot. All 77 tmux-router tests + 38 agent-doc tests pass.
-5. **Binary rebuilt** — `cargo build --release` + `cargo install --path .` completed.
+5. **Binary rebuilt** — `cargo build --release` + `cargo install --path .` completed.: Please install locally for testing.
 
 **Q: Why was `0:agent-doc` closed in the first place?**
-Window 0 was never *closed* — it was never *created at index 0*. The `-a` flag on `new_window` meant: when session 0 already had `1:stash`, the new window went to index 2. The `repair_layout` Phase 3 fix (swap-window) we implemented earlier tonight would have corrected this, but `repair_layout` isn't called during preflight — only during `sync`.
+Window 0 was never *closed* — it was never *created at index 0*. The `-a` flag on `new_window` meant: when session 0 already had `1:stash`, the new window went to index 2. The `repair_layout` Phase 3 fix (swap-window) we implemented earlier tonight would have corrected this, but `repair_layout` isn't called during preflight — only during `sync`.: I saw 0:agent-doc was earlier than what you are t
 
 **Q: What happened to the `tasks/evals.md` claude session?**
 Sessions 2 and 3 are both idle zsh shells — no claude or agent-doc process is running in either. The evals session's Claude process likely exited (context exhaustion or clean exit) and the restart loop ended. Session 2 is at `/home/brian`, session 3 is at `/home/brian/work/btakita/agent-loop`.
@@ -1771,7 +1771,23 @@ The `-a` flag in `new_window` was the root cause. Now removed. Future windows wi
 4. Update SPEC.md
 
 Starting implementation now.
-<!-- agent:boundary:ecf1b0bb -->
+
+### Re: inline feedback (HEAD)
+
+**"We should have 1:stash now"** — Created `0:1:stash` window. Session 0 now has `0:agent-doc` + `1:stash` as expected. The health check (in progress via subagent) will ensure this exists on every preflight.
+
+**"Please install locally for testing"** — The `.bin/agent-doc` symlink already points to `src/agent-doc/target/release/agent-doc` which was rebuilt. `cargo install --path .` also updated `~/.cargo/bin/agent-doc`. Both paths have the latest binary.
+
+**"I saw 0:"** — Yes, window 0 did exist initially when the session was created via `new_session` (which creates window 0 by default). But when a second document was routed to the same tmux session, `new_window -a` created window 2 (after the stash at 1). Then when the original window 0 pane exited, window 0 was lost. The `-a` removal fixes this for future windows.
+
+**"audit docs"** — Will run `make precommit` (includes audit-docs) after the subagents complete their implementations.
+
+**Status:** Two subagents working in parallel:
+1. Preflight health check implementation (adding layout validation step 0)
+2. Stash-return mechanism (returning active panes from stash to origin sessions)
+
+Will integrate, test, audit, and rebuild once they complete.
+<!-- agent:boundary:c2a4044e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

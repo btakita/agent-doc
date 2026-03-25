@@ -94,6 +94,15 @@ interface AgentDocLib : Library {
     /** Check if the document has been tracked (at least one document_changed call). */
     fun agent_doc_is_tracked(file_path: String): Boolean
 
+    /** Set response status for a file. Values: "generating", "writing", "routing", "idle". */
+    fun agent_doc_set_status(file_path: String, status: String)
+
+    /** Get response status for a file. Returns "generating", "writing", "routing", or "idle". Caller must free result. */
+    fun agent_doc_get_status(file_path: String): Pointer?
+
+    /** Check if any operation is in progress. Returns true if status != "idle". */
+    fun agent_doc_is_busy(file_path: String): Boolean
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

@@ -498,6 +498,10 @@ Why was it passing before this last blog post?
 Pushed `d76dc2b` — CI should now resolve 0.1.4 everywhere.
 release corky if we have not yet
 
+Publish a comment to the YouTube video with a link to the blog post.
+
+Draft a linkedin post
+
 ### Re: Release corky
 
 Released **corky v0.21.2** with `youtube delete` command.
@@ -508,15 +512,32 @@ Released **corky v0.21.2** with `youtube delete` command.
 - GitHub Release: https://github.com/btakita/corky/releases/tag/v0.21.2
 - Installed with `--features transcribe-cuda`
 - Agent-loop submodule pointer updated
-<!-- agent:boundary:9ecd09ea -->
+
+### Re: YouTube comment + LinkedIn draft (HEAD)
+
+**YouTube comment posted:**
+- Blog post link + topic summary on https://www.youtube.com/watch?v=ixDbYPO43Cw
+- Comment ID: `UgyiecVWPCM3UTiPdDp4AaABAg`
+- Pin it: https://www.youtube.com/watch?v=ixDbYPO43Cw&lc=UgyiecVWPCM3UTiPdDp4AaABAg
+
+**LinkedIn draft created:** `mail/social/20260325-module-harness-linkedin.md`
+
+Leads with the module harness concept, highlights the ontology-building session, covers back-testing and agent teams philosophy. Links in first comment (better for engagement) — ready for you to review and publish.
+
+To publish: `corky linkedin publish mail/social/20260325-module-harness-linkedin.md`
+
+Or review/edit the draft first.
+<!-- agent:boundary:0f12bf4e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
 - [x] rappstack packages published at 0.1.4
 - [x] Blog post video URL updated
-- [x] corky v0.21.2 released (youtube delete)
-- [x] Deleted old edited video OrGJi8Hh_bQ
-- [x] Fixed transitive dep resolution with overrides
+- [x] corky v0.21.2 released
+- [x] Deleted old edited video
+- [x] YouTube comment with blog link posted
+- [x] LinkedIn draft created
+- [ ] Publish LinkedIn post (review draft first)
 - [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

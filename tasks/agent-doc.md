@@ -1655,22 +1655,36 @@ Just saw "The m" truncation happen again — caught by truncation detection but 
 2. **Longer recheck**: Current 400ms single recheck is too short. Should do multiple rechecks (e.g., 3x 500ms) before accepting truncated content as stable
 
 Note: "The m" in your edit is truncated — what were you typing?
+Implement:
+- [ ] **IPC silent failure bug** — plugin ACKs patch without verifying Document API write
+- [ ] **FFI debounce bridge** — expose typing state to CLI preflight
+- [ ] **Truncation recheck too short** — 400ms single check misses editor auto-save delay
+
 
 ### Re: Confirmed — bugs added to pending
 
 Correction noted: "buffer then flush cycle" (not cache). You're right — the editor buffers keystrokes and flushes to disk on auto-save intervals, which is why mtime-based detection misses mid-typing state.
 
 Both bugs added to pending list below.
-<!-- agent:boundary:86aee079 -->
+
+### Re: Implementing all three bugs (HEAD)
+
+Starting implementation now. Working on:
+1. **IPC silent failure** — add verification after patch consumption
+2. **FFI debounce bridge** — expose typing state via lock file for CLI access
+3. **Truncation recheck** — increase to 3x 500ms rechecks
+
+Will update pending as each is completed.
+<!-- agent:boundary:b2ed0972 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
-- [ ] **IPC silent failure bug** — plugin ACKs patch without verifying Document API write
-- [ ] **FFI debounce bridge** — expose typing state to CLI preflight (buffer→flush gap)
-- [ ] **Truncation recheck too short** — 400ms single check misses editor auto-save delay
+- [ ] **IPC silent failure bug** — implementing verification (active)
+- [ ] **FFI debounce bridge** — expose typing state to CLI preflight
+- [ ] **Truncation recheck too short** — 400ms → 3x 500ms
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md

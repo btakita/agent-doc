@@ -2512,7 +2512,7 @@ In tmux-router add dev dependencies:
 
 Add an ontology for tmux-router
 
-### Re: tmux-router dev deps + ontology (HEAD)
+### Re: tmux-router dev deps + ontology
 
 **Dev dependencies added** to `src/tmux-router/Cargo.toml`:
 ```toml
@@ -2533,7 +2533,7 @@ Compilation verified.
 | **Reconcile** | Algorithm | 5-phase attach-first sync (ATTACH→SELECT→DETACH→REORDER→VERIFY) |
 | **Stash** | State | Hidden window preserving pane process continuity across transitions |
 | **Registry** | State | Persistent JSON file-path-to-pane-ID map with advisory locking |
-<!-- agent:boundary:7e9a9e94 -->
+<!-- agent:boundary:ca7fa6c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

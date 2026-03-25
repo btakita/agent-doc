@@ -278,7 +278,7 @@ Demonstrates all eval types in a single JetBrains plugin harness:
 **Test results: 36 tests pass (16 unit + 20 integration), clippy clean.**
 
 Ready for v0.1.0 release — commit, tag, push, publish?
-<!-- agent:boundary:b4fc418e -->
+<!-- agent:boundary:0e7385f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

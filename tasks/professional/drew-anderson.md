@@ -138,7 +138,7 @@ These are all agentic software that focuses on human-agent alignment.
 
 Please take all of this into consideration. Let's start to frame the discussion and a response.
 
-### Re: Framing the discussion + draft response (HEAD)
+### Re: Framing the discussion + draft response
 
 **Strategic framing:**
 
@@ -180,7 +180,7 @@ Brian
 **Tone notes:** Matches Drew's casual-professional style. Establishes peer credibility without name-dropping. Asks specific technical questions that signal you know the space. Leaves the PresenceAI licensing angle as a conversation starter without tipping your hand.
 
 Want me to adjust the tone, add/remove anything, or send as-is?
-<!-- agent:boundary:f62c066a -->
+<!-- agent:boundary:6483f9f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

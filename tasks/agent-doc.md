@@ -2203,7 +2203,7 @@ Test name detection supports:
 - JS/TS: `it("name"` / `test("name"`
 
 These metrics are the foundation for backtesting — comparing harness context effectiveness by measuring how different harness versions affect agent outcomes.
-<!-- agent:boundary:ffda9b91 -->
+<!-- agent:boundary:077acbe4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

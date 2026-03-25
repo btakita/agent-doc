@@ -280,7 +280,7 @@ Error: Process completed with exit code 1.
 Let's be less aggressive with the video editing. The light edit cut out some of my speech.
 CC transcribe the result video.
 Upload result video with transcription.
-Edit video description
+Edit video descriptio
 
 ### Re: Build failure — missing `blog_post__video_url_` export
 
@@ -322,15 +322,34 @@ Done! Full unedited video uploaded to YouTube.
 - **Draft:** `mail/social/20260325-youtube-module-harness-full.md`
 
 **Previous edited version** (110 min) is still up at https://www.youtube.com/watch?v=OrGJi8Hh_bQ — you can delete it or keep both.
+Delete it
 
 **Still pending:** blog deploy is blocked by the missing `blog_post__video_url_` npm export. Need to publish `@rappstack/domain--server--blog@0.1.2`.
-<!-- agent:boundary:717d3f3b -->
+publish
+
+Update blog post with new video url.
+
+### Re: Publish rappstack packages (HEAD)
+
+Done. Published both packages and updated all dependencies:
+
+**Published:**
+- `@rappstack/domain--any--blog@0.1.3` — added `video_url` and `playlist_url` to `Post` and `post_meta_T` types
+- `@rappstack/domain--server--blog@0.1.3` — added `blog_post__video_url_` and `blog_post__playlist_url_` exports, fixed `workspace:*` dep
+
+**Updated briantakita.me-dev:**
+- All three `package.json` files updated to `^0.1.3`
+- Regenerated `bun.lock` (had to clear bun cache — stale 0.1.2 with `workspace:*` was cached)
+- Pushed `e20031c` — CI should now build successfully
+
+**Note:** The 0.1.2 publish of `domain--server--blog` had a `workspace:*` dependency that slipped through — npm publish doesn't resolve workspace references. Fixed by replacing with `^0.1.0` in 0.1.3.
+<!-- agent:boundary:2626d9f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Full video re-encoded (7.4 GB → 712 MB)
-- [x] Full video transcribed (4423 segments)
 - [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
-- [ ] Publish `@rappstack/domain--server--blog@0.1.2` (blog deploy blocked)
-- [ ] Delete old edited video (optional)
+- [x] Published `@rappstack/domain--any--blog@0.1.3`
+- [x] Published `@rappstack/domain--server--blog@0.1.3`
+- [x] Updated briantakita.me-dev deps and pushed
+- [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

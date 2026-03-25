@@ -458,7 +458,7 @@ You can commit and push. Don't release yet.
 
 agent-doc regression: committing the response patch with the top level patch (h3 in this case) headers having the ` (HEAD)` prefix. With uncommit change to remove the `
 
-### Re: Implement placeholder panes (HEAD)
+### Re: Implement placeholder panes
 
 **Implemented.** When sync encounters an unclaimed file (no session UUID), it now auto-inits the file by writing a session UUID via `frontmatter::ensure_session()`. This makes the file "managed" so the auto-start path creates a Claude pane for it.
 
@@ -471,7 +471,7 @@ agent-doc regression: committing the response patch with the top level patch (h3
 This means switching to an unclaimed .md file in the editor will auto-claim it on the next sync cycle — no manual `/agent-doc claim` needed.
 
 **Tests:** 558 passing. Binary rebuilt and installed.
-<!-- agent:boundary:09ddbf95 -->
+<!-- agent:boundary:2948897e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

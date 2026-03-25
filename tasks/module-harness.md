@@ -318,7 +318,7 @@ If you wanted a stronger coupling in the future, the options would be:
 - **Shared validation** — use the `existence` CLI to lint module-harness ontology terms against the kernel vocabulary (as a CI step, not a Cargo dependency)
 
 But for now, the markdown-link reference is the right level of coupling — it preserves independence while documenting the conceptual lineage.
-<!-- agent:boundary:0d44f882 -->
+<!-- agent:boundary:f21f0bf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

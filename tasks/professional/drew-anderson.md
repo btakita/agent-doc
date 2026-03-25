@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v5 (final candidate) — IP corrected, social signal added
+Draft v6 — module-harness/existence-lang woven into opener conceptually
 <!-- /agent:status -->
 
 ## Exchange
@@ -274,7 +274,7 @@ Reviewed the `src/presence` codebase. Here's what I found and how it shapes the 
 
 Hey Drew,
 
-Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).: Drew like a couple of my recent posts. My last post ca
+Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).
 
 I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: production real-time V2V pipeline on LiveKit with multi-modal integration. We ran real-time lipsync avatars using diffusion models, and on-demand image generation across multiple providers (Flux, Grok Imagine, Kling) — all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but I retained the IP and codebase.
 
@@ -311,12 +311,12 @@ Two important corrections:
 
 Hey Drew,
 
-Great to connect — saw you liked a couple of my recent posts. Right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).
+Great to connect — saw you liked a couple of my recent posts. Right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).: Drew like a couple of my recent posts. My last post came after looked at my profile. Would it be worth mentioning, since I get into module-harness + using existence-lang.
 
 I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
 
 A few things I'd love to compare notes on:
-- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic. I've worked across Claude, Grok V2V, and Hume, and each has different latency/quality profiles
+- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic. I've worked across Claude, Grok V2V, and Hume, and each has different latency/quality profiles: Hume has 
 - On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
 
 I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
@@ -333,7 +333,44 @@ Brian
 - **Role clarified:** "I was the lead engineer" — establishes credibility without overstating
 - **Social acknowledgment:** "saw you liked a couple of my recent posts" — natural opener that shows you noticed his engagement
 - Removed "Great to connect" standalone — merged with the social signal for a tighter opener
-<!-- agent:boundary:abf12b1b -->
+
+### Re: Draft v6 — module-harness / existence-lang mention (HEAD)
+
+Good instinct. If Drew liked your posts *after* viewing your profile, he's already seen your agentic tooling content. A brief nod to it makes the opener more personal and shows you're paying attention to the engagement sequence.
+
+However — I'd keep it subtle. Naming "module-harness" and "existence-lang" directly in a LinkedIn message to someone you haven't spoken to yet risks sounding like jargon. Better to reference the *concept* (human-agent alignment, structured AI development) and let Drew ask if he wants specifics.
+
+**Revised draft v6:**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on human-agent alignment: structured ways for humans and AI to collaborate on documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic. I've worked across Claude, Grok V2V, and Hume, and each has different latency/quality profiles
+- On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
+
+I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Changes from v5:**
+- Expanded opener to acknowledge he saw your posts *and* connect them to the "5th wave" theme: "we're past vibe coding into something more intentional"
+- Reframed agentic tools as "human-agent alignment" — describes module-harness + existence-lang conceptually without naming them (saves jargon for a deeper conversation)
+- "documents, correspondence, and ontology-driven systems" — accurately describes agent-doc, corky, existence-lang without dropping product names
+- Rest of the message unchanged — it was already solid
+
+**Trade-off:** The opener is now 3 sentences instead of 1, but each carries meaning. If you want it tighter, we can cut "Your '5th wave' framing resonates..." but I think it builds rapport.
+<!-- agent:boundary:049d2a84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

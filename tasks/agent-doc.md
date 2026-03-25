@@ -2203,14 +2203,48 @@ Test name detection supports:
 - JS/TS: `it("name"` / `test("name"`
 
 These metrics are the foundation for backtesting — comparing harness context effectiveness by measuring how different harness versions affect agent outcomes.
-<!-- agent:boundary:077acbe4 -->
+
+Can we properly define what spec, agentic contracts, and evals are in module harness.
+Please create an ontology using existence-lang in module-harness.
+Let's precisely define our terminology.
+
+### Re: Ontology for module-harness (HEAD)
+
+Created 7 domain terms in `ontology/src/`, each following the existence-lang node format (Ontology/Axiology/Epistemology):
+
+| Term | Extends | Definition |
+|------|---------|------------|
+| **Harness** | Context | Structured context applied to a module — bounds what an agent needs to know |
+| **Spec** | Definition | Behavioral specification of public interface — what it does, not how |
+| **Contract** | Integrity | Invariant or guarantee a module upholds — what callers can rely on |
+| **Eval** | Pattern | Named, testable scenario — repeatable pattern connecting spec to evidence |
+| **Coverage** | Resolution | Degree to which evals account for spec — resolution metric on completeness |
+| **Drift** | Evolution | Divergence between harness and actual state — system evolved beyond docs |
+| **Backtest** | Story | Replayed agent work against known state — story measuring harness effectiveness |
+
+**Ontology chain:**
+```
+Existence → Entity → System → Domain → Module → Harness
+                                                  ├── Spec (what it does)
+                                                  ├── Contract (what callers can assume)
+                                                  └── Eval (how to verify)
+                                                       ├── Coverage (completeness metric)
+                                                       └── Backtest (effectiveness metric)
+```
+
+Key design decisions:
+- **Spec vs Contract**: spec describes per-function behavior; contract describes cross-cutting guarantees (atomicity, error handling). Both are needed — agents use spec to understand, contracts to reason about safety.
+- **Eval as Pattern**: evals are the bridge between documentation and measurement. The name makes them addressable by test frameworks and coverage tools.
+- **Drift as Evolution**: drift is natural — code evolves. The ontology frames it neutrally (not as failure) while the tooling surfaces it for action.
+
+Pushed to GitHub: https://github.com/btakita/module-harness
+<!-- agent:boundary:be05f867 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**module-harness: GitHub repo + submodule** — created, pushed, README + SPEC~~ ([done])
-- ~~**module-harness: coverage subcommand** — 100% module coverage, 68% eval coverage~~ ([done])
+- ~~**module-harness ontology** — 7 terms defined, pushed~~ ([done])
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

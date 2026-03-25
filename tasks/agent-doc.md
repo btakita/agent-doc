@@ -1332,7 +1332,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - Orphaned agent processes everywhere killed
 Impl]ement:
 - [ ] **Split direction from column position** — left column = split before
-### Re: Split direction from column position (HEAD)
+### Re: Split direction from column position
 
 This is already implemented and tested:
 
@@ -1346,7 +1346,7 @@ This is already implemented and tested:
 3. `sync.rs` reconcile: `first_pane_join_flag()` and `join_target()` compute the correct join direction for each pane based on its position in the column grid
 
 This pending item can be marked done — it's been working since the sync rewrite.
-<!-- agent:boundary:a765e887 -->
+<!-- agent:boundary:8f4c3ad4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2208,7 +2208,7 @@ Can we properly define what spec, agentic contracts, and evals are in module har
 Please create an ontology using existence-lang in module-harness.
 Let's precisely define our terminology.
 
-### Re: Ontology for module-harness (HEAD)
+### Re: Ontology for module-harness
 
 Created 7 domain terms in `ontology/src/`, each following the existence-lang node format (Ontology/Axiology/Epistemology):
 
@@ -2238,7 +2238,7 @@ Key design decisions:
 - **Drift as Evolution**: drift is natural — code evolves. The ontology frames it neutrally (not as failure) while the tooling surfaces it for action.
 
 Pushed to GitHub: https://github.com/btakita/module-harness
-<!-- agent:boundary:be05f867 -->
+<!-- agent:boundary:5d0ab379 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

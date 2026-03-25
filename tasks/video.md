@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Disk cleanup analysis complete. 46 GB deletable (raw sources on YouTube). 18.1 GB unmapped — awaiting user input.
+Cleanup done: 68 GB → 21 GB (47 GB freed). 8 unmapped files remain — awaiting identification.
 <!-- /agent:status -->
 
 ## Exchange
@@ -73,15 +73,46 @@ Cross-referenced your 25 video files (68 GB) against 13 YouTube uploads on brian
 - Do you recognize the unmapped 03-09, 03-12, 03-15, 03-16, 03-18 recordings?
 - Keep epN-light.mp4 as archival copies, or trust YouTube?
 - Should I delete the safe-to-delete files now?
-<!-- agent:boundary:0588ba43 -->
+
+Do the recommendations
+### Re: Do the recommendations (HEAD)
+
+**Deleted 17 files (~48 GB):**
+
+Raw sources (10 files, ~46 GB):
+- `2026-03-22-merged.mp4`, `2026-03-21 17-04-37.mp4`, `2026-03-21 19-11-06.mp4`
+- `2026-03-22 00-07-18.mp4`, `2026-03-22 09-19-30.mp4`, `2026-03-22 10-27-48.mp4`
+- `2026-03-22 10-27-48-edited2.mp4`, `2026-03-22 11-59-10.mp4`
+- `2026-03-18 02-19-37.mp4`, `2026-03-18 03-16-04.mp4`
+
+Uploaded files (7 files, ~2.3 GB):
+- `ep1-light.mp4` through `ep6-light.mp4`, `2026-03-19 02-26-07-edited.mp4`
+
+**Result: 68 GB → 21 GB** (47 GB freed)
+
+**Remaining 8 files (unmapped to YouTube):**
+
+| File | Size | Duration |
+|------|------|----------|
+| `2026-03-12 00-43-08.mp4` | 5.5 GB | 2:05 |
+| `2026-03-15 01-14-16.mp4` | 4.8 GB | 1:49 |
+| `2026-03-16 12-01-46.mp4` | 2.4 GB | 0:55 |
+| `2026-03-23 16-58-55.mp4` | 2.0 GB | 0:45 |
+| `2026-03-12 03-50-55.mp4` | 1.8 GB | 0:41 |
+| `2026-03-09 15-31-58_backstage_interview.mp4` | 1.7 GB | 0:37 |
+| `2026-03-18 10-23-25.mp4` | 1.7 GB | 0:37 |
+| `2026-03-12 17-49-43-cropped.mp4` | 671 MB | 2:01 |
+
+Still need your input on these — are any of them sources for older YouTube videos (Dog-fooding Parts 1-3, Lazily, Sub-1KB Framework)?
+<!-- agent:boundary:7ce0f666 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Delete raw source videos already on YouTube (~46 GB)
-- [ ] Decide on epN-light.mp4 retention (1.9 GB)
-- [ ] Identify unmapped videos (03-09, 03-12, 03-15, 03-16, 03-18, 03-23)
+- [x] Delete raw source videos already on YouTube (~46 GB)
+- [x] Delete epN-light.mp4 uploaded files (1.9 GB)
+- [ ] Identify remaining 8 unmapped videos (03-09, 03-12, 03-15, 03-16, 03-18, 03-23)
 - [ ] Compress or process unmapped videos if keeping
 - [ ] Backup strategy decision (YouTube-only vs external)
 <!-- /agent:pending -->

@@ -728,7 +728,7 @@ Done:
 ### Re: agent_doc_version()
 
 Done (`98aa3c0`). `agent_doc_version()` returns the compile-time `CARGO_PKG_VERSION`. 558 tests pass. Binary + plugin rebuilt and pushed.
-<!-- agent:boundary:df632091 -->
+<!-- agent:boundary:cc2ce70c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

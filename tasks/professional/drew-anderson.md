@@ -183,7 +183,7 @@ Want me to adjust the tone, add/remove anything, or send as-is?
 
 Please update the draft accounting for my inline prompts.
 
-### Re: Updated draft (HEAD)
+### Re: Updated draft
 
 Good notes. Key shifts: (1) broaden your model experience beyond just Claude, (2) respect that Drew's core is low-latency V2V — don't lead with avatar as if that's his main thing, (3) add the specific tech stack depth.
 
@@ -215,7 +215,7 @@ Brian
 - Added LTXV/WAN/ComfyUI as specific technical depth signals
 - Softened the PresenceAI mention — "retained the IP" rather than "available" (less transactional)
 - Questions positioned as collaborative exploration, not interrogation
-<!-- agent:boundary:3c6eed04 -->
+<!-- agent:boundary:8a67fb8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

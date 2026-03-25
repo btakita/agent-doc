@@ -244,7 +244,7 @@ Add tests to reproduce the issue.
 Fix issue.
 Note that the right editor is focused
 
-### Re: 3-pane layout (again) after file move (HEAD)
+### Re: 3-pane layout (again) after file move
 
 **Diagnosis:** The file move (`tasks/linkedin/don-desando.md` → `tasks/professional/don-desando.md`) triggered a route for the new path. Route created a new pane (%143) via auto-start, but the existing excess panes weren't stashed because `sync_after_claim` was only called on the lazy-claim path — not on auto-start or the alive-pane path.
 
@@ -260,7 +260,7 @@ This ensures every route operation aligns the tmux layout to the editor's `col_a
 **Tests:** 558 passing. Release binary rebuilt.
 
 This is the same class of bug as the previous 3-pane issue — the fix was incomplete because only one of three route paths had the sync call.
-<!-- agent:boundary:4e3d99b5 -->
+<!-- agent:boundary:d1dd9992 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

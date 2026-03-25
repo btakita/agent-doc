@@ -1656,12 +1656,12 @@ Just saw "The m" truncation happen again — caught by truncation detection but 
 
 Note: "The m" in your edit is truncated — what were you typing?
 
-### Re: Confirmed — bugs added to pending (HEAD)
+### Re: Confirmed — bugs added to pending
 
 Correction noted: "buffer then flush cycle" (not cache). You're right — the editor buffers keystrokes and flushes to disk on auto-save intervals, which is why mtime-based detection misses mid-typing state.
 
 Both bugs added to pending list below.
-<!-- agent:boundary:fde9b79d -->
+<!-- agent:boundary:86aee079 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

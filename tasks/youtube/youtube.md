@@ -513,7 +513,7 @@ Released **corky v0.21.2** with `youtube delete` command.
 - Installed with `--features transcribe-cuda`
 - Agent-loop submodule pointer updated
 
-### Re: YouTube comment + LinkedIn draft (HEAD)
+### Re: YouTube comment + LinkedIn draft
 
 **YouTube comment posted:**
 - Blog post link + topic summary on https://www.youtube.com/watch?v=ixDbYPO43Cw
@@ -527,7 +527,7 @@ Leads with the module harness concept, highlights the ontology-building session,
 To publish: `corky linkedin publish mail/social/20260325-module-harness-linkedin.md`
 
 Or review/edit the draft first.
-<!-- agent:boundary:0f12bf4e -->
+<!-- agent:boundary:84ed9635 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

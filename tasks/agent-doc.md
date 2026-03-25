@@ -1576,7 +1576,7 @@ The previous response **was** written to the document (IPC patch consumed succes
 
 "Why did" — your edit appears truncated. What were you asking?
 
-### Re: Debounce & missing patch (HEAD)
+### Re: Debounce & missing patch
 
 **What happened:** The previous run (before this one) DID write a patch — "Re: Missed detection & binary install" appeared in the exchange. You deleted it while editing the section, then the debounce triggered a new cycle before you finished typing "Why did". That cycle picked up your incomplete edit as a diff.
 
@@ -1588,7 +1588,7 @@ The cycle after that (this run's predecessor) DID patch the response "Re: Patchi
 1. Run N: Wrote "Re: Missed detection" → you deleted it while editing
 2. Run N+1: Picked up your deletion + "Why did" (truncated) → wrote "Re: Patching"
 3. Run N+2 (this one): You finished typing → this response
-<!-- agent:boundary:ebd100a8 -->
+<!-- agent:boundary:f9dbd654 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

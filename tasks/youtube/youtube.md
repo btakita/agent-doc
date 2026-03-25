@@ -94,7 +94,35 @@ Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 - Video uploaded with CC subtitles and 60+ chapter markers
 - Visibility: public
 - Draft updated: `mail/social/20260325-youtube-module-harness.md` (status: published)
-<!-- agent:boundary:3e30e84f -->
+
+Create a featured blog post on briantakita.me
+recap and expand on interesting topics in the CC transcript.
+
+### Re: Blog post (HEAD)
+
+Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-24-agent-doc-module-harness-ontology.md`
+
+- **Featured:** yes
+- **Video embed:** included
+- **Tags:** agent-doc, module-harness, existence-language, ontology, evals, rust, claude-code, live-coding, vibe-coding, agentic-programming
+
+**Sections:**
+1. Tmux Session Sync Recovery — stale frontmatter values causing session zero kill
+2. Module-Level Harness Context — the central concept: specs, contracts, evals per source file
+3. Back-Testing for Harness Evaluation — git revision ranges as test windows, quantitative finance analogy
+4. Agent Teams Are a Human Artifact — role-based teams vs module-level quality guarantees
+5. Building a Domain Ontology with Existence Language — agent-defined eval, contract, spec, harness, audit terminology
+6. Agentic Audit as Self-Healing — audits that produce both reports and actionable work queues
+7. IPC Timeout and CRDT Merge Fixes — double-application bug, content verification
+8. agent-doc v0.26.0 Release
+
+**Deployed:**
+1. briantakita.me — committed & pushed (`c2d3347`)
+2. briantakita.me-dev — committed & pushed (`71083aa`)
+3. agent-loop submodule pointer updated (`39ae262`)
+
+Post will be live at: `https://briantakita.me/posts/agent-doc-module-harness-ontology`
+<!-- agent:boundary:26251801 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -102,4 +130,5 @@ Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 - [x] Transcribe edited video (2211 segments)
 - [x] Create YouTube draft with title, description, chapters
 - [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
+- [x] Blog post created and deployed
 <!-- /agent:pending -->

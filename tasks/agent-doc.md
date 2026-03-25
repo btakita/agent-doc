@@ -1611,7 +1611,7 @@ No — the debounce ran but has a structural gap in this scenario.
 
 Should I add this to the pending list as a feature?
 
-### Re: IPC patch silent failure — root cause found (HEAD)
+### Re: IPC patch silent failure — root cause found
 
 You're right — you didn't delete the response. **The IPC patch was consumed (plugin deleted the patch file as ACK) but the Document API write failed silently.**
 
@@ -1630,7 +1630,7 @@ You're right — you didn't delete the response. **The IPC patch was consumed (p
 3. Plugin logs errors when Document API write fails
 
 Should I add this to the bug tracker?
-<!-- agent:boundary:bc5fe579 -->
+<!-- agent:boundary:bee1270f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

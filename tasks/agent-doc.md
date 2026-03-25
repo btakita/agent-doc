@@ -1939,7 +1939,7 @@ Let's begin adding a module level harness context for each rust module as commen
 - agentic contracts
 - potentially evals with cached results
 
-### Re: Did you add automated tests? (HEAD)
+### Re: Did you add automated tests?
 
 No — I didn't add dedicated tests for the config auto-sync. The existing 340 tests pass and cover the surrounding code (route, session resolution), but there's no test that specifically:
 - Configures a dead session in `config.toml`
@@ -1948,7 +1948,7 @@ No — I didn't add dedicated tests for the config auto-sync. The existing 340 t
 
 I should add that. Want me to add it now before moving on?
 
-### Re: Module-level harness context (HEAD)
+### Re: Module-level harness context
 
 Interesting initiative. To make sure I understand the shape you want — something like this at the top of each module?
 
@@ -1975,7 +1975,7 @@ Questions before I start:
 1. **Scope** — all modules in agent-doc? Or start with the ones we just changed (config, route, resync, tmux)?
 2. **Evals format** — should the eval entries be runnable (tied to `#[test]` functions) or aspirational (documenting what _should_ be tested)?
 3. **Agentic contracts** — are these guarantees the module makes to _agent callers_ (Claude Code skill, other agents) specifically, or general API contracts?
-<!-- agent:boundary:c79b0846 -->
+<!-- agent:boundary:2284175c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

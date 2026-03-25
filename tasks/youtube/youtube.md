@@ -122,7 +122,34 @@ Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-24-agen
 3. agent-loop submodule pointer updated (`39ae262`)
 
 Post will be live at: `https://briantakita.me/posts/agent-doc-module-harness-ontology`
-<!-- agent:boundary:55113e89 -->
+
+On gh actions
+
+```
+Submodule path 'lib/dev-bin': checked out '248ac1ce597b4112c9fd188b0e52f3b6bc652f77'
+  Submodule path 'lib/domain--server--briantakita': checked out '82ba97fd23bc7d0c103eecfb628871ef3957093c'
+  Submodule path 'lib/snippet--rappstack': checked out '5913cc2ba0087b9ed1765965ee95de9c95362ea9'
+  From https://github.com/btakita/ui--browser--briantakita
+   * branch            2d51c5f245280d9ded8aea7703501d739721553d -> FETCH_HEAD
+  Submodule path 'lib/ui--browser--briantakita': checked out '2d51c5f245280d9ded8aea7703501d739721553d'
+  Submodule path 'lib/ui--browser--semantic': checked out 'fd35c4e61f8161dc4768052f8bc2aa57caa243e2'
+  Error: fatal: remote error: upload-pack: not our ref d8010e5b10d8c9b22df2c8b6864c704c76fbe9e5
+  Error: fatal: Fetched in submodule path 'lib/ui--server--briantakita', but it did not contain d8010e5b10d8c9b22df2c8b6864c704c76fbe9e5. Direct fetching of that commit failed.
+  Error: The process '/usr/bin/git' failed with exit code 128
+
+```
+
+### Re: GH Actions deploy failure (HEAD)
+
+Fixed. The `lib/ui--server--briantakita` submodule in briantakita.me-dev had diverged — local commit `d8010e5` was never pushed to the remote, while the remote had a different commit (`95f7d80`).
+
+**Fix:**
+1. Rebased local onto remote in `lib/ui--server--briantakita` → pushed `a054895`
+2. Updated submodule pointer in briantakita.me-dev → pushed `c6046f2`
+3. Updated agent-loop pointer → `7db75f0`
+
+The Cloudflare Pages deploy should now trigger successfully from the push.
+<!-- agent:boundary:81265fe6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -130,5 +157,5 @@ Post will be live at: `https://briantakita.me/posts/agent-doc-module-harness-ont
 - [x] Transcribe edited video (2211 segments)
 - [x] Create YouTube draft with title, description, chapters
 - [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
-- [x] Blog post created and deployed
+- [x] Blog post created and deployed (fixed stale submodule pointer)
 <!-- /agent:pending -->

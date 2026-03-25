@@ -220,7 +220,7 @@ Please write a LinkedIn post about this video.
 If it's better for engagement to put the link to the post in the comment vs putting it in the post itself, do so.
 Include video screenshot in the post.
 
-### Re: LinkedIn post (HEAD)
+### Re: LinkedIn post
 
 Published! https://www.linkedin.com/feed/update/urn:li:share:7441146047336210432
 

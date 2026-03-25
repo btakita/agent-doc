@@ -1872,7 +1872,7 @@ continue
 **Remaining proposed guards (2-4) are defense-in-depth** — they'd protect against future `kill_pane` additions. Want me to implement those too, or is removing the only production `kill_pane` call sufficient?
 Implement fixes 1-4
 
-### Re: Implement fixes 1-4 (HEAD)
+### Re: Implement fixes 1-4
 
 All four kill_pane safety fixes are implemented and passing (77 tests, 0 failures).
 
@@ -1896,7 +1896,7 @@ Added to the detach loop in `reconcile()` (sync.rs):
 **Files changed:**
 - `src/tmux-router/src/tmux.rs` — `kill_pane()` with guards, new `session_window_count()`
 - `src/tmux-router/src/sync.rs` — cross-session check in detach loop
-<!-- agent:boundary:2f5062c5 -->
+<!-- agent:boundary:5bec4c78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1853,7 +1853,7 @@ When I ran `Run Agent Doc` just now...the 2nd pane in the 0:agent-doc window clo
 
 continue
 
-### Re: continue (kill_pane safety fixes) (HEAD)
+### Re: continue (kill_pane safety fixes)
 
 **Fix applied:** Replaced the dangerous `kill_pane` fallback in `stash_pane()` (tmux.rs:578) with `break_pane_to_stash()`.
 
@@ -1870,7 +1870,7 @@ continue
 **Tests:** 77 passed, 0 failed.
 
 **Remaining proposed guards (2-4) are defense-in-depth** — they'd protect against future `kill_pane` additions. Want me to implement those too, or is removing the only production `kill_pane` call sufficient?
-<!-- agent:boundary:15e4e13a -->
+<!-- agent:boundary:1d18dc2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

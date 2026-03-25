@@ -91,3 +91,6 @@
 [submodule "src/agent-resume"]
 	path = src/agent-resume
 	url = git@github.com:btakita/agent-resume.git
+[submodule "src/module-harness"]
+	path = src/module-harness
+	url = git@github.com:btakita/module-harness.git

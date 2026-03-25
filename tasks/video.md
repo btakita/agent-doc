@@ -7,14 +7,21 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Initialized. Awaiting first input.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+
+### Assistant (HEAD)
+
+Video task document initialized. Write your prompt in the exchange section — what would you like to work on?
+<!-- agent:boundary:7fb4707b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+*(none yet)*
 <!-- /agent:pending -->

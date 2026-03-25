@@ -1896,15 +1896,49 @@ Added to the detach loop in `reconcile()` (sync.rs):
 **Files changed:**
 - `src/tmux-router/src/tmux.rs` — `kill_pane()` with guards, new `session_window_count()`
 - `src/tmux-router/src/sync.rs` — cross-session check in detach loop
-<!-- agent:boundary:5bec4c78 -->
+We are currently bound to tmux session 6.
+/home/brian/work/btakita/agent-loop/.agent-doc/config.toml shows tmux_session = "0"
+We are currently recovering from an agent-doc bug where the tmux session 0 was killed due to all of the windows being killed.
+.agent-doc/config.toml should be in sync when the new bound tmux session changes.
+Please add to `agent-doc repair`, `agent-doc sync`, `agent-doc run`, `agent-doc start`, and any other commands. Basically we should always be in sync.
+
+### Re: tmux_session config auto-sync (HEAD)
+
+**Problem:** `.agent-doc/config.toml` had `tmux_session = "0"` but session 0 was destroyed. Now on session 6, the config was stale.
+
+**Fix:** Auto-sync the config when the configured session is dead.
+
+**What changed:**
+
+1. **`config.rs`** — Added `save_project()` and `update_project_tmux_session()` functions
+2. **`route.rs` (two paths)** — Both `run_with_tmux()` and `auto_start_ext()` now:
+   - Check if the configured session is alive
+   - If dead, fall back to `current_tmux_session()`
+   - Auto-update `config.toml` with the new session name
+   - Logs: `[config] updated tmux_session: 0 → 6`
+3. **`resync.rs`** — `apply_fixes_to_registry` no longer aborts on `kill_pane` failure (when the pane is the last in a session). It deregisters the entry regardless.
+4. **Immediate fix:** Updated `.agent-doc/config.toml` to `tmux_session = "6"`
+
+**How it works at runtime:**
+```
+route → project_tmux_session() returns "0"
+     → session_alive("0") returns false
+     → fallback to current_tmux_session() → "6"
+     → update_project_tmux_session("6") writes config.toml
+     → next call reads "6" directly
+```
+
+**Tests:** 340 passed (agent-doc) + 77 passed (tmux-router), 0 failures.
+
+**Coverage:** `route`, `sync` (via auto_start), and `repair` (via sync) all hit the route path. The `start` command runs inside already-created panes so doesn't need this. `resync` inspects existing panes without resolving a target session.
+<!-- agent:boundary:48293636 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Fix 1: kill_pane safety in stash_pane fallback**~~ ([done])
-- ~~**Fix 2+3: Window-count + session-last-window guard on kill_pane**~~ ([done])
-- ~~**Fix 4: Cross-session registry check before stash/kill**~~ ([done])
+- ~~**tmux_session config auto-sync** — update config.toml when configured session is dead~~ ([done])
+- ~~**Fix 1-4: kill_pane safety guards**~~ ([done])
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

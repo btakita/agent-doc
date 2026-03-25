@@ -1397,7 +1397,7 @@ Depending on your answers, I'll add targeted tests and fixes. The most likely ag
 - **Minimum pane height check** — agent-doc should refuse to split/create panes when terminal is too small
 - **User window protection** — ensure sync/repair/purge never destroys non-agent-doc windows
 - **Graceful degradation** — detect unusable terminal size and warn instead of running blind
-### Re: Layout Impact from i3 Resize (HEAD)
+### Re: Layout Impact from i3 Resize
 
 Thanks for the answers. Now I understand the scenario:
 
@@ -1420,7 +1420,7 @@ Thanks for the answers. Now I understand the scenario:
 3. **Stash panes when terminal shrinks too much** — if the window becomes too small for 2+ panes, stash extras to the stash window and restore when terminal grows back
 
 Starting implementation now. I'll add tests first, then fix the code.
-<!-- agent:boundary:478875f1 -->
+<!-- agent:boundary:c0dc3422 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

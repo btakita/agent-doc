@@ -479,7 +479,7 @@ Brian
 - **KPI question leads the compare-notes section:** "How are you measuring interaction quality?" — shows business thinking, invites Drew to share his metrics (which tells you how serious the product is)
 - Slightly longer but each addition is high-signal
 
-### Re: Draft v10 — video gen accuracy fix (HEAD)
+### Re: Draft v10 — video gen accuracy fix
 
 Good catch. Claiming you "tested" LTXV/WAN/ComfyUI pipelines alongside the production work is misleading if those were prototypes. Separating what was production vs. exploratory keeps the message honest.
 
@@ -508,7 +508,7 @@ Brian
 **Change from v9:**
 - Split the visual bullet into production (lipsync + image gen) vs. prototype (LTXV/WAN/ComfyUI): "we ran... in production" + "I've also been prototyping" — honest distinction
 - "early stage but the latency curves are getting interesting" — signals potential without overclaiming
-<!-- agent:boundary:e763780e -->
+<!-- agent:boundary:d60a8f42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

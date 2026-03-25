@@ -139,7 +139,7 @@ Submodule path 'lib/dev-bin': checked out '248ac1ce597b4112c9fd188b0e52f3b6bc652
 
 ```
 
-### Re: GH Actions deploy failure (HEAD)
+### Re: GH Actions deploy failure
 
 Fixed. The `lib/ui--server--briantakita` submodule in briantakita.me-dev had diverged — local commit `d8010e5` was never pushed to the remote, while the remote had a different commit (`95f7d80`).
 
@@ -149,7 +149,7 @@ Fixed. The `lib/ui--server--briantakita` submodule in briantakita.me-dev had div
 3. Updated agent-loop pointer → `7db75f0`
 
 The Cloudflare Pages deploy should now trigger successfully from the push.
-<!-- agent:boundary:81265fe6 -->
+<!-- agent:boundary:550e9ac0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

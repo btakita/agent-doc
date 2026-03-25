@@ -1217,7 +1217,7 @@ Add tests for the beginning of the incorrect tmux layout transition.
 Ensure tests pass by fixing the agent-doc software.
 Let's figure out how to evaluate agent harness.
 
-### Re: Iterate until correct tmux layout (HEAD)
+### Re: Iterate until correct tmux layout
 
 Done — full cycle completed:
 
@@ -1274,7 +1274,7 @@ There is still an orphaned window in tmux session 3
 
 Add as agent-doc SKILL.md to identify contract(s) from prompt.
 Iterate until the contract(s) are met.
-### Re: Session 3 orphan + agent harness evaluation (HEAD)
+### Re: Session 3 orphan + agent harness evaluation
 
 **Session 3 state:**
 ```
@@ -1303,7 +1303,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 4. ✅ Run and ensure tmux is correct (session 0 clean, stash purged)
 5. ⬜ Session 3 orphan still exists → fixing now
 6. ⬜ Review logs for incorrect transitions → after session 3 fix
-<!-- agent:boundary:0c45f16a -->
+<!-- agent:boundary:99db8dda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

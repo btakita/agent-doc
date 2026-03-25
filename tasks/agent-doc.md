@@ -2078,7 +2078,7 @@ module-harness
 Let's make module-harness work with any programming language. Make sure the skill is general enough.
 Is there any deterministic aspects that would benefict from a binary executable?
 
-### Re: module-harness skill design (HEAD)
+### Re: module-harness skill design
 
 **Name confirmed: `module-harness`**
 
@@ -2129,7 +2129,7 @@ module-harness (skill)
 The binary handles structure; the skill handles understanding. This matches the agent-doc pattern (binary = deterministic, skill = non-deterministic).
 
 Want me to create the skill now and scaffold the binary?
-<!-- agent:boundary:bf8950c7 -->
+<!-- agent:boundary:33122f82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

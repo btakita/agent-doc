@@ -18,7 +18,7 @@ Add to eric-yang contact
 - https://me.sh/profile/eric-yang-eb6a67d5
 - https://vanderbilthustler.com/2019/01/23/former-vanderbilt-student-launches-a-new-brand-of-social-media/
 
-### Re: Eric Yang Contact Profile (HEAD)
+### Re: Eric Yang Contact Profile
 
 Researched the three URLs. Medium (@sunyae) returned 403; Vanderbilt Hustler article body didn't render. The me.sh profile had the most detail.
 
@@ -39,7 +39,7 @@ Researched the three URLs. Medium (@sunyae) returned 403; Vanderbilt Hustler art
 - Vanderbilt Hustler: https://vanderbilthustler.com/2019/01/23/former-vanderbilt-student-launches-a-new-brand-of-social-media/
 
 The Vanderbilt Hustler article likely covers the origin story of Junto/Flux — worth reading directly in a browser for the full narrative.
-<!-- agent:boundary:84588428 -->
+<!-- agent:boundary:fcbb00f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

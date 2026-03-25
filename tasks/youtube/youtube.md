@@ -413,7 +413,14 @@ Done. Added `corky youtube delete <VIDEO_ID>` command to corky.
 ```
 
 Then say "go" to delete the old video (`OrGJi8Hh_bQ`).
-<!-- agent:boundary:730ebb30 -->
+go
+
+### Re: go (delete old video) (HEAD)
+
+Deleted! `OrGJi8Hh_bQ` removed from YouTube.
+
+Only the full version remains: https://www.youtube.com/watch?v=ixDbYPO43Cw
+<!-- agent:boundary:775f580f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -421,7 +428,7 @@ Then say "go" to delete the old video (`OrGJi8Hh_bQ`).
 - [x] rappstack packages published at 0.1.4
 - [x] Blog post video URL updated
 - [x] Implemented `corky youtube delete` command
-- [ ] Delete old video OrGJi8Hh_bQ (needs YouTube auth)
+- [x] Deleted old edited video OrGJi8Hh_bQ
 - [ ] Commit and release corky with delete command
-- [ ] Verify CI build passes
+- [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

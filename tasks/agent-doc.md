@@ -1211,34 +1211,37 @@ Ensure tests pass by fixing the agent-doc software.
 Build and install.
 Run and ensure that tmux is in the correct state.
 If not in correct state repeat cycle.
-### Re: Iterate until correct tmux layout (HEAD)
 
-Done — full cycle completed:
+Review logs to find incorrect tmux layout transitions.
+Add tests for the beginning of the incorrect tmux layout transition.
+Ensure tests pass by fixing the agent-doc software.
+### Re: Iterative tmux layout fix cycle (HEAD)
 
-**Tests added (4 new, all pass):**
-- `sync::tests::sync_does_not_write_tmux_session_to_frontmatter` — verifies sync never writes tmux_session back
-- `sync::tests::resolve_file_ignores_frontmatter_tmux_session` — verifies FileResolution always gets `tmux_session: None`
-- `terminal::tests::resolve_session_name_defaults_to_zero` — verifies default session is "0", ignoring frontmatter
-- `terminal::tests::resolve_session_name_uses_explicit_flag` — verifies explicit flag takes precedence
+**Current state diagnosis:**
 
-**Full test suite: 541 tests pass** (173 lib + 330 bin + 38 integration)
+| Item | Status |
+|------|--------|
+| Layout (window @48) | Correct — 2 panes, 2 columns, fast path |
+| Route (config.toml) | Working — targets session "0" from project config |
+| Stash (window @2) | **17 orphaned panes** — never cleaned up |
+| resync --fix | Clean — only checks registered panes |
 
-**Build & install:** Release binary installed.
+**The layout itself is correct.** The remaining issue is **stash pane accumulation**. Root cause:
 
-**Tmux state verified:**
-```
-Session 0:
-  Window 0 "agent-doc" — 2 panes (%103=agent-doc.md, %97=benjamin-becker.md)
-  Window 1 "stash" — 17 orphaned panes (unregistered, harmless)
-```
+1. `purge_stash_windows()` only kills stash windows where **all** panes are idle shells
+2. The stash has active Claude/agent-doc sessions, so it's never purged
+3. No mechanism exists to kill individual unregistered panes in stash
+4. Every `route`/`sync` call logs the 17 orphans but never acts on them
 
-Sync correctly targets session "0" via `--window @48` → `target_session=Some("0")`. Fast-path confirms layout is already correct. No frontmatter `tmux_session` was read or written during any of these operations.
+**Fix plan:**
 
-**Dead code cleaned up:**
-- `read_frontmatter_session()` removed from terminal.rs
-- `files_needing_session` tracking removed from sync.rs
-- `set_tmux_session()` in frontmatter.rs is now fully dead (only defined, never called)
-<!-- agent:boundary:b727c105 -->
+1. Add `purge_unregistered_stash_panes()` to `resync.rs` — kill stash panes not in sessions.json that have been idle for >60s
+2. Add test: stash with mix of registered + unregistered panes → only unregistered get purged
+3. Add test: recently-created stash panes survive grace period
+4. Build, install, verify stash gets cleaned up
+
+Starting implementation now.
+<!-- agent:boundary:e1c8578d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1248,6 +1251,7 @@ Sync correctly targets session "0" via `--window @48` → `target_session=Some("
 - [x] **SessionScope type wrapper** — implemented
 - [x] **Reconcile post-condition** — session boundary check at VERIFY
 - [x] **Session firewall tests** — standardized cross-session test template
+- [ ] **Purge unregistered stash panes** — kill orphaned Claude sessions in stash
 - [ ] **Split direction from column position** — left column = split before
 - [ ] **Release v0.25.16**
 <!-- /agent:pending -->

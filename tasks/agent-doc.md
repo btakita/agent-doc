@@ -2319,6 +2319,8 @@ Session 6 is currently at 2 panes (correct). The 3-pane layout was transient —
 1. Delete the patch file before returning 75 (preventing late consumption), or
 2. The `--force-disk` path should check for and delete any pending IPC patches
 
+What do you recommend? Option 1, 2, or both?
+
 I'll clean up the duplicated content in the exchange. The duplicated pending entry is also from this same issue.
 
 Note: Your `"Plrease"` at the end appears truncated — looks like you were still typing when the cycle triggered. Let me know what you wanted to add.
@@ -2342,15 +2344,51 @@ if force_disk {
 **3-pane layout tests**: tmux-router already has tests for 3→2 pane eviction (`test_sync_3_panes_to_2_evicts_extra`, `test_overflow_stash_preserves_focus_pane`). The transient 3-pane issue you saw was triggered by a sync cycle racing with a file selection change in the editor — the sync saw 3 files momentarily before the editor settled. The existing stash overflow logic handled it correctly (evicted the extra pane).
 
 **Tests:** 343 (agent-doc) + 77 (tmux-router) = 420 passing, 0 failures.
-<!-- agent:boundary:56a5c2d6 -->
+
+Implement:
+- **IPC silent failure verification** — verify Document API write failures are surfaced
+- **FFI debounce bridge** — cross-process typing indicator integration
+
+### Re: IPC option recommendation + implement remaining (HEAD)
+
+**IPC fix: I implemented option 2** (the `--force-disk` path cleans up stale IPC patches). Option 1 (deleting before exit 75) would break deferred pickup — the whole point of exit 75 is to leave a patch for the plugin to pick up later. Option 2 is correct: when the skill explicitly retries with `--force-disk`, it means "I'm taking over, cancel the IPC path."
+
+### Re: IPC silent failure verification (HEAD)
+
+**Implemented** — added content verification to `write_ipc_and_poll()`:
+
+After the plugin consumes the patch file and the disk flush completes, we now:
+1. Check if the file changed at all (already existed) — catches total failure
+2. **New:** Verify that at least one patch's content appears in the resulting file — catches partial application where the plugin consumed the patch file but failed to apply content
+
+If either check fails, returns `Ok(false)` to trigger disk fallback with a diagnostic log message.
+
+Test mocks updated: the mock "plugin" threads now actually write content to the document file (not just delete the patch file), so the verification path is exercised.
+
+### Re: FFI debounce bridge (HEAD)
+
+**Already implemented** — verified the full chain is in place:
+
+1. **`debounce.rs`**: `document_changed()` records timestamps + writes `.agent-doc/typing/<hash>` indicator files
+2. **`ffi.rs`**: Exports `agent_doc_document_changed`, `agent_doc_is_tracked`, `agent_doc_await_idle` via C ABI
+3. **`preflight.rs`**: Checks both file mtime and typing indicator before computing diff — waits up to 3s for typing to settle
+4. **JetBrains plugin**: Calls `document_changed` via JNA on every `DocumentListener` event
+5. **VS Code extension**: Same via native module
+
+The bridge is complete: plugin → FFI → debounce state → typing indicator file → preflight reads it.
+
+**Tests:** 343 (agent-doc) + 77 (tmux-router) = 420 passing, 0 failures.
+**Release binary:** rebuilt with all fixes.
+<!-- agent:boundary:3745b36e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**IPC timeout double-write bug** — fixed: force-disk cleans stale IPC patches~~ ([done])
-- **IPC silent failure verification** — verify Document API write failures are surfaced
-- **FFI debounce bridge** — cross-process typing indicator integration
+- ~~**IPC timeout double-write bug** — fixed~~ ([done])
+- ~~**IPC silent failure verification** — content verification added~~ ([done])
+- ~~**FFI debounce bridge** — already fully implemented~~ ([done])
+All pending items cleared.
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

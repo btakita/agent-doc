@@ -298,7 +298,7 @@ Brian
 - Kept hosting high-level (no Modal/H100 mention) — save for deeper conversation
 - Still concise enough for LinkedIn
 
-### Re: Draft v5 — IP correction + social signal (HEAD)
+### Re: Draft v5 — IP correction + social signal
 
 Two important corrections:
 
@@ -333,7 +333,7 @@ Brian
 - **Role clarified:** "I was the lead engineer" — establishes credibility without overstating
 - **Social acknowledgment:** "saw you liked a couple of my recent posts" — natural opener that shows you noticed his engagement
 - Removed "Great to connect" standalone — merged with the social signal for a tighter opener
-<!-- agent:boundary:00aa159f -->
+<!-- agent:boundary:abf12b1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

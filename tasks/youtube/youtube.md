@@ -159,7 +159,7 @@ ENOENT: No such file or directory: failed to link package: @rappstack/domain--se
 
 ```
 
-### Re: Preventing yalc issues in CI (HEAD)
+### Re: Preventing yalc issues in CI
 
 **Root cause:** Two packages had `file:.yalc/...` paths committed to `package.json`. The `.yalc/` directory and `yalc.lock` were also tracked in git. CI has no `.yalc/` directory, so `bun install` fails with ENOENT.
 
@@ -181,7 +181,7 @@ ENOENT: No such file or directory: failed to link package: @rappstack/domain--se
   ```
 
 The CI deploy should succeed now.
-<!-- agent:boundary:87b9a285 -->
+<!-- agent:boundary:c89b9c19 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

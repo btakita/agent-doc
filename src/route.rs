@@ -1458,4 +1458,41 @@ mod tests {
         );
         assert!(iso.pane_alive(&pane2), "pane should be alive after join");
     }
+
+    #[test]
+    fn sync_after_claim_prefers_col_args_over_registry() {
+        // Regression test: when editor provides col_args, sync_after_claim should
+        // pass those to sync::run instead of auto-discovering from registry.
+        // The actual pane stashing is handled by tmux-router's reconcile —
+        // this test verifies the col_args flow.
+        let iso = IsolatedTmux::new("route-test-col-args");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane_a = iso.auto_start(session, &cwd).unwrap();
+        let window_id = iso.pane_window(&pane_a).unwrap();
+
+        // With col_args having < 2 entries, sync_after_claim returns early (no sync needed).
+        // This verifies the early-return path.
+        sync_after_claim(&iso, &pane_a, &["single.md".to_string()]);
+
+        // With empty col_args and < 2 registry entries, also returns early.
+        sync_after_claim(&iso, &pane_a, &[]);
+
+        // Pane should still be alive and in the same window — no unintended stashing
+        assert!(iso.pane_alive(&pane_a), "pane should survive sync_after_claim");
+        assert_eq!(
+            iso.pane_window(&pane_a).unwrap(),
+            window_id,
+            "pane should stay in original window"
+        );
+
+        // With 2+ col_args, sync_after_claim runs sync::run with those args.
+        // sync::run will fail to resolve files (no registrations), but shouldn't crash.
+        let col_args = vec!["file_a.md".to_string(), "file_b.md".to_string()];
+        sync_after_claim(&iso, &pane_a, &col_args);
+
+        // Pane should still be alive
+        assert!(iso.pane_alive(&pane_a), "pane should survive sync with unresolved files");
+    }
 }

@@ -618,7 +618,7 @@ update SPEC, README
 The Plugin integration should be done on the FFI plugin level.
 Please add the necessary module-harness and AGENTS.md + CLAUDE.md + Skills to ensure that we follow this heuristic.
 
-### Re: Plugin integration (HEAD)
+### Re: Plugin integration
 
 **JB plugin updated** (`e10e6e7`):
 
@@ -638,7 +638,7 @@ Please add the necessary module-harness and AGENTS.md + CLAUDE.md + Skills to en
 Plugin builds successfully. To install: Settings → Plugins → gear → Install from Disk → select `build/distributions/agent-doc-jetbrains-0.1.0.zip`.
 
 Note: the plugin needs the updated `libagent_doc.so`/`.dylib` to use the new FFI functions. The binary is already rebuilt — the shared library at `agent-doc lib-path` has the exports.
-<!-- agent:boundary:474fe3fa -->
+<!-- agent:boundary:98461c58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2533,13 +2533,33 @@ Compilation verified.
 | **Reconcile** | Algorithm | 5-phase attach-first sync (ATTACH→SELECT→DETACH→REORDER→VERIFY) |
 | **Stash** | State | Hidden window preserving pane process continuity across transitions |
 | **Registry** | State | Persistent JSON file-path-to-pane-ID map with advisory locking |
-<!-- agent:boundary:ca7fa6c6 -->
+- Release tmux-router
+- Release agent-doc
+
+### Re: Release tmux-router + agent-doc (HEAD)
+
+**tmux-router v0.3.0 released:**
+- Published to crates.io
+- Tagged and pushed to GitHub
+- Parent submodule pointer updated
+
+Changes in v0.3.0:
+- kill_pane safety guards (refuse to destroy last session window)
+- Cross-session registry check in reconcile detach loop
+- stash_pane fallback uses break_pane_to_stash instead of kill_pane
+- Module harness context on tmux.rs and sync.rs
+- Existence-lang ontology (7 domain terms)
+- Dev dependencies: existence, module-harness
+
+Now starting agent-doc release...
+<!-- agent:boundary:de65a895 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-All pending items cleared.
+- ~~**tmux-router v0.3.0 release**~~ ([done])
+- **agent-doc release** — in progress
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

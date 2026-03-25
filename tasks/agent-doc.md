@@ -1303,7 +1303,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 4. ✅ Run and ensure tmux is correct (session 0 clean, stash purged)
 5. ⬜ Session 3 orphan still exists → fixing now
 6. ⬜ Review logs for incorrect transitions → after session 3 fix
-### Re: Iteration complete — all orphans purged (HEAD)
+### Re: Iteration complete — all orphans purged
 
 **Session 3 orphan fixed.** Added `purge_orphaned_agent_panes()` to kill unregistered agent-doc/claude panes in ANY window (not just stash), provided the window has at least one other pane.
 
@@ -1330,7 +1330,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - Last pane in a window never killed
 - Idle shells in stash killed
 - Orphaned agent processes everywhere killed
-<!-- agent:boundary:578be601 -->
+<!-- agent:boundary:cfcbd8e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

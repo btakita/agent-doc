@@ -2049,14 +2049,38 @@ All modules now have harness context. Here's the summary:
 **Also fixed:** Config tests were using `chdir` which caused race conditions in parallel test runs. Refactored to use path-parameterized helpers instead.
 
 **Ready for backtesting:** The eval entries in each module are named and described, making them identifiable targets for your future backtest harness. Each eval maps either to an existing `#[test]` function or documents an aspirational scenario.
-<!-- agent:boundary:b58d1ac1 -->
+
+Let's add this technique to a project-wide skill.
+Do you have name recommendations? Maybe module-harness? module-skill? module-spec?
+
+### Re: Skill naming for module harness context (HEAD)
+
+Good idea to make this a reusable skill. Here are my recommendations, ranked:
+
+1. **`module-harness`** — Direct, descriptive. "Harness" captures that it's infrastructure for testing/evaluation, not just docs. Matches what we've been calling it in conversation.
+
+2. **`module-context`** — More general. "Context" aligns with your ontology (Scope → Context → Resolution). The harness IS context for agents working on the module.
+
+3. **`module-spec`** — Clean and short, but undersells the agentic contracts and evals sections. A "spec" is typically just behavioral requirements, not the eval/contract layer.
+
+4. **`module-skill`** — Ambiguous. "Skill" already means something specific in agent-doc (SKILL.md). Could confuse.
+
+**My pick: `module-harness`** — it's the most accurate. The skill would:
+- Read a Rust module
+- Generate/update the `## Spec`, `## Agentic Contracts`, `## Evals` doc comment
+- Optionally validate existing harness context against current code (drift detection)
+- Support batch mode (all modules in a crate)
+
+The skill could also eventually integrate with the backtest harness — `module-harness eval <module>` to run the named eval scenarios.
+
+What's your preference?
+<!-- agent:boundary:45afb029 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Config auto-sync tests** — 3 tests added and passing~~ ([done])
-- ~~**Module harness context** — all 53 modules across agent-doc + tmux-router~~ ([done])
+- **Create module-harness skill** — reusable skill for generating/updating module harness context
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

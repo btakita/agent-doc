@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — all eval scoring features implemented, ready for v0.1.0 release
+**Released** — module-harness v0.1.0 published to crates.io and GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -242,6 +242,8 @@ Implement:
 - Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
 - Create reference plugin harness with runnable evals
 - Update eval.md ontology node with directional range eval spec
+
+Then release
 ### Assistant
 
 **All four items implemented.**
@@ -278,20 +280,36 @@ Demonstrates all eval types in a single JetBrains plugin harness:
 **Test results: 36 tests pass (16 unit + 20 integration), clippy clean.**
 
 Ready for v0.1.0 release — commit, tag, push, publish?
-<!-- agent:boundary:0e7385f8 -->
+Release
+### Assistant
+
+**v0.1.0 released.**
+
+1. **Committed** all changes in submodule (17 files, 1072 insertions)
+2. **Tagged** v0.1.0 and pushed to GitHub — release workflow triggered for 5-platform builds
+3. **Published** to crates.io: `cargo install module-harness`
+4. **Installed** locally to `~/.cargo/bin/module-harness`
+5. **Updated** parent agent-loop submodule pointer
+
+**Release artifacts:**
+- crates.io: https://crates.io/crates/module-harness
+- GitHub: https://github.com/btakita/module-harness/releases/tag/v0.1.0 (binaries building)
+
+**Summary of v0.1.0:**
+- 4 CLI commands: `parse`, `inventory`, `diff`, `coverage`
+- 2 scoring commands: `score`, `score-file`
+- 7 language parsers: Rust, Python, TypeScript, JavaScript, Go, Kotlin, Java
+- Eval types: boolean, ordinal, continuous, range (with directional deviation)
+- 36 tests (16 unit + 20 integration)
+- Cross-platform CI + release builds (Linux x86/arm, macOS x86/arm, Windows)
+<!-- agent:boundary:b4d3b087 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Commit, tag v0.1.0, push, publish to crates.io (awaiting approval)
-- ([done]) Extend eval result type with signed deviation + direction enum
-- ([done]) Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
-- ([done]) Create reference plugin harness with runnable evals
-- ([done]) Update eval.md ontology node with directional range eval spec
-- ([done]) Add integration tests for binary commands (parse, inventory, diff, coverage)
-- ([done]) Add GitHub Actions CI + Release workflows
-- ([done]) Add Makefile with standard targets
-- ([done]) Add release profile to Cargo.toml
-- ([done]) Create /rust-package skill for future Rust packages
+- ([done]) v0.1.0 released to crates.io, GitHub, and installed locally
+- ([done]) All eval scoring features implemented
+- ([done]) All infrastructure (tests, CI, Makefile, release profile) in place
+- ([done]) /rust-package skill created for future packages
 <!-- /agent:pending -->

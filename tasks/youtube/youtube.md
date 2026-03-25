@@ -527,17 +527,32 @@ Leads with the module harness concept, highlights the ontology-building session,
 To publish: `corky linkedin publish mail/social/20260325-module-harness-linkedin.md`
 
 Or review/edit the draft first.
-<!-- agent:boundary:84ed9635 -->
+Publish to LinkedIn
+Publish comment on the post with links to:
+- the YouTube video
+- the blog post
+- btakita/module-harness github and crate
+- existence-lang/existence github and existence crate
+
+### Re: Publish LinkedIn + comment (HEAD)
+
+**LinkedIn published:** https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
+
+**Comment posted** with links to:
+- YouTube full session
+- Blog post
+- module-harness GitHub + crates.io
+- existence-lang GitHub + crates.io
+<!-- agent:boundary:ebef6fb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
-- [x] rappstack packages published at 0.1.4
-- [x] Blog post video URL updated
+- [x] Full video: https://www.youtube.com/watch?v=ixDbYPO43Cw
+- [x] Blog post: https://briantakita.me/posts/agent-doc-module-harness-ontology
+- [x] LinkedIn: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
+- [x] YouTube comment with blog link
+- [x] LinkedIn comment with all links
 - [x] corky v0.21.2 released
-- [x] Deleted old edited video
-- [x] YouTube comment with blog link posted
-- [x] LinkedIn draft created
-- [ ] Publish LinkedIn post (review draft first)
-- [ ] Verify CI build passes and blog post deploys
+- [x] rappstack packages at 0.1.4
+- [ ] Verify CI build passes and blog deploys
 <!-- /agent:pending -->

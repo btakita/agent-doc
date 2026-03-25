@@ -603,6 +603,7 @@ Brian
 - Shows reciprocal interest in his product, not just talking about yourself
 
 Tell me more about the "5th wave" framing.
+Where is "5th wave" mentioned?
 
 ### Re: "5th wave coding" framing
 
@@ -628,7 +629,15 @@ He explicitly contrasts it with "vibe coding" — he's saying the same phenomeno
 - MIT Technology Review (2005): "Computing's Fifth Wave" — predicted this era
 
 **Why it matters for your conversation:** Drew sees himself as part of a historical arc. He's been coding since 1975 and sees AI-assisted development as the fulfillment of a decades-old dream. Your "human-agent alignment" framing in v12 connects well — you're both saying "this isn't a toy, it's the next paradigm."
-<!-- agent:boundary:e014484b -->
+
+### Re: Where is "5th wave" mentioned? (HEAD)
+
+From Drew's LinkedIn message (`mail/contacts/drew-anderson/20260325-linkedin-drew-anderson.txt`):
+
+> *"Im a free-lance like you: I don't call it vibe-coding - I use the term 5th wave coding instead."*
+
+He coined it in his initial outreach to you. It's his personal rebranding of "vibe coding" — positioning AI-assisted development as a historical computing wave rather than a casual trend.
+<!-- agent:boundary:1cb5ddfb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

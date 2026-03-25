@@ -1303,7 +1303,34 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 4. ✅ Run and ensure tmux is correct (session 0 clean, stash purged)
 5. ⬜ Session 3 orphan still exists → fixing now
 6. ⬜ Review logs for incorrect transitions → after session 3 fix
-<!-- agent:boundary:99db8dda -->
+### Re: Iteration complete — all orphans purged (HEAD)
+
+**Session 3 orphan fixed.** Added `purge_orphaned_agent_panes()` to kill unregistered agent-doc/claude panes in ANY window (not just stash), provided the window has at least one other pane.
+
+**Final tmux state (verified):**
+```
+0:0 agent-doc  %103 agent-doc   (tasks/agent-doc.md)
+0:0 agent-doc  %97  agent-doc   (benjamin-becker.md)
+0:1 stash      %20  corky       (user process — preserved)
+2:0 zsh        %32  zsh         (user shell)
+3:0 zsh        %107 zsh         (this session)
+```
+
+**All contracts met:**
+1. ✅ Tests replicating current state — 5 new tests for stash/orphan purge
+2. ✅ Tests pass — all 17 resync tests pass, full suite passes
+3. ✅ Built and installed — release binary updated
+4. ✅ Tmux in correct state — layout correct, stash cleaned (17→1), session 3 orphan killed
+5. ✅ Reviewed logs — `resync: purged 1 orphaned agent pane(s) from non-stash windows`
+6. ✅ Added tests for transition — `purge_orphan_agent_in_non_stash_window`, `purge_orphan_does_not_kill_last_pane`
+
+**Safety guarantees:**
+- Registered panes never killed
+- User processes (corky, vim, etc.) never killed
+- Last pane in a window never killed
+- Idle shells in stash killed
+- Orphaned agent processes everywhere killed
+<!-- agent:boundary:578be601 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1314,7 +1341,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - [x] **Reconcile post-condition** — session boundary check at VERIFY
 - [x] **Session firewall tests** — standardized cross-session test template
 - [x] **Purge unregistered stash panes** — kills orphaned agent/shell panes in stash
-- [ ] **Purge orphaned agent panes in non-stash windows** — session 3 orphan
+- [x] **Purge orphaned agent panes in non-stash windows** — session 3 orphan fixed
 - [ ] **Split direction from column position** — left column = split before
 - [ ] **Release v0.25.16**
 <!-- /agent:pending -->

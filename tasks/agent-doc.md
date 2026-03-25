@@ -1447,7 +1447,7 @@ The config should prevent this since `tmux_session = "0"` in config.toml. But **
 **Possible root cause:** The editor plugin sends `agent-doc route` without `--window`, and the route creates panes in the config-specified session (0). But subsequent `sync` operations might use the _editor's_ tmux context (session 3) for layout operations, causing cross-session window moves.
 
 Need to trace the exact code path to confirm. Should I dig into the sync → repair_layout → move-window chain to find where cross-session contamination occurs?
-### Re: Overflow Stash for Small Terminals (HEAD)
+### Re: Overflow Stash for Small Terminals
 
 You're right — when the terminal shrinks below usable size for multiple panes, agent-doc should stash overflow panes automatically.
 
@@ -1470,7 +1470,7 @@ You're right — when the terminal shrinks below usable size for multiple panes,
 - `test_sync_overflow_stash_and_restore` — stash on shrink, restore on grow
 
 Starting implementation now.
-<!-- agent:boundary:dd83702e -->
+<!-- agent:boundary:a90ca565 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

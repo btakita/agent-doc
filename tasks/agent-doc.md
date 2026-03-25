@@ -1511,7 +1511,7 @@ Also 1:stash originated in tmux session 3.
 What is running is corky watch...started in tmux session 3 window 1
 I
 
-### Re: Window loss & stash origin (HEAD)
+### Re: Window loss & stash origin
 
 **Current tmux session 0 state:**
 - `1:stash` (@2) — `corky watch` (PID 92194), 1000-row stash height. This is an original session 0 window (window ID @2 is very low = created early). Not from session 3.
@@ -1521,7 +1521,7 @@ I
 
 The 15-row terminal height likely triggered overflow stashing, and the resync may have improperly handled the window during the process. This needs investigation.
 
-### Re: Action items (HEAD)
+### Re: Action items
 
 Noted from your edits:
 1. **Release v0.25.16** — version bumped, needs `cargo publish` + binary
@@ -1530,7 +1530,7 @@ Noted from your edits:
 4. **Window 0 loss** — bug to investigate
 
 Which should I tackle first?
-<!-- agent:boundary:bcd4bfde -->
+<!-- agent:boundary:dcb8d8ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

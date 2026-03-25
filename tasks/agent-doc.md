@@ -1419,6 +1419,7 @@ Thanks for the answers. Now I understand the scenario:
 3. **Stash panes when terminal shrinks too much** — if the window becomes too small for 2+ panes, stash extras to the stash window and restore when terminal grows back
 
 Starting implementation now. I'll add tests first, then fix the code.
+A new stash window should have been created to handle the overflow.
 ### Re: Cross-Session Window Contamination
 
 Interesting — I checked the current tmux state and don't see cross-session windows right now:
@@ -1446,7 +1447,30 @@ The config should prevent this since `tmux_session = "0"` in config.toml. But **
 **Possible root cause:** The editor plugin sends `agent-doc route` without `--window`, and the route creates panes in the config-specified session (0). But subsequent `sync` operations might use the _editor's_ tmux context (session 3) for layout operations, causing cross-session window moves.
 
 Need to trace the exact code path to confirm. Should I dig into the sync → repair_layout → move-window chain to find where cross-session contamination occurs?
-<!-- agent:boundary:22b62c5d -->
+### Re: Overflow Stash for Small Terminals (HEAD)
+
+You're right — when the terminal shrinks below usable size for multiple panes, agent-doc should stash overflow panes automatically.
+
+**Root cause confirmed:** Zero size validation in the sync/reconcile chain:
+- `reconcile()` in tmux-router joins panes without checking window dimensions
+- `equalize_sizes()` blindly resizes to 50%/equal — with 15 rows, panes become ~7 rows each
+- All `resize_pane()` failures are silently swallowed (`let _ =`)
+
+**Implementation plan:**
+
+1. **Add `MIN_PANE_HEIGHT` constant** (e.g., 20 rows) to tmux-router
+2. **Pre-reconcile size check** in `sync()` — query `#{window_height}`, calculate max panes that fit
+3. **Overflow stash** — if desired panes > max capacity, stash extras before reconcile
+4. **Post-reconcile validation** — if any pane < MIN_PANE_HEIGHT after equalize, stash the smallest
+5. **Log resize failures** — replace `let _ =` with warnings in `equalize_sizes()`
+
+**Test plan:**
+- `test_reconcile_stashes_overflow_when_window_too_small` — 2 panes in 16-row window → 1 stashed
+- `test_equalize_sizes_logs_when_panes_too_small` — resize failure produces warning
+- `test_sync_overflow_stash_and_restore` — stash on shrink, restore on grow
+
+Starting implementation now.
+<!-- agent:boundary:dd83702e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

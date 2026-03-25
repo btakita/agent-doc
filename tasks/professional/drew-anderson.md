@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v8 (final) — distribution claim removed, ready to send
+Draft v9 — analytics angle, KPI question, iteration practices
 <!-- /agent:status -->
 
 ## Exchange
@@ -417,11 +417,11 @@ I'd go with **Option A** — cleaner, and you can always bring it up later if Dr
 
 Hey Drew,
 
-Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on human-agent alignment: structured ways for humans and AI to collaborate on documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on human-agent alignment: structured ways for humans and AI to collaborate on documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.: Improving human-agent alignment and iteration practices
 
-I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.: Emphasize the analytics-first approach with PresenceAI with the consumer prospect pipeline (Chatroulette)?
 
-A few things I'd love to compare notes on:
+A few things I'd love to compare notes on: Is he getting good interaction KPIs with his products?
 - Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
 - On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
 
@@ -438,7 +438,43 @@ Brian
 - The PresenceAI licensing + distribution angle can come up naturally in a follow-up if Drew engages
 
 Ready to send, or any final tweaks?
-<!-- agent:boundary:57c9d3a1 -->
+
+### Re: Draft v9 — analytics angle + KPI question + iteration practices (HEAD)
+
+Three good additions:
+
+1. **"Improving human-agent alignment and iteration practices"** — tighter than "structured ways for humans and AI to collaborate." More action-oriented.
+2. **Analytics-first / Chatroulette pipeline** — this is interesting. You can mention the analytics-driven approach without naming Chatroulette. It positions you as someone who thinks about the full funnel (build → measure → iterate), not just the tech.
+3. **KPI question** — asking Drew about his interaction metrics is a smart move. It's a peer-level question that an investor/strategist type will respect. Most developers ask about features; asking about KPIs signals business acumen.
+
+**Draft v9:**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on improving human-agent alignment and iteration practices — structured ways to tighten the feedback loop between humans and AI across documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. We took an analytics-first approach, instrumenting the full consumer interaction pipeline to measure what actually moved engagement. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- How are you measuring interaction quality with Nova? Curious what KPIs you're tracking — session duration, completion rates, something else?
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
+- On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Changes from v8:**
+- **Opener refined:** "improving human-agent alignment and iteration practices" + "tighten the feedback loop" — more active, more specific
+- **Analytics-first approach added:** "instrumenting the full consumer interaction pipeline to measure what actually moved engagement" — signals you think beyond just building, into measuring impact. Hints at Chatroulette funnel without naming it
+- **KPI question leads the compare-notes section:** "How are you measuring interaction quality?" — shows business thinking, invites Drew to share his metrics (which tells you how serious the product is)
+- Slightly longer but each addition is high-signal
+<!-- agent:boundary:026f8c2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

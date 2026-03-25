@@ -310,7 +310,7 @@ Encoding in progress...
 
 **Re: build failure** — still need to publish `@rappstack/domain--server--blog@0.1.2` with the `blog_post__video_url_` export. Will address after video upload.
 
-### Re: Full video upload (HEAD)
+### Re: Full video upload
 
 Done! Full unedited video uploaded to YouTube.
 
@@ -324,7 +324,7 @@ Done! Full unedited video uploaded to YouTube.
 **Previous edited version** (110 min) is still up at https://www.youtube.com/watch?v=OrGJi8Hh_bQ — you can delete it or keep both.
 
 **Still pending:** blog deploy is blocked by the missing `blog_post__video_url_` npm export. Need to publish `@rappstack/domain--server--blog@0.1.2`.
-<!-- agent:boundary:2effae04 -->
+<!-- agent:boundary:717d3f3b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

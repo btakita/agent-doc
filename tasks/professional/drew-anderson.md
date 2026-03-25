@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created — `mail/contacts/drew-anderson/`
+Contact updated with Drew's LinkedIn outreach context — awaiting reply direction
 <!-- /agent:status -->
 
 ## Exchange
@@ -48,11 +48,30 @@ Created `mail/contacts/drew-anderson/` with:
 - **Volunteer:** CERT / Santa Clara County Fire Dept (2012–present)
 
 What's the context for connecting with Drew? I can help draft outreach or add relationship notes.
-<!-- agent:boundary:fe42613b -->
+
+Drew reached out to me on LinkedIn. See contacts/drew-anderson/*.txt for his message
+
+### Re: Drew's LinkedIn outreach (HEAD)
+
+Read his message in `20260325-linkedin-drew-anderson.txt`. Updated the contact file with:
+
+- **Relationship:** Fellow freelance AI developer, reached out 2026-03-25 re: voice agents
+- **Tone:** Casual-professional, conversational, nostalgic about programming history
+- **Topics:** Full-duplex voice agents, avatars, Centerbeam Nova SDK/API, "5th wave coding"
+- **Message log:** Indexed his initial outreach
+
+**Drew's message summary:** He's interested in full-duplex voice agents and adding avatars. Asks for your thoughts on Centerbeam Nova SDK/API (https://centerbeam.ai/#nova-bot). Sees a kinship — fellow freelancer using AI to build/rebuild apps, coding since 1975. Prefers "5th wave coding" over "vibe coding."
+
+Would you like me to:
+1. **Research Centerbeam Nova** so you can give an informed reply
+2. **Draft a response** to Drew on LinkedIn
+3. **Both** — research first, then draft
+<!-- agent:boundary:abb7fb65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add relationship context / communication timeline when available
+- [ ] Respond to Drew's LinkedIn message
+- [ ] Research Centerbeam Nova SDK/API if needed
 <!-- /agent:pending -->

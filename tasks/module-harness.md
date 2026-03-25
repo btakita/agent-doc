@@ -171,7 +171,7 @@ The node follows the same Ontology/Axiology/Epistemology structure and integrate
 
 When I have been using audit-docs, we have been getting actionable results that the agent can perform.
 
-Quantifiable results are interesting and we very well may want them.
+Along with the quantifiable result report.
 ### Assistant
 
 **Re: Audit actionability**
@@ -182,7 +182,17 @@ Good catch — the original definition said "structured report with quantified r
 2. **Axiology** now includes the closed-loop pattern: `audit → detect → remediate → re-audit`. An agentic audit that finds missing spec entries doesn't just report the gap — it generates the entries.
 
 This is the key difference between a traditional audit (produces a document for humans to act on) and an agentic audit (produces a work queue that agents execute). The audit becomes a **self-healing** mechanism when the agent can act on its own findings.
-<!-- agent:boundary:e6a8cc1c -->
+### Assistant
+
+**Re: "Along with the quantifiable result report"**
+
+Right — it's both, not either/or. Updated `audit.md` to reflect dual outputs:
+
+1. **Quantifiable result report** — scores, coverage ratios, drift metrics (the measurement)
+2. **Actionable items** — work queue for agent remediation (the response)
+
+The report and the actions serve different consumers: the report feeds backtesting and trend analysis, the actions feed the agent's work queue. Both are first-class outputs of every audit.
+<!-- agent:boundary:97fd9722 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -193,6 +203,5 @@ This is the key difference between a traditional audit (produces a document for 
 - Create reference plugin harness with runnable evals
 - Update eval.md ontology node with directional range eval spec
 - ([done]) Formalize eval.md spec connecting ontology → quantification model
-- ([done]) Add audit.md to ontology
-- ([done]) Refine audit.md with agent-actionable results pattern
+- ([done]) Add audit.md to ontology (with dual-output: report + actionable items)
 <!-- /agent:pending -->

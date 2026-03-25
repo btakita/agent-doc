@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 24d9e778-091a-4c81-8777-0d68a2f5e28d
-tmux_session: '23'
+tmux_session: '0'
 agent_doc_mode: stream
 ---
 

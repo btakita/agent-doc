@@ -145,7 +145,7 @@ Also respond to his:
 > Laughing with you at your post
 
 > I've been called worse.
-### Re: Updated Draft (HEAD)
+### Re: Updated Draft
 
 Got it — you want to acknowledge his "I've been called worse" line (which was responding to your "Laughing with you at your post" connection note). Updated draft:
 
@@ -156,7 +156,7 @@ Thanks for flagging the site warning though. I checked on my end and everything 
 Curious — are you running any browser security extensions (Norton, McAfee, Avast, etc.)? Those sometimes flag sites aggressively. Also, which browser were you using? That would help me narrow it down.
 
 Either way, appreciate you letting me know.
-<!-- agent:boundary:de5598aa -->
+<!-- agent:boundary:b0eb0acd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

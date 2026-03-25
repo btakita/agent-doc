@@ -1870,16 +1870,41 @@ continue
 **Tests:** 77 passed, 0 failed.
 
 **Remaining proposed guards (2-4) are defense-in-depth** — they'd protect against future `kill_pane` additions. Want me to implement those too, or is removing the only production `kill_pane` call sufficient?
-<!-- agent:boundary:1d18dc2e -->
+Implement fixes 1-4
+
+### Re: Implement fixes 1-4 (HEAD)
+
+All four kill_pane safety fixes are implemented and passing (77 tests, 0 failures).
+
+**Fix 1 — Never kill_pane as fallback** (done last cycle)
+`stash_pane()` fallback now calls `break_pane_to_stash()` instead of `kill_pane()`.
+
+**Fix 2+3 — Window-count + session-last-window guard**
+`kill_pane()` itself now checks before executing:
+- Queries pane count in the pane's window
+- If it's the last pane, queries window count in the session
+- If killing would destroy the last window (and thus the session), returns an error instead
+
+New helper: `session_window_count()` for the window count query.
+
+**Fix 4 — Cross-session registry check**
+Added to the detach loop in `reconcile()` (sync.rs):
+- Before stashing a pane, loads the registry and checks if the pane belongs to a different session
+- If `pane_session(pane) != current_session`, skips the stash with a log entry
+- Prevents one session's reconciliation from disrupting another session's panes
+
+**Files changed:**
+- `src/tmux-router/src/tmux.rs` — `kill_pane()` with guards, new `session_window_count()`
+- `src/tmux-router/src/sync.rs` — cross-session check in detach loop
+<!-- agent:boundary:2f5062c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**kill_pane safety in stash_pane fallback** — replace with break_pane_to_stash~~ ([done])
-- **Window-count guard on kill_pane** — defense-in-depth: refuse to kill if it would destroy last window
-- **Session-last-window guard** — refuse kill if 0 windows would remain
-- **Cross-session pane check** — verify pane isn't in sessions.json for another active session before kill/stash
+- ~~**Fix 1: kill_pane safety in stash_pane fallback**~~ ([done])
+- ~~**Fix 2+3: Window-count + session-last-window guard on kill_pane**~~ ([done])
+- ~~**Fix 4: Cross-session registry check before stash/kill**~~ ([done])
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

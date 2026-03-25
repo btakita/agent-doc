@@ -728,13 +728,27 @@ Done:
 ### Re: agent_doc_version()
 
 Done (`98aa3c0`). `agent_doc_version()` returns the compile-time `CARGO_PKG_VERSION`. 558 tests pass. Binary + plugin rebuilt and pushed.
-<!-- agent:boundary:cc2ce70c -->
+
+### Re: Should the FFI have its own crate? (HEAD)
+
+No — keeping FFI in the same crate is the right call. Reasons:
+
+1. **FFI exports wrap internal modules** — `ffi.rs` calls `component::parse`, `template::apply_patch`, `crdt::merge`, etc. Extracting FFI to its own crate would require re-exporting every internal type as public API.
+
+2. **Version sync is free** — since FFI is in the same crate, `agent_doc_version()` uses `env!("CARGO_PKG_VERSION")` and stays perfectly in sync. A separate crate would need manual version coordination.
+
+3. **Single build artifact** — `cargo build --release` produces both the binary and the `cdylib` in one pass. A separate crate would need coordinated builds.
+
+4. **The `[lib]` target already handles it** — `crate-type = ["cdylib", "lib"]` gives us both the shared library (for plugins) and the Rust library (for internal use) from one crate.
+
+The only reason to extract would be if the FFI surface grew so large that it warranted its own API documentation or if other crates wanted to link against `libagent_doc` as a dependency. Neither applies today.
+<!-- agent:boundary:bab41db2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Install JB plugin v0.2.24** — user action needed
+All items cleared.
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

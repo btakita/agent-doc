@@ -1,4 +1,24 @@
-//! `agent-doc commands` — Output available commands as JSON for editor plugin autocomplete.
+//! # Module: commands
+//!
+//! ## Spec
+//! - Enumerates all commands available in the agent-doc ecosystem: agent-doc CLI subcommands,
+//!   Claude Code built-in slash commands, and installed skill commands (`/existence`, `/tagpath`).
+//! - Each entry carries a `name` (slash-prefixed), `args` (synopsis), and `description`.
+//! - `run()` serializes the full list to pretty-printed JSON on stdout; consumed by editor plugins
+//!   for autocomplete popups.
+//! - All entries are static; no filesystem or process inspection occurs at runtime.
+//!
+//! ## Agentic Contracts
+//! - `run() -> anyhow::Result<()>` — always succeeds unless JSON serialization panics (it won't);
+//!   prints to stdout and returns `Ok(())`.
+//! - Every `CommandInfo` entry must have a non-empty `name` starting with `/` and a non-empty
+//!   `description`; enforced by tests.
+//! - Total command count is ≥ 50 (test guard against accidental truncation).
+//!
+//! ## Evals
+//! - nonempty_list: `all_commands()` → at least 50 entries
+//! - names_start_with_slash: every entry name starts with `/` and has non-empty description
+//! - json_output: serialized JSON contains `"/agent-doc"`, `"/help"`, `"/existence"`
 
 #![allow(clippy::vec_init_then_push)]
 

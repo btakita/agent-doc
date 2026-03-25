@@ -1,3 +1,76 @@
+//! # Module: frontmatter
+//!
+//! ## Spec
+//! - Defines the YAML frontmatter schema (`Frontmatter`) embedded between `---\n` delimiters at
+//!   the top of agent-doc documents.
+//! - `parse(content)` splits a document string into `(Frontmatter, body_str)`. Documents that do
+//!   not start with `---\n` return a default `Frontmatter` and the full content as body.
+//!   Unterminated frontmatter (no closing `---`) returns `Err`.
+//! - `write(fm, body)` serialises `Frontmatter` to YAML and prepends it to `body`, producing a
+//!   complete document string.
+//! - `set_session_id` / `set_resume_id` are convenience wrappers: parse → mutate one field →
+//!   write. They create frontmatter when none exists.
+//! - `ensure_session` is idempotent: if `session` is already set the document is returned
+//!   unchanged; otherwise a UUID v4 is generated and written.
+//! - `set_format_and_write` atomically sets `agent_doc_format` + `agent_doc_write` and clears
+//!   the deprecated `agent_doc_mode` field.
+//! - `merge_fields(content, yaml_fields)` applies additive key/value patches to the frontmatter;
+//!   unknown keys are logged to stderr and discarded; the document body is preserved unchanged.
+//! - `set_tmux_session` is retained for backward compatibility; `tmux_session` in frontmatter is
+//!   deprecated — runtime session is now determined by `--window` or `current_tmux_session()`.
+//! - `AgentDocFormat` (append | template) controls document structure; serialised as `inline` /
+//!   `template` in YAML; `inline` and `append` are accepted as aliases on deserialise.
+//! - `AgentDocWrite` (merge | crdt) controls the write/merge strategy.
+//! - `ResolvedMode` is the canonical (format, write) pair after deprecation migration.
+//!   `Frontmatter::resolve_mode()` applies a three-level priority: explicit `agent_doc_format` /
+//!   `agent_doc_write` fields > deprecated `agent_doc_mode` string > defaults
+//!   (format=template, write=crdt).
+//! - Deprecated `agent_doc_mode` values: `"append"` → format=Append; `"template"` or `"stream"`
+//!   → format=Template; all keep write=Crdt.
+//! - `StreamConfig` carries optional CRDT stream parameters: write-back interval, ANSI stripping,
+//!   target component, and chain-of-thought routing.
+//! - Field renames and aliases ensure backward compatibility:
+//!   `session` / `agent_doc_session` → `session`;
+//!   `mode` / `response_mode` / `agent_doc_mode` → `mode`.
+//!
+//! ## Agentic Contracts
+//! - `parse` never panics; it returns `Err` only for an unterminated frontmatter block or a YAML
+//!   deserialisation failure. All missing optional fields default to `None`.
+//! - `write(parse(doc).0, parse(doc).1)` round-trips the document: re-parsing the result yields
+//!   semantically equivalent `Frontmatter` and an identical body string.
+//! - `ensure_session` is idempotent: calling it twice on the same document returns the same
+//!   session ID and does not modify the document on the second call.
+//! - `merge_fields` is additive: it never removes existing fields unless an explicit `null`
+//!   value is supplied for that field in `yaml_fields`.
+//! - `set_format_and_write` is the only function that actively clears a field (`mode = None`);
+//!   all other helpers are strictly additive.
+//! - `resolve_mode` is pure and total: it always returns a valid `ResolvedMode` regardless of
+//!   which combination of deprecated and current fields are populated.
+//! - Serialised YAML always uses the canonical field names (`agent_doc_session`,
+//!   `agent_doc_mode`, `agent_doc_format`, `agent_doc_write`); legacy aliases are read-only.
+//!
+//! ## Evals
+//! - parse_no_frontmatter: content without `---` prefix → default Frontmatter, full content as body
+//! - parse_all_fields: document with all known fields → each field correctly populated
+//! - parse_null_fields: YAML `null` values → all fields `None`
+//! - parse_unterminated_frontmatter: `---` open with no close → `Err` "Unterminated frontmatter"
+//! - parse_closing_at_eof: closing `---` without trailing newline → body = ""
+//! - write_roundtrip: write then parse → identical Frontmatter, body contains original text
+//! - write_default_frontmatter: default Frontmatter → output starts with `---\n`, ends with `---\n`
+//! - set_session_id_creates_frontmatter: plain doc → frontmatter added with correct session
+//! - set_session_id_preserves_other_fields: existing fields not clobbered by session update
+//! - ensure_session_no_frontmatter: plain doc → UUID generated, written, returned
+//! - ensure_session_existing_session: session already set → content unchanged, same ID returned
+//! - parse_legacy_session_field: `session:` alias → populates `fm.session`
+//! - parse_mode_shorthand_alias: `mode:` alias → populates `fm.mode`
+//! - write_uses_agent_doc_mode_field: deprecated mode serialised as `agent_doc_mode:`, not `mode:`
+//! - write_uses_new_field_name: session serialised as `agent_doc_session:`, not `session:`
+//! - resolve_mode_defaults: empty Frontmatter → format=Template, write=Crdt
+//! - resolve_mode_new_fields_override_deprecated: both present → new fields win
+//! - set_format_and_write_clears_deprecated_mode: deprecated `mode` cleared after migration
+//! - merge_fields_adds_new_field: new key added without disturbing existing fields
+//! - merge_fields_ignores_unknown: unknown key logged to stderr, not stored
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt;

@@ -1,3 +1,73 @@
+//! # Module: snapshot
+//!
+//! ## Spec
+//! - `doc_hash(doc)`: compute SHA-256 hex of the document's canonical absolute path.
+//!   Used as a stable, collision-resistant filename key for all per-doc state files.
+//! - `find_project_root(path)`: walk up directory tree to find the directory containing
+//!   `.agent-doc/`. Returns `None` if not found (e.g., in tests without project scaffolding).
+//! - `path_for(doc)`: compute snapshot path `<project_root>/.agent-doc/snapshots/<hash>.md`.
+//!   Falls back to a relative path when no project root is found.
+//! - `lock_path_for(doc)`: compute advisory lock path `<project_root>/.agent-doc/locks/<hash>.lock`.
+//! - `pending_path_for(doc)`: compute pending response path `<project_root>/.agent-doc/pending/<hash>.md`.
+//! - `crdt_path_for(doc)`: compute CRDT state path `<project_root>/.agent-doc/crdt/<hash>.yrs`.
+//! - `pre_response_path_for(doc)`: compute pre-response snapshot path
+//!   `<project_root>/.agent-doc/pre-response/<hash>.md`.
+//! - `SnapshotLock::acquire(doc)`: acquire an exclusive advisory flock on the snapshot lock
+//!   file. Blocks until available. Released on drop.
+//! - `load(doc)`: acquire snapshot lock, return snapshot content or `None` if absent.
+//! - `save(doc, content)`: acquire snapshot lock, atomically write content via tempfile+rename.
+//! - `delete(doc)`: acquire snapshot lock, remove snapshot file if present. No-op if absent.
+//! - `resolve(doc)`: authoritative baseline for merge. Returns snapshot file content when it
+//!   exists. Falls back to `git show HEAD:<doc>` only when no snapshot file exists and git
+//!   content differs from current file (recovery path). Returns `None` on first submit.
+//! - `save_pre_response(doc, content)`: atomically write content to the pre-response path
+//!   (saved before the agent's response is applied, enabling undo).
+//! - `load_pre_response(doc)`: return pre-response snapshot content or `None`.
+//! - `delete_pre_response(doc)`: remove pre-response snapshot if present.
+//! - `load_crdt(doc)`: acquire CRDT advisory lock, return CRDT state bytes or `None`.
+//! - `save_crdt(doc, state)`: acquire CRDT advisory lock, atomically write state bytes.
+//! - `delete_crdt(doc)`: acquire CRDT advisory lock, remove CRDT state file if present.
+//!
+//! ## Agentic Contracts
+//! - All writes (snapshot, pre-response, CRDT) are atomic: written to a temp file in the
+//!   same directory then renamed, ensuring no partial reads under concurrent access.
+//! - `load`, `save`, `delete`, `load_crdt`, `save_crdt`, `delete_crdt` are all
+//!   flock-protected — safe to call from concurrent processes on the same document.
+//! - `resolve` prefers the snapshot file unconditionally when it exists. Git is only used
+//!   as a recovery fallback. This prevents false baselines after a step-0b commit.
+//! - `doc_hash` is deterministic and stable: same canonical path → same hash across runs.
+//! - `path_for`, `lock_path_for`, `pending_path_for`, `crdt_path_for`, and
+//!   `pre_response_path_for` all use the same `doc_hash`, so files for the same document
+//!   always colocate under the same project root `.agent-doc/` tree.
+//! - `delete` and `delete_crdt` are idempotent: calling them on an absent file is not an error.
+//! - Pre-response snapshots are not flock-protected (single-writer assumption: only the
+//!   active write path saves them).
+//!
+//! ## Evals
+//! - `path_for_consistent_hash`: calling `path_for` twice on the same doc returns equal paths.
+//! - `path_for_different_files_different_hashes`: two distinct files → distinct snapshot paths.
+//! - `path_for_has_correct_structure`: path contains `.agent-doc/snapshots/`, ends with `.md`,
+//!   stem is 64 lowercase hex chars.
+//! - `load_returns_none_when_no_snapshot`: no snapshot file → `load` returns `None`.
+//! - `snapshot_write_and_read_directly`: write then read snapshot file → content round-trips.
+//! - `snapshot_overwrite`: writing twice → second value persists.
+//! - `snapshot_delete_by_removing_file`: remove snapshot file → `read` returns `None`.
+//! - `delete_no_error_when_missing`: `delete` on absent snapshot → no error.
+//! - `flock_acquire_and_release_on_drop`: flock released after drop → second acquire succeeds.
+//! - `flock_serializes_concurrent_access`: 10 threads increment a counter under flock →
+//!   final value is exactly 10 (no lost updates).
+//! - `atomic_write_via_tempfile_produces_correct_content`: tempfile+rename → correct content.
+//! - `atomic_write_overwrites_existing`: atomic write over existing file → new content visible.
+//! - `crdt_path_has_correct_extension`: CRDT path contains `.agent-doc/crdt/`, ends `.yrs`.
+//! - `crdt_save_and_load_roundtrip`: save bytes then load → same bytes returned.
+//! - `crdt_load_returns_none_when_missing`: no CRDT file → `load_crdt` returns `None`.
+//! - `crdt_delete_removes_file`: save then delete → `load_crdt` returns `None`.
+//! - `crdt_delete_no_error_when_missing`: `delete_crdt` on absent file → no error.
+//! - `concurrent_atomic_writes_no_partial_content`: 20 threads atomically overwrite same
+//!   file → final content is exactly one complete write (no corruption).
+//! - `resolve_prefers_snapshot_over_git`: snapshot file present with different content than
+//!   disk → `resolve` returns snapshot content, not disk/git content.
+
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};

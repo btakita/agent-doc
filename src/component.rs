@@ -1,3 +1,68 @@
+//! # Module: component
+//!
+//! ## Spec
+//! - Defines `Component`, the parsed representation of a bounded document region delimited by
+//!   `<!-- agent:name [attrs...] -->` (open) and `<!-- /agent:name -->` (close) HTML comments.
+//! - `parse(doc)` scans the raw document bytes for `<!--` / `-->` comment pairs, builds a
+//!   stack-based nesting model, and returns all `Component` values sorted by `open_start`.
+//! - Markers that appear inside fenced code blocks (backtick or tilde) or inline code spans are
+//!   skipped; `find_code_ranges(doc)` uses the `pulldown-cmark` AST (CommonMark-compliant) to
+//!   locate these regions.
+//! - `is_agent_marker(comment_text)` classifies whether the inner text of a comment is an
+//!   agent open/close marker vs. an ordinary HTML comment.
+//! - Component names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`; invalid names, unmatched opens,
+//!   unmatched closes, and mismatched open/close pairs all return `Err`.
+//! - `boundary:*` prefixed markers (`<!-- agent:boundary:ID -->`) are recognised and skipped
+//!   during component parsing; they are not treated as component open tags.
+//! - Opening markers may carry space-separated `key=value` inline attributes
+//!   (e.g., `patch=append`). `patch=` takes precedence over the legacy `mode=` alias;
+//!   `patch_mode()` encapsulates this lookup.
+//! - Marker `open_end` / `close_end` byte offsets include a trailing newline when present,
+//!   so that content slices are clean.
+//! - `replace_content(doc, new_content)` rebuilds the document preserving both markers,
+//!   replacing only the bytes between them.
+//! - `append_with_caret(doc, content, caret_offset)` appends content after existing text, or
+//!   inserts before the caret line when the caret falls inside the component.
+//! - `append_with_boundary(doc, content, boundary_id)` locates `<!-- agent:boundary:ID -->`
+//!   inside the component (skipping any occurrence that lives inside a code block), replaces it
+//!   with the new content, and re-inserts a fresh boundary marker; falls back to
+//!   `append_with_caret` when no boundary is found.
+//!
+//! ## Agentic Contracts
+//! - `parse` is pure and deterministic: identical input always yields identical output.
+//! - All byte offsets (`open_start`, `open_end`, `close_start`, `close_end`) are valid UTF-8
+//!   char boundaries within the document string they were parsed from.
+//! - `content(doc)` returns exactly `&doc[open_end..close_start]` — no allocation.
+//! - `replace_content` and `append_with_*` never mutate the original `&str`; they return a
+//!   new `String` with all offsets consistent for a fresh `parse` call.
+//! - Markers inside any code region (fenced block or inline span) are never parsed as
+//!   components and never mutated by any append/replace operation.
+//! - `append_with_boundary` always re-inserts a boundary marker with a fresh UUID, preserving
+//!   the invariant that exactly one boundary exists inside the component after each write.
+//! - Unknown or malformed `key=value` tokens in inline attributes are silently discarded;
+//!   they never cause a parse error.
+//!
+//! ## Evals
+//! - single_range: doc with one component → one `Component`, correct name and content slice
+//! - nested_ranges: outer + inner components → two entries sorted outer-first
+//! - siblings: two adjacent components → two entries, each with correct content
+//! - no_ranges: plain markdown → empty vec, no error
+//! - unmatched_open_error: open without close → `Err` containing "unclosed component"
+//! - unmatched_close_error: close without open → `Err` containing "without matching open"
+//! - mismatched_names_error: `<!-- agent:foo -->…<!-- /agent:bar -->` → `Err` "mismatched"
+//! - invalid_name: name starting with `-` → `Err` "invalid component name"
+//! - markers_in_fenced_code_block_ignored: marker inside ``` block → not parsed as component
+//! - markers_in_inline_code_ignored: marker inside `` `…` `` span → not parsed
+//! - markers_in_tilde_fence_ignored: marker inside ~~~ block → not parsed
+//! - markers_in_indented_fenced_code_block_ignored: up-to-3-space-indented fence → not parsed
+//! - double_backtick_comment_before_agent_marker: `` `<!--` `` followed by real marker → one component
+//! - parse_component_with_patch_attr: `patch=append` on opening tag → `patch_mode()` = "append"
+//! - patch_attr_takes_precedence_over_mode: both `patch=` and `mode=` present → `patch=` wins
+//! - mode_attr_backward_compat: only `mode=append` present → `patch_mode()` = "append"
+//! - replace_roundtrip: replace content, re-parse → one component with new content
+//! - append_with_boundary_no_code_block: boundary found → content inserted, old ID consumed, new boundary present
+//! - append_with_boundary_skips_code_block: boundary inside code block skipped, real boundary used
+
 use anyhow::{bail, Result};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;

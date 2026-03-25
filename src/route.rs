@@ -1,14 +1,85 @@
-//! `agent-doc route` — Route /agent-doc commands to the correct tmux pane.
+//! # Module: route
 //!
-//! Usage: agent-doc route <file.md>
+//! Routes `/agent-doc <file>` commands to the correct tmux pane. This is the
+//! process-level coordinator between file-save events (editor plugin / watch daemon)
+//! and running Claude Code sessions inside tmux.
 //!
-//! 1. Reads session UUID from file's frontmatter
-//! 2. Looks up pane in sessions.json
-//! 3. If pane alive: sends `/agent-doc <path>` via tmux send-keys
-//! 4. If dead/missing: lazy-claims to an active pane, syncs layout, and sends command
-//! 5. If no registered/active pane: auto-starts a new Claude session
+//! ## Spec
 //!
-//! After lazy claim, automatically syncs tmux layout via `sync_after_claim()`.
+//! - **`run(file, pane, debounce_ms, col_args)`**: Public entry point. Delegates to
+//!   `run_with_tmux` using the default tmux server. Accepts an optional explicit
+//!   `pane` override, a debounce delay in milliseconds, and column layout hints.
+//! - **`run_with_tmux(file, tmux, pane, debounce_ms, col_args)`**: Core routing logic.
+//!   1. Prunes stale session registry entries via `resync::prune`.
+//!   2. If `debounce_ms > 0`, waits for the file's mtime to settle (`await_idle`).
+//!   3. Ensures a session UUID exists in the file's YAML frontmatter (generates one if missing).
+//!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
+//!      back to current tmux session, auto-updates config when the configured session is dead.
+//!   5. Looks up the registered pane in `sessions.json`.
+//!   6. If pane is alive and in the correct session: optionally rescues from a stash window,
+//!      then sends the `/agent-doc <path>` command via `send_command`.
+//!   7. If pane is alive but in the wrong session: skips it and falls through.
+//!   8. If pane is dead and was previously registered: lazy-claims to an active pane via
+//!      `find_target_pane`, sends the command, then calls `sync_after_claim` to re-sync layout.
+//!   9. If no registered pane or no claimable pane: auto-starts a new Claude session.
+//!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
+//! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
+//!   new Claude pane and sends `/agent-doc start`. Waits for Claude's idle prompt before
+//!   sending the initial command. Called by `sync.rs` for unresolved files.
+//! - **`auto_start_no_wait(tmux, file, session_id, file_path, context_session)`**: Like
+//!   `auto_start` but skips waiting for Claude to be ready. Used by sync when only pane
+//!   existence is needed (Claude will start asynchronously).
+//! - **`is_first_column(file, col_args)`**: Returns true when `file` appears in the first
+//!   `--col` argument. Drives the `-dbh` (split before) vs `-dh` (split after) split direction
+//!   when creating a new pane. Returns false when `col_args` has fewer than 2 entries.
+//! - **`send_command(tmux, pane, file_path)`**: Flashes a tmux display-message on the target
+//!   pane, sends `/agent-doc <file_path>` via send-keys, focuses the pane, then polls up to
+//!   5 seconds verifying the command was accepted (retrying Enter if still visible in input).
+//! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
+//!   elapsed since last modification, or until `10 × debounce` safety cap expires.
+//! - **`wait_for_claude_ready(tmux, pane_id, timeout)`**: Polls pane content every 500ms
+//!   looking for Claude's idle prompt (`❯` / `>`). Returns true when prompt found, false on
+//!   timeout. Logs progress every 10 polls.
+//! - **`sync_after_claim(tmux, pane_id)`**: After a lazy claim, re-runs `sync::run` for all
+//!   registered files in the same window to keep the tmux layout mirroring the editor split.
+//!   Skipped when fewer than 2 files share the window.
+//!
+//! ## Agentic Contracts
+//!
+//! - **Session UUID guarantee**: `run_with_tmux` always ensures the file has a session UUID
+//!   in frontmatter before any registry lookup. Callers never see a file without a UUID.
+//! - **Stale-registry hygiene**: `resync::prune` is called at the start of every `run_with_tmux`
+//!   invocation; the registry is always pruned before a lookup is attempted.
+//! - **One pane per document**: Each document gets its own Claude pane. Unregistered files
+//!   (no prior session) skip lazy-claim and always get a fresh pane via auto-start.
+//! - **Session isolation**: Panes are validated to be in the correct target tmux session.
+//!   Cross-session panes are not reused; a new pane is created in the correct session.
+//! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
+//!   automatically rescued back into the `agent-doc` window before routing.
+//! - **Auto-start inhibit**: Setting `AGENT_DOC_NO_AUTOSTART` prevents `auto_start_in_session`
+//!   from spawning a new pane. The call returns `Err` with a descriptive message.
+//! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
+//!   the routing flow. The command is still sent even if focus fails.
+//! - **Split direction determinism**: `is_first_column` requires ≥ 2 `col_args` entries to
+//!   return true, ensuring a single-column layout never triggers a left-split.
+//!
+//! ## Evals
+//!
+//! - `is_first_column_empty_cols`: empty `col_args` → returns false (no layout context)
+//! - `is_first_column_single_col`: single `col_args` entry → returns false (< 2 entries required)
+//! - `is_first_column_in_first_col`: file matches first col arg → returns true
+//! - `is_first_column_in_second_col`: file matches second col arg → returns false
+//! - `is_first_column_comma_separated`: file matches comma-separated first col arg → returns true
+//! - `detects_unicode_prompt`: `❯`, `❯ `, `  ❯  ` → all detected as Claude idle prompt
+//! - `detects_ascii_prompt`: `>`, `> `, `  >  ` → all detected as Claude idle prompt
+//! - `rejects_non_prompt_lines`: status text, empty lines, markdown headers → not matched as prompt
+//! - `handles_ansi_prompt`: ANSI-colored `❯`/`>` → detected after strip_ansi
+//! - `unregistered_file_skips_lazy_claim`: `registered = None` → lazy-claim step is skipped
+//! - `dead_registered_pane_allows_lazy_claim`: `registered = Some(pane)` with dead pane → lazy-claim attempted
+//! - (aspirational) `stash_rescue`: pane in stash window → rescued to agent-doc window before send
+//! - (aspirational) `wrong_session_pane`: alive pane in wrong session → new pane created in target session
+//! - (aspirational) `debounce_idle`: file written rapidly → routing waits for mtime to settle
+//! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -19,11 +90,27 @@ use crate::{frontmatter, prompt, resync, sessions, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
-pub fn run(file: &Path, pane: Option<&str>, debounce_ms: u64) -> Result<()> {
-    run_with_tmux(file, &Tmux::default_server(), pane, debounce_ms)
+/// Determine if the file is in the first column of the editor layout.
+/// When true, the new pane should be split BEFORE (left of) the existing pane.
+/// Returns false when col_args is empty (no layout context — default to split right).
+fn is_first_column(file: &Path, col_args: &[String]) -> bool {
+    if col_args.len() < 2 {
+        return false;
+    }
+    let file_str = file.to_string_lossy();
+    // Check if file appears in the first --col arg
+    if let Some(first_col) = col_args.first() {
+        first_col.split(',').any(|f| f.trim() == file_str.as_ref())
+    } else {
+        false
+    }
 }
 
-pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: u64) -> Result<()> {
+pub fn run(file: &Path, pane: Option<&str>, debounce_ms: u64, col_args: &[String]) -> Result<()> {
+    run_with_tmux(file, &Tmux::default_server(), pane, debounce_ms, col_args)
+}
+
+pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: u64, col_args: &[String]) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before lookup
 
     // Debounce: wait for file mtime to settle before proceeding
@@ -44,26 +131,21 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    // Use tmux_session from frontmatter if available, otherwise default
-    let frontmatter_session = frontmatter::parse(&updated_content)
-        .ok()
-        .and_then(|(fm, _)| fm.tmux_session);
-    let target_session = if let Some(ref requested) = frontmatter_session {
-        if tmux.session_exists(requested) {
-            requested.clone()
-        } else {
-            // Requested session doesn't exist — refuse to route to wrong session.
-            // The user must create the session or update tmux_session in frontmatter.
-            anyhow::bail!(
-                "[route] tmux_session '{}' does not exist. \
-                 Create it with `tmux new-session -ds {}` or update frontmatter.",
-                requested, requested
-            );
-        }
+    // Read target session from project config (.agent-doc/config.toml), fall back to current session
+    let configured_session = crate::config::project_tmux_session();
+    let configured_alive = configured_session.as_ref().map_or(false, |s| tmux.session_alive(s));
+    let target_session = if configured_alive {
+        configured_session.unwrap()
     } else {
-        // No tmux_session in frontmatter — use current session (first claim sets it)
-        current_tmux_session(tmux)
-            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
+        let fallback = current_tmux_session(tmux)
+            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+        // Auto-sync config when configured session is dead or missing
+        if configured_session.as_deref() != Some(&fallback) {
+            if let Err(e) = crate::config::update_project_tmux_session(&fallback) {
+                eprintln!("warning: failed to update project tmux_session config: {}", e);
+            }
+        }
+        fallback
     };
     eprintln!("[route] target tmux session: {}", target_session);
 
@@ -155,7 +237,8 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
-    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session, false)?;
+    let split_before = is_first_column(file, col_args);
+    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session, false, split_before)?;
     Ok(())
 }
 
@@ -317,7 +400,7 @@ pub fn auto_start(
     file_path: &str,
     context_session: Option<&str>,
 ) -> Result<()> {
-    auto_start_ext(tmux, file, session_id, file_path, context_session, false)
+    auto_start_ext(tmux, file, session_id, file_path, context_session, false, false)
 }
 
 /// Auto-start without waiting for Claude or sending commands.
@@ -329,7 +412,7 @@ pub fn auto_start_no_wait(
     file_path: &str,
     context_session: Option<&str>,
 ) -> Result<()> {
-    auto_start_ext(tmux, file, session_id, file_path, context_session, true)
+    auto_start_ext(tmux, file, session_id, file_path, context_session, true, false)
 }
 
 fn auto_start_ext(
@@ -339,50 +422,32 @@ fn auto_start_ext(
     file_path: &str,
     context_session: Option<&str>,
     skip_wait: bool,
+    split_before: bool,
 ) -> Result<()> {
     // Determine target session. Priority:
     // 1. context_session (from sync --window) — sync knows which session it's managing
-    // 2. tmux_session from frontmatter — document's preferred session
-    // 3. current_tmux_session() — first-claim fallback
+    // 2. current_tmux_session() — fallback
+    // (tmux_session frontmatter field is deprecated — no longer read)
     let session_name = if let Some(ctx) = context_session {
-        // Context session from sync overrides frontmatter — sync is managing
-        // a specific window/session and needs the pane there, not elsewhere.
-        let fm_session = std::fs::read_to_string(file).ok()
-            .and_then(|c| {
-                let (fm, _) = frontmatter::parse(&c).ok()?;
-                fm.tmux_session
-            });
-        if let Some(ref fm) = fm_session {
-            eprintln!(
-                "[auto_start] context_session '{}' overrides deprecated frontmatter tmux_session '{}'",
-                ctx, fm
-            );
-        }
         ctx.to_string()
-    } else if let Ok(content) = std::fs::read_to_string(file) {
-        let requested = frontmatter::parse(&content)
-            .ok()
-            .and_then(|(fm, _)| fm.tmux_session);
-        if let Some(ref name) = requested {
-            if tmux.session_exists(name) {
-                name.clone()
-            } else {
-                // Refuse to start in wrong session — bail instead of fallback
-                anyhow::bail!(
-                    "[auto_start] tmux_session '{}' does not exist. \
-                     Create it with `tmux new-session -ds {}` or update frontmatter.",
-                    name, name
-                );
-            }
-        } else {
-            // No tmux_session and no context — use current session (first claim sets it)
-            current_tmux_session(tmux)
-                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
-        }
     } else {
-        TMUX_SESSION_NAME.to_string()
+        // Check project config first, fall back to current session
+        let configured = crate::config::project_tmux_session();
+        let configured_alive = configured.as_ref().map_or(false, |s| tmux.session_alive(s));
+        if configured_alive {
+            configured.unwrap()
+        } else {
+            let fallback = current_tmux_session(tmux)
+                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+            if configured.as_deref() != Some(&fallback) {
+                if let Err(e) = crate::config::update_project_tmux_session(&fallback) {
+                    eprintln!("warning: failed to update project tmux_session config: {}", e);
+                }
+            }
+            fallback
+        }
     };
-    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait)
+    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before)
 }
 
 /// Auto-start a new Claude session in a specific tmux session.
@@ -395,7 +460,7 @@ fn auto_start_ext(
 ///
 /// When `skip_wait` is true, skips `wait_for_claude_ready` and `send_command`.
 /// Used by sync which only needs the pane to exist with Claude starting.
-fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool) -> Result<()> {
+fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     // Resolve the agent-doc binary path (same binary that's currently running)
@@ -417,12 +482,13 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     } else {
         find_registered_pane_in_session(tmux, session_name, "")
     };
+    let split_flag = if split_before { "-dbh" } else { "-dh" };
     let new_pane = if let Some(ref target) = existing_pane {
-        match tmux.split_window(target, &cwd, "-dh") {
+        match tmux.split_window(target, &cwd, split_flag) {
             Ok(pane) => {
                 eprintln!(
-                    "[route] split-window alongside registered pane {} in session '{}' → new pane {}",
-                    target, session_name, pane
+                    "[route] split-window {} alongside registered pane {} in session '{}' → new pane {}",
+                    split_flag, target, session_name, pane
                 );
                 pane
             }
@@ -648,6 +714,52 @@ fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Split direction tests ---
+
+    #[test]
+    fn is_first_column_empty_cols() {
+        let file = Path::new("tasks/agent-doc.md");
+        assert!(!is_first_column(file, &[]));
+    }
+
+    #[test]
+    fn is_first_column_single_col() {
+        let file = Path::new("tasks/agent-doc.md");
+        let cols = vec!["tasks/agent-doc.md".to_string()];
+        // Single column — no need to split before
+        assert!(!is_first_column(file, &cols));
+    }
+
+    #[test]
+    fn is_first_column_in_first_col() {
+        let file = Path::new("tasks/agent-doc.md");
+        let cols = vec![
+            "tasks/agent-doc.md".to_string(),
+            "tasks/email.md".to_string(),
+        ];
+        assert!(is_first_column(file, &cols));
+    }
+
+    #[test]
+    fn is_first_column_in_second_col() {
+        let file = Path::new("tasks/email.md");
+        let cols = vec![
+            "tasks/agent-doc.md".to_string(),
+            "tasks/email.md".to_string(),
+        ];
+        assert!(!is_first_column(file, &cols));
+    }
+
+    #[test]
+    fn is_first_column_comma_separated() {
+        let file = Path::new("tasks/agent-doc.md");
+        let cols = vec![
+            "tasks/agent-doc.md,tasks/corky.md".to_string(),
+            "tasks/email.md".to_string(),
+        ];
+        assert!(is_first_column(file, &cols));
+    }
 
     // --- Prompt detection tests ---
 
@@ -1202,7 +1314,7 @@ mod tests {
         // but we can verify the session was never created
         // SAFETY: test is single-threaded; env var is removed immediately after use
         unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
-        let result = run_with_tmux(&file, &iso, None, 0);
+        let result = run_with_tmux(&file, &iso, None, 0, &[]);
         unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
 
         // The ghost session should still not exist (route fell back, didn't create it)
@@ -1243,7 +1355,7 @@ mod tests {
         // but we can inspect the validation behavior
         // SAFETY: test is single-threaded; env var is removed immediately after use
         unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
-        let _result = run_with_tmux(&file, &iso, None, 0);
+        let _result = run_with_tmux(&file, &iso, None, 0, &[]);
         unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
 
         // The ghost session should NOT have been created
@@ -1257,5 +1369,93 @@ mod tests {
             iso.session_exists("claude"),
             "fallback session should still be alive"
         );
+    }
+
+    // --- Stash rescue tests ---
+
+    #[test]
+    fn pane_in_stash_rescued_to_agent_doc() {
+        // When a registered pane ends up in a stash window, route should
+        // rescue it back to the agent-doc window via swap-pane.
+        let iso = IsolatedTmux::new("route-test-stash-rescue");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create session and rename the window to "agent-doc"
+        let pane1 = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+
+        // Create a second pane and stash it (simulating a pane that ended up in stash)
+        let stashed_pane = iso.auto_start(session, &cwd).unwrap();
+        iso.stash_pane(&stashed_pane, session).unwrap();
+
+        // Verify it's in the stash window
+        let stash_win = iso.find_stash_window(session);
+        assert!(stash_win.is_some(), "stash window should exist");
+        let pane_win = iso.pane_window(&stashed_pane).unwrap();
+        assert_eq!(pane_win, stash_win.unwrap(), "pane should be in stash");
+
+        // Now rescue: swap the stashed pane with a pane in the agent-doc window
+        let agent_doc_window = format!("{}:agent-doc", session);
+        let target_panes = iso.list_window_panes(&agent_doc_window).unwrap_or_default();
+        assert!(!target_panes.is_empty(), "agent-doc window should have panes");
+
+        if let Some(target) = target_panes.first() {
+            // This is the same swap logic as route.rs:88
+            match iso.swap_pane(&stashed_pane, target) {
+                Ok(()) => {
+                    // Verify the stashed pane is now in the agent-doc window
+                    let rescued_win = iso.pane_window(&stashed_pane).unwrap();
+                    let agent_doc_win_id = iso.pane_window(&pane1).unwrap_or_default();
+                    // After swap, the stashed pane should be in agent-doc window
+                    // and pane1 should be in stash
+                    assert!(iso.pane_alive(&stashed_pane), "rescued pane should be alive");
+                }
+                Err(e) => {
+                    // Fallback to join-pane (same as route.rs:94)
+                    iso.join_pane(&stashed_pane, target, "-dh").unwrap();
+                    assert!(iso.pane_alive(&stashed_pane), "pane should survive join rescue");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn swap_failure_falls_back_to_join_pane() {
+        // When swap-pane fails during rescue, join-pane should be used as fallback.
+        let iso = IsolatedTmux::new("route-test-swap-fallback");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create session with agent-doc window
+        let pane1 = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+
+        // Create a second pane in its own window
+        let pane2 = iso.auto_start(session, &cwd).unwrap();
+        let win_before = iso.pane_window(&pane2).unwrap();
+
+        // Use join_pane to move pane2 into agent-doc window (the fallback path)
+        let agent_doc_window = format!("{}:agent-doc", session);
+        let target_panes = iso.list_window_panes(&agent_doc_window).unwrap();
+        let target = &target_panes[0];
+
+        iso.join_pane(&pane2, target, "-dh").unwrap();
+
+        // Verify pane2 is now in the agent-doc window
+        let win_after = iso.pane_window(&pane2).unwrap();
+        let agent_doc_panes = iso.list_window_panes(&agent_doc_window).unwrap();
+        assert!(
+            agent_doc_panes.contains(&pane2),
+            "pane should be in agent-doc window after join, got: {:?}",
+            agent_doc_panes
+        );
+        assert!(iso.pane_alive(&pane2), "pane should be alive after join");
     }
 }

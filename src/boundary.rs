@@ -1,3 +1,40 @@
+//! # Module: boundary
+//!
+//! ## Spec
+//! - Manages `<!-- agent:boundary:UUID -->` markers that anchor IPC patch insertion points
+//!   inside append-mode components (especially `exchange`).
+//! - `insert` removes all stale boundary markers first, then appends a fresh UUID marker
+//!   just before the component close tag; stale marker count is logged to stderr.
+//! - `remove` / `remove_all` strip markers from a document string without touching other content.
+//! - `find_in_component` locates a specific boundary marker's byte range within a component,
+//!   returning `(line_start, line_end)` for surgical replacement.
+//! - `find_boundary_id_in_component` scans a component for any boundary marker, skipping matches
+//!   inside fenced code blocks.
+//! - `run` (CLI entry point) atomically writes the updated document, refreshes the snapshot, and
+//!   signals the IDE plugin via a VCS refresh signal file; prints the UUID to stdout.
+//! - `signal_editor_refresh` writes `.agent-doc/patches/vcs-refresh.signal` so the PatchWatcher
+//!   triggers a VFS refresh before the next IPC patch write.
+//!
+//! ## Agentic Contracts
+//! - `new_id() -> String` — delegates to `agent_doc::new_boundary_id()`; guaranteed unique UUID.
+//! - `format_marker(id) -> String` — produces `<!-- agent:boundary:ID -->`.
+//! - `extract_id(marker) -> Option<&str>` — inverse of `format_marker`; returns trimmed ID.
+//! - `insert(doc, component_name) -> Result<(String, String)>` — returns `(uuid, updated_doc)`;
+//!   errors if the named component is not found.
+//! - `remove_all(doc) -> String` — pure function; original trailing-newline behaviour preserved.
+//! - `run(file, component) -> Result<()>` — atomic write + snapshot update + IDE signal; prints
+//!   UUID to stdout on success.
+//!
+//! ## Evals
+//! - format_and_extract: `format_marker("abc-123")` → `"<!-- agent:boundary:abc-123 -->"`;
+//!   `extract_id` round-trips back to `"abc-123"`
+//! - insert_at_end: insert into `<!-- agent:exchange -->` component → marker appears between
+//!   content and close tag
+//! - stale_cleanup: document with two orphaned markers → `insert` removes both, leaves exactly one
+//! - remove_all: two boundary lines in doc → both stripped, other lines preserved verbatim
+//! - find_in_component: marker present → `Some((line_start, line_end))` within component bounds
+//! - no_component: `insert` with unknown component name → `Err` containing component name
+
 use anyhow::{Context, Result};
 use std::path::Path;
 

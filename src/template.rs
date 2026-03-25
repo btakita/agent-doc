@@ -1,7 +1,80 @@
-//! Template-mode support for in-place response documents.
+//! # Module: template
 //!
-//! Parses `<!-- patch:name -->...<!-- /patch:name -->` blocks from agent responses
-//! and applies them to the corresponding `<!-- agent:name -->` components in the document.
+//! Template-mode support for in-place response documents. Parses structured patch
+//! blocks from agent responses and applies them to named component slots in the
+//! document, with boundary marker lifecycle management for CRDT-safe stream writes.
+//!
+//! ## Spec
+//! - `parse_patches`: Scans agent response text for `<!-- patch:name -->...<!-- /patch:name -->`
+//!   blocks and returns a list of `PatchBlock` values plus any unmatched text (content outside
+//!   patch blocks). Markers inside fenced code blocks (``` or ~~~) and inline code spans are
+//!   ignored so examples in responses are never mis-parsed as real patches.
+//! - `apply_patches`: Delegates to `apply_patches_with_overrides` with an empty override map.
+//!   Applies parsed patches to matching `<!-- agent:name -->` components in the document.
+//! - `apply_patches_with_overrides`: Core patch application pipeline:
+//!   1. Pre-patch: strips all existing boundary markers, inserts a fresh boundary at the end
+//!      of the `exchange` component (keyed to the file stem).
+//!   2. Applies each patch using mode resolution: stream overrides > inline attr (`patch=` or
+//!      `mode=`) > `.agent-doc/components.toml` > built-in defaults (`exchange`/`findings`
+//!      default to `append`, all others to `replace`).
+//!   3. For `append` mode, uses boundary-aware insertion when a boundary marker exists.
+//!   4. Patches targeting missing component names are routed as overflow to `exchange`/`output`.
+//!   5. Unmatched text and overflow are merged and appended to `exchange`/`output` (or an
+//!      auto-created `exchange` component if none exists).
+//!   6. Post-patch: if the boundary was consumed, re-inserts a fresh one at the end of exchange.
+//! - `reposition_boundary_to_end`: Removes all boundaries and inserts a new one at the end of
+//!   `exchange`. Used by the IPC write path to keep boundary position current.
+//! - `reposition_boundary_to_end_with_summary`: Same, with optional human-readable suffix on
+//!   the boundary ID (e.g. `a0cfeb34:agent-doc`).
+//! - `template_info`: Reads a document file, resolves its template mode flag, and returns a
+//!   serializable `TemplateInfo` with per-component name, resolved mode, content, and line
+//!   number. Used by editor plugins for rendering.
+//! - `is_template_mode` (test-only): Legacy helper to detect `mode = "template"` string.
+//!
+//! ## Agentic Contracts
+//! - `parse_patches` is pure and infallible for valid UTF-8; it returns `Ok` even for empty
+//!   or patch-free responses.
+//! - Patch markers inside fenced code blocks are never extracted as real patches. Agents may
+//!   include example markers in code blocks without triggering unintended writes.
+//! - Component patches are applied in reverse document order so earlier byte offsets remain
+//!   valid throughout the operation.
+//! - A boundary marker always exists at the end of `exchange` after `apply_patches_with_overrides`
+//!   returns. Callers that perform incremental (CRDT/stream) writes may rely on this invariant.
+//! - Missing-component patches never cause errors; content is silently routed to `exchange`/
+//!   `output` with a diagnostic written to stderr.
+//! - Mode precedence is deterministic: stream override > inline attr (`patch=` > `mode=`) >
+//!   `components.toml` (`patch` key > `mode` key) > built-in default. Callers can rely on this
+//!   ordering when constructing overrides for stream mode.
+//! - `template_info` reads the document from disk; callers must ensure the file is flushed
+//!   before calling (especially in the IPC write path).
+//!
+//! ## Evals
+//! - `parse_single_patch`: single patch block → one `PatchBlock`, empty unmatched
+//! - `parse_multiple_patches`: two sequential patch blocks → two `PatchBlock`s in order, empty unmatched
+//! - `parse_with_unmatched_content`: text before and after patch block → unmatched contains both text segments
+//! - `parse_empty_response`: empty string → zero patches, empty unmatched
+//! - `parse_no_patches`: plain text with no markers → zero patches, full text in unmatched
+//! - `parse_patches_ignores_markers_in_fenced_code_block`: agent:component markers inside ``` are preserved as content
+//! - `parse_patches_ignores_patch_markers_in_fenced_code_block`: nested patch markers inside ``` are not parsed as patches
+//! - `parse_patches_ignores_markers_in_tilde_fence`: patch markers inside ~~~ are ignored
+//! - `parse_patches_ignores_closing_marker_in_code_block`: closing marker inside code block is skipped; real close is found
+//! - `parse_patches_normal_markers_still_work`: sanity — two back-to-back patches parse correctly
+//! - `apply_patches_replace`: patch to non-exchange component replaces existing content
+//! - `apply_patches_unmatched_creates_exchange`: unmatched text auto-creates `<!-- agent:exchange -->` when absent
+//! - `apply_patches_unmatched_appends_to_existing_exchange`: unmatched text appends to existing exchange; no duplicate component
+//! - `apply_patches_missing_component_routes_to_exchange`: patch targeting unknown component name appears in exchange
+//! - `apply_patches_missing_component_creates_exchange`: missing component + no exchange → auto-creates exchange with overflow
+//! - `inline_attr_mode_overrides_config`: `mode=replace` on tag wins over `components.toml` append config
+//! - `inline_attr_mode_overrides_default`: `mode=replace` on exchange wins over built-in append default
+//! - `no_inline_attr_falls_back_to_config`: no inline attr → `components.toml` append config applies
+//! - `no_inline_attr_no_config_falls_back_to_default`: no attr, no config → exchange defaults to append
+//! - `inline_patch_attr_overrides_config`: `patch=replace` on tag wins over `components.toml` append config
+//! - `template_info_works`: template-mode doc → `TemplateInfo.template_mode = true`, component list populated
+//! - `template_info_legacy_mode_works`: `response_mode: template` frontmatter key recognized
+//! - `template_info_append_mode`: non-template doc → `template_mode = false`, empty component list
+//! - `is_template_mode_detection`: `Some("template")` → true; other strings and `None` → false
+//! - (aspirational) `apply_patches_boundary_invariant`: after any apply_patches call with an exchange component, a boundary marker exists at end of exchange
+//! - (aspirational) `reposition_boundary_removes_stale`: multiple stale boundaries are reduced to exactly one at end of exchange
 
 use anyhow::{Context, Result};
 use serde::Serialize;

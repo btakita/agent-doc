@@ -1,3 +1,35 @@
+//! # Module: patch
+//!
+//! ## Spec
+//! - Replaces, appends, or prepends content in a named `<!-- agent:name -->` component within a markdown document.
+//! - Patch mode resolution order: inline attribute on the component tag (`patch=`) > `[component]` entry in `.agent-doc/components.toml` > built-in default (`replace`). `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence when both are present.
+//! - `append` mode: concatenates new content after existing; `prepend` mode: inserts new content before existing.
+//! - Optional `timestamp: true` in `components.toml` prefixes each entry with an ISO-8601 UTC timestamp.
+//! - Optional `max_entries` in `components.toml` trims to the last N non-empty lines after append/prepend.
+//! - `pre_patch` shell hook: content piped to stdin, transformed stdout replaces the replacement string before writing. Receives `COMPONENT` and `FILE` env vars.
+//! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
+//! - After patching, the document is written to disk and a snapshot is saved relative to the project root (`.agent-doc/snapshots/`). Falls back to CWD-relative snapshot if no project root is found.
+//! - `run` reads replacement content from the `content` argument or stdin when `None`.
+//!
+//! ## Agentic Contracts
+//! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
+//! - Snapshot is always updated after a successful patch; callers can rely on snapshot consistency.
+//! - `pre_patch` hook failure (non-zero exit) aborts the patch and returns `Err`; no partial write occurs.
+//! - `post_patch` hook failure never aborts the patch; stderr warning only.
+//! - `trim_entries(content, max)` trims to the last `max` non-empty lines; returns content unchanged when under the limit.
+//!
+//! ## Evals
+//! - replace_component: existing component + new content → old content replaced, surroundings preserved
+//! - preserve_surrounding: content before and after component → unchanged after patch
+//! - component_not_found: component name absent from doc → Err containing "not found"
+//! - file_not_found: missing file path → Err containing "file not found"
+//! - snapshot_updated_after_patch: after replace → snapshot file contains new content, not old
+//! - append_mode: `mode = "append"` config + second patch → both entries present in document
+//! - prepend_mode: `mode = "prepend"` config + new entry → new entry appears before existing
+//! - trim_entries_limits: 5-line content trimmed to 3 → oldest 2 lines removed
+//! - pre_patch_hook_transforms: `pre_patch = "tr a-z A-Z"` → content uppercased before write
+//! - post_patch_hook_runs: `post_patch = "touch <file>"` → marker file created after write
+
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;

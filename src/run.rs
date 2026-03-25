@@ -1,3 +1,81 @@
+//! # Module: run
+//!
+//! ## Spec
+//! - `run(file, branch, agent_name, model, dry_run, no_git, config)`: executes
+//!   a single agent request-response cycle for a session document.
+//! - Bails immediately if the file does not exist.
+//! - Computes a diff via `diff::compute`; returns `Ok(())` early (no-op) when
+//!   the snapshot matches the document (nothing changed since the last run).
+//! - Ensures the document has a session UUID in frontmatter, writing it if
+//!   absent.
+//! - Resolves the agent backend from: `agent_name` arg > frontmatter `agent`
+//!   field > `config.default_agent` > fallback `"claude"`.
+//! - Resolves the model from: `model` arg > frontmatter `model` field.
+//! - Builds one of two prompt shapes: "resume" (diff + full document, for
+//!   continuing sessions) or "fork" (full document only, for new sessions),
+//!   determined by whether `resume` is set in frontmatter.
+//! - In `--dry-run` mode: prints the diff and prompt size to stderr and returns
+//!   without calling the agent, writing files, or touching git.
+//! - Optionally creates a git branch via `git::create_branch` before committing
+//!   (only when `branch=true` and `no_git=false`).
+//! - Pre-commits user's changes via `git::commit` before sending to the agent
+//!   so the editor shows agent additions as diff-gutter entries.
+//! - Appends the agent response as `## Assistant\n\n<response>\n\n## User\n\n`
+//!   and updates the `resume` ID in frontmatter from the agent's returned
+//!   session ID.
+//! - Acquires an advisory `flock` on a per-document lock file before writing so
+//!   concurrent `agent-doc run` / watch-daemon invocations are serialized.
+//! - Re-reads the file under lock; if the user edited concurrently, performs a
+//!   3-way merge via `merge::merge_contents`.
+//! - Tries IPC write to the IDE plugin first; on IPC miss, falls back to
+//!   `atomic_write` (temp file + POSIX rename) and saves a snapshot.
+//! - `acquire_doc_lock(path)`: opens/creates `.agent-doc/locks/<hash>.lock` and
+//!   acquires an exclusive `flock`; returned `File` releases the lock on drop.
+//! - `atomic_write(path, content)`: writes to a sibling temp file and renames
+//!   atomically, eliminating partial-write windows.
+//!
+//! ## Agentic Contracts
+//! - Callers must not assume the file is modified when `run` returns `Ok(())`
+//!   early (no-op case): the document and snapshot are untouched.
+//! - The snapshot saved after a successful run always reflects
+//!   `content_ours` (baseline + response), never `final_content`, so concurrent
+//!   user edits are detectable on the next diff.
+//! - Git operations (branch creation, pre-commit) are skipped entirely when
+//!   `no_git=true`; the agent call and write still proceed normally.
+//! - The advisory flock serializes only agent-doc processes; editors bypass it.
+//!   Readers of the document file must not rely on the lock for read safety.
+//! - IPC success: snapshot is saved by the IDE plugin; the binary does not
+//!   write a snapshot in this path. IPC failure: binary writes snapshot.
+//! - `atomic_write` is safe for concurrent callers on the same path; one write
+//!   wins and the file is never in a partially-written state.
+//! - The assistant heading (`## Assistant`) is stripped from the agent response
+//!   before appending to avoid duplication; the binary inserts it.
+//!
+//! ## Evals
+//! - `run_file_not_found`: call `run` with a missing path → `Err` containing
+//!   "file not found".
+//! - `run_no_changes`: snapshot matches document → returns `Ok(())` without
+//!   calling the agent or modifying anything.
+//! - `run_dry_run`: `dry_run=true` → diff and prompt size printed to stderr;
+//!   file unchanged, no agent call, no git operations.
+//! - `acquire_doc_lock_succeeds`: lock file created and exclusive lock acquired
+//!   on a fresh document path → `Ok(File)`.
+//! - `doc_lock_released_on_drop`: after dropping the lock handle, a second
+//!   `acquire_doc_lock` on the same path succeeds immediately.
+//! - `atomic_write_correct_content`: written content is exactly the input string.
+//! - `atomic_write_overwrites_existing`: writing to an existing file replaces
+//!   content atomically.
+//! - `concurrent_atomic_writes_no_corruption`: 20 concurrent writers → final
+//!   file is exactly one valid write; no partial or interleaved content.
+//! - `parallel_different_files_no_interference`: two concurrent cycles on
+//!   different files complete without lock contention or cross-contamination.
+//! - `same_file_serialized_by_flock`: two concurrent cycles on the same file
+//!   are serialized; both writes land with no corruption.
+//! - `flock_prevents_partial_read_during_write`: a reader blocked on the same
+//!   lock sees the completed write, not a partial state.
+//! - `merge_clean_no_conflicts`: agent response appended as "ours" + user
+//!   unchanged as "theirs" → clean 3-way merge containing the response.
+
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;

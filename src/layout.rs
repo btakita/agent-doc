@@ -1,13 +1,62 @@
-//! `agent-doc layout` — Arrange tmux panes to mirror editor split layout.
+//! # Module: layout
 //!
-//! Usage: agent-doc layout <file1.md> <file2.md> [--split h|v]
+//! Arrange tmux panes to mirror the editor's split layout.
 //!
-//! Creates a "mirror window" in tmux where panes are arranged to match the
-//! editor's split layout. Uses `join-pane` to move Claude sessions into the
-//! mirror window and `break-pane` to disassemble when layout changes.
+//! Usage: `agent-doc layout <file1.md> <file2.md> [--split h|v]`
 //!
-//! The mirror window is tracked in sessions.json so subsequent layout calls
-//! can update it rather than creating duplicates.
+//! ## Spec
+//! - `Split` enum: `Horizontal` (side-by-side, `-h`) or `Vertical` (stacked, `-v`).
+//! - `run(files, split, pane, window)`: entry point; delegates to `run_with_tmux` using
+//!   the default tmux server.
+//! - `run_with_tmux(files, split, pane, window, tmux)`:
+//!   - Requires at least one file; errors if `files` is empty.
+//!   - With exactly one file: delegates entirely to `focus::run_with_tmux` and returns.
+//!   - For each file: reads frontmatter to obtain the session UUID via
+//!     `frontmatter::ensure_session`, then looks up the live pane in `sessions.json`.
+//!     Files with no registered pane or a dead pane are skipped with a stderr warning.
+//!   - When `--window` is supplied, discards any resolved pane that does not belong to
+//!     that window (prevents cross-window pane migration).
+//!   - If fewer than two live, unique panes remain after filtering, focuses the first
+//!     file's pane if it was resolved; returns `Ok(())` without rearranging.
+//!   - Deduplicates panes so multiple files sharing a pane count as one; errors if
+//!     deduplication leaves fewer than two panes.
+//!   - Selects the target window by choosing the window that already contains the most
+//!     wanted panes (tiebreaker: most total panes), minimising disruption to any
+//!     existing layout.
+//!   - Breaks out session-registered panes that are in the target window but not in the
+//!     wanted set (`tmux break-pane`); non-session panes (shells, tools) are untouched.
+//!   - Joins each wanted pane that is outside the target window into it via `join-pane`
+//!     with the `Split` flag.
+//!   - Focuses the first file's pane after the layout is complete.
+//!
+//! ## Agentic Contracts
+//! - Only panes that are registered in `sessions.json` are ever broken out of the target
+//!   window; unmanaged panes are never touched.
+//! - A single-file invocation never modifies tmux window structure; it is a pure focus
+//!   operation.
+//! - The `--window` filter is a hard boundary: panes outside the specified window are
+//!   silently excluded rather than migrated into it.
+//! - After a successful multi-pane layout, the first file's pane is always focused.
+//! - `run_with_tmux` does not modify `sessions.json`; session registry updates are the
+//!   responsibility of `claim.rs` / `route.rs`.
+//!
+//! ## Evals
+//! - `layout_two_files_horizontal` (aspirational): two files each with a live pane in
+//!   different windows → both panes joined into one window side-by-side and first pane
+//!   focused.
+//! - `layout_single_file_delegates_to_focus` (aspirational): one file supplied → focus
+//!   is called, no `join-pane` or `break-pane` issued.
+//! - `layout_skips_dead_pane` (aspirational): one of two files has a dead pane → dead
+//!   pane is skipped with a warning; if only one live pane remains, focus is called
+//!   instead of rearranging.
+//! - `layout_window_filter_excludes_foreign_panes` (aspirational): `--window` supplied
+//!   and one resolved pane is in a different window → that pane is filtered out before
+//!   arrangement.
+//! - `layout_does_not_break_nonregistered_panes` (aspirational): target window contains
+//!   a shell pane not in `sessions.json` alongside a registered pane to be broken out →
+//!   only the registered pane is broken out; the shell pane remains.
+//! - `layout_empty_files_errors` (aspirational): `files` is empty → `anyhow::bail!`
+//!   with "at least one file required".
 
 use anyhow::{Context, Result};
 use std::path::Path;

@@ -1,9 +1,44 @@
-//! `agent-doc convert` — Bidirectional mode conversion between append and template.
+//! # Module: convert
 //!
-//! Usage: agent-doc convert <FILE> [MODE]
+//! ## Spec
+//! - Performs bidirectional conversion between `inline` (append) and `template` document formats,
+//!   and independently updates the `write` strategy (`crdt` / `inline`).
+//! - Target format resolution precedence: explicit `--format` flag > legacy positional `MODE`
+//!   argument > current frontmatter value > default (`template`).
+//! - Target write resolution precedence: explicit `--write` flag > legacy `stream` mode alias >
+//!   default (`crdt`).
+//! - If neither format nor write strategy would change, returns `Err` with an "already in …"
+//!   message rather than writing a no-op file.
+//! - **Append → Template:** finds the first `## User` heading outside a code block; preserves
+//!   preceding content verbatim; wraps from that line to EOF in
+//!   `## Exchange\n\n<!-- agent:exchange -->\n…\n<!-- /agent:exchange -->`.
+//!   If no `## User` block exists, adds an empty `<!-- agent:exchange -->` component.
+//! - **Template → Append:** strips all `<!-- agent:… -->` / `<!-- /agent:… -->` marker lines and
+//!   the `## Exchange` heading (plus its following blank line) from the body; preserves all other
+//!   content including non-exchange components.
+//! - Frontmatter field `mode` (deprecated) is cleared on conversion; `agent_doc_format` and
+//!   `agent_doc_write_mode` are set to the resolved target values.
+//! - All writes are atomic; snapshot is updated after each successful write.
 //!
-//! - Append → Template: wraps content from first `## User` in `<!-- agent:exchange -->` markers
-//! - Template → Append: strips component markers and `## Exchange` headings, preserving content
+//! ## Agentic Contracts
+//! - `run(file, legacy_mode, explicit_format, explicit_write) -> Result<()>` — sole public entry
+//!   point; reads file, resolves targets, dispatches to `convert_to_template` or
+//!   `convert_to_append` (or frontmatter-only update), then atomically writes and saves snapshot.
+//! - Returns `Err` if the file does not exist, is already in the target mode, or any I/O fails.
+//! - Conversion is content-preserving: all user text survives a round-trip
+//!   append → template → append.
+//!
+//! ## Evals
+//! - user_blocks: body with `## User` → exchange markers wrap from first User block; preceding
+//!   content remains outside markers
+//! - no_user_blocks: body with no `## User` → empty `<!-- agent:exchange -->` component added
+//! - code_block_skip: `## User` inside fenced block → not treated as section start
+//! - already_template: file already in template mode → `Err` containing "already in template"
+//! - already_append: file already in append mode → `Err` containing "already in append/inline"
+//! - strip_markers: template body → append body has no `<!-- agent:… -->` lines, `## Exchange`
+//!   removed, all content preserved
+//! - roundtrip: append → template → append preserves all User/Assistant content
+//! - frontmatter_updated: after conversion, `agent_doc_format` reflects target format
 
 use anyhow::{Context, Result};
 use std::path::Path;

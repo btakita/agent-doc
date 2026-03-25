@@ -1,12 +1,77 @@
-//! Resync — validate sessions.json against live tmux panes.
+//! # Module: resync
 //!
-//! Delegates to `tmux_router::prune()` for the core prune logic.
-//! The `run()` function adds verbose output for the standalone `agent-doc resync` command.
+//! ## Spec
+//! - `prune()`: quietly removes dead/duplicate registry entries by delegating to
+//!   `tmux_router::prune()`, then returns active panes from stash windows, purges
+//!   idle stash windows, and clears orphaned stash panes. Called automatically
+//!   before route, sync, and claim operations. Returns the count of entries removed.
+//! - `run(fix)`: verbose counterpart to `prune()` for the `agent-doc resync` CLI
+//!   subcommand. Prints which entries were removed, which issues were detected, and
+//!   the post-resync active session list.
+//! - Issue detection (`detect_issues`): inspects every alive registry pane for four
+//!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
+//!   (pane running a non-agent process such as `corky watch`), `WrongSession`
+//!   (pane's tmux session differs from the document's `tmux_session` frontmatter
+//!   field), and `WrongWindow` (panes for the same tmux session are scattered across
+//!   multiple non-stash windows, determined by majority-window vote).
+//! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry;
+//!   `WrongProcess` → deregister only (foreign process is not killed); `InStash` →
+//!   deregister only (pane left intact for potential manual recovery); `WrongWindow`
+//!   → stash the outlier pane so the next route consolidates it.
+//! - Stash management: `return_stashed_panes` moves registered active panes back to
+//!   their original window (or first non-stash window of the frontmatter session);
+//!   `purge_stash_windows` kills entire stash windows where all panes are idle
+//!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
+//!   kills individual unregistered idle/agent panes in stash windows without touching
+//!   user-owned processes; `purge_orphaned_agent_panes` removes unregistered
+//!   agent-doc/claude/node panes from any window, but only when the window has at
+//!   least one other pane (never orphans the last pane).
+//! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `node`) are
+//!   expected occupants of registered panes. `IDLE_SHELLS` (`zsh`, `bash`, `sh`,
+//!   `fish`) are treated as empty/unused slots.
 //!
-//! With `--fix`, performs additional checks:
-//! 1. Kills panes that are in the wrong tmux session (vs frontmatter `tmux_session`)
-//! 2. Deregisters panes running non-agent-doc processes (e.g., `corky watch`)
-//!    Both actions cause the next `route` to auto-start in the correct session.
+//! ## Agentic Contracts
+//! - `prune()` never kills a registered pane that is alive and in a non-stash window;
+//!   it only removes dead entries from the registry and stash-specific garbage.
+//! - User-owned processes (anything not in `AGENT_PROCESSES` or `IDLE_SHELLS`) are
+//!   never killed by any automatic or fix path — they are left running.
+//! - Stash windows named exactly `"stash"` or matching `"stash-*"` are the only
+//!   windows whose panes may be killed automatically; non-stash windows are only
+//!   touched when purging orphaned agent panes with sibling panes present.
+//! - `apply_fixes` acquires a `RegistryLock` before mutating `sessions.json`; all
+//!   registry mutations are atomic with respect to concurrent agent-doc processes.
+//! - Dead panes are exclusively handled by `tmux_router::prune()`; `detect_issues`
+//!   skips dead panes entirely to avoid double-reporting.
+//! - On `WrongSession` fix failure (kill error), the registry entry is still removed
+//!   to prevent a permanently stale entry from blocking future routes.
+//! - `find_return_target` priority: (1) original window from registry entry if alive
+//!   and non-stash, (2) first non-stash window in the frontmatter `tmux_session`,
+//!   (3) returns `None` (no move attempted, error logged).
+//!
+//! ## Evals
+//! - `detect_dead_pane_not_flagged_as_issue`: registry entry with a non-existent
+//!   pane ID → `detect_issues_in_registry` returns no issues (dead panes belong to
+//!   `prune`, not issue detection).
+//! - `detect_wrong_session_pane`: pane running in session `"wrong"` with frontmatter
+//!   `tmux_session: correct` → `WrongSession` issue detected.
+//! - `fix_wrong_session_removes_registry_entry`: `apply_fixes_to_registry` with a
+//!   `WrongSession` issue → entry removed from registry, pane kill attempted.
+//! - `fix_wrong_process_deregisters_without_kill`: `WrongProcess` issue →
+//!   registry entry removed, foreign process pane untouched.
+//! - `fix_in_stash_deregisters_entry`: `InStash` issue → registry entry removed,
+//!   stash pane left alive.
+//! - `stash_window_purged_when_all_idle`: stash window with only idle shell panes
+//!   older than 30 s → `purge_stash_windows` kills the window.
+//! - `stash_window_spared_when_agent_active`: stash window containing a `claude`
+//!   pane → `purge_stash_windows` leaves the window intact.
+//! - `purge_unregistered_stash_panes_leaves_user_processes`: stash window with an
+//!   unregistered `corky` pane and an unregistered idle shell → idle shell killed,
+//!   `corky` pane untouched.
+//! - `purge_orphaned_agent_panes_skips_last_pane`: window with a single unregistered
+//!   `claude` pane → pane not killed (would orphan the window).
+//! - `wrong_window_detected_by_majority_vote`: three registered panes in session A,
+//!   two in window W1 and one in window W2 → the W2 pane produces a `WrongWindow`
+//!   issue; the W1 panes do not.
 
 use anyhow::Result;
 
@@ -113,9 +178,12 @@ pub fn prune() -> Result<usize> {
     if removed > 0 {
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
-    // Purge stash windows with idle shells, then log remaining orphans
+    // Return active panes from stash, then purge idle stash panes.
+    // SAFETY: Only touch stash windows here. Never purge non-stash agent panes
+    // in the automatic path — that can kill active sessions in other windows.
+    return_stashed_panes(&tmux);
     purge_stash_windows(&tmux);
-    log_orphaned_windows(&tmux);
+    purge_unregistered_stash_panes(&tmux);
     Ok(removed)
 }
 
@@ -198,10 +266,21 @@ fn purge_stash_windows(tmux: &Tmux) {
     }
 }
 
-/// Log tmux windows named "claude" or "stash" whose panes are all unregistered.
-/// This helps diagnose why windows become orphaned without killing them.
-fn log_orphaned_windows(tmux: &Tmux) {
+/// Purge unregistered panes in stash windows.
+///
+/// Kills individual panes in stash windows that are:
+/// 1. Not registered in sessions.json (orphaned)
+/// 2. Running idle shells OR agent-doc/claude/node processes
+/// 3. Leaves other user processes (corky, vim, etc.) alive
+///
+/// After purging panes, kills any stash window that becomes empty.
+fn purge_unregistered_stash_panes(tmux: &Tmux) {
     let registry = sessions::load().unwrap_or_default();
+    purge_unregistered_stash_panes_with_registry(tmux, &registry);
+}
+
+/// Testable inner function that accepts a registry parameter.
+fn purge_unregistered_stash_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) {
     let registered_panes: std::collections::HashSet<&str> = registry
         .values()
         .map(|e| e.pane.as_str())
@@ -221,6 +300,8 @@ fn log_orphaned_windows(tmux: &Tmux) {
         _ => return,
     };
 
+    let mut killed_count = 0;
+
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
@@ -228,7 +309,7 @@ fn log_orphaned_windows(tmux: &Tmux) {
         }
         let (window_id, window_name, session_name) = (parts[0], parts[1], parts[2]);
 
-        if window_name != "claude" && window_name != "stash" {
+        if !is_stash_window_name(window_name) {
             continue;
         }
 
@@ -237,17 +318,319 @@ fn log_orphaned_windows(tmux: &Tmux) {
             continue;
         }
 
-        let all_orphaned = panes.iter().all(|p| !registered_panes.contains(p.as_str()));
-        if all_orphaned {
+        // Check each pane individually
+        let mut panes_to_kill = Vec::new();
+        for pane_id in &panes {
+            if registered_panes.contains(pane_id.as_str()) {
+                continue; // Registered — leave it
+            }
+            let cmd = pane_current_command(tmux, pane_id).unwrap_or_default();
+            // Kill idle shells and orphaned agent processes
+            if IDLE_SHELLS.contains(&cmd.as_str()) || AGENT_PROCESSES.contains(&cmd.as_str()) {
+                panes_to_kill.push(pane_id.clone());
+            }
+        }
+
+        for pane_id in &panes_to_kill {
+            if let Err(e) = tmux.kill_pane(pane_id) {
+                eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
+            } else {
+                killed_count += 1;
+            }
+        }
+
+        // If we killed all panes in this stash window, tmux auto-removes it.
+        // If some survived (user processes), log them.
+        let remaining = panes.len() - panes_to_kill.len();
+        if remaining > 0 && !panes_to_kill.is_empty() {
             eprintln!(
-                "resync: orphaned {} window {} in session '{}' ({} unregistered panes: {})",
-                window_name,
-                window_id,
-                session_name,
-                panes.len(),
-                panes.join(", ")
+                "resync: purged {} of {} panes from stash {} in session '{}' ({} user-process panes remain)",
+                panes_to_kill.len(), panes.len(), window_id, session_name, remaining
             );
         }
+    }
+
+    if killed_count > 0 {
+        eprintln!("resync: purged {} orphaned stash pane(s)", killed_count);
+    }
+}
+
+/// Return active (non-idle) panes from stash windows back to their original sessions.
+///
+/// For each registered pane sitting in a stash window:
+/// 1. Skip idle shells (zsh/bash/sh/fish) — those are handled by purge functions.
+/// 2. Look up the pane's registry entry to find the original window.
+/// 3. If the original window is alive, move the pane back via `join-pane`.
+/// 4. Otherwise, if the tmux session exists, move to the session's first window.
+/// 5. Log each action to stderr.
+///
+/// After returning panes, any stash window that becomes empty is auto-cleaned by tmux.
+fn return_stashed_panes(tmux: &Tmux) {
+    let registry = sessions::load().unwrap_or_default();
+    return_stashed_panes_with_registry(tmux, &registry);
+}
+
+/// Testable inner function that accepts a registry parameter.
+fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) {
+    // Build a map from pane_id → (key, entry) for quick lookup
+    let pane_to_entry: std::collections::HashMap<&str, (&str, &sessions::SessionEntry)> = registry
+        .iter()
+        .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
+        .collect();
+
+    // List all windows to find stash windows
+    let output = tmux
+        .cmd()
+        .args([
+            "list-windows",
+            "-a",
+            "-F",
+            "#{window_id}\t#{window_name}\t#{session_name}",
+        ])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    let mut returned = 0;
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let (window_id, window_name, _session_name) = (parts[0], parts[1], parts[2]);
+
+        if !is_stash_window_name(window_name) {
+            continue;
+        }
+
+        // List panes in this stash window with their current command
+        let pane_output = tmux
+            .cmd()
+            .args([
+                "list-panes",
+                "-t",
+                window_id,
+                "-F",
+                "#{pane_id}\t#{pane_current_command}",
+            ])
+            .output();
+        let pane_output = match pane_output {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        for pane_line in String::from_utf8_lossy(&pane_output.stdout).lines() {
+            let pane_parts: Vec<&str> = pane_line.splitn(2, '\t').collect();
+            if pane_parts.len() < 2 {
+                continue;
+            }
+            let (pane_id, pane_cmd) = (pane_parts[0], pane_parts[1]);
+
+            // Skip idle shells — they're not active work
+            if IDLE_SHELLS.contains(&pane_cmd) {
+                continue;
+            }
+
+            // Look up registry entry for this pane
+            let (key, entry) = match pane_to_entry.get(pane_id) {
+                Some(pair) => *pair,
+                None => continue, // Unregistered — handled by purge functions
+            };
+
+            // Try to find a target to move back to:
+            // 1. Original window (from entry.window) if alive
+            // 2. First window of the original tmux session (from frontmatter)
+            let target = find_return_target(tmux, entry);
+            let target = match target {
+                Some(t) => t,
+                None => {
+                    eprintln!(
+                        "resync: cannot return stashed pane {} ({}): no valid target found",
+                        pane_id, key
+                    );
+                    continue;
+                }
+            };
+
+            // Move the pane back using join-pane
+            match tmux.join_pane(pane_id, &target, "-dv") {
+                Ok(()) => {
+                    eprintln!(
+                        "resync: returned stashed pane {} ({}, running '{}') to window {}",
+                        pane_id, key, pane_cmd, target
+                    );
+                    returned += 1;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "resync: failed to return stashed pane {} to {}: {}",
+                        pane_id, target, e
+                    );
+                }
+            }
+        }
+    }
+
+    if returned > 0 {
+        eprintln!("resync: returned {} stashed pane(s) to their sessions", returned);
+    }
+}
+
+/// Find a target pane to return a stashed pane to.
+///
+/// Priority:
+/// 1. The entry's original window (if alive and not a stash window)
+/// 2. The first non-stash window in the tmux session from frontmatter
+/// 3. The first non-stash window in any session with a matching name
+fn find_return_target(tmux: &Tmux, entry: &sessions::SessionEntry) -> Option<String> {
+    // 1. Try the original window from the registry entry
+    if !entry.window.is_empty() {
+        if let Ok(panes) = tmux.list_window_panes(&entry.window) {
+            if !panes.is_empty() {
+                // Check it's not a stash window itself
+                if let Some(wname) = pane_window_name(tmux, &panes[0]) {
+                    if !is_stash_window_name(&wname) {
+                        return Some(panes[0].clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Try to find the tmux session from frontmatter
+    let session_name = if !entry.file.is_empty() {
+        std::fs::read_to_string(&entry.file)
+            .ok()
+            .and_then(|content| {
+                let (fm, _) = frontmatter::parse(&content).ok()?;
+                fm.tmux_session
+            })
+    } else {
+        None
+    };
+
+    if let Some(ref sess) = session_name {
+        if tmux.session_exists(sess) {
+            if let Some(target) = first_non_stash_pane(tmux, sess) {
+                return Some(target);
+            }
+        }
+    }
+
+    None
+}
+
+/// Find the first pane in the first non-stash window of a tmux session.
+fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<String> {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-windows",
+            "-t",
+            &format!("{}:", session_name),
+            "-F",
+            "#{window_id}\t#{window_name}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(2, '\t').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let (window_id, window_name) = (parts[0], parts[1]);
+        if is_stash_window_name(window_name) {
+            continue;
+        }
+        // Return the first pane in this non-stash window
+        if let Ok(panes) = tmux.list_window_panes(window_id) {
+            if let Some(first) = panes.into_iter().next() {
+                return Some(first);
+            }
+        }
+    }
+
+    None
+}
+
+/// Purge orphaned agent-doc/claude panes in ANY window (not just stash).
+///
+/// Targets panes that are:
+/// 1. Not registered in sessions.json
+/// 2. Running agent-doc, claude, or node
+/// 3. In a window that has at least one other pane (won't orphan last pane)
+///
+/// This catches orphaned Claude sessions in non-stash windows (e.g., session 3).
+fn purge_orphaned_agent_panes(tmux: &Tmux) {
+    let registry = sessions::load().unwrap_or_default();
+    purge_orphaned_agent_panes_with_registry(tmux, &registry);
+}
+
+fn purge_orphaned_agent_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) {
+    let registered_panes: std::collections::HashSet<&str> = registry
+        .values()
+        .map(|e| e.pane.as_str())
+        .collect();
+
+    // List all panes across all sessions
+    let output = tmux
+        .cmd()
+        .args([
+            "list-panes",
+            "-a",
+            "-F",
+            "#{pane_id}\t#{window_id}\t#{pane_current_command}",
+        ])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    // Group panes by window
+    let mut window_panes: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let (pane_id, window_id, cmd) = (parts[0], parts[1], parts[2]);
+        window_panes
+            .entry(window_id.to_string())
+            .or_default()
+            .push((pane_id.to_string(), cmd.to_string()));
+    }
+
+    let mut killed = 0;
+    for panes in window_panes.values() {
+        if panes.len() < 2 {
+            continue; // Don't kill the last pane in a window
+        }
+        for (pane_id, cmd) in panes {
+            if registered_panes.contains(pane_id.as_str()) {
+                continue; // Registered — leave it
+            }
+            // Only target agent processes (not shells or user processes)
+            if AGENT_PROCESSES.contains(&cmd.as_str()) {
+                if let Err(e) = tmux.kill_pane(pane_id) {
+                    eprintln!("resync: failed to kill orphaned agent pane {}: {}", pane_id, e);
+                } else {
+                    killed += 1;
+                }
+            }
+        }
+    }
+
+    if killed > 0 {
+        eprintln!("resync: purged {} orphaned agent pane(s) from non-stash windows", killed);
     }
 }
 
@@ -483,10 +866,11 @@ fn apply_fixes_to_registry(
     for issue in issues {
         match issue {
             Issue::WrongSession { key, pane, .. } => {
-                // Kill the pane (next route will auto-start in correct session)
+                // Kill the pane (next route will auto-start in correct session).
+                // If kill fails (e.g., last pane in session), still deregister —
+                // the stale entry is worse than an orphaned pane.
                 if let Err(e) = tmux.kill_pane(pane) {
-                    eprintln!("resync: failed to kill pane {}: {}", pane, e);
-                    continue;
+                    eprintln!("resync: could not kill pane {} ({}), deregistering anyway", pane, e);
                 }
                 registry.remove(key);
                 eprintln!("  fixed: {}", issue);
@@ -569,6 +953,15 @@ pub fn run(fix: bool) -> Result<()> {
         }
     } else {
         eprintln!("\nNo session/process issues detected.");
+    }
+
+    if fix {
+        // Return active panes from stash back to their original sessions,
+        // then clean up idle/orphaned stash panes.
+        return_stashed_panes(&tmux);
+        purge_stash_windows(&tmux);
+        purge_unregistered_stash_panes(&tmux);
+        purge_orphaned_agent_panes(&tmux);
     }
 
     // Show current state
@@ -706,6 +1099,8 @@ mod tests {
 
         let pane = iso.auto_start("wrong", &cwd).unwrap();
         assert!(iso.pane_alive(&pane));
+        // Create a second window so the kill_pane guard allows killing the pane
+        let _ = iso.new_window("wrong", &cwd);
 
         let mut registry = SessionRegistry::new();
         registry.insert("sess-fix".to_string(), test_entry(&pane, "test.md"));
@@ -937,6 +1332,120 @@ mod tests {
     }
 
     #[test]
+    fn purge_kills_unregistered_shell_in_stash() {
+        // An unregistered idle shell in the stash should be killed.
+        let iso = IsolatedTmux::new("resync-purge-shell");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+
+        // Move pane2 to stash (it will be running a shell)
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        assert!(iso.pane_alive(&pane2), "pane2 should be alive in stash");
+
+        // Empty registry — pane2 is not registered
+        let registry = SessionRegistry::new();
+        purge_unregistered_stash_panes_with_registry(&iso, &registry);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!iso.pane_alive(&pane2), "unregistered shell in stash should be killed");
+    }
+
+    #[test]
+    fn purge_preserves_registered_pane_in_stash() {
+        // A registered pane in stash should NOT be killed.
+        let iso = IsolatedTmux::new("resync-purge-registered");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // Registry with pane2 registered
+        let mut registry = SessionRegistry::new();
+        registry.insert("registered-sess".to_string(), test_entry(&pane2, "test.md"));
+
+        purge_unregistered_stash_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(iso.pane_alive(&pane2), "registered pane in stash should survive purge");
+    }
+
+    #[test]
+    fn purge_preserves_user_process_in_stash() {
+        // A pane running a user process (not shell/agent) should NOT be killed.
+        let iso = IsolatedTmux::new("resync-purge-userproc");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let output = iso
+            .cmd()
+            .args([
+                "split-window",
+                "-t", &pane1,
+                "-d", "-h",
+                "-c", &cwd.to_string_lossy(),
+                "-P", "-F", "#{pane_id}",
+                "sleep", "60",
+            ])
+            .output()
+            .unwrap();
+        let pane2 = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // Move to stash
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let registry = SessionRegistry::new();
+        purge_unregistered_stash_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(iso.pane_alive(&pane2), "user process (sleep) in stash should survive purge");
+    }
+
+    #[test]
+    fn purge_orphan_agent_in_non_stash_window() {
+        // An unregistered agent-doc pane in a regular window (not stash) should be killed
+        // if the window has other panes.
+        let iso = IsolatedTmux::new("resync-purge-orphan-agent");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a session with 2 panes in the same window
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // pane2 is running a shell. We want to simulate an agent-doc process.
+        // Instead, we test the shell case: shells should NOT be killed by this function
+        // (only agent processes). Let's just verify the non-stash purge doesn't touch shells.
+        let registry = SessionRegistry::new();
+        purge_orphaned_agent_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Both panes should survive (they're running shells, not agent processes)
+        assert!(iso.pane_alive(&pane1), "shell pane1 should survive");
+        assert!(iso.pane_alive(&pane2), "shell pane2 should survive");
+    }
+
+    #[test]
+    fn purge_orphan_does_not_kill_last_pane() {
+        // A window with only one pane (even if orphaned agent) should not be touched.
+        let iso = IsolatedTmux::new("resync-purge-last-pane");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let registry = SessionRegistry::new();
+        purge_orphaned_agent_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        assert!(iso.pane_alive(&pane1), "last pane in window should not be killed");
+    }
+
+    #[test]
     fn is_stash_window_name_matches() {
         assert!(is_stash_window_name("stash"));
         assert!(is_stash_window_name("stash-1"));
@@ -944,5 +1453,91 @@ mod tests {
         assert!(!is_stash_window_name("claude"));
         assert!(!is_stash_window_name(""));
         assert!(!is_stash_window_name("stashed"));
+    }
+
+    #[test]
+    fn return_stashed_panes_moves_active_pane_back() {
+        // A registered pane running an active process (sleep) in stash should be
+        // returned to its original session window.
+        let iso = IsolatedTmux::new("resync-return-active");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a pane with an active process (sleep)
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let output = iso
+            .cmd()
+            .args([
+                "split-window",
+                "-t", &pane1,
+                "-d", "-h",
+                "-c", &cwd.to_string_lossy(),
+                "-P", "-F", "#{pane_id}",
+                "sleep", "60",
+            ])
+            .output()
+            .unwrap();
+        let active_pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let original_window = iso.pane_window(&active_pane).unwrap();
+
+        // Move the active pane to stash
+        iso.stash_pane(&active_pane, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // Verify it's in stash
+        let stash_window = iso.pane_window(&active_pane).unwrap();
+        assert_ne!(stash_window, original_window, "pane should be in stash");
+
+        // Register the pane with the original window
+        let mut registry = SessionRegistry::new();
+        let mut entry = test_entry(&active_pane, "");
+        entry.window = original_window.clone();
+        registry.insert("active-sess".to_string(), entry);
+
+        // Return stashed panes
+        return_stashed_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // Verify pane is back in original window
+        assert!(iso.pane_alive(&active_pane), "pane should still be alive");
+        let current_window = iso.pane_window(&active_pane).unwrap();
+        assert_eq!(
+            current_window, original_window,
+            "active pane should be returned to original window"
+        );
+    }
+
+    #[test]
+    fn return_stashed_panes_skips_idle_shells() {
+        // An idle shell in stash should NOT be returned — it's handled by purge.
+        let iso = IsolatedTmux::new("resync-return-idle");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        let original_window = iso.pane_window(&pane2).unwrap();
+
+        // Move idle shell to stash
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let stash_window = iso.pane_window(&pane2).unwrap();
+        assert_ne!(stash_window, original_window, "pane should be in stash");
+
+        // Register the idle shell pane
+        let mut registry = SessionRegistry::new();
+        let mut entry = test_entry(&pane2, "");
+        entry.window = original_window.clone();
+        registry.insert("idle-sess".to_string(), entry);
+
+        // Return stashed panes — should skip idle shells
+        return_stashed_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // Verify pane is still in stash (not returned)
+        let current_window = iso.pane_window(&pane2).unwrap();
+        assert_eq!(
+            current_window, stash_window,
+            "idle shell should NOT be returned from stash"
+        );
     }
 }

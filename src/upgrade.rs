@@ -1,3 +1,45 @@
+//! # Module: upgrade
+//!
+//! ## Spec
+//! - `run()` is the `agent-doc upgrade` subcommand handler. It checks crates.io for
+//!   the latest version and upgrades the binary in place using three ordered strategies:
+//!   1. Download prebuilt binary from GitHub Releases (`tar.gz` for detected target triple).
+//!   2. `cargo install <crate>` fallback.
+//!   3. `pip install --upgrade <crate>` fallback.
+//!   If all strategies fail, prints manual installation instructions and returns `Ok(())`.
+//! - `warn_if_outdated()` is called on every startup. Checks crates.io with a 24-hour
+//!   disk cache (`~/.cache/agent-doc/version-cache.json`) and prints a one-line warning
+//!   to stderr if a newer version is available. Silently swallows all errors.
+//! - Version comparison uses simple semver tuple ordering `(major, minor, patch)`.
+//! - `detect_target()` resolves the current platform to a target triple
+//!   (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
+//!   `aarch64-apple-darwin`); returns `None` for unsupported platforms.
+//! - GitHub Releases download writes to a temp file alongside the binary, extracts via
+//!   `tar xzf`, sets `0o755` permissions, then atomically renames into place.
+//! - `fetch_latest_version()` hits `https://crates.io/api/v1/crates/<name>` and reads
+//!   `/crate/max_version`.
+//! - Cache TTL is 24 hours; stale or missing cache triggers a live network fetch.
+//!
+//! ## Agentic Contracts
+//! - `run()` and `warn_if_outdated()` are the only public entry points.
+//! - `warn_if_outdated()` never panics or propagates errors; safe to call unconditionally at startup.
+//! - `run()` returns `Ok(())` even when all upgrade strategies fail; callers do not need
+//!   to handle the upgrade failure specially.
+//! - The binary is upgraded in place (same path as `std::env::current_exe()`); symlinks
+//!   resolve to the real file before writing.
+//!
+//! ## Evals
+//! - test_version_newer_major: "2.0.0" > "1.0.0" → true
+//! - test_version_newer_minor: "1.2.0" > "1.1.0" → true
+//! - test_version_newer_patch: "1.0.2" > "1.0.1" → true
+//! - test_version_same: "1.0.0" vs "1.0.0" → false
+//! - test_version_older_major: "0.9.0" vs "1.0.0" → false
+//! - test_version_invalid: non-semver strings → false (no panic)
+//! - test_cache_freshness: cache written now → fresh; cache written 25h ago → stale
+//! - test_cache_roundtrip: write then read cache file → version and timestamp preserved
+//! - test_detect_target: current platform → `Some` string containing a dash
+//! - test_github_release_url_format: version + detected target → URL starts with correct GitHub prefix, ends with `.tar.gz`
+
 use anyhow::Result;
 use serde_json::Value;
 use std::fs;

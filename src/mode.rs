@@ -1,9 +1,30 @@
-//! `agent-doc mode` — Get or set the document mode (append/template).
+//! # Module: mode
 //!
-//! Usage:
-//!   agent-doc mode <file>              # Show current mode
-//!   agent-doc mode <file> --set append # Set mode to append
-//!   agent-doc mode <file> --set template # Set mode to template
+//! ## Spec
+//! - `run(file, set)`: reads the document's frontmatter and either reports the current mode or
+//!   updates it.
+//!   - **Get** (`set = None`): resolves `(agent_doc_format, agent_doc_write)` via
+//!     `frontmatter::parse` + `fm.resolve_mode()` and prints `format: <value>` and
+//!     `write: <value>` to stdout.  If the legacy `agent_doc_mode` field is present, emits a
+//!     deprecation warning to stderr.
+//!   - **Set** (`set = Some(mode)`): maps the mode string to `(AgentDocFormat, AgentDocWrite)`:
+//!     `"append"` → `(Append, Crdt)`, `"template"` → `(Template, Crdt)`, `"stream"` →
+//!     `(Template, Crdt)`.  Any other value returns `Err`.  Calls
+//!     `frontmatter::set_format_and_write` and writes the updated content back to the file.
+//!
+//! ## Agentic Contracts
+//! - Returns `Err` if the file does not exist or is unreadable.
+//! - Returns `Err` for unrecognised mode strings.
+//! - The set path writes the full document back atomically via `std::fs::write`; the rest of the
+//!   document content is preserved exactly.
+//! - Get output goes to stdout; all diagnostic messages go to stderr.
+//!
+//! ## Evals
+//! - run_get_reports_format: document with `agent_doc_format: template` → stdout contains "format: template"
+//! - run_get_legacy_deprecation: document with `agent_doc_mode: stream` → stderr contains deprecation note
+//! - run_set_append: `set="append"` → frontmatter updated to `agent_doc_format: append`
+//! - run_set_invalid: `set="unknown"` → returns Err with message listing valid values
+//! - run_file_not_found: non-existent file → returns Err
 
 use anyhow::{Context, Result};
 use std::path::Path;

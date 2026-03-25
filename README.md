@@ -1,468 +1,85 @@
 # agent-doc
 
-<p align="center">
-  <img src="assets/logo.svg" alt="agent-doc logo" width="128">
-</p>
-
-**v0.25.13** | JetBrains plugin v0.2.21 | VS Code extension v0.2.3
-
-> **Alpha Software** — actively developed, APIs and frontmatter format may change between versions. Feedback welcome via GitHub issues.
-
 Interactive document sessions with AI agents.
 
-Edit a markdown document. Press a hotkey. The tool diffs your changes, sends
-them to an AI agent, and writes the response back into the document. The
-document is the UI.
+Edit a markdown file, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back into the document. The document is the UI.
 
-## Why
-
-Terminal prompts are ephemeral. You type, the agent responds, the context
-scrolls away. Documents are persistent — you can reorganize, delete noise,
-annotate inline, and curate the conversation as a living artifact. The agent
-sees your edits as diffs, so every change carries intent.
-
-## Features
-
-- **Boundary markers** — component open/close tags (`<!-- agent:name -->...<!-- /agent:name -->`) managed by the binary across all write paths
-- **IPC-first writes** — IDE plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
-- **CRDT merge** — yrs-based conflict-free merge for concurrent edits; no reorder hack
-- **pulldown-cmark outline parsing** — CommonMark-compliant section structure and token counts; component tags inside code spans/blocks are ignored
-- **Stash window routing** — failed `split-window` calls land in a stash window instead of creating visible throwaway windows; resync purges idle stash windows
-- **Streaming** — real-time CRDT write-back loop with chain-of-thought routing
-- **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session
-- **Preflight mtime debounce** — 500ms idle gate prevents duplicate preflight runs from rapid file saves
-- **Unified diff with context** — 5-line context radius for clearer diffs sent to the agent
-- **Route --debounce** — configurable debounce flag on `route` to coalesce rapid editor triggers
-- **is_tracked FFI export** — `agent_doc_is_tracked()` C ABI function for editor plugins to check session tracking
-- **Sync no-wait auto-start** — `auto_start_no_wait` for the sync path avoids blocking on prompt detection
-- **Sync swap-pane atomic reconcile** — swap-pane transitions with atomic reconcile, `auto_start_no_wait`, and cross-session context override
-- **Sync tmux_session auto-repair** — frontmatter `tmux_session` automatically corrected when context session differs
-- **Sync resync report-only** — `resync --fix` disabled in sync path to avoid killing cross-session panes; report only
-- **Sync visible-window split** — new panes split in the visible agent-doc window instead of stash
-- **install.sh** — rewritten installer with platform detection, Homebrew formula support
-- **Homebrew formula** — `Formula/agent-doc.rb` for `brew install btakita/tap/agent-doc`
-- **tmux_session stripping** — deprecated `tmux_session` frontmatter field auto-removed on sync instead of repaired
-- **Stash join fix** — failed stash join-pane kills the pane instead of creating orphan stash windows
-- **Plugin v0.2.21** — sync logging at INFO level
-- **526 tests** — deterministic behavior fully covered in Rust; see `CLAUDE.md` for module layout
+> **Alpha Software** — actively developed; APIs and frontmatter format may change between versions.
 
 ## Install
 
 ```sh
+# From crates.io
+cargo install agent-doc
+
+# From source
+cargo build --release
 cargo install --path .
 ```
 
 ## Quick Start
 
 ```sh
-agent-doc install                         # check prereqs + install editor plugins
-agent-doc init                            # initialize project (.agent-doc/, SKILL.md)
-agent-doc init session.md "Topic Name"   # scaffold a session doc
-agent-doc run session.md                  # diff, send, append response
-agent-doc preflight session.md             # pre-agent checks → JSON (recover, commit, claims, diff, doc)
-agent-doc diff session.md                 # preview what would be sent
-agent-doc reset session.md                # clear session + snapshot
-agent-doc clean session.md                # squash session git history
-agent-doc route session.md               # route to tmux pane (or auto-start)
-agent-doc start session.md               # start Claude in current tmux pane
-agent-doc claim session.md [--window W]  # claim file for a tmux pane
-agent-doc focus session.md               # focus tmux pane for a session
-agent-doc layout a.md b.md --split h [--window W]  # arrange panes (window-scoped)
-agent-doc outline session.md             # section structure + token counts
-agent-doc outline session.md --json      # JSON output for tooling
-agent-doc patch dashboard.md status "new content"  # update a component
-agent-doc watch                          # auto-submit on file change
-agent-doc parallel session.md --task "task 1" --task "task 2"  # parallel fan-out
-agent-doc resync                         # validate sessions, prune dead panes
-agent-doc resync --fix                   # also fix wrong-session/wrong-process panes
-agent-doc commit session.md              # git add + commit with timestamp
-agent-doc prompt session.md              # detect permission prompts → JSON
-agent-doc skill install                  # install Claude Code skill definition
-agent-doc skill check                    # check if skill is up to date
-agent-doc upgrade                        # upgrade to latest version
-agent-doc plugin install <editor>        # install editor plugin (jetbrains|vscode)
-agent-doc plugin update <editor>         # update editor plugin to latest
-agent-doc plugin list                    # list available editor plugins
+# 1. Initialize project (creates .agent-doc/ and installs SKILL.md)
+agent-doc init
+
+# 2. Scaffold a session document
+agent-doc init session.md "My Topic"
+
+# 3. Claim the document to the current tmux pane
+agent-doc claim session.md
+
+# 4. Route hotkey triggers to the correct tmux pane
+agent-doc route session.md
+
+# 5. Run: diff, send to agent, write response back
+agent-doc run session.md
 ```
 
-## Document Format
+The typical edit cycle: write in your editor, trigger `agent-doc route <file>` via a hotkey, the agent responds in the same document.
 
-```markdown
----
-agent_doc_session: 05304d74-90f1-46a1-8a79-55736341b193
-agent: claude
----
+## Key Features
 
-# Session: Topic Name
+- **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attr > `components.toml` > built-in defaults
+- **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
+- **IPC-first writes** — editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
+- **Tmux routing** — persistent Claude Code sessions per document; `route` dispatches to the correct pane or auto-starts one
+- **Streaming** — real-time CRDT write-back loop (`agent-doc stream`) with optional chain-of-thought routing
+- **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session (`agent-doc parallel`)
+- **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
+- **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
+- **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 
-## User
+## Architecture
 
-Your question or instruction here.
+The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The SKILL.md Claude Code skill is the non-deterministic orchestrator — it reads the diff, generates responses, and decides what to write.
 
-## Assistant
+See [CLAUDE.md](CLAUDE.md) for the full module layout, binary vs. agent responsibility table, stream mode details, and release process.
 
-(agent writes here)
+## Supported Editors
 
-## User
-
-Follow-up. You can also annotate inline:
-
-> What about edge cases?
-```
-
-### Frontmatter fields
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `agent_doc_session` | no | (generated on first run) | Document UUID for tmux pane routing (legacy: `session`) |
-| `agent_doc_format` | no | `template` | Document format: `inline` (canonical) or `template`. `append` accepted as backward-compat alias for `inline`. |
-| `agent_doc_write` | no | `crdt` | Write strategy: `merge` or `crdt` |
-| `agent_doc_mode` | no | — | **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead |
-| `tmux_session` | no | — | **Deprecated.** Session is now determined at runtime by `--window` (sync) or `current_tmux_session()` (route/start). Still written for backward compatibility; auto-repaired by sync. |
-| `resume` | no | (none) | Claude conversation ID for `--resume` |
-| `agent` | no | `claude` | Agent backend to use |
-| `model` | no | (agent default) | Model override |
-| `branch` | no | (none) | Git branch for session commits |
-| `claude_args` | no | (none) | Additional CLI args for `claude` process (space-separated) |
-
-### Two interaction modes
-
-**Append mode:** Structured `## User` / `## Assistant` blocks.
-
-**Inline mode:** Annotations anywhere — blockquotes, edits to previous
-responses. The diff captures what changed; the agent addresses inline edits
-alongside new `## User` content.
-
-Both work simultaneously because the run sends a diff, not a parsed structure.
-
-## Run Flow
-
-```
-┌──────────┐  hotkey ┌────────────┐  diff + prompt  ┌───────┐
-│  Editor  │ ──────> │ agent-doc  │ ──────────────> │ Agent │
-│          │         │            │ <────────────── │  API  │
-│  reload  │ <────── │ write+snap │                 └───────┘
-└──────────┘         │ git commit │
-                     └────────────┘
-```
-
-1. Read document, load snapshot (last-known state)
-2. Compute diff — if empty, exit (double-run guard)
-3. Send diff + full document to agent, resuming session
-4. Append response as `## Assistant` block
-5. Save snapshot, git commit
-
-### Session continuity
-
-- **Empty `agent_doc_session:`** — forks from the most recent agent session in the
-  directory (inherits context)
-- **`agent_doc_session: <uuid>`** — resumes that specific session
-- **Delete `agent_doc_session:` value** — next run starts fresh
-
-### History rewriting
-
-Delete anything from the document. On next run, the diff shows deletions
-and the agent sees the cleaned-up doc as ground truth.
-
-## Components
-
-Components are bounded, named regions in a document that can be updated independently:
-
-```markdown
-<!-- agent:status patch=replace -->
-| Service | State   |
-|---------|---------|
-| api     | healthy |
-<!-- /agent:status -->
-```
-
-Inline attributes on the tag override `components.toml` and built-in defaults. Precedence: inline attr > `components.toml` > built-in defaults.
-
-Component marker detection uses [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) for CommonMark-compliant parsing: tags inside inline code spans or fenced code blocks are ignored and never treated as component boundaries.
-
-### Standard component names
-
-| Component | Default `patch` | Description |
-|-----------|----------------|-------------|
-| `exchange` | append | Conversation history — each cycle appends |
-| `findings` | append | Accumulated research data — grows over time |
-| `status` | replace | Current state — updated at milestones |
-| `pending` | replace | Task queue — auto-cleaned each cycle |
-| `output` | replace | Latest agent response only |
-| `input` | replace | User prompt area |
-| (custom) | replace | All other components default to replace |
-
-Update a component:
+**JetBrains (IntelliJ, PyCharm, etc.)**
 
 ```sh
-agent-doc patch dashboard.md status "| api | healthy |"
-echo "deploy complete" | agent-doc patch dashboard.md log
+agent-doc plugin install jetbrains
 ```
 
-### Component config
+Or install from JetBrains Marketplace. Configure an External Tool: Program=`agent-doc`, Args=`run $FilePath$`, Working dir=`$ProjectFileDir$`. Assign a keyboard shortcut.
 
-Configure modes and hooks in `.agent-doc/components.toml`:
-
-```toml
-[log]
-mode = "append"        # append | replace (default) | prepend
-timestamp = true       # auto-prefix with ISO timestamp
-max_entries = 100      # trim old entries
-
-[status]
-pre_patch = "scripts/validate.sh"   # transform content (stdin → stdout)
-post_patch = "scripts/notify.sh"    # fire-and-forget after write
-```
-
-### Dashboard-as-document
-
-A dashboard is a markdown document with agent-maintained components. External scripts update components via `agent-doc patch`, and the watch daemon can auto-trigger agent responses:
+**VS Code**
 
 ```sh
-# Start watching for changes
-agent-doc watch
-
-# Update from CI scripts
-agent-doc patch monitor.md builds "$(./format-builds.sh)"
-agent-doc patch monitor.md log "Build #${BUILD_ID}: ${STATUS}"
+agent-doc plugin install vscode
 ```
 
-See [Components guide](docs/guide/components.md) and [Dashboard tutorial](docs/guide/dashboard.md) for full documentation.
+Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc run ${file}"` and bind it to a keybinding.
 
-## Git Integration
-
-Each run auto-commits the document for inline diff highlighting in your editor.
-
-| Flag | Behavior |
-|------|----------|
-| `-b` | Auto-create branch `agent-doc/<filename>` on first run |
-| (none) | Commit to current branch |
-| `--no-git` | Skip git entirely |
-
-Cleanup: `agent-doc clean <file>` squashes all session commits into one.
-
-## Configuration
-
-### claude_args
-
-Pass additional CLI arguments to the `claude` process spawned by `agent-doc start`. Three sources, highest precedence first:
-
-**1. Document frontmatter** (per-document):
-```yaml
----
-agent_doc_session: 05304d74-...
-claude_args: "--dangerously-skip-permissions"
----
-```
-
-**2. Global config** (`~/.config/agent-doc/config.toml`):
-```toml
-claude_args = "--dangerously-skip-permissions"
-```
-
-**3. Environment variable**:
-```sh
-export AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"
-```
-
-Args are split on whitespace and prepended to the `claude` command before other flags.
-
-## Agent Backends
-
-Agent-agnostic core. Only the "send prompt, get response" step varies.
-
-```toml
-# ~/.config/agent-doc/config.toml
-
-[agents.claude]
-command = "claude"
-args = ["-p", "--output-format", "json"]
-result_path = ".result"
-session_path = ".session_id"
-
-[agents.codex]
-command = "codex"
-args = ["--prompt"]
-result_path = ".output"
-session_path = ".id"
-
-default_agent = "claude"
-```
-
-Override per-document via `agent:` in frontmatter, or per-invocation via `--agent`.
-
-## Tmux Session Routing
-
-Route documents to persistent Claude sessions via tmux. Pane management is powered by [tmux-router](https://github.com/btakita/tmux-router).
-
-```sh
-agent-doc route plan.md    # send to existing pane, or auto-start one
-agent-doc sync --col a.md,b.md --col c.md --focus a.md  # 2D layout sync
-```
-
-**How it works:**
-1. Each document gets an `agent_doc_session` UUID in frontmatter (auto-generated if missing)
-2. agent-doc maps UUIDs to file paths, then delegates to tmux-router for pane routing
-3. `route` checks if the pane is alive — if so, sends the command (with Enter retry verification) and focuses the pane
-4. If the pane is dead (previously registered), `route` lazy-claims to an active pane in the `claude` tmux session, syncs the layout, then sends the command
-5. New/unregistered files skip lazy-claim and go directly to auto-start, so each file gets its own Claude session
-6. If no active pane is available, auto-starts a new Claude session in tmux: first tries `split-window` in an existing window that has a registered agent-doc pane (avoids creating throwaway windows), falls back to creating a new window if no registered panes exist (30s startup timeout with `❯` prompt detection)
-7. `sync` auto-starts Claude sessions for files with session UUIDs but no alive panes before arranging the layout
-
-## Parallel — Fan-Out
-
-Decompose a complex task into independent subtasks, each running in its own git worktree with a separate Claude session.
-
-### CLI
-
-```sh
-agent-doc parallel plan.md \
-  --task "Implement auth middleware in src/auth.rs" \
-  --task "Write integration tests for auth" \
-  --task "Update API docs for auth endpoints" \
-  --model opus \
-  --timeout 600
-```
-
-| Flag | Description |
-|------|-------------|
-| `--task "..."` | Subtask description (repeatable, at least 1) |
-| `--model <model>` | Model override for subtask agents |
-| `--timeout <secs>` | Per-task timeout (default: 600) |
-| `--no-git` | Skip git commits in worktrees |
-| `--dry-run` | Print plan without executing |
-
-### How it works
-
-1. Creates a git worktree per task (`.agent-doc/worktrees/<session>-<n>`)
-2. Writes task prompt to each worktree
-3. Spawns `claude -p` in stashed tmux panes (one per worktree)
-4. Polls for completion every 2 seconds
-5. Collects results: agent JSON output + `git diff HEAD` per worktree
-6. Prints formatted markdown with collapsible diffs
-
-### From a document session
-
-In a template-mode document, write a `deep:` directive in the exchange:
-
-```markdown
-deep:
-- Implement auth middleware
-- Write integration tests
-- Update API docs
-```
-
-The SKILL.md skill parses the `deep:` prefix, extracts bullet tasks, and calls `agent-doc parallel --task "..." --task "..."`. Results are written back to the exchange.
-
-## Resync
-
-Validate `sessions.json` against live tmux state and fix inconsistencies.
-
-```sh
-agent-doc resync          # dry-run: prune dead panes, report issues
-agent-doc resync --fix    # also fix detected issues
-```
-
-**Dry-run (no `--fix`):** Removes entries whose tmux panes no longer exist, purges idle stash windows (30s grace period), logs orphaned `claude`/`stash` windows, and reports wrong-session, wrong-process, or wrong-window panes without changing them.
-
-**With `--fix`:**
-- **Wrong-session panes** (pane is in a different tmux session than the document's `tmux_session` frontmatter) — kills the pane and deregisters it. The next `route` auto-starts in the correct session.
-- **Wrong-process panes** (pane is running a non-agent-doc process, e.g. `corky watch`) — deregisters the entry but leaves the foreign process alive.
-- **Wrong-window panes** (pane is in a separate non-stash window from the majority of panes in the same tmux session) — moves the pane into the stash window via `stash_pane`. The next `sync` or `layout` will rejoin it into the correct window.
-
-**Stash windows:** When `split-window` fails during auto-start (e.g. minimum pane size constraint), the new pane is created in a fresh window and immediately moved to the stash window so no extra visible windows appear. Stash windows are named `stash`; if tmux auto-deduplicates the name they become `stash-2`, `stash-3`, etc. — all such names are recognized and eligible for purging.
-
-**Process allowlist:** `agent-doc`, `claude`, `node` are valid agent processes. Idle shells (`zsh`, `bash`, `sh`, `fish`) are also allowed (a shell means the agent process hasn't started yet or has exited).
-
-**Automatic pruning:** `resync::prune()` runs automatically before `route`, `sync`, and `claim` operations — you only need to run `agent-doc resync` explicitly for diagnostics or `--fix`.
-
-## IPC-First Writes
-
-Since v0.17.5, all write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. agent-doc writes a JSON patch to `.agent-doc/patches/` instead of modifying the file directly. The plugin applies the change via Document API, preserving cursor position, undo history, and avoiding "externally modified" dialogs. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
-
-## Editor Integration
-
-### JetBrains (v0.2.21)
-
-External Tool: Program=`agent-doc`, Args=`run $FilePath$`,
-Working dir=`$ProjectFileDir$`, Output paths=`$FilePath$`. Assign keyboard shortcut.
-
-Install via `agent-doc plugin install jetbrains` or `Settings → Plugins` (marketplace).
-
-### VS Code (v0.2.3)
-
-Task: `"command": "agent-doc run ${file}"`. Bind to keybinding.
-
-Install via `agent-doc plugin install vscode` or the VS Code marketplace.
-
-### Vim/Neovim
+**Vim/Neovim**
 
 ```vim
 nnoremap <leader>as :!agent-doc run %<CR>:e<CR>
 ```
 
-## CLI Reference
-
-```
-agent-doc run <file> [-b] [--agent <name>] [--model <model>] [--dry-run] [--no-git]
-agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]
-agent-doc init                              # project init: .agent-doc/ dirs + SKILL.md
-agent-doc init <file> [title] [--agent <name>]  # scaffold session document
-agent-doc preflight <file>                         # pre-agent checks → JSON (recover, commit, claims, diff, doc)
-agent-doc diff <file>
-agent-doc reset <file>
-agent-doc clean <file>
-agent-doc route <file>              # route to existing tmux pane or auto-start
-agent-doc start <file>              # start Claude session in current tmux pane
-agent-doc claim <file> [--window W] [--pane P]  # claim file for a tmux pane
-agent-doc focus <file> [--pane P]              # focus tmux pane for a session
-agent-doc layout <files> --split h [--window W] # arrange panes (window-scoped)
-agent-doc outline <file> [--json]    # section structure + token counts
-agent-doc parallel <file> --task "..." [--model M] [--timeout S] [--dry-run]  # parallel fan-out
-agent-doc resync                    # validate sessions, prune dead panes, report issues
-agent-doc resync --fix              # also kill wrong-session panes, deregister wrong-process panes
-agent-doc prompt <file> [--all]     # detect permission prompts → JSON
-agent-doc prompt --answer N <file>  # answer prompt option N
-agent-doc commit <file>             # selective commit (snapshot only, user edits stay uncommitted)
-agent-doc terminal <file> [--session S]  # launch terminal with tmux for editor plugins
-agent-doc skill install             # install Claude Code skill definition
-agent-doc skill check               # check if installed skill is up to date
-agent-doc patch <file> <component> [content]  # update component (stdin if no content)
-agent-doc watch [--stop] [--status]          # watch daemon (debounce + reactive mode for stream docs)
-agent-doc write <file> --force-disk  # bypass IPC, write directly to disk
-agent-doc history <file>            # list exchange versions from git
-agent-doc history <file> --restore <commit>  # prepend old exchange content
-agent-doc audit-docs                # audit instruction files for staleness
-agent-doc upgrade                   # upgrade to latest version
-agent-doc plugin install <editor>   # install editor plugin (jetbrains|vscode)
-agent-doc plugin update <editor>    # update editor plugin to latest
-agent-doc plugin list               # list available editor plugins
-```
-
-## Module Layout
-
-See [CLAUDE.md](CLAUDE.md#module-layout) for the full source module layout, binary vs. agent responsibility table, and conventions used when adding new subcommands.
-
-## Domain Ontology
-
-agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms for interactive document sessions.
-
-| Term | Derives From | Description |
-|------|-------------|-------------|
-| **Session** | project + story | A bounded interaction with temporal arc; the unit of agent-doc work |
-| **Document** | entity + context | A markdown file that holds conversational state between user and agent |
-| **Pane** | focus + scope | A tmux viewport — finite attention applied to a single document |
-| **Claim** | scope + entity | Binding a document to a pane; scoping focus to a specific file |
-| **Route** | context + resolution | Resolving which pane handles a document; context-aware dispatch |
-| **Sync** | pattern + system | Aligning tmux pane layout to editor split state; maintaining coherence |
-| **Watch** | consciousness + evolution | Detecting file changes and triggering agent responses; event-driven |
-| **Dashboard** | system + focus | A document used as a live system view with agent-maintained sections |
-| **Component** | scope + abstraction | Bounded, named, re-renderable region in a document (`<!-- agent:name -->...<!-- /agent:name -->`). Configurable mode (replace/append/prepend) and shell hooks. |
-| **Registry** | system + perspective | Persistent mapping of documents to panes; the routing state |
-| **Snapshot** | entity + story | Point-in-time capture of document content for diff computation |
-| **Project** | system + scope | The bounded working context; identified by `.agent-doc/` at its root. Contains documents, registry, snapshots, daemon. tmux-router is project-agnostic. |
-| **Overlay** | context + resolution | Domain-specific terms extending the base kernel vocabulary |
-
 ## License
 
-MIT
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.

@@ -1,12 +1,39 @@
-//! `agent-doc compact` — Archive old exchanges and compact components.
+//! # Module: compact
 //!
-//! Usage: agent-doc compact <file.md> [--keep N] [--component NAME] [--message MSG]
+//! ## Spec
+//! - Reduces document size by archiving old content to `.agent-doc/archives/<hash>-<timestamp>.md`.
+//! - **Inline/append mode:** parses `## User` / `## Assistant` exchange pairs from the document
+//!   body; archives all but the `keep` most-recent complete pairs; rebuilds the document with an
+//!   archive summary line and a trailing `## User` prompt block.
+//!   - Trailing `## User` blocks without an assistant reply are never counted or archived.
+//!   - Code blocks containing `## User` / `## Assistant` headings are not treated as section
+//!     boundaries.
+//! - **Template/stream mode:** archives the full content of a named component (default `exchange`)
+//!   and replaces it with a one-line summary marker; optionally accepts a custom `--message`.
+//!   - If the document uses CRDT write strategy, the CRDT state is compacted (GC tombstones)
+//!     before the component replacement.
+//! - Archive filenames are derived from the snapshot hash + a UTC timestamp computed without
+//!   the `chrono` crate.
+//! - All writes are atomic (temp file + rename); the snapshot is updated after each write.
 //!
-//! **Append mode:** Moves old User/Assistant exchange pairs to an archive file
-//! under `.agent-doc/archives/`, leaving only the most recent N exchanges.
+//! ## Agentic Contracts
+//! - `run(file, keep, component_name, message) -> Result<()>` — entry point; dispatches to
+//!   component compact (template/stream) or exchange compact (inline) based on frontmatter mode.
+//! - If `exchanges.len() <= keep` in inline mode, logs to stderr and exits `Ok(())` without
+//!   modifying the document.
+//! - Archive path is always under `.agent-doc/archives/` relative to the project root (found by
+//!   walking up to the directory containing `.agent-doc/`).
+//! - Returns `Err` if the file does not exist, the named component is not found (template mode),
+//!   or any I/O operation fails.
 //!
-//! **Template/stream mode:** Replaces the content of a named component
-//! (default: `exchange`) with a summary marker. Archives old content.
+//! ## Evals
+//! - parse_basic: two complete exchanges + trailing User → 2 exchanges parsed, trailing skipped
+//! - parse_code_blocks: `## User` inside fenced block → not treated as section boundary
+//! - keep_threshold: exchange count ≤ keep → no-op, `Ok(())` returned
+//! - archive_format: archived content contains `archived_from: compact`, session ID, exchange text
+//! - compacted_format: result has archive summary line, kept exchanges, trailing `## User\n\n`
+//! - timestamp_format: `chrono_timestamp()` → 15-char string matching `YYYYMMDD-HHMMSS`
+//! - component_archive_format: template-mode archive contains component name, session ID, content
 
 use anyhow::{Context, Result};
 use std::path::Path;

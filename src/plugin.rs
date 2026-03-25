@@ -1,3 +1,31 @@
+//! # Module: plugin
+//!
+//! ## Spec
+//! - Manages editor plugin lifecycle (install, update, list) for JetBrains IDEs and VS Code-family editors (VS Code, VSCodium, Cursor).
+//! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
+//! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
+//! - `update(editor)` — for JetBrains, skips re-install if the installed plugin.xml version matches the latest release tag; for VS Code, always reinstalls (handled idempotently by the CLI).
+//! - `list()` — scans JetBrains plugin directories for `agent-doc-jetbrains/META-INF/plugin.xml` and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
+//! - JetBrains plugin directories are discovered from OS-specific paths (`~/.local/share/JetBrains/*/plugins/` on Linux, `~/Library/Application Support/JetBrains/*/plugins/` on macOS). When multiple IDEs are found, the user is prompted interactively on stderr.
+//! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`).
+//! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`.
+//!
+//! ## Agentic Contracts
+//! - `install(editor)` — returns `Err` on network failure, missing asset, or CLI install failure.
+//! - `install_local(editor)` — returns `Err` if no `editors/` directory is found or no artifact exists.
+//! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
+//! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
+//! - Unrecognized `editor` strings return `Err` with a list of supported values.
+//! - Old JetBrains plugin installation (`agent-doc-jetbrains/` directory) is removed before extracting the new zip.
+//!
+//! ## Evals
+//! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
+//! - update_already_current: JetBrains plugin at matching version → early Ok, no download
+//! - list_no_plugins: no IDE dirs, `code` absent → stderr "No agent-doc editor plugins found", Ok
+//! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"
+//! - find_asset_prefers_signed: release with both signed and unsigned zip → signed asset selected
+//! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
+
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::fs;

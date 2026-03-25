@@ -1,4 +1,31 @@
-//! `agent-doc install` — System-level setup: prerequisites + editor plugins.
+//! # Module: install
+//!
+//! ## Spec
+//! - `check_prereqs()`: checks for `tmux` and `claude` in `PATH` via `which`, printing `ok` or
+//!   `MISSING` with an install hint for each.  Never fails — warnings only.
+//! - `run(editor, skip_prereqs, skip_plugins)`: orchestrates the full install workflow.
+//!   - Runs `check_prereqs()` unless `skip_prereqs` is set.
+//!   - Skips plugin installation when `skip_plugins` is set.
+//!   - If `editor` is given, installs only for that editor; otherwise auto-detects installed editors
+//!     via `detect_editors()`.
+//!   - `detect_editors()` (private): detects JetBrains by checking
+//!     `~/.local/share/JetBrains/` (Linux) or `/Applications/IntelliJ*` (macOS); detects VS Code
+//!     family by probing `cursor`, `codium`, or `code` in PATH.
+//!   - For each detected editor, calls `crate::plugin::install(editor)` and collects
+//!     installed/failed lists.
+//!   - Prints a summary of installed and failed plugins to stderr.
+//!
+//! ## Agentic Contracts
+//! - `run` always returns `Ok(())`; individual plugin failures are logged but do not propagate.
+//! - `check_prereqs` is side-effect-free beyond stderr output.
+//! - When no editors are detected and none is specified, installation is skipped with a hint to use
+//!   `--editor`.
+//!
+//! ## Evals
+//! - check_prereqs_runs_without_panic: calling `check_prereqs()` on any system completes without panic
+//! - run_skip_plugins: `skip_plugins=true` → no `plugin::install` called, returns Ok
+//! - run_explicit_editor: `editor=Some("jetbrains")` → only JetBrains plugin install attempted
+//! - run_no_editors_detected: empty PATH + no JetBrains dirs → skips plugin install, returns Ok
 
 use anyhow::Result;
 use std::path::PathBuf;

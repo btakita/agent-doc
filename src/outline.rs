@@ -1,3 +1,28 @@
+//! # Module: outline
+//!
+//! ## Spec
+//! - Parses a markdown document (after stripping YAML frontmatter) into a list of heading-delimited sections.
+//! - Uses pulldown-cmark for CommonMark-compliant heading detection: ATX (`# …`) and setext (`===`/`---`) headings are recognized; headings inside fenced code blocks are silently ignored.
+//! - Each section records: heading text (ATX-normalized), depth (1–6), 1-based start line, content line count, and approximate token count (bytes ÷ 4).
+//! - Content before the first heading is emitted as a synthetic `(preamble)` section (depth 0) when non-empty.
+//! - `run` outputs either a human-readable table (`--json` false) or compact JSON array (`--json` true) to stdout.
+//! - Text output: indented by heading depth, padded columns for lines and tokens, with a `Total` summary row.
+//! - JSON output: array of `{"heading","depth","line","lines","tokens"}` objects, no pretty-printing.
+//!
+//! ## Agentic Contracts
+//! - `run(file, json)` — reads the file, returns `Err` if missing; otherwise prints section table/JSON and returns `Ok(())`.
+//! - Callers may rely on stable JSON field names and column ordering for downstream parsing.
+//! - Token counts are an approximation; callers must not treat them as exact.
+//! - Headings inside code fences are guaranteed to be excluded from section output.
+//!
+//! ## Evals
+//! - atx_headings: ATX `#`/`##`/`###` body → correct depth and text per section
+//! - setext_headings: `===`/`---` underlined body → ATX-normalized heading strings
+//! - code_block_ignored: `# heading` inside triple-backtick fence → not emitted as section
+//! - preamble: body with content before first heading → `(preamble)` section at depth 0
+//! - empty_doc: empty body → empty section list, no output rows
+//! - json_output: single section → valid JSON array with all five fields
+
 use anyhow::Result;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
 use std::path::Path;

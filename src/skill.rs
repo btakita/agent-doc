@@ -1,7 +1,33 @@
-//! `agent-doc skill` — Manage the Claude Code skill definition.
+//! # Module: skill
 //!
-//! Delegates to `agent_kit::skill::SkillConfig` for the actual install/check logic.
-//! The SKILL.md content is bundled into the binary at build time via `include_str!`.
+//! ## Spec
+//! - Bundles SKILL.md into the binary at compile time via `include_str!`.
+//! - `install()` writes the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md`
+//!   under the git superproject root (or toplevel if not a submodule).
+//! - `install_at(root)` accepts an explicit root override; used by tests.
+//! - `install_and_check_updated()` installs and returns `true` if the file was
+//!   absent or stale, `false` if already up to date.
+//! - `check()` / `check_at(root)` verify the installed skill matches the bundled
+//!   version; exit code 1 if out of date.
+//! - Install is idempotent: calling it multiple times with identical content is a no-op.
+//! - When CWD is inside a git submodule, resolves to the superproject root so that
+//!   the skill file lands in the workspace root that Claude Code actually reads.
+//!
+//! ## Agentic Contracts
+//! - `install()` and `check()` never require arguments; resolution is automatic.
+//! - `install_at(Some(path))` is deterministic and safe for isolated tests.
+//! - `install_and_check_updated()` is the preferred call site for startup skill sync;
+//!   callers can branch on the bool to print "skill updated" notices.
+//! - `check_at` exits the process (code 1) rather than returning `Err` when outdated,
+//!   making it safe to call from CI scripts.
+//!
+//! ## Evals
+//! - install_creates_file: fresh temp dir → `.claude/skills/agent-doc/SKILL.md` created with bundled content
+//! - install_idempotent: install twice → file content unchanged, no error
+//! - install_overwrites_outdated: stale "old content" present → replaced with bundled content
+//! - check_not_installed: no SKILL.md present → path does not exist (check would return false)
+//! - bundled_skill_is_not_empty: `BUNDLED_SKILL` length > 0 at compile time
+//! - bundled_skill_contains_agent_doc: bundled content references "agent-doc"
 
 use anyhow::Result;
 use std::path::Path;

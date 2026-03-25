@@ -1,15 +1,52 @@
-//! `agent-doc autoclaim` — Re-establish claims after context compaction.
+//! # Module: autoclaim
+//!
+//! Re-establish document claims after Claude Code context compaction.
 //!
 //! Designed for use in a `.claude/hooks.json` SessionStart hook:
 //! ```json
 //! { "hooks": { "SessionStart": [{ "command": "agent-doc autoclaim" }] } }
 //! ```
 //!
-//! 1. Looks up the current tmux pane in the session registry
-//! 2. Focuses the pane to refresh visual state
-//! 3. Syncs tmux layout to match claimed files in the window
-//! 4. Outputs claim information so the new Claude session knows which files are
-//!    bound to this pane.
+//! ## Spec
+//! - `run()`: entry point; delegates to `run_with_tmux` using the default tmux server.
+//! - `run_with_tmux(tmux)`: reads `$TMUX_PANE` to identify the current pane; if not
+//!   in tmux, exits silently with `Ok(())`.
+//! - Loads `sessions.json` and collects all entries whose `pane` matches the current pane.
+//! - Validates each claim: if the registered file no longer exists on disk, the entry is
+//!   pruned from the registry and the pruned registry is persisted.
+//! - If no valid claims remain, exits with `Ok(())` after logging to stderr.
+//! - Calls `tmux select-pane` on the current pane to refresh visual state in the terminal.
+//! - When two or more files in the same tmux window have live panes, calls `sync::run_with_tmux`
+//!   to arrange panes side-by-side (one pane per column).
+//! - For every surviving claim, prints to stdout: the pane ID, the file path, and the
+//!   `/agent-doc claim <file>` command — this output is piped back to Claude Code as
+//!   session context by the SessionStart hook.
+//! - `sync_after_autoclaim`: collects all registry entries alive in the same window and
+//!   triggers a layout sync; skips sync when fewer than two files share the window.
+//!
+//! ## Agentic Contracts
+//! - Callers may assume `run()` and `run_with_tmux()` are idempotent: running autoclaim
+//!   multiple times on the same pane produces the same final registry and tmux state.
+//! - Stale entries (file deleted or renamed) are always pruned before any output is
+//!   emitted; the session context printed to stdout only references live files.
+//! - When not running inside tmux (`$TMUX_PANE` absent or `current_pane()` fails),
+//!   the function returns `Ok(())` without side effects.
+//! - Layout sync is only triggered when `window_files.len() >= 2`; a single-file window
+//!   is never reorganized.
+//! - Non-fatal errors (select-pane failure, sync failure) are logged to stderr and do
+//!   not cause the function to return an error; the stdout claim output is still emitted.
+//!
+//! ## Evals
+//! - `autoclaim_focuses_pane_with_claim`: pane has one live claim → `select-pane` switches
+//!   focus to the claimed pane and stdout contains the `/agent-doc claim <file>` directive.
+//! - `autoclaim_syncs_layout_with_multiple_files`: two panes in the same window each have
+//!   a live claim → both panes survive and the window layout reflects a side-by-side split.
+//! - `autoclaim_no_claim_skips_focus`: registry is empty for the current pane → function
+//!   returns `Ok(())` without calling `select-pane` or modifying the registry.
+//! - `autoclaim_prunes_stale_claim` (aspirational): pane has a claim for a deleted file →
+//!   the entry is removed from `sessions.json` and no stdout output is emitted for it.
+//! - `autoclaim_noop_outside_tmux` (aspirational): `$TMUX_PANE` is unset → function
+//!   returns `Ok(())` immediately with no registry or tmux side effects.
 
 use anyhow::Result;
 

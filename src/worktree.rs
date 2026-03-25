@@ -1,3 +1,44 @@
+//! # Module: worktree
+//!
+//! ## Spec
+//! - `create(project_root, session_id, index)` creates a git worktree for a parallel
+//!   deep task. Path: `.agent-doc/worktrees/<session_short>-<index>`. Branch:
+//!   `deep/<session_short>/<index>`. `session_short` = first 8 characters of `session_id`.
+//! - `diff(worktree_path)` returns the unified diff of the worktree against HEAD
+//!   (`git diff HEAD`) as a UTF-8 string. Empty string when no staged or unstaged changes.
+//! - `remove(project_root, worktree_path, branch)` removes the worktree directory
+//!   (`git worktree remove --force`) and deletes the associated branch (`git branch -D`).
+//! - `cleanup_session(project_root, session_id)` removes all worktrees belonging to
+//!   a session by listing via `list_session()` then calling `remove()` on each.
+//! - `list_session(project_root, session_id)` scans `.agent-doc/worktrees/` for
+//!   directories matching the session prefix and parses their numeric index suffix.
+//!   Returns an empty vec when the worktree directory does not exist.
+//! - All git operations use `std::process::Command` (no `git2` dependency).
+//! - Worktree parent directories are created with `create_dir_all` before `git worktree add`.
+//! - `session_short()` truncates to a maximum of 8 characters; sessions shorter than 8
+//!   characters use their full length.
+//!
+//! ## Agentic Contracts
+//! - `create()`, `diff()`, `remove()`, `cleanup_session()`, and `list_session()` are
+//!   the public API; all naming helpers are private.
+//! - `create()` always checks out from `HEAD` at the time of creation; the caller is
+//!   responsible for branching strategy.
+//! - `diff()` returns an empty string (not an error) when the worktree is clean.
+//! - `remove()` and `cleanup_session()` are marked `#[allow(dead_code)]`; they are
+//!   used by the parallel task lifecycle but not yet wired to a subcommand.
+//! - Errors from git subprocesses propagate as `anyhow::Error` with context messages.
+//!
+//! ## Evals
+//! - create_worktree: valid git repo → worktree dir exists, branch = "deep/abcdefgh/0", README.md present
+//! - create_multiple_worktrees: two creates for same session → distinct paths and branches
+//! - diff_empty_when_no_changes: fresh worktree with no edits → empty diff string
+//! - diff_shows_changes: staged new file → diff contains file content
+//! - remove_worktree: created worktree → dir gone, branch deleted after remove
+//! - cleanup_session_removes_all: two worktrees for same session → both gone after cleanup
+//! - list_session_finds_matching: session A has 2, session B has 1 → counts correct, no cross-contamination
+//! - list_session_empty_when_no_dir: no `.agent-doc/worktrees/` dir → empty vec, no error
+//! - session_short_truncates: 16-char input → 8 chars; 5-char input → 5 chars unchanged
+
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;

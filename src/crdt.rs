@@ -1,3 +1,59 @@
+//! # Module: crdt
+//!
+//! ## Spec
+//! - `CrdtDoc::from_text(content)`: construct a new Yrs document pre-populated with text.
+//! - `CrdtDoc::to_text()`: extract current UTF-8 text from the document.
+//! - `CrdtDoc::apply_edit(offset, delete_len, insert)`: apply a local delta edit (delete then
+//!   insert at byte offset) within a single transaction.
+//! - `CrdtDoc::encode_state()`: serialize full document state as a v1 update byte vector for
+//!   persistence or cross-doc merge.
+//! - `CrdtDoc::decode_state(bytes)`: deserialize a previously encoded state into a new doc.
+//! - `merge(base_state, ours_text, theirs_text)`: three-way CRDT merge.
+//!   1. Decodes base state (or starts from empty if `None`).
+//!   2. Detects stale base: if base shares <50% common prefix with both sides, replaces base
+//!      with `ours_text` to prevent duplicate insertions.
+//!   3. Advances base to the line-snapped common prefix of ours and theirs when that prefix
+//!      extends beyond the current base — prevents duplication of shared new content.
+//!   4. Computes `similar`-based line diffs from base → ours and base → theirs.
+//!   5. Replays diffs onto two independent Yrs docs (agent=client_id 1, user=client_id 2).
+//!   6. Merges by applying theirs' incremental update into the agent doc.
+//!   7. Runs `dedup_adjacent_blocks` to remove identical adjacent paragraph-level blocks.
+//!   8. Returns the merged string (always conflict-free).
+//! - `dedup_adjacent_blocks(text)`: removes duplicate adjacent blocks (separated by `\n\n`)
+//!   where a block has ≥2 non-empty lines, to clean up CRDT double-insertion artifacts.
+//! - `compact(state)`: decode then re-encode a CRDT state to GC tombstones.
+//!
+//! ## Agentic Contracts
+//! - `merge` is always conflict-free — it never produces conflict markers.
+//! - Agent content (client_id 1) appears before user content (client_id 2) at identical
+//!   insertion points due to Yrs' deterministic client-ID ordering.
+//! - Short-circuit: if `ours_text == theirs_text`, `merge` returns immediately without any
+//!   CRDT operations.
+//! - Stale base detection prevents duplicate insertions across multiple merge cycles.
+//! - Shared common prefix (line-boundary snapped) is never inserted twice.
+//! - `dedup_adjacent_blocks` only removes blocks with ≥2 non-empty lines; single-line
+//!   repeated content (e.g., `---`) is not deduplicated to avoid false positives.
+//! - `encode_state` / `decode_state` are inverse operations: round-trip preserves all text.
+//! - `compact` is idempotent: compacting already-compact state is a no-op in terms of text.
+//!
+//! ## Evals
+//! - `roundtrip_text`: `from_text(s).to_text() == s` for arbitrary content.
+//! - `encode_decode_roundtrip`: encode then decode preserves text exactly.
+//! - `apply_edit_insert`: insert at offset 0 prepends correctly.
+//! - `apply_edit_delete`: delete range removes exact byte count.
+//! - `apply_edit_replace`: delete + insert at same offset replaces content.
+//! - `merge_both_append`: both sides add different text → both present, no conflict.
+//! - `merge_agent_ordering`: agent and user insert at same position → agent content first.
+//! - `merge_identical_sides`: ours == theirs → short-circuit, result equals either side.
+//! - `merge_no_base_state`: `None` base → valid merged result, both sides present.
+//! - `merge_stale_base_no_duplicates`: base is stale (< 50% common prefix) → no duplication.
+//! - `merge_shared_prefix_no_duplication`: ours and theirs share new content beyond base →
+//!   shared content appears exactly once.
+//! - `dedup_adjacent_blocks_removes_duplicate`: two identical adjacent multi-line blocks →
+//!   deduplicated to one.
+//! - `dedup_adjacent_blocks_preserves_short`: single-line repeated blocks left intact.
+//! - `compact_preserves_text`: compact state → decoded text unchanged.
+
 use anyhow::{Context, Result};
 use yrs::updates::decoder::Decode;
 use yrs::{Doc, GetString, ReadTxn, Text, TextRef, Transact, Update};

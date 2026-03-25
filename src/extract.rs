@@ -1,7 +1,30 @@
-//! `agent-doc extract` — Move content between session documents.
+//! # Module: extract
 //!
-//! Supports extracting the last exchange pair, specific components,
-//! or line ranges from one document to another.
+//! ## Spec
+//! - `run(source, target, component_name)`: extracts the last `### Re:` block from the named
+//!   component in `source` (defaulting to `exchange`) and appends it to the matching component in
+//!   `target`.  Both files must exist.  Source component must be non-empty and contain at least one
+//!   `### Re:` header; if absent, the entire component content is treated as a single entry.
+//! - `transfer(source, target, component_name)`: moves the entire named component content from
+//!   `source` to `target`, clearing the source component and appending to the target component (or
+//!   end of file if the target has no matching component).
+//! - Both operations write atomically via `write::atomic_write_pub` and persist a snapshot after
+//!   each file mutation.
+//! - `split_last_entry` is private; it splits on the last `### Re:` header position.
+//!
+//! ## Agentic Contracts
+//! - Callers receive `Err` if either file does not exist, the named component is absent, or the
+//!   component is empty.
+//! - After `run` returns `Ok`, the last `### Re:` block has been removed from `source` and
+//!   appended to `target`; no other content is modified.
+//! - After `transfer` returns `Ok`, the named component in `source` is cleared (single newline)
+//!   and its prior content appears at the end of the matching component in `target`.
+//! - Snapshots are updated for both source and target on every successful call.
+//!
+//! ## Evals
+//! - split_last_entry_single_block: single `### Re:` block → entire content extracted, remaining empty
+//! - split_last_entry_multiple_blocks: two `### Re:` blocks → second extracted, first remains
+//! - split_last_entry_no_headers: no headers present → entire content extracted as single entry
 
 use anyhow::{Context, Result};
 use std::path::Path;

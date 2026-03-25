@@ -329,7 +329,7 @@ publish
 
 Update blog post with new video url.
 
-### Re: Publish rappstack packages (HEAD)
+### Re: Publish rappstack packages
 
 Done. Published both packages and updated all dependencies:
 
@@ -343,7 +343,7 @@ Done. Published both packages and updated all dependencies:
 - Pushed `e20031c` — CI should now build successfully
 
 **Note:** The 0.1.2 publish of `domain--server--blog` had a `workspace:*` dependency that slipped through — npm publish doesn't resolve workspace references. Fixed by replacing with `^0.1.0` in 0.1.3.
-<!-- agent:boundary:2626d9f8 -->
+<!-- agent:boundary:e09d25f2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -551,7 +551,7 @@ We should talk more about his product. Is there a demo?
 He also has a high level role at https://caratvp.com/
 So he could be an investor
 
-### Re: Drew's investor angle + demo question (HEAD)
+### Re: Drew's investor angle + demo question
 
 Good instincts. Looked up Carat VP:
 
@@ -601,7 +601,7 @@ Brian
 **Changes from v11:**
 - Added demo ask in closing: "Would love to see Nova in action if you have a demo available"
 - Shows reciprocal interest in his product, not just talking about yourself
-<!-- agent:boundary:2c6f776f -->
+<!-- agent:boundary:b14d9da4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

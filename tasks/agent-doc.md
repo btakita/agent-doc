@@ -536,14 +536,51 @@ The `--force-disk` fallback in this session was **avoidable** in most cases. It 
 - **FFI route guard** — the proposed `is_routing()` check would prevent the plugin from being busy with route operations when a write arrives
 
 I'll stop using `--force-disk` by default. The IPC path is preferred because it preserves cursor position and undo stack.
-<!-- agent:boundary:3823e33a -->
+
+Can we have a quick "pending" flag via CRDT or something else to signal that a response is incoming?
+Also indicate if the response is blocked by another operation.
+
+### Re: Pending flag for incoming response (HEAD)
+
+Good idea. Two signals needed:
+
+1. **Response incoming** — let the editor show a spinner/indicator while the agent generates
+2. **Response blocked** — let the user know their edit triggered a cycle but it's waiting on something (IPC, debounce, another operation)
+
+**Implementation options:**
+
+**Option A: File-based signal** (simplest, cross-process)
+```
+.agent-doc/status/<hash>.json
+{ "state": "generating" | "writing" | "blocked", "file": "tasks/agent-doc.md", "since": 1711... }
+```
+Plugin polls this file (same pattern as typing indicators). Agent writes "generating" at cycle start, "writing" before write, clears on commit.
+
+**Option B: FFI state** (in-process, faster)
+```rust
+pub extern "C" fn agent_doc_set_status(file: *const c_char, status: *const c_char)
+pub extern "C" fn agent_doc_get_status(file: *const c_char) -> *const c_char
+```
+Plugin calls `get_status` on timer. But this only works for the same-process plugin, not CLI-spawned agents.
+
+**Option C: Boundary marker** (already exists!)
+The boundary marker `<!-- agent:boundary:ID -->` already signals "response was written here." We could extend it:
+- `<!-- agent:boundary:ID:generating -->` — response in progress
+- `<!-- agent:boundary:ID -->` — response complete (current behavior)
+
+The plugin already watches for boundary changes. This requires no new infrastructure.
+
+**Recommendation: Option A + C combined.** File signal for cross-process visibility, boundary marker state for in-document signaling. Both are lightweight.
+
+Want me to implement this?
+<!-- agent:boundary:480754ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- **Response status signal** — file-based + boundary marker for incoming/blocked state
 - **Stop defaulting to --force-disk** — use IPC path, only fallback on exit 75
-- **Investigate (HEAD) marker persistence** — verify working tree only
 - **FFI route guard** — `route_begin`/`route_end`/`is_routing`
 <!-- /agent:pending -->
 

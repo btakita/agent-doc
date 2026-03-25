@@ -24,7 +24,7 @@ Look in my history as well.
 Which videos can I delete...due to it being released on YouTube?
 Which videos can be compressed?
 Which videos should be backed up? Should I just backup my YouTub content or should I also backup my source videos?
-### Re: Disk Cleanup — ~/Videos Analysis (HEAD)
+### Re: Disk Cleanup — ~/Videos Analysis
 
 Cross-referenced your 25 video files (68 GB) against 13 YouTube uploads on briantakita.
 
@@ -73,7 +73,7 @@ Cross-referenced your 25 video files (68 GB) against 13 YouTube uploads on brian
 - Do you recognize the unmapped 03-09, 03-12, 03-15, 03-16, 03-18 recordings?
 - Keep epN-light.mp4 as archival copies, or trust YouTube?
 - Should I delete the safe-to-delete files now?
-<!-- agent:boundary:cabfdfb5 -->
+<!-- agent:boundary:0588ba43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

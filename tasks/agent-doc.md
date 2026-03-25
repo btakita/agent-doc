@@ -2496,7 +2496,7 @@ Update dependencies:
 - existence
 - module-harness
 
-### Re: Update dependencies (HEAD)
+### Re: Update dependencies
 
 Both submodules are already at their latest versions:
 - **existence**: v0.4.0 (now has a library target for programmatic use)
@@ -2505,7 +2505,7 @@ Both submodules are already at their latest versions:
 Path dependencies (`{ path = "..." }`) automatically resolve to whatever version is checked out in the submodule — no version pins to update. `cargo check` passes cleanly.
 
 Submodule pointers in agent-loop are also current — no commits needed.
-<!-- agent:boundary:898c9344 -->
+<!-- agent:boundary:c0219212 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -182,7 +182,7 @@ Good catch — the original definition said "structured report with quantified r
 2. **Axiology** now includes the closed-loop pattern: `audit → detect → remediate → re-audit`. An agentic audit that finds missing spec entries doesn't just report the gap — it generates the entries.
 
 This is the key difference between a traditional audit (produces a document for humans to act on) and an agentic audit (produces a work queue that agents execute). The audit becomes a **self-healing** mechanism when the agent can act on its own findings.
-<!-- agent:boundary:726706cf -->
+<!-- agent:boundary:e6a8cc1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

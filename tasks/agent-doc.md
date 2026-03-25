@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -1778,7 +1777,7 @@ Starting implementation now.
 
 **"Please install locally for testing"** — The `.bin/agent-doc` symlink already points to `src/agent-doc/target/release/agent-doc` which was rebuilt. `cargo install --path .` also updated `~/.cargo/bin/agent-doc`. Both paths have the latest binary.
 
-**"I saw 0:"** — Yes, window 0 did exist initially when the session was created via `new_session` (which creates window 0 by default). But when a second document was routed to the same tmux session, `new_window -a` created window 2 (after the stash at 1). Then when the original window 0 pane exited, window 0 was lost. The `-a` removal fixes this for future windows.: Why was window 0 lost? Was it due to window 2 replacing it via agent-doc logic? What happen to the tmux panes running the agent-doc
+**"I saw 0:"** — Yes, window 0 did exist initially when the session was created via `new_session` (which creates window 0 by default). But when a second document was routed to the same tmux session, `new_window -a` created window 2 (after the stash at 1). Then when the original window 0 pane exited, window 0 was lost. The `-a` removal fixes this for future windows.: Why was window 0 lost? Was it due to window 2 replacing it via agent-doc logic? What happen to the tmux panes with active `agent-doc run` commands?
 
 **"audit docs"** — Will run `make precommit` (includes audit-docs) after the subagents complete their implementations.
 
@@ -1802,7 +1801,12 @@ Will integrate, test, audit, and rebuild once they complete.
 This is a real bug. The evals session was running, and something killed its tmux window. The most likely culprit is `repair_layout()` during a sync operation for the agent-doc document:
 
 1. `repair_layout` Phase 1 consolidates stash windows — it uses `join-pane` to merge panes and then `kill-window` on empty secondaries
-2. If the evals window was misidentified or its pane was moved during consolidation, the window could have been destroyed
+2. If the evals window was misidentified or its pane was moved during consolidation, the window could have been destroyed: We should move **all** tmux panes into the `1:stash` window...The entire tmux session closed.
+```
+❯ tmux list-sessions
+2: 1 windows (created Mon Mar 23 23:30:41 2026) (attached)
+3: 1 windows (created Tue Mar 24 18:42:54 2026) (attached)
+```
 3. The `stash_overflow_panes` mechanism in tmux-router's sync could also have stashed the evals pane, and then a subsequent `purge_stash_windows` killed it as "idle"
 
 **The root cause is that sync/repair operations are not session-aware** — they operate on a single session's windows but don't check if other active agent-doc sessions have panes in the same tmux session.
@@ -1816,7 +1820,37 @@ This is a real bug. The evals session was running, and something killed its tmux
 - **Fix needed:** Before any window kill/stash operation, check if the pane is registered in `sessions.json` for a *different* session. If so, skip it.
 
 Adding this to the pending list. Subagents still working on the health check and stash-return implementations.
-<!-- agent:boundary:34e30a33 -->
+
+catestrophic bug occurred. The entire tmux session was closed. Please try to revive the existing claude session when calling `agent-doc run`
+In the appropriate `agent-doc` command (existing or a new command)...please add a way to recover the existing Claude session that claimed the document.
+
+When I ran `Run Agent Doc` just now...the 2nd pane in the 0:agent-doc window closed. Please investigate. We have multiple bugs.
+**tmux_session frontmatter removal** — Good cleanup, deprecation complete.
+
+**"What happened to tmux panes with active agent-doc run commands?"** — When window 0's pane exited, tmux destroyed window 0 (tmux kills windows when their last pane exits). The agent-doc pane in window 2 kept running but at the wrong index — those panes survived as orphans. The `-a` fix prevents future windows from being created at index 2+ instead of reusing 0.
+
+**"The entire tmux session closed"** — Catastrophic bug confirmed. Investigation found **3 high-risk kill paths**:
+
+1. **`stash_pane` fallback** (`tmux.rs:578`) — When `join-pane` fails ("pane too small"), it falls back to `kill_pane`. If that pane is the last in its window in the session → session destroyed.
+2. **`sync.rs:465`** — Kills pane on file-rename detection with no window-count guard and swallowed error (`let _`).
+3. **`purge_orphaned_agent_panes`** (`resync.rs:558`) — Uses stale pane count. Two unregistered panes in a window → both killed sequentially → session destroyed.
+
+**"Recover existing Claude session"** — Need a recovery command that:
+- Reads `sessions.json` for the Claude process that claimed the doc
+- Checks if the PID is still alive
+- If alive but pane destroyed → create new pane, reattach process (via `reptyr` or signal)
+- If dead → clean up registration and restart
+
+**"2nd pane in 0:agent-doc closed"** — Most likely `reconcile`'s DETACH phase (`sync.rs:890-930`). It stashes any pane not in the "wanted" set. If the 2nd pane belongs to a different document, it gets stashed → join-pane fails → `kill_pane` fallback.
+
+**"Move all panes into 1:stash"** — Agreed. The stash window should be the safe harbor. Panes should only be killed if they're truly dead processes, never as a fallback for a failed move.
+
+**Proposed fixes (priority order):**
+1. **Never kill_pane as fallback** — `stash_pane` should `break-pane -t session:stash` instead of killing when join fails
+2. **Window-count guard before every kill_pane** — re-check live count immediately before kill; refuse if it would destroy last window
+3. **Session-last-window guard** — if killing would leave 0 windows → refuse and log error
+4. **Cross-session check** — before any kill/stash, verify pane isn't in `sessions.json` for another active session
+<!-- agent:boundary:e9a3ad1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1824,19 +1858,22 @@ Adding this to the pending list. Subagents still working on the health check and
 <!-- agent:pending -->
 ### Pending
 
-**In Progress**
-- [ ] **Preflight tmux health check** — validate layout at start of every preflight (subagent implementing)
-- [ ] **Stash-return mechanism** — return active panes from stash to origin sessions (subagent implementing)
+**Bugs — Catastrophic**
+- [ ] **Never kill_pane as stash fallback** — `stash_pane` (`tmux.rs:578`) must use `break-pane` instead of `kill_pane` when `join-pane` fails. Root cause of session destruction.
+- [ ] **Window-count guard on all kill_pane calls** — re-check live pane count before every `kill_pane`; refuse if it would destroy last window in session
+- [ ] **Cross-session pane safety** — all kill/stash operations must check `sessions.json` before touching panes belonging to other active sessions
+- [ ] **Session recovery command** — `agent-doc recover` to find orphaned Claude processes via PID and reattach to new tmux panes
 
 **Bugs — Critical**
-- [ ] **Cross-session pane safety** — `repair_layout` and `stash_overflow_panes` must check `sessions.json` before killing/stashing panes belonging to other active sessions. Root cause of evals window loss.
-- [ ] **Stash window preservation** — `purge_stash_windows` should keep at least one stash window as placeholder, not purge all idle stash windows
+- [ ] **sync.rs:465 unguarded kill** — file-rename detection kills pane with no window-count guard and `let _` swallows error
+- [ ] **purge_orphaned_agent_panes stale count** — resync.rs:558 uses snapshot count; concurrent kills can destroy session
+- [ ] **Stash window preservation** — `purge_stash_windows` should keep at least one stash window as placeholder
 
 **Bugs — Priority**
-- [x] **`new_window -a` wrong index** — removed `-a` flag from `tmux_router::Tmux::new_window()`
+- [x] **`new_window -a` wrong index** — removed `-a` flag
 - [ ] **IPC silent failure** — add verification after patch consumption
-- [ ] **FFI debounce bridge** — expose typing state via lock file for CLI access
-- [x] **Truncation recheck timing** — 3-iteration consecutive stability check implemented
+- [ ] **FFI debounce bridge** — expose typing state via lock file
+- [x] **Truncation recheck timing** — 3-iteration stability check implemented
 
 **Features**
 - [ ] Split direction support (horizontal/vertical)

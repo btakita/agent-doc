@@ -2053,7 +2053,7 @@ All modules now have harness context. Here's the summary:
 Let's add this technique to a project-wide skill.
 Do you have name recommendations? Maybe module-harness? module-skill? module-spec?
 
-### Re: Skill naming for module harness context (HEAD)
+### Re: Skill naming for module harness context
 
 Good idea to make this a reusable skill. Here are my recommendations, ranked:
 
@@ -2074,7 +2074,7 @@ Good idea to make this a reusable skill. Here are my recommendations, ranked:
 The skill could also eventually integrate with the backtest harness — `module-harness eval <module>` to run the named eval scenarios.
 
 What's your preference?
-<!-- agent:boundary:45afb029 -->
+<!-- agent:boundary:a10dfdcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

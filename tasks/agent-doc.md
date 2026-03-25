@@ -212,7 +212,23 @@ release
 | Local binary | ~/.cargo/bin/agent-doc updated |
 
 Parent submodule pointers updated.
-<!-- agent:boundary:89d70133 -->
+
+Did we add tests to drive this bug fix?
+
+### Re: Did we add tests? (HEAD)
+
+No — I hadn't added a test for the `sync_after_claim` col_args fix. Now added:
+
+**`sync_after_claim_prefers_col_args_over_registry`** — verifies:
+- Single col_arg → early return (no sync needed)
+- Empty col_args → early return (falls through to registry path, also early return with <2 files)
+- 2+ col_args → sync::run called with those args (not registry-discovered files)
+- Pane survives all paths without unintended stashing
+
+558 tests passing (344 bin + 176 lib + 38 cli).
+
+The test confirmed the fix works — when col_args are provided, sync uses them instead of auto-discovering from registry. The first version of the test actually caught that the original 3-pane layout issue would still occur without the fix (sync arranged all 3 registry panes instead of the 2 from col_args).
+<!-- agent:boundary:5a077e6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

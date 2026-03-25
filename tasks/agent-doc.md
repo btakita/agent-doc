@@ -2469,7 +2469,29 @@ Summary of dependency decisions:
 |-----------|------|--------|
 | module-harness | dev-dep (path) | Syntax sync for harness parsing |
 | existence-lang | git submodule only | Markdown specs, no code |
-<!-- agent:boundary:bc366e3a -->
+
+existence is a rust crate
+https://crates.io/crates/existence
+This should be a dev dependency
+
+### Re: existence as dev dependency (HEAD)
+
+My mistake — `existence` is indeed a Rust crate (CLI for the ontology framework). Added as dev-dependency:
+
+```toml
+[dev-dependencies]
+existence = { path = "../existence-lang/existence" }
+```
+
+Updated dependency table:
+
+| Dependency | Type | Reason |
+|-----------|------|--------|
+| module-harness | dev-dep (path) | Syntax sync for harness parsing |
+| existence | dev-dep (path) | Ontology framework CLI — validates term definitions |
+
+Compilation verified.
+<!-- agent:boundary:d5cba339 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

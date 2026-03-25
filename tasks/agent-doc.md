@@ -1675,7 +1675,7 @@ Starting implementation now. Working on:
 3. **Truncation recheck** — increase to 3x 500ms rechecks
 
 Will update pending as each is completed.
-<!-- agent:boundary:4a35f3e1 -->
+<!-- agent:boundary:2182373f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

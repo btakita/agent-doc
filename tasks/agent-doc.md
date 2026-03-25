@@ -2505,7 +2505,35 @@ Both submodules are already at their latest versions:
 Path dependencies (`{ path = "..." }`) automatically resolve to whatever version is checked out in the submodule — no version pins to update. `cargo check` passes cleanly.
 
 Submodule pointers in agent-loop are also current — no commits needed.
-<!-- agent:boundary:c0219212 -->
+
+In tmux-router add dev dependencies:
+- existence
+- module-harness
+
+Add an ontology for tmux-router
+
+### Re: tmux-router dev deps + ontology (HEAD)
+
+**Dev dependencies added** to `src/tmux-router/Cargo.toml`:
+```toml
+[dev-dependencies]
+existence = { path = "../existence-lang/existence" }
+module-harness = { path = "../module-harness" }
+```
+Compilation verified.
+
+**Ontology created** at `src/tmux-router/ontology/` (8 files):
+
+| Term | Extends | Definition |
+|------|---------|------------|
+| **Pane** | Entity | Atomic terminal surface with stable ID; survives layout changes via stash |
+| **Window** | System | Spatial container for panes; includes special stash variant |
+| **Session** | Domain | Routing boundary enforced by SessionScope; confines all operations |
+| **Layout** | Pattern | Columnar arrangement from `--col` args; pure declaration consumed by reconcile |
+| **Reconcile** | Algorithm | 5-phase attach-first sync (ATTACH→SELECT→DETACH→REORDER→VERIFY) |
+| **Stash** | State | Hidden window preserving pane process continuity across transitions |
+| **Registry** | State | Persistent JSON file-path-to-pane-ID map with advisory locking |
+<!-- agent:boundary:7e9a9e94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

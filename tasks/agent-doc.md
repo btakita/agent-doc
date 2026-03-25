@@ -595,14 +595,27 @@ We should do B too — all three. Here's why each matters:
 - **C** — boundary state visible in document (persistent, survives process restart)
 
 I'll implement all three.
-<!-- agent:boundary:7316a773 -->
+go...I don't see the patch response if you already finished
+
+### Re: Implement status signals (HEAD)
+
+**All three implemented and pushed** (`2002907`):
+
+**A (file-based):** `.agent-doc/status/<hash>` with 30s staleness timeout
+**B (FFI):** `set_status`/`get_status`/`is_busy` + FFI exports
+**C (boundary):** Already exists, extensible
+
+Status values: `"generating"`, `"writing"`, `"routing"`, `"idle"`
+
+558 tests passing. Binary rebuilt. Next: plugin calls `is_busy()` before routing.
+<!-- agent:boundary:8d9f7318 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Response status signal (A+B+C)** — file + FFI + boundary marker for incoming/blocked state
-- **FFI route guard** — subsumes into status signal B
+- ~~**Response status signal (A+B+C)**~~ ([done])
+- **Plugin integration** — JB plugin calls `is_busy()` before routing
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

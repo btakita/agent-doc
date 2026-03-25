@@ -192,7 +192,7 @@ Right — it's both, not either/or. Updated `audit.md` to reflect dual outputs:
 2. **Actionable items** — work queue for agent remediation (the response)
 
 The report and the actions serve different consumers: the report feeds backtesting and trend analysis, the actions feed the agent's work queue. Both are first-class outputs of every audit.
-<!-- agent:boundary:97fd9722 -->
+<!-- agent:boundary:e88a5e8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v11 — model-agnostic pitch softened to mention-only
+Draft v12 — demo ask added, Drew's VC role identified
 <!-- /agent:status -->
 
 ## Exchange
@@ -545,12 +545,69 @@ Brian
 ---
 
 **Change from v10:** Removed "There's real value in being model-agnostic" — now just states experience across providers and lets Drew draw his own conclusion.
-<!-- agent:boundary:8106834a -->
+
+We should talk more about his product. Is there a demo?
+
+He also has a high level role at https://caratvp.com/
+So he could be an investor
+
+### Re: Drew's investor angle + demo question (HEAD)
+
+Good instincts. Looked up Carat VP:
+
+**Carat Venture Partners:**
+- Multi-stage VC firm (post-seed to Series B, $2-15M checks)
+- Focus: deep tech, sustainable industrial — AI is an explicit investment vertical
+- ~30 target investments, lead through Series B with follow-on
+- Drew is listed as Managing Director/Founder on RocketReach
+
+**This reframes the conversation.** Drew isn't just a fellow freelancer chatting about tech — he's a VC who invests in AI companies. His outreach to you could be:
+1. **Scouting** — looking at your profile/work as a potential investment opportunity or portfolio talent
+2. **Centerbeam deal flow** — he may be an investor in Centerbeam, promoting it to gauge market interest
+3. **Genuine peer interest** — but even so, the VC lens means any collaboration discussion has investment implications
+
+**On asking for a demo:** Yes — asking to see Nova in action is natural and shows genuine interest. It also helps you evaluate whether Centerbeam is a real product or still vaporware (given zero external footprint).
+
+**Should we add a demo ask to the v11 draft?** I'd suggest a light touch — add it to the closing rather than making it a bullet point:
+
+> Sounds like we're circling similar problems from different angles. Would love to see Nova in action if you have a demo. Let me know if you'd like to dig deeper.
+
+This is natural, shows interest in *his* product (reciprocity), and gives you a chance to evaluate Centerbeam's maturity.
+
+**Updated contact notes:** I'll update the AGENTS.md to reflect his VC role.
+
+**Draft v12 (final with demo ask):**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on improving human-agent alignment and iteration practices — structured ways to tighten the feedback loop between humans and AI across documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. We took an analytics-first approach, instrumenting the full consumer interaction pipeline to measure what actually moved engagement. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- How are you measuring interaction quality with Nova? Curious what KPIs you're tracking — session duration, completion rates, something else?
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume — each has different strengths, especially Hume for emotional voice range and expression
+- On the visual side — we ran real-time lipsync and image generation in production. I've also been prototyping semi-realtime video gen pipelines (LTXV, WAN, ComfyUI) — early stage but the latency curves are getting interesting. If multi-modal is on your roadmap, happy to share what we've learned
+
+Sounds like we're circling similar problems from different angles. Would love to see Nova in action if you have a demo available. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Changes from v11:**
+- Added demo ask in closing: "Would love to see Nova in action if you have a demo available"
+- Shows reciprocal interest in his product, not just talking about yourself
+<!-- agent:boundary:2c6f776f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Send reply to Drew on LinkedIn
+- [ ] Update drew-anderson AGENTS.md with VC role details
 - [ ] Follow up on PresenceAI licensing with Eric/Andrey
 <!-- /agent:pending -->

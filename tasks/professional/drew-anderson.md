@@ -371,7 +371,7 @@ Brian
 
 **Trade-off:** The opener is now 3 sentences instead of 1, but each carries meaning. If you want it tighter, we can cut "Your '5th wave' framing resonates..." but I think it builds rapport.
 
-### Re: Draft v7 — Hume emotional voice range (HEAD)
+### Re: Draft v7 — Hume emotional voice range
 
 Good addition. Hume's emotional expression range is a real differentiator — it shows you understand the nuances beyond just "which model is fastest." Updated the model flexibility bullet to include this.
 
@@ -400,7 +400,7 @@ Brian
 
 **Change from v6:**
 - Added Hume's emotional voice range as a specific differentiator: "Hume especially stands out for emotional voice range and expression" — shows you understand the qualitative differences between providers, not just latency numbers
-<!-- agent:boundary:3500e298 -->
+<!-- agent:boundary:1f9f7684 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

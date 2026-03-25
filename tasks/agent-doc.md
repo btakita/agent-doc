@@ -1549,14 +1549,37 @@ Which should I tackle first?
 **File:** `src/agent-doc/src/sync.rs` lines 228-252
 
 **Results:** 547 tests pass (173 lib + 336 bin + 38 integration). Release binary built.
-<!-- agent:boundary:47c06574 -->
+I still see the agent-doc window in window 2.
+It should be in window 0.
+Window 2:agent-doc has 1 pane...it should have 2 panes.
+
+How/Why did you miss these issues with your detection?
+Does the agent-doc binary also miss these issues?
+Is the binary installed locally?
+
+### Re: Missed detection & binary install (HEAD)
+
+**Why I missed it:** I fixed the code and ran tests but failed to verify the live system:
+1. Didn't install to `~/.cargo/bin` — tmux-spawned sessions were still on v0.25.15
+2. Didn't trigger repair on the current session to verify the fix
+3. Didn't check actual tmux state after the code change
+
+**Corrections made:**
+- `cargo install --path .` — `~/.cargo/bin/agent-doc` now v0.25.16
+- Window state is now correct: `0:agent-doc` (2 panes, @58), `1:stash` (@2)
+- The repair ran during preflight and correctly moved agent-doc to window 0
+
+**Lesson:** Code fix + passing tests is not enough. Must verify the live system state after applying the fix.
+<!-- agent:boundary:7da9d872 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
-- [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
+- [x] Install binary to ~/.cargo/bin (v0.25.16)
+- [x] Verify live tmux state corrected
+- [ ] Release v0.25.16 (cargo publish + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
 <!-- /agent:pending -->

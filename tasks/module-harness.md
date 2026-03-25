@@ -166,7 +166,7 @@ The node follows the same Ontology/Axiology/Epistemology structure and integrate
 - The `eval_result` type with `{score, deviation, direction}` from our range eval discussion
 - Aggregation levels: module score → directory score → drift report
 - The audit-as-universal-pattern framing (financial, security, code audits all share the structure)
-<!-- agent:boundary:7de9cb5f -->
+<!-- agent:boundary:0093f379 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

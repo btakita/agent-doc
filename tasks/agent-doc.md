@@ -385,7 +385,7 @@ The stash window disappeared again and we're back to 3 panes. The issue: **the r
 
 Let me check what arguments the plugin sends:
 
-### Re: Stash missing + plugin (HEAD)
+### Re: Stash missing + plugin
 
 **Immediate fix:** Manually stashed panes %143 and %137, created stash window. Layout now: `0:agent-doc` (1 pane) + `1:stash` (3 panes).
 
@@ -400,7 +400,7 @@ Let me check what arguments the plugin sends:
 The real fix is the **route refactor to single exit point** — `route` should resolve the pane AND sync in one atomic operation, not leave a gap.
 
 **No plugin update needed** — JB v0.2.23 is correct. The fix needs to be in the binary's route command.
-<!-- agent:boundary:c6c4903c -->
+<!-- agent:boundary:318cd97e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

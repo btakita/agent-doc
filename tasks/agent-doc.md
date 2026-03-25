@@ -1509,7 +1509,11 @@ Just saw the agent-doc window close.
 Only see 1:stash now.
 Also 1:stash originated in tmux session 3.
 What is running is corky watch...started in tmux session 3 window 1
-I
+I see 2:agent-doc again. It should have opened 0:agent-doc.
+Add tests to simulate the issues.
+Fix issue by making tests pass.
+Iterate until tests pass.
+
 
 ### Re: Window loss & stash origin
 
@@ -1530,16 +1534,31 @@ Noted from your edits:
 4. **Window 0 loss** — bug to investigate
 
 Which should I tackle first?
-<!-- agent:boundary:dcb8d8ed -->
+> 4. **Window 0 loss** — bug to investigate
+
+### Re: Window 0 loss — root cause & fix (HEAD)
+
+**Root cause:** `repair_layout()` Phase 3 used `move-window -t session:0` to normalize window indices. When window 0 was already occupied by another window (e.g., corky watch), `move-window` silently failed — leaving agent-doc at index 2 and window 0 unchanged.
+
+**Fix:** Phase 3 now checks if window 0 is occupied before acting:
+- **Occupied** → `swap-window` (preserves both windows, swaps indices)
+- **Free** → `move-window` (original behavior)
+
+**Test:** `repair_layout_swaps_when_index_0_occupied` — creates corky at 0, stash at 1, agent-doc at 2. Verifies swap puts agent-doc at 0, corky moves to 2, all 3 windows preserved.
+
+**File:** `src/agent-doc/src/sync.rs` lines 228-252
+
+**Results:** 547 tests pass (173 lib + 336 bin + 38 integration). Release binary built.
+<!-- agent:boundary:2a6c297e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [x] Fix window 0 loss bug (swap-window when index 0 occupied)
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
-- [ ] Investigate window 0 destruction bug
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

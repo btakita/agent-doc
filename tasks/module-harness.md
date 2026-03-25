@@ -237,7 +237,7 @@ Here's what was built:
 - Release checklist
 
 **Ready to release v0.1.0** — needs your go-ahead to commit, tag, push, and publish to crates.io.
-<!-- agent:boundary:42efda31 -->
+<!-- agent:boundary:34ad8059 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

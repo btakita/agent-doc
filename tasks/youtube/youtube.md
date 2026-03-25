@@ -392,15 +392,36 @@ Please release any pending releases in the rappstack libraries.
 - Pushed `6a1dea0` — CI should now build
 
 **Old video:** Can't delete via corky (no `delete` subcommand). Delete `OrGJi8Hh_bQ` from YouTube Studio manually: https://studio.youtube.com/video/OrGJi8Hh_bQ/edit
-<!-- agent:boundary:9b91a426 -->
+
+Implement `corky youtube delete`
+
+### Re: Implement `corky youtube delete` (HEAD)
+
+Done. Added `corky youtube delete <VIDEO_ID>` command to corky.
+
+**Changes:**
+- `src/social/youtube.rs`: Added `delete_video()` and `delete_video_at()` — calls YouTube Data API v3 `videos.delete` endpoint
+- `src/cli.rs`: Added `Delete { video_id }` variant to `YoutubeCommands`
+- `src/main.rs`: Wired up `YoutubeCommands::Delete` to `run_youtube_delete()`
+- `src/social/mod.rs`: Added `run_youtube_delete()` using `get_youtube_token()` helper
+
+**Built and verified:** `corky youtube delete --help` works.
+
+**Blocker:** YouTube OAuth token expired. Please run:
+```
+! corky youtube auth
+```
+
+Then say "go" to delete the old video (`OrGJi8Hh_bQ`).
+<!-- agent:boundary:954acff9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
-- [x] Published `@rappstack/domain--any--blog@0.1.4` (fully synced)
-- [x] Published `@rappstack/domain--server--blog@0.1.4` (fully synced)
-- [x] Updated briantakita.me-dev deps to 0.1.4
-- [x] Blog post video URL updated to full version
-- [ ] Delete old edited video from YouTube Studio (manual)
-- [ ] Verify CI build passes and blog post deploys
+- [x] rappstack packages published at 0.1.4
+- [x] Blog post video URL updated
+- [x] Implemented `corky youtube delete` command
+- [ ] Delete old video OrGJi8Hh_bQ (needs YouTube auth)
+- [ ] Commit and release corky with delete command
+- [ ] Verify CI build passes
 <!-- /agent:pending -->

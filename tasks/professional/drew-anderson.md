@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v6 — module-harness/existence-lang woven into opener conceptually
+Draft v7 — Hume emotional range added to model flexibility bullet
 <!-- /agent:status -->
 
 ## Exchange
@@ -316,7 +316,7 @@ Great to connect — saw you liked a couple of my recent posts. Right there with
 I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
 
 A few things I'd love to compare notes on:
-- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic. I've worked across Claude, Grok V2V, and Hume, and each has different latency/quality profiles: Hume has 
+- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic. I've worked across Claude, Grok V2V, and Hume, and each has different latency/quality profiles: Hume has a greater range of voices and emotions as well.
 - On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
 
 I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
@@ -370,7 +370,37 @@ Brian
 - Rest of the message unchanged — it was already solid
 
 **Trade-off:** The opener is now 3 sentences instead of 1, but each carries meaning. If you want it tighter, we can cut "Your '5th wave' framing resonates..." but I think it builds rapport.
-<!-- agent:boundary:8e6e6281 -->
+
+### Re: Draft v7 — Hume emotional voice range (HEAD)
+
+Good addition. Hume's emotional expression range is a real differentiator — it shows you understand the nuances beyond just "which model is fastest." Updated the model flexibility bullet to include this.
+
+**Revised draft v7:**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on human-agent alignment: structured ways for humans and AI to collaborate on documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
+- On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
+
+I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Change from v6:**
+- Added Hume's emotional voice range as a specific differentiator: "Hume especially stands out for emotional voice range and expression" — shows you understand the qualitative differences between providers, not just latency numbers
+<!-- agent:boundary:3500e298 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

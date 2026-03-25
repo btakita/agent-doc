@@ -302,7 +302,7 @@ Great question. This is a **cross-cutting concern** — behavior that should app
 
 The harness contract for `route.rs` should say:
 ```
-## Agentic Contracts (HEAD)
+## Agentic Contracts
 - **Post-route sync invariant**: ALL route exit paths (alive pane, lazy claim, auto-start) 
   MUST call sync_after_claim with the editor's col_args before returning Ok(()).
 ```
@@ -361,7 +361,7 @@ Plugins call `route_begin`/`route_end` around their route invocations. Before tr
 This is a cleaner pattern than per-plugin debounce — one implementation, all editors benefit.
 
 The 2 agent-doc windows issue was fixed (renamed @74 to "stash"). The layout is now correct: `0:agent-doc` + `1:stash`.
-<!-- agent:boundary:fe55245d -->
+<!-- agent:boundary:97cb5635 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2536,7 +2536,7 @@ Compilation verified.
 - Release tmux-router
 - Release agent-doc
 
-### Re: Release agent-doc (HEAD)
+### Re: Release agent-doc
 
 **agent-doc v0.26.0 released** to all targets:
 
@@ -2552,7 +2552,7 @@ Compilation verified.
 **Summary of this session's releases:**
 - tmux-router v0.3.0 → crates.io
 - agent-doc v0.26.0 → crates.io + PyPI + GitHub Release
-<!-- agent:boundary:12002eb4 -->
+<!-- agent:boundary:5bb7db80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

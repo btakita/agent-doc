@@ -718,14 +718,23 @@ pub unsafe extern "C" fn agent_doc_check_compat(min_version: *const c_char) -> b
 Plugin passes its minimum required library version. Returns false if the library is too old.
 
 Want me to add `agent_doc_version()` to FFI + NativeLib.kt? It's a 5-minute change.
-<!-- agent:boundary:e4f02e01 -->
+Yes
+You have missed several of my prompts. It seems there is a bug.
+> Should the FFI plugin have it's own rust crates package?
+
+Done:
+- **Install JB plugin v0.2.24** — user action needed
+
+### Re: agent_doc_version() (HEAD)
+
+Done (`98aa3c0`). `agent_doc_version()` returns the compile-time `CARGO_PKG_VERSION`. 558 tests pass. Binary + plugin rebuilt and pushed.
+<!-- agent:boundary:a0f27dd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - **Install JB plugin v0.2.24** — user action needed
-- **Add agent_doc_version() FFI** — runtime version query from plugin
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

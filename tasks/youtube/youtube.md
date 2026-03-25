@@ -420,7 +420,83 @@ go
 Deleted! `OrGJi8Hh_bQ` removed from YouTube.
 
 Only the full version remains: https://www.youtube.com/watch?v=ixDbYPO43Cw
-<!-- agent:boundary:19bc490b -->
+
+Another briantakita.me ci failure
+```
+Run cd app/briantakita.me
+build|done
+build|done
+Error: R] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.3+7e8a29ff7fc1bd94/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__tags_"
+
+    ../../node_modules/.bun/@rappstack+ui--server--blog@0.1.2+7e8a29ff7fc1bd94/node_modules/@rappstack/ui--server--blog/post/blog_post__main_fragment.ts:9:1:
+      9 │   blog_post__tags_,
+        ╵   ~~~~~~~~~~~~~~~~
+
+Error: R] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.3+7e8a29ff7fc1bd94/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__tags_"
+
+    ../../node_modules/.bun/@rappstack+ui--server--blog@0.1.2+7e8a29ff7fc1bd94/node_modules/@rappstack/ui--server--blog/post/blog_post__main_fragment.ts:9:1:
+      9 │   blog_post__tags_,
+        ╵   ~~~~~~~~~~~~~~~~
+
+Error: R] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.3+7e8a29ff7fc1bd94/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__tags_"
+
+    ../../node_modules/.bun/@rappstack+ui--server--blog@0.1.2+7e8a29ff7fc1bd94/node_modules/@rappstack/ui--server--blog/post/blog_post__main_fragment.ts:9:1:
+      9 │   blog_post__tags_,
+        ╵   ~~~~~~~~~~~~~~~~
+
+Error: R] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.3+7e8a29ff7fc1bd94/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__tags_"
+
+    ../../node_modules/.bun/@rappstack+ui--server--blog@0.1.2+7e8a29ff7fc1bd94/node_modules/@rappstack/ui--server--blog/post/blog_post__main_fragment.ts:9:1:
+      9 │   blog_post__tags_,
+        ╵   ~~~~~~~~~~~~~~~~
+
+1197 |         mangleCache: void 0
+1198 |       };
+1199 |       const originalErrors = result.errors.slice();
+1200 |       const originalWarnings = result.warnings.slice();
+1201 |       if (response.outputFiles) result.outputFiles = response.outputFiles.map(convertOutputFiles);
+1202 |       if (response.metafile) result.metafile = parseJSON(response.metafile);
+                                                      ^
+SyntaxError: JSON Parse error: Unexpected EOF
+      at buildResponseToResult (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:48)
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:884:9)
+      at handleIncomingPacket (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:939:12)
+      at readFromStdout (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:862:7)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:265:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:243:18)
+      at handleNumberResult (internal:streams/native-readable:69:18)
+      at <anonymous> (internal:streams/native-readable:43:68)
+[static_export] using external server: http://localhost:4100
+[static_export] site_url: ***
+[static_export] sitemap fetch failed, using explicit routes only
+[static_export] /search -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] /robots.txt -> Unable to connect. Is the computer able to access the url?
+[static_export] /sitemap.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] completed with 5 error(s)
+Error: Process completed with exit code 1.
+```
+
+Why was it passing before this last blog post?
+
+### Re: CI failure (blog_post__tags_ in transitive dep) (HEAD)
+
+**Why it passed before:** The site was built locally with yalc'd packages that had all exports. Once we went to npm, version resolution mismatches between packages started showing.
+
+**This failure:** `@rappstack/ui--server--blog@0.1.2` (a transitive dep) depends on `@rappstack/domain--server--blog@^0.1.0`. Bun resolved that to `0.1.3` (which lacks `blog_post__tags_`) instead of `0.1.4` (which has it). Our direct dep was pinned to 0.1.4, but the nested resolution was independent.
+
+**Fix:** Added `overrides` to `package.json` to force all transitive deps to use 0.1.4:
+```json
+"overrides": {
+    "@rappstack/domain--any--blog": "0.1.4",
+    "@rappstack/domain--server--blog": "0.1.4"
+}
+```
+
+Pushed `d76dc2b` — CI should now resolve 0.1.4 everywhere.
+<!-- agent:boundary:fd85a757 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -429,6 +505,6 @@ Only the full version remains: https://www.youtube.com/watch?v=ixDbYPO43Cw
 - [x] Blog post video URL updated
 - [x] Implemented `corky youtube delete` command
 - [x] Deleted old edited video OrGJi8Hh_bQ
-- [ ] Commit and release corky with delete command
+- [x] Fixed transitive dep resolution with overrides
 - [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

@@ -86,7 +86,7 @@ Yes do a light edit instead
 Then say "go" to publish.
 go
 
-### Re: go (publish) (HEAD)
+### Re: go (publish)
 
 Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 
@@ -94,7 +94,7 @@ Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 - Video uploaded with CC subtitles and 60+ chapter markers
 - Visibility: public
 - Draft updated: `mail/social/20260325-youtube-module-harness.md` (status: published)
-<!-- agent:boundary:0a304f48 -->
+<!-- agent:boundary:06892faf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

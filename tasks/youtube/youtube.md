@@ -235,7 +235,7 @@ The post leads with the tmux race condition debugging hook, covers the key bugs 
 
 compact exchange
 
-### Exchange Summary (compacted) (HEAD)
+### Exchange Summary (compacted)
 
 **Video:** "Building Agent-Doc: Live Debugging tmux Race Conditions & CRDT Document Sessions"
 - **YouTube:** https://www.youtube.com/watch?v=N8EX3zJLHUA (public, CC + chapter markers)
@@ -252,7 +252,7 @@ compact exchange
 - Draft: `mail/social/20260321-agent-doc-tmux-crdt-linkedin.md`
 
 **Topics covered in video:** Corky OAuth verification, agent-doc pending/component modes, tmux proliferation bug debugging, corky doctor command, document corruption (backtick parsing), prompt loss investigation, over-specification vs under-specification discussion.
-<!-- agent:boundary:3929606a -->
+<!-- agent:boundary:c59bfad9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -67,11 +67,29 @@ Yes do a light edit instead
 **Content summary:** The stream covers building a new "module harness" system for agent-doc — structured doc comments at the top of each Rust source file containing specs, agentic contracts, and evals that give AI agents the context they need per module. Also covers tmux session sync bug fixes, existence language ontology generation, and agent-doc v0.26.0 release.
 
 **Chapter markers and draft ready.** Creating YouTube draft now...
-<!-- agent:boundary:a457016b -->
+
+### Re: YouTube release (continued) (HEAD)
+
+**All prep complete:**
+- Edited video: `tmp/2026-03-24-edited.mp4` (110 min, 5.5 GB)
+- CC transcription: `tasks/youtube/2026-03-24-edited.srt` (2211 segments)
+- Draft: `mail/social/20260325-youtube-module-harness.md`
+- Title: "Module Harness: Agentic Specs, Evals & Ontology for Rust Modules"
+- 60+ chapter markers, description, tags
+
+**Blocker:** YouTube OAuth token expired. Please run:
+
+```
+! corky youtube auth
+```
+
+Then say "go" to publish.
+<!-- agent:boundary:703b37d5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Light edit — trimmed 61 min of silence
 - [x] Transcribe edited video (2211 segments)
-- [ ] Create YouTube draft and publish
+- [x] Create YouTube draft with title, description, chapters
+- [ ] Publish to YouTube (blocked: OAuth token expired)
 <!-- /agent:pending -->

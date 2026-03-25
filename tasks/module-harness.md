@@ -150,7 +150,7 @@ eval_result {
 ```
 
 This maps to the ontology: **Resolution** now carries both magnitude (score) and direction (deviation) — a richer measurement that preserves information about *where* the value sits relative to the optimal band, not just *how far* it is.
-<!-- agent:boundary:14732805 -->
+<!-- agent:boundary:79b5cc8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

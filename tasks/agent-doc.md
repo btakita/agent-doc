@@ -289,52 +289,12 @@ Why would tmux behavior affect the agent-doc + plugin behavior on the document?
 **Fix committed and pushed** — the sync-on-all-route-paths fix is already on GitHub (`326b6d4`). The current binary has the fix.
 There are 2 agent-doc
 
-### Re: Module harness for propagation bugs
+### Re: 2 agent-doc windows (HEAD)
 
-Great question. This is a **cross-cutting concern** — behavior that should apply uniformly across multiple code paths but gets missed when paths are added independently.
+Fixed — renamed window @74 to "stash". Layout now correct: `0:agent-doc` (2 panes) + `1:stash` (1 pane).
 
-**How module-harness can help:**
-
-The harness contract for `route.rs` should say:
-```
-## Agentic Contracts
-- **Post-route sync invariant**: ALL route exit paths (alive pane, lazy claim, auto-start) 
-  MUST call sync_after_claim with the editor's col_args before returning Ok(()).
-```
-
-An agent reading this contract before modifying route would know to check all paths. Today the contract exists but doesn't call out this specific invariant. I should update it.
-
-**Cross-cutting abstraction:**
-
-Yes — the right pattern is a single exit point. Instead of 3 separate return paths each needing to remember to sync, refactor `run_with_tmux` to:
-
-```rust
-fn run_with_tmux(...) -> Result<()> {
-    let pane_id = resolve_or_create_pane(...)?;  // handles all 3 paths
-    sync_after_claim(tmux, &pane_id, col_args);  // single sync call
-    Ok(())
-}
-```
-
-This eliminates the propagation problem entirely — there's one sync call, not three. The three paths become a single `resolve_or_create_pane` that returns the pane ID regardless of how it was obtained.
-
-**For module-harness specifically**, the eval to add:
-```
-- post_route_sync_invariant: route with 2 col_args + 3 registered panes → only 2 panes remain
-```
-
-This eval tests the invariant across ALL paths, not just one. If any path breaks, the eval catches it.
-
-### Re: Why tmux affects document content
-
-Good catch — it shouldn't. The "lost typing" was NOT caused by tmux `break-pane` affecting the document file. It was caused by:
-
-1. **Editor focus shift**: When tmux rearranges panes, the editor plugin receives a focus event for the resized pane. If the active editor tab changes (e.g., the plugin auto-navigates), the cursor position and unsaved buffer state can be disrupted.
-
-2. **Plugin routing trigger**: The JetBrains plugin fires `agent-doc route` on editor tab focus changes. A tmux layout shift can trigger a cascade: pane resize → editor focus event → route call → potential additional pane operations.
-
-The fix for this: the plugin should debounce layout-triggered focus events and not route during active tmux operations. This is a plugin-side fix, not a binary-side fix.
-<!-- agent:boundary:965d586d -->
+The orphan window was created by my `break-pane` fix earlier. `break-pane` doesn't know about the stash naming convention — it creates a new anonymous window. The stash should have been recreated by `ensure_stash_window()`, but since a second "agent-doc" window already existed at index 1, there was no trigger to create a stash.
+<!-- agent:boundary:39306cff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

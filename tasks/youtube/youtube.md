@@ -481,7 +481,7 @@ Error: Process completed with exit code 1.
 
 Why was it passing before this last blog post?
 
-### Re: CI failure (blog_post__tags_ in transitive dep) (HEAD)
+### Re: CI failure (blog_post__tags_ in transitive dep)
 
 **Why it passed before:** The site was built locally with yalc'd packages that had all exports. Once we went to npm, version resolution mismatches between packages started showing.
 
@@ -496,7 +496,7 @@ Why was it passing before this last blog post?
 ```
 
 Pushed `d76dc2b` — CI should now resolve 0.1.4 everywhere.
-<!-- agent:boundary:fd85a757 -->
+<!-- agent:boundary:c38213de -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

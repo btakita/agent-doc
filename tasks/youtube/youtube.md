@@ -94,7 +94,7 @@ Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 - Video uploaded with CC subtitles and 60+ chapter markers
 - Visibility: public
 - Draft updated: `mail/social/20260325-youtube-module-harness.md` (status: published)
-<!-- agent:boundary:06892faf -->
+<!-- agent:boundary:3e30e84f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

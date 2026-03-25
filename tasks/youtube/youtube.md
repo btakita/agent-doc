@@ -84,12 +84,22 @@ Yes do a light edit instead
 ```
 
 Then say "go" to publish.
-<!-- agent:boundary:3c5215ad -->
+go
+
+### Re: go (publish) (HEAD)
+
+Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
+
+- **Title:** Module Harness: Agentic Specs, Evals & Ontology for Rust Modules
+- Video uploaded with CC subtitles and 60+ chapter markers
+- Visibility: public
+- Draft updated: `mail/social/20260325-youtube-module-harness.md` (status: published)
+<!-- agent:boundary:0a304f48 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Light edit — trimmed 61 min of silence
 - [x] Transcribe edited video (2211 segments)
 - [x] Create YouTube draft with title, description, chapters
-- [ ] Publish to YouTube (blocked: OAuth token expired)
+- [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 <!-- /agent:pending -->

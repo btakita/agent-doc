@@ -1633,7 +1633,7 @@ You're right — you didn't delete the response. **The IPC patch was consumed (p
 
 Should I add this to the bug tracker?
 
-### Re: Plugin debounce gap — yes, there is one (HEAD)
+### Re: Plugin debounce gap — yes, there is one
 
 Just saw "The m" truncation happen again — caught by truncation detection but passed after one 400ms recheck because the file was unchanged on disk.
 
@@ -1653,7 +1653,7 @@ Just saw "The m" truncation happen again — caught by truncation detection but 
 2. **Longer recheck**: Current 400ms single recheck is too short. Should do multiple rechecks (e.g., 3x 500ms) before accepting truncated content as stable
 
 Note: "The m" in your edit is truncated — what were you typing?
-<!-- agent:boundary:0cc0f3d1 -->
+<!-- agent:boundary:159222ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

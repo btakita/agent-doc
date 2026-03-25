@@ -1719,7 +1719,7 @@ Two gaps:
 3. Run `repair_layout` now to fix the missing window 0
 
 Want me to run the repair now and implement the preflight health check?
-<!-- agent:boundary:dbbe61ff -->
+<!-- agent:boundary:4c6155c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

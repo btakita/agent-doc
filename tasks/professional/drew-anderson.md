@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft LinkedIn reply to Drew ready for review
+Revised draft v2 ready — refocused on Drew's V2V core business
 <!-- /agent:status -->
 
 ## Exchange
@@ -152,7 +152,7 @@ You have a uniquely strong position for this conversation with Drew:
 
 **Key angles for the reply:**
 - Lead with the avatar/lipsync connection — that's the hook Drew will care about most
-- Mention you've built production real-time video lipsync (without over-sharing IP details)
+- Mention you've built production real-time video lipsync (without over-sharing IP details): Using LiveKit, Voice2Voice models, multi-modal image generation, realtime lipsync
 - Show interest in Nova but frame yourself as a peer/potential collaborator, not a customer
 - Keep the door open without committing — you're still in discussions with Andrey/Eric on the PresenceAI licensing
 
@@ -167,8 +167,8 @@ Great to connect — and I'm right there with you on 5th wave coding. I've been 
 Your mention of avatars caught my attention. I recently built a real-time lipsync avatar pipeline — full video generation with LiveKit, GPU inference, the works. The company (Presence AI) wound down, but the IP and codebase are available. Could be interesting synergy with what you're building at Centerbeam.
 
 I took a look at Nova — clean SDK, and the full-duplex voice pipeline is solid positioning. A few questions that came to mind:
-- Are you planning to support models beyond OpenAI Realtime? (I work extensively with Claude/Anthropic)
-- What's the avatar integration roadmap look like? Lip-synced video, or more stylized/animated?
+- Are you planning to support models beyond OpenAI Realtime? (I work extensively with Claude/Anthropic): Also worked with Grok V2V and other platform such as Hume
+- What's the avatar integration roadmap look like? Lip-synced video, or more stylized/animated?: His business is low latency voice 2 voice. So this would be a potential add on to his core business. But we should stay focused on his core business...exploring additions. Image generation. I also explored semi-realtime video generation using LTXV, WAN, along with various ComfyUI pipelines.
 
 Would be happy to compare notes on the voice + avatar space. Sounds like we're circling similar problems from different angles.
 
@@ -180,7 +180,42 @@ Brian
 **Tone notes:** Matches Drew's casual-professional style. Establishes peer credibility without name-dropping. Asks specific technical questions that signal you know the space. Leaves the PresenceAI licensing angle as a conversation starter without tipping your hand.
 
 Want me to adjust the tone, add/remove anything, or send as-is?
-<!-- agent:boundary:6483f9f0 -->
+
+Please update the draft accounting for my inline prompts.
+
+### Re: Updated draft (HEAD)
+
+Good notes. Key shifts: (1) broaden your model experience beyond just Claude, (2) respect that Drew's core is low-latency V2V — don't lead with avatar as if that's his main thing, (3) add the specific tech stack depth.
+
+**Revised draft:**
+
+---
+
+Hey Drew,
+
+Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been working in a similar space: built a real-time voice-to-voice pipeline using LiveKit with multi-modal integration (lipsync avatars, image generation). Also explored Grok V2V, Hume, and various model backends. The company (Presence AI) wound down, but I retained the IP and codebase.
+
+A few things I'd love to compare notes on:
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume and there's real value in being model-agnostic
+- Where are you thinking on the avatar/visual side? I explored both real-time lipsync and semi-realtime video generation (LTXV, WAN, ComfyUI pipelines) — the latency tradeoffs are interesting
+
+Sounds like we're circling similar problems from different angles. Happy to dig deeper if there's mutual interest.
+
+Best,
+Brian
+
+---
+
+**Changes from v1:**
+- Leads with Nova appreciation (respects his core business) instead of leading with avatars
+- Broadened model experience: Claude, Grok V2V, Hume — not just Anthropic
+- Framed avatar/video as exploration alongside his core V2V, not as the main pitch
+- Added LTXV/WAN/ComfyUI as specific technical depth signals
+- Softened the PresenceAI mention — "retained the IP" rather than "available" (less transactional)
+- Questions positioned as collaborative exploration, not interrogation
+<!-- agent:boundary:3c6eed04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

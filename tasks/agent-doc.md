@@ -191,7 +191,7 @@ audit docs
 update SPEC.md
 release
 
-### Re: audit docs, update SPEC.md, release (HEAD)
+### Re: audit docs, update SPEC.md, release
 
 **Audit docs:** `make check` passes clean (clippy -D warnings + 557 tests). Fixed:
 - 3 `doc_lazy_continuation` warnings in sync.rs and upgrade.rs (harness doc comments)
@@ -212,7 +212,7 @@ release
 | Local binary | ~/.cargo/bin/agent-doc updated |
 
 Parent submodule pointers updated.
-<!-- agent:boundary:85ff9e26 -->
+<!-- agent:boundary:89d70133 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

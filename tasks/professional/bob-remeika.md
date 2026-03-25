@@ -58,7 +58,7 @@ Help me with the rest of the response.
 Help me fill out:
 > What is your RAG use case?
 ![img.png](img.png)
-### Re: Heartfelt Response & Ragie Sign-up (HEAD)
+### Re: Heartfelt Response & Ragie Sign-up
 
 Love the approach — speaking from the heart is much better here. Here are revised drafts incorporating your voice and the Yammer backstory.
 
@@ -83,7 +83,7 @@ Love the approach — speaking from the heart is much better here. Here are revi
 > Would love to reconnect and talk shop. It feels like our paths are converging again.
 
 Let me know if you want to adjust any of these, or if you're ready to post/send.
-<!-- agent:boundary:0309d5b2 -->
+<!-- agent:boundary:7ed7b39a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

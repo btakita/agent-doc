@@ -2178,7 +2178,7 @@ If you want the current session to also skip permissions, that's controlled by h
 
 Working on both items now. Starting with the GitHub repo setup and submodule conversion.
 
-### Re: Continue (GitHub repo + coverage) (HEAD)
+### Re: Continue (GitHub repo + coverage)
 
 **GitHub repo created:** https://github.com/btakita/module-harness
 - Added as git submodule at `src/module-harness`
@@ -2203,7 +2203,7 @@ Test name detection supports:
 - JS/TS: `it("name"` / `test("name"`
 
 These metrics are the foundation for backtesting — comparing harness context effectiveness by measuring how different harness versions affect agent outcomes.
-<!-- agent:boundary:a654312d -->
+<!-- agent:boundary:ffda9b91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

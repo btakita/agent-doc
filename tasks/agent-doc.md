@@ -1364,7 +1364,7 @@ Fix in agent-doc.
 Add test for current state.
 Fix in agent-doc.
 Iterate until it's all fixed.
-### Re: Diagnosing tmux session 0 (HEAD)
+### Re: Diagnosing tmux session 0
 
 **Current state of session 0:**
 | Window | ID | Panes | Size | Content |
@@ -1395,7 +1395,7 @@ Depending on your answers, I'll add targeted tests and fixes. The most likely ag
 - **Minimum pane height check** — agent-doc should refuse to split/create panes when terminal is too small
 - **User window protection** — ensure sync/repair/purge never destroys non-agent-doc windows
 - **Graceful degradation** — detect unusable terminal size and warn instead of running blind
-<!-- agent:boundary:34e4f4fa -->
+<!-- agent:boundary:2aab1253 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

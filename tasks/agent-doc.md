@@ -464,7 +464,7 @@ I apologize for missing your earlier edits — the rapid cycle of layout fixes c
 I checked the committed content — there's no `(HEAD)` in the committed file headers:
 ```
 git show HEAD:tasks/agent-doc.md | grep "^### .*HEAD"
-# (no output) (HEAD)
+# (no output)
 ```
 
 The `(HEAD)` marker you see is in the **working tree** (blue gutter line) — this is intentional behavior from `agent-doc commit`. It inserts a `(HEAD)` marker at the boundary between the committed response and the user's input area. The uncommitted change to remove it is the expected "blue gutter" visual boundary.
@@ -482,7 +482,7 @@ Both are expected when IPC times out and falls back to disk write. The `--force-
 **Re: Non-.md placeholder + commit:**
 
 Working on both now — placeholder for any file type + commit/push.
-<!-- agent:boundary:2d702f6c -->
+<!-- agent:boundary:b3f553b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

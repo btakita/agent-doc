@@ -2309,7 +2309,7 @@ I saw:
 
 Please write tests for this scenario.
 
-### Re: 3-pane layout issue (HEAD)
+### Re: 3-pane layout issue
 
 Session 6 is currently at 2 panes (correct). The 3-pane layout was transient — likely triggered during the IPC timeout when a sync cycle momentarily added a pane before the layout self-corrected.
 
@@ -2322,7 +2322,7 @@ Session 6 is currently at 2 panes (correct). The 3-pane layout was transient —
 I'll clean up the duplicated content in the exchange. The duplicated pending entry is also from this same issue.
 
 Note: Your `"Plrease"` at the end appears truncated — looks like you were still typing when the cycle triggered. Let me know what you wanted to add.
-<!-- agent:boundary:2449eba2 -->
+<!-- agent:boundary:6ecb5266 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

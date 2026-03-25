@@ -216,7 +216,7 @@ Brian
 - Softened the PresenceAI mention — "retained the IP" rather than "available" (less transactional)
 - Questions positioned as collaborative exploration, not interrogation
 
-### Re: Draft v3 — LiveKit + PresenceAI offer (HEAD)
+### Re: Draft v3 — LiveKit + PresenceAI offer
 
 Two adjustments: (1) LiveKit gets its own sentence for emphasis, (2) added a soft offer to share more about the PresenceAI pipeline + distribution angle.
 
@@ -250,7 +250,7 @@ Brian
 - Added soft PresenceAI/Chatroulette teaser: "distribution angle in the works with a video-first platform" — signals opportunity without naming Chatroulette or over-committing
 - Removed "mutual interest" closing (slightly passive) → replaced with direct "let me know if you'd like to dig deeper"
 - Kept the message concise — LinkedIn messages that are too long get skimmed
-<!-- agent:boundary:a74d2221 -->
+<!-- agent:boundary:ad9a13d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

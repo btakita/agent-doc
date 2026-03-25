@@ -1215,7 +1215,7 @@ If not in correct state repeat cycle.
 Review logs to find incorrect tmux layout transitions.
 Add tests for the beginning of the incorrect tmux layout transition.
 Ensure tests pass by fixing the agent-doc software.
-### Re: Iterative tmux layout fix cycle (HEAD)
+### Re: Iterative tmux layout fix cycle
 
 **Current state diagnosis:**
 
@@ -1241,7 +1241,7 @@ Ensure tests pass by fixing the agent-doc software.
 4. Build, install, verify stash gets cleaned up
 
 Starting implementation now.
-<!-- agent:boundary:e1c8578d -->
+<!-- agent:boundary:277e6512 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

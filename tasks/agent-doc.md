@@ -2349,11 +2349,11 @@ Implement:
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 
-### Re: IPC option recommendation + implement remaining (HEAD)
+### Re: IPC option recommendation + implement remaining
 
 **IPC fix: I implemented option 2** (the `--force-disk` path cleans up stale IPC patches). Option 1 (deleting before exit 75) would break deferred pickup — the whole point of exit 75 is to leave a patch for the plugin to pick up later. Option 2 is correct: when the skill explicitly retries with `--force-disk`, it means "I'm taking over, cancel the IPC path."
 
-### Re: IPC silent failure verification (HEAD)
+### Re: IPC silent failure verification
 
 **Implemented** — added content verification to `write_ipc_and_poll()`:
 
@@ -2365,7 +2365,7 @@ If either check fails, returns `Ok(false)` to trigger disk fallback with a diagn
 
 Test mocks updated: the mock "plugin" threads now actually write content to the document file (not just delete the patch file), so the verification path is exercised.
 
-### Re: FFI debounce bridge (HEAD)
+### Re: FFI debounce bridge
 
 **Already implemented** — verified the full chain is in place:
 
@@ -2379,7 +2379,7 @@ The bridge is complete: plugin → FFI → debounce state → typing indicator f
 
 **Tests:** 343 (agent-doc) + 77 (tmux-router) = 420 passing, 0 failures.
 **Release binary:** rebuilt with all fixes.
-<!-- agent:boundary:3745b36e -->
+<!-- agent:boundary:10d7a1b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

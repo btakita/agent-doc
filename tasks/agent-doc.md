@@ -1419,7 +1419,7 @@ Thanks for the answers. Now I understand the scenario:
 3. **Stash panes when terminal shrinks too much** — if the window becomes too small for 2+ panes, stash extras to the stash window and restore when terminal grows back
 
 Starting implementation now. I'll add tests first, then fix the code.
-### Re: Cross-Session Window Contamination (HEAD)
+### Re: Cross-Session Window Contamination
 
 Interesting — I checked the current tmux state and don't see cross-session windows right now:
 - Session 0: @55 (agent-doc), @2 (stash)
@@ -1446,7 +1446,7 @@ The config should prevent this since `tmux_session = "0"` in config.toml. But **
 **Possible root cause:** The editor plugin sends `agent-doc route` without `--window`, and the route creates panes in the config-specified session (0). But subsequent `sync` operations might use the _editor's_ tmux context (session 3) for layout operations, causing cross-session window moves.
 
 Need to trace the exact code path to confirm. Should I dig into the sync → repair_layout → move-window chain to find where cross-session contamination occurs?
-<!-- agent:boundary:f5bdbf59 -->
+<!-- agent:boundary:22b62c5d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

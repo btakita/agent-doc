@@ -2016,7 +2016,7 @@ Understood. Here's the plan:
 
 Working on it now...
 
-### Re: Module harness context — complete (HEAD)
+### Re: Module harness context — complete
 
 All modules now have harness context. Here's the summary:
 
@@ -2049,7 +2049,7 @@ All modules now have harness context. Here's the summary:
 **Also fixed:** Config tests were using `chdir` which caused race conditions in parallel test runs. Refactored to use path-parameterized helpers instead.
 
 **Ready for backtesting:** The eval entries in each module are named and described, making them identifiable targets for your future backtest harness. Each eval maps either to an existing `#[test]` function or documents an aspirational scenario.
-<!-- agent:boundary:5663b666 -->
+<!-- agent:boundary:b58d1ac1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

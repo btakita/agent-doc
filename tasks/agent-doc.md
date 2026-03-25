@@ -1982,7 +1982,7 @@ Questions before I start:
 2. **Evals format** — should the eval entries be runnable (tied to `#[test]` functions) or aspirational (documenting what _should_ be tested)?: This is agentic evals. So measure the effectiveness of the agent harness context. Also measure the effectiveness off proposed changes to the agent harness context. I have an idea to run backtests...starting with a git revision and having the agent harness implement target specs. We can then quantitatively compare the effectiveness ofd the different agent harness contexts. I don't plan on actually beginning the backtests in this session. But I will in the future.
 3. **Agentic contracts** — are these guarantees the module makes to _agent callers_ (Claude Code skill, other agents) specifically, or general API contracts?: both
 
-### Re: Yes (add config auto-sync tests) (HEAD)
+### Re: Yes (add config auto-sync tests)
 
 Added 3 tests to `config.rs`:
 - `save_and_load_project_config` — round-trip save/load + update
@@ -2015,17 +2015,48 @@ Understood. Here's the plan:
 **Approach:** I'll work through modules in batches, reading each module to understand its spec and contracts before writing the harness context. Starting with the modules we just modified (config, route, resync), then expanding to core modules, then the rest.
 
 Working on it now...
-<!-- agent:boundary:eb95a06d -->
+
+### Re: Module harness context — complete (HEAD)
+
+All modules now have harness context. Here's the summary:
+
+**Scope:** 53 modules across agent-doc + tmux-router
+
+| Batch | Modules | Status |
+|-------|---------|--------|
+| 1 (just changed) | config, route, resync, tmux.rs | Done |
+| 2 (core) | diff, write, template, component, frontmatter, merge, crdt, snapshot | Done |
+| 3 (session/routing) | sessions, sync, claim, autoclaim, focus, layout, start, run, preflight | Done |
+| 4 (remaining) | All 30 remaining + agent/* + lib + main + tmux-router sync.rs | Done |
+
+**Format per module:**
+```rust
+//! # Module: <name>
+//!
+//! ## Spec
+//! - behavioral specification (all public functions)
+//!
+//! ## Agentic Contracts
+//! - invariants and guarantees (both agent and API callers)
+//!
+//! ## Evals
+//! - <name>: <scenario> → <expected outcome>
+//!   (maps to existing tests where available, aspirational otherwise)
+```
+
+**Test results:** 343 (agent-doc) + 77 (tmux-router) = 420 tests passing, 0 failures.
+
+**Also fixed:** Config tests were using `chdir` which caused race conditions in parallel test runs. Refactored to use path-parameterized helpers instead.
+
+**Ready for backtesting:** The eval entries in each module are named and described, making them identifiable targets for your future backtest harness. Each eval maps either to an existing `#[test]` function or documents an aspirational scenario.
+<!-- agent:boundary:5663b666 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - ~~**Config auto-sync tests** — 3 tests added and passing~~ ([done])
-- **Module harness context — batch 1** — config, route, resync, tmux (sync.rs in tmux-router)
-- **Module harness context — batch 2** — core modules (diff, write, template, component, frontmatter, merge, crdt, snapshot)
-- **Module harness context — batch 3** — session/routing (sessions, sync, claim, autoclaim, focus, layout, start, run)
-- **Module harness context — batch 4** — remaining modules
+- ~~**Module harness context** — all 53 modules across agent-doc + tmux-router~~ ([done])
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

@@ -718,7 +718,7 @@ pub unsafe extern "C" fn agent_doc_check_compat(min_version: *const c_char) -> b
 Plugin passes its minimum required library version. Returns false if the library is too old.
 
 Want me to add `agent_doc_version()` to FFI + NativeLib.kt? It's a 5-minute change.
-<!-- agent:boundary:b6b22224 -->
+<!-- agent:boundary:e4f02e01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

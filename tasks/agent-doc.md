@@ -264,7 +264,7 @@ The right editor is focused on tasks/professional/drew-anderson.md: an unclaimed
 I also lost what I was typing. Please diagnose. Add logs if missing.
 The stash window is also missing. Why?
 
-### Re: Unclaimed file, lost typing, missing stash (HEAD)
+### Re: Unclaimed file, lost typing, missing stash
 
 **Diagnosis:**
 
@@ -281,7 +281,7 @@ The stash window is also missing. Why?
 **Stash window recreation**: The next `agent-doc sync` or `agent-doc route` call will auto-create the stash window when needed via `ensure_stash_window()`.
 
 **Fix committed and pushed** — the sync-on-all-route-paths fix is already on GitHub (`326b6d4`). The current binary has the fix.
-<!-- agent:boundary:b549d31f -->
+<!-- agent:boundary:dd16595b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

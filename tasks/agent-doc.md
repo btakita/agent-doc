@@ -1850,7 +1850,7 @@ When I ran `Run Agent Doc` just now...the 2nd pane in the 0:agent-doc window clo
 2. **Window-count guard before every kill_pane** — re-check live count immediately before kill; refuse if it would destroy last window
 3. **Session-last-window guard** — if killing would leave 0 windows → refuse and log error
 4. **Cross-session check** — before any kill/stash, verify pane isn't in `sessions.json` for another active session
-<!-- agent:boundary:ba991ae5 -->
+<!-- agent:boundary:b2e5a7b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

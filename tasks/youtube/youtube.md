@@ -235,7 +235,61 @@ Plus the `bun.lock` had cached the yalc resolutions.
 4. Pushed monorepo root → `03d1705`
 
 **All three repos now have `.yalc/` and `yalc.lock` in `.gitignore`.** CI should pass on this push.
-<!-- agent:boundary:47dc8503 -->
+
+Please verify the build succeeds
+```
+10s
+Run cd app/briantakita.me
+build|done
+build|done
+Error: R] No matching export in "../../node_modules/.bun/@rappstack+domain--server--blog@0.1.1+7e8a29ff7fc1bd94/node_modules/@rappstack/domain--server--blog/post/index.ts" for import "blog_post__video_url_"
+
+    ../../lib/ui--server--briantakita/post/post__doc_html.ts:7:1:
+      7 │   blog_post__video_url_,
+        ╵   ~~~~~~~~~~~~~~~~~~~~~
+
+1197 |         mangleCache: void 0
+1198 |       };
+1199 |       const originalErrors = result.errors.slice();
+1200 |       const originalWarnings = result.warnings.slice();
+1201 |       if (response.outputFiles) result.outputFiles = response.outputFiles.map(convertOutputFiles);
+1202 |       if (response.metafile) result.metafile = parseJSON(response.metafile);
+                                                      ^
+SyntaxError: JSON Parse error: Unexpected EOF
+      at buildResponseToResult (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:1202:48)
+      at <anonymous> (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:884:9)
+      at handleIncomingPacket (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:939:12)
+      at readFromStdout (/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/esbuild@0.27.4/node_modules/esbuild/lib/main.js:862:7)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:265:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:243:18)
+      at handleNumberResult (internal:streams/native-readable:69:18)
+      at <anonymous> (internal:streams/native-readable:43:68)
+[static_export] using external server: http://localhost:4100
+[static_export] site_url: ***
+[static_export] sitemap fetch failed, using explicit routes only
+[static_export] /search -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] /robots.txt -> Unable to connect. Is the computer able to access the url?
+[static_export] /sitemap.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] completed with 5 error(s)
+Error: Process completed with exit code 1.
+```
+
+### Re: Build failure — missing `blog_post__video_url_` export (HEAD)
+
+The yalc install issue is fixed, but the build fails because `blog_post__video_url_` was added to the **local yalc'd** version of `@rappstack/domain--server--blog` but never published to npm.
+
+**The chain:**
+- `lib/ui--server--briantakita/post/post__doc_html.ts:7` imports `blog_post__video_url_` from `@rappstack/domain--server--blog/post`
+- The npm `@0.1.1` version doesn't have this export — it only existed in the yalc'd local copy
+- Source lives at `/home/brian/work/rappstack/dev/lib/domain--server--blog/` — currently has no `video_url` related code at all
+
+**To fix:** need to add `blog_post__video_url_` to the rappstack source, publish `@rappstack/domain--server--blog@0.1.2`, and update the dependency.
+
+This is rappstack package development work — should I proceed with adding the export and publishing, or would you prefer to handle this separately?
+<!-- agent:boundary:9461fda5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -243,7 +297,9 @@ Plus the `bun.lock` had cached the yalc resolutions.
 - [x] Transcribe edited video (2211 segments)
 - [x] Create YouTube draft with title, description, chapters
 - [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
-- [x] Blog post created and deployed
+- [x] Blog post created (deploy blocked by build error)
 - [x] Fixed stale submodule pointer (ui--server--briantakita)
-- [x] Fixed yalc artifacts in all three repos (briantakita.me, monorepo root, ui--server--briantakita)
+- [x] Fixed yalc artifacts in all three repos
+- [ ] Publish `@rappstack/domain--server--blog@0.1.2` with `blog_post__video_url_` export
+- [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

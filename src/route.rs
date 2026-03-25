@@ -201,7 +201,10 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
                 }
 
                 eprintln!("[route] Pane {} is alive in session '{}'", registered_pane, pane_session);
-                return send_command(tmux, registered_pane, &file_path);
+                send_command(tmux, registered_pane, &file_path)?;
+                // Sync layout to match editor's col_args (stash excess panes)
+                sync_after_claim(tmux, registered_pane, col_args);
+                return Ok(());
             }
             eprintln!(
                 "[route] Pane {} is alive but in wrong session ('{}', expected '{}'). Will re-create.",
@@ -238,6 +241,13 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     }
     let split_before = is_first_column(file, col_args);
     auto_start_in_session(tmux, file, &session_id, &file_path, &target_session, false, split_before)?;
+
+    // Sync layout after auto-start — ensures the pane arrangement matches the editor's
+    // col_args, stashing any excess panes from previous file selections.
+    if let Some(pane_id) = sessions::lookup(&session_id)? {
+        sync_after_claim(tmux, &pane_id, col_args);
+    }
+
     Ok(())
 }
 

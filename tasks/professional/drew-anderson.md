@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v10 — video gen accuracy corrected (production vs prototype)
+Draft v11 — model-agnostic pitch softened to mention-only
 <!-- /agent:status -->
 
 ## Exchange
@@ -495,7 +495,10 @@ I checked out Nova — the full-duplex voice pipeline and device-neutral relay g
 
 A few things I'd love to compare notes on:
 - How are you measuring interaction quality with Nova? Curious what KPIs you're tracking — session duration, completion rates, something else?
-- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression.
+> There's real value in being model-agnostic
+
+No need to emphasize a sell on this. Just mention.
 - On the visual side — we ran real-time lipsync and image generation in production. I've also been prototyping semi-realtime video gen pipelines (LTXV, WAN, ComfyUI) — early stage but the latency curves are getting interesting. If multi-modal is on your roadmap, happy to share what we've learned
 
 Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
@@ -508,7 +511,41 @@ Brian
 **Change from v9:**
 - Split the visual bullet into production (lipsync + image gen) vs. prototype (LTXV/WAN/ComfyUI): "we ran... in production" + "I've also been prototyping" — honest distinction
 - "early stage but the latency curves are getting interesting" — signals potential without overclaiming
-<!-- agent:boundary:d60a8f42 -->
+
+### Re: Draft v11 — soften model-agnostic sell (HEAD)
+
+Right — "There's real value in being model-agnostic" reads like a pitch. Just stating the fact is stronger. Here's the updated bullet:
+
+**Draft v11 (model flexibility bullet only — rest unchanged):**
+
+> - Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume — each has different strengths, especially Hume for emotional voice range and expression
+
+That's it. Dropped the "there's real value" advocacy line. The fact that you've worked across multiple providers already implies you see value in it — no need to spell it out.
+
+**Full draft v11:**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on improving human-agent alignment and iteration practices — structured ways to tighten the feedback loop between humans and AI across documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. We took an analytics-first approach, instrumenting the full consumer interaction pipeline to measure what actually moved engagement. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- How are you measuring interaction quality with Nova? Curious what KPIs you're tracking — session duration, completion rates, something else?
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume — each has different strengths, especially Hume for emotional voice range and expression
+- On the visual side — we ran real-time lipsync and image generation in production. I've also been prototyping semi-realtime video gen pipelines (LTXV, WAN, ComfyUI) — early stage but the latency curves are getting interesting. If multi-modal is on your roadmap, happy to share what we've learned
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Change from v10:** Removed "There's real value in being model-agnostic" — now just states experience across providers and lets Drew draw his own conclusion.
+<!-- agent:boundary:02288d41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

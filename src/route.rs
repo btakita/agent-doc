@@ -133,18 +133,17 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
 
     // Read target session from project config (.agent-doc/config.toml), fall back to current session
     let configured_session = crate::config::project_tmux_session();
-    let configured_alive = configured_session.as_ref().map_or(false, |s| tmux.session_alive(s));
+    let configured_alive = configured_session.as_ref().is_some_and(|s| tmux.session_alive(s));
     let target_session = if configured_alive {
         configured_session.unwrap()
     } else {
         let fallback = current_tmux_session(tmux)
             .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
         // Auto-sync config when configured session is dead or missing
-        if configured_session.as_deref() != Some(&fallback) {
-            if let Err(e) = crate::config::update_project_tmux_session(&fallback) {
+        if configured_session.as_deref() != Some(&fallback)
+            && let Err(e) = crate::config::update_project_tmux_session(&fallback) {
                 eprintln!("warning: failed to update project tmux_session config: {}", e);
             }
-        }
         fallback
     };
     eprintln!("[route] target tmux session: {}", target_session);
@@ -228,7 +227,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
             eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
             sessions::register(&session_id, &new_pane, &file_path)?;
             send_command(tmux, &new_pane, &file_path)?;
-            sync_after_claim(tmux, &new_pane);
+            sync_after_claim(tmux, &new_pane, col_args);
             return Ok(());
         }
 
@@ -433,17 +432,16 @@ fn auto_start_ext(
     } else {
         // Check project config first, fall back to current session
         let configured = crate::config::project_tmux_session();
-        let configured_alive = configured.as_ref().map_or(false, |s| tmux.session_alive(s));
+        let configured_alive = configured.as_ref().is_some_and(|s| tmux.session_alive(s));
         if configured_alive {
             configured.unwrap()
         } else {
             let fallback = current_tmux_session(tmux)
                 .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-            if configured.as_deref() != Some(&fallback) {
-                if let Err(e) = crate::config::update_project_tmux_session(&fallback) {
+            if configured.as_deref() != Some(&fallback)
+                && let Err(e) = crate::config::update_project_tmux_session(&fallback) {
                     eprintln!("warning: failed to update project tmux_session config: {}", e);
                 }
-            }
             fallback
         }
     };
@@ -637,39 +635,41 @@ fn pane_has_prompt(tmux: &Tmux, pane_id: &str) -> bool {
 ///
 /// This ensures pane arrangement stays consistent when a file is reclaimed
 /// to a different pane. Only runs on autoclaim — normal routing skips this.
-fn sync_after_claim(tmux: &Tmux, pane_id: &str) {
+fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
     let window_id = match tmux.pane_window(pane_id) {
         Ok(w) => w,
         Err(_) => return,
     };
 
-    // Load registry and find all files whose panes are in the same window
-    let registry = match sessions::load() {
-        Ok(r) => r,
-        Err(_) => return,
+    // Use editor-provided col_args when available (authoritative layout).
+    // Only fall back to registry discovery when no col_args given.
+    let effective_col_args: Vec<String> = if !col_args.is_empty() {
+        col_args.to_vec()
+    } else {
+        // Load registry and find all files whose panes are in the same window
+        let registry = match sessions::load() {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        registry
+            .values()
+            .filter(|entry| {
+                !entry.pane.is_empty()
+                    && tmux.pane_alive(&entry.pane)
+                    && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
+                    && !entry.file.is_empty()
+            })
+            .map(|entry| entry.file.clone())
+            .collect()
     };
 
-    let window_files: Vec<String> = registry
-        .values()
-        .filter(|entry| {
-            !entry.pane.is_empty()
-                && tmux.pane_alive(&entry.pane)
-                && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
-                && !entry.file.is_empty()
-        })
-        .map(|entry| entry.file.clone())
-        .collect();
-
-    if window_files.len() < 2 {
+    if effective_col_args.len() < 2 {
         return; // 0 or 1 files — no layout sync needed
     }
 
-    // Each file as its own column (side-by-side / horizontal layout).
-    // Previously this joined all files into a single column, which caused
-    // tmux panes to stack vertically (top/bottom) instead of side-by-side.
-    let file_count = window_files.len();
-    let col_args: Vec<String> = window_files;
-    if let Err(e) = sync::run(&col_args, Some(&window_id), None) {
+    let file_count = effective_col_args.len();
+    if let Err(e) = sync::run(&effective_col_args, Some(&window_id), None) {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
         eprintln!("[route] Auto-synced {} files in window {}", file_count, window_id);

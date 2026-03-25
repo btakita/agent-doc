@@ -476,8 +476,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // No plugin installed or --force-disk — direct disk write
     // When --force-disk is set, clean up any pending IPC patch files to prevent
     // the plugin from applying them later (which would cause double-write).
-    if force_disk {
-        if let Ok(canonical) = file.canonicalize() {
+    if force_disk
+        && let Ok(canonical) = file.canonicalize() {
             let project_root = find_project_root(&canonical)
                 .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
             let patches_dir = project_root.join(".agent-doc/patches");
@@ -489,7 +489,6 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 }
             }
         }
-    }
     let t_disk = std::time::Instant::now();
 
     // Read document state
@@ -1110,7 +1109,7 @@ fn write_ipc_and_poll(
                         // Check first meaningful line of content appears in file
                         content.lines()
                             .find(|l| !l.trim().is_empty())
-                            .map_or(true, |first_line| current_on_disk.contains(first_line.trim()))
+                            .is_none_or(|first_line| current_on_disk.contains(first_line.trim()))
                     });
                     if !any_present {
                         eprintln!(

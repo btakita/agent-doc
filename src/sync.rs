@@ -25,6 +25,7 @@
 //!      registered pane out of the stash and renames the new window.
 //!   3. **Index normalisation** — moves or swaps the target window to index 0,
 //!      using `swap-window` when index 0 is occupied to avoid data loss.
+//!
 //!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
 //!   single stash). Phase 3 always runs.
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and

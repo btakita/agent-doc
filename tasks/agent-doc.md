@@ -1347,7 +1347,7 @@ This is already implemented and tested:
 
 This pending item can be marked done — it's been working since the sync rewrite.
 release
-### Re: Release v0.25.16 (HEAD)
+### Re: Release v0.25.16
 
 Starting release workflow. Changes since v0.25.15:
 
@@ -1356,7 +1356,7 @@ Starting release workflow. Changes since v0.25.15:
 3. **5 new resync tests** — purge_kills_unregistered_shell_in_stash, purge_preserves_registered_pane_in_stash, purge_preserves_user_process_in_stash, purge_orphan_agent_in_non_stash_window, purge_orphan_does_not_kill_last_pane
 
 Bumping version and running release checklist now.
-<!-- agent:boundary:c5e37372 -->
+<!-- agent:boundary:4ef546ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

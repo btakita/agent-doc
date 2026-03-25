@@ -1605,13 +1605,15 @@ No — the debounce ran but has a structural gap in this scenario.
 
 **What happened:** You were editing in the IDE, the JetBrains plugin detected the save and triggered `agent-doc run` (or you manually triggered `/agent-doc`). The preflight mtime debounce checked whether the file's mtime was stable for 500ms. If you saved, paused briefly (>500ms) while composing your next thought, then continued typing — the debounce passed even though your edit was logically incomplete.: Not true. I was in the middle of typing. Is there a gap in the plugin debounce detection?
 
-The mtime detection has obvious gaps...due to the cache then flush cycle.
+The mtime detection has obvious gaps...due to the buffer then flush cycle.
 
 **The gap:** Mtime debounce catches rapid typing but not "user paused to think between sentences." The FFI debounce is better (tracks actual keystrokes) but only works in-process — the CLI invocation can't see it.
 
 **Potential fix:** The preflight could query the FFI debounce state via a socket or lock file, so CLI-invoked runs also wait for typing to settle. Alternatively, the diff's truncation detection (`[diff] Last line may be truncated`) could be stricter about incomplete sentences.
 
 Should I add this to the pending list as a feature?
+
+Yes. Add to the pending list.
 
 ### Re: IPC patch silent failure — root cause found
 
@@ -1653,7 +1655,13 @@ Just saw "The m" truncation happen again — caught by truncation detection but 
 2. **Longer recheck**: Current 400ms single recheck is too short. Should do multiple rechecks (e.g., 3x 500ms) before accepting truncated content as stable
 
 Note: "The m" in your edit is truncated — what were you typing?
-<!-- agent:boundary:159222ff -->
+
+### Re: Confirmed — bugs added to pending (HEAD)
+
+Correction noted: "buffer then flush cycle" (not cache). You're right — the editor buffers keystrokes and flushes to disk on auto-save intervals, which is why mtime-based detection misses mid-typing state.
+
+Both bugs added to pending list below.
+<!-- agent:boundary:fde9b79d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1661,7 +1669,7 @@ Note: "The m" in your edit is truncated — what were you typing?
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
 - [ ] **IPC silent failure bug** — plugin ACKs patch without verifying Document API write
-- [ ] **FFI debounce bridge** — expose typing state to CLI preflight
+- [ ] **FFI debounce bridge** — expose typing state to CLI preflight (buffer→flush gap)
 - [ ] **Truncation recheck too short** — 400ms single check misses editor auto-save delay
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs

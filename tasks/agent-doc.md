@@ -2323,7 +2323,7 @@ I'll clean up the duplicated content in the exchange. The duplicated pending ent
 
 Note: Your `"Plrease"` at the end appears truncated — looks like you were still typing when the cycle triggered. Let me know what you wanted to add.
 
-### Re: Write tests + fix IPC double-write (HEAD)
+### Re: Write tests + fix IPC double-write
 
 **IPC timeout double-write fix applied** (`write.rs`):
 
@@ -2342,7 +2342,7 @@ if force_disk {
 **3-pane layout tests**: tmux-router already has tests for 3→2 pane eviction (`test_sync_3_panes_to_2_evicts_extra`, `test_overflow_stash_preserves_focus_pane`). The transient 3-pane issue you saw was triggered by a sync cycle racing with a file selection change in the editor — the sync saw 3 files momentarily before the editor settled. The existing stash overflow logic handled it correctly (evicted the extra pane).
 
 **Tests:** 343 (agent-doc) + 77 (tmux-router) = 420 passing, 0 failures.
-<!-- agent:boundary:5a76db48 -->
+<!-- agent:boundary:56a5c2d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

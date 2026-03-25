@@ -218,7 +218,7 @@ Failed to install 2 packages
 Error: Process completed with exit code 1.
 ```
 
-### Re: CI still failing (yalc in monorepo root + submodule) (HEAD)
+### Re: CI still failing (yalc in monorepo root + submodule)
 
 The yalc cleanup wasn't complete — the `file:.yalc/` paths existed in **three** places:
 
@@ -235,7 +235,7 @@ Plus the `bun.lock` had cached the yalc resolutions.
 4. Pushed monorepo root → `03d1705`
 
 **All three repos now have `.yalc/` and `yalc.lock` in `.gitignore`.** CI should pass on this push.
-<!-- agent:boundary:bfb4951a -->
+<!-- agent:boundary:47dc8503 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -1580,7 +1580,7 @@ The previous response **was** written to the document (IPC patch consumed succes
 
 **What happened:** The previous run (before this one) DID write a patch — "Re: Missed detection & binary install" appeared in the exchange. You deleted it while editing the section, then the debounce triggered a new cycle before you finished typing "Why did". That cycle picked up your incomplete edit as a diff.
 
-I d
+I did not interfere with the patch response. Why was there no patch response? What went wrong?
 
 The cycle after that (this run's predecessor) DID patch the response "Re: Patching & detection gaps" — which is now visible in the document.
 
@@ -1610,17 +1610,38 @@ No — the debounce ran but has a structural gap in this scenario.
 **Potential fix:** The preflight could query the FFI debounce state via a socket or lock file, so CLI-invoked runs also wait for typing to settle. Alternatively, the diff's truncation detection (`[diff] Last line may be truncated`) could be stricter about incomplete sentences.
 
 Should I add this to the pending list as a feature?
-<!-- agent:boundary:1d8390d1 -->
+
+### Re: IPC patch silent failure — root cause found (HEAD)
+
+You're right — you didn't delete the response. **The IPC patch was consumed (plugin deleted the patch file as ACK) but the Document API write failed silently.**
+
+**Evidence from git history:**
+1. `60f16da` (22:42:54) — Snapshot saved with "Re: Missed detection" content
+2. `84f5a52` (22:45:04) — Next preflight diffed snapshot vs document, found the content "missing" from the document
+3. The diff showed it as user deletion, but the content was never applied to the editor buffer
+
+**The bug:** The JetBrains plugin consumes the patch file (deletes it = ACK) even when the Document API write fails. The `agent-doc write --stream` code sees the deletion and reports "IPC patch consumed by plugin — snapshot updated" — but the content never reached the editor.
+
+**This is a separate bug from the window issue.** The IPC mechanism needs to verify application success, not just file consumption.
+
+**Potential fixes:**
+1. Plugin writes a result file (success/error) instead of just deleting
+2. Preflight verifies document content matches snapshot after IPC write
+3. Plugin logs errors when Document API write fails
+
+Should I add this to the bug tracker?
+<!-- agent:boundary:bc5fe579 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
+- [ ] **IPC silent failure bug** — plugin ACKs patch without verifying Document API write
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
-- [ ] Investigate cross-process debounce gap (FFI state not visible to CLI preflight)
+- [ ] Investigate cross-process debounce gap
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

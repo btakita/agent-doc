@@ -575,7 +575,7 @@ The plugin already watches for boundary changes. This requires no new infrastruc
 Want me to implement this?
 Yet...definitely A + C. Why not B?
 
-### Re: Why not B (FFI)? (HEAD)
+### Re: Why not B (FFI)?
 
 We should do B too — all three. Here's why each matters:
 
@@ -595,7 +595,7 @@ We should do B too — all three. Here's why each matters:
 - **C** — boundary state visible in document (persistent, survives process restart)
 
 I'll implement all three.
-<!-- agent:boundary:fb51d0d4 -->
+<!-- agent:boundary:7316a773 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

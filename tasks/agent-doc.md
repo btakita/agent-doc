@@ -1205,7 +1205,7 @@ tmux_session = "0"
 `sync.rs` still passes `tmux_session: None` in `FileResolution` — the tmux-router derives session from `--window` or wanted panes, which is correct since the window comes from the editor plugin (session 0).
 
 Binary installed. Try `Sync Tmux Layout` now — route should target session "0" from the project config.
-<!-- agent:boundary:0830a35e -->
+<!-- agent:boundary:d7de875c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

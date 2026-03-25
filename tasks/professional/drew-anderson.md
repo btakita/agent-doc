@@ -69,7 +69,7 @@ Would you like me to:
 
 Let's research first and discuss.
 
-### Re: Research Centerbeam Nova (HEAD)
+### Re: Research Centerbeam Nova
 
 **Centerbeam AI / Nova SDK — Research Summary**
 
@@ -111,7 +111,7 @@ This looks like an early-stage voice AI platform wrapping OpenAI Realtime with e
 3. The OpenAI Realtime dependency is notable — worth asking if they plan to support other models (Claude, open-source)
 
 What direction do you want to take the reply?
-<!-- agent:boundary:73b7c49f -->
+<!-- agent:boundary:613b3bd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

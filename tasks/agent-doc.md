@@ -342,7 +342,6 @@ The fix for this: the plugin should debounce layout-triggered focus events and n
 Preferable a FFI plugin fix so all editors can share the behavior.
 There are 2 agent-doc windows...which is incorrect.
 There should be 0:agent-doc and 1:stash
-The left tmux layout has a 2 pane ver
 
 ### Re: FFI plugin debounce + window fix
 
@@ -361,7 +360,14 @@ Plugins call `route_begin`/`route_end` around their route invocations. Before tr
 This is a cleaner pattern than per-plugin debounce — one implementation, all editors benefit.
 
 The 2 agent-doc windows issue was fixed (renamed @74 to "stash"). The layout is now correct: `0:agent-doc` + `1:stash`.
-<!-- agent:boundary:97cb5635 -->
+The left tmux layout has a 2 pane vertical orientation: `lt / lb | r1`
+
+### Re: Left pane vertical orientation (HEAD)
+
+Noted — `lt / lb | r1` (two vertical panes on left, one on right). This is the expected layout when the editor has a vertical split on the left side. The tmux sync mirrors the editor's split orientation via the `--col` args from the plugin.
+
+The pending items (route refactor, harness contract, FFI route guard) are good next-session tasks. This session covered a lot of ground — ready to wrap up whenever you are.
+<!-- agent:boundary:af44dfed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

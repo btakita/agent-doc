@@ -176,7 +176,7 @@ Look in the logs.
 Please add a test replicating this error.
 Fix
 
-### Re: 3-pane layout on file switch (HEAD)
+### Re: 3-pane layout on file switch
 
 **Root cause found:** `sync_after_claim()` was auto-discovering files from the registry instead of using the editor's `col_args`. When switching from agent-doc.md to youtube.md, the registry had panes for both files in the same window, so sync arranged 3 columns instead of 2.
 
@@ -187,7 +187,7 @@ This ensures the sync layout matches what the editor actually shows, not what th
 **Tests:** 557 passing, 0 failures. Release binary rebuilt.
 
 The stash pane %135 is still there (leftover from earlier). Want me to kill it, or leave it for next resync?
-<!-- agent:boundary:019464b8 -->
+<!-- agent:boundary:a886b859 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1580,15 +1580,37 @@ The previous response **was** written to the document (IPC patch consumed succes
 
 **What happened:** The previous run (before this one) DID write a patch — "Re: Missed detection & binary install" appeared in the exchange. You deleted it while editing the section, then the debounce triggered a new cycle before you finished typing "Why did". That cycle picked up your incomplete edit as a diff.
 
+I d
+
 The cycle after that (this run's predecessor) DID patch the response "Re: Patching & detection gaps" — which is now visible in the document.
 
 **The debounce race:** When you edit near the boundary marker and the watch daemon triggers, it can capture mid-edit state. The skill is supposed to detect truncated edits and wait, but "Why did" looked like a complete (if terse) phrase, so I responded to it instead of waiting.
+
+This is supposed to be a deterministic operation with the FFI plugin binary with Plugin hooks AND the `agent-doc run` binary using mtime.
+These deterministic operations are supposed to debounce.
+Were these deterministic operations skipped?
 
 **Summary of debounce sequence:**
 1. Run N: Wrote "Re: Missed detection" → you deleted it while editing
 2. Run N+1: Picked up your deletion + "Why did" (truncated) → wrote "Re: Patching"
 3. Run N+2 (this one): You finished typing → this response
-<!-- agent:boundary:f9dbd654 -->
+
+### Re: Were debounce operations skipped? (HEAD)
+
+No — the debounce ran but has a structural gap in this scenario.
+
+**Two debounce layers exist:**
+1. **FFI debounce** (`debounce.rs`): In-process memory. Plugin calls `document_changed()` on keystrokes, `await_idle()` blocks until typing stops. Only works within the same process (watch daemon or FFI-linked plugin).
+2. **Preflight mtime debounce** (`preflight.rs:81-106`): Polls file mtime. Waits for 500ms idle, max 2s timeout.
+
+**What happened:** You were editing in the IDE, the JetBrains plugin detected the save and triggered `agent-doc run` (or you manually triggered `/agent-doc`). The preflight mtime debounce checked whether the file's mtime was stable for 500ms. If you saved, paused briefly (>500ms) while composing your next thought, then continued typing — the debounce passed even though your edit was logically incomplete.
+
+**The gap:** Mtime debounce catches rapid typing but not "user paused to think between sentences." The FFI debounce is better (tracks actual keystrokes) but only works in-process — the CLI invocation can't see it.
+
+**Potential fix:** The preflight could query the FFI debounce state via a socket or lock file, so CLI-invoked runs also wait for typing to settle. Alternatively, the diff's truncation detection (`[diff] Last line may be truncated`) could be stricter about incomplete sentences.
+
+Should I add this to the pending list as a feature?
+<!-- agent:boundary:707effe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1598,6 +1620,7 @@ The cycle after that (this run's predecessor) DID patch the response "Re: Patchi
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
+- [ ] Investigate cross-process debounce gap (FFI state not visible to CLI preflight)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

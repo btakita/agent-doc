@@ -1391,12 +1391,11 @@ Iterate until it's all fixed.
 - Did you intentionally resize the kitty window to 16 rows, or did that happen unexpectedly?: The i3 tiling manager sized the windows
 - Is the core problem (a) the small terminal, (b) the missing user window, or (c) something else you observed?: Something else. The tmux layout in tmux session 0 was affected.
 
-tmux
-
 Depending on your answers, I'll add targeted tests and fixes. The most likely agent-doc bugs to address:
 - **Minimum pane height check** — agent-doc should refuse to split/create panes when terminal is too small
 - **User window protection** — ensure sync/repair/purge never destroys non-agent-doc windows
 - **Graceful degradation** — detect unusable terminal size and warn instead of running blind
+tmux session 0 has a window from tmux session 3. I did not see tmux session 3 get the agent-doc pane however.
 ### Re: Layout Impact from i3 Resize
 
 Thanks for the answers. Now I understand the scenario:
@@ -1420,7 +1419,34 @@ Thanks for the answers. Now I understand the scenario:
 3. **Stash panes when terminal shrinks too much** — if the window becomes too small for 2+ panes, stash extras to the stash window and restore when terminal grows back
 
 Starting implementation now. I'll add tests first, then fix the code.
-<!-- agent:boundary:c0dc3422 -->
+### Re: Cross-Session Window Contamination (HEAD)
+
+Interesting — I checked the current tmux state and don't see cross-session windows right now:
+- Session 0: @55 (agent-doc), @2 (stash)
+- Session 3: @50 (zsh)
+
+No linked or shared windows detected. The contamination may have already been cleaned up by the prune/purge cycle.
+
+**However**, I found an active `agent-doc route` command from the editor plugin:
+```
+agent-doc route tasks/agent-doc.md --col tasks/agent-doc.md --col tasks/recruit/benjamin-becker.md --focus tasks/agent-doc.md
+```
+
+**No `--window` argument** — so `route.rs` falls back to `current_tmux_session()` if the config check fails. If the user's active tmux session was session 3 when the route fired, it could target session 3 instead of session 0.
+
+Looking at route.rs:64-67:
+```rust
+let target_session = crate::config::project_tmux_session()  // "0" from config.toml
+    .filter(|s| tmux.session_alive(s))                        // session 0 alive → use it
+    .or_else(|| current_tmux_session(tmux))                   // fallback
+```
+
+The config should prevent this since `tmux_session = "0"` in config.toml. But **sync.rs takes the session from `--window`**, and if no `--window` is provided, it uses the current session from the environment. This could be session 3 if the editor plugin's tmux context points there.
+
+**Possible root cause:** The editor plugin sends `agent-doc route` without `--window`, and the route creates panes in the config-specified session (0). But subsequent `sync` operations might use the _editor's_ tmux context (session 3) for layout operations, causing cross-session window moves.
+
+Need to trace the exact code path to confirm. Should I dig into the sync → repair_layout → move-window chain to find where cross-session contamination occurs?
+<!-- agent:boundary:f5bdbf59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

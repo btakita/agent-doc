@@ -415,12 +415,12 @@ Done. Added `corky youtube delete <VIDEO_ID>` command to corky.
 Then say "go" to delete the old video (`OrGJi8Hh_bQ`).
 go
 
-### Re: go (delete old video) (HEAD)
+### Re: go (delete old video)
 
 Deleted! `OrGJi8Hh_bQ` removed from YouTube.
 
 Only the full version remains: https://www.youtube.com/watch?v=ixDbYPO43Cw
-<!-- agent:boundary:775f580f -->
+<!-- agent:boundary:19bc490b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -128,7 +128,7 @@ Seems a bit awkward given his endorsement. Maybe something like:
 - 2017-2024: Harbor + Internal.io (Co-Founder/CTO)
 - 2024-present: Ragie (CEO & Co-Founder)
 Symlink
-### Re: Final Revisions (v4) (HEAD)
+### Re: Final Revisions (v4)
 
 Good call on the Yammer line. "Water under the bridge" reads as regret after his warm endorsement. Your reframe turns the Sacks story into a compliment: "I don't want to repeat that mistake" = "I want to work with you this time."
 
@@ -145,7 +145,7 @@ Good call on the Yammer line. "Water under the bridge" reads as regret after his
 > Great to reconnect. Feels like our paths are converging.
 
 Ready to send when you are.
-<!-- agent:boundary:4dc98d91 -->
+<!-- agent:boundary:5b15379b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

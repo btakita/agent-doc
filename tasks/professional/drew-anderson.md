@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v12 — demo ask added, Drew's VC role identified
+Draft v12 ready to send + 5th wave context explored
 <!-- /agent:status -->
 
 ## Exchange
@@ -601,7 +601,34 @@ Brian
 **Changes from v11:**
 - Added demo ask in closing: "Would love to see Nova in action if you have a demo available"
 - Shows reciprocal interest in his product, not just talking about yourself
-<!-- agent:boundary:b14d9da4 -->
+
+Tell me more about the "5th wave" framing.
+
+### Re: "5th wave coding" framing (HEAD)
+
+Drew's "5th wave coding" appears to be his personal term — it doesn't have an established definition online. But based on his message and the broader "waves of computing" literature, here's what he likely means:
+
+**The waves of programming (reconstructed from context):**
+
+| Wave | Era | Paradigm |
+|------|-----|----------|
+| 1st | ~1950s-60s | Machine code / assembly — talking directly to hardware |
+| 2nd | ~1970s-80s | High-level languages (C, BASIC, Pascal) — abstraction over hardware |
+| 3rd | ~1990s-2000s | Object-oriented / web (Java, Python, JavaScript) — abstraction over systems |
+| 4th | ~2010s | Frameworks & low-code — abstraction over boilerplate |
+| **5th** | **Now** | **Natural language → code — telling the computer what to write, and it does** |
+
+Drew's own words: *"Since I took my first computer programming class in 1975 at CSUN, we've been dreaming of the day when we could just tell the computer what to write, and it would do so."*
+
+He explicitly contrasts it with "vibe coding" — he's saying the same phenomenon, but framing it with more gravitas. "Vibe coding" (coined by Andrej Karpathy) sounds casual/dismissive; "5th wave coding" positions it as the culmination of 50 years of computing evolution.
+
+**Related frameworks:**
+- NVIDIA's 5 waves of AI computing: big bang → cloud → enterprise → edge → autonomy
+- ARM's 5th wave of computing: AI + 5G + IoT convergence
+- MIT Technology Review (2005): "Computing's Fifth Wave" — predicted this era
+
+**Why it matters for your conversation:** Drew sees himself as part of a historical arc. He's been coding since 1975 and sees AI-assisted development as the fulfillment of a decades-old dream. Your "human-agent alignment" framing in v12 connects well — you're both saying "this isn't a toy, it's the next paradigm."
+<!-- agent:boundary:2fa56ebe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

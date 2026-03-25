@@ -252,7 +252,7 @@ compact exchange
 - Draft: `mail/social/20260321-agent-doc-tmux-crdt-linkedin.md`
 
 **Topics covered in video:** Corky OAuth verification, agent-doc pending/component modes, tmux proliferation bug debugging, corky doctor command, document corruption (backtick parsing), prompt loss investigation, over-specification vs under-specification discussion.
-<!-- agent:boundary:c59bfad9 -->
+<!-- agent:boundary:43e8e50b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

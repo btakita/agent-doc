@@ -1931,14 +1931,58 @@ route → project_tmux_session() returns "0"
 **Tests:** 340 passed (agent-doc) + 77 passed (tmux-router), 0 failures.
 
 **Coverage:** `route`, `sync` (via auto_start), and `repair` (via sync) all hit the route path. The `start` command runs inside already-created panes so doesn't need this. `resync` inspects existing panes without resolving a target session.
-<!-- agent:boundary:cad5e459 -->
+
+Did you add automated tests?
+
+Let's begin adding a module level harness context for each rust module as comments. This includes:
+- spec
+- agentic contracts
+- potentially evals with cached results
+
+### Re: Did you add automated tests? (HEAD)
+
+No — I didn't add dedicated tests for the config auto-sync. The existing 340 tests pass and cover the surrounding code (route, session resolution), but there's no test that specifically:
+- Configures a dead session in `config.toml`
+- Runs a route operation
+- Asserts `config.toml` was updated to the current session
+
+I should add that. Want me to add it now before moving on?
+
+### Re: Module-level harness context (HEAD)
+
+Interesting initiative. To make sure I understand the shape you want — something like this at the top of each module?
+
+```rust
+//! # Module: config
+//!
+//! ## Spec
+//! - Load/save project config from `.agent-doc/config.toml`
+//! - Auto-sync tmux_session when configured session is dead
+//! - Fall back to defaults on parse error
+//!
+//! ## Agentic Contracts
+//! - `project_tmux_session()` → always returns a live session or None
+//! - `update_project_tmux_session()` → idempotent, logs old→new transition
+//! - Config writes are atomic (no partial TOML on crash)
+//!
+//! ## Evals
+//! - dead_session_triggers_auto_sync: config="0", session 0 dead → config updated to current
+//! - missing_config_creates_file: no config.toml → created on first auto-sync
+//! - parse_error_returns_defaults: malformed TOML → ProjectConfig::default()
+```
+
+Questions before I start:
+1. **Scope** — all modules in agent-doc? Or start with the ones we just changed (config, route, resync, tmux)?
+2. **Evals format** — should the eval entries be runnable (tied to `#[test]` functions) or aspirational (documenting what _should_ be tested)?
+3. **Agentic contracts** — are these guarantees the module makes to _agent callers_ (Claude Code skill, other agents) specifically, or general API contracts?
+<!-- agent:boundary:c79b0846 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**tmux_session config auto-sync** — update config.toml when configured session is dead~~ ([done])
-- ~~**Fix 1-4: kill_pane safety guards**~~ ([done])
+- **Add config auto-sync test** — test that dead session triggers config.toml update
+- **Module-level harness context** — add spec/contracts/evals comments to Rust modules (design TBD)
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

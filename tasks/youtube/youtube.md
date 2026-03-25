@@ -368,7 +368,7 @@ Error: Process completed with exit code 1.
 
 Please release any pending releases in the rappstack libraries.
 
-### Re: CI failure (unique_tags_) + pending rappstack releases (HEAD)
+### Re: CI failure (unique_tags_) + pending rappstack releases
 
 **Root cause:** The yalc'd versions of both rappstack packages had diverged significantly from the source repos. The published npm versions were missing entire files and exports.
 
@@ -392,7 +392,7 @@ Please release any pending releases in the rappstack libraries.
 - Pushed `6a1dea0` — CI should now build
 
 **Old video:** Can't delete via corky (no `delete` subcommand). Delete `OrGJi8Hh_bQ` from YouTube Studio manually: https://studio.youtube.com/video/OrGJi8Hh_bQ/edit
-<!-- agent:boundary:ca3469a7 -->
+<!-- agent:boundary:9b91a426 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -401,7 +401,7 @@ Brian
 **Change from v6:**
 - Added Hume's emotional voice range as a specific differentiator: "Hume especially stands out for emotional voice range and expression" — shows you understand the qualitative differences between providers, not just latency numbers
 
-### Re: Draft v8 — remove active distribution claim (HEAD)
+### Re: Draft v8 — remove active distribution claim
 
 Good call. If the distribution angle isn't active work and income is the priority, presenting it as "in the works" would be misleading. Two options:
 
@@ -438,7 +438,7 @@ Brian
 - The PresenceAI licensing + distribution angle can come up naturally in a follow-up if Drew engages
 
 Ready to send, or any final tweaks?
-<!-- agent:boundary:293a5ac7 -->
+<!-- agent:boundary:57c9d3a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

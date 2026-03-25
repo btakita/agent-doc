@@ -334,7 +334,7 @@ Brian
 - **Social acknowledgment:** "saw you liked a couple of my recent posts" — natural opener that shows you noticed his engagement
 - Removed "Great to connect" standalone — merged with the social signal for a tighter opener
 
-### Re: Draft v6 — module-harness / existence-lang mention (HEAD)
+### Re: Draft v6 — module-harness / existence-lang mention
 
 Good instinct. If Drew liked your posts *after* viewing your profile, he's already seen your agentic tooling content. A brief nod to it makes the opener more personal and shows you're paying attention to the engagement sequence.
 
@@ -370,7 +370,7 @@ Brian
 - Rest of the message unchanged — it was already solid
 
 **Trade-off:** The opener is now 3 sentences instead of 1, but each carries meaning. If you want it tighter, we can cut "Your '5th wave' framing resonates..." but I think it builds rapport.
-<!-- agent:boundary:049d2a84 -->
+<!-- agent:boundary:8e6e6281 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

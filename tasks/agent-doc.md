@@ -1330,7 +1330,23 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - Last pane in a window never killed
 - Idle shells in stash killed
 - Orphaned agent processes everywhere killed
-<!-- agent:boundary:cfcbd8e6 -->
+Impl]ement:
+- [ ] **Split direction from column position** — left column = split before
+### Re: Split direction from column position (HEAD)
+
+This is already implemented and tested:
+
+**route.rs** — `is_first_column()` (line 25): If the file is in the first `--col` arg, `split_before=true` → uses `-dbh` (split before/left). Otherwise `-dh` (split after/right). 6 unit tests.
+
+**tmux-router/sync.rs** — `first_pane_join_flag()` (line 996): During reconciliation, determines the correct join direction based on column/row position. If the anchor pane is in a later column, the first pane joins with `-dbh` (left of it). 2 unit tests covering 2-col and 3-col grids.
+
+**How it works end-to-end:**
+1. Editor plugin sends `agent-doc sync --col file1.md --col file2.md --window @48`
+2. `route.rs` auto-start: `is_first_column(file, col_args)` → determines `-dbh` or `-dh`
+3. `sync.rs` reconcile: `first_pane_join_flag()` and `join_target()` compute the correct join direction for each pane based on its position in the column grid
+
+This pending item can be marked done — it's been working since the sync rewrite.
+<!-- agent:boundary:a765e887 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1342,7 +1358,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - [x] **Session firewall tests** — standardized cross-session test template
 - [x] **Purge unregistered stash panes** — kills orphaned agent/shell panes in stash
 - [x] **Purge orphaned agent panes in non-stash windows** — session 3 orphan fixed
-- [ ] **Split direction from column position** — left column = split before
+- [x] **Split direction from column position** — already implemented in route.rs + sync.rs (8 tests)
 - [ ] **Release v0.25.16**
 <!-- /agent:pending -->
 

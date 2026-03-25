@@ -2129,14 +2129,47 @@ module-harness (skill)
 The binary handles structure; the skill handles understanding. This matches the agent-doc pattern (binary = deterministic, skill = non-deterministic).
 
 Want me to create the skill now and scaffold the binary?
-<!-- agent:boundary:33122f82 -->
+
+Let's create a module-harness rust project.
+On github it would be at btakita/module-harness.
+The Rust package name would be module-harness...it's available on crates.
+
+Let's keep this basic because I want to wrap this session up and get through the pending.
+
+### Re: Create module-harness project (HEAD)
+
+Done. Created the `module-harness` Rust project and skill.
+
+**Binary (`src/module-harness/`):**
+- `module-harness parse <file>` — extract harness sections to JSON
+- `module-harness inventory <dir>` — list all evals across modules
+- `module-harness diff <file>` — show harness summary
+- Supports: Rust, Python, TypeScript, JavaScript, Go, Kotlin, Java
+- 6 tests passing
+
+**Skill (`.claude/skills/module-harness/`):**
+- `/module-harness <file>` — generate/update harness for one module
+- `/module-harness batch <dir>` — all modules in a directory
+- `/module-harness audit <dir>` — report coverage and drift
+
+**Smoke test against agent-doc:**
+- `parse config.rs` → correctly extracts module name, 10 spec entries, 6 contracts, 7 evals
+- `inventory src/` → **468 evals** discovered across all agent-doc modules
+
+**Not yet done (future):**
+- GitHub repo creation (btakita/module-harness)
+- crates.io publish
+- `format` subcommand (write harness from JSON input)
+- `coverage` subcommand (match evals to test functions)
+<!-- agent:boundary:bb3b2534 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Create module-harness skill** — SKILL.md with generate/batch/audit commands
-- **Scaffold module-harness binary** — parse, diff, inventory, coverage, format subcommands
+- ~~**Create module-harness project** — binary + skill scaffolded~~ ([done])
+- **module-harness: GitHub repo + publish** — create btakita/module-harness, publish to crates.io
+- **module-harness: coverage subcommand** — match evals to test functions
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

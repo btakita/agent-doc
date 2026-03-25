@@ -277,8 +277,10 @@ SyntaxError: JSON Parse error: Unexpected EOF
 Error: Process completed with exit code 1.
 ```
 
-Process the entire video to reduce size. Please upload the entire video. The light edit cut out some of my speech.
-
+Let's be less aggressive with the video editing. The light edit cut out some of my speech.
+CC transcribe the result video.
+Upload result video with transcription.
+Edit video description
 
 ### Re: Build failure — missing `blog_post__video_url_` export
 
@@ -293,8 +295,9 @@ The yalc install issue is fixed, but the build fails because `blog_post__video_u
 
 This is rappstack package development work — should I proceed with adding the export and publishing, or would you prefer to handle this separately?
 fix it now
+publish rappstack packages
 
-### Re: Upload full video instead (HEAD)
+### Re: Upload full video instead
 
 Understood — the light edit cut speech. Re-encoding the **full original video** (2h 50min, 7.4 GB) with NVENC GPU compression to reduce file size. Once done:
 
@@ -306,12 +309,28 @@ Understood — the light edit cut speech. Re-encoding the **full original video*
 Encoding in progress...
 
 **Re: build failure** — still need to publish `@rappstack/domain--server--blog@0.1.2` with the `blog_post__video_url_` export. Will address after video upload.
-<!-- agent:boundary:c31bbffc -->
+
+### Re: Full video upload (HEAD)
+
+Done! Full unedited video uploaded to YouTube.
+
+**New video:** https://www.youtube.com/watch?v=ixDbYPO43Cw
+- **Duration:** 2h 50min (full, unedited)
+- **Size:** 712 MB (compressed from 7.4 GB with NVENC, CQ 28)
+- **CC:** `tasks/youtube/2026-03-24-full.srt` (4423 segments)
+- **Chapters:** 36 markers for the full timeline
+- **Draft:** `mail/social/20260325-youtube-module-harness-full.md`
+
+**Previous edited version** (110 min) is still up at https://www.youtube.com/watch?v=OrGJi8Hh_bQ — you can delete it or keep both.
+
+**Still pending:** blog deploy is blocked by the missing `blog_post__video_url_` npm export. Need to publish `@rappstack/domain--server--blog@0.1.2`.
+<!-- agent:boundary:2effae04 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Re-encode full video with NVENC (in progress)
-- [ ] Transcribe full video
-- [ ] Update YouTube upload with full video
+- [x] Full video re-encoded (7.4 GB → 712 MB)
+- [x] Full video transcribed (4423 segments)
+- [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
 - [ ] Publish `@rappstack/domain--server--blog@0.1.2` (blog deploy blocked)
+- [ ] Delete old edited video (optional)
 <!-- /agent:pending -->

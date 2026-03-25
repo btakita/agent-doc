@@ -1471,7 +1471,7 @@ You're right — when the terminal shrinks below usable size for multiple panes,
 - `test_sync_overflow_stash_and_restore` — stash on shrink, restore on grow
 
 Starting implementation now.
-### Re: Overflow Stash Implementation (HEAD)
+### Re: Overflow Stash Implementation
 
 Implemented overflow stash in tmux-router. When the terminal shrinks and panes become unusably small, excess panes are now automatically stashed.
 
@@ -1497,7 +1497,7 @@ Implemented overflow stash in tmux-router. When the terminal shrinks and panes b
 **Full test suite: 77/77 passing.** Release binary built.
 
 **Cross-session verification:** The sync code (lines 602-642) already validates `--window` against the target session — if `--window` is in a different session, it's ignored. The cross-session contamination you may have seen was likely from an earlier version before these guards were added.
-<!-- agent:boundary:112bcdbd -->
+<!-- agent:boundary:1b07a2e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

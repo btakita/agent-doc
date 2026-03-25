@@ -503,7 +503,7 @@ I don't see a response to:
 Why?
 My previous prompt was placed below the response patch.
 
-### Re: Prompt placed below response patch (HEAD)
+### Re: Prompt placed below response patch
 
 This is a known CRDT merge ordering issue. When you type in the exchange while I'm generating a response, the CRDT merge places your edit relative to the boundary marker. If the boundary marker was consumed by the write, your edit can end up after the response instead of before it.
 
@@ -519,7 +519,7 @@ The `(HEAD)` marker is added to the boundary heading line (e.g., `### Re: ... (H
 Caused by `--force-disk` writes bypassing the IDE's Document API. When the IPC path fails (timeout), the disk write modifies the file directly, triggering IntelliJ's "external change" dialog. This is expected behavior when IPC degrades.
 
 **Committed and pushed** — the route refactor + auto-init are on GitHub (`bf39bd7`).
-<!-- agent:boundary:9cc3b81a -->
+<!-- agent:boundary:f801c37a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

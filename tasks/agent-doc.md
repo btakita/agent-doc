@@ -1902,7 +1902,7 @@ We are currently recovering from an agent-doc bug where the tmux session 0 was k
 .agent-doc/config.toml should be in sync when the new bound tmux session changes.
 Please add to `agent-doc repair`, `agent-doc sync`, `agent-doc run`, `agent-doc start`, and any other commands. Basically we should always be in sync.
 
-### Re: tmux_session config auto-sync (HEAD)
+### Re: tmux_session config auto-sync
 
 **Problem:** `.agent-doc/config.toml` had `tmux_session = "0"` but session 0 was destroyed. Now on session 6, the config was stale.
 
@@ -1931,7 +1931,7 @@ route → project_tmux_session() returns "0"
 **Tests:** 340 passed (agent-doc) + 77 passed (tmux-router), 0 failures.
 
 **Coverage:** `route`, `sync` (via auto_start), and `repair` (via sync) all hit the route path. The `start` command runs inside already-created panes so doesn't need this. `resync` inspects existing panes without resolving a target session.
-<!-- agent:boundary:48293636 -->
+<!-- agent:boundary:cad5e459 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

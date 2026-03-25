@@ -2434,14 +2434,29 @@ proceed with both
 | **Claim** | Agreement | Binding between a document and a tmux pane |
 
 Each term follows the existence-lang node format (Ontology/Axiology/Epistemology) with cross-links to kernel terms and between agent-doc terms.
-<!-- agent:boundary:c262f058 -->
+
+> - **module-harness dev-dependency decision** — add as dev-dep or keep standalone CLI
+
+dev dep...because the syntax of the module harness may change and we want to be in sync
+
+### Re: module-harness as dev-dep (HEAD)
+
+Added to `src/agent-doc/Cargo.toml`:
+
+```toml
+[dev-dependencies]
+module-harness = { path = "../module-harness" }
+```
+
+Using a path dependency for now (not yet on crates.io). This ensures agent-doc's test builds stay in sync with module-harness syntax changes. When module-harness is published, we can switch to a version pin.
+
+Compilation verified — no errors.
+<!-- agent:boundary:b8836cbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**agent-doc README update**~~ ([done])
-- ~~**agent-doc existence-lang ontology** — 9 domain terms defined~~ ([done])
 All pending items cleared.
 <!-- /agent:pending -->
 

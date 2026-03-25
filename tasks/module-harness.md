@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — updated eval.md ontology node with quantification model
+**Active** — expanding range evals with directional vectors
 <!-- /agent:status -->
 
 ## Exchange
@@ -117,14 +117,48 @@ Added three new sections to the existing ontology node:
 4. **Eval Execution Layers** — Static (code-graded), Dynamic (test-backed), Agentic (LLM-graded)
 
 The file retains its original Ontology/Axiology/Epistemology structure with the new content integrated under Epistemology.
-<!-- agent:boundary:dda2112c -->
+
+> ### Range Evals
+
+It seems this is a scalar value. But can we also have a vector direction for over-provisioning/under-provisioning, etc?
+### Assistant
+
+**Re: Range Evals — vector direction**
+
+Yes — a scalar score alone loses the "which direction am I failing?" information. The solution is to make range evals return a **signed deviation** alongside the score:
+
+**Scalar only (lossy):**
+- `hook_count = 12, band = [5, 10]` → `score = 0.8` (degraded, but *which way?*)
+
+**Scalar + direction vector (lossless):**
+- `hook_count = 12, band = [5, 10]` → `score = 0.8, direction = +over` (over-provisioned by 2)
+- `hook_count = 3, band = [5, 10]` → `score = 0.6, direction = -under` (under-provisioned by 2)
+
+**Why direction matters:**
+- **Actionable diagnostics**: "remove 2 hooks" vs "add 2 hooks" — the agent knows *what to do*
+- **Trend analysis**: consecutive evals trending toward `+over` signals architectural drift
+- **Asymmetric penalties**: over-provisioning might be cheaper to fix than under-provisioning (or vice versa), so the score degradation curve can differ by direction
+
+**Proposed eval result structure:**
+
+```
+eval_result {
+  score: 0.0–1.0,        // how far from optimal
+  deviation: f64,         // signed distance from band center (- = under, + = over)
+  direction: Under | Within | Over,  // categorical label
+}
+```
+
+This maps to the ontology: **Resolution** now carries both magnitude (score) and direction (deviation) — a richer measurement that preserves information about *where* the value sits relative to the optimal band, not just *how far* it is.
+<!-- agent:boundary:14732805 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Build module-harness binary support for eval scoring (boolean + ordinal + continuous)
+- Extend eval result type with signed deviation + direction enum
+- Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
 - Create reference plugin harness with runnable evals
-- Add range-eval support (band scoring for "too much/too little" criteria)
+- Update eval.md ontology node with directional range eval spec
 - ([done]) Formalize eval.md spec connecting ontology → quantification model
 <!-- /agent:pending -->

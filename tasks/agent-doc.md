@@ -1683,7 +1683,8 @@ Why did you not detect this tmux layout issues? You should check every single ru
 What happened to the tasks/evals.md claude session?
 I don't see it anymore. It went away.
 
-Why do you keep on opening
+Why do you keep on opening tmux window `2:agent-doc`. You should be opening tmux window `0:agent-doc`.
+Why do you keep on getting this wrong?
 
 ### Re: tmux layout issues
 
@@ -1706,20 +1707,71 @@ The `corky watch` pane was moved to `0:1:stash` by the overflow stash mechanism 
 **Q: Where is window `0:agent-doc`?**
 Window 0 doesn't exist. The `new_window -a` flag in tmux creates windows *after* the current index, so agent-doc ended up at index 2 instead of 0. We fixed this in `repair_layout()` Phase 3 earlier tonight (the swap-window fix in v0.25.16), but the **live session wasn't repaired** after the binary was rebuilt — the fix only applies to future `repair_layout` calls.
 
+Why was `0:agent-doc` closed in the first place? It should have remained open.
+
 **Q: Why wasn't this detected?**
 Two gaps:
 
 1. **Resync doesn't run automatically on every preflight** — it only runs at session start or explicit resync calls. The preflight command checks diff/snapshot state, not tmux layout health.
 
+We should have a check which compares the actual state with the expected state. If there is a mismatch, then run resync.
+This should happen in the `agent-doc run` command...at the beginning and end.
+
 2. **No stash-return mechanism** — `purge_stash_windows` kills idle-shell stash panes, but it has no logic to *return* active panes (like `corky watch`) to their original sessions. It only purges dead ones.
 
+Let's do a 1 off and move it back.
+
 **Recommended fixes:**
-1. Add a tmux layout health check to every preflight run (fast — just `list-windows` + `list-panes`)
-2. Add stash-return logic: if a stash pane has a registered session origin, move it back
-3. Run `repair_layout` now to fix the missing window 0
+1. Add a tmux layout health check to every preflight run (fast — just `list-windows` + `list-panes`): Yes...before and after operation
+2. Add stash-return logic: if a stash pane has a registered session origin, move it back: Yes.
+3. Run `repair_layout` now to fix the missing window 0: Yes
 
 Want me to run the repair now and implement the preflight health check?
-<!-- agent:boundary:4c6155c2 -->
+
+Yes
+What are the gaps in the agent-doc binary commands?
+This should be deterministically fixed.
+Add tests.
+Update SPEC.md
+audit
+
+### Re: window 0, evals session, corky watch, and detection gaps (HEAD)
+
+**Immediate fixes applied:**
+
+1. **Window 0 restored** — moved `agent-doc` from `0:2` to `0:0`. Session 0 now has only `0:agent-doc`.
+2. **Corky watch returned** — moved from `0:1:stash` back to session 3. Session 3 now shows `0:corky` with both zsh and corky watch panes.
+3. **Stash window gone** — session 0 no longer has a stash window.
+4. **Root cause fixed** — removed the `-a` flag from `tmux_router::Tmux::new_window()`. This flag caused windows to be created *after* the current index instead of at the lowest available slot. All 77 tmux-router tests + 38 agent-doc tests pass.
+5. **Binary rebuilt** — `cargo build --release` + `cargo install --path .` completed.
+
+**Q: Why was `0:agent-doc` closed in the first place?**
+Window 0 was never *closed* — it was never *created at index 0*. The `-a` flag on `new_window` meant: when session 0 already had `1:stash`, the new window went to index 2. The `repair_layout` Phase 3 fix (swap-window) we implemented earlier tonight would have corrected this, but `repair_layout` isn't called during preflight — only during `sync`.
+
+**Q: What happened to the `tasks/evals.md` claude session?**
+Sessions 2 and 3 are both idle zsh shells — no claude or agent-doc process is running in either. The evals session's Claude process likely exited (context exhaustion or clean exit) and the restart loop ended. Session 2 is at `/home/brian`, session 3 is at `/home/brian/work/btakita/agent-loop`.
+
+**Q: Why do you keep opening window 2 instead of 0?**
+The `-a` flag in `new_window` was the root cause. Now removed. Future windows will use the next available index (starting from base-index 0).
+
+**Gaps identified in agent-doc binary commands:**
+
+| Gap | Where | Fix |
+|-----|-------|-----|
+| No layout health check in preflight | `preflight.rs` | Add step 0: validate window indices + stash state |
+| No resync during preflight | `preflight.rs` | Call lightweight resync check (read-only) before diff |
+| No stash-return mechanism | `resync.rs` | Active stash panes should be moved back to origin session |
+| `new_window -a` creates wrong index | `tmux.rs` | **Fixed** — removed `-a` flag |
+| `repair_layout` not called on preflight | `sync.rs`/`preflight.rs` | Add optional repair step |
+
+**Next steps:**
+1. Add tmux health check to `preflight.rs` (before step 1 and as new output field)
+2. Add stash-return logic to `resync.rs` 
+3. Add tests for both
+4. Update SPEC.md
+
+Starting implementation now.
+<!-- agent:boundary:a83adba9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1727,12 +1779,17 @@ Want me to run the repair now and implement the preflight health check?
 <!-- agent:pending -->
 ### Pending
 
+**In Progress**
+- [ ] **Preflight tmux health check** — validate layout at start of every preflight (window indices, stash state, orphaned panes)
+- [ ] **Stash-return mechanism** — return active panes from stash to their original sessions
+- [ ] **Tests for layout validation** — deterministic tests for health check and stash-return
+- [ ] **SPEC.md updates** — document new preflight health check contract
+
 **Bugs — Priority**
-- [ ] **Preflight tmux health check** — add layout validation to every preflight run (detect missing window 0, orphaned stash panes)
-- [ ] **Stash-return mechanism** — return active panes from stash to their original sessions instead of just purging idle ones
+- [x] **`new_window -a` wrong index** — removed `-a` flag from `tmux_router::Tmux::new_window()` 
 - [ ] **IPC silent failure** — add verification after patch consumption
 - [ ] **FFI debounce bridge** — expose typing state via lock file for CLI access
-- [ ] **Truncation recheck timing** — `[done]` 3-iteration consecutive stability check implemented
+- [x] **Truncation recheck timing** — 3-iteration consecutive stability check implemented
 
 **Features**
 - [ ] Split direction support (horizontal/vertical)

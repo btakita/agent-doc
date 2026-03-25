@@ -118,6 +118,25 @@ Three sources, in precedence order (highest first):
 
 The resolved args are split on whitespace and prepended to the `claude` command before other flags (e.g., `--continue`).
 
+### 6.2 Project Config
+
+Location: `.agent-doc/config.toml` (relative to project root).
+
+Fields: `tmux_session` — the tmux session name bound to this project.
+
+**Auto-sync:** When the configured `tmux_session` is dead (session no longer exists), the route path falls back to `current_tmux_session()` and auto-updates `config.toml` with the new session name. This prevents stale config after session destruction.
+
+### 6.3 IPC Write Verification
+
+After the IDE plugin consumes an IPC patch file:
+1. **File-change check:** If the document file is unchanged on disk, the plugin failed to apply — falls back to disk write.
+2. **Content verification:** If the document changed but none of the patch content appears in the result, the plugin partially failed — falls back to disk write.
+3. **Force-disk cleanup:** When `--force-disk` is set, any pending IPC patch files are deleted before disk write to prevent the plugin from applying stale patches (double-write prevention).
+
+### 6.4 Sync Layout Authority
+
+`sync_after_claim()` uses editor-provided `col_args` when available (authoritative layout from the IDE plugin). Only falls back to registry-based file discovery when no `col_args` given. This prevents stale registry entries from creating incorrect multi-pane layouts.
+
 ## 7. Commands
 
 ### 7.1 run

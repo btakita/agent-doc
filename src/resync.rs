@@ -487,18 +487,15 @@ fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionR
 /// 3. The first non-stash window in any session with a matching name
 fn find_return_target(tmux: &Tmux, entry: &sessions::SessionEntry) -> Option<String> {
     // 1. Try the original window from the registry entry
-    if !entry.window.is_empty() {
-        if let Ok(panes) = tmux.list_window_panes(&entry.window) {
-            if !panes.is_empty() {
+    if !entry.window.is_empty()
+        && let Ok(panes) = tmux.list_window_panes(&entry.window)
+            && !panes.is_empty() {
                 // Check it's not a stash window itself
-                if let Some(wname) = pane_window_name(tmux, &panes[0]) {
-                    if !is_stash_window_name(&wname) {
+                if let Some(wname) = pane_window_name(tmux, &panes[0])
+                    && !is_stash_window_name(&wname) {
                         return Some(panes[0].clone());
                     }
-                }
             }
-        }
-    }
 
     // 2. Try to find the tmux session from frontmatter
     let session_name = if !entry.file.is_empty() {
@@ -512,13 +509,11 @@ fn find_return_target(tmux: &Tmux, entry: &sessions::SessionEntry) -> Option<Str
         None
     };
 
-    if let Some(ref sess) = session_name {
-        if tmux.session_exists(sess) {
-            if let Some(target) = first_non_stash_pane(tmux, sess) {
+    if let Some(ref sess) = session_name
+        && tmux.session_exists(sess)
+            && let Some(target) = first_non_stash_pane(tmux, sess) {
                 return Some(target);
             }
-        }
-    }
 
     None
 }
@@ -550,11 +545,10 @@ fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<String> {
             continue;
         }
         // Return the first pane in this non-stash window
-        if let Ok(panes) = tmux.list_window_panes(window_id) {
-            if let Some(first) = panes.into_iter().next() {
+        if let Ok(panes) = tmux.list_window_panes(window_id)
+            && let Some(first) = panes.into_iter().next() {
                 return Some(first);
             }
-        }
     }
 
     None

@@ -6,6 +6,7 @@
 //!   1. Download prebuilt binary from GitHub Releases (`tar.gz` for detected target triple).
 //!   2. `cargo install <crate>` fallback.
 //!   3. `pip install --upgrade <crate>` fallback.
+//!
 //!   If all strategies fail, prints manual installation instructions and returns `Ok(())`.
 //! - `warn_if_outdated()` is called on every startup. Checks crates.io with a 24-hour
 //!   disk cache (`~/.cache/agent-doc/version-cache.json`) and prints a one-line warning

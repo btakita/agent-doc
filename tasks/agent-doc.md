@@ -2412,7 +2412,7 @@ These are non-trivial tasks. Let me scope them:
 Want me to proceed with both, or is this session wrapping up? These could be a good next-session task.
 proceed with both
 
-### Re: proceed with both (HEAD)
+### Re: proceed with both
 
 **README.md** — created at `src/agent-doc/README.md`:
 - GitHub-facing quick start guide (~80 lines)
@@ -2434,7 +2434,7 @@ proceed with both
 | **Claim** | Agreement | Binding between a document and a tmux pane |
 
 Each term follows the existence-lang node format (Ontology/Axiology/Epistemology) with cross-links to kernel terms and between agent-doc terms.
-<!-- agent:boundary:a32f8406 -->
+<!-- agent:boundary:c262f058 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

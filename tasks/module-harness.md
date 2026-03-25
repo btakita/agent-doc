@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — added audit.md ontology node
+**Active** — refined audit.md with agent-actionable results
 <!-- /agent:status -->
 
 ## Exchange
@@ -166,7 +166,23 @@ The node follows the same Ontology/Axiology/Epistemology structure and integrate
 - The `eval_result` type with `{score, deviation, direction}` from our range eval discussion
 - Aggregation levels: module score → directory score → drift report
 - The audit-as-universal-pattern framing (financial, security, code audits all share the structure)
-<!-- agent:boundary:0093f379 -->
+
+> An audit produces a structured report with quantified results.
+
+When I have been using audit-docs, we have been getting actionable results that the agent can perform.
+
+Quantifiable results are interesting and we very well may want them.
+### Assistant
+
+**Re: Audit actionability**
+
+Good catch — the original definition said "structured report with quantified results" which is too passive. In your experience with audit-docs, the audit produces **actionable items that the agent performs**, not just a report to read. Updated `audit.md`:
+
+1. **Ontology definition** now says "actionable results — structured items that agents can directly perform" instead of "structured report with quantified results"
+2. **Axiology** now includes the closed-loop pattern: `audit → detect → remediate → re-audit`. An agentic audit that finds missing spec entries doesn't just report the gap — it generates the entries.
+
+This is the key difference between a traditional audit (produces a document for humans to act on) and an agentic audit (produces a work queue that agents execute). The audit becomes a **self-healing** mechanism when the agent can act on its own findings.
+<!-- agent:boundary:726706cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -178,4 +194,5 @@ The node follows the same Ontology/Axiology/Epistemology structure and integrate
 - Update eval.md ontology node with directional range eval spec
 - ([done]) Formalize eval.md spec connecting ontology → quantification model
 - ([done]) Add audit.md to ontology
+- ([done]) Refine audit.md with agent-actionable results pattern
 <!-- /agent:pending -->

@@ -7,11 +7,23 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+**Session active** — module-harness task document initialized. Awaiting instructions.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+
+### Assistant (HEAD)
+
+Module-harness session ready. This document tracks work related to the `/module-harness` skill — generating, updating, and auditing module-level harness context (specs, contracts, evals) for any programming language.
+
+What would you like to work on? Some options:
+- Define or refine the module-harness skill spec
+- Generate harness context for a specific module/submodule
+- Audit existing harness coverage across the repo
+- Plan improvements to the skill workflow
+<!-- agent:boundary:857f5077 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

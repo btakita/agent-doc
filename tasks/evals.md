@@ -93,7 +93,7 @@ evals/
 #### Recommended Starting Point
 
 Start with **agent-doc diff interpretation** evals — highest-leverage area since it's the core reasoning loop every session depends on. Create 20-30 golden-answer test cases from real session diffs (plenty in git history), then expand with Claude-generated variations.
-<!-- agent:boundary:a6148076 -->
+<!-- agent:boundary:bfb313b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

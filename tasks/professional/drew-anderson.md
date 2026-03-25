@@ -439,7 +439,7 @@ Brian
 
 Ready to send, or any final tweaks?
 
-### Re: Draft v9 — analytics angle + KPI question + iteration practices (HEAD)
+### Re: Draft v9 — analytics angle + KPI question + iteration practices
 
 Three good additions:
 
@@ -474,7 +474,7 @@ Brian
 - **Analytics-first approach added:** "instrumenting the full consumer interaction pipeline to measure what actually moved engagement" — signals you think beyond just building, into measuring impact. Hints at Chatroulette funnel without naming it
 - **KPI question leads the compare-notes section:** "How are you measuring interaction quality?" — shows business thinking, invites Drew to share his metrics (which tells you how serious the product is)
 - Slightly longer but each addition is high-signal
-<!-- agent:boundary:026f8c2e -->
+<!-- agent:boundary:9b1ea9c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

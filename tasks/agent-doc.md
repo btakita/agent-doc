@@ -2238,13 +2238,97 @@ Key design decisions:
 - **Drift as Evolution**: drift is natural — code evolves. The ontology frames it neutrally (not as failure) while the tooling surfaces it for action.
 
 Pushed to GitHub: https://github.com/btakita/module-harness
-<!-- agent:boundary:5d0ab379 -->
+
+### Re: Ontology for module-harness
+
+Created 7 domain terms in `ontology/src/`, each following the existence-lang node format (Ontology/Axiology/Epistemology):
+
+| Term | Extends | Definition |
+|------|---------|------------|
+| **Harness** | Context | Structured context applied to a module — bounds what an agent needs to know |
+| **Spec** | Definition | Behavioral specification of public interface — what it does, not how |
+| **Contract** | Integrity | Invariant or guarantee a module upholds — what callers can rely on |
+| **Eval** | Pattern | Named, testable scenario — repeatable pattern connecting spec to evidence |
+| **Coverage** | Resolution | Degree to which evals account for spec — resolution metric on completeness |
+| **Drift** | Evolution | Divergence between harness and actual state — system evolved beyond docs |
+| **Backtest** | Story | Replayed agent work against known state — story measuring harness effectiveness |
+
+**Ontology chain:**
+```
+Existence → Entity → System → Domain → Module → Harness
+                                                  ├── Spec (what it does)
+                                                  ├── Contract (what callers can assume)
+                                                  └── Eval (how to verify)
+                                                       ├── Coverage (completeness metric)
+                                                       └── Backtest (effectiveness metric)
+```
+
+Key design decisions:
+- **Spec vs Contract**: spec describes per-function behavior; contract describes cross-cutting guarantees (atomicity, error handling). Both are needed — agents use spec to understand, contracts to reason about safety.
+- **Eval as Pattern**: evals are the bridge between documentation and measurement. The name makes them addressable by test frameworks and coverage tools.
+- **Drift as Evolution**: drift is natural — code evolves. The ontology frames it neutrally (not as failure) while the tooling surfaces it for action.
+
+Pushed to GitHub: https://github.com/btakita/module-harness
+
+### Re: Ontology for module-harness
+
+Created 7 domain terms in `ontology/src/`, each following the existence-lang node format (Ontology/Axiology/Epistemology):
+
+| Term | Extends | Definition |
+|------|---------|------------|
+| **Harness** | Context | Structured context applied to a module — bounds what an agent needs to know |
+| **Spec** | Definition | Behavioral specification of public interface — what it does, not how |
+| **Contract** | Integrity | Invariant or guarantee a module upholds — what callers can rely on |
+| **Eval** | Pattern | Named, testable scenario — repeatable pattern connecting spec to evidence |
+| **Coverage** | Resolution | Degree to which evals account for spec — resolution metric on completeness |
+| **Drift** | Evolution | Divergence between harness and actual state — system evolved beyond docs |
+| **Backtest** | Story | Replayed agent work against known state — story measuring harness effectiveness |
+
+**Ontology chain:**
+```
+Existence → Entity → System → Domain → Module → Harness
+                                                  ├── Spec (what it does)
+                                                  ├── Contract (what callers can assume)
+                                                  └── Eval (how to verify)
+                                                       ├── Coverage (completeness metric)
+                                                       └── Backtest (effectiveness metric)
+```
+
+Key design decisions:
+- **Spec vs Contract**: spec describes per-function behavior; contract describes cross-cutting guarantees (atomicity, error handling). Both are needed — agents use spec to understand, contracts to reason about safety.
+- **Eval as Pattern**: evals are the bridge between documentation and measurement. The name makes them addressable by test frameworks and coverage tools.
+- **Drift as Evolution**: drift is natural — code evolves. The ontology frames it neutrally (not as failure) while the tooling surfaces it for action.
+
+Pushed to GitHub: https://github.com/btakita/module-harness
+The tmux session 6 went into a 3 pane layout. Please review logs.
+I saw:
+- right editor selected module-harness.md
+- left editor selected audit.md
+- left editor selected spec.md: In 3 pane layout `l1 | l2 | r1`
+- left editor selected agend-doc.md: Corrected to 2 pane layout
+
+Please write tests for this scenario.
+
+### Re: 3-pane layout issue (HEAD)
+
+Session 6 is currently at 2 panes (correct). The 3-pane layout was transient — likely triggered during the IPC timeout when a sync cycle momentarily added a pane before the layout self-corrected.
+
+**What happened:** The `agent-doc write` IPC timed out (exit code 75), then the `--force-disk` fallback wrote the response again. The CRDT merge handled the concurrent content correctly but the exchange section got the ontology response duplicated because both the IPC patch (consumed late) and the disk write applied.
+
+**Root cause:** When IPC times out, `agent-doc write` exits with code 75 and saves the patch file. If the plugin later consumes the patch, the content gets applied twice when the skill retries with `--force-disk`. This is a known gap — the IPC timeout should either:
+1. Delete the patch file before returning 75 (preventing late consumption), or
+2. The `--force-disk` path should check for and delete any pending IPC patches
+
+I'll clean up the duplicated content in the exchange. The duplicated pending entry is also from this same issue.
+
+Note: Your `"Plrease"` at the end appears truncated — looks like you were still typing when the cycle triggered. Let me know what you wanted to add.
+<!-- agent:boundary:2449eba2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**module-harness ontology** — 7 terms defined, pushed~~ ([done])
+- **IPC timeout double-write bug** — fix `agent-doc write` to prevent duplicate application when IPC times out and plugin consumes late
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

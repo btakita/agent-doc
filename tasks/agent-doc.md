@@ -660,7 +660,7 @@ build/distributions/agent-doc-jetbrains-0.2.24.zip
 - `NativeLib.kt`: `agent_doc_set_status`, `agent_doc_get_status`, `agent_doc_is_busy`
 - `EditorTabSyncListener.kt`: FFI busy guard before sync
 - `TerminalUtil.kt`: FFI busy guard before route
-<!-- agent:boundary:1caf6829 -->
+<!-- agent:boundary:0364788e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

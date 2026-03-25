@@ -1561,7 +1561,7 @@ debounce error just occurred...see `Why did`...I was in the middle of typing.
 What happened? 
 Why did
 
-### Re: Patching & detection gaps (HEAD)
+### Re: Patching & detection gaps
 
 The previous response **was** written to the document (IPC patch consumed successfully) — you may have deleted it before seeing it, or it landed in an unexpected location.
 
@@ -1574,7 +1574,7 @@ The previous response **was** written to the document (IPC patch consumed succes
 **Why detection missed it initially:** I verified tests passed (547/547) but didn't check the actual tmux session state or install the binary. Lesson saved to memory.
 
 "Why did" — your edit appears truncated. What were you asking?
-<!-- agent:boundary:03ee2a0f -->
+<!-- agent:boundary:256aa314 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

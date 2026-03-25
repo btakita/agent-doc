@@ -1186,7 +1186,7 @@ This way individual documents don't each need `tmux_session` in their frontmatte
 **For multi-project support:** `agent-doc <cmd> .` would resolve `.` to the nearest `.agent-doc/` directory, which uniquely identifies the project. Different projects in different directories get different configs.
 
 Implementing Part 1 now — un-deprecating `tmux_session` in route.rs and sync.rs.
-### Re: Project config, not frontmatter (HEAD)
+### Re: Project config, not frontmatter
 
 Understood — frontmatter is the wrong place for project state. Reverted.
 
@@ -1205,7 +1205,7 @@ tmux_session = "0"
 `sync.rs` still passes `tmux_session: None` in `FileResolution` — the tmux-router derives session from `--window` or wanted panes, which is correct since the window comes from the editor plugin (session 0).
 
 Binary installed. Try `Sync Tmux Layout` now — route should target session "0" from the project config.
-<!-- agent:boundary:4338eb87 -->
+<!-- agent:boundary:694d49b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -540,7 +540,7 @@ I'll stop using `--force-disk` by default. The IPC path is preferred because it 
 Can we have a quick "pending" flag via CRDT or something else to signal that a response is incoming?
 Also indicate if the response is blocked by another operation.
 
-### Re: Pending flag for incoming response (HEAD)
+### Re: Pending flag for incoming response
 
 Good idea. Two signals needed:
 
@@ -573,7 +573,7 @@ The plugin already watches for boundary changes. This requires no new infrastruc
 **Recommendation: Option A + C combined.** File signal for cross-process visibility, boundary marker state for in-document signaling. Both are lightweight.
 
 Want me to implement this?
-<!-- agent:boundary:480754ba -->
+<!-- agent:boundary:2c1b47d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

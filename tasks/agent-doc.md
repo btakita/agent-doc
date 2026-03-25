@@ -1536,7 +1536,7 @@ Noted from your edits:
 Which should I tackle first?
 > 4. **Window 0 loss** — bug to investigate
 
-### Re: Window 0 loss — root cause & fix (HEAD)
+### Re: Window 0 loss — root cause & fix
 
 **Root cause:** `repair_layout()` Phase 3 used `move-window -t session:0` to normalize window indices. When window 0 was already occupied by another window (e.g., corky watch), `move-window` silently failed — leaving agent-doc at index 2 and window 0 unchanged.
 
@@ -1549,7 +1549,7 @@ Which should I tackle first?
 **File:** `src/agent-doc/src/sync.rs` lines 228-252
 
 **Results:** 547 tests pass (173 lib + 336 bin + 38 integration). Release binary built.
-<!-- agent:boundary:2a6c297e -->
+<!-- agent:boundary:47c06574 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

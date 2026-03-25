@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created: `mail/contacts/drew-anderson/AGENTS.md`
+Contact created — `mail/contacts/drew-anderson/`
 <!-- /agent:status -->
 
 ## Exchange
@@ -16,7 +16,7 @@ Contact created: `mail/contacts/drew-anderson/AGENTS.md`
 Create a contact for drew-anderson
 https://www.linkedin.com/in/drewanderson/
 
-### Re: Create contact for drew-anderson (HEAD)
+### Re: Create contact for drew-anderson
 
 Created contact at `mail/contacts/drew-anderson/`:
 - **AGENTS.md** — full contact file (canonical)
@@ -32,10 +32,27 @@ Profile from LinkedIn:
 - **LinkedIn:** https://www.linkedin.com/in/drewanderson/
 
 The contact is minimal since LinkedIn data was partially redacted. You can flesh out the relationship and tone sections once you've had communication.
-<!-- agent:boundary:3a61e05d -->
+
+### Re: Create contact
+
+Created `mail/contacts/drew-anderson/` with:
+- **AGENTS.md** — professional profile from LinkedIn
+- **CLAUDE.md** → symlink to AGENTS.md
+
+**Profile summary:**
+- **Drew Anderson** — AI Architect & Tech Strategist at Carat Venture Partners
+- **Location:** Los Gatos, CA (Silicon Valley)
+- **Focus:** AI, OTT video, cloud tech, nearshoring
+- **Patents:** 4 (2010) — ad tech & content personalization
+- **Certs:** AWS (Business Pro, Cloud Practitioner, Security), HIPAA
+- **Volunteer:** CERT / Santa Clara County Fire Dept (2012–present)
+
+What's the context for connecting with Drew? I can help draft outreach or add relationship notes.
+<!-- agent:boundary:143a4232 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Add relationship context / communication timeline when available
 <!-- /agent:pending -->

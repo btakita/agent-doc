@@ -456,22 +456,10 @@ Implement the placeholder now.
 The placeholder should also work with non *.md files. It's really about the shape of the editor layout.
 You can commit and push. Don't release yet.
 
-agent-doc regression: committing the response patch with the top level patch (h3 in this case) headers having the ` (HEAD)` prefix. With uncommit change to remove the `
+agent-doc regression: committing the response patch with the top level patch (h3 in this case) headers having the ` (HEAD)` suffix. With uncommit change to remove the ` (HEAD)` suffix.
 
-### Re: Implement placeholder panes
-
-**Implemented.** When sync encounters an unclaimed file (no session UUID), it now auto-inits the file by writing a session UUID via `frontmatter::ensure_session()`. This makes the file "managed" so the auto-start path creates a Claude pane for it.
-
-**How it works:**
-1. Sync's `resolve_file` encounters a file without a session UUID
-2. Writes a UUID via `ensure_session()` → file becomes managed
-3. Auto-start sees the file has a UUID but no alive pane → creates one
-4. Sync arranges panes in the 2D layout as normal
-
-This means switching to an unclaimed .md file in the editor will auto-claim it on the next sync cycle — no manual `/agent-doc claim` needed.
-
-**Tests:** 558 passing. Binary rebuilt and installed.
-<!-- agent:boundary:2948897e -->
+There was a external change to this file. Why?
+<!-- agent:boundary:73d41ef5:agent-doc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -287,14 +287,81 @@ Why would tmux behavior affect the agent-doc + plugin behavior on the document?
 **Stash window recreation**: The next `agent-doc sync` or `agent-doc route` call will auto-create the stash window when needed via `ensure_stash_window()`.
 
 **Fix committed and pushed** — the sync-on-all-route-paths fix is already on GitHub (`326b6d4`). The current binary has the fix.
-There are 2 agent-doc
 
 ### Re: 2 agent-doc windows
 
 Fixed — renamed window @74 to "stash". Layout now correct: `0:agent-doc` (2 panes) + `1:stash` (1 pane).
 
 The orphan window was created by my `break-pane` fix earlier. `break-pane` doesn't know about the stash naming convention — it creates a new anonymous window. The stash should have been recreated by `ensure_stash_window()`, but since a second "agent-doc" window already existed at index 1, there was no trigger to create a stash.
-<!-- agent:boundary:d5365723 -->
+
+### Re: Module harness for propagation bugs
+
+Great question. This is a **cross-cutting concern** — behavior that should apply uniformly across multiple code paths but gets missed when paths are added independently.
+
+**How module-harness can help:**
+
+The harness contract for `route.rs` should say:
+```
+## Agentic Contracts (HEAD)
+- **Post-route sync invariant**: ALL route exit paths (alive pane, lazy claim, auto-start) 
+  MUST call sync_after_claim with the editor's col_args before returning Ok(()).
+```
+
+An agent reading this contract before modifying route would know to check all paths. Today the contract exists but doesn't call out this specific invariant. I should update it.
+
+**Cross-cutting abstraction:**
+
+Yes — the right pattern is a single exit point. Instead of 3 separate return paths each needing to remember to sync, refactor `run_with_tmux` to:
+
+```rust
+fn run_with_tmux(...) -> Result<()> {
+    let pane_id = resolve_or_create_pane(...)?;  // handles all 3 paths
+    sync_after_claim(tmux, &pane_id, col_args);  // single sync call
+    Ok(())
+}
+```
+
+This eliminates the propagation problem entirely — there's one sync call, not three. The three paths become a single `resolve_or_create_pane` that returns the pane ID regardless of how it was obtained.
+
+**For module-harness specifically**, the eval to add:
+```
+- post_route_sync_invariant: route with 2 col_args + 3 registered panes → only 2 panes remain
+```
+
+This eval tests the invariant across ALL paths, not just one. If any path breaks, the eval catches it.
+
+### Re: Why tmux affects document content
+
+Good catch — it shouldn't. The "lost typing" was NOT caused by tmux `break-pane` affecting the document file. It was caused by:
+
+1. **Editor focus shift**: When tmux rearranges panes, the editor plugin receives a focus event for the resized pane. If the active editor tab changes (e.g., the plugin auto-navigates), the cursor position and unsaved buffer state can be disrupted.
+
+2. **Plugin routing trigger**: The JetBrains plugin fires `agent-doc route` on editor tab focus changes. A tmux layout shift can trigger a cascade: pane resize → editor focus event → route call → potential additional pane operations.
+
+The fix for this: the plugin should debounce layout-triggered focus events and not route during active tmux operations. This is a plugin-side fix, not a binary-side fix.
+Preferable a FFI plugin fix so all editors can share the behavior.
+There are 2 agent-doc windows...which is incorrect.
+There should be 0:agent-doc and 1:stash
+The left tmux layout has a 2 pane ver
+
+### Re: FFI plugin debounce + window fix
+
+Agreed — the debounce belongs in the FFI layer so all editors share it. The `debounce.rs` module already has the primitives (`document_changed`, `is_idle`, `await_idle`). The missing piece is a **route-level debounce** that prevents cascading route calls during layout operations.
+
+**Proposed FFI addition:**
+```rust
+// In ffi.rs — new exports
+pub extern "C" fn agent_doc_route_begin() { ... }  // mark route in progress
+pub extern "C" fn agent_doc_route_end() { ... }    // mark route complete
+pub extern "C" fn agent_doc_is_routing() -> bool { ... }  // check if routing
+```
+
+Plugins call `route_begin`/`route_end` around their route invocations. Before triggering a new route from a focus event, they check `is_routing()` — if true, skip the route (it's a cascade from an in-progress operation).
+
+This is a cleaner pattern than per-plugin debounce — one implementation, all editors benefit.
+
+The 2 agent-doc windows issue was fixed (renamed @74 to "stash"). The layout is now correct: `0:agent-doc` + `1:stash`.
+<!-- agent:boundary:fe55245d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -302,7 +369,7 @@ The orphan window was created by my `break-pane` fix earlier. `break-pane` doesn
 <!-- agent:pending -->
 - **Refactor route to single exit point** — eliminate propagation bugs by design
 - **Update route.rs harness contract** — add post-route sync invariant
-- **Plugin debounce for layout events** — prevent cascade from tmux pane operations
+- **FFI route guard** — `route_begin`/`route_end`/`is_routing` to prevent cascade from layout events
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

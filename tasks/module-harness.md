@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — expanding range evals with directional vectors
+**Active** — added audit.md ontology node
 <!-- /agent:status -->
 
 ## Exchange
@@ -150,7 +150,23 @@ eval_result {
 ```
 
 This maps to the ontology: **Resolution** now carries both magnitude (score) and direction (deviation) — a richer measurement that preserves information about *where* the value sits relative to the optimal band, not just *how far* it is.
-<!-- agent:boundary:79b5cc8d -->
+Add audit to the ontology.
+### Assistant
+
+**Created `src/module-harness/ontology/src/audit.md`**
+
+Audit is the active process that connects evals to actionable results. Key distinctions from related terms:
+
+- **Eval** defines *what* to measure → **Audit** is *running* those measurements
+- **Coverage** is a *metric* the audit computes → **Drift** is a *condition* the audit detects
+- **Backtest** compares audit results *across time* → a single audit is a *point-in-time snapshot*
+
+The node follows the same Ontology/Axiology/Epistemology structure and integrates:
+- The three audit layers (static, dynamic, agentic) mirroring eval execution layers
+- The `eval_result` type with `{score, deviation, direction}` from our range eval discussion
+- Aggregation levels: module score → directory score → drift report
+- The audit-as-universal-pattern framing (financial, security, code audits all share the structure)
+<!-- agent:boundary:7de9cb5f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -161,4 +177,5 @@ This maps to the ontology: **Resolution** now carries both magnitude (score) and
 - Create reference plugin harness with runnable evals
 - Update eval.md ontology node with directional range eval spec
 - ([done]) Formalize eval.md spec connecting ontology → quantification model
+- ([done]) Add audit.md to ontology
 <!-- /agent:pending -->

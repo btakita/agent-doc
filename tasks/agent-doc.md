@@ -1558,8 +1558,9 @@ Does the agent-doc binary also miss these issues?
 Is the binary installed locally?
 Please patch this document with the response.
 debounce error just occurred...see `Why did`...I was in the middle of typing.
-What happened? 
-Why did
+What happened?
+
+Why did you not respond with a patch in the last run?
 
 ### Re: Patching & detection gaps
 
@@ -1574,7 +1575,20 @@ The previous response **was** written to the document (IPC patch consumed succes
 **Why detection missed it initially:** I verified tests passed (547/547) but didn't check the actual tmux session state or install the binary. Lesson saved to memory.
 
 "Why did" — your edit appears truncated. What were you asking?
-<!-- agent:boundary:256aa314 -->
+
+### Re: Debounce & missing patch (HEAD)
+
+**What happened:** The previous run (before this one) DID write a patch — "Re: Missed detection & binary install" appeared in the exchange. You deleted it while editing the section, then the debounce triggered a new cycle before you finished typing "Why did". That cycle picked up your incomplete edit as a diff.
+
+The cycle after that (this run's predecessor) DID patch the response "Re: Patching & detection gaps" — which is now visible in the document.
+
+**The debounce race:** When you edit near the boundary marker and the watch daemon triggers, it can capture mid-edit state. The skill is supposed to detect truncated edits and wait, but "Why did" looked like a complete (if terse) phrase, so I responded to it instead of waiting.
+
+**Summary of debounce sequence:**
+1. Run N: Wrote "Re: Missed detection" → you deleted it while editing
+2. Run N+1: Picked up your deletion + "Why did" (truncated) → wrote "Re: Patching"
+3. Run N+2 (this one): You finished typing → this response
+<!-- agent:boundary:ebd100a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

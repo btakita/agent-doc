@@ -1497,21 +1497,49 @@ Implemented overflow stash in tmux-router. When the terminal shrinks and panes b
 **Full test suite: 77/77 passing.** Release binary built.
 
 **Cross-session verification:** The sync code (lines 602-642) already validates `--window` against the target session — if `--window` is in a different session, it's ignored. The cross-session contamination you may have seen was likely from an earlier version before these guards were added.
-<!-- agent:boundary:a4ff8cde -->
+release
+audit docs
+Add to SPEC.md
+
+We lost window 0:agent-doc.
+Switched claude session to 1:stash
+I switched the editor view to the right document...tasks/recruit/benjamin-becker.md
+2:agent-doc opened (should have been 0:agent-doc)
+Just saw the agent-doc window close.
+Only see 1:stash now.
+Also 1:stash originated in tmux session 3.
+What is running is corky watch...started in tmux session 3 window 1
+I
+
+### Re: Window loss & stash origin (HEAD)
+
+**Current tmux session 0 state:**
+- `1:stash` (@2) — `corky watch` (PID 92194), 1000-row stash height. This is an original session 0 window (window ID @2 is very low = created early). Not from session 3.
+- `2:agent-doc` (@58) — active agent-doc pane, 15 rows tall
+
+**Window 0 is missing.** The original `0:agent-doc` was destroyed at some point. The stash window is legitimate session 0 content running `corky watch`.
+
+The 15-row terminal height likely triggered overflow stashing, and the resync may have improperly handled the window during the process. This needs investigation.
+
+### Re: Action items (HEAD)
+
+Noted from your edits:
+1. **Release v0.25.16** — version bumped, needs `cargo publish` + binary
+2. **Audit docs** — will run audit check
+3. **Add to SPEC.md** — document overflow stash feature
+4. **Window 0 loss** — bug to investigate
+
+Which should I tackle first?
+<!-- agent:boundary:bcd4bfde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **Project config for tmux_session** — `.agent-doc/config.toml` replaces frontmatter
-- [x] **SessionScope type wrapper** — implemented
-- [x] **Reconcile post-condition** — session boundary check at VERIFY
-- [x] **Session firewall tests** — standardized cross-session test template
-- [x] **Purge unregistered stash panes** — kills orphaned agent/shell panes in stash
-- [x] **Purge orphaned agent panes in non-stash windows** — session 3 orphan fixed
-- [x] **Split direction from column position** — already implemented (8 tests)
-- [x] **Overflow stash for small terminals** — MIN_PANE_HEIGHT + stash_overflow_panes (4 tests)
-- [ ] **Release v0.25.16** — version bumped, needs publish
+- [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
+- [ ] Audit docs
+- [ ] Add overflow stash to SPEC.md
+- [ ] Investigate window 0 destruction bug
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

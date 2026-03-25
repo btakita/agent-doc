@@ -597,7 +597,7 @@ We should do B too — all three. Here's why each matters:
 I'll implement all three.
 go...I don't see the patch response if you already finished
 
-### Re: Implement status signals (HEAD)
+### Re: Implement status signals
 
 **All three implemented and pushed** (`2002907`):
 
@@ -608,7 +608,7 @@ go...I don't see the patch response if you already finished
 Status values: `"generating"`, `"writing"`, `"routing"`, `"idle"`
 
 558 tests passing. Binary rebuilt. Next: plugin calls `is_busy()` before routing.
-<!-- agent:boundary:8d9f7318 -->
+<!-- agent:boundary:04da41ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

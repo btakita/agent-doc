@@ -1595,7 +1595,7 @@ Were these deterministic operations skipped?
 2. Run N+1: Picked up your deletion + "Why did" (truncated) → wrote "Re: Patching"
 3. Run N+2 (this one): You finished typing → this response
 
-### Re: Were debounce operations skipped? (HEAD)
+### Re: Were debounce operations skipped?
 
 No — the debounce ran but has a structural gap in this scenario.
 
@@ -1610,7 +1610,7 @@ No — the debounce ran but has a structural gap in this scenario.
 **Potential fix:** The preflight could query the FFI debounce state via a socket or lock file, so CLI-invoked runs also wait for typing to settle. Alternatively, the diff's truncation detection (`[diff] Last line may be truncated`) could be stricter about incomplete sentences.
 
 Should I add this to the pending list as a feature?
-<!-- agent:boundary:707effe7 -->
+<!-- agent:boundary:1d8390d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

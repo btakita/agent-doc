@@ -149,12 +149,43 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     eprintln!("[route] target tmux session: {}", target_session);
 
     let file_path = file.to_string_lossy();
-    let registered = sessions::lookup(&session_id)?;
 
-    // Step 1: Check if registered pane is alive AND in the correct tmux session
+    // === SINGLE EXIT POINT PATTERN ===
+    // All paths resolve to a pane_id, then ONE sync call handles layout.
+    // This prevents propagation bugs where cross-cutting behavior (sync)
+    // is added to one path but missed on others.
+    let pane_id = resolve_or_create_pane(
+        tmux, file, pane, col_args,
+        &session_id, &file_path, &target_session,
+    )?;
+
+    // Post-route sync: align tmux layout to editor's col_args.
+    // This is the ONLY place sync runs after route — never in individual paths.
+    sync_after_claim(tmux, &pane_id, col_args);
+
+    Ok(())
+}
+
+/// Resolve an existing pane or create a new one. Returns the pane ID.
+///
+/// Three resolution strategies, tried in order:
+/// 1. Alive registered pane in the correct session → reuse (send command)
+/// 2. Lazy claim to an active pane (when registered pane is dead)
+/// 3. Auto-start a new Claude session
+fn resolve_or_create_pane(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+) -> Result<String> {
+    let registered = sessions::lookup(session_id)?;
+
+    // Strategy 1: Alive registered pane in correct session
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            // Verify the pane is in the target tmux session
             let pane_session = tmux
                 .cmd()
                 .args(["display-message", "-t", registered_pane, "-p", "#{session_name}"])
@@ -164,54 +195,17 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
                 .unwrap_or_default();
 
             if pane_session == target_session {
-                // Check if pane is in a stash window — if so, rescue it
-                let pane_win_name = tmux.pane_window(registered_pane).ok()
-                    .and_then(|wid| {
-                        tmux.cmd()
-                            .args(["display-message", "-t", &wid, "-p", "#{window_name}"])
-                            .output().ok()
-                            .filter(|o| o.status.success())
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    })
-                    .unwrap_or_default();
-
-                if pane_win_name == "stash" || pane_win_name.starts_with("stash-") {
-                    eprintln!(
-                        "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
-                        registered_pane, pane_win_name
-                    );
-                    // Find the agent-doc window and join the pane back
-                    let agent_doc_window = format!("{}:agent-doc", target_session);
-                    let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
-                    if let Some(target) = target_panes.first() {
-                        match tmux.swap_pane(registered_pane, target) {
-                            Ok(()) => {
-                                eprintln!("[route] Rescued pane {} via swap-pane", registered_pane);
-                            }
-                            Err(e) => {
-                                eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);
-                                let _ = tmux.join_pane(registered_pane, target, "-dh");
-                            }
-                        }
-                    }
-                    // Update registry window
-                    if let Err(e) = sessions::register(&session_id, registered_pane, &file_path) {
-                        eprintln!("[route] warning: re-register failed: {}", e);
-                    }
-                }
+                // Rescue from stash if needed
+                rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
 
                 eprintln!("[route] Pane {} is alive in session '{}'", registered_pane, pane_session);
-                send_command(tmux, registered_pane, &file_path)?;
-                // Sync layout to match editor's col_args (stash excess panes)
-                sync_after_claim(tmux, registered_pane, col_args);
-                return Ok(());
+                send_command(tmux, registered_pane, file_path)?;
+                return Ok(registered_pane.clone());
             }
             eprintln!(
                 "[route] Pane {} is alive but in wrong session ('{}', expected '{}'). Will re-create.",
                 registered_pane, pane_session, target_session
             );
-            // Don't kill — the user might want to keep the session.
-            // Just proceed to auto-start in the correct session.
         } else {
             eprintln!("[route] Pane {} is dead", registered_pane);
         }
@@ -222,33 +216,67 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         );
     }
 
-    // Step 2: Try lazy claim to an active pane (only when a registered pane died).
-    // For unregistered files (no prior session), skip to auto-start so each file
-    // gets its own Claude session instead of stealing an existing one.
-    if registered.is_some()
-        && let Some(new_pane) = find_target_pane(tmux, pane, &target_session) {
+    // Strategy 2: Lazy claim (only when a registered pane died)
+    if registered.is_some() {
+        if let Some(new_pane) = find_target_pane(tmux, pane, target_session) {
             eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
-            sessions::register(&session_id, &new_pane, &file_path)?;
-            send_command(tmux, &new_pane, &file_path)?;
-            sync_after_claim(tmux, &new_pane, col_args);
-            return Ok(());
+            sessions::register(session_id, &new_pane, file_path)?;
+            send_command(tmux, &new_pane, file_path)?;
+            return Ok(new_pane);
         }
+    }
 
-    // Step 3: Auto-start a new Claude session
+    // Strategy 3: Auto-start
     eprintln!("[route] No active pane found, auto-starting...");
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
     let split_before = is_first_column(file, col_args);
-    auto_start_in_session(tmux, file, &session_id, &file_path, &target_session, false, split_before)?;
+    auto_start_in_session(tmux, file, session_id, file_path, target_session, false, split_before)?;
 
-    // Sync layout after auto-start — ensures the pane arrangement matches the editor's
-    // col_args, stashing any excess panes from previous file selections.
-    if let Some(pane_id) = sessions::lookup(&session_id)? {
-        sync_after_claim(tmux, &pane_id, col_args);
+    // Look up the pane that was just created
+    sessions::lookup(session_id)?
+        .ok_or_else(|| anyhow::anyhow!("auto-start completed but pane not found in registry"))
+}
+
+/// Rescue a pane from a stash window back to the agent-doc window.
+fn rescue_from_stash(
+    tmux: &Tmux,
+    pane_id: &str,
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+) {
+    let pane_win_name = tmux.pane_window(pane_id).ok()
+        .and_then(|wid| {
+            tmux.cmd()
+                .args(["display-message", "-t", &wid, "-p", "#{window_name}"])
+                .output().ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .unwrap_or_default();
+
+    if pane_win_name == "stash" || pane_win_name.starts_with("stash-") {
+        eprintln!(
+            "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
+            pane_id, pane_win_name
+        );
+        let agent_doc_window = format!("{}:agent-doc", target_session);
+        let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
+        if let Some(target) = target_panes.first() {
+            match tmux.swap_pane(pane_id, target) {
+                Ok(()) => eprintln!("[route] Rescued pane {} via swap-pane", pane_id),
+                Err(e) => {
+                    eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);
+                    let _ = tmux.join_pane(pane_id, target, "-dh");
+                }
+            }
+        }
+        if let Err(e) = sessions::register(session_id, pane_id, file_path) {
+            eprintln!("[route] warning: re-register failed: {}", e);
+        }
     }
-
-    Ok(())
 }
 
 /// Send `/agent-doc <file>` to a pane and focus it.

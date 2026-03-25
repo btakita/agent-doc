@@ -2453,7 +2453,7 @@ Using a path dependency for now (not yet on crates.io). This ensures agent-doc's
 Compilation verified — no errors.
 Should existence-lang be a dev dependency?
 
-### Re: existence-lang as dev dependency? (HEAD)
+### Re: existence-lang as dev dependency?
 
 No — existence-lang is a specification, not a code library. It has no Cargo.toml and no Rust exports. It's a collection of markdown term definitions.
 
@@ -2469,7 +2469,7 @@ Summary of dependency decisions:
 |-----------|------|--------|
 | module-harness | dev-dep (path) | Syntax sync for harness parsing |
 | existence-lang | git submodule only | Markdown specs, no code |
-<!-- agent:boundary:fed4d482 -->
+<!-- agent:boundary:bc366e3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

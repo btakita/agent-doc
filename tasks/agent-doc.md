@@ -2387,11 +2387,11 @@ Update README, SPEC.
 Add existence-lang ontology for this project.
 Should we add module-harness as a dependency or a dev dependency?
 
-### Re: write_ipc_and_poll() polling mechanism (HEAD)
+### Re: write_ipc_and_poll() polling mechanism
 
 **Threaded poll** — it uses `std::thread::sleep` in a loop, checking `patch_file.exists()` every 100ms with a 2s timeout. No FD events (inotify/kqueue). The polling approach was chosen for simplicity and portability — the 2s window is short enough that 100ms polling is negligible overhead, and it avoids platform-specific watcher dependencies.
 
-### Re: module-harness as dependency (HEAD)
+### Re: module-harness as dependency
 
 **Dev-dependency** — module-harness is a development tool, not a runtime requirement. Agent-doc doesn't call module-harness at runtime. The harness context lives in doc comments (compiled away) and the `module-harness` binary is only used during development/CI for auditing.
 
@@ -2402,7 +2402,7 @@ module-harness = "0.1"
 
 Though honestly, for now it doesn't even need to be a dependency at all — it's a standalone CLI tool that operates on source files. Adding it as a dev-dependency would only matter if we wanted to import it as a library (e.g., for programmatic eval coverage checks in tests).
 
-### Re: Audit docs + ontology (HEAD)
+### Re: Audit docs + ontology
 
 These are non-trivial tasks. Let me scope them:
 
@@ -2410,7 +2410,7 @@ These are non-trivial tasks. Let me scope them:
 2. **agent-doc existence-lang ontology** — agent-doc already has a Domain Ontology section in its README. A full existence-lang ontology with individual term files would define terms like: Document, Session, Component, Boundary, Snapshot, Patch, Exchange, etc.
 
 Want me to proceed with both, or is this session wrapping up? These could be a good next-session task.
-<!-- agent:boundary:d8ad7ee9 -->
+<!-- agent:boundary:948f3194 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

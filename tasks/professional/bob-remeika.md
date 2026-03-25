@@ -18,7 +18,7 @@ https://www.linkedin.com/in/bobremeika/
 
 Bob wrote a very kind endorsement for my post. Please help me express gratitude with a comment and a message.
 https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160/
-### Re: Contact & Gratitude Drafts (HEAD)
+### Re: Contact & Gratitude Drafts
 
 **Contact created** at `mail/contacts/bob-remeika/AGENTS.md`
 
@@ -43,7 +43,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160/
 > Hey Bob — your comment on my post really made my day. Grockit was such a formative time, and it means a lot coming from you. I've been keeping an eye on Ragie — the agentic OCR approach to document extraction is exactly the kind of infrastructure the ecosystem needs. Would love to catch up and hear more about what you're building. Always great to reconnect with Grockit folks.
 
 Let me know if you'd like to adjust tone, length, or content of either draft.
-<!-- agent:boundary:db21bb9c -->
+<!-- agent:boundary:cd4b4238 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

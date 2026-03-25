@@ -103,6 +103,9 @@ interface AgentDocLib : Library {
     /** Check if any operation is in progress. Returns true if status != "idle". */
     fun agent_doc_is_busy(file_path: String): Boolean
 
+    /** Get the library version (e.g. "0.26.1"). Caller must free result. */
+    fun agent_doc_version(): Pointer?
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

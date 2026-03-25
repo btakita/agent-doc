@@ -68,7 +68,7 @@ Yes do a light edit instead
 
 **Chapter markers and draft ready.** Creating YouTube draft now...
 
-### Re: YouTube release (continued) (HEAD)
+### Re: YouTube release (continued)
 
 **All prep complete:**
 - Edited video: `tmp/2026-03-24-edited.mp4` (110 min, 5.5 GB)
@@ -84,7 +84,7 @@ Yes do a light edit instead
 ```
 
 Then say "go" to publish.
-<!-- agent:boundary:703b37d5 -->
+<!-- agent:boundary:3c5215ad -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

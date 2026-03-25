@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — expanding ontology → eval mapping and plugin eval example
+**Active** — updated eval.md ontology node with quantification model
 <!-- /agent:status -->
 
 ## Exchange
@@ -31,19 +31,22 @@ Some evals could include:
 - Are there enough hooks?
 - Are there too many hooks?
 - Is the interface too simple or too complex?
+
 ### Assistant
 
 **Ontology → Eval Connection**
 
 The eval framework maps directly to the ontology chain:
 
-| Ontology Term | Eval Role |
-|---|---|
-| **System** | The module under evaluation — viewed from an internalized perspective |
+| Ontology Term  | Eval Role |
+|----------------|---|
+| **System**     | The module under evaluation — viewed from an internalized perspective |
 | **Resolution** | The granularity of measurement — boolean (1.0/0.0) is lowest resolution; Likert scales, continuous scores are higher |
-| **Pattern** | What evals detect — repeatable, predictable elements that should transfer across contexts |
-| **Context** | The scope bounding what's relevant to each eval — limits the information needed for coherent judgment |
-| **Focus** | Finite attention applied — each eval focuses on one measurable aspect to avoid dilution |
+| **Pattern**    | What evals detect — repeatable, predictable elements that should transfer across contexts |
+| **Scope**      | The scope bounding what's relevant to each eval — limits the information needed for coherent judgment |
+| **Focus**      | Finite attention applied — each eval focuses on one measurable aspect to avoid dilution |
+
+Re: Context: this term has a broader scope than "scope". It includes Agentic Context and human context...which is effectively whatever is held in attention space at any given moment. I want to be careful to be accurate with the terminology. And not overconstrain terms.
 
 **Quantification model:**
 - Boolean: `true → 1.0, false → 0.0` — pass/fail evals (contract violations, structural checks)
@@ -93,14 +96,35 @@ For a JetBrains plugin module (e.g., `python-intentions`), the harness evals wou
 | Is the interface too complex? | Ordinal | `API_surface_score` on 1-5 scale |
 
 The "too simple vs too complex" question is a **range eval** — the optimal value sits in a band, not at an extreme. This maps to the ontology's **Resolution** concept: you need enough granularity to distinguish "just right" from "too much" or "too little."
-<!-- agent:boundary:969708fc -->
+
+Update /home/brian/work/btakita/agent-loop/src/module-harness/ontology/src/eval.md with our research here.
+### Assistant
+
+**Re: Context vs Scope terminology**
+
+You're right — I was using Context where Scope was more precise. Fixed in the table. Context is the broader term: it encompasses the full attention space (agentic + human) active at the moment of evaluation, not just the bounds of what's relevant. Scope limits; Context includes everything held in working memory. The eval.md ontology node now reflects this distinction:
+
+- **Scope** → bounds what's relevant to each eval
+- **Context** → the full attention space active during evaluation (broader than scope)
+
+**Updated `src/module-harness/ontology/src/eval.md`**
+
+Added three new sections to the existing ontology node:
+
+1. **Ontology chain mapping table** — System, Resolution, Pattern, Scope, Context, Focus with their eval roles (preserving the Context/Scope distinction)
+2. **Quantification Model** — Boolean, Ordinal, Continuous, Composite scoring tiers
+3. **Range Evals** — band scoring for "too much/too little" criteria (hook count, API surface)
+4. **Eval Execution Layers** — Static (code-graded), Dynamic (test-backed), Agentic (LLM-graded)
+
+The file retains its original Ontology/Axiology/Epistemology structure with the new content integrated under Epistemology.
+<!-- agent:boundary:4340d013 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Formalize eval.md spec connecting ontology → quantification model
 - Build module-harness binary support for eval scoring (boolean + ordinal + continuous)
 - Create reference plugin harness with runnable evals
 - Add range-eval support (band scoring for "too much/too little" criteria)
+- ([done]) Formalize eval.md spec connecting ontology → quantification model
 <!-- /agent:pending -->

@@ -1788,7 +1788,7 @@ Starting implementation now.
 
 Will integrate, test, audit, and rebuild once they complete.
 
-### Re: evals window loss, stash visibility, and window 0 history (HEAD)
+### Re: evals window loss, stash visibility, and window 0 history
 
 **"I saw 0:agent-doc earlier"** — You're right. Looking at the git log timeline:
 
@@ -1816,7 +1816,7 @@ This is a real bug. The evals session was running, and something killed its tmux
 - **Fix needed:** Before any window kill/stash operation, check if the pane is registered in `sessions.json` for a *different* session. If so, skip it.
 
 Adding this to the pending list. Subagents still working on the health check and stash-return implementations.
-<!-- agent:boundary:1d3c19ef -->
+<!-- agent:boundary:fb8555b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

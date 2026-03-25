@@ -1772,7 +1772,7 @@ The `-a` flag in `new_window` was the root cause. Now removed. Future windows wi
 
 Starting implementation now.
 
-### Re: inline feedback (HEAD)
+### Re: inline feedback
 
 **"We should have 1:stash now"** — Created `0:1:stash` window. Session 0 now has `0:agent-doc` + `1:stash` as expected. The health check (in progress via subagent) will ensure this exists on every preflight.
 
@@ -1787,7 +1787,7 @@ Starting implementation now.
 2. Stash-return mechanism (returning active panes from stash to origin sessions)
 
 Will integrate, test, audit, and rebuild once they complete.
-<!-- agent:boundary:c2a4044e -->
+<!-- agent:boundary:44b3503f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

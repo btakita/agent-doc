@@ -12,6 +12,8 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Create a contact for andrey-ternovskiy
+- https://www.crunchbase.com/person/andrey-ternovskiy
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

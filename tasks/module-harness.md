@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — refined audit.md with agent-actionable results
+**Active** — v0.1.0 infrastructure complete, awaiting release approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -192,16 +192,66 @@ Right — it's both, not either/or. Updated `audit.md` to reflect dual outputs:
 2. **Actionable items** — work queue for agent remediation (the response)
 
 The report and the actions serve different consumers: the report feeds backtesting and trend analysis, the actions feed the agent's work queue. Both are first-class outputs of every audit.
-<!-- agent:boundary:e88a5e8a -->
+Let's add tests for the binary functions.
+Let's add github actions.
+Follow the same heuristics as in corky and agent-doc.
+Support builds for major platforms such as Linux, osx, and windows.
+
+Let's have our first release.
+
+Please save these general rust package instructions somewhere that I can refer to when making a new rust package in the future.
+Would this be an agent-loop skill?
+### Assistant
+
+**Tests, CI, release infrastructure, and rust-package skill — all done.**
+
+Here's what was built:
+
+**1. Integration Tests (11 new tests, 17 total)**
+- `parse_rust_file`, `parse_python_file`, `parse_typescript_file`, `parse_go_file` — verify JSON output for each language
+- `parse_nonexistent_file_fails` — error path
+- `inventory_fixtures_dir`, `inventory_with_ext_filter` — inventory command with ext filtering
+- `diff_rust_file`, `diff_no_harness` — human-readable diff output
+- `coverage_json_output`, `coverage_human_output` — both output formats
+- Test fixtures: `sample.rs`, `sample.py`, `sample.ts`, `sample.go`, `no_harness.rs`
+
+**2. Makefile** — Standard targets: `build`, `release`, `test`, `clippy`, `check`, `install`, `publish`, `install-hooks`, `clean`
+
+**3. GitHub Actions**
+- `ci.yml` — clippy + test on push to main / PRs
+- `release.yml` — cross-platform builds on tag push (`v*`):
+  - Linux x86_64, Linux aarch64 (via cross), macOS x86_64, macOS aarch64, Windows x86_64
+  - Packages as `.tar.gz` (Unix) / `.zip` (Windows)
+  - Creates GitHub Release with all binaries
+
+**4. Release Profile** — `Cargo.toml` now has `[profile.release]` with LTO, strip, panic=abort
+
+**5. Clippy fixes** — 5 collapsible-if warnings resolved across `parse.rs` and `main.rs`
+
+**6. `/rust-package` skill created** — Reusable instructions at `.claude/skills/rust-package/SKILL.md` covering:
+- Cargo.toml release profile
+- Makefile template
+- CI + Release workflow templates
+- PyPI workflow (optional, for maturin projects)
+- install.sh template (optional)
+- Release checklist
+
+**Ready to release v0.1.0** — needs your go-ahead to commit, tag, push, and publish to crates.io.
+<!-- agent:boundary:42efda31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Commit, tag v0.1.0, push, publish to crates.io (awaiting approval)
+- ([done]) Add integration tests for binary commands (parse, inventory, diff, coverage)
+- ([done]) Add GitHub Actions CI (clippy + test)
+- ([done]) Add GitHub Actions Release (cross-platform builds)
+- ([done]) Add Makefile with standard targets
+- ([done]) Add release profile to Cargo.toml
+- ([done]) Create /rust-package skill for future Rust packages
 - Extend eval result type with signed deviation + direction enum
 - Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
 - Create reference plugin harness with runnable evals
 - Update eval.md ontology node with directional range eval spec
-- ([done]) Formalize eval.md spec connecting ontology → quantification model
-- ([done]) Add audit.md to ontology (with dual-output: report + actionable items)
 <!-- /agent:pending -->

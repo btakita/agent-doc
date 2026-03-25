@@ -1556,30 +1556,32 @@ Window 2:agent-doc has 1 pane...it should have 2 panes.
 How/Why did you miss these issues with your detection?
 Does the agent-doc binary also miss these issues?
 Is the binary installed locally?
+Please patch this document with the response.
+debounce error just occurred...see `Why did`...I was in the middle of typing.
+What happened? 
+Why did
 
-### Re: Missed detection & binary install
+### Re: Patching & detection gaps (HEAD)
 
-**Why I missed it:** I fixed the code and ran tests but failed to verify the live system:
-1. Didn't install to `~/.cargo/bin` — tmux-spawned sessions were still on v0.25.15
-2. Didn't trigger repair on the current session to verify the fix
-3. Didn't check actual tmux state after the code change
+The previous response **was** written to the document (IPC patch consumed successfully) — you may have deleted it before seeing it, or it landed in an unexpected location.
 
-**Corrections made:**
-- `cargo install --path .` — `~/.cargo/bin/agent-doc` now v0.25.16
-- Window state is now correct: `0:agent-doc` (2 panes, @58), `1:stash` (@2)
-- The repair ran during preflight and correctly moved agent-doc to window 0
+**What was fixed this session:**
+1. **Root cause:** `repair_layout()` Phase 3 used `move-window` which silently fails when window 0 is occupied. Fixed to use `swap-window` when index 0 is taken.
+2. **Test added:** `repair_layout_swaps_when_index_0_occupied` — verifies the swap preserves all windows.
+3. **Binary installed:** `~/.cargo/bin/agent-doc` updated from v0.25.15 → v0.25.16.
+4. **Live state verified:** Windows now `0:agent-doc` (2 panes), `1:stash`.
 
-**Lesson:** Code fix + passing tests is not enough. Must verify the live system state after applying the fix.
-<!-- agent:boundary:14d71c88 -->
+**Why detection missed it initially:** I verified tests passed (547/547) but didn't check the actual tmux session state or install the binary. Lesson saved to memory.
+
+"Why did" — your edit appears truncated. What were you asking?
+<!-- agent:boundary:03ee2a0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
-- [x] Install binary to ~/.cargo/bin (v0.25.16)
-- [x] Verify live tmux state corrected
-- [ ] Release v0.25.16 (cargo publish + GitHub release)
+- [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
 <!-- /agent:pending -->

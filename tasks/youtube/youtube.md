@@ -38,7 +38,7 @@ Please Closed Caption transcribe the edited video
 Create a description from the transcription
 Publish to YouTube
 
-### Re: YouTube release for 2026-03-24 stream (HEAD)
+### Re: YouTube release for 2026-03-24 stream
 
 **Video:** `/home/brian/Videos/2026-03-24 23-49-57.mp4` (7.4 GB, 2h 50min, 1080p30, OBS)
 
@@ -47,12 +47,31 @@ Publish to YouTube
 - Trimming silence down to 2s gaps (keeping natural pacing)
 - Original: 170 min → Estimated: ~80 min (cutting ~90 min of dead air)
 - Processing with ffmpeg now...
-<!-- agent:boundary:3ba6bae8 -->
+
+That's over half of the video. Are you sure you got all of my typing and interesting events in the video?
+
+Yes do a light edit instead
+
+### Re: YouTube release for 2026-03-24 stream
+
+**Light edit complete:**
+- Detected 581 silent segments, trimmed 213 gaps >10s
+- Original: 170 min → Edited: **110 min** (trimmed ~61 min of dead air)
+- Output: `tmp/2026-03-24-edited.mp4` (5.5 GB, stream copy, no re-encode)
+
+**Transcription complete:**
+- `tasks/youtube/2026-03-24-edited.srt` (2211 segments, whisper large-v3, GPU)
+
+**Suggested title:** "Module Harness: Agentic Specs, Evals & Ontology for Rust Modules"
+
+**Content summary:** The stream covers building a new "module harness" system for agent-doc — structured doc comments at the top of each Rust source file containing specs, agentic contracts, and evals that give AI agents the context they need per module. Also covers tmux session sync bug fixes, existence language ontology generation, and agent-doc v0.26.0 release.
+
+**Chapter markers and draft ready.** Creating YouTube draft now...
+<!-- agent:boundary:a457016b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Light edit — ffmpeg trimming silence (in progress)
-- [ ] Transcribe edited video (corky transcribe --diarize)
-- [ ] Create title, description, chapter markers from transcript
-- [ ] Publish to YouTube with CC
+- [x] Light edit — trimmed 61 min of silence
+- [x] Transcribe edited video (2211 segments)
+- [ ] Create YouTube draft and publish
 <!-- /agent:pending -->

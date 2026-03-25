@@ -14,10 +14,10 @@ Initialized. Awaiting first input.
 
 <!-- agent:exchange patch=append -->
 
-### Assistant (HEAD)
+### Assistant
 
 Video task document initialized. Write your prompt in the exchange section — what would you like to work on?
-<!-- agent:boundary:7fb4707b -->
+<!-- agent:boundary:7ebe1677 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

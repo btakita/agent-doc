@@ -440,7 +440,7 @@ The 1 pane layout from before was more correct...but not fully defined.
 If there are 2 editor panes, with 1 pane being onclaimed, there should be a 2 pane tmux layout.
 The unclaimed side should just have an open shell or free claude session ready to go
 
-### Re: Unclaimed pane should show shell (HEAD)
+### Re: Unclaimed pane should show shell
 
 Good insight. The current sync only arranges panes for claimed files — unclaimed files are ignored. But the editor shows 2 splits, so tmux should mirror that.
 
@@ -452,7 +452,7 @@ Good insight. The current sync only arranges panes for claimed files — unclaim
 This requires the sync to create placeholder panes for unclaimed files in the `col_args`. Currently sync skips files it can't resolve to a registered pane.
 
 This is a feature enhancement — I'll add it to pending. The route refactor needs to be committed and released first.
-<!-- agent:boundary:480e241f -->
+<!-- agent:boundary:b57ae031 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

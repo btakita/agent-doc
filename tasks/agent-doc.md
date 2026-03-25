@@ -573,15 +573,36 @@ The plugin already watches for boundary changes. This requires no new infrastruc
 **Recommendation: Option A + C combined.** File signal for cross-process visibility, boundary marker state for in-document signaling. Both are lightweight.
 
 Want me to implement this?
-<!-- agent:boundary:2c1b47d0 -->
+Yet...definitely A + C. Why not B?
+
+### Re: Why not B (FFI)? (HEAD)
+
+We should do B too — all three. Here's why each matters:
+
+| Option | Who benefits | Latency | Cross-process? |
+|--------|-------------|---------|----------------|
+| **A (file)** | CLI agents, watch daemon | ~100ms poll | Yes |
+| **B (FFI)** | Plugin (same process) | Instant | No (in-process only) |
+| **C (boundary)** | Document readers, next diff | On write | Yes (via file) |
+
+**B is valuable because** the plugin runs in the same process as the FFI library. It can check `get_status()` without any I/O — pure memory read. This is faster than polling a file and eliminates the 100ms polling gap.
+
+**Use case for B:** The plugin's `PatchWatcher` or `EditorTabSyncListener` can call `agent_doc_get_status(file)` before triggering a route. If status is "generating" or "writing", skip the route entirely. This is the FFI route guard we've been discussing — `is_routing()` is really just a specific status check.
+
+**All three combined:**
+- **B** — plugin checks before acting (instant, prevents cascades)
+- **A** — CLI/watch daemon checks before acting (cross-process)
+- **C** — boundary state visible in document (persistent, survives process restart)
+
+I'll implement all three.
+<!-- agent:boundary:fb51d0d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Response status signal** — file-based + boundary marker for incoming/blocked state
-- **Stop defaulting to --force-disk** — use IPC path, only fallback on exit 75
-- **FFI route guard** — `route_begin`/`route_end`/`is_routing`
+- **Response status signal (A+B+C)** — file + FFI + boundary marker for incoming/blocked state
+- **FFI route guard** — subsumes into status signal B
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

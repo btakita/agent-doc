@@ -2474,7 +2474,7 @@ existence is a rust crate
 https://crates.io/crates/existence
 This should be a dev dependency
 
-### Re: existence as dev dependency (HEAD)
+### Re: existence as dev dependency
 
 My mistake — `existence` is indeed a Rust crate (CLI for the ontology framework). Added as dev-dependency:
 
@@ -2491,7 +2491,7 @@ Updated dependency table:
 | existence | dev-dep (path) | Ontology framework CLI — validates term definitions |
 
 Compilation verified.
-<!-- agent:boundary:d5cba339 -->
+<!-- agent:boundary:6dabd5b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

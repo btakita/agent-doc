@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created | Heartfelt drafts revised | Ragie sign-up RAG use case drafted
+Contact created | Drafts revised (v3) — gratitude-only comment, accurate timeline
 <!-- /agent:status -->
 
 ## Exchange
@@ -36,7 +36,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160/
 
 **Draft 1 — Comment reply on the post:**
 
-> Bob! Great to hear from you. Grockit was truly a special team — the engineering culture there shaped so much of how I think about building software. Really appreciate the kind words, and glad the AI work resonates. Following what you're building at Ragie too — the document understanding problem is so fundamental to getting RAG right. Let's catch up sometime.
+> Bob! Great to hear from you. Grockit was truly a special team — the engineering culture there shaped so much of how I think about building software. Really appreciate the kind words, and glad the AI work resonates. Following what you're building at Ragie too — the document understanding problem is so fundamental to getting RAG right. Let's catch up!
 
 **Draft 2 — LinkedIn DM:**
 
@@ -66,11 +66,15 @@ Love the approach — speaking from the heart is much better here. Here are revi
 
 > Bob, I'm overwhelmed with gratitude for your kind post. It means a lot coming from you. Grockit was such a special place — I think about those days often. Been following what you're up to with Ragie. We have very similar interests — I want to integrate Ragie into the interactive documents workflow I'm building. It's a natural next step. Would love to reconnect.
 
+I just want to focus on the gratitude with the comment. No need to plan on integrate Ragie here. Going to discuss over messages.
+
 ---
 
 **For the Ragie sign-up "What is your RAG use case?" field:**
 
 > Building an interactive document system (agent-doc) where AI agents collaborate with users through markdown documents. Want to use Ragie to ingest project context — codebases, correspondence, specs — so agents have high-quality retrieval context during sessions. Currently using local context windows but need scalable document understanding for cross-session knowledge.
+
+Also mention Corky, existence-lang, and other tooling.
 
 ---
 
@@ -82,8 +86,36 @@ Love the approach — speaking from the heart is much better here. Here are revi
 >
 > Would love to reconnect and talk shop. It feels like our paths are converging again.
 
-Let me know if you want to adjust any of these, or if you're ready to post/send.
-<!-- agent:boundary:7ed7b39a -->
+Let me know if you want to adjust any of these, or if you're ready to post/send. I don't have much memory of working with Bob @ Grokit. I worked a lot with nathan-sobo on the unison library (https://github.com/nathansobo/unison), event machine, and erlang for the real time social quiz app.
+
+It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
+### Re: Timeline & Revised Drafts (v3) (HEAD)
+
+**Bob's Grockit timeline:** 2008-2010 (Sr. Engineer), then Yammer 2010-2015. Your overlap was indeed just the tail end — you were leaving as he arrived. The Yammer reference would have been ~2010+ when he was already there.
+
+**Revised comment reply (gratitude only, no Ragie pitch):**
+
+> Bob, I'm overwhelmed with gratitude for your kind words. Grockit was such a special place — the caliber of engineers there was remarkable. Really means a lot coming from you. Thank you.
+
+**Revised RAG use case (with Corky, existence-lang, and tooling):**
+
+> Building AI agent tooling in Rust: agent-doc (interactive document sessions), Corky (correspondence/email kit), and existence-lang (domain ontology language). Need RAG for ingesting project context — codebases, specs, correspondence history — so agents have high-quality retrieval across sessions. Currently hitting context window limits with local approaches.
+
+**Revised LinkedIn DM (accurate to brief overlap):**
+
+> Hey Bob — your comment on my module-harness post really made my day. We only overlapped briefly at Grockit — my last few weeks were your first — but I remember the caliber of people that place attracted, and you were clearly one of them. Thank you for being a reference for the Yammer offer back in the day. I ended up staying at Honk, and David Sacks told me I was "making a mistake." He may have been right — but that's water under the bridge now.
+>
+> I just signed up for Ragie. I'm building AI agent tooling in Rust — interactive document sessions, a correspondence kit, a domain ontology language — and document retrieval is exactly the bottleneck I'm hitting. Would love to talk about how Ragie could fit into the workflow.
+>
+> Great to reconnect. Feels like our paths are converging.
+
+**Career timeline for reference:**
+- 2008-2010: Grockit (Sr. Engineer)
+- 2010-2015: Yammer (Sr. Engineer)
+- 2015-2017: Zenefits (VP Engineering)
+- 2017-2024: Harbor + Internal.io (Co-Founder/CTO)
+- 2024-present: Ragie (CEO & Co-Founder)
+<!-- agent:boundary:46ab59b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

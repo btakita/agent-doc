@@ -1205,7 +1205,40 @@ tmux_session = "0"
 `sync.rs` still passes `tmux_session: None` in `FileResolution` — the tmux-router derives session from `--window` or wanted panes, which is correct since the window comes from the editor plugin (session 0).
 
 Binary installed. Try `Sync Tmux Layout` now — route should target session "0" from the project config.
-<!-- agent:boundary:d7de875c -->
+Don't stop iterating until we can demonstrate the correct tmux layout.
+Add tests replicating current state.
+Ensure tests pass by fixing the agent-doc software.
+Build and install.
+Run and ensure that tmux is in the correct state.
+If not in correct state repeat cycle.
+### Re: Iterate until correct tmux layout (HEAD)
+
+Done — full cycle completed:
+
+**Tests added (4 new, all pass):**
+- `sync::tests::sync_does_not_write_tmux_session_to_frontmatter` — verifies sync never writes tmux_session back
+- `sync::tests::resolve_file_ignores_frontmatter_tmux_session` — verifies FileResolution always gets `tmux_session: None`
+- `terminal::tests::resolve_session_name_defaults_to_zero` — verifies default session is "0", ignoring frontmatter
+- `terminal::tests::resolve_session_name_uses_explicit_flag` — verifies explicit flag takes precedence
+
+**Full test suite: 541 tests pass** (173 lib + 330 bin + 38 integration)
+
+**Build & install:** Release binary installed.
+
+**Tmux state verified:**
+```
+Session 0:
+  Window 0 "agent-doc" — 2 panes (%103=agent-doc.md, %97=benjamin-becker.md)
+  Window 1 "stash" — 17 orphaned panes (unregistered, harmless)
+```
+
+Sync correctly targets session "0" via `--window @48` → `target_session=Some("0")`. Fast-path confirms layout is already correct. No frontmatter `tmux_session` was read or written during any of these operations.
+
+**Dead code cleaned up:**
+- `read_frontmatter_session()` removed from terminal.rs
+- `files_needing_session` tracking removed from sync.rs
+- `set_tmux_session()` in frontmatter.rs is now fully dead (only defined, never called)
+<!-- agent:boundary:b727c105 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

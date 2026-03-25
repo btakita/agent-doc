@@ -12,7 +12,9 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Please propose a plan for continuous evals to improve the effectiveness of the agent harnesses
 
+Start with https://platform.claude.com/docs/en/test-and-evaluate/develop-tests
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

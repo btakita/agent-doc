@@ -512,7 +512,7 @@ Brian
 - Split the visual bullet into production (lipsync + image gen) vs. prototype (LTXV/WAN/ComfyUI): "we ran... in production" + "I've also been prototyping" — honest distinction
 - "early stage but the latency curves are getting interesting" — signals potential without overclaiming
 
-### Re: Draft v11 — soften model-agnostic sell (HEAD)
+### Re: Draft v11 — soften model-agnostic sell
 
 Right — "There's real value in being model-agnostic" reads like a pitch. Just stating the fact is stronger. Here's the updated bullet:
 
@@ -545,7 +545,7 @@ Brian
 ---
 
 **Change from v10:** Removed "There's real value in being model-agnostic" — now just states experience across providers and lets Drew draw his own conclusion.
-<!-- agent:boundary:02288d41 -->
+<!-- agent:boundary:8106834a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

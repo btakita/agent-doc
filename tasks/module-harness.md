@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Released** — module-harness v0.1.0 published to crates.io and GitHub
+**Released** — module-harness v0.2.0 + existence v0.4.0 (with lib target)
 <!-- /agent:status -->
 
 ## Exchange
@@ -327,16 +327,36 @@ The `existence` crate on crates.io is a **binary-only crate** — it has `[[bin]
 
 3. **Both** — add a lib target for programmatic use AND keep the CLI for CI/manual use.
 
+both
+
 Would you like me to add a `[lib]` target to the existence crate? That would enable `existence = "0.3"` as a proper dev-dependency in module-harness.
-<!-- agent:boundary:1bc3d44f -->
+### Assistant
+
+**Done — both approaches implemented.**
+
+**1. Added `[lib]` target to existence crate (v0.4.0)**
+- Created `src/lib.rs` re-exporting `config`, `markdown`, and `commands` modules (excluding `completions` which depends on the CLI `Cli` struct)
+- Published existence v0.4.0 to crates.io with library target
+- All 36 existing tests pass across lib + both binary targets
+
+**2. Added existence as dev-dependency + CI lint step in module-harness (v0.2.0)**
+- `existence = "0.4"` in `[dev-dependencies]`
+- CI now runs `cargo install existence && existence --ontology ontology lint` after tests
+- Published module-harness v0.2.0 to crates.io
+- Installed locally, parent submodule pointers updated
+
+**What this enables:**
+- **In tests**: `use existence::commands::lint` to programmatically validate ontology nodes
+- **In CI**: `existence lint ontology/` catches broken links, missing sections, missing titles
+- **For consumers**: any crate can now `use existence::{config, markdown, commands}` for ontology tooling
+<!-- agent:boundary:b74a4d21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Add `[lib]` target to existence crate (enables dev-dependency use)
-- ([done]) v0.1.0 released to crates.io, GitHub, and installed locally
-- ([done]) All eval scoring features implemented
-- ([done]) All infrastructure (tests, CI, Makefile, release profile) in place
-- ([done]) /rust-package skill created for future packages
+- ([done]) Add `[lib]` target to existence crate and publish v0.4.0
+- ([done]) Add existence as dev-dependency in module-harness
+- ([done]) Add ontology lint step to CI
+- ([done]) Publish module-harness v0.2.0
 <!-- /agent:pending -->

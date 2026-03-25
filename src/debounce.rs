@@ -251,16 +251,14 @@ pub fn get_status_via_file(file: &str) -> String {
         Ok(content) => {
             // Format: "status:timestamp_ms"
             let parts: Vec<&str> = content.trim().splitn(2, ':').collect();
-            if parts.len() == 2 {
-                if let Ok(ts) = parts[1].parse::<u128>() {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis();
-                    // Stale after 30s — operation probably crashed
-                    if now.saturating_sub(ts) < 30_000 {
-                        return parts[0].to_string();
-                    }
+            if parts.len() == 2 && let Ok(ts) = parts[1].parse::<u128>() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                // Stale after 30s — operation probably crashed
+                if now.saturating_sub(ts) < 30_000 {
+                    return parts[0].to_string();
                 }
             }
             "idle".to_string()

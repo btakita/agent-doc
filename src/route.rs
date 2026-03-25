@@ -217,13 +217,13 @@ fn resolve_or_create_pane(
     }
 
     // Strategy 2: Lazy claim (only when a registered pane died)
-    if registered.is_some() {
-        if let Some(new_pane) = find_target_pane(tmux, pane, target_session) {
-            eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
-            sessions::register(session_id, &new_pane, file_path)?;
-            send_command(tmux, &new_pane, file_path)?;
-            return Ok(new_pane);
-        }
+    if registered.is_some()
+        && let Some(new_pane) = find_target_pane(tmux, pane, target_session)
+    {
+        eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
+        sessions::register(session_id, &new_pane, file_path)?;
+        send_command(tmux, &new_pane, file_path)?;
+        return Ok(new_pane);
     }
 
     // Strategy 3: Auto-start

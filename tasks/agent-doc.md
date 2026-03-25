@@ -691,7 +691,7 @@ The FFI exports are stable — adding new functions doesn't break old plugins. O
 How can I track what version of the FFI plugin the frontend editor plugin is using?
 Should the FFI plugin have it's own rust crates package?
 
-### Re: Tracking FFI version from plugin (HEAD)
+### Re: Tracking FFI version from plugin
 
 The FFI library version can be queried at runtime. There's already `agent-doc --version` which prints the binary version — the library is the same version. But we could add a dedicated FFI export:
 
@@ -718,7 +718,7 @@ pub unsafe extern "C" fn agent_doc_check_compat(min_version: *const c_char) -> b
 Plugin passes its minimum required library version. Returns false if the library is too old.
 
 Want me to add `agent_doc_version()` to FFI + NativeLib.kt? It's a 5-minute change.
-<!-- agent:boundary:88174d64 -->
+<!-- agent:boundary:b6b22224 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

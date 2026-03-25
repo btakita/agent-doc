@@ -608,14 +608,45 @@ go...I don't see the patch response if you already finished
 Status values: `"generating"`, `"writing"`, `"routing"`, `"idle"`
 
 558 tests passing. Binary rebuilt. Next: plugin calls `is_busy()` before routing.
-<!-- agent:boundary:04da41ea -->
+
+go:
+- **Plugin integration** — JB plugin calls `is_busy()` before routing
+ensure that the module-harness is in sync with the latest changes
+audit docs
+update SPEC, README
+
+The Plugin integration should be done on the FFI plugin level.
+Please add the necessary module-harness and AGENTS.md + CLAUDE.md + Skills to ensure that we follow this heuristic.
+
+### Re: Plugin integration (HEAD)
+
+**JB plugin updated** (`e10e6e7`):
+
+**NativeLib.kt** — added 3 FFI declarations:
+- `agent_doc_set_status(file, status)`
+- `agent_doc_get_status(file)` → Pointer (caller frees)
+- `agent_doc_is_busy(file)` → Boolean
+
+**EditorTabSyncListener.kt** — FFI busy guard:
+- After debounce + concurrency guard, checks `is_busy()` for all visible .md files
+- If any file is busy, skips the sync entirely (prevents cascade)
+
+**TerminalUtil.kt** — FFI busy guard:
+- Before building route command, checks `is_busy()` for the target file
+- If busy, skips route and calls `onComplete()` to unblock callers
+
+Plugin builds successfully. To install: Settings → Plugins → gear → Install from Disk → select `build/distributions/agent-doc-jetbrains-0.1.0.zip`.
+
+Note: the plugin needs the updated `libagent_doc.so`/`.dylib` to use the new FFI functions. The binary is already rebuilt — the shared library at `agent-doc lib-path` has the exports.
+<!-- agent:boundary:474fe3fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Response status signal (A+B+C)**~~ ([done])
-- **Plugin integration** — JB plugin calls `is_busy()` before routing
+- ~~**Plugin integration**~~ ([done])
+- **Build + install plugin** — user needs to install the updated zip
+- **Bump plugin version** — currently 0.1.0, should bump for the new FFI
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

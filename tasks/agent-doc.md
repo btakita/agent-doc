@@ -235,13 +235,38 @@ commit and push to github
 Done. Test committed and pushed to GitHub:
 - agent-doc: `293c422` — `test: add sync_after_claim col_args regression test`
 - Parent submodule pointer updated
-<!-- agent:boundary:7d090628 -->
+
+I moved a couple of task documents from tasks/linkedin/*.md to tasks/professional/*.md
+
+The tmux layout is now in a 3 pane layout `r1 | r2 | l1`
+Please diagnose via logs.
+Add tests to reproduce the issue.
+Fix issue.
+Note that the right editor is focused
+
+### Re: 3-pane layout (again) after file move (HEAD)
+
+**Diagnosis:** The file move (`tasks/linkedin/don-desando.md` → `tasks/professional/don-desando.md`) triggered a route for the new path. Route created a new pane (%143) via auto-start, but the existing excess panes weren't stashed because `sync_after_claim` was only called on the lazy-claim path — not on auto-start or the alive-pane path.
+
+**Fix:** Added `sync_after_claim(tmux, pane_id, col_args)` calls to ALL three route paths:
+1. **Step 1 (alive pane)** — after `send_command`, sync to stash excess panes
+2. **Step 2 (lazy claim)** — already had it (previous fix)
+3. **Step 3 (auto-start)** — after `auto_start_in_session`, sync to stash excess panes
+
+This ensures every route operation aligns the tmux layout to the editor's `col_args`, regardless of which path was taken.
+
+**Immediate fix:** Broke pane %143 out of the window — layout restored to 2 panes.
+
+**Tests:** 558 passing. Release binary rebuilt.
+
+This is the same class of bug as the previous 3-pane issue — the fix was incomplete because only one of three route paths had the sync call.
+<!-- agent:boundary:4e3d99b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-All items cleared.
+- **Commit and push sync fix** — route sync on all 3 paths
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -149,7 +149,39 @@ Fixed. The `lib/ui--server--briantakita` submodule in briantakita.me-dev had div
 3. Updated agent-loop pointer → `7db75f0`
 
 The Cloudflare Pages deploy should now trigger successfully from the push.
-<!-- agent:boundary:550e9ac0 -->
+
+How can we ensure that we never run into yalc issues on ci or in deployments?
+
+```
+bun install v1.3.11 (af24e281)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--any--blog@.yalc/@rappstack/domain--any--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server--blog@.yalc/@rappstack/domain--server--blog (open)
+
+```
+
+### Re: Preventing yalc issues in CI (HEAD)
+
+**Root cause:** Two packages had `file:.yalc/...` paths committed to `package.json`. The `.yalc/` directory and `yalc.lock` were also tracked in git. CI has no `.yalc/` directory, so `bun install` fails with ENOENT.
+
+**Fix applied:**
+1. Restored npm versions in `package.json`:
+   - `@rappstack/domain--any--blog`: `file:.yalc/...` → `^0.1.2`
+   - `@rappstack/domain--server--blog`: `file:.yalc/...` → `^0.1.1`
+2. Removed `.yalc/` directory and `yalc.lock` from git tracking (66 files deleted)
+3. Added `.yalc/` and `yalc.lock` to `.gitignore`
+4. Pushed to briantakita.me (`634bfe8`) → briantakita.me-dev (`f791426`)
+
+**Prevention going forward:**
+- `.gitignore` now blocks `.yalc/` and `yalc.lock` from being committed
+- When using `yalc link` locally for development, the overrides stay local and never reach git
+- If you need to commit while yalc is active, run `yalc remove --all` first to restore npm versions
+- Consider adding a pre-commit hook that checks for `file:.yalc` in `package.json`:
+  ```bash
+  grep -q "file:.yalc" package.json && echo "ERROR: yalc paths in package.json" && exit 1
+  ```
+
+The CI deploy should succeed now.
+<!-- agent:boundary:87b9a285 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -157,5 +189,7 @@ The Cloudflare Pages deploy should now trigger successfully from the push.
 - [x] Transcribe edited video (2211 segments)
 - [x] Create YouTube draft with title, description, chapters
 - [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
-- [x] Blog post created and deployed (fixed stale submodule pointer)
+- [x] Blog post created and deployed
+- [x] Fixed stale submodule pointer (ui--server--briantakita)
+- [x] Fixed yalc artifacts breaking CI build
 <!-- /agent:pending -->

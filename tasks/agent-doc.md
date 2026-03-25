@@ -1685,7 +1685,7 @@ I don't see it anymore. It went away.
 
 Why do you keep on opening
 
-### Re: tmux layout issues (HEAD)
+### Re: tmux layout issues
 
 Good catch — here's what's happening:
 
@@ -1719,13 +1719,13 @@ Two gaps:
 3. Run `repair_layout` now to fix the missing window 0
 
 Want me to run the repair now and implement the preflight health check?
-<!-- agent:boundary:87cffbb7 -->
+<!-- agent:boundary:dbbe61ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-### Pending (HEAD)
+### Pending
 
 **Bugs — Priority**
 - [ ] **Preflight tmux health check** — add layout validation to every preflight run (detect missing window 0, orphaned stash panes)

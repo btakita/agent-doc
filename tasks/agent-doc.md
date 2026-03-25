@@ -297,7 +297,7 @@ Great question. This is a **cross-cutting concern** — behavior that should app
 
 The harness contract for `route.rs` should say:
 ```
-## Agentic Contracts (HEAD)
+## Agentic Contracts
 - **Post-route sync invariant**: ALL route exit paths (alive pane, lazy claim, auto-start) 
   MUST call sync_after_claim with the editor's col_args before returning Ok(()).
 ```
@@ -334,7 +334,7 @@ Good catch — it shouldn't. The "lost typing" was NOT caused by tmux `break-pan
 2. **Plugin routing trigger**: The JetBrains plugin fires `agent-doc route` on editor tab focus changes. A tmux layout shift can trigger a cascade: pane resize → editor focus event → route call → potential additional pane operations.
 
 The fix for this: the plugin should debounce layout-triggered focus events and not route during active tmux operations. This is a plugin-side fix, not a binary-side fix.
-<!-- agent:boundary:ce06e36b -->
+<!-- agent:boundary:965d586d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

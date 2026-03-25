@@ -1667,7 +1667,7 @@ Correction noted: "buffer then flush cycle" (not cache). You're right — the ed
 
 Both bugs added to pending list below.
 
-### Re: Implementing all three bugs (HEAD)
+### Re: Implementing all three bugs
 
 Starting implementation now. Working on:
 1. **IPC silent failure** — add verification after patch consumption
@@ -1675,7 +1675,7 @@ Starting implementation now. Working on:
 3. **Truncation recheck** — increase to 3x 500ms rechecks
 
 Will update pending as each is completed.
-<!-- agent:boundary:b2ed0972 -->
+<!-- agent:boundary:4a35f3e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

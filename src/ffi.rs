@@ -604,6 +604,15 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> bool {
     crate::debounce::is_busy(path)
 }
 
+/// Get the agent-doc library version.
+///
+/// Returns a NUL-terminated string like "0.26.1".
+/// Caller must free with `agent_doc_free_string`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_version() -> *mut c_char {
+    CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety

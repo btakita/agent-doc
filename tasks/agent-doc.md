@@ -362,12 +362,12 @@ This is a cleaner pattern than per-plugin debounce — one implementation, all e
 The 2 agent-doc windows issue was fixed (renamed @74 to "stash"). The layout is now correct: `0:agent-doc` + `1:stash`.
 The left tmux layout has a 2 pane vertical orientation: `lt / lb | r1`
 
-### Re: Left pane vertical orientation (HEAD)
+### Re: Left pane vertical orientation
 
 Noted — `lt / lb | r1` (two vertical panes on left, one on right). This is the expected layout when the editor has a vertical split on the left side. The tmux sync mirrors the editor's split orientation via the `--col` args from the plugin.
 
 The pending items (route refactor, harness contract, FFI route guard) are good next-session tasks. This session covered a lot of ground — ready to wrap up whenever you are.
-<!-- agent:boundary:af44dfed -->
+<!-- agent:boundary:d7175eae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -51,7 +51,7 @@ What's the context for connecting with Drew? I can help draft outreach or add re
 
 Drew reached out to me on LinkedIn. See contacts/drew-anderson/*.txt for his message
 
-### Re: Drew's LinkedIn outreach (HEAD)
+### Re: Drew's LinkedIn outreach
 
 Read his message in `20260325-linkedin-drew-anderson.txt`. Updated the contact file with:
 
@@ -66,7 +66,7 @@ Would you like me to:
 1. **Research Centerbeam Nova** so you can give an informed reply
 2. **Draft a response** to Drew on LinkedIn
 3. **Both** — research first, then draft
-<!-- agent:boundary:abb7fb65 -->
+<!-- agent:boundary:87eb86c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

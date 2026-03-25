@@ -1330,7 +1330,7 @@ The user wants the SKILL.md to identify testable contracts from each prompt, the
 - Last pane in a window never killed
 - Idle shells in stash killed
 - Orphaned agent processes everywhere killed
-Impl]ement:
+Implement:
 - [ ] **Split direction from column position** — left column = split before
 ### Re: Split direction from column position
 
@@ -1346,7 +1346,17 @@ This is already implemented and tested:
 3. `sync.rs` reconcile: `first_pane_join_flag()` and `join_target()` compute the correct join direction for each pane based on its position in the column grid
 
 This pending item can be marked done — it's been working since the sync rewrite.
-<!-- agent:boundary:8f4c3ad4 -->
+release
+### Re: Release v0.25.16 (HEAD)
+
+Starting release workflow. Changes since v0.25.15:
+
+1. **Purge unregistered stash panes** — `purge_unregistered_stash_panes()` kills orphaned shell/agent panes in stash windows
+2. **Purge orphaned agent panes in non-stash windows** — `purge_orphaned_agent_panes()` kills unregistered agent-doc/claude panes in any window (if not the last pane)
+3. **5 new resync tests** — purge_kills_unregistered_shell_in_stash, purge_preserves_registered_pane_in_stash, purge_preserves_user_process_in_stash, purge_orphan_agent_in_non_stash_window, purge_orphan_does_not_kill_last_pane
+
+Bumping version and running release checklist now.
+<!-- agent:boundary:c5e37372 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1358,8 +1368,8 @@ This pending item can be marked done — it's been working since the sync rewrit
 - [x] **Session firewall tests** — standardized cross-session test template
 - [x] **Purge unregistered stash panes** — kills orphaned agent/shell panes in stash
 - [x] **Purge orphaned agent panes in non-stash windows** — session 3 orphan fixed
-- [x] **Split direction from column position** — already implemented in route.rs + sync.rs (8 tests)
-- [ ] **Release v0.25.16**
+- [x] **Split direction from column position** — already implemented (8 tests)
+- [ ] **Release v0.25.16** — in progress
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

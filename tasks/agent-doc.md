@@ -1603,7 +1603,9 @@ No — the debounce ran but has a structural gap in this scenario.
 1. **FFI debounce** (`debounce.rs`): In-process memory. Plugin calls `document_changed()` on keystrokes, `await_idle()` blocks until typing stops. Only works within the same process (watch daemon or FFI-linked plugin).
 2. **Preflight mtime debounce** (`preflight.rs:81-106`): Polls file mtime. Waits for 500ms idle, max 2s timeout.
 
-**What happened:** You were editing in the IDE, the JetBrains plugin detected the save and triggered `agent-doc run` (or you manually triggered `/agent-doc`). The preflight mtime debounce checked whether the file's mtime was stable for 500ms. If you saved, paused briefly (>500ms) while composing your next thought, then continued typing — the debounce passed even though your edit was logically incomplete.
+**What happened:** You were editing in the IDE, the JetBrains plugin detected the save and triggered `agent-doc run` (or you manually triggered `/agent-doc`). The preflight mtime debounce checked whether the file's mtime was stable for 500ms. If you saved, paused briefly (>500ms) while composing your next thought, then continued typing — the debounce passed even though your edit was logically incomplete.: Not true. I was in the middle of typing. Is there a gap in the plugin debounce detection?
+
+The mtime detection has obvious gaps...due to the cache then flush cycle.
 
 **The gap:** Mtime debounce catches rapid typing but not "user paused to think between sentences." The FFI debounce is better (tracks actual keystrokes) but only works in-process — the CLI invocation can't see it.
 
@@ -1630,7 +1632,28 @@ You're right — you didn't delete the response. **The IPC patch was consumed (p
 3. Plugin logs errors when Document API write fails
 
 Should I add this to the bug tracker?
-<!-- agent:boundary:bee1270f -->
+
+### Re: Plugin debounce gap — yes, there is one (HEAD)
+
+Just saw "The m" truncation happen again — caught by truncation detection but passed after one 400ms recheck because the file was unchanged on disk.
+
+**The gap is between editor buffer and disk:**
+
+1. You type "The m..." in the editor
+2. Editor auto-save has a delay (JetBrains default: ~1-2 seconds idle)
+3. Something triggers preflight (watch daemon sees previous save, or manual `/agent-doc`)
+4. Preflight reads file from disk → sees "The m"
+5. Truncation detection: waits 400ms, re-reads file → still "The m" (editor hasn't flushed buffer yet)
+6. Concludes content is stable → proceeds
+
+**The FFI debounce (`document_changed()`) tracks buffer-level edits** and would have caught this — but it's in-process only. The preflight CLI can't see it.
+
+**Two-part fix needed:**
+1. **FFI debounce bridge**: Expose debounce state via a file lock or socket so the CLI can query "is the user actively typing?" before proceeding
+2. **Longer recheck**: Current 400ms single recheck is too short. Should do multiple rechecks (e.g., 3x 500ms) before accepting truncated content as stable
+
+Note: "The m" in your edit is truncated — what were you typing?
+<!-- agent:boundary:0cc0f3d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1638,10 +1661,11 @@ Should I add this to the bug tracker?
 <!-- agent:pending -->
 - [x] Fix window 0 loss bug (swap-window when index 0 occupied)
 - [ ] **IPC silent failure bug** — plugin ACKs patch without verifying Document API write
+- [ ] **FFI debounce bridge** — expose typing state to CLI preflight
+- [ ] **Truncation recheck too short** — 400ms single check misses editor auto-save delay
 - [ ] Release v0.25.16 (cargo publish + binary + GitHub release)
 - [ ] Audit docs
 - [ ] Add overflow stash to SPEC.md
-- [ ] Investigate cross-process debounce gap
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

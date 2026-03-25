@@ -371,9 +371,9 @@ Noted — `lt / lb | r1` (two vertical panes on left, one on right). This is the
 
 The pending items (route refactor, harness contract, FFI route guard) are good next-session tasks. This session covered a lot of ground — ready to wrap up whenever you are.
 
-c
+continue...this is a rolling session.
 
-### Re: Missing stash + plugin update (HEAD)
+### Re: Missing stash + plugin update
 
 The stash window disappeared again and we're back to 3 panes. The issue: **the running agent-doc processes in tmux panes were started with the old binary** (before the sync fix). The fix is in the `agent-doc route` code, which is called by the plugin — but the plugin invokes `~/.cargo/bin/agent-doc`, which is updated. The issue is that the route command is called but the old Claude sessions in the panes are processing it.
 
@@ -384,14 +384,29 @@ The stash window disappeared again and we're back to 3 panes. The issue: **the r
 3. **But the fix won't help until the plugin actually passes `col_args`** — I need to check if the plugin sends `--col` args
 
 Let me check what arguments the plugin sends:
-<!-- agent:boundary:4938d2e3 -->
+
+### Re: Stash missing + plugin (HEAD)
+
+**Immediate fix:** Manually stashed panes %143 and %137, created stash window. Layout now: `0:agent-doc` (1 pane) + `1:stash` (3 panes).
+
+**Plugin analysis:** The JB plugin **does send `--col` args** — both to `agent-doc sync` (via EditorTabSyncListener) and `agent-doc route` (via TerminalUtil). The plugin is working correctly.
+
+**Root cause of persistent 3-pane issue:** The `sync_after_claim` fix in `route.rs` only helps when the plugin calls `route` with `--col` args. But the plugin primarily calls `sync` (not `route`) for layout changes. The `sync` command already uses `col_args` correctly — the problem is timing:
+
+1. Plugin detects file switch → calls `agent-doc route` (creates/finds pane)
+2. Plugin detects layout change → calls `agent-doc sync` (arranges panes)
+3. Between steps 1 and 2, there's a window where 3 panes exist
+
+The real fix is the **route refactor to single exit point** — `route` should resolve the pane AND sync in one atomic operation, not leave a gap.
+
+**No plugin update needed** — JB v0.2.23 is correct. The fix needs to be in the binary's route command.
+<!-- agent:boundary:c6c4903c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Verify plugin sends col_args** — check if JB plugin passes --col to route
-- **Refactor route to single exit point** — eliminate propagation bugs by design
+- **Route refactor to single exit point** — critical: eliminate the timing gap between pane creation and layout sync
 - **FFI route guard** — prevent cascade from layout events
 <!-- /agent:pending -->
 

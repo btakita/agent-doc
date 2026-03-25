@@ -725,10 +725,10 @@ You have missed several of my prompts. It seems there is a bug.
 Done:
 - **Install JB plugin v0.2.24** — user action needed
 
-### Re: agent_doc_version() (HEAD)
+### Re: agent_doc_version()
 
 Done (`98aa3c0`). `agent_doc_version()` returns the compile-time `CARGO_PKG_VERSION`. 558 tests pass. Binary + plugin rebuilt and pushed.
-<!-- agent:boundary:a0f27dd8 -->
+<!-- agent:boundary:df632091 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

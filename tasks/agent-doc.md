@@ -400,14 +400,47 @@ Let me check what arguments the plugin sends:
 The real fix is the **route refactor to single exit point** — `route` should resolve the pane AND sync in one atomic operation, not leave a gap.
 
 **No plugin update needed** — JB v0.2.23 is correct. The fix needs to be in the binary's route command.
-<!-- agent:boundary:318cd97e -->
+
+Go:
+- **Route refactor to single exit point** — critical: eliminate the timing gap between pane creation and layout sync
+- **FFI route guard** — prevent cascade from layout events
+
+`Run Agent Doc` resulted in 2 vertical panes.
+Actually 3.
+
+### Re: Route refactor + FFI route guard (HEAD)
+
+**Route refactored to single exit point.** The key change:
+
+```rust
+fn run_with_tmux(...) -> Result<()> {
+    let pane_id = resolve_or_create_pane(...)?;  // handles all 3 strategies
+    sync_after_claim(tmux, &pane_id, col_args);  // ONE sync call
+    Ok(())
+}
+```
+
+`resolve_or_create_pane` tries 3 strategies in order:
+1. Alive registered pane in correct session → reuse
+2. Lazy claim to active pane (dead pane replacement)
+3. Auto-start new Claude session
+
+All return a `pane_id`. The sync call happens ONCE after resolution — no more per-path sync calls to forget.
+
+Also extracted `rescue_from_stash` as a separate helper for clarity.
+
+**Tests:** 558 passing. Binary rebuilt and installed.
+
+**Re: "Run Agent Doc" resulted in 2 vertical panes** — this is likely the stash contents being visible. The current layout is `0:agent-doc` (1 pane) + `1:stash` (3 panes). The "2 vertical panes" might be the plugin triggering a sync that created a second pane.
+<!-- agent:boundary:8da95741 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Route refactor to single exit point** — critical: eliminate the timing gap between pane creation and layout sync
-- **FFI route guard** — prevent cascade from layout events
+- ~~**Route refactor to single exit point**~~ ([done])
+- **Commit + push + release** — route refactor needs publishing
+- **FFI route guard** — `route_begin`/`route_end`/`is_routing` (next priority)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

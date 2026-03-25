@@ -644,7 +644,7 @@ Note: the plugin needs the updated `libagent_doc.so`/`.dylib` to use the new FFI
 
 Does the FFI plugin need it's own independent versioning?
 
-### Re: Plugin version (HEAD)
+### Re: Plugin version
 
 You're right — the current version is 0.2.23, not 0.1.0. My mistake. Bumped to **v0.2.24**.
 
@@ -660,7 +660,7 @@ build/distributions/agent-doc-jetbrains-0.2.24.zip
 - `NativeLib.kt`: `agent_doc_set_status`, `agent_doc_get_status`, `agent_doc_is_busy`
 - `EditorTabSyncListener.kt`: FFI busy guard before sync
 - `TerminalUtil.kt`: FFI busy guard before route
-<!-- agent:boundary:0de5bc8f -->
+<!-- agent:boundary:1caf6829 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

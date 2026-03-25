@@ -215,7 +215,7 @@ Parent submodule pointers updated.
 
 Did we add tests to drive this bug fix?
 
-### Re: Did we add tests? (HEAD)
+### Re: Did we add tests?
 
 No — I hadn't added a test for the `sync_after_claim` col_args fix. Now added:
 
@@ -228,7 +228,7 @@ No — I hadn't added a test for the `sync_after_claim` col_args fix. Now added:
 558 tests passing (344 bin + 176 lib + 38 cli).
 
 The test confirmed the fix works — when col_args are provided, sync uses them instead of auto-discovering from registry. The first version of the test actually caught that the original 3-pane layout issue would still occur without the fix (sync arranged all 3 registry panes instead of the 2 from col_args).
-<!-- agent:boundary:5a077e6b -->
+<!-- agent:boundary:e5029826 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

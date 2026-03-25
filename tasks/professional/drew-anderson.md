@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Centerbeam Nova research complete — ready to draft reply to Drew
+Draft LinkedIn reply to Drew ready for review
 <!-- /agent:status -->
 
 ## Exchange
@@ -111,11 +111,81 @@ This looks like an early-stage voice AI platform wrapping OpenAI Realtime with e
 3. The OpenAI Realtime dependency is notable — worth asking if they plan to support other models (Claude, open-source)
 
 What direction do you want to take the reply?
-<!-- agent:boundary:613b3bd6 -->
+
+We have PresenceAI, which was recently shut down. But the IP is available. Since I was building the realtime lipsync avatar, there's potential collaboration opportunity.
+We also discussed content creator avatars, multimodal support + sales.
+
+See contacts:
+- andrey-ternovskiy
+- andrew-yang
+
+Tasks:
+- tasks/professional/andrey-ternovskiy.md
+- tasks/professional/andrew-yang.md
+
+We may want to license the PresenceAI codebase + Chatroulette funnel. Still waiting on Eric or Andrei.
+
+---
+I'm also recently working on:
+- agent-doc
+- corky
+- existence-lang
+- module-harness
+
+These are all agentic software that focuses on human-agent alignment.
+
+---
+
+Please take all of this into consideration. Let's start to frame the discussion and a response.
+
+### Re: Framing the discussion + draft response (HEAD)
+
+**Strategic framing:**
+
+You have a uniquely strong position for this conversation with Drew:
+
+1. **PresenceAI IP** — You built a real-time lipsync avatar pipeline (Python/LiveKit/GPU inference). Drew's team is "looking to add avatars" to their full-duplex voice platform. Your tech is exactly what they need — lipsync avatars on top of voice agents.
+
+2. **Chatroulette funnel** — Andrey Ternovskiy's Chatroulette is a massive distribution channel for video-first AI interactions. If you're discussing licensing PresenceAI + Chatroulette funnel with Eric/Andrey, Drew's Centerbeam Nova could be a complementary piece (voice pipeline) or a competing approach.
+
+3. **Agentic software portfolio** — agent-doc, corky, existence-lang, module-harness all demonstrate deep expertise in human-agent alignment. Drew's "5th wave coding" philosophy aligns with this — you're both building tools that bridge human intent and AI execution.
+
+**Key angles for the reply:**
+- Lead with the avatar/lipsync connection — that's the hook Drew will care about most
+- Mention you've built production real-time video lipsync (without over-sharing IP details)
+- Show interest in Nova but frame yourself as a peer/potential collaborator, not a customer
+- Keep the door open without committing — you're still in discussions with Andrey/Eric on the PresenceAI licensing
+
+**Draft LinkedIn reply to Drew:**
+
+---
+
+Hey Drew,
+
+Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development for the last couple years building agentic tools (document sessions, correspondence automation, ontology systems).
+
+Your mention of avatars caught my attention. I recently built a real-time lipsync avatar pipeline — full video generation with LiveKit, GPU inference, the works. The company (Presence AI) wound down, but the IP and codebase are available. Could be interesting synergy with what you're building at Centerbeam.
+
+I took a look at Nova — clean SDK, and the full-duplex voice pipeline is solid positioning. A few questions that came to mind:
+- Are you planning to support models beyond OpenAI Realtime? (I work extensively with Claude/Anthropic)
+- What's the avatar integration roadmap look like? Lip-synced video, or more stylized/animated?
+
+Would be happy to compare notes on the voice + avatar space. Sounds like we're circling similar problems from different angles.
+
+Best,
+Brian
+
+---
+
+**Tone notes:** Matches Drew's casual-professional style. Establishes peer credibility without name-dropping. Asks specific technical questions that signal you know the space. Leaves the PresenceAI licensing angle as a conversation starter without tipping your hand.
+
+Want me to adjust the tone, add/remove anything, or send as-is?
+<!-- agent:boundary:f62c066a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Draft reply to Drew's LinkedIn message
+- [ ] Finalize and send reply to Drew on LinkedIn
+- [ ] Follow up on PresenceAI licensing with Eric/Andrey
 <!-- /agent:pending -->

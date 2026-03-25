@@ -89,7 +89,7 @@ Also mention Corky, existence-lang, and other tooling.
 Let me know if you want to adjust any of these, or if you're ready to post/send. I don't have much memory of working with Bob @ Grokit. I worked a lot with nathan-sobo on the unison library (https://github.com/nathansobo/unison), event machine, and erlang for the real time social quiz app.
 
 It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
-### Re: Timeline & Revised Drafts (v3) (HEAD)
+### Re: Timeline & Revised Drafts (v3)
 
 **Bob's Grockit timeline:** 2008-2010 (Sr. Engineer), then Yammer 2010-2015. Your overlap was indeed just the tail end — you were leaving as he arrived. The Yammer reference would have been ~2010+ when he was already there.
 
@@ -115,7 +115,7 @@ It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
 - 2015-2017: Zenefits (VP Engineering)
 - 2017-2024: Harbor + Internal.io (Co-Founder/CTO)
 - 2024-present: Ragie (CEO & Co-Founder)
-<!-- agent:boundary:46ab59b5 -->
+<!-- agent:boundary:6be81729 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

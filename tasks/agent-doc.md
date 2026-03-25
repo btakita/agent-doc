@@ -2074,13 +2074,69 @@ Good idea to make this a reusable skill. Here are my recommendations, ranked:
 The skill could also eventually integrate with the backtest harness — `module-harness eval <module>` to run the named eval scenarios.
 
 What's your preference?
-<!-- agent:boundary:a10dfdcb -->
+module-harness
+Let's make module-harness work with any programming language. Make sure the skill is general enough.
+Is there any deterministic aspects that would benefict from a binary executable?
+
+### Re: module-harness skill design (HEAD)
+
+**Name confirmed: `module-harness`**
+
+**Language-agnostic design:**
+
+The harness format maps naturally to any language's module/file comment convention:
+- **Rust:** `//!` doc comments
+- **Python:** module docstring (`"""..."""`)
+- **TypeScript/JavaScript:** JSDoc comment at top of file (`/** ... */`)
+- **Go:** package comment
+- **Kotlin:** KDoc
+
+The skill just needs to know: (1) how to read the module, (2) the comment syntax for the language, (3) where to place it.
+
+**Re: Binary executable for deterministic aspects?**
+
+Yes — there are several deterministic operations that would benefit from a binary:
+
+| Operation | Why binary? |
+|-----------|------------|
+| **Parse existing harness** | Extract structured Spec/Contracts/Evals from comments — regex/tree-sitter, no LLM needed |
+| **Drift detection** | Compare harness public function list against actual exports — AST analysis |
+| **Eval inventory** | Enumerate all named evals across modules, check which map to real tests |
+| **Batch operations** | Walk all modules in a crate/package, report coverage stats |
+| **Language detection** | File extension → comment syntax mapping |
+
+**What stays in the skill (LLM):**
+- Reading code and *understanding* what a module does → writing the Spec
+- Inferring agentic contracts from usage patterns
+- Generating meaningful eval scenarios
+- Updating harness when code changes semantically
+
+**Proposed architecture:**
+```
+module-harness (binary)
+├── parse <file>          → JSON of existing harness sections
+├── diff <file>           → show drift (new/removed public symbols)
+├── inventory [dir]       → list all evals across modules
+├── coverage [dir]        → which evals have matching tests
+└── format <file> --lang  → write harness from JSON input (stdin)
+
+module-harness (skill)
+├── /module-harness <file>        → generate/update harness for one module
+├── /module-harness batch <dir>   → all modules in directory
+└── /module-harness audit <dir>   → report drift and coverage
+```
+
+The binary handles structure; the skill handles understanding. This matches the agent-doc pattern (binary = deterministic, skill = non-deterministic).
+
+Want me to create the skill now and scaffold the binary?
+<!-- agent:boundary:bf8950c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Create module-harness skill** — reusable skill for generating/updating module harness context
+- **Create module-harness skill** — SKILL.md with generate/batch/audit commands
+- **Scaffold module-harness binary** — parse, diff, inventory, coverage, format subcommands
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

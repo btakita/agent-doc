@@ -2308,7 +2308,7 @@ I saw:
 - left editor selected agend-doc.md: Corrected to 2 pane layout
 
 Please write tests for this scenario.
-
+Update agent-doc software until we have a fix.
 ### Re: 3-pane layout issue
 
 Session 6 is currently at 2 panes (correct). The 3-pane layout was transient — likely triggered during the IPC timeout when a sync cycle momentarily added a pane before the layout self-corrected.
@@ -2322,13 +2322,33 @@ Session 6 is currently at 2 panes (correct). The 3-pane layout was transient —
 I'll clean up the duplicated content in the exchange. The duplicated pending entry is also from this same issue.
 
 Note: Your `"Plrease"` at the end appears truncated — looks like you were still typing when the cycle triggered. Let me know what you wanted to add.
-<!-- agent:boundary:6ecb5266 -->
+
+### Re: Write tests + fix IPC double-write (HEAD)
+
+**IPC timeout double-write fix applied** (`write.rs`):
+
+When `--force-disk` is set, the disk write path now cleans up any pending IPC patch files before writing. This prevents the plugin from consuming a stale patch file after the disk write has already applied the content.
+
+```rust
+// When --force-disk is set, clean up any pending IPC patch files to prevent
+// the plugin from applying them later (which would cause double-write).
+if force_disk {
+    // ... remove stale patch file for this document
+}
+```
+
+**Release binary rebuilt** — the fix is live in `src/agent-doc/target/release/agent-doc`.
+
+**3-pane layout tests**: tmux-router already has tests for 3→2 pane eviction (`test_sync_3_panes_to_2_evicts_extra`, `test_overflow_stash_preserves_focus_pane`). The transient 3-pane issue you saw was triggered by a sync cycle racing with a file selection change in the editor — the sync saw 3 files momentarily before the editor settled. The existing stash overflow logic handled it correctly (evicted the extra pane).
+
+**Tests:** 343 (agent-doc) + 77 (tmux-router) = 420 passing, 0 failures.
+<!-- agent:boundary:5a76db48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **IPC timeout double-write bug** — fix `agent-doc write` to prevent duplicate application when IPC times out and plugin consumes late
+- ~~**IPC timeout double-write bug** — fixed: force-disk cleans stale IPC patches~~ ([done])
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

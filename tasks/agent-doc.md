@@ -687,13 +687,45 @@ The JB plugin version (0.2.24) is independent from the binary version (0.26.1) b
 - Plugin changes don't always require a binary change (and vice versa)
 
 The FFI exports are stable — adding new functions doesn't break old plugins. Old plugins just don't call the new functions.
-<!-- agent:boundary:2a600bf0 -->
+
+How can I track what version of the FFI plugin the frontend editor plugin is using?
+Should the FFI plugin have it's own rust crates package?
+
+### Re: Tracking FFI version from plugin (HEAD)
+
+The FFI library version can be queried at runtime. There's already `agent-doc --version` which prints the binary version — the library is the same version. But we could add a dedicated FFI export:
+
+**Quick solution (already available):**
+The plugin can shell out to `agent-doc --version` on startup and log it. This tells you which binary/library version the plugin is talking to.
+
+**Better solution (FFI export):**
+Add `agent_doc_version()` to FFI:
+```rust
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_version() -> *mut c_char {
+    CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
+}
+```
+
+The plugin calls this on load and logs: "FFI library v0.26.1, plugin v0.2.24". Version mismatch = warning.
+
+**Even better: compatibility check:**
+```rust
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_check_compat(min_version: *const c_char) -> bool { ... }
+```
+
+Plugin passes its minimum required library version. Returns false if the library is too old.
+
+Want me to add `agent_doc_version()` to FFI + NativeLib.kt? It's a 5-minute change.
+<!-- agent:boundary:88174d64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - **Install JB plugin v0.2.24** — user action needed
+- **Add agent_doc_version() FFI** — runtime version query from plugin
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

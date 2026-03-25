@@ -498,7 +498,7 @@ Why was it passing before this last blog post?
 Pushed `d76dc2b` — CI should now resolve 0.1.4 everywhere.
 release corky if we have not yet
 
-### Re: Release corky (HEAD)
+### Re: Release corky
 
 Released **corky v0.21.2** with `youtube delete` command.
 
@@ -508,7 +508,7 @@ Released **corky v0.21.2** with `youtube delete` command.
 - GitHub Release: https://github.com/btakita/corky/releases/tag/v0.21.2
 - Installed with `--features transcribe-cuda`
 - Agent-loop submodule pointer updated
-<!-- agent:boundary:500d9aa3 -->
+<!-- agent:boundary:9ecd09ea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

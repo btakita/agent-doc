@@ -277,7 +277,7 @@ SyntaxError: JSON Parse error: Unexpected EOF
 Error: Process completed with exit code 1.
 ```
 
-### Re: Build failure — missing `blog_post__video_url_` export (HEAD)
+### Re: Build failure — missing `blog_post__video_url_` export
 
 The yalc install issue is fixed, but the build fails because `blog_post__video_url_` was added to the **local yalc'd** version of `@rappstack/domain--server--blog` but never published to npm.
 
@@ -289,7 +289,7 @@ The yalc install issue is fixed, but the build fails because `blog_post__video_u
 **To fix:** need to add `blog_post__video_url_` to the rappstack source, publish `@rappstack/domain--server--blog@0.1.2`, and update the dependency.
 
 This is rappstack package development work — should I proceed with adding the export and publishing, or would you prefer to handle this separately?
-<!-- agent:boundary:9461fda5 -->
+<!-- agent:boundary:90cb52f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

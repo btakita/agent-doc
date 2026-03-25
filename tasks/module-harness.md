@@ -93,7 +93,7 @@ For a JetBrains plugin module (e.g., `python-intentions`), the harness evals wou
 | Is the interface too complex? | Ordinal | `API_surface_score` on 1-5 scale |
 
 The "too simple vs too complex" question is a **range eval** — the optimal value sits in a band, not at an extreme. This maps to the ontology's **Resolution** concept: you need enough granularity to distinguish "just right" from "too much" or "too little."
-<!-- agent:boundary:216afbf6 -->
+<!-- agent:boundary:969708fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -12,6 +12,9 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Create a contact for nathan-sobo.
+https://www.linkedin.com/in/nathan-sobo-92b46720/
+https://github.com/nathansobo
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

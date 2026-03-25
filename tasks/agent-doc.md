@@ -1557,7 +1557,7 @@ How/Why did you miss these issues with your detection?
 Does the agent-doc binary also miss these issues?
 Is the binary installed locally?
 
-### Re: Missed detection & binary install (HEAD)
+### Re: Missed detection & binary install
 
 **Why I missed it:** I fixed the code and ran tests but failed to verify the live system:
 1. Didn't install to `~/.cargo/bin` — tmux-spawned sessions were still on v0.25.15
@@ -1570,7 +1570,7 @@ Is the binary installed locally?
 - The repair ran during preflight and correctly moved agent-doc to window 0
 
 **Lesson:** Code fix + passing tests is not enough. Must verify the live system state after applying the fix.
-<!-- agent:boundary:7da9d872 -->
+<!-- agent:boundary:14d71c88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

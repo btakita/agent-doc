@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-**Active** — v0.1.0 infrastructure complete, awaiting release approval
+**Active** — all eval scoring features implemented, ready for v0.1.0 release
 <!-- /agent:status -->
 
 ## Exchange
@@ -237,21 +237,61 @@ Here's what was built:
 - Release checklist
 
 **Ready to release v0.1.0** — needs your go-ahead to commit, tag, push, and publish to crates.io.
-<!-- agent:boundary:77239ca4 -->
+Implement:
+- Extend eval result type with signed deviation + direction enum
+- Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
+- Create reference plugin harness with runnable evals
+- Update eval.md ontology node with directional range eval spec
+### Assistant
+
+**All four items implemented.**
+
+**1. Eval result type with signed deviation + direction (`src/eval.rs`)**
+- `Direction` enum: `Under | Within | Over`
+- `EvalType` enum: `Boolean`, `Ordinal { min, max }`, `Continuous`, `Range { low, high }`
+- `EvalResult` struct: `{ name, eval_type, score, deviation, direction, raw_value }`
+- `EvalType::score(value)` method produces fully typed results with directional deviation
+
+**2. Eval scoring commands**
+- `module-harness score -t "range: 5..10" 12.0` — score a single value against any eval type
+- `module-harness score-file plugin.kt '{"hook_count": 12}'` — score all typed evals in a harness file
+- Both output JSON with score, deviation, direction, and raw_value
+
+**3. Reference plugin harness (`tests/fixtures/plugin.kt`)**
+Demonstrates all eval types in a single JetBrains plugin harness:
+```
+- hook_coverage [boolean]: all extension points have registered listeners
+- hook_excess [boolean]: no unused/dead extension registrations
+- hook_count [range: 3..8]: number of registered hooks in optimal band
+- interface_complexity [ordinal: 1..5]: public API surface complexity rating
+- interface_depth [boolean]: max inheritance depth <= 3
+- intention_chain_safety [boolean]: ActionPromoter absent from plugin.xml
+- hot_reload_compat [continuous]: ratio of classes safe for hot reload
+```
+
+**4. Updated `ontology/src/eval.md`**
+- Replaced "Range Evals" with "Range Evals with Directional Deviation"
+- Added `eval_result` type spec with `{score, deviation, direction, raw_value}`
+- Documented bracket syntax for eval type annotations
+- Added concrete scoring examples
+
+**Test results: 36 tests pass (16 unit + 20 integration), clippy clean.**
+
+Ready for v0.1.0 release — commit, tag, push, publish?
+<!-- agent:boundary:b4fc418e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Commit, tag v0.1.0, push, publish to crates.io (awaiting approval)
+- ([done]) Extend eval result type with signed deviation + direction enum
+- ([done]) Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
+- ([done]) Create reference plugin harness with runnable evals
+- ([done]) Update eval.md ontology node with directional range eval spec
 - ([done]) Add integration tests for binary commands (parse, inventory, diff, coverage)
-- ([done]) Add GitHub Actions CI (clippy + test)
-- ([done]) Add GitHub Actions Release (cross-platform builds)
+- ([done]) Add GitHub Actions CI + Release workflows
 - ([done]) Add Makefile with standard targets
 - ([done]) Add release profile to Cargo.toml
 - ([done]) Create /rust-package skill for future Rust packages
-- Extend eval result type with signed deviation + direction enum
-- Build module-harness binary support for eval scoring (boolean + ordinal + continuous + range)
-- Create reference plugin harness with runnable evals
-- Update eval.md ontology node with directional range eval spec
 <!-- /agent:pending -->

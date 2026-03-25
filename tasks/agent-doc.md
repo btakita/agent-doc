@@ -660,7 +660,34 @@ build/distributions/agent-doc-jetbrains-0.2.24.zip
 - `NativeLib.kt`: `agent_doc_set_status`, `agent_doc_get_status`, `agent_doc_is_busy`
 - `EditorTabSyncListener.kt`: FFI busy guard before sync
 - `TerminalUtil.kt`: FFI busy guard before route
-<!-- agent:boundary:0364788e -->
+
+Why did you not process:
+> Does the FFI plugin need it's own independent versioning?
+
+### Re: FFI plugin independent versioning (HEAD)
+
+Sorry for missing that prompt — it was likely lost in a CRDT merge ordering issue (same pattern as earlier).
+
+**Answer: No, the FFI library does NOT need independent versioning.** Here's why:
+
+The FFI library (`libagent_doc.so`/`.dylib`) is built from the same `Cargo.toml` as the `agent-doc` binary — they share the same version (currently 0.26.1). The library is a `cdylib` target of the same crate.
+
+**What needs versioning:**
+
+| Artifact | Version source | Versioned independently? |
+|----------|---------------|--------------------------|
+| `agent-doc` binary | `Cargo.toml` | No (same as lib) |
+| `libagent_doc` shared lib | `Cargo.toml` | No (same crate) |
+| JB plugin | `gradle.properties` | Yes — `pluginVersion = 0.2.24` |
+| VS Code extension | `package.json` | Yes — own semver |
+
+The JB plugin version (0.2.24) is independent from the binary version (0.26.1) because:
+- Plugin releases are IDE-marketplace-gated (review process)
+- Plugin can work with a range of binary versions (backward compat via JNA)
+- Plugin changes don't always require a binary change (and vice versa)
+
+The FFI exports are stable — adding new functions doesn't break old plugins. Old plugins just don't call the new functions.
+<!-- agent:boundary:79f5583b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

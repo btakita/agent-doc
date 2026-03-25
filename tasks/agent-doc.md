@@ -742,7 +742,13 @@ No — keeping FFI in the same crate is the right call. Reasons:
 4. **The `[lib]` target already handles it** — `crate-type = ["cdylib", "lib"]` gives us both the shared library (for plugins) and the Rust library (for internal use) from one crate.
 
 The only reason to extract would be if the FFI surface grew so large that it warranted its own API documentation or if other crates wanted to link against `libagent_doc` as a dependency. Neither applies today.
-<!-- agent:boundary:21701772 -->
+
+release
+
+### Re: release (HEAD)
+
+**agent-doc v0.26.2 released** — crates.io + PyPI + GitHub Release. Binary installed. All targets verified.
+<!-- agent:boundary:ad0bded6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

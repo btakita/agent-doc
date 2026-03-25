@@ -395,7 +395,7 @@ Please release any pending releases in the rappstack libraries.
 
 Implement `corky youtube delete`
 
-### Re: Implement `corky youtube delete` (HEAD)
+### Re: Implement `corky youtube delete`
 
 Done. Added `corky youtube delete <VIDEO_ID>` command to corky.
 
@@ -413,7 +413,7 @@ Done. Added `corky youtube delete <VIDEO_ID>` command to corky.
 ```
 
 Then say "go" to delete the old video (`OrGJi8Hh_bQ`).
-<!-- agent:boundary:954acff9 -->
+<!-- agent:boundary:730ebb30 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

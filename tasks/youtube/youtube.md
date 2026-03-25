@@ -534,7 +534,7 @@ Publish comment on the post with links to:
 - btakita/module-harness github and crate
 - existence-lang/existence github and existence crate
 
-### Re: Publish LinkedIn + comment (HEAD)
+### Re: Publish LinkedIn + comment
 
 **LinkedIn published:** https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
 
@@ -543,7 +543,7 @@ Publish comment on the post with links to:
 - Blog post
 - module-harness GitHub + crates.io
 - existence-lang GitHub + crates.io
-<!-- agent:boundary:ebef6fb9 -->
+<!-- agent:boundary:932be85c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

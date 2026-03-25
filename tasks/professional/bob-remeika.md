@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Contact created | Drafts revised (v3) — gratitude-only comment, accurate timeline
+Comment posted | DM v4 ready | RAG use case v2 ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -89,6 +89,8 @@ Also mention Corky, existence-lang, and other tooling.
 Let me know if you want to adjust any of these, or if you're ready to post/send. I don't have much memory of working with Bob @ Grokit. I worked a lot with nathan-sobo on the unison library (https://github.com/nathansobo/unison), event machine, and erlang for the real time social quiz app.
 
 It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
+> I ended up staying at Honk, and David Sacks told me I was "making a mistake." He may have been right — but that's water under the bridge now.
+
 ### Re: Timeline & Revised Drafts (v3)
 
 **Bob's Grockit timeline:** 2008-2010 (Sr. Engineer), then Yammer 2010-2015. Your overlap was indeed just the tail end — you were leaving as he arrived. The Yammer reference would have been ~2010+ when he was already there.
@@ -97,9 +99,13 @@ It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
 
 > Bob, I'm overwhelmed with gratitude for your kind words. Grockit was such a special place — the caliber of engineers there was remarkable. Really means a lot coming from you. Thank you.
 
+Posted
+
 **Revised RAG use case (with Corky, existence-lang, and tooling):**
 
 > Building AI agent tooling in Rust: agent-doc (interactive document sessions), Corky (correspondence/email kit), and existence-lang (domain ontology language). Need RAG for ingesting project context — codebases, specs, correspondence history — so agents have high-quality retrieval across sessions. Currently hitting context window limits with local approaches.
+
+Also, I want to integrate with google docs and other cloud sources.
 
 **Revised LinkedIn DM (accurate to brief overlap):**
 
@@ -109,19 +115,43 @@ It was my last few weeks at Grokit when Bob joined. When did Bob join Grokit?
 >
 > Great to reconnect. Feels like our paths are converging.
 
+> I ended up staying at Honk, and David Sacks told me I was "making a mistake." He may have been right — but that's water under the bridge now.
+
+Seems a bit awkward given his endorsement. Maybe something like:
+
+> David Sacks told me I was "making a mistake" and I don't want to repeat that mistake.
+
 **Career timeline for reference:**
 - 2008-2010: Grockit (Sr. Engineer)
 - 2010-2015: Yammer (Sr. Engineer)
 - 2015-2017: Zenefits (VP Engineering)
 - 2017-2024: Harbor + Internal.io (Co-Founder/CTO)
 - 2024-present: Ragie (CEO & Co-Founder)
-<!-- agent:boundary:6be81729 -->
+Symlink
+### Re: Final Revisions (v4) (HEAD)
+
+Good call on the Yammer line. "Water under the bridge" reads as regret after his warm endorsement. Your reframe turns the Sacks story into a compliment: "I don't want to repeat that mistake" = "I want to work with you this time."
+
+**RAG use case (v2 — with cloud sources):**
+
+> Building AI agent tooling in Rust: agent-doc (interactive document sessions), Corky (correspondence/email kit), and existence-lang (domain ontology language). Need RAG for ingesting project context — codebases, specs, correspondence history, Google Docs, and other cloud sources — so agents have high-quality retrieval across sessions.
+
+**LinkedIn DM (v4 — Sacks line reframed):**
+
+> Hey Bob — your comment on my module-harness post really made my day. We only overlapped briefly at Grockit — my last few weeks were your first — but I remember the caliber of people that place attracted, and you were clearly one of them. Thank you for being a reference for the Yammer offer back in the day. David Sacks told me I was "making a mistake" when I turned it down, and I don't want to repeat that mistake.
+>
+> I just signed up for Ragie. I'm building AI agent tooling in Rust — interactive document sessions, a correspondence kit, a domain ontology language — and document retrieval is exactly the bottleneck I'm hitting. Would love to talk about how Ragie could fit into the workflow.
+>
+> Great to reconnect. Feels like our paths are converging.
+
+Ready to send when you are.
+<!-- agent:boundary:4dc98d91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Post comment reply on LinkedIn activity
+- [x] Post comment reply on LinkedIn activity
 - [ ] Send LinkedIn DM to Bob
 - [ ] Complete Ragie sign-up with RAG use case
 <!-- /agent:pending -->

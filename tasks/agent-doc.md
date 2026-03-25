@@ -2451,7 +2451,25 @@ module-harness = { path = "../module-harness" }
 Using a path dependency for now (not yet on crates.io). This ensures agent-doc's test builds stay in sync with module-harness syntax changes. When module-harness is published, we can switch to a version pin.
 
 Compilation verified — no errors.
-<!-- agent:boundary:08100976 -->
+Should existence-lang be a dev dependency?
+
+### Re: existence-lang as dev dependency? (HEAD)
+
+No — existence-lang is a specification, not a code library. It has no Cargo.toml and no Rust exports. It's a collection of markdown term definitions.
+
+The relationship between agent-doc and existence-lang is:
+- **existence-lang** provides the ontological vocabulary (markdown files in `ontology/src/`)
+- **agent-doc's ontology** extends that vocabulary with domain-specific terms (also markdown files)
+- Neither produces compiled code — they're documentation that informs agent behavior
+
+The connection is purely through relative file links (`../../../existence-lang/ontology/src/entity.md`), not import statements. No dependency needed — the submodule reference in the git tree is sufficient.
+
+Summary of dependency decisions:
+| Dependency | Type | Reason |
+|-----------|------|--------|
+| module-harness | dev-dep (path) | Syntax sync for harness parsing |
+| existence-lang | git submodule only | Markdown specs, no code |
+<!-- agent:boundary:fed4d482 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

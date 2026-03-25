@@ -40,6 +40,21 @@ object TerminalUtil {
         }
 
         val agentDoc = resolveAgentDoc()
+
+        // FFI busy guard: skip route if an agent-doc operation is in progress
+        val lib = AgentDocLib.get()
+        if (lib != null) {
+            try {
+                val absPath = java.io.File(basePath, relativePath).absolutePath
+                if (lib.agent_doc_is_busy(absPath)) {
+                    com.intellij.openapi.diagnostic.Logger.getInstance(TerminalUtil::class.java)
+                        .info("[route] agent-doc is busy for $relativePath, skipping route")
+                    onComplete?.invoke()
+                    return
+                }
+            } catch (_: Exception) { /* FFI unavailable — proceed */ }
+        }
+
         try {
             // Build route command with optional layout args
             val cmd = mutableListOf(agentDoc, "route", relativePath)

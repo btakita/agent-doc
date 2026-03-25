@@ -1816,7 +1816,7 @@ This is a real bug. The evals session was running, and something killed its tmux
 - **Fix needed:** Before any window kill/stash operation, check if the pane is registered in `sessions.json` for a *different* session. If so, skip it.
 
 Adding this to the pending list. Subagents still working on the health check and stash-return implementations.
-<!-- agent:boundary:63be6958 -->
+<!-- agent:boundary:34e30a33 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

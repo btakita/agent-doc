@@ -17,7 +17,7 @@ Please propose a plan for continuous evals to improve the effectiveness of the a
 
 Start with https://platform.claude.com/docs/en/test-and-evaluate/develop-tests
 
-### Plan: Continuous Evals for Agent Harnesses (HEAD)
+### Plan: Continuous Evals for Agent Harnesses
 
 Drawing from Anthropic's [eval development guide](https://platform.claude.com/docs/en/test-and-evaluate/develop-tests), here's a phased plan tailored to your agent-loop ecosystem (agent-doc, corky, Claude Code skills).
 
@@ -93,7 +93,7 @@ evals/
 #### Recommended Starting Point
 
 Start with **agent-doc diff interpretation** evals — highest-leverage area since it's the core reasoning loop every session depends on. Create 20-30 golden-answer test cases from real session diffs (plenty in git history), then expand with Claude-generated variations.
-<!-- agent:boundary:62cb421f -->
+<!-- agent:boundary:a6148076 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

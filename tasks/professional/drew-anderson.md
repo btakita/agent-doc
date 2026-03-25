@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v7 — Hume emotional range added to model flexibility bullet
+Draft v8 (final) — distribution claim removed, ready to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -389,7 +389,7 @@ A few things I'd love to compare notes on:
 - Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
 - On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
 
-I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
+I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.: I'm not actively working on this. Merely gauging interest. I need to earn income so this would come later after I have income.
 
 Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
 
@@ -400,12 +400,50 @@ Brian
 
 **Change from v6:**
 - Added Hume's emotional voice range as a specific differentiator: "Hume especially stands out for emotional voice range and expression" — shows you understand the qualitative differences between providers, not just latency numbers
-<!-- agent:boundary:1f9f7684 -->
+
+### Re: Draft v8 — remove active distribution claim (HEAD)
+
+Good call. If the distribution angle isn't active work and income is the priority, presenting it as "in the works" would be misleading. Two options:
+
+**Option A: Remove entirely.** The message is already strong without it — your PresenceAI experience + model flexibility + visual pipeline are enough hooks. Removing it keeps the message shorter and more honest.
+
+**Option B: Reframe as past experience.** Instead of "I have a distribution angle in the works," mention it as context you've explored: "I've also looked at distribution through video-first platforms for voice agent deployment."
+
+I'd go with **Option A** — cleaner, and you can always bring it up later if Drew engages and the conversation goes that direction. Here's the final draft:
+
+**Draft v8 (final):**
+
+---
+
+Hey Drew,
+
+Saw you liked a couple of my recent posts — appreciate the engagement. Right there with you on 5th wave coding. I've been building agentic tools focused on human-agent alignment: structured ways for humans and AI to collaborate on documents, correspondence, and ontology-driven systems. Your "5th wave" framing resonates — we're past vibe coding into something more intentional.
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: I was the lead engineer on a production real-time V2V pipeline on LiveKit with multi-modal integration — real-time lipsync avatars using diffusion models, on-demand image generation across multiple providers (Flux, Grok Imagine, Kling), all production-tested with measured latency tradeoffs. The company (Presence AI) wound down, but the founders and I are in discussions around licensing the codebase and IP.
+
+A few things I'd love to compare notes on:
+- Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume. Each has different strengths — Hume especially stands out for emotional voice range and expression. There's real value in being model-agnostic
+- On the visual side — we tested both real-time lipsync and image generation in production, plus semi-realtime video gen pipelines (LTXV, WAN, ComfyUI). If multi-modal is on your roadmap, happy to share what we learned
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Changes from v7:**
+- **Removed distribution paragraph entirely** — you're not actively working on it, and claiming it's "in the works" would be misleading
+- Message is now tighter and more focused on what you can credibly discuss today: V2V pipeline experience, model flexibility, visual/multi-modal production work
+- The PresenceAI licensing + distribution angle can come up naturally in a follow-up if Drew engages
+
+Ready to send, or any final tweaks?
+<!-- agent:boundary:293a5ac7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Finalize and send reply to Drew on LinkedIn
+- [ ] Send reply to Drew on LinkedIn
 - [ ] Follow up on PresenceAI licensing with Eric/Andrey
 <!-- /agent:pending -->

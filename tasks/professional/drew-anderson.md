@@ -251,7 +251,7 @@ Brian
 - Removed "mutual interest" closing (slightly passive) → replaced with direct "let me know if you'd like to dig deeper"
 - Kept the message concise — LinkedIn messages that are too long get skimmed
 
-### Re: Draft v4 — image gen details + codebase review (HEAD)
+### Re: Draft v4 — image gen details + codebase review
 
 Reviewed the `src/presence` codebase. Here's what I found and how it shapes the draft:
 
@@ -297,7 +297,7 @@ Brian
 - Changed "I explored" → "we tested... in production" — stronger credibility
 - Kept hosting high-level (no Modal/H100 mention) — save for deeper conversation
 - Still concise enough for LinkedIn
-<!-- agent:boundary:8ec12307 -->
+<!-- agent:boundary:97bfd88f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

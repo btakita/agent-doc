@@ -407,7 +407,10 @@ Go:
 
 `Run Agent Doc` resulted in 2 vertical panes.
 Actually 3.
+It looks like 0:agent-doc is really the stash window.
+There is only 1 tmux window 0:agent-doc. 1:stash went away.
 
+`Sync Tmux Layout` did not fix the layout
 ### Re: Route refactor + FFI route guard
 
 **Route refactored to single exit point.** The key change:
@@ -432,15 +435,32 @@ Also extracted `rescue_from_stash` as a separate helper for clarity.
 **Tests:** 558 passing. Binary rebuilt and installed.
 
 **Re: "Run Agent Doc" resulted in 2 vertical panes** — this is likely the stash contents being visible. The current layout is `0:agent-doc` (1 pane) + `1:stash` (3 panes). The "2 vertical panes" might be the plugin triggering a sync that created a second pane.
-<!-- agent:boundary:2a717aeb -->
+Switching to the claimed tasks/youtube.me fixed the layout.
+The 1 pane layout from before was more correct...but not fully defined.
+If there are 2 editor panes, with 1 pane being onclaimed, there should be a 2 pane tmux layout.
+The unclaimed side should just have an open shell or free claude session ready to go
+
+### Re: Unclaimed pane should show shell (HEAD)
+
+Good insight. The current sync only arranges panes for claimed files — unclaimed files are ignored. But the editor shows 2 splits, so tmux should mirror that.
+
+**Proposed behavior:**
+- Editor has 2 columns: `claimed.md | unclaimed.md`
+- Tmux should have 2 panes: `claude-session | shell` (or idle Claude ready for claim)
+- When the unclaimed file gets claimed (user runs /agent-doc on it), the shell pane becomes a Claude session
+
+This requires the sync to create placeholder panes for unclaimed files in the `col_args`. Currently sync skips files it can't resolve to a registered pane.
+
+This is a feature enhancement — I'll add it to pending. The route refactor needs to be committed and released first.
+<!-- agent:boundary:480e241f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Route refactor to single exit point**~~ ([done])
 - **Commit + push + release** — route refactor needs publishing
-- **FFI route guard** — `route_begin`/`route_end`/`is_routing` (next priority)
+- **Placeholder panes for unclaimed files** — sync should create shell panes for editor columns without claimed files
+- **FFI route guard** — `route_begin`/`route_end`/`is_routing`
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

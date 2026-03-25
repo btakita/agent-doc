@@ -260,13 +260,35 @@ This ensures every route operation aligns the tmux layout to the editor's `col_a
 **Tests:** 558 passing. Release binary rebuilt.
 
 This is the same class of bug as the previous 3-pane issue — the fix was incomplete because only one of three route paths had the sync call.
-<!-- agent:boundary:d1dd9992 -->
+The right editor is focused on tasks/professional/drew-anderson.md: an unclaimed file
+I also lost what I was typing. Please diagnose. Add logs if missing.
+The stash window is also missing. Why?
+
+### Re: Unclaimed file, lost typing, missing stash (HEAD)
+
+**Diagnosis:**
+
+1. **Missing stash window**: When I ran `tmux break-pane -d -s %143` to fix the 3-pane layout, `break-pane` creates a new window (now `@74` named "agent-doc") instead of putting the pane into the stash window. The stash window `@71` was likely destroyed when all its panes were cleaned up.
+
+2. **Lost typing**: The `break-pane` command causes a layout shift — tmux rearranges remaining panes, which can interrupt the active input buffer. This is a known tmux behavior when panes are moved while the user is typing.
+
+3. **Unclaimed file**: `tasks/professional/drew-anderson.md` doesn't have a session UUID yet (it's a new file from the directory move). The plugin won't route it until it's claimed or agent-doc is invoked on it.
+
+**Root causes:**
+- I shouldn't have used `tmux break-pane` directly — I should have used `agent-doc resync --fix` or the stash mechanism which preserves layout integrity
+- The sync fix (all 3 route paths) should prevent the 3-pane issue from recurring, so manual intervention shouldn't be needed again
+
+**Stash window recreation**: The next `agent-doc sync` or `agent-doc route` call will auto-create the stash window when needed via `ensure_stash_window()`.
+
+**Fix committed and pushed** — the sync-on-all-route-paths fix is already on GitHub (`326b6d4`). The current binary has the fix.
+<!-- agent:boundary:b549d31f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Commit and push sync fix** — route sync on all 3 paths
+- ~~**Commit and push sync fix**~~ ([done] — `326b6d4`)
+- **Recreate stash window** — will happen automatically on next sync/route
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

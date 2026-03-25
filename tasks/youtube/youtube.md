@@ -98,7 +98,7 @@ Published! https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 Create a featured blog post on briantakita.me
 recap and expand on interesting topics in the CC transcript.
 
-### Re: Blog post (HEAD)
+### Re: Blog post
 
 Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-24-agent-doc-module-harness-ontology.md`
 
@@ -122,7 +122,7 @@ Created: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-24-agen
 3. agent-loop submodule pointer updated (`39ae262`)
 
 Post will be live at: `https://briantakita.me/posts/agent-doc-module-harness-ontology`
-<!-- agent:boundary:26251801 -->
+<!-- agent:boundary:55113e89 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

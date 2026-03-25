@@ -1,13 +1,26 @@
-//! `agent-doc parallel` — Orchestrate parallel Claude sessions across git worktrees.
+//! # Module: parallel
 //!
-//! Usage: agent-doc parallel <file.md> --task "task 1" --task "task 2" [--model opus] [--no-git] [--timeout 600] [--dry-run]
+//! ## Spec
+//! - Orchestrates fan-out of multiple Claude tasks across isolated git worktrees inside tmux panes.
+//! - For each task: optionally creates a git worktree (`worktree::create`), writes the task prompt to `.agent-doc-prompt.txt`, spawns `claude -p --output-format json` in a new tmux pane, and stashes the pane out of the user's view.
+//! - With `--no-worktree`: all tasks run in the project root directory (no isolation).
+//! - Polls for pane death at a fixed 2-second interval; enforces a per-task timeout (kills remaining panes when exceeded).
+//! - Collects results: extracts `"result"` text from Claude's JSON output, reads the stderr log, and optionally reads `git diff` from each worktree.
+//! - Formats all results as a markdown document (`## Deep Results` → `### Task N — …` sections with collapsible diff and stderr blocks) and prints to stdout.
+//! - `--dry-run` prints the plan (project root, session, task list) and exits without spawning.
 //!
-//! 1. Finds project root and reads frontmatter for tmux/session config
-//! 2. Creates a git worktree per task via `worktree::create`
-//! 3. Spawns Claude in a tmux pane per worktree (non-interactive `claude -p`)
-//! 4. Polls for completion (pane death)
-//! 5. Collects results: JSON output + git diff from each worktree
-//! 6. Formats and prints results as markdown
+//! ## Agentic Contracts
+//! - `run(file, config)` — returns `Err` if the file is missing or the project root cannot be found; returns `Ok(())` after all tasks complete or time out.
+//! - Result text is extracted from the last valid JSON line with a `"result"` field; raw JSON is used as fallback when extraction fails.
+//! - Pane stashing is best-effort; stash failures emit a warning to stderr and do not abort the run.
+//! - Output format is stable markdown; callers may parse the `### Task N —` header pattern.
+//!
+//! ## Evals
+//! - dry_run: valid file + tasks + `dry_run: true` → prints plan to stderr, no panes spawned, exits Ok
+//! - no_tasks: valid file + empty task list → emits warning to stderr, exits Ok immediately
+//! - extract_result_text: Claude JSON with `"result"` field → extracted text returned; malformed JSON → raw content fallback
+//! - timeout_kills_panes: tasks that exceed `timeout_secs` → panes killed, results collected with whatever output exists
+//! - format_results: mixed output/diff/error results → markdown with correct section headers and collapsible blocks
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -69,16 +82,23 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     let project_root = snapshot::find_project_root(&canonical)
         .ok_or_else(|| anyhow::anyhow!("no .agent-doc/ project root found for {}", file.display()))?;
 
-    // Step 2: Read frontmatter for tmux_session and agent_doc_session
+    // Step 2: Read frontmatter for agent_doc_session
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (fm, _body) = frontmatter::parse(&content)?;
 
-    let session_name = fm
-        .tmux_session
-        .as_deref()
-        .unwrap_or("claude")
-        .to_string();
+    // tmux_session frontmatter field is deprecated — use current tmux session
+    let session_name = {
+        let tmux = Tmux::default_server();
+        tmux.cmd()
+            .args(["display-message", "-p", "#{session_name}"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "claude".to_string())
+    };
 
     let agent_doc_session = fm
         .session

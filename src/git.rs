@@ -1,3 +1,45 @@
+//! # Module: git
+//!
+//! ## Spec
+//! - `commit(file)`: stages and commits a session document with an auto-generated
+//!   `agent-doc(<stem>): <timestamp>` message, skipping hooks (`--no-verify`).  Relative paths are
+//!   resolved against the git superproject root first, then the toplevel.  When a snapshot exists,
+//!   the snapshot content (with ` (HEAD)` markers added to the shallowest new headings) is staged
+//!   via `git hash-object + update-index` so the working tree is never touched; user keystrokes
+//!   typed after the snapshot was taken remain uncommitted (green gutter).  Falls back to
+//!   `git add -f` when hash-object fails.  After a successful commit, strips `(HEAD)` from the
+//!   snapshot, repositions the boundary marker in the snapshot, cleans stale boundaries from the
+//!   working tree if >1 are found, and fires an IPC signal to the IDE plugin.
+//! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
+//!   tracked.
+//! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
+//!   file, or `None` if none exists.
+//! - `create_branch(file)`: creates and checks out `agent-doc/<stem>`, or switches to it if it
+//!   already exists.
+//! - `squash_session(file)`: soft-resets to before the first `agent-doc` commit touching the file
+//!   and recommits as a single squashed commit.
+//! - `add_head_marker` (private): compares the snapshot against `HEAD` to identify newly added
+//!   headings; marks only the shallowest (root-level) new headings with ` (HEAD)` so the IDE shows
+//!   a single modified line per response section as a visual boundary.
+//!
+//! ## Agentic Contracts
+//! - `commit` never modifies the working tree file directly; all staging is done through the git
+//!   index.  The only disk writes are to the snapshot file and (safety-net) stale boundary cleanup.
+//! - `commit` captures all git stdout to stderr so callers that reserve stdout for JSON (e.g.,
+//!   `preflight`) are not polluted.
+//! - All public functions resolve paths relative to the superproject root when running inside a
+//!   submodule, so git commands always run in the correct repo.
+//! - `show_head` and `last_commit_mtime` return `Ok(None)` (not `Err`) when the file has no git
+//!   history.
+//!
+//! ## Evals
+//! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
+//! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
+//! - add_head_marker_strips_old_markers: old `(HEAD)` heading stripped; new heading acquires `(HEAD)`
+//! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
+//! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
+//! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
+
 use anyhow::Result;
 use std::path::Path;
 use std::process::Command;

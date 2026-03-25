@@ -1,14 +1,49 @@
-//! C ABI exports for editor plugin native bindings.
+//! # Module: ffi
 //!
-//! Provides a minimal FFI surface for component parsing, patch application,
-//! and CRDT merge — the operations currently duplicated in Kotlin and TypeScript.
+//! ## Spec
+//! - Exports a C ABI (`extern "C"`) surface consumed by the JetBrains plugin via JNA and the VS
+//!   Code extension via Node native addons, eliminating duplicated parsing/merge logic in Kotlin
+//!   and TypeScript.
+//! - `agent_doc_parse_components(doc)`: parses all `<!-- agent:name -->` components and returns a
+//!   JSON-encoded array with fields `name`, `attrs`, `open_start`, `open_end`, `close_start`,
+//!   `close_end`, `content`.
+//! - `agent_doc_apply_patch(doc, component_name, content, mode)`: applies a patch to a named
+//!   component using `replace`, `append`, or `prepend` mode.
+//! - `agent_doc_apply_patch_with_caret(…, caret_offset)`: caret-aware append — inserts content at
+//!   the line boundary before the caret when `mode == "append"` and `caret_offset >= 0`.  Falls
+//!   back to `apply_patch` otherwise.
+//! - `agent_doc_apply_patch_with_boundary(…, boundary_id)`: boundary-marker-aware append — inserts
+//!   content at the named boundary marker position, then falls back to `apply_patch` if the marker
+//!   is not found.
+//! - `agent_doc_crdt_merge(base_state, base_state_len, ours, theirs)`: 3-way CRDT merge; `base_state`
+//!   may be null for the first merge.  Returns merged text and updated opaque CRDT state bytes.
+//! - `agent_doc_merge_frontmatter(doc, yaml_fields)`: merges YAML key/value pairs into the
+//!   document's frontmatter additively (never removes keys).
+//! - `agent_doc_reposition_boundary_to_end(doc)`: removes all existing boundary markers and inserts
+//!   a single fresh one at the end of the `exchange` component.
+//! - `agent_doc_document_changed(file_path)`: records a change event for debounce tracking.
+//! - `agent_doc_is_tracked(file_path)`: returns whether at least one change event has been recorded
+//!   for the file.
+//! - `agent_doc_await_idle(file_path, debounce_ms, timeout_ms)`: blocks until the document has been
+//!   idle for `debounce_ms`, or `timeout_ms` expires.  Returns `true` on idle, `false` on timeout.
+//! - `agent_doc_free_string(ptr)` / `agent_doc_free_state(ptr, len)`: free memory returned by any
+//!   `agent_doc_*` function.  Must be called for every non-null pointer.
 //!
-//! # Safety
+//! ## Agentic Contracts
+//! - All string parameters must be valid, non-null, NUL-terminated UTF-8; violation is UB.
+//! - Every non-null `text` or `error` pointer in a result struct must be freed exactly once with
+//!   `agent_doc_free_string`; CRDT `state` pointers must be freed with `agent_doc_free_state`.
+//! - On parse/apply errors, `text` (or `json`) is null and `error` holds a message; callers must
+//!   check nullability before use.
+//! - `agent_doc_await_idle` returning `false` means the timeout expired — the caller must not
+//!   proceed with the agent run.
 //!
-//! All `extern "C"` functions accept raw pointers. Callers must ensure:
-//! - String pointers are valid, non-null, NUL-terminated UTF-8
-//! - Returned pointers are freed with [`agent_doc_free_string`]
-//! - Byte-buffer pointers (`*const u8`) have the specified length
+//! ## Evals
+//! - parse_components_roundtrip: single `agent:status` component → JSON count=1, content="hello\n"
+//! - apply_patch_replace: replace mode on `agent:output` → new content present, old content absent
+//! - merge_frontmatter_adds_field: add `model: opus` to existing frontmatter → both keys present, body unchanged
+//! - reposition_boundary_removes_stale: two boundary markers in exchange → exactly one marker at end
+//! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;

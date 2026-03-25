@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc"
-version = "0.25.15"
+version = "0.26.0"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"
@@ -33,12 +33,14 @@ uuid = { version = "1", features = ["v4"] }
 notify = "7"
 agent-kit = { path = "../agent-kit", version = "0.2" }
 instruction-files = { path = "../instruction-files", version = "0.1" }
-tmux-router = { path = "../tmux-router", version = "0.2.9" }
+tmux-router = { path = "../tmux-router", version = "0.3.0" }
 pulldown-cmark = "0.12"
 yrs = "0.21"
 
 [dev-dependencies]
 assert_cmd = "2"
+existence = { path = "../existence-lang/existence" }
+module-harness = { path = "../module-harness" }
 predicates = "3"
 proptest = "1"
 tempfile = "3"

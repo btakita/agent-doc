@@ -1,8 +1,24 @@
-//! `agent-doc recover` — Detect and apply orphaned pending responses.
+//! # Module: recover
 //!
-//! When context compaction interrupts the agent-doc workflow between
-//! step 3 (respond) and step 4 (write), the response is saved to
-//! `.agent-doc/pending/<hash>.md`. This module detects and applies it.
+//! ## Spec
+//! - Guards against response loss caused by context compaction interrupting the write-back phase (between agent respond and `agent-doc write`).
+//! - Pending responses are stored in `.agent-doc/pending/<hash>.md` before the write attempt, making them durable across process restarts.
+//! - `run(file)` — canonicalizes the path, checks for a pending file, and applies it if found. Detection of `<!-- patch:` in the pending content selects template-patch write (`write::apply_template_from_string`); otherwise plain append is used (`write::apply_append_from_string`). Removes the pending file on successful write.
+//! - Empty pending files are cleaned up without triggering a write; `run` returns `false`.
+//! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
+//! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
+//!
+//! ## Agentic Contracts
+//! - `run(file)` — returns `Ok(false)` when no pending file exists or the pending file is empty; returns `Ok(true)` after a successful recovery write; returns `Err` on I/O failure or if the write-back itself fails.
+//! - Pending file is removed only after a fully successful write; a failed write leaves the pending file intact for retry.
+//! - `save_pending` and `clear_pending` are idempotent with respect to directory creation and missing files respectively.
+//! - Callers (e.g., `preflight`) invoke `run` at session start to surface any orphaned responses before proceeding.
+//!
+//! ## Evals
+//! - no_pending_returns_false: document with no pending file → run returns Ok(false)
+//! - save_and_clear_pending: save then clear → pending file created then removed
+//! - recover_append_response: pending plain text response → applied as Assistant section, file updated, pending file removed, run returns Ok(true)
+//! - empty_pending_cleaned_up: pending file with only whitespace → run returns Ok(false), pending file removed
 
 use anyhow::{Context, Result};
 use std::path::Path;

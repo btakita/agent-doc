@@ -1,8 +1,57 @@
-//! 3-way merge with append-friendly conflict resolution.
+//! # Module: merge
 //!
-//! Uses `git merge-file --diff3` for the base merge, then post-processes
-//! to auto-resolve append-only conflicts (where both sides added content
-//! at the same position without modifying existing lines).
+//! ## Spec
+//! - `merge_contents_crdt(base_state, ours, theirs)`: conflict-free merge using Yrs CRDT.
+//!   Delegates to `crdt::merge`, then encodes a fresh CRDT state from the merged result.
+//!   Agent content (client_id=1) is ordered before human content (client_id=2) at the same
+//!   insertion point by Yrs' native client-ID ordering — no post-merge reorder needed.
+//!   Returns `(merged_text, new_crdt_state_bytes)`.
+//! - `merge_contents(base, ours, theirs)`: 3-way merge via `git merge-file --diff3`.
+//!   Auto-resolves append-only conflicts (empty original section) by concatenating ours then
+//!   theirs. Preserves standard conflict markers only for true conflicts where existing lines
+//!   were modified differently by both sides. Returns the merged content string.
+//! - `resolve_append_conflicts(merged)` (private): post-processes `--diff3` conflict blocks.
+//!   Scans each `<<<<<<< / ||||||| / ======= / >>>>>>>` block; if the `|||||||` section is
+//!   empty/whitespace-only, auto-resolves by emitting ours then theirs. Otherwise keeps all
+//!   markers intact. Returns `(resolved_content, has_remaining_conflicts)`.
+//!
+//! ## Agentic Contracts
+//! - `merge_contents_crdt` never returns conflict markers — CRDT guarantees a conflict-free
+//!   result for all concurrent append/edit combinations.
+//! - `merge_contents_crdt` always returns a non-empty `state` vec usable as `base_state` in
+//!   the next merge cycle; state encodes the full merged text, including user edits.
+//! - `merge_contents` returns `Ok` even when conflicts remain — callers must inspect the
+//!   content for `<<<<<<<` markers if they need to detect unresolved conflicts.
+//! - When `base_state` is `None`, `merge_contents_crdt` bootstraps from an empty CRDT doc
+//!   and still produces a valid merged result.
+//! - Agent content always appears before user content at the same insertion point.
+//! - Returned CRDT state after a merge includes all user edits from the merge; using it as
+//!   the base for the next cycle will not duplicate those edits.
+//!
+//! ## Evals
+//! - `resolve_append_only_conflict`: both sides append at same point, original empty →
+//!   markers removed, agent content before user content, no `<<<<<<<` in output.
+//! - `preserve_true_conflict`: both sides modify same original line →
+//!   conflict markers preserved, original section present in output.
+//! - `mixed_append_and_true_conflicts`: one append-only block + one true-conflict block →
+//!   append-only resolved, true-conflict keeps markers.
+//! - `no_conflicts_passthrough`: no conflict markers in input → output identical to input.
+//! - `multiline_append_conflict`: multi-line append-only block → all lines preserved,
+//!   agent lines before user lines.
+//! - `merge_contents_clean`: ours adds a line, theirs unchanged → agent addition present,
+//!   no markers.
+//! - `merge_contents_both_append`: both sides add different lines → both present, no markers.
+//! - `crdt_merge_agent_and_user_append`: agent and user both append different content →
+//!   both preserved, no conflict markers, base content intact.
+//! - `crdt_merge_concurrent_same_line`: both sides insert at same position →
+//!   both preserved, deterministic order, no conflict.
+//! - `crdt_merge_no_base_state_bootstrap`: `None` base state → valid merge, non-empty state.
+//! - `crdt_merge_one_side_unchanged`: only agent appended, theirs = base →
+//!   merged equals ours exactly.
+//! - `crdt_state_includes_user_edits_no_duplicates`: two consecutive merge cycles with
+//!   concurrent user edit in cycle 1 → user edit appears exactly once in cycle 2 output.
+//! - `crdt_multi_flush_no_duplicates`: multiple streaming flush cycles with concurrent user
+//!   notes → each content piece appears exactly once across all flushes.
 
 use anyhow::{Context, Result};
 use std::process::Command;

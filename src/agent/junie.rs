@@ -1,3 +1,34 @@
+//! # Module: agent::junie
+//!
+//! ## Spec
+//! - Wraps the Junie CLI (via `junie-bridge.sh` or `junie` on PATH) as an `Agent` backend.
+//! - Command resolution order: (1) `junie` on PATH via `which`, (2) `junie-bridge.sh` next to
+//!   the agent-doc binary, (3) `~/bin/junie-bridge.sh`, (4) `~/.local/bin/junie-bridge.sh`,
+//!   (5) fallback to literal `"junie"` (produces a clear error at runtime if absent).
+//! - Command and base args may be overridden via `AgentConfig` (from `config.toml`).
+//! - Session resumption: appends `--resume <id>` when `session_id` is provided.
+//! - Session forking: appends `--continue --fork-session` when `fork = true` and no session ID.
+//! - Model override: appends `--model <m>` when `model` is provided.
+//! - Injects a Junie-specific `--append-system-prompt` that contextualises the agent within
+//!   an interactive session document (respond to git diffs, blockquotes, `## User` blocks).
+//! - Expects Junie's CLI to emit the same JSON schema as Claude: `{result, is_error, session_id}`.
+//! - Does NOT implement `StreamingAgent`; streaming is Claude-only.
+//!
+//! ## Agentic Contracts
+//! - `Agent::send` blocks until the child exits; all errors propagate via `anyhow::Result`.
+//! - Returns `Err` (with install hint) when the junie command cannot be spawned.
+//! - Returns `Err` if the process exits non-zero, `is_error` is true, or `result` is empty.
+//! - `session_id` on the returned `AgentResponse` mirrors the JSON `session_id` field.
+//!
+//! ## Evals
+//! - resolve_path_junie: `junie` on PATH → `command = "junie"`
+//! - resolve_bridge_next_to_binary: `junie-bridge.sh` in binary dir → uses that path
+//! - resolve_home_bin: `~/bin/junie-bridge.sh` exists → uses that path
+//! - resolve_fallback: none of the above → `command = "junie"` (deferred runtime error)
+//! - send_success: JSON `{result: "ok", session_id: "j1"}` stdout → `AgentResponse { text: "ok", session_id: Some("j1") }`
+//! - send_is_error: JSON `{is_error: true, result: "err"}` → `Err("Junie returned an error: err")`
+//! - send_spawn_fail: junie binary absent → `Err` containing install hint with config path
+
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;

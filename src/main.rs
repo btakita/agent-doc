@@ -1,3 +1,45 @@
+//! # Module: main (agent-doc CLI)
+//!
+//! ## Spec
+//! - Entry point for the `agent-doc` binary; parses the command line with `clap` derive.
+//! - Top-level struct `Cli` holds a single `Commands` subcommand enum (40+ variants).
+//! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
+//!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
+//! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
+//! - Loads global config via `config::load()` before dispatching; config is threaded into
+//!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
+//! - Each subcommand delegates immediately to its own module (`run::run`, `diff::run`, etc.);
+//!   `main` contains no business logic beyond argument destructuring and dispatch.
+//! - `Route` additionally calls `sync::run_layout_only` when `--col` args are present,
+//!   logging layout-sync failures to stderr without propagating the error.
+//! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
+//!   flag is given; CRDT-mode documents use `write::run_stream`, others use `write::run`.
+//! - `Prompt --all` runs `prompt::run_all()`; otherwise `FILE` is required.
+//! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
+//! - `Watch` dispatches to `watch::stop`, `watch::status`, or `watch::start` based on flags.
+//! - `Skill install --reload` prints `SKILL_RELOAD=compact` or `SKILL_RELOAD=restart` when the
+//!   skill was updated, enabling the caller to take the appropriate reload action.
+//! - `LibPath` prints the platform-appropriate shared library path (`libagent_doc.so/dylib/dll`)
+//!   next to the binary, exiting with code 1 if not found.
+//! - `ListCommands` emits a JSON array of all available subcommand names for plugin autocomplete.
+//!
+//! ## Agentic Contracts
+//! - `main` returns `anyhow::Result<()>`; any subcommand error propagates and prints to stderr.
+//! - Subcommand modules are the single source of truth for their behavior; `main` only routes.
+//! - Config is loaded once and passed by reference; subcommands must not reload config.
+//! - `Upgrade` bypasses the version check that all other subcommands run on startup.
+//!
+//! ## Evals
+//! - dispatch_run: `agent-doc run <file>` → `run::run` called with correct args
+//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `write::run_stream` selected
+//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `write::run` selected
+//! - dispatch_route_with_cols: `--col` args present → `sync::run_layout_only` called after route
+//! - dispatch_prompt_all: `--all` → `prompt::run_all`, no FILE required
+//! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
+//! - dispatch_watch_stop: `--stop` flag → `watch::stop` called
+//! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
+//! - dispatch_lib_path_missing: library absent → exits with code 1
+
 mod agent;
 mod audit_docs;
 mod autoclaim;
@@ -517,7 +559,7 @@ fn main() -> anyhow::Result<()> {
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Start { file } => start::run(&file),
         Commands::Route { file, pane, cols, focus, debounce } => {
-            let result = route::run(&file, pane.as_deref(), debounce);
+            let result = route::run(&file, pane.as_deref(), debounce, &cols);
             // If layout columns provided, sync tmux layout after routing (no auto-start —
             // route already handled the target file, auto-start would create duplicates)
             if !cols.is_empty()

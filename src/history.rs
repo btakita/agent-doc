@@ -1,3 +1,36 @@
+//! # Module: history
+//!
+//! ## Spec
+//! - `list(file)`: walks `git log` for the file, extracts the `exchange` component from each
+//!   commit's snapshot, and prints a table of `COMMIT`, `DATE`, and the first non-empty line of
+//!   the exchange (truncated to 72 chars).  Reports "(no exchange component)" or "(file not
+//!   available)" when the component is absent or the git show fails.
+//! - `restore(file, commit)`: verifies the commit exists, extracts its `exchange` content, prepends
+//!   it to the current document's exchange (separated by `---\n\n`), writes atomically via
+//!   `tempfile::NamedTempFile`, and updates the snapshot.  If the current exchange is empty, no
+//!   separator is inserted.
+//! - Both functions require the file to be inside a git repository; `list` on a non-git file
+//!   returns `Err`.
+//!
+//! ## Agentic Contracts
+//! - `list` prints to stdout (the table) and stderr (warnings/empty messages); it never modifies
+//!   any file.
+//! - `restore` returns `Err` for a non-existent commit, a commit that does not contain the file,
+//!   or a commit whose exchange component is empty.
+//! - After `restore` returns `Ok`, old exchange content is prepended before the current content;
+//!   the rest of the document is unchanged.
+//! - Snapshot update on `restore` is best-effort: failure logs a warning but does not propagate.
+//!
+//! ## Evals
+//! - extract_exchange_found: doc with exchange component → content extracted correctly
+//! - extract_exchange_not_found: plain doc without component → returns None
+//! - extract_exchange_empty: empty exchange tags → returns empty string
+//! - extract_exchange_nested_components: exchange nested inside outer component → inner content extracted
+//! - list_in_git_repo: file committed in temp git repo → list returns Ok without error
+//! - restore_prepends_exchange: v1 committed, v2 current → restore inserts v1 before v2 with separator
+//! - restore_into_empty_exchange: restore into empty exchange → content inserted without separator
+//! - restore_nonexistent_commit_fails: bogus commit hash → returns Err
+
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;

@@ -1,3 +1,35 @@
+//! # Module: agent::claude
+//!
+//! ## Spec
+//! - Wraps the `claude` CLI binary as an `Agent` and `StreamingAgent` backend.
+//! - Default invocation: `claude -p --output-format json --permission-mode acceptEdits`.
+//! - Session resumption: appends `--resume <id>` when `session_id` is provided.
+//! - Session forking: appends `--continue --fork-session` when `fork = true` and no session ID.
+//! - Model override: appends `--model <m>` when `model` is provided.
+//! - Injects a fixed `--append-system-prompt` that contextualises the agent within an
+//!   interactive session document (respond to diffs, blockquotes, and `## User` blocks).
+//! - `CLAUDECODE` env var is removed from the child process to prevent recursive detection.
+//! - Non-streaming: spawns child, writes prompt to stdin, waits for full output, parses JSON
+//!   `{result, is_error, session_id}`.
+//! - Streaming (`StreamingAgent`): uses `--output-format stream-json`, closes stdin, yields
+//!   `StreamChunk` items via `StreamIterator` line-by-line until the process exits.
+//!
+//! ## Agentic Contracts
+//! - `Agent::send` blocks until the child exits; errors propagate via `anyhow::Result`.
+//! - Returns `Err` if the process exits non-zero, `is_error` is true, or `result` is empty.
+//! - `session_id` on the returned `AgentResponse` is taken from the JSON `session_id` field.
+//! - `StreamingAgent::send_streaming` returns an iterator immediately; the child runs concurrently
+//!   and is held alive by `StreamIterator` until the iterator is exhausted or dropped.
+//! - Final chunk (`is_final = true`) carries the complete response text and `session_id`.
+//!
+//! ## Evals
+//! - send_success: valid JSON `{result: "ok", session_id: "abc"}` stdout → `AgentResponse { text: "ok", session_id: Some("abc") }`
+//! - send_is_error: JSON `{is_error: true, result: "boom"}` → `Err("Claude returned an error: boom")`
+//! - send_empty_result: JSON `{result: ""}` → `Err("Empty response from Claude")`
+//! - send_nonzero_exit: child exits 1 with stderr "fail" → `Err("claude command failed: fail")`
+//! - streaming_chunks: stream-json lines emitted incrementally → iterator yields partial then final chunk
+//! - streaming_session_id: final `{type:"result", session_id:"xyz"}` line → last chunk has `session_id = Some("xyz")`
+
 use anyhow::Result;
 use std::io::BufRead;
 use std::process::Command;

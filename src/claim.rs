@@ -1,23 +1,78 @@
-//! `agent-doc claim` — Claim a document for the current tmux pane.
+//! # Module: claim
 //!
-//! Usage: agent-doc claim <file.md>
+//! `agent-doc claim` — bind a document to the current (or specified) tmux pane.
 //!
-//! Reads the session UUID from frontmatter, detects the current tmux pane,
-//! and registers the mapping in sessions.json. This allows the JetBrains
-//! plugin (and `agent-doc route`) to send commands to the correct pane.
+//! Usage: `agent-doc claim <file.md> [--position left|right|top|bottom] [--pane %N] [--window @N]`
 //!
-//! ## Window resolution spec
+//! Reads (or generates) the session UUID in the document's YAML frontmatter, resolves
+//! the target pane, and registers the session→pane mapping in `sessions.json`. This
+//! mapping is consumed by `agent-doc route` and the JetBrains/VS Code plugins to
+//! direct commands to the correct tmux pane.
 //!
-//! When `--window` is provided, the claim command resolves the effective window:
+//! ## Spec
+//! - `run(file, position, pane, window, _force)` is the sole public entry point.
+//! - Prunes stale registry entries via `resync::prune()` before any resolution.
+//! - Calls `validate_file_claim(file)` to remove dead-pane entries for this specific
+//!   file and log why the re-claim was needed (complements the bulk prune).
+//! - Canonicalises the file path to handle CWD drift (e.g. when called from a
+//!   submodule directory).
+//! - Window resolution when `--window` is provided:
+//!   1. Window is alive → use it directly.
+//!   2. Window is dead → search `sessions.json` for an alive window in the same
+//!      project CWD via `find_alive_project_window`. Falls through to no-window
+//!      behaviour if none found.
+//!   3. No `--window` → no window scoping.
+//! - Ensures the session UUID exists in frontmatter via `frontmatter::ensure_session`;
+//!   writes the UUID back to disk if it was freshly generated.
+//! - Pane resolution priority: explicit `--pane` > `--position` (scoped to
+//!   effective window if set) > `TMUX_PANE` / active pane.
+//! - Sets `agent_doc_format=template` and `agent_doc_write=crdt` in frontmatter when
+//!   neither `format`, `write_mode`, nor legacy `mode` is present.
+//! - Scaffolds default `## Status` and `## Exchange` component sections when the
+//!   document has none and format is `template`.
+//! - Creates `.agent-doc/components.toml` with default per-component patch modes if
+//!   the file does not yet exist.
+//! - Registers the session→pane mapping using the pane's own PID (not the short-lived
+//!   CLI process PID) via `sessions::register_with_pid`.
+//! - Focuses the claimed pane via `tmux select-pane` (cross-window safe); warns but
+//!   continues if the pane is not alive.
+//! - Displays a 3-second tmux notification on the target pane.
+//! - Appends a one-line entry to `.agent-doc/claims.log` for skill-side display.
+//! - Lazy-starts the watch daemon via `watch::ensure_running` if not already running.
+//! - `find_alive_window_in_registry` is pure (I/O-injected predicate) for unit testability.
 //!
-//! 1. **Alive window** → use it directly (no change from original behavior)
-//! 2. **Dead window** → scan sessions.json for entries with matching project cwd,
-//!    check each entry's window for liveness, use the first alive match.
-//!    If no alive windows found → fall through to no-window behavior.
-//! 3. **No window** → existing behavior (position detection without window scoping)
+//! ## Agentic Contracts
+//! - Claim is idempotent for an already-claimed live pane: re-claiming updates the
+//!   registry entry and refocuses the pane without side-effects.
+//! - Stale claims (dead pane) are cleaned before the new claim is written; the
+//!   caller never observes a registry with two entries for the same file.
+//! - `agent_doc_format` and `agent_doc_write` are only set when ALL three of
+//!   `format`, `write_mode`, and `mode` are absent — existing mode configuration
+//!   is never overwritten.
+//! - Component scaffolding is only applied when the document has no `status` or
+//!   `exchange` component yet; existing components are preserved.
+//! - `claims.log` failures are non-fatal: errors are logged to stderr and the claim
+//!   itself succeeds.
+//! - Watch daemon launch failure is non-fatal: a warning is emitted and claim succeeds.
 //!
-//! This matches the fallback pattern in `sync.rs` (line 310-322) where a dead
-//! `--window` falls back to auto-detected best window.
+//! ## Evals
+//! - find_alive_window_returns_first_alive_match: registry with three entries for same
+//!   cwd where only `@3` is alive → returns `Some("@3")`.
+//! - find_alive_window_skips_wrong_cwd: entry with matching window but wrong cwd is
+//!   ignored; only the entry with the correct cwd is returned.
+//! - find_alive_window_skips_empty_window: legacy entries with empty window field are
+//!   skipped; entry with non-empty window is returned.
+//! - find_alive_window_returns_none_when_all_dead: all windows report dead →
+//!   returns `None`.
+//! - find_alive_window_returns_none_for_empty_registry: empty registry → `None`.
+//! - find_alive_window_returns_none_when_no_cwd_match: registry entries exist but none
+//!   match the queried cwd → `None`.
+//! - claim_generates_session_uuid: document without `agent_doc_session` frontmatter →
+//!   after claim, file contains a valid UUID in frontmatter.
+//! - claim_scaffolds_components: template document with no components → after claim,
+//!   file contains `<!-- agent:status -->` and `<!-- agent:exchange -->` sections.
+//! - claim_does_not_overwrite_existing_format: document with explicit `agent_doc_format`
+//!   set → claim leaves the format field unchanged.
 
 use anyhow::{Context, Result};
 use std::io::Write;
@@ -25,7 +80,7 @@ use std::path::Path;
 
 use crate::{frontmatter, resync, sessions};
 
-pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, _force: bool) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
 
     // Check for stale claims on this specific file and log if found
@@ -72,45 +127,9 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         sessions::current_pane()?
     };
 
-    // Detect tmux session name from the pane and write to frontmatter.
-    // Only set tmux_session if not already set. If already set and differs,
-    // warn but do NOT overwrite — this prevents accidental session reassignment.
+    // tmux_session frontmatter field is deprecated — no longer written on claim.
+    // Session targeting now uses current_tmux_session() at route time.
     let tmux = sessions::Tmux::default_server();
-    if let Ok(pane_sess) = tmux.pane_session(&pane_id) {
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        let (fm, _) = frontmatter::parse(&content)?;
-        match &fm.tmux_session {
-            None => {
-                // Not set yet — write the detected session
-                let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
-                if updated != content {
-                    std::fs::write(file, &updated)
-                        .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
-                    eprintln!("set tmux_session={} in {}", pane_sess, file.display());
-                }
-            }
-            Some(existing) if existing != &pane_sess => {
-                if force {
-                    // --force: overwrite tmux_session binding
-                    let updated = frontmatter::set_tmux_session(&content, &pane_sess)?;
-                    if updated != content {
-                        std::fs::write(file, &updated)
-                            .with_context(|| format!("failed to write tmux_session to {}", file.display()))?;
-                        eprintln!("forced tmux_session={} (was '{}') in {}", pane_sess, existing, file.display());
-                    }
-                } else {
-                    // Already set to a different session — warn, don't overwrite
-                    eprintln!(
-                        "warning: {} has tmux_session='{}' but pane {} is in session '{}'. \
-                         Not overwriting. Use --force to change session binding.",
-                        file.display(), existing, pane_id, pane_sess
-                    );
-                }
-            }
-            _ => {} // Already matches — nothing to do
-        }
-    }
 
     // Default to template+crdt if neither format nor write_mode nor legacy mode is set
     {

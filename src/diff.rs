@@ -1,3 +1,62 @@
+//! # Module: diff
+//!
+//! ## Spec
+//! - `strip_comments(content)` removes `[//]: # (...)` link-reference comments and
+//!   `<!-- ... -->` HTML comments from document content, while preserving agent
+//!   range markers (`<!-- agent:* -->`). Comment patterns inside fenced code blocks
+//!   and inline backtick spans are not treated as comment syntax.
+//! - `compute(doc)` reads the on-disk snapshot for `doc`, waits for stable content
+//!   via `wait_for_stable_content`, strips comments from both sides, and returns a
+//!   unified diff (5-line context, header `snapshot`→`document`) or `None` when
+//!   there are no changes. Stale-snapshot recovery fires before emitting a diff:
+//!   if the delta contains only completed assistant/user exchanges with an empty
+//!   trailing user block, the snapshot is synced to the document and `None` is returned.
+//! - `wait_for_stable_content(doc, previous)` polls the document file until the
+//!   last inserted line looks complete (not mid-word/mid-URL) or up to 12 × 500 ms
+//!   rechecks (~6 s). Three consecutive identical reads constitute "stable".
+//! - `is_stale_snapshot(snapshot, document)` returns `true` when the document is a
+//!   superset of the snapshot, the extra content contains at least one `## Assistant`
+//!   block, and the trailing `## User` block is empty.
+//! - `run(file, wait)` is the CLI entry point for the `diff` subcommand. When `wait`
+//!   is `true` it runs truncation detection first, then calls `compute` and prints
+//!   the result to stdout.
+//!
+//! ## Agentic Contracts
+//! - Comment stripping is idempotent: calling `strip_comments` twice yields the same
+//!   result as calling it once.
+//! - Agent markers are always preserved by `strip_comments`; the skill can rely on
+//!   their presence in the stripped output.
+//! - `compute` never writes to the document file; it may write to the snapshot file
+//!   only during stale-snapshot recovery.
+//! - `compute` returns `None` (no diff) if and only if there are no meaningful
+//!   content changes after comment stripping.
+//! - `wait_for_stable_content` always terminates: the `MAX_RECHECKS` bound guarantees
+//!   it returns within ~6 s regardless of file activity.
+//! - `looks_truncated` never returns `true` for empty strings, markdown headings,
+//!   slash commands, fenced code fences, or single alphanumeric characters (choice
+//!   selections).
+//! - Callers of `compute` can assume: `Some(diff)` → there is user-visible content
+//!   to respond to; `None` → skip the response cycle.
+//!
+//! ## Evals
+//! - `strip_html_comment`: `"before\n<!-- a comment -->\nafter\n"` → `"before\nafter\n"`
+//! - `strip_multiline_html_comment`: multiline `<!-- ... -->` on its own lines → stripped with surrounding newlines preserved
+//! - `strip_link_ref_comment`: `"[//]: # (note)\n"` on its own line → removed entirely
+//! - `preserve_agent_markers`: `<!-- agent:status -->` and `<!-- /agent:status -->` → unchanged
+//! - `strip_inline_comment`: inline `<!-- note -->` in middle of line → comment removed, surrounding text retained
+//! - `strip_preserves_comment_syntax_in_fenced_code_block`: `<!-- not a comment -->` inside triple-backtick fence → unchanged
+//! - `strip_preserves_comment_syntax_in_inline_backticks`: `` `<!--` `` in inline code → not treated as comment start
+//! - `strip_backtick_comment_before_agent_marker`: `` `<!--` `` text followed by `<!-- /agent:exchange -->` → agent marker not consumed
+//! - `stale_snapshot_detects_completed_exchange`: snapshot + completed assistant/user cycle with empty trailing user block → `is_stale_snapshot` returns `true`
+//! - `stale_snapshot_false_when_user_has_new_content`: trailing `## User` block has text → `is_stale_snapshot` returns `false`
+//! - `stale_snapshot_ignores_comments_in_detection`: scratch comments between exchanges → still detected as stale
+//! - `diff_detects_user_edits_after_stream_write`: snapshot saved post-stream, user adds line → `compute` returns `Some(diff)` containing new text
+//! - `diff_no_change_when_document_matches_snapshot`: document identical to snapshot → `compute` returns `None`
+//! - `truncated_mid_sentence`: line ending mid-word → `looks_truncated` returns `true`
+//! - `not_truncated_complete_sentence`: line ending with `.` → `looks_truncated` returns `false`
+//! - `not_truncated_single_word_command`: bare word like `"release"` → `looks_truncated` returns `false`
+//! - `wait_for_stable_content_returns_immediately_when_complete`: already-complete content → returns in < 500 ms
+
 use anyhow::Result;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
@@ -197,8 +256,9 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 ///
 /// Returns the stable file content.
 pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
-    const RECHECK_DELAY_MS: u64 = 400;
-    const MAX_RECHECKS: u32 = 12; // ~5 seconds max
+    const RECHECK_DELAY_MS: u64 = 500;
+    const MAX_RECHECKS: u32 = 12; // ~6 seconds max
+    const STABLE_CHECKS_REQUIRED: u32 = 3; // require 3 consecutive stable reads
 
     let mut current = std::fs::read_to_string(doc)?;
 
@@ -214,14 +274,24 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
                 MAX_RECHECKS,
                 truncate_for_log(line, 60)
             );
-            std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
-            let refreshed = std::fs::read_to_string(doc)?;
-            if refreshed == current {
-                // Content unchanged — user stopped typing
-                eprintln!("[diff] Content stable after recheck");
+            // Require multiple consecutive stable reads to account for
+            // editor buffer→flush delays (auto-save may take 1-2s)
+            let mut stable_count = 0u32;
+            for _check in 0..STABLE_CHECKS_REQUIRED {
+                std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
+                let refreshed = std::fs::read_to_string(doc)?;
+                if refreshed == current {
+                    stable_count += 1;
+                } else {
+                    current = refreshed;
+                    stable_count = 0;
+                    break;
+                }
+            }
+            if stable_count >= STABLE_CHECKS_REQUIRED {
+                eprintln!("[diff] Content stable after {} consecutive checks", STABLE_CHECKS_REQUIRED);
                 break;
             }
-            current = refreshed;
             continue;
         }
         // Line looks complete — no recheck needed

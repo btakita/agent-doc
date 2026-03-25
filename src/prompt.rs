@@ -1,16 +1,33 @@
-//! `agent-doc prompt` — Detect and surface permission prompts from Claude Code.
+//! # Module: prompt
 //!
-//! Usage: agent-doc prompt <file.md>
+//! ## Spec
+//! - Detects active Claude Code permission/question prompts in a tmux pane and surfaces them as JSON.
+//! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
+//! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
+//! - `answer(file, option_index)` — navigates the Claude Code TUI to the target option using Up/Down arrow keys (30 ms between presses) then sends Enter. Validates that a prompt is active and the index is in range before sending keys.
+//! - Prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for `[N] label` bracket-format options, then identifies the question as the first non-empty, non-option line above.
+//! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
+//! - `selected` is 0-based (reflecting TUI cursor position); `options[*].index` is 1-based (matching the TUI display).
+//! - Markdown numbered lists (`1. item`) must NOT be detected as prompt options; only `[N] label` bracket format matches.
+//! - When no pane is registered or the pane is dead, `run` emits `{"active":false}` and returns `Ok(())`.
+//! - Optional fields (`question`, `options`, `selected`) are omitted from JSON serialization when `None`.
 //!
-//! 1. Reads session UUID from file's frontmatter
-//! 2. Looks up pane in sessions.json
-//! 3. Captures pane content via `tmux capture-pane`
-//! 4. Parses for Claude Code permission/question patterns
-//! 5. Outputs JSON to stdout
+//! ## Agentic Contracts
+//! - `run(file)` / `run_with_tmux(file, tmux)` — returns `Err` only on file I/O or tmux command failure; missing/dead pane produces `active: false` output, not an error.
+//! - `answer(file, option_index)` — returns `Err` when: file missing, no pane registered, pane dead, no active prompt, or index out of range (1-based).
+//! - `parse_prompt(content)` is `pub` and deterministic; callers may unit-test it directly.
+//! - `PromptAllEntry` serializes flat (prompt fields at top level via `#[serde(flatten)]`).
 //!
-//! Usage: agent-doc prompt --answer <file.md> <option-number>
-//!
-//! Sends the selected option to the tmux pane.
+//! ## Evals
+//! - parse_permission_prompt: three-option prompt with `❯` cursor on option 2 → active, correct question, 3 options, selected=1 (0-based)
+//! - parse_no_prompt: plain output without footer → inactive PromptInfo
+//! - parse_yes_no_prompt: two-option prompt → active, 2 options
+//! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
+//! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
+//! - parse_option_line_with_cursor: `❯ [2] label` → index=2, label extracted
+//! - parse_option_line_rejects_markdown: `1. item` / `2. item` → None
+//! - prompt_all_entry_serializes_flat: active entry → `session_id`, `file`, `active`, `question` all at JSON top level
+//! - prompt_all_entry_inactive_omits_optional: inactive entry → no `question`/`options` keys in JSON
 
 use anyhow::{Context, Result};
 use serde::Serialize;

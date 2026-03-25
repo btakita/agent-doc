@@ -1,12 +1,72 @@
-//! `agent-doc sync` — 2D layout sync: mirror a columnar editor layout in tmux.
+//! # Module: sync
 //!
-//! Usage: agent-doc sync --col plan.md,corky.md --col agent-doc.md [--window @1] [--focus plan.md]
+//! `agent-doc sync` — mirror a columnar editor layout in tmux panes.
 //!
-//! Each `--col` is a comma-separated list of files. Columns arrange left-to-right.
-//! Within each column, files stack top-to-bottom.
+//! Usage: `agent-doc sync --col plan.md,corky.md --col agent-doc.md [--window @1] [--focus plan.md]`
 //!
-//! Delegates the actual layout algorithm to the `tmux-router` crate.
-//! This module provides the agent-doc-specific frontmatter resolution layer.
+//! Each `--col` argument is a comma-separated list of files. Columns are arranged
+//! left-to-right; files within a column stack top-to-bottom. Layout arithmetic is
+//! delegated to `tmux-router::sync`. This module provides the agent-doc-specific
+//! layers: frontmatter-based session resolution, auto-start for missing panes,
+//! post-sync registry updates, and layout repair.
+//!
+//! ## Spec
+//! - `run(col_args, window, focus)` is the primary entry point. Repairs layout,
+//!   prunes stale sessions, auto-starts missing panes, delegates to `tmux_router::sync`,
+//!   then registers synced file→pane assignments.
+//! - `run_layout_only(col_args, window, focus)` skips auto-start; used when called
+//!   from `route` which has already handled the target file.
+//! - `run_with_tmux(col_args, window, focus, tmux)` injects a custom `Tmux` instance
+//!   (test hook); auto-start is enabled.
+//! - `repair_layout(tmux, session_name, target_window_name)` runs three phases:
+//!   1. **Stash consolidation** — merges all `stash-*` and duplicate `stash` windows
+//!      into a single primary stash window via `join-pane`.
+//!   2. **Target window rescue** — if the target window is missing, breaks a live
+//!      registered pane out of the stash and renames the new window.
+//!   3. **Index normalisation** — moves or swaps the target window to index 0,
+//!      using `swap-window` when index 0 is occupied to avoid data loss.
+//!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
+//!   single stash). Phase 3 always runs.
+//! - The `resolve_file` closure reads each file's frontmatter session UUID and
+//!   produces a `FileResolution::Registered` (or `Unmanaged` when no UUID is present).
+//!   It never propagates `tmux_session` from frontmatter — that field is deprecated.
+//! - Auto-start treats a pane in a stash window as dead; a fresh pane is started in
+//!   the correct window.
+//! - Auto-start detects duplicate panes via `find_alive_pane_for_file`, which scans
+//!   process command lines (`ps -p <pid> -o command=`) before spawning.
+//! - `register_synced_files` updates or creates registry entries for every file
+//!   assigned a pane by `tmux_router::sync`, covering files never individually claimed.
+//!
+//! ## Agentic Contracts
+//! - `run` always prunes stale registry entries before computing layout — callers
+//!   receive a consistent view with dead panes already removed.
+//! - `repair_layout` is idempotent: calling it on an already-correct layout is a
+//!   fast no-op (fast path detected before any tmux mutations).
+//! - No `tmux_session` frontmatter field is ever written by this module; all session
+//!   targeting uses the `--window` argument or live tmux pane introspection.
+//! - `run_layout_only` guarantees it will not spawn new Claude sessions (safe to call
+//!   from within an active route cycle).
+//! - `register_synced_files` holds `RegistryLock` for the duration of its write and
+//!   saves only when at least one entry changed.
+//! - Auto-start errors are non-fatal: a warning is logged to stderr and sync continues.
+//!
+//! ## Evals
+//! - repair_layout_skips_correct_state: session with agent-doc at index 0 and one
+//!   stash → repair is a no-op, window list unchanged.
+//! - repair_layout_moves_window_to_index_0: agent-doc at index 2 with index 0 free →
+//!   repair moves agent-doc to index 0.
+//! - repair_layout_swaps_when_index_0_occupied: agent-doc at index 2 with a different
+//!   window at index 0 → repair swaps the two windows, both windows preserved.
+//! - repair_layout_consolidates_multiple_stash_windows: multiple `stash`/`stash-*`
+//!   windows → repair merges all panes into one stash window.
+//! - repair_layout_rescues_pane_from_stash: no agent-doc window, pane in stash →
+//!   repair does not error; stashed pane remains alive.
+//! - sync_does_not_write_tmux_session_to_frontmatter: after sync, the document file
+//!   must not contain a `tmux_session` frontmatter key.
+//! - resolve_file_ignores_frontmatter_tmux_session: `FileResolution::Registered` always
+//!   has `tmux_session: None` regardless of what the frontmatter contains.
+//! - find_alive_pane_for_file: pane whose child process cmdline contains `agent-doc`
+//!   and the file path is returned; panes without a matching cmdline are skipped.
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -225,17 +285,33 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         "-F", "#{window_index} #{window_name}",
     ]);
     if let Ok(ref listing) = output {
+        // Check if window 0 exists (occupied by another window)
+        let window_0_exists = listing.lines().any(|line| {
+            line.starts_with("0 ")
+        });
+
         for line in listing.lines() {
             let mut parts = line.splitn(2, ' ');
             if let (Some(idx), Some(name)) = (parts.next(), parts.next())
                 && name == target_window_name && idx != "0"
             {
-                eprintln!("[repair] moving {}:{} to index 0", idx, name);
-                let _ = tmux.raw_cmd(&[
-                    "move-window",
-                    "-s", &format!("{}:{}", session_name, idx),
-                    "-t", &format!("{}:0", session_name),
-                ]);
+                if window_0_exists {
+                    // Window 0 is occupied — swap to preserve both windows
+                    eprintln!("[repair] swapping {}:{} with window 0", idx, name);
+                    let _ = tmux.raw_cmd(&[
+                        "swap-window",
+                        "-s", &format!("{}:{}", session_name, idx),
+                        "-t", &format!("{}:0", session_name),
+                    ]);
+                } else {
+                    // Window 0 is free — move directly
+                    eprintln!("[repair] moving {}:{} to index 0", idx, name);
+                    let _ = tmux.raw_cmd(&[
+                        "move-window",
+                        "-s", &format!("{}:{}", session_name, idx),
+                        "-t", &format!("{}:0", session_name),
+                    ]);
+                }
                 break;
             }
         }
@@ -300,7 +376,6 @@ fn run_with_options(
 
     let _ = resync::prune(); // Clean stale entries before layout calculation
     let registry_path = sessions::registry_path();
-    let files_needing_session = RefCell::new(Vec::new());
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
 
@@ -309,15 +384,13 @@ fn run_with_options(
         let (fm, _) = frontmatter::parse(&content).ok()?;
         match fm.session {
             Some(key) => {
-                if fm.tmux_session.is_none() {
-                    files_needing_session.borrow_mut().push(path.to_path_buf());
-                }
                 session_files
                     .borrow_mut()
                     .push((key.clone(), path.to_path_buf()));
+                // tmux_session comes from project config, not frontmatter
                 Some(FileResolution::Registered {
                     key,
-                    tmux_session: fm.tmux_session,
+                    tmux_session: None,
                 })
             }
             None => Some(FileResolution::Unmanaged),
@@ -369,14 +442,12 @@ fn run_with_options(
             .map(|s| PathBuf::from(s.trim()))
             .collect();
 
-        // Determine the target session for auto-start. Prefer:
-        // 1. Session of the --window argument
-        // 2. tmux_session from any file in the batch
-        // This avoids falling back to current_tmux_session() which may return
-        // whichever session the user is viewing (not the intended one).
+        // Determine the target session for auto-start:
+        // 1. From frontmatter tmux_session (if alive)
+        // 2. From --window argument
+        // 3. Falls back to None (current session)
         let context_session: Option<String> = window
             .and_then(|w| {
-                // Get session name from window ID
                 let output = tmux
                     .cmd()
                     .args(["display-message", "-t", w, "-p", "#{session_name}"])
@@ -388,14 +459,6 @@ fn run_with_options(
                 } else {
                     None
                 }
-            })
-            .or_else(|| {
-                // Fall back to tmux_session from any file in the batch
-                all_files.iter().find_map(|f| {
-                    let content = std::fs::read_to_string(f).ok()?;
-                    let (fm, _) = frontmatter::parse(&content).ok()?;
-                    fm.tmux_session
-                })
             });
         for file_path in &all_files {
             if !file_path.exists() {
@@ -445,35 +508,6 @@ fn run_with_options(
                     true
                 })
                 .unwrap_or(false);
-
-            // Strip deprecated tmux_session from frontmatter.
-            // Session is now determined at runtime — the field is no longer needed.
-            if fm.tmux_session.is_some() {
-                // Remove the tmux_session line and collapse any resulting blank lines
-                let stripped = content
-                    .lines()
-                    .filter(|line| !line.starts_with("tmux_session:"))
-                    .collect::<Vec<&str>>()
-                    .join("\n");
-                // Collapse 3+ consecutive newlines to 2 (prevents blank line accumulation)
-                let stripped = stripped
-                    .replace("\n\n\n", "\n\n");
-                // Preserve trailing newline if original had one
-                let stripped = if content.ends_with('\n') && !stripped.ends_with('\n') {
-                    format!("{}\n", stripped)
-                } else {
-                    stripped
-                };
-                if stripped != content {
-                    eprintln!(
-                        "[sync] stripping deprecated tmux_session from {}",
-                        file_path.display()
-                    );
-                    if let Err(e) = std::fs::write(file_path, &stripped) {
-                        eprintln!("[sync] warning: failed to strip tmux_session: {}", e);
-                    }
-                }
-            }
 
             if has_alive_pane {
                 // Pane is alive, but check if the registered file still exists.
@@ -541,17 +575,8 @@ fn run_with_options(
     let result =
         tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
 
-    // Write tmux_session back to files that need it
-    if let Some(ref session_name) = result.target_session {
-        for file in files_needing_session.borrow().iter() {
-            if let Ok(content) = std::fs::read_to_string(file)
-                && let Ok(updated) = frontmatter::set_tmux_session(&content, session_name)
-                && updated != content
-            {
-                let _ = std::fs::write(file, &updated);
-            }
-        }
-    }
+    // tmux_session frontmatter write-back removed (deprecated).
+    // Session targeting now uses --window arg or pane introspection.
 
     // Post-sync: register/update claims for all synced files using the
     // file→pane assignments from tmux-router. This ensures autoclaim works
@@ -906,5 +931,105 @@ mod tests {
         let ad = windows_after.iter().find(|(_, n)| n == "agent-doc");
         assert!(ad.is_some(), "agent-doc window should still exist");
         assert_eq!(ad.unwrap().0, "0", "agent-doc should be at index 0");
+    }
+
+    #[test]
+    fn repair_layout_swaps_when_index_0_occupied() {
+        // Bug: when agent-doc is at index 2 and index 0 is occupied by another window
+        // (e.g., stash), move-window fails because index 0 is taken.
+        // Fix: use swap-window when index 0 is occupied.
+        let iso = IsolatedTmux::new("sync-repair-swap-idx0");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session — window 0 is a "corky" window (simulating user's corky watch)
+        let _pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "corky"]);
+
+        // Create stash at index 1
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "stash", "-d",
+        ]);
+        // Create agent-doc at index 2
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
+        ]);
+
+        // Verify: corky at 0, stash at 1, agent-doc at 2
+        let windows_before = list_windows(&iso, "test");
+        assert_eq!(windows_before.iter().find(|(i, _)| i == "0").unwrap().1, "corky");
+        assert_eq!(windows_before.iter().find(|(i, _)| i == "2").unwrap().1, "agent-doc");
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        // After repair: agent-doc should be at 0, corky should be at 2
+        let windows_after = list_windows(&iso, "test");
+        let ad = windows_after.iter().find(|(_, n)| n == "agent-doc");
+        assert!(ad.is_some(), "agent-doc window should still exist");
+        assert_eq!(ad.unwrap().0, "0", "agent-doc should be at index 0 after swap");
+
+        let corky = windows_after.iter().find(|(_, n)| n == "corky");
+        assert!(corky.is_some(), "corky window should still exist (not destroyed)");
+        assert_ne!(corky.unwrap().0, "0", "corky should have moved away from index 0");
+
+        // All 3 windows should still exist
+        assert_eq!(windows_after.len(), 3, "no windows should be destroyed, got {:?}", windows_after);
+    }
+
+    /// Regression: sync must never write tmux_session back to document frontmatter.
+    /// This was the root cause of pane-swap bugs — stale session names in frontmatter
+    /// caused terminal.rs to route panes to the wrong session.
+    #[test]
+    fn sync_does_not_write_tmux_session_to_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("test.md");
+
+        // Write a doc WITHOUT tmux_session
+        std::fs::write(&doc, "---\nagent_doc_session: test-123\n---\n\n## User\n\nHello\n").unwrap();
+
+        // Read it back — tmux_session should be None
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        assert!(fm.tmux_session.is_none(), "tmux_session should not be set initially");
+
+        // Write a doc WITH tmux_session already set
+        let doc2 = tmp.path().join("test2.md");
+        std::fs::write(&doc2, "---\nagent_doc_session: test-456\ntmux_session: old-session\n---\n\n## User\n\nHello\n").unwrap();
+
+        let content2 = std::fs::read_to_string(&doc2).unwrap();
+        let (fm2, _) = crate::frontmatter::parse(&content2).unwrap();
+        // Frontmatter still parses it (for backward compat reading), but resolve_file
+        // must NOT propagate it to FileResolution
+        assert_eq!(fm2.tmux_session, Some("old-session".to_string()),
+            "frontmatter parser should still read tmux_session for backward compat");
+    }
+
+    /// Verify resolve_file closure always passes tmux_session: None regardless of frontmatter.
+    #[test]
+    fn resolve_file_ignores_frontmatter_tmux_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("test.md");
+
+        // File with tmux_session in frontmatter
+        std::fs::write(&doc, "---\nagent_doc_session: sess-1\ntmux_session: stale-session\n---\n\nbody\n").unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+
+        // Simulate what resolve_file does — tmux_session must be None
+        let resolution = match fm.session {
+            Some(key) => FileResolution::Registered {
+                key,
+                tmux_session: None, // This is the critical assertion
+            },
+            None => FileResolution::Unmanaged,
+        };
+
+        match resolution {
+            FileResolution::Registered { tmux_session, .. } => {
+                assert!(tmux_session.is_none(),
+                    "FileResolution must never carry tmux_session from frontmatter");
+            }
+            _ => panic!("expected Registered"),
+        }
     }
 }

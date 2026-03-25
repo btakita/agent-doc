@@ -1,3 +1,64 @@
+//! # Module: watch
+//!
+//! ## Spec
+//! - `start(config, WatchConfig)` runs the watch daemon. Acquires a PID file
+//!   (`.agent-doc/watch.pid`) to prevent duplicate daemons; bails if one is already alive.
+//! - `is_running()` checks the PID file and `/proc/<pid>` for daemon liveness.
+//! - `ensure_running()` lazily starts the daemon if it is not running; spawns the
+//!   `agent-doc watch` subprocess from the project root. Returns `Ok(true)` if started,
+//!   `Ok(false)` if already running.
+//! - `stop()` signals shutdown by removing the PID file; the daemon detects this on its
+//!   next loop tick and exits cleanly.
+//! - `status()` prints daemon running state and PID to stdout.
+//! - The daemon resolves the project root (directory containing `.agent-doc/`) at startup
+//!   and `chdir`s there so relative paths (PID file, sessions.json) are always correct.
+//! - Session discovery: `discover_entries()` reads `sessions.json` and classifies each
+//!   document by frontmatter mode:
+//!   - `FileWatch` — append/template mode: monitored via `notify` file-system watcher.
+//!   - `StreamCapture` — CRDT mode: polled by capturing the associated tmux pane.
+//! - File-watch path: events are debounced (`debounce_ms`). After debounce, `run::run()`
+//!   is called on the changed file.
+//! - Loop prevention for file-watch: agent-triggered changes (within `debounce * 3` of
+//!   last run) increment a per-file cycle counter; hard cap at `max_cycles`. Content hash
+//!   equality stops the loop early (convergence detection).
+//! - Stream-capture path: every 500 ms poll tick, `sessions::capture_pane()` is called;
+//!   new lines (from `extract_new_lines()`) are flushed to the document via
+//!   `stream::flush_to_document()`.
+//! - CRDT documents also get reactive file-watching with zero debounce (tracked in
+//!   `reactive_paths: HashSet<PathBuf>`).
+//! - Session registry is rescanned every 10 s to pick up newly registered documents.
+//! - Dead stream panes (pane no longer alive in tmux) are pruned on rescan.
+//! - Idle timeout: daemon exits automatically after 60 s with no active sessions.
+//! - PID file removal (external `stop` or daemon crash) triggers clean shutdown on next tick.
+//! - `extract_new_lines(old, new)` finds the first diverging line between two captures
+//!   and returns all new lines from that point onward.
+//!
+//! ## Agentic Contracts
+//! - `start()`, `stop()`, `status()`, `is_running()`, and `ensure_running()` are the
+//!   public API surface; all loop internals are private.
+//! - `ensure_running()` is safe to call from any subcommand needing the daemon; it
+//!   is idempotent and returns promptly when the daemon is already live.
+//! - `extract_new_lines()` is pure and allocation-only; no I/O or side effects.
+//! - The daemon never panics on individual file submit errors; errors are logged to
+//!   stderr and the loop continues.
+//!
+//! ## Evals
+//! - pid_file_roundtrip: write_pid → read_pid matches process id; remove_pid → read_pid returns None
+//! - pid_alive_self: current process PID → true
+//! - pid_alive_nonexistent: PID 4294967295 → false
+//! - discover_empty_registry: no sessions.json → empty vec
+//! - hash_deterministic: same file content read twice → identical hash
+//! - hash_changes_with_content: file content changed → different hash
+//! - loop_prevention_counter: increment then reset cycle_count → correct values
+//! - convergence_detection: last_hash set → value preserved in state
+//! - extract_new_lines_appended: new has extra lines at end → returns only new lines
+//! - extract_new_lines_modified: diverges at line 2 → returns from divergence point onward
+//! - extract_new_lines_identical: same content → empty string
+//! - extract_new_lines_empty_old: old empty → all new lines returned
+//! - extract_new_lines_empty_new: new empty → empty string
+//! - stream_state_tracks_capture: two captures → incremental new content extracted correctly
+//! - doc_mode_eq: FileWatch == FileWatch; StreamCapture != FileWatch
+
 use anyhow::{bail, Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};

@@ -1,9 +1,135 @@
-//! `agent-doc write` — Append an assistant response to a session document.
+//! # Module: write
 //!
-//! Usage: echo "response text" | agent-doc write <file.md>
+//! All write paths for agent responses: inline append, template patch, stream
+//! (CRDT), IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
+//! invariant: save pending → acquire lock → compute `content_ours` (baseline +
+//! response) → merge with any concurrent user edits → atomic write → save
+//! snapshot as `content_ours` (not the merged result) → clear pending.
 //!
-//! Atomically appends `## Assistant\n\n<content>\n\n## User\n\n` to the document,
-//! handling concurrent edits via 3-way merge. Updates the snapshot after writing.
+//! ## Spec
+//!
+//! - `run`: inline (User/Assistant) mode. Reads response from stdin, strips any
+//!   leading `## Assistant` / trailing `## User` headings the agent may have
+//!   echoed, then appends `## Assistant\n\n<response>\n\n## User\n\n` to the
+//!   document. Saves a pre-response snapshot for undo. If the file changed
+//!   since `baseline`, performs a 3-way git merge before writing.
+//!
+//! - `run_template`: template-component mode. Parses `patch:NAME` fence blocks
+//!   from stdin, sanitizes any `<!-- agent:NAME -->` markers in patch content
+//!   (prevents parser corruption), applies patches to the baseline via
+//!   `template::apply_patches`, then performs the same lock/merge/atomic-write
+//!   cycle as `run`.
+//!
+//! - `run_stream`: CRDT stream-flush mode. Like `run_template` but uses
+//!   `merge::merge_contents_crdt` for conflict-free merge. Saves both a text
+//!   snapshot and a CRDT state snapshot after every flush. Supports IPC-first
+//!   writes: when `.agent-doc/patches/` exists and `--force-disk` is not set,
+//!   tries `try_ipc` first; on timeout (exit code 75 / `EX_TEMPFAIL`) leaves a
+//!   fallback patch file for the plugin to pick up later.
+//!
+//! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
+//!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
+//!   as ACK (2 s timeout), then falls back to the direct CRDT disk path.
+//!
+//! - `try_ipc`: low-level IPC helper used by `run_stream`. Writes a JSON patch
+//!   file (component patches + optional frontmatter + `reposition_boundary`
+//!   flag) and polls for ACK. Returns `Ok(true)` on success, `Ok(false)` on
+//!   timeout. Safe to call unconditionally — returns `false` immediately when
+//!   `.agent-doc/patches/` does not exist. Synthesises a boundary-aware
+//!   exchange patch when no explicit patches exist but unmatched content and a
+//!   boundary marker are present.
+//!
+//! - `try_ipc_full_content`: like `try_ipc` but sends a full document
+//!   replacement (`fullContent` field) instead of component patches. Used by
+//!   inline-mode documents without component markers.
+//!
+//! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with empty
+//!   patches and `reposition_boundary: true`. Moves the boundary marker to
+//!   end-of-exchange without touching the working tree (preserves cursor/undo
+//!   in the IDE). Non-fatal on timeout.
+//!
+//! - `apply_append_from_string`: recovery variant of `run` — takes response
+//!   text directly instead of reading stdin. Used by `recover` to replay
+//!   orphaned inline responses.
+//!
+//! - `apply_template_from_string`: recovery variant of `run_template`.
+//!
+//! - `apply_stream_from_string`: recovery variant of `run_stream` (CRDT merge).
+//!
+//! - `sanitize_component_tags`: escapes `<!-- agent:NAME -->` and
+//!   `<!-- /agent:NAME -->` markers appearing in patch content to prevent the
+//!   component parser from treating them as real delimiters.
+//!
+//! - `strip_assistant_heading`: strips a leading `## Assistant` heading and/or
+//!   trailing `## User` heading from a response string. Prevents duplicate
+//!   headings when the agent echoes them.
+//!
+//! - `atomic_write_pub`: public thin wrapper around the internal `atomic_write`
+//!   (write to temp file + rename). Used by `compact` and other modules.
+//!
+//! ## Agentic Contracts
+//!
+//! - Snapshot invariant: the snapshot saved after every write contains
+//!   `content_ours` (baseline + response), never the merged result. This
+//!   ensures the next diff cycle sees concurrent user edits as a diff, not as
+//!   already-committed content.
+//! - Pending response is saved before any write attempt and cleared only after
+//!   a successful write, so an interrupted write is recoverable.
+//! - Pre-response snapshot is saved before acquiring the lock so `undo` can
+//!   restore the document to its pre-response state regardless of merge
+//!   outcome.
+//! - All writes are atomic (temp file + rename). Partial writes never corrupt
+//!   the document.
+//! - Advisory file lock (`flock`) serialises concurrent writes to the same
+//!   document; the lock is dropped immediately after `atomic_write`.
+//! - `try_ipc` / `try_ipc_full_content` return `false` immediately (no I/O
+//!   wait) when `.agent-doc/patches/` does not exist — callers may invoke them
+//!   unconditionally without performance cost when no plugin is active.
+//! - IPC writes include `reposition_boundary: true` so the plugin moves the
+//!   boundary marker to end-of-exchange in the same Document API transaction as
+//!   the patch, avoiding a second round-trip.
+//! - CRDT snapshots are saved from the merged state (not from `content_ours`)
+//!   so subsequent merges use the correct shared ancestor, preventing
+//!   character-level duplication across cycles.
+//! - `sanitize_component_tags` is applied to every patch block before any
+//!   write path applies it, preventing agent-generated examples of component
+//!   syntax from corrupting future parses.
+//!
+//! ## Evals
+//!
+//! - `write_appends_response`: inline write appends `## Assistant\n\n<text>` +
+//!   `\n## User\n\n` to a document → both headings and content present in file.
+//! - `write_updates_snapshot`: after a write the snapshot path resolves to
+//!   `.agent-doc/snapshots/` and a roundtrip read/write is lossless.
+//! - `write_preserves_user_edits_via_merge`: 3-way merge when user appends to
+//!   `## User` block concurrently → merged result contains both response and
+//!   user addition.
+//! - `write_no_merge_when_unchanged`: when file equals baseline at lock time,
+//!   `content_ours` is used directly (no merge invoked).
+//! - `atomic_write_correct_content`: temp-rename write produces the exact bytes
+//!   supplied.
+//! - `concurrent_writes_no_corruption`: 20 threads racing on atomic_write →
+//!   final file is one complete writer's content (no corruption or partial
+//!   writes).
+//! - `snapshot_excludes_concurrent_user_edits`: snapshot saved as
+//!   `content_ours`; concurrent user edit is present in the file but absent
+//!   from the snapshot, so the next diff detects it.
+//! - `try_ipc_returns_false_when_no_patches_dir`: `try_ipc` with no
+//!   `.agent-doc/patches/` → returns `false` immediately.
+//! - `try_ipc_times_out_when_no_plugin`: `.agent-doc/patches/` exists but
+//!   nothing consumes the file → returns `false` after 2 s; patch file cleaned
+//!   up.
+//! - `try_ipc_succeeds_when_plugin_consumes`: mock plugin thread deletes patch
+//!   file within 2 s → `try_ipc` returns `true`.
+//! - `try_ipc_full_content_returns_false_when_no_patches_dir`: full-content IPC
+//!   with no patches dir → returns `false`.
+//! - `sanitize_escapes_open_agent_tag`: `<!-- agent:exchange -->` inside patch
+//!   content is escaped to `&lt;!-- agent:exchange --&gt;`.
+//! - *(aspirational)* `run_stream_crdt_merge`: concurrent user keystroke during
+//!   stream flush → CRDT merge produces text containing both agent response and
+//!   user addition without character interleaving.
+//! - *(aspirational)* `ipc_fallback_on_timeout`: `run_stream` with IPC timeout
+//!   exits with code 75 and leaves a patch file for deferred plugin pickup.
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -348,6 +474,22 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     }
 
     // No plugin installed or --force-disk — direct disk write
+    // When --force-disk is set, clean up any pending IPC patch files to prevent
+    // the plugin from applying them later (which would cause double-write).
+    if force_disk {
+        if let Ok(canonical) = file.canonicalize() {
+            let project_root = find_project_root(&canonical)
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+            let patches_dir = project_root.join(".agent-doc/patches");
+            if let Ok(hash) = snapshot::doc_hash(file) {
+                let patch_file = patches_dir.join(format!("{}.json", hash));
+                if patch_file.exists() {
+                    eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
+                    let _ = std::fs::remove_file(&patch_file);
+                }
+            }
+        }
+    }
     let t_disk = std::time::Instant::now();
 
     // Read document state
@@ -934,7 +1076,52 @@ fn write_ipc_and_poll(
 
     while start.elapsed() < timeout {
         if !patch_file.exists() {
-            // Plugin consumed the patch — update snapshot.
+            // Plugin consumed the patch — verify it was actually applied.
+            // Wait briefly for the plugin's Document API write to flush to disk,
+            // then check that the file has changed from the baseline.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let current_on_disk = std::fs::read_to_string(doc_file).unwrap_or_default();
+            let baseline_content = payload.get("baseline")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            if !baseline_content.is_empty() && current_on_disk == baseline_content {
+                // File on disk hasn't changed — plugin likely failed to apply the patch.
+                // Don't save snapshot with content that was never applied.
+                eprintln!(
+                    "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply. Falling back to disk write."
+                );
+                return Ok(false);
+            }
+
+            // Verify patch content is present in the file (catches partial application).
+            // Check that at least one non-empty patch's content appears in the result.
+            let patch_list = payload.get("patches")
+                .and_then(|v| v.as_array());
+            if let Some(patches) = patch_list {
+                let has_content_patch = patches.iter().any(|p| {
+                    let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    !content.trim().is_empty()
+                });
+                if has_content_patch {
+                    let any_present = patches.iter().any(|p| {
+                        let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        if content.trim().is_empty() { return true; }
+                        // Check first meaningful line of content appears in file
+                        content.lines()
+                            .find(|l| !l.trim().is_empty())
+                            .map_or(true, |first_line| current_on_disk.contains(first_line.trim()))
+                    });
+                    if !any_present {
+                        eprintln!(
+                            "[write] IPC patch consumed but response content not found in file — plugin may have partially failed. Falling back to disk write."
+                        );
+                        return Ok(false);
+                    }
+                }
+            }
+
+            // Plugin applied the patch — update snapshot.
             // Use content_ours (baseline + response) when available, NOT the current
             // file. The current file may include user edits typed after the boundary,
             // which would be absorbed into the snapshot and lost to the next diff.
@@ -1373,15 +1560,19 @@ mod tests {
             content: "new content".to_string(),
         };
 
-        // Spawn "plugin" thread that watches for and deletes patch files
+        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
                         if entry.path().extension().is_some_and(|e| e == "json") {
+                            // Simulate plugin applying the patch by modifying the doc
+                            let _ = fs::write(&doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n");
                             let _ = fs::remove_file(entry.path());
                             return;
                         }
@@ -1517,15 +1708,19 @@ mod tests {
         let user_edited = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\nuser typed something new\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
         fs::write(&doc, user_edited).unwrap();
 
-        // Spawn "plugin" thread that watches for and deletes patch files
+        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
                         if entry.path().extension().is_some_and(|e| e == "json") {
+                            // Simulate plugin applying patch + user edits
+                            let _ = fs::write(&doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\nuser typed something new\n<!-- /agent:exchange -->\n");
                             let _ = fs::remove_file(entry.path());
                             return;
                         }

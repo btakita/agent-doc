@@ -1,7 +1,40 @@
-//! Streaming agent backend — iterates over agent output chunks.
+//! # Module: agent::streaming
 //!
-//! Claude Code supports `--output-format stream-json --include-partial-messages`
-//! which emits one JSON object per line as output is generated.
+//! ## Spec
+//! - Defines `StreamChunk`: incremental output unit with `text`, optional `thinking`,
+//!   `is_final` flag, and optional `session_id` (present only on the final chunk).
+//! - Defines `StreamingAgent` trait: `send_streaming(prompt, session_id, fork, model)`
+//!   returns a boxed `Iterator<Item = Result<StreamChunk>>`.
+//! - `parse_stream_line(line)` parses one newline-delimited JSON object from Claude Code's
+//!   `--output-format stream-json` protocol:
+//!   - `type = "result"` → final chunk (`is_final = true`) with complete text and `session_id`.
+//!   - `type = "assistant"` → partial chunk (`is_final = false`) with incremental text and
+//!     optional thinking content extracted from `message.content` blocks.
+//!   - All other types (system, tool_use, etc.) → empty non-final chunk (silently skipped).
+//! - `extract_assistant_content` concatenates all `"text"` blocks into `text` and all
+//!   `"thinking"` blocks into `thinking`; returns `None` for thinking when empty.
+//! - Malformed JSON lines produce `Err`, not panics.
+//!
+//! ## Agentic Contracts
+//! - Callers must exhaust or drop the iterator to avoid leaving child processes alive.
+//! - `is_final = true` on exactly one chunk per stream (the `"result"` line); all prior
+//!   chunks have `is_final = false`.
+//! - `session_id` is `None` on all partial chunks and `Some` on the final chunk (when
+//!   the Claude CLI includes it in the result message).
+//! - Multiple `"text"` content blocks within a single assistant message are concatenated
+//!   in order with no separator.
+//!
+//! ## Evals
+//! - parse_result_line: `{"type":"result","result":"Hello","session_id":"abc"}` → final chunk, text = "Hello", session_id = Some("abc")
+//! - parse_assistant_line: `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` → partial chunk, text = "hi"
+//! - parse_thinking_block: assistant message with thinking + text blocks → chunk has both fields populated
+//! - parse_thinking_only: assistant with only thinking block → text = "", thinking = Some("...")
+//! - parse_no_thinking_returns_none: assistant with only text block → thinking = None
+//! - parse_unknown_type: `{"type":"system",...}` → empty non-final chunk, no error
+//! - parse_malformed_json_errors: non-JSON input → `Err`
+//! - parse_empty_content_blocks: assistant with `content: []` → text = "", thinking = None
+//! - parse_multiple_content_blocks: two text blocks → text is concatenated
+//! - parse_result_with_no_session_id: result without session_id field → session_id = None
 
 use anyhow::Result;
 

@@ -1,14 +1,58 @@
-//! `agent-doc stream` — Stream agent output to document in real-time.
+//! # Module: stream
 //!
-//! Reads the document, computes a diff, sends to a streaming agent backend,
-//! and periodically writes accumulated output back to the document using
-//! CRDT merge for conflict-free concurrent editing.
+//! ## Spec
+//! - `run()` is the top-level entry point for `agent-doc stream <FILE>`.
+//! - Requires the document write strategy to be CRDT (`resolved.is_crdt()`); bails
+//!   with a user-facing message if the document uses a non-CRDT write mode.
+//! - Reads `StreamConfig` from frontmatter (interval, target component, thinking flags).
+//! - Computes a diff against the last snapshot; exits early with no error when nothing changed.
+//! - Ensures a session UUID exists in frontmatter before sending; writes it back if absent.
+//! - Resolves the streaming agent from the `--agent` flag, frontmatter, or config default.
+//! - Pre-commits user changes to git before sending; final-commits after stream completes.
+//! - `stream_loop()` spawns a timer thread that flushes the accumulated text buffer to
+//!   the document on a configurable interval (default 2 s). Flush uses **replace** mode
+//!   for the target component regardless of component default, because the buffer is
+//!   cumulative (full text so far, not a delta).
+//! - Thinking content (`chunk.thinking`) is routed to a separate component when
+//!   `thinking_target` is set, or interleaved as `<details>` when unset.
+//! - On stream completion: saves crash-recovery pending file, writes final content, saves
+//!   CRDT state + snapshot, clears pending file, and updates `resume` frontmatter field.
+//! - `flush_to_document()` tries IPC to the IDE plugin first; falls back to flock +
+//!   atomic write on IPC absence or timeout.
+//! - `build_prompt()` produces distinct prompts for first submit (no `resume`) vs.
+//!   resumed sessions (includes diff + full document).
 //!
 //! Write-back loop:
 //! ```text
-//! [Agent chunks] → [Buffer] → [Timer: 2s] → [Lock → Read → CRDT merge → Write → Unlock]
-//! [User edits]  → [File]   → [Detected on next tick via content comparison]
+//! [Agent chunks] → [Buffer] → [Timer] → [IPC or Lock → Read → patch(replace) → Write → Unlock]
+//! [User edits]   → [File]  → [Detected by CRDT merge on next flush]
 //! ```
+//!
+//! ## Agentic Contracts
+//! - `run()` is the sole public entry point; all internal state is encapsulated.
+//! - `flush_to_document()` is `pub(crate)` so `watch.rs` can reuse it for stream-capture polling.
+//! - `flush_to_document()` is safe to call concurrently from multiple documents; each
+//!   call acquires a per-file advisory lock before writing.
+//! - Callers may pass `--no-git` to suppress all git operations (useful in tests).
+//! - The `_baseline` parameter of `flush_to_document` is currently unused; kept for
+//!   future CRDT merge path.
+//!
+//! ## Evals
+//! - flush_to_document_applies_patch: document with `output` component → new streamed content replaces old
+//! - flush_replaces_exchange_in_stream_mode: exchange component with existing text → old text absent after flush
+//! - flush_cumulative_does_not_duplicate: two flushes with "Hello" then "Hello world" → exactly one "Hello" in doc
+//! - flush_preserves_other_components: flush to `output` → `status` component untouched
+//! - stream_loop_processes_chunks: three chunks ending with is_final → session_id captured, final text in doc
+//! - stream_loop_empty_chunks: empty-text chunks → session_id None, doc unchanged
+//! - build_prompt_first_submit: no resume → prompt says "starting a session", no diff included
+//! - build_prompt_resume: resume ID set → prompt includes diff and full document
+//! - build_prompt_mentions_patch_blocks: prompt always references `patch:exchange` format
+//! - stream_loop_thinking_to_separate_component: thinking_target="log" → thinking in log, response in exchange
+//! - stream_loop_thinking_interleaved: no thinking_target → `<details>` block in target component
+//! - stream_loop_no_thinking_skips_thinking_blocks: thinking_cfg=None → thinking content absent from doc
+//! - mode_validation_rejects_non_crdt: non-CRDT document → error containing "expected crdt"
+//! - content_ours_exchange_no_duplicate: replace mode applied → user prompt appears exactly once
+//! - content_ours_exchange_duplicates_without_replace: append mode (no override) → prompt duplicated (regression baseline)
 
 use anyhow::{Context, Result};
 use std::path::Path;

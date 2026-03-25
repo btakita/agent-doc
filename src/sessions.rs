@@ -1,10 +1,72 @@
-//! Session registry — maps session UUIDs to tmux pane IDs.
+//! # Module: sessions
+//!
+//! Session registry — maps session UUIDs to tmux pane IDs and metadata.
 //!
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
+//! Re-exports `Tmux`, `IsolatedTmux`, `RegistryEntry` (as `SessionEntry`),
+//! `RegistryLock`, and `Registry` (as `SessionRegistry`) from `tmux-router`.
+//! Agent-doc-specific operations (capture_pane, send_key, registry load/save
+//! with the hardcoded `.agent-doc/sessions.json` path, pane/window queries,
+//! positional pane resolution) live here.
 //!
-//! The `Tmux` struct and `IsolatedTmux` test helper are re-exported from the
-//! `tmux-router` crate. Agent-doc-specific functions (capture_pane, send_key,
-//! registry load/save with hardcoded path) remain here.
+//! ## Spec
+//! - `registry_path()` returns the canonical `.agent-doc/sessions.json` path.
+//! - `load()` deserialises the registry from disk; returns an empty map when the file
+//!   does not exist. Not locked internally — read-only callers may call directly.
+//! - `save(registry)` serialises the registry to disk with pretty-printing. Callers
+//!   MUST hold a `RegistryLock` before calling.
+//! - `register(session_id, pane_id, file)` acquires the lock, calls
+//!   `register_with_pid` using the current process ID.
+//! - `register_with_pid` queries the pane's window and delegates to `register_full`.
+//! - `register_full` enforces single-session-per-pane by evicting stale entries that
+//!   share the same pane before inserting the new `SessionEntry`.
+//! - `lookup(session_id)` returns the pane ID for a session, or `None` if not found.
+//! - `lookup_entry(session_id)` returns the full `SessionEntry`, or `None`.
+//! - `current_pane()` reads `TMUX_PANE` env var; falls back to querying tmux for the
+//!   active pane (works from IDE processes outside a tmux shell).
+//! - `pane_pid(pane_id)` queries the foreground process PID of a pane via
+//!   `tmux display-message`.
+//! - `pane_window(pane_id)` returns the tmux window ID (`@N`) for a pane.
+//! - `capture_pane(tmux, pane_id)` returns visible pane content via
+//!   `tmux capture-pane -p`.
+//! - `send_key(tmux, pane_id, key)` sends a single named key (e.g. `"Enter"`,
+//!   `"Up"`) — does NOT append a newline, unlike `Tmux::send_keys`.
+//! - `pane_by_position(position)` resolves a pane in the current window by
+//!   positional hint: `left`, `right`, `top`, `bottom`.
+//! - `pane_by_position_in_window(position, window)` is the same but scoped to a
+//!   specific window ID.
+//! - `in_tmux()` returns `true` when the `TMUX` env var is set.
+//!
+//! ## Agentic Contracts
+//! - The registry file path is always `.agent-doc/sessions.json` relative to CWD at
+//!   call time; callers must ensure CWD is the project root.
+//! - `load` and `save` are NOT self-locking. Any read-modify-write cycle must acquire
+//!   `RegistryLock` first; prefer `tmux_router::with_registry` for safe cycles.
+//! - `register_full` guarantees at most one registry entry per pane ID; pre-existing
+//!   entries pointing to the same pane are removed before the new entry is inserted.
+//! - `capture_pane` and `send_key` propagate tmux errors as `anyhow::Error` — callers
+//!   should treat failures as non-fatal warnings when used for display or navigation.
+//! - `pane_by_position` errors on unrecognised position strings with an explicit
+//!   message; valid values are exactly `left`, `right`, `top`, `bottom`.
+//! - `current_pane` never returns an empty string; an empty tmux response is an error.
+//!
+//! ## Evals
+//! - registry_roundtrip: save a `SessionEntry` → load from same dir → entry is
+//!   preserved with identical fields.
+//! - load_empty_returns_empty_map: load from a dir with no sessions.json → empty map.
+//! - registry_multiple_sessions_isolated: two entries with distinct pane IDs round-trip
+//!   independently without cross-contamination.
+//! - registry_overwrite_existing_session: inserting the same session_id twice replaces
+//!   the entry; registry length stays at 1.
+//! - prune_removes_dead_panes: retain entries whose pane is alive removes fabricated
+//!   dead pane IDs, leaving an empty registry.
+//! - register_full_deduplicates_pane: seeding two sessions with the same pane then
+//!   calling `register_full` with a third session leaves only the third in the registry.
+//! - pane_alive_returns_false_for_nonexistent: `pane_alive("%99999")` returns `false`.
+//! - tmux_create_session_and_verify: isolated server → `new_session` → pane ID starts
+//!   with `%` and `pane_alive` returns `true`.
+//! - tmux_auto_start_cascade: auto_start on no-server, no-session, and existing-session
+//!   each produce a live pane in the correct session.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;

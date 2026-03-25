@@ -637,16 +637,36 @@ Please add the necessary module-harness and AGENTS.md + CLAUDE.md + Skills to en
 
 Plugin builds successfully. To install: Settings → Plugins → gear → Install from Disk → select `build/distributions/agent-doc-jetbrains-0.1.0.zip`.
 
+The current version is 0.2.23. Why are we going back to 0.1.0?
+Please add the contract in the necessary location to bump from the current version.
+
 Note: the plugin needs the updated `libagent_doc.so`/`.dylib` to use the new FFI functions. The binary is already rebuilt — the shared library at `agent-doc lib-path` has the exports.
-<!-- agent:boundary:98461c58 -->
+
+Does the FFI plugin need it's own independent versioning?
+
+### Re: Plugin version (HEAD)
+
+You're right — the current version is 0.2.23, not 0.1.0. My mistake. Bumped to **v0.2.24**.
+
+**Version contract location:** `editors/jetbrains/gradle.properties` → `pluginVersion = 0.2.24`
+
+**Install the new plugin:**
+```
+Settings → Plugins → gear → Install from Disk → 
+build/distributions/agent-doc-jetbrains-0.2.24.zip
+```
+
+**What's in v0.2.24:**
+- `NativeLib.kt`: `agent_doc_set_status`, `agent_doc_get_status`, `agent_doc_is_busy`
+- `EditorTabSyncListener.kt`: FFI busy guard before sync
+- `TerminalUtil.kt`: FFI busy guard before route
+<!-- agent:boundary:0de5bc8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Plugin integration**~~ ([done])
-- **Build + install plugin** — user needs to install the updated zip
-- **Bump plugin version** — currently 0.1.0, should bump for the new FFI
+- **Install JB plugin v0.2.24** — user action needed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

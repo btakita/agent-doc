@@ -343,13 +343,64 @@ Done. Published both packages and updated all dependencies:
 - Pushed `e20031c` — CI should now build successfully
 
 **Note:** The 0.1.2 publish of `domain--server--blog` had a `workspace:*` dependency that slipped through — npm publish doesn't resolve workspace references. Fixed by replacing with `^0.1.0` in 0.1.3.
-<!-- agent:boundary:e09d25f2 -->
+
+ci failure
+```
+Run cd app/briantakita.me
+1 | })
+2 | {
+    ^
+SyntaxError: Export named 'unique_tags_' not found in module '/home/runner/work/briantakita.me-dev/briantakita.me-dev/node_modules/.bun/@rappstack+domain--any--blog@0.1.3+1fb4c65d43e298b9/node_modules/@rappstack/domain--any--blog/tag/index.ts'.
+      at requestImportModule (2:1)
+
+Bun v1.3.11 (Linux x64)
+[static_export] using external server: http://localhost:4100
+[static_export] site_url: ***
+[static_export] sitemap fetch failed, using explicit routes only
+[static_export] /search -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss -> Unable to connect. Is the computer able to access the url?
+[static_export] /rss.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] /robots.txt -> Unable to connect. Is the computer able to access the url?
+[static_export] /sitemap.xml -> Unable to connect. Is the computer able to access the url?
+[static_export] completed with 5 error(s)
+Error: Process completed with exit code 1.
+```
+
+Please release any pending releases in the rappstack libraries.
+
+### Re: CI failure (unique_tags_) + pending rappstack releases (HEAD)
+
+**Root cause:** The yalc'd versions of both rappstack packages had diverged significantly from the source repos. The published npm versions were missing entire files and exports.
+
+**Comprehensive sync — published both at 0.1.4:**
+
+`@rappstack/domain--any--blog@0.1.4`:
+- Added `tag/tags.ts` with `unique_tags_`, `unique_tags$_`, `unique_tags__new` exports
+- Synced `tags` → `tag_a1` property rename in types
+- Synced `rhonojs` → `relysjs` import migration
+- Added `video_url`, `playlist_url` to `Post` and `post_meta_T`
+
+`@rappstack/domain--server--blog@0.1.4`:
+- Synced all `.ts` files from yalc'd version to source
+- Fixed `workspace:*` deps for npm publishing
+- Added `video_url`, `playlist_url` to schema and exports
+
+**briantakita.me-dev updated:**
+- All deps pinned to `0.1.4`
+- Clean `bun install` — no errors
+- Blog post video URL updated to full version (`ixDbYPO43Cw`)
+- Pushed `6a1dea0` — CI should now build
+
+**Old video:** Can't delete via corky (no `delete` subcommand). Delete `OrGJi8Hh_bQ` from YouTube Studio manually: https://studio.youtube.com/video/OrGJi8Hh_bQ/edit
+<!-- agent:boundary:ca3469a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
-- [x] Published `@rappstack/domain--any--blog@0.1.3`
-- [x] Published `@rappstack/domain--server--blog@0.1.3`
-- [x] Updated briantakita.me-dev deps and pushed
+- [x] Published `@rappstack/domain--any--blog@0.1.4` (fully synced)
+- [x] Published `@rappstack/domain--server--blog@0.1.4` (fully synced)
+- [x] Updated briantakita.me-dev deps to 0.1.4
+- [x] Blog post video URL updated to full version
+- [ ] Delete old edited video from YouTube Studio (manual)
 - [ ] Verify CI build passes and blog post deploys
 <!-- /agent:pending -->

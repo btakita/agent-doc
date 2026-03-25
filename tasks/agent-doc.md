@@ -362,20 +362,37 @@ This is a cleaner pattern than per-plugin debounce — one implementation, all e
 The 2 agent-doc windows issue was fixed (renamed @74 to "stash"). The layout is now correct: `0:agent-doc` + `1:stash`.
 The left tmux layout has a 2 pane vertical orientation: `lt / lb | r1`
 
+I don't see `1:stash`. Can we test the sync operation by installing the local agent-doc update and running it. Do I need to install the plugin update?
+I'm on jb 0.2.23 which seems to be the latest for yesterday. Do we need to update the plugin and bump the version + build?
+
 ### Re: Left pane vertical orientation
 
 Noted — `lt / lb | r1` (two vertical panes on left, one on right). This is the expected layout when the editor has a vertical split on the left side. The tmux sync mirrors the editor's split orientation via the `--col` args from the plugin.
 
 The pending items (route refactor, harness contract, FFI route guard) are good next-session tasks. This session covered a lot of ground — ready to wrap up whenever you are.
-<!-- agent:boundary:d7175eae -->
+
+c
+
+### Re: Missing stash + plugin update (HEAD)
+
+The stash window disappeared again and we're back to 3 panes. The issue: **the running agent-doc processes in tmux panes were started with the old binary** (before the sync fix). The fix is in the `agent-doc route` code, which is called by the plugin — but the plugin invokes `~/.cargo/bin/agent-doc`, which is updated. The issue is that the route command is called but the old Claude sessions in the panes are processing it.
+
+**What you need to do:**
+
+1. **Binary is already updated** — `agent-doc --version` shows 0.26.1 with the sync fix
+2. **Plugin does NOT need updating** — JB v0.2.23 calls `agent-doc route` which uses the binary. The fix is in the binary, not the plugin
+3. **But the fix won't help until the plugin actually passes `col_args`** — I need to check if the plugin sends `--col` args
+
+Let me check what arguments the plugin sends:
+<!-- agent:boundary:4938d2e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- **Verify plugin sends col_args** — check if JB plugin passes --col to route
 - **Refactor route to single exit point** — eliminate propagation bugs by design
-- **Update route.rs harness contract** — add post-route sync invariant
-- **FFI route guard** — `route_begin`/`route_end`/`is_routing` to prevent cascade from layout events
+- **FFI route guard** — prevent cascade from layout events
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

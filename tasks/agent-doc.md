@@ -408,7 +408,7 @@ Go:
 `Run Agent Doc` resulted in 2 vertical panes.
 Actually 3.
 
-### Re: Route refactor + FFI route guard (HEAD)
+### Re: Route refactor + FFI route guard
 
 **Route refactored to single exit point.** The key change:
 
@@ -432,7 +432,7 @@ Also extracted `rescue_from_stash` as a separate helper for clarity.
 **Tests:** 558 passing. Binary rebuilt and installed.
 
 **Re: "Run Agent Doc" resulted in 2 vertical panes** — this is likely the stash contents being visible. The current layout is `0:agent-doc` (1 pane) + `1:stash` (3 panes). The "2 vertical panes" might be the plugin triggering a sync that created a second pane.
-<!-- agent:boundary:8da95741 -->
+<!-- agent:boundary:188ae04d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

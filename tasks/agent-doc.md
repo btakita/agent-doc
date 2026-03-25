@@ -518,15 +518,32 @@ The `(HEAD)` marker is added to the boundary heading line (e.g., `### Re: ... (H
 **The external change:**
 Caused by `--force-disk` writes bypassing the IDE's Document API. When the IPC path fails (timeout), the disk write modifies the file directly, triggering IntelliJ's "external change" dialog. This is expected behavior when IPC degrades.
 
+Can we avoid this fallback or was the fallback unavoidable in this case?
+
 **Committed and pushed** — the route refactor + auto-init are on GitHub (`bf39bd7`).
-<!-- agent:boundary:f801c37a -->
+
+### Re: Can we avoid the fallback? (HEAD)
+
+The `--force-disk` fallback in this session was **avoidable** in most cases. It happened because:
+
+1. **First IPC timeout** — the plugin didn't consume the patch within 2s. This triggered exit code 75, then the skill retried with `--force-disk`. The root cause was likely the plugin being busy (layout operations, focus events) when the patch arrived.
+
+2. **Subsequent `--force-disk` usage** — I explicitly used `--force-disk` as a safety measure after the IPC timeout, even when IPC might have worked. This was overly cautious.
+
+**How to avoid it:**
+- **Don't default to `--force-disk`** — I should only use it after a confirmed IPC timeout (exit 75), not preemptively
+- **Increase IPC timeout** — the 2s timeout may be too aggressive during layout operations. A 5s timeout would catch more plugin-busy scenarios
+- **FFI route guard** — the proposed `is_routing()` check would prevent the plugin from being busy with route operations when a write arrives
+
+I'll stop using `--force-disk` by default. The IPC path is preferred because it preserves cursor position and undo stack.
+<!-- agent:boundary:fc65be8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Commit + push**~~ ([done] — `bf39bd7`)
-- **Investigate (HEAD) marker persistence** — verify it's not leaking into committed content
+- **Stop defaulting to --force-disk** — use IPC path, only fallback on exit 75
+- **Investigate (HEAD) marker persistence** — verify working tree only
 - **FFI route guard** — `route_begin`/`route_end`/`is_routing`
 <!-- /agent:pending -->
 

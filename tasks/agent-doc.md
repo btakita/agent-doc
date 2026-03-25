@@ -664,7 +664,7 @@ build/distributions/agent-doc-jetbrains-0.2.24.zip
 Why did you not process:
 > Does the FFI plugin need it's own independent versioning?
 
-### Re: FFI plugin independent versioning (HEAD)
+### Re: FFI plugin independent versioning
 
 Sorry for missing that prompt — it was likely lost in a CRDT merge ordering issue (same pattern as earlier).
 
@@ -687,7 +687,7 @@ The JB plugin version (0.2.24) is independent from the binary version (0.26.1) b
 - Plugin changes don't always require a binary change (and vice versa)
 
 The FFI exports are stable — adding new functions doesn't break old plugins. Old plugins just don't call the new functions.
-<!-- agent:boundary:79f5583b -->
+<!-- agent:boundary:2a600bf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

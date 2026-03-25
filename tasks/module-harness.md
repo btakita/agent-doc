@@ -302,7 +302,23 @@ Release
 - Eval types: boolean, ordinal, continuous, range (with directional deviation)
 - 36 tests (16 unit + 20 integration)
 - Cross-platform CI + release builds (Linux x86/arm, macOS x86/arm, Windows)
-<!-- agent:boundary:ad1e77d3 -->
+Should existence-lang be a dev dependency?
+### Assistant
+
+**No — existence-lang should not be a dev dependency.**
+
+The relationship between module-harness and existence-lang is purely conceptual/documentary, not a code dependency:
+
+1. **existence-lang has no Cargo.toml** — it's a collection of markdown ontology files (`ontology/src/*.md`) and a separate `existence` CLI tool, not a library crate
+2. **module-harness references existence-lang at the documentation level** — `ontology/README.md` links to existence-lang terms via relative paths (e.g., `../../existence-lang/ontology/src/context.md`), but no Rust code imports anything from it
+3. **No runtime or test-time coupling** — module-harness compiles and tests independently
+
+If you wanted a stronger coupling in the future, the options would be:
+- **Git submodule** — embed existence-lang ontology as a submodule within module-harness (for co-located docs)
+- **Shared validation** — use the `existence` CLI to lint module-harness ontology terms against the kernel vocabulary (as a CI step, not a Cargo dependency)
+
+But for now, the markdown-link reference is the right level of coupling — it preserves independence while documenting the conceptual lineage.
+<!-- agent:boundary:0d44f882 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

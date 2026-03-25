@@ -303,27 +303,38 @@ Release
 - 36 tests (16 unit + 20 integration)
 - Cross-platform CI + release builds (Linux x86/arm, macOS x86/arm, Windows)
 Should existence-lang be a dev dependency?
+
+The response did not patch in this doc. 
+
+existence is a rust crate
+https://crates.io/crates/existence
+This should be a dev dependency
 ### Assistant
 
-**No — existence-lang should not be a dev dependency.**
+**Apologies for the failed patch last cycle.** Fixed now.
 
-The relationship between module-harness and existence-lang is purely conceptual/documentary, not a code dependency:
+**Re: existence as a dev dependency** — I tried adding `existence = "0.3"` to `[dev-dependencies]`, but Cargo warns:
 
-1. **existence-lang has no Cargo.toml** — it's a collection of markdown ontology files (`ontology/src/*.md`) and a separate `existence` CLI tool, not a library crate
-2. **module-harness references existence-lang at the documentation level** — `ontology/README.md` links to existence-lang terms via relative paths (e.g., `../../existence-lang/ontology/src/context.md`), but no Rust code imports anything from it
-3. **No runtime or test-time coupling** — module-harness compiles and tests independently
+> `ignoring invalid dependency 'existence' which is missing a lib target`
 
-If you wanted a stronger coupling in the future, the options would be:
-- **Git submodule** — embed existence-lang ontology as a submodule within module-harness (for co-located docs)
-- **Shared validation** — use the `existence` CLI to lint module-harness ontology terms against the kernel vocabulary (as a CI step, not a Cargo dependency)
+The `existence` crate on crates.io is a **binary-only crate** — it has `[[bin]]` targets (`existence` and `xist`) but no `[lib]` target. Cargo can't use it as a Rust library dependency because there's nothing to link against.
 
-But for now, the markdown-link reference is the right level of coupling — it preserves independence while documenting the conceptual lineage.
-<!-- agent:boundary:f21f0bf0 -->
+**Options to integrate it:**
+
+1. **Add a `[lib]` target to existence** — expose its markdown parsing/linting functions as a library. Then module-harness can depend on it as a dev-dependency and call the lint API in tests. This is the cleanest path.
+
+2. **Use it as a CLI in CI** — `cargo install existence` in the CI workflow, then run `existence lint ontology/` as a test step. No Cargo dependency needed, just a CI step.
+
+3. **Both** — add a lib target for programmatic use AND keep the CLI for CI/manual use.
+
+Would you like me to add a `[lib]` target to the existence crate? That would enable `existence = "0.3"` as a proper dev-dependency in module-harness.
+<!-- agent:boundary:4dfea21b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Add `[lib]` target to existence crate (enables dev-dependency use)
 - ([done]) v0.1.0 released to crates.io, GitHub, and installed locally
 - ([done]) All eval scoring features implemented
 - ([done]) All infrastructure (tests, CI, Makefile, release profile) in place

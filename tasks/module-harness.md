@@ -302,7 +302,7 @@ Release
 - Eval types: boolean, ordinal, continuous, range (with directional deviation)
 - 36 tests (16 unit + 20 integration)
 - Cross-platform CI + release builds (Linux x86/arm, macOS x86/arm, Windows)
-<!-- agent:boundary:b4d3b087 -->
+<!-- agent:boundary:ad1e77d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

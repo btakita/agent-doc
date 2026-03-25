@@ -604,7 +604,7 @@ Brian
 
 Tell me more about the "5th wave" framing.
 
-### Re: "5th wave coding" framing (HEAD)
+### Re: "5th wave coding" framing
 
 Drew's "5th wave coding" appears to be his personal term — it doesn't have an established definition online. But based on his message and the broader "waves of computing" literature, here's what he likely means:
 
@@ -628,7 +628,7 @@ He explicitly contrasts it with "vibe coding" — he's saying the same phenomeno
 - MIT Technology Review (2005): "Computing's Fifth Wave" — predicted this era
 
 **Why it matters for your conversation:** Drew sees himself as part of a historical arc. He's been coding since 1975 and sees AI-assisted development as the fulfillment of a decades-old dream. Your "human-agent alignment" framing in v12 connects well — you're both saying "this isn't a toy, it's the next paradigm."
-<!-- agent:boundary:2fa56ebe -->
+<!-- agent:boundary:e014484b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

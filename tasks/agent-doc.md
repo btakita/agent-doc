@@ -1386,16 +1386,41 @@ Iterate until it's all fixed.
 
 **Questions to narrow root cause:**
 
-- Did session 0 previously have a user shell window (editor, zsh, etc.) that disappeared? Or has it always been agent-doc managed?
-- When you "opened a tmux session during the last run" — did you create a new kitty terminal, or did you run `tmux new-session` from within session 0?
-- Did you intentionally resize the kitty window to 16 rows, or did that happen unexpectedly?
-- Is the core problem (a) the small terminal, (b) the missing user window, or (c) something else you observed?
+- Did session 0 previously have a user shell window (editor, zsh, etc.) that disappeared? Or has it always been agent-doc managed: agent-doc managed
+- When you "opened a tmux session during the last run" — did you create a new kitty terminal, or did you run `tmux new-session` from within session 0?: new kitty terminal that automatically starts a new tmux session via i3 hotkey
+- Did you intentionally resize the kitty window to 16 rows, or did that happen unexpectedly?: The i3 tiling manager sized the windows
+- Is the core problem (a) the small terminal, (b) the missing user window, or (c) something else you observed?: Something else. The tmux layout in tmux session 0 was affected.
+
+tmux
 
 Depending on your answers, I'll add targeted tests and fixes. The most likely agent-doc bugs to address:
 - **Minimum pane height check** — agent-doc should refuse to split/create panes when terminal is too small
 - **User window protection** — ensure sync/repair/purge never destroys non-agent-doc windows
 - **Graceful degradation** — detect unusable terminal size and warn instead of running blind
-<!-- agent:boundary:2aab1253 -->
+### Re: Layout Impact from i3 Resize (HEAD)
+
+Thanks for the answers. Now I understand the scenario:
+
+1. **i3 hotkey** opens new kitty terminal → auto-starts new tmux session
+2. **i3 tiling** resizes session 0's kitty from ~55 rows to 16 rows
+3. **tmux auto-resizes** all panes in session 0 → 2 agent-doc panes at 120x15 each
+4. **Layout is corrupted** — 15-row panes are unusable for Claude Code
+
+**Current state confirmed:** Both panes (%110, %111) show Claude Code prompts at 15 rows. They're technically functional but too small to be useful.
+
+**What agent-doc should do when terminal shrinks:**
+
+1. **Detect minimum usable height** — Claude Code needs ~20+ rows to function. If window height < minimum, agent-doc should:
+   - Skip sync/layout operations
+   - Log a warning: "terminal too small (15 rows, minimum 20)"
+   - Not attempt to split/create panes in the small window
+
+2. **Handle resize events in watch mode** — if `agent-doc watch` is running and detects a resize, pause layout operations until terminal is usable again
+
+3. **Stash panes when terminal shrinks too much** — if the window becomes too small for 2+ panes, stash extras to the stash window and restore when terminal grows back
+
+Starting implementation now. I'll add tests first, then fix the code.
+<!-- agent:boundary:478875f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -328,7 +328,7 @@ The `existence` crate on crates.io is a **binary-only crate** — it has `[[bin]
 3. **Both** — add a lib target for programmatic use AND keep the CLI for CI/manual use.
 
 Would you like me to add a `[lib]` target to the existence crate? That would enable `existence = "0.3"` as a proper dev-dependency in module-harness.
-<!-- agent:boundary:4dfea21b -->
+<!-- agent:boundary:1bc3d44f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

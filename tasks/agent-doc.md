@@ -522,7 +522,7 @@ Can we avoid this fallback or was the fallback unavoidable in this case?
 
 **Committed and pushed** — the route refactor + auto-init are on GitHub (`bf39bd7`).
 
-### Re: Can we avoid the fallback? (HEAD)
+### Re: Can we avoid the fallback?
 
 The `--force-disk` fallback in this session was **avoidable** in most cases. It happened because:
 
@@ -536,7 +536,7 @@ The `--force-disk` fallback in this session was **avoidable** in most cases. It 
 - **FFI route guard** — the proposed `is_routing()` check would prevent the plugin from being busy with route operations when a write arrives
 
 I'll stop using `--force-disk` by default. The IPC path is preferred because it preserves cursor position and undo stack.
-<!-- agent:boundary:fc65be8d -->
+<!-- agent:boundary:3823e33a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

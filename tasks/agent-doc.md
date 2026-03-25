@@ -2536,30 +2536,29 @@ Compilation verified.
 - Release tmux-router
 - Release agent-doc
 
-### Re: Release tmux-router + agent-doc (HEAD)
+### Re: Release agent-doc (HEAD)
 
-**tmux-router v0.3.0 released:**
-- Published to crates.io
-- Tagged and pushed to GitHub
-- Parent submodule pointer updated
+**agent-doc v0.26.0 released** to all targets:
 
-Changes in v0.3.0:
-- kill_pane safety guards (refuse to destroy last session window)
-- Cross-session registry check in reconcile detach loop
-- stash_pane fallback uses break_pane_to_stash instead of kill_pane
-- Module harness context on tmux.rs and sync.rs
-- Existence-lang ontology (7 domain terms)
-- Dev dependencies: existence, module-harness
+| Target | Status |
+|--------|--------|
+| crates.io | agent-doc 0.26.0 |
+| PyPI | agent-doc 0.26.0 |
+| GitHub Release | v0.26.0 with binary |
+| Local binary | ~/.cargo/bin/agent-doc updated |
 
-Now starting agent-doc release...
-<!-- agent:boundary:de65a895 -->
+**Note:** maturin publish needed `--no-sdist` to work with path dev-dependencies. The `pypi/publish_token` pass path was used (not `pypi/token` which doesn't exist).
+
+**Summary of this session's releases:**
+- tmux-router v0.3.0 → crates.io
+- agent-doc v0.26.0 → crates.io + PyPI + GitHub Release
+<!-- agent:boundary:12002eb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**tmux-router v0.3.0 release**~~ ([done])
-- **agent-doc release** — in progress
+All pending items cleared. Session complete.
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

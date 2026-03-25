@@ -545,6 +545,65 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
 }
 
+/// Set the response status for a file (Option B: in-process).
+///
+/// Status values: "generating", "writing", "routing", "idle"
+/// Also writes a file-based signal (Option A: cross-process).
+///
+/// # Safety
+///
+/// `file_path` and `status` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_set_status(
+    file_path: *const c_char,
+    status: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let st = match unsafe { CStr::from_ptr(status) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    crate::debounce::set_status(path, st);
+}
+
+/// Get the response status for a file (Option B: in-process).
+///
+/// Returns a NUL-terminated string: "generating", "writing", "routing", or "idle".
+/// Caller must free with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut c_char {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return CString::new("idle").unwrap().into_raw(),
+    };
+    let status = crate::debounce::get_status(path);
+    CString::new(status).unwrap_or_else(|_| CString::new("idle").unwrap()).into_raw()
+}
+
+/// Check if any operation is in progress for a file (Option B: in-process).
+///
+/// Returns `true` if status is NOT "idle". Plugins should skip route
+/// operations when this returns `true` to prevent cascading.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    crate::debounce::is_busy(path)
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety

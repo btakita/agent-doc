@@ -729,7 +729,7 @@ Done:
 
 Done (`98aa3c0`). `agent_doc_version()` returns the compile-time `CARGO_PKG_VERSION`. 558 tests pass. Binary + plugin rebuilt and pushed.
 
-### Re: Should the FFI have its own crate? (HEAD)
+### Re: Should the FFI have its own crate?
 
 No — keeping FFI in the same crate is the right call. Reasons:
 
@@ -742,7 +742,7 @@ No — keeping FFI in the same crate is the right call. Reasons:
 4. **The `[lib]` target already handles it** — `crate-type = ["cdylib", "lib"]` gives us both the shared library (for plugins) and the Rust library (for internal use) from one crate.
 
 The only reason to extract would be if the FFI surface grew so large that it warranted its own API documentation or if other crates wanted to link against `libagent_doc` as a dependency. Neither applies today.
-<!-- agent:boundary:bab41db2 -->
+<!-- agent:boundary:21701772 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

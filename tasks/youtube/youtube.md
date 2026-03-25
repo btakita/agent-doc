@@ -496,14 +496,26 @@ Why was it passing before this last blog post?
 ```
 
 Pushed `d76dc2b` — CI should now resolve 0.1.4 everywhere.
-<!-- agent:boundary:c38213de -->
+release corky if we have not yet
+
+### Re: Release corky (HEAD)
+
+Released **corky v0.21.2** with `youtube delete` command.
+
+- Committed & pushed `4a933eb`
+- Tagged `v0.21.2`
+- Published to crates.io
+- GitHub Release: https://github.com/btakita/corky/releases/tag/v0.21.2
+- Installed with `--features transcribe-cuda`
+- Agent-loop submodule pointer updated
+<!-- agent:boundary:500d9aa3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Full video published: https://www.youtube.com/watch?v=ixDbYPO43Cw
 - [x] rappstack packages published at 0.1.4
 - [x] Blog post video URL updated
-- [x] Implemented `corky youtube delete` command
+- [x] corky v0.21.2 released (youtube delete)
 - [x] Deleted old edited video OrGJi8Hh_bQ
 - [x] Fixed transitive dep resolution with overrides
 - [ ] Verify CI build passes and blog post deploys

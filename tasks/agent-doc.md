@@ -1735,7 +1735,7 @@ Add tests.
 Update SPEC.md
 audit
 
-### Re: window 0, evals session, corky watch, and detection gaps (HEAD)
+### Re: window 0, evals session, corky watch, and detection gaps
 
 **Immediate fixes applied:**
 
@@ -1771,7 +1771,7 @@ The `-a` flag in `new_window` was the root cause. Now removed. Future windows wi
 4. Update SPEC.md
 
 Starting implementation now.
-<!-- agent:boundary:a83adba9 -->
+<!-- agent:boundary:ecf1b0bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -289,12 +289,12 @@ Why would tmux behavior affect the agent-doc + plugin behavior on the document?
 **Fix committed and pushed** — the sync-on-all-route-paths fix is already on GitHub (`326b6d4`). The current binary has the fix.
 There are 2 agent-doc
 
-### Re: 2 agent-doc windows (HEAD)
+### Re: 2 agent-doc windows
 
 Fixed — renamed window @74 to "stash". Layout now correct: `0:agent-doc` (2 panes) + `1:stash` (1 pane).
 
 The orphan window was created by my `break-pane` fix earlier. `break-pane` doesn't know about the stash naming convention — it creates a new anonymous window. The stash should have been recreated by `ensure_stash_window()`, but since a second "agent-doc" window already existed at index 1, there was no trigger to create a stash.
-<!-- agent:boundary:39306cff -->
+<!-- agent:boundary:d5365723 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

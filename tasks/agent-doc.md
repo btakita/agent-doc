@@ -175,7 +175,7 @@ Switching to tasks/youtube.md should have resulted in the correct tmux pane layo
 Look in the logs.
 Please add a test replicating this error.
 Fix
-
+ 
 ### Re: 3-pane layout on file switch
 
 **Root cause found:** `sync_after_claim()` was auto-discovering files from the registry instead of using the editor's `col_args`. When switching from agent-doc.md to youtube.md, the registry had panes for both files in the same window, so sync arranged 3 columns instead of 2.
@@ -187,13 +187,38 @@ This ensures the sync layout matches what the editor actually shows, not what th
 **Tests:** 557 passing, 0 failures. Release binary rebuilt.
 
 The stash pane %135 is still there (leftover from earlier). Want me to kill it, or leave it for next resync?
-<!-- agent:boundary:a886b859 -->
+audit docs
+update SPEC.md
+release
+
+### Re: audit docs, update SPEC.md, release (HEAD)
+
+**Audit docs:** `make check` passes clean (clippy -D warnings + 557 tests). Fixed:
+- 3 `doc_lazy_continuation` warnings in sync.rs and upgrade.rs (harness doc comments)
+- 1 unused variable in tmux-router `break_pane_to_stash`
+
+**SPEC.md updated** — added 3 new sections:
+- §6.2 Project Config — `tmux_session` auto-sync behavior
+- §6.3 IPC Write Verification — file-change check, content verification, force-disk cleanup
+- §6.4 Sync Layout Authority — editor `col_args` take precedence over registry discovery
+
+**agent-doc v0.26.1 released** to all targets:
+
+| Target | Status |
+|--------|--------|
+| crates.io | v0.26.1 |
+| PyPI | v0.26.1 |
+| GitHub Release | v0.26.1 with binary |
+| Local binary | ~/.cargo/bin/agent-doc updated |
+
+Parent submodule pointers updated.
+<!-- agent:boundary:85ff9e26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- **Stash pane %135 cleanup** — orphaned agent-doc process in stash window
+All items cleared.
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

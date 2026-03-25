@@ -2135,6 +2135,7 @@ On github it would be at btakita/module-harness.
 The Rust package name would be module-harness...it's available on crates.
 
 Let's keep this basic because I want to wrap this session up and get through the pending.
+I was prompted for a answer even though this document has `claude_args: --dangerously-skip-permissions` in the frontmatter.
 
 ### Re: Create module-harness project
 
@@ -2161,15 +2162,28 @@ Done. Created the `module-harness` Rust project and skill.
 - crates.io publish
 - `format` subcommand (write harness from JSON input)
 - `coverage` subcommand (match evals to test functions)
-<!-- agent:boundary:b08b148f -->
+
+Continue:
+- **module-harness: GitHub repo + publish** — create btakita/module-harness, publish to crates.io: module-harness should be a git submodule in agent-loop. Make sure you add a README.md and a SPEC.md
+- **module-harness: coverage subcommand** — match evals to test functions: evals should create a quantifiable metric for us to compare different harness contexts via backtesting. Please update the `## Evals` accordingly. Don't overspecify the evals yet. We are still exploring how the evals and backtesting will be used.
+
+### Re: Permission prompt with claude_args (HEAD)
+
+The `claude_args: --dangerously-skip-permissions` in frontmatter only applies to the Claude CLI process spawned by `agent-doc start` (the tmux pane session). It doesn't affect the current Claude Code session you're typing in directly. The prompt you saw was from *this* session, not from agent-doc's spawned process.
+
+If you want the current session to also skip permissions, that's controlled by how *you* launched Claude Code (e.g., `claude --dangerously-skip-permissions`). The frontmatter setting is for the agent-doc watch/stream sessions.
+
+### Re: Continue with pending (HEAD)
+
+Working on both items now. Starting with the GitHub repo setup and submodule conversion.
+<!-- agent:boundary:2f4d68e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- ~~**Create module-harness project** — binary + skill scaffolded~~ ([done])
-- **module-harness: GitHub repo + publish** — create btakita/module-harness, publish to crates.io
-- **module-harness: coverage subcommand** — match evals to test functions
+- **module-harness: GitHub repo + submodule** — create repo, README, SPEC, convert to submodule (in progress)
+- **module-harness: coverage subcommand** — quantifiable eval metrics for backtesting
 - **IPC silent failure verification** — verify Document API write failures are surfaced
 - **FFI debounce bridge** — cross-process typing indicator integration
 <!-- /agent:pending -->

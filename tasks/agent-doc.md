@@ -2136,7 +2136,7 @@ The Rust package name would be module-harness...it's available on crates.
 
 Let's keep this basic because I want to wrap this session up and get through the pending.
 
-### Re: Create module-harness project (HEAD)
+### Re: Create module-harness project
 
 Done. Created the `module-harness` Rust project and skill.
 
@@ -2161,7 +2161,7 @@ Done. Created the `module-harness` Rust project and skill.
 - crates.io publish
 - `format` subcommand (write harness from JSON input)
 - `coverage` subcommand (match evals to test functions)
-<!-- agent:boundary:bb3b2534 -->
+<!-- agent:boundary:b08b148f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

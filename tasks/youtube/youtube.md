@@ -181,7 +181,61 @@ ENOENT: No such file or directory: failed to link package: @rappstack/domain--se
   ```
 
 The CI deploy should succeed now.
-<!-- agent:boundary:c89b9c19 -->
+
+On gh actions
+
+```
+2s
+Run bun install --ignore-scripts
+bun install v1.3.11 (af24e281)
+Resolving dependencies
+Resolved, downloaded and extracted [78]
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--any--blog@.yalc/@rappstack/domain--any--blog (open)
+ENOENT: No such file or directory: failed to link package: @rappstack/domain--server--blog@.yalc/@rappstack/domain--server--blog (open)
+Saved lockfile
+
++ @changesets/cli@2.30.0
++ @ctx-core/dev-tools@8.3.72
++ @ctx-core/monorepo@21.4.162
++ broken-link-checker@0.7.8
++ fdir@6.5.0
++ @ctx-core/preprocess@0.2.4
++ @ctx-core/source-map@0.2.117
++ @rappstack/domain--server@0.1.2
++ @rebuildjs/tailwindcss@0.10.60 (v0.11.1 available)
++ baseline-browser-mapping@2.10.8
++ caniuse-lite@1.0.30001780
++ ctx-core@7.2.34
++ esmcss@0.2.15
++ rebuildjs@0.71.1
++ relementjs@0.80.33
++ rhonojs@0.1.3
++ rmemo@0.51.34
++ typescript@5.9.3
+
+1073 packages installed [2.68s]
+Failed to install 2 packages
+Error: Process completed with exit code 1.
+```
+
+### Re: CI still failing (yalc in monorepo root + submodule) (HEAD)
+
+The yalc cleanup wasn't complete — the `file:.yalc/` paths existed in **three** places:
+
+1. `app/briantakita.me/package.json` (fixed earlier)
+2. **`package.json` (monorepo root)** — where CI runs `bun install`
+3. **`lib/ui--server--briantakita/package.json`** — workspace submodule
+
+Plus the `bun.lock` had cached the yalc resolutions.
+
+**Complete fix applied:**
+1. Restored npm versions in monorepo root `package.json` (`^0.1.2`, `^0.1.1`)
+2. Fixed `lib/ui--server--briantakita` — restored versions, removed tracked `.yalc/`, added `.gitignore` → pushed `e45a05a`
+3. Deleted and regenerated `bun.lock` — verified zero `file:.yalc` references
+4. Pushed monorepo root → `03d1705`
+
+**All three repos now have `.yalc/` and `yalc.lock` in `.gitignore`.** CI should pass on this push.
+<!-- agent:boundary:bfb4951a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -191,5 +245,5 @@ The CI deploy should succeed now.
 - [x] Published to YouTube: https://www.youtube.com/watch?v=OrGJi8Hh_bQ
 - [x] Blog post created and deployed
 - [x] Fixed stale submodule pointer (ui--server--briantakita)
-- [x] Fixed yalc artifacts breaking CI build
+- [x] Fixed yalc artifacts in all three repos (briantakita.me, monorepo root, ui--server--briantakita)
 <!-- /agent:pending -->

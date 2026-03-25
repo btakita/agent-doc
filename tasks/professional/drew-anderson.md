@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised draft v2 ready — refocused on Drew's V2V core business
+Draft v3 ready — LiveKit emphasis + soft PresenceAI/distribution offer
 <!-- /agent:status -->
 
 ## Exchange
@@ -195,11 +195,11 @@ Hey Drew,
 
 Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).
 
-I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been working in a similar space: built a real-time voice-to-voice pipeline using LiveKit with multi-modal integration (lipsync avatars, image generation). Also explored Grok V2V, Hume, and various model backends. The company (Presence AI) wound down, but I retained the IP and codebase.
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been working in a similar space: built a real-time voice-to-voice pipeline using LiveKit with multi-modal integration (lipsync avatars, image generation). Also explored Grok V2V, Hume, and various model backends. The company (Presence AI) wound down, but I retained the IP and codebase.: Mention Livekit
 
 A few things I'd love to compare notes on:
 - Model flexibility — are you planning support beyond OpenAI Realtime? I've worked across Claude, Grok V2V, and Hume and there's real value in being model-agnostic
-- Where are you thinking on the avatar/visual side? I explored both real-time lipsync and semi-realtime video generation (LTXV, WAN, ComfyUI pipelines) — the latency tradeoffs are interesting
+- Where are you thinking on the avatar/visual side? I explored both real-time lipsync and semi-realtime video generation (LTXV, WAN, ComfyUI pipelines) — the latency tradeoffs are interesting: Should we ask if he is interested in learning more about the PresenceAI codebase and Chatroulette funnel?
 
 Sounds like we're circling similar problems from different angles. Happy to dig deeper if there's mutual interest.
 
@@ -215,7 +215,42 @@ Brian
 - Added LTXV/WAN/ComfyUI as specific technical depth signals
 - Softened the PresenceAI mention — "retained the IP" rather than "available" (less transactional)
 - Questions positioned as collaborative exploration, not interrogation
-<!-- agent:boundary:8a67fb8c -->
+
+### Re: Draft v3 — LiveKit + PresenceAI offer (HEAD)
+
+Two adjustments: (1) LiveKit gets its own sentence for emphasis, (2) added a soft offer to share more about the PresenceAI pipeline + distribution angle.
+
+On the PresenceAI/Chatroulette question — I'd say yes, but keep it light. Drew's an investor/strategist type, so framing it as "I have a production codebase + distribution partnership in play" signals opportunity without being pushy. If he bites, you can go deeper on the next exchange.
+
+**Revised draft v3:**
+
+---
+
+Hey Drew,
+
+Great to connect — and I'm right there with you on 5th wave coding. I've been deep in AI-assisted development building agentic tools (document sessions, correspondence automation, ontology systems).
+
+I checked out Nova — the full-duplex voice pipeline and device-neutral relay gateway are solid. Clean SDK too. I've been building in a similar space: production real-time V2V pipeline on LiveKit with multi-modal integration — lipsync avatars, image generation, the full stack. Also worked with Grok V2V, Hume, and various model backends beyond OpenAI. The company (Presence AI) wound down, but I retained the IP and codebase.
+
+A few things I'd love to compare notes on:
+- Model flexibility — are you planning support beyond OpenAI Realtime? There's real value in being model-agnostic, and each provider has different latency/quality tradeoffs
+- On the avatar/visual side — I explored both real-time lipsync and semi-realtime video generation (LTXV, WAN, ComfyUI pipelines). If that's on your roadmap, I'd be happy to share what I learned about the latency tradeoffs
+
+I also have a distribution angle in the works with a video-first platform that could be interesting for voice agent deployment. Happy to share more if that's relevant.
+
+Sounds like we're circling similar problems from different angles. Let me know if you'd like to dig deeper.
+
+Best,
+Brian
+
+---
+
+**Changes from v2:**
+- LiveKit now gets its own emphasis: "production real-time V2V pipeline on LiveKit"
+- Added soft PresenceAI/Chatroulette teaser: "distribution angle in the works with a video-first platform" — signals opportunity without naming Chatroulette or over-committing
+- Removed "mutual interest" closing (slightly passive) → replaced with direct "let me know if you'd like to dig deeper"
+- Kept the message concise — LinkedIn messages that are too long get skimmed
+<!-- agent:boundary:a74d2221 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

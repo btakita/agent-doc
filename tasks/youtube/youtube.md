@@ -232,6 +232,27 @@ Published! https://www.linkedin.com/feed/update/urn:li:share:7441146047336210432
 - **Draft:** `mail/social/20260321-agent-doc-tmux-crdt-linkedin.md`
 
 The post leads with the tmux race condition debugging hook, covers the key bugs found during the session, and ends with the "vibe coding not a tutorial" framing.
+
+compact exchange
+
+### Exchange Summary (compacted) (HEAD)
+
+**Video:** "Building Agent-Doc: Live Debugging tmux Race Conditions & CRDT Document Sessions"
+- **YouTube:** https://www.youtube.com/watch?v=N8EX3zJLHUA (public, CC + chapter markers)
+- **Source:** `tmp/2026-03-18-merged.mp4` (~55 min, merged from two stream recordings)
+- **SRT:** `tasks/youtube/2026-03-18-merged.srt` (334 captions)
+- **Draft:** `mail/social/20260321-110726-youtube.md`
+
+**Blog post:** https://briantakita.me/posts/agent-doc-tmux-crdt-live
+- Source: `src/briantakita.me-dev/app/briantakita.me/post/content/2026-03-18-agent-doc-tmux-crdt-live.md`
+- Featured post, deployed via Cloudflare Pages
+
+**LinkedIn:** https://www.linkedin.com/feed/update/urn:li:share:7441146047336210432
+- Links in first comment (engagement optimization)
+- Draft: `mail/social/20260321-agent-doc-tmux-crdt-linkedin.md`
+
+**Topics covered in video:** Corky OAuth verification, agent-doc pending/component modes, tmux proliferation bug debugging, corky doctor command, document corruption (backtick parsing), prompt loss investigation, over-specification vs under-specification discussion.
+<!-- agent:boundary:3929606a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

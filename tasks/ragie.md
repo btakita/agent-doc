@@ -83,11 +83,13 @@ Is Ragie equivalent to a flat file system where all data is semantically indexed
 
 **Recommendation:** Start with **tantivy** — pure Rust, integrates cleanly into Corky, full-text search is the immediate gap. Add embeddings later if you need semantic similarity. tantivy also supports faceted search, which maps well to Corky's labels/contacts metadata.
 
+How does tantivy compare with sift https://www.alexdk.com/blog/introducing-sift? Are they 
+
 ### Re: Ragie complementary to your workflow / Lucas collaboration
 
 Ragie becomes complementary as a **shared collaboration layer** on top of your local workflow:
 
-1. **Your workflow stays local** — git + Markdown + local search (tantivy). Full control.
+1. **Your workflow stays local** — git + Markdown + local search (tantivy). Full control.: It seems that Ragie has semantic search, so Ragie offers more than tantivy. Perhaps SQLite + embeddings would be a better comparison?
 2. **Ragie as the shared view** — push selected documents so collaborators can query without your dev setup.
 3. **With Lucas:** Index shared project context (specs, meeting notes, design docs) into Ragie so both of you can query "what did we decide about X?" — especially useful if Lucas isn't in your git repo.
 
@@ -101,17 +103,51 @@ Close but not quite — more like a **document database with a multi-layer searc
 - **Not a file system:** No directory hierarchy, no file paths, no streaming reads. Query by meaning or metadata, not location.
 
 Think: **"What if S3 understood your documents and could answer questions about them?"**
-<!-- agent:boundary:5d1e57d0 -->
+
+### Re: tantivy vs Sift (HEAD)
+
+Your question was truncated ("Are they ") — but here's the comparison:
+
+**Sift** (alexdk.com) is a much better fit than tantivy for Corky. Key differences:
+
+| | **tantivy** | **Sift** |
+|---|---|---|
+| **Type** | Rust library (crate you embed) | Rust CLI (standalone binary, daemonless) |
+| **Search** | BM25 keyword only | Hybrid: BM25 + dense vector + phrase matching |
+| **Reranking** | None | Local LLM reranking (Qwen model) |
+| **Pipeline** | Build your own | 4-stage: expand → retrieve → fuse (RRF) → rerank |
+| **Integration** | Embed in your Rust code | CLI invocation or could wrap as library |
+| **Perf** | Sub-ms keyword search | ~5ms BM25, ~26ms vector (SciFact benchmark) |
+| **Deps** | Pure Rust, minimal | Single static binary, no daemon/server |
+
+**Sift is effectively the local equivalent of Ragie** — hybrid keyword + semantic search, no cloud dependency, runs on demand. For Corky, this could be the best of both worlds: local-first with full semantic capabilities.
+
+### Re: Ragie vs local comparison (corrected) (HEAD)
+
+You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full semantic). The correct local equivalents to Ragie are:
+
+| | **Sift** | **SQLite + embeddings** | **Ragie** |
+|---|---|---|---|
+| **Deployment** | Local CLI binary | Local DB + embedding model | Cloud managed |
+| **Search** | Hybrid (BM25 + vector + rerank) | Vector similarity | Hybrid (vector + keyword + summary) |
+| **Document parsing** | Text files | You handle parsing | PDFs, images, audio, video |
+| **Collaboration** | Single user | Single user | Multi-user, shared access |
+| **Setup** | `brew install` | Build embedding pipeline | Sign up, upload |
+| **Best for** | Your personal workflow | Custom integration needs | Judith's team, Lucas collab |
+
+**Revised recommendation:** **Sift for local, Ragie for shared.** Sift gives you the semantic search locally that tantivy lacked. Ragie remains the right choice for collaborative contexts (Judith, Lucas) where non-developers need access.
+<!-- agent:boundary:71c4f812 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Prototype tantivy integration for `corky search` (local full-text search)
+- [ ] Evaluate Sift CLI for `corky search` (local hybrid search — replaces tantivy plan)
 - [ ] Explore Ragie Python SDK / REST API — test document upload and retrieval
 - [ ] Prototype `corky ragie push` with sample conversation files
 - [ ] Design `corky ragie` command tree (push/search/sync/status)
 - [ ] Evaluate Ragie pricing/limits for correspondence corpus size
 - [ ] Plan Judith Krug project integration using Ragie as primary store
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang
+- [ ] Test Sift on mail/conversations corpus — measure index size and query latency
 <!-- /agent:pending -->

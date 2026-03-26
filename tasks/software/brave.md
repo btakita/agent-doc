@@ -382,7 +382,7 @@ All pushed to `btakita/chromium-bridge` main branch. Submodule pointer ready to 
 
 Look at https://crates.io/crates/cdpkit
 Does this do what we need?
-### Re: cdpkit evaluation (HEAD)
+### Re: cdpkit evaluation
 
 **cdpkit** (`0.2.2`) is a type-safe CDP client library for Rust. Here's the comparison:
 
@@ -416,7 +416,7 @@ page::methods::Navigate::new(url).send(&cdp, Some(&session)).await?;
 **What stays ours:** The CLI layer (clap commands, `--json` output, `setup` wizard, `markdown` extraction JS). cdpkit handles the protocol plumbing; chromium-bridge is the user-facing tool.
 
 Want me to refactor chromium-bridge to use cdpkit?
-<!-- agent:boundary:976f2a3d -->
+<!-- agent:boundary:c7022ad3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

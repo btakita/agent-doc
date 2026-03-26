@@ -234,10 +234,10 @@ Fair point. "Work in the open" most likely refers to your LinkedIn posts (module
 
 Ready to send when you are.
 
-It would be awesome to get a job...but it's aggressive to ask. If you 
+It would be awesome to get a job...but it's aggressive to ask. 
 
 Please review tasks/ragie.md.
-We should mention that I'm working on intergrating Ragie into corky. Should we also mention that I will be using it with Judith's project?
+We should mention that I'm working on intergrating Ragie into corky. Should we also mention that I will be using it with Judith's project? 
 ### Re: Ragie Integration Mention & Job Angle (v9)
 
 **Reviewed tasks/ragie.md.** You've done solid architecture work there — Sift for local, Ragie for shared/collaborative contexts, with a unified `corky search` abstraction.
@@ -256,6 +256,15 @@ Keep it light though — no need to name Judith or over-explain. Just enough to 
 >
 > Great to reconnect. Feels like our paths are converging.
 
+> We only overlapped briefly at Grockit — my last few weeks were your first — but I remember the caliber of people that place attracted, and you were clearly one of them. Thank you for being a reference for the Yammer offer back in the day. David Sacks told me I was "making a mistake" when I turned it down, and I don't want to repeat that mistake.
+
+Probably don't need to talk about this. Let's focus on Ragie instead.
+Should I mention that I'm thinking of using Sift locally. He might not have heard of Sift, so should we throw in a link?
+
+> I'm also planning to use it for a client project where non-technical staff need to query document context without a developer setup
+
+Also emphasize the collaborative rag.
+
 **What changed from v8:**
 - Added "integrating it into Corky" — shows active integration, not just sign-up
 - Added Sift + Ragie architecture mention — demonstrates technical depth and thoughtful platform positioning
@@ -263,7 +272,32 @@ Keep it light though — no need to name Judith or over-explain. Just enough to 
 - Slightly restructured the Ragie paragraph for flow
 
 **Note:** Your first line "It would be awesome to get a job...but it's aggressive to ask. If you" was cut off mid-sentence. If you want to finish that thought, I can work it into the strategy. The current approach is: let the integration work speak for itself, and let Bob be the one to suggest deeper involvement.
-<!-- agent:boundary:8f698b12 -->
+Mention that I want to
+### Re: Streamlined DM — Ragie Focus (v10) (HEAD)
+
+Good calls on all three points:
+
+1. **Drop the Grockit/Sacks paragraph** — Agreed. It's personal backstory that dilutes the Ragie pitch. Save it for a call.
+
+2. **Sift mention** — I'd skip the link. Mentioning "local hybrid search" shows technical depth without requiring Bob to know Sift. If he's curious, he'll ask. Dropping a link to a competing local tool in a message to the CEO of a cloud RAG company could read as "I might not need your product."
+
+3. **Collaborative RAG emphasis** — Strengthened below. The key message: Ragie isn't just for you, it's the shared layer that makes your tooling work for teams.
+
+**LinkedIn DM (v10 — Ragie-focused, no Grockit/Sacks):**
+
+> Hey Bob — your comment on my module-harness post really made my day, and knowing you've been following along means a lot.
+>
+> I just signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — I'm building it so teams and non-technical users can query shared document context without a developer setup. I have a client project where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+>
+> I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
+
+**What changed from v9:**
+- Removed entire Grockit/Yammer/Sacks paragraph — focuses the message entirely on Ragie and what you're building
+- Replaced "Sift" with "local hybrid search" — no need to name a competitor's tool
+- Reframed collaborative angle: "teams and non-technical users can query shared document context" — positions Ragie as the team enablement layer
+- Added "I have a client project where this is exactly the need" — concrete signal without details
+- Shorter, punchier — the message is now purely about shared technical interests
+<!-- agent:boundary:e53573c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -271,7 +305,7 @@ Keep it light though — no need to name Judith or over-explain. Just enough to 
 <!-- agent:pending patch=replace -->
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
-- [ ] Send LinkedIn DM to Bob (v9 ready — with Ragie integration angle)
+- [ ] Send LinkedIn DM to Bob (v10 ready — Ragie-focused, collaborative angle)
 - [ ] Complete Ragie sign-up with RAG use case
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
 <!-- /agent:pending -->

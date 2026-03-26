@@ -7,12 +7,14 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Session initialized. Awaiting input.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
 
+<!-- agent:boundary:72c777a8:brave -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

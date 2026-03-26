@@ -497,7 +497,7 @@ Both backends are live. `corky search "query"` defaults to Sift (local). `corky 
 
 Should we instead have a sift wrapper crate that include a SKILL.md for general agentic capability within an agent-doc project?
 
-### Re: Sift wrapper crate with SKILL.md (HEAD)
+### Re: Sift wrapper crate with SKILL.md
 
 Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
 
@@ -532,7 +532,7 @@ Yes. Should we name it sift-skill, sift-agent, sift-harness, or another name?
 
 Since sift does not currently have a crate, should this new project add sift as a submodule?
 
-### Re: Sift wrapper crate with SKILL.md (HEAD)
+### Re: Sift wrapper crate with SKILL.md
 
 Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
 
@@ -563,7 +563,7 @@ The sift-skill would be especially useful for agent-doc projects that aren't Cor
 
 Want me to scaffold the sift-skill package?
 
-### Re: Sift wrapper crate with SKILL.md (HEAD)
+### Re: Sift wrapper crate with SKILL.md
 
 Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
 

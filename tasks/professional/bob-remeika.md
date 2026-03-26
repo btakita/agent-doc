@@ -497,12 +497,39 @@ No, Corky cannot currently read LinkedIn post comments. LinkedIn's API is heavil
 **Should we build it?** No — the ROI is low. LinkedIn comment interactions are infrequent enough that manual paste works fine. The engineering effort to maintain a LinkedIn API integration would be significant relative to the value.
 
 What you're already doing (pasting the comment with the URL) is the best pattern — it captures context with provenance.
-<!-- agent:boundary:4bf599ab -->
+
+What can we build right now with the **LinkedIn API limitations**? Don't assess the ROI, just let me know what's possible using the api with my personal OAuth credentials or app credentials. 
+
+Can we have a bookmarklet to extract a post with the comments into a md or txt file?
+
+### Re: LinkedIn API capabilities & bookmarklet (HEAD)
+
+**LinkedIn API — What's Actually Possible**
+
+With personal OAuth credentials (3-legged OAuth via a LinkedIn app you own):
+
+| Capability | Endpoint | Access |
+|---|---|---|
+| Read your posts | `GET /ugcPosts` | ✅ Your own posts |
+| Read comments | `GET /socialActions/{urn}/comments` | ✅ On **your** posts only |
+| Post comments | `POST /socialActions/{urn}/comments` | ✅ On any post |
+| Create posts | `POST /ugcPosts` | ✅ Your profile |
+| Read likes | `GET /socialActions/{urn}/likes` | ✅ On your posts |
+| Read connections | `GET /connections` | ✅ Limited fields |
+| Read others' post comments | — | ❌ Not available |
+| Access DMs/messaging | — | ❌ No API |
+| Search posts/feed | — | ❌ No API |
+
+**Key limitation for the Bob use case:** If Bob comments on *your* post, you can pull that via API. But comments on *his* posts — no API access since you're not the author.
+
+**Bookmarklet — Yes, buildable now.** A bookmarklet can scrape the rendered LinkedIn post page DOM for author, content, date, and all loaded comments, then format as markdown and copy to clipboard. Caveats: only captures loaded comments (need to expand "load more" first), and DOM selectors may break when LinkedIn updates their frontend. Low-effort to build, high-utility for your paste-into-document workflow. Say the word and I'll build it.
+<!-- agent:boundary:229426c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - LinkedIn DM (v10) to Bob — ready to send, awaiting user go-ahead
+- LinkedIn post bookmarklet — ready to build if approved
 - Sift deployment recommendation documented — awaiting Bob's response
 <!-- /agent:pending -->

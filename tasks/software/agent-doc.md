@@ -1352,18 +1352,27 @@ ANTHROPIC_API_KEY="$(pass ...)" eval-runner run evals/agent-doc/diff-interpretat
 **Fixed:** `cases.yaml` line 409 had a YAML quoting issue (`"Yes"` at start of list item). Wrapped in single quotes.
 Let's create a new task for `tasks/software/eval-runner.md`.
 Transfer all relevant context from this file related to eval-runner.
-<!-- agent:boundary:16f6414f -->
+### Re: Create eval-runner task file (HEAD)
+
+Created `tasks/software/eval-runner.md` with all eval-runner context transferred:
+
+- Architecture (pipeline, CLI interface, case format, metrics, market context)
+- Design decisions and relationship to module-harness/agent-doc
+- Session history summary (motivation, design process, implementation status)
+- Pending items (API key setup, end-to-end test, make check integration)
+- Future todo items (HTML/SVG output, Promptfoo/Inspect AI export, parallel execution)
+
+The eval-runner pending items were removed from this document's `&lt;!-- agent:pending --&gt;` since they now live in the dedicated task file.
+<!-- agent:boundary:01ba6ea4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Scaffold eval-runner crate — done (`src/eval-runner/`)
-- [x] Implement YAML case parser — 21 cases parse successfully
-- [x] Implement Claude API client for eval + judge — done
-- [x] Implement CLI output with metrics — done
-- [ ] Set up ANTHROPIC_API_KEY in `pass` and run full eval suite
-- [ ] Test with agent-doc diff-interpretation cases end-to-end
+- [ ] FFI route guard — prevent cascade from layout events (status signals A+B+C implemented, plugin integration done in v0.2.26)
+- [ ] Route refactor single exit point — done and pushed
+- [ ] Placeholder panes for unclaimed files in multi-column layout
+- [ ] Plugin debounce for layout-triggered focus events (FFI-level)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

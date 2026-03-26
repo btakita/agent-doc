@@ -429,7 +429,7 @@ Good pick. Fly.io advantages for Sift hosting:
 This keeps Ragie positioned as the premium collaborative option (which is the right message for Bob) while Fly.io handles the cost-sensitive deployments.
 
 Please render the updated draft to bob-remeika.
-### Re: Rendered DM v10 — Ready to Send (HEAD)
+### Re: Rendered DM v10 — Ready to Send
 
 Here's the final LinkedIn DM draft for Bob Remeika, ready to copy-paste:
 
@@ -444,7 +444,7 @@ I'd love to show you what I'm building — I think there's real overlap between 
 ---
 
 No changes from v10 — this is the version you approved. Ready to send on LinkedIn.
-<!-- agent:boundary:cca817f1 -->
+<!-- agent:boundary:2841d2cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

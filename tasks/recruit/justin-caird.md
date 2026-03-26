@@ -679,7 +679,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/?origin
 > The video walkthrough and blog post are linked in the post. Looking forward to next steps!
 
 Also, note the usage of deterministic software + SKILL context complimenting each other and being deployed as a Rust crate.
-### Re: Deterministic software + SKILL context pattern (HEAD)
+### Re: Deterministic software + SKILL context pattern
 
 Good call highlighting this. The architecture pattern is itself a selling point:
 
@@ -696,7 +696,7 @@ This is the exact pattern ECI needs at scale. With 160 products, you can't rely 
 > Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. The architecture pairs deterministic Rust tooling with AI skill context — the crate enforces structure, the agent handles judgment. Relevant to scaling across a multi-product environment like ECI's: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
 >
 > Video walkthrough and blog post linked in the post. Looking forward to next steps!
-<!-- agent:boundary:2555fdb7 -->
+<!-- agent:boundary:50543891 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

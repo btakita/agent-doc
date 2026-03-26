@@ -968,7 +968,27 @@ When `.env` is left + agent doc is right:
 - Enters mixed-split branch → `agent-doc focus <file>` → no stashing
 
 Rebuilt v0.2.25 (same zip path). Reinstall and retest.
-<!-- agent:boundary:2c5ff8b5 -->
+
+> - [ ] Retest mixed-layout fix v2 — `.env` + agent doc split
+
+Works
+
+`Run Agent Doc` on tasks/ragie.md resulted in an uncommitted result patch.
+See the large blue gutter.
+![img_10.png](img_10.png)
+
+### Re: uncommitted patch on ragie.md (HEAD)
+
+**Root cause:** IPC timeout during the `--force-disk` fallback phase caused the response to be written to disk twice. The orphan recovery then added a third copy.
+
+**Current state:** `tasks/ragie.md` has 3 copies of the "Re: Sift wrapper crate with SKILL.md" response (lines 500, 535, 566). The blue gutter is mostly cleared (preflight auto-committed), but the content needs deduplication.
+
+**To fix ragie.md:** You'll need to manually delete the 2 duplicate response blocks (keep the first one at line 500, delete the copies at 535 and 566). Or I can do it if you'd like.
+
+**Prevention:** The IPC timeout was caused by me using `--force-disk` during plugin reinstall. Now that the plugin is stable and IPC is working, this shouldn't recur. The `--force-disk` flag should only be used as a last resort when the plugin is genuinely unavailable.
+
+Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
+<!-- agent:boundary:ab0d37eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -976,8 +996,10 @@ Rebuilt v0.2.25 (same zip path). Reinstall and retest.
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done
 - [x] Alt+Enter/Alt+Space separation — verified working
-- [ ] Retest mixed-layout fix v2 — `.env` + agent doc split
-- [ ] Clean up unused files after all fixes confirmed
+- [x] Mixed-layout fix — verified working
+- [ ] Clean up ragie.md duplicate responses (3 copies → 1)
+- [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
+- [ ] Commit plugin changes in agent-doc submodule
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

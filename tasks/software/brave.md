@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 built, installed (.bin/ + ~/.cargo/bin/), verified.
+chromium-bridge v0.1.0 published to crates.io.
 <!-- /agent:status -->
 
 ## Exchange
@@ -513,13 +513,27 @@ $ chromium-bridge list
 ```
 
 Both the symlink and cargo-installed binary are working.
-<!-- agent:boundary:52f1277e -->
+
+release chromium-bridge
+Create an ins
+### Re: Release chromium-bridge (HEAD)
+
+Published to crates.io: `chromium-bridge v0.1.0`
+
+```
+$ cargo install chromium-bridge
+```
+
+Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains).
+
+**Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
+<!-- agent:boundary:31b10698 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Publish chromium-bridge to crates.io
+- Create GitHub Release with prebuilt binary
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)

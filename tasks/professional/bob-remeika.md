@@ -707,7 +707,7 @@ Here's the LinkedIn post and comments from Bob Remeika (activity:744260825725423
 ---
 
 Successfully used `chromium-bridge markdown` to fetch the post. The raw HTML-to-markdown conversion has some noise from LinkedIn's UI elements, but the core content is captured above.
-<!-- agent:boundary:e9b4d07f -->
+<!-- agent:boundary:96ed7f2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

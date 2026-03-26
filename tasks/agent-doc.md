@@ -1060,18 +1060,56 @@ The eval runner could live in:
 3. **Module-harness** — if we generalize it to include execution, not just definition
 
 Option 1 seems most natural since the evals test agent-doc's own SKILL.md behavior. The runner would feed cases from `cases.yaml` through the same prompt pipeline the skill uses, then LLM-grade the outputs.
-<!-- agent:boundary:7f9aef5c -->
+
+Option 1 makes sense, assuming there is criteria for the eval specified somewhere.
+Currently, module-harness is the place that has the criteria, which implies Option 3 right now.
+Option 1 implies that agent-doc would be compatible with various ways to run evals. Please research the market for skills, packages, and techniques to run evals that seem compatible with agent-doc.
+
+Option 3 seems like a concrete use case that we can benefit from right now. But we need some research into how evals are done across the market that would be compatible from a cli.
+
+### Re: eval ecosystem research (HEAD)
+
+**Top CLI-compatible eval frameworks ranked by agent-doc fit:**
+
+| Tool | CLI-First | YAML Cases | LLM-as-Judge | Language | Open Source |
+|------|-----------|------------|--------------|----------|-------------|
+| **Promptfoo** | Yes | Native | `llm-rubric` | Node.js | MIT |
+| **Inspect AI** | Yes | Python defs | Built-in | Python | MIT |
+| **DeepEval** | Via pytest | Python defs | G-Eval | Python | Apache 2.0 |
+| **Braintrust autoevals** | Partial | No | Yes | Python/TS | MIT |
+| **Custom Rust** | Yes | Your YAML | Custom | Rust | N/A |
+
+**Promptfoo is the closest match.** Your existing `cases.yaml` already uses patterns that map directly to promptfoo's format — YAML cases with `llm-rubric` grading and `expected_behavior` lists. You'd need a custom provider to simulate the diff-interpretation pipeline. Downside: Node.js dependency.
+
+**Custom Rust eval runner (~200-400 LOC)** is the most elegant for agent-doc:
+- No Node.js/Python dependency
+- Reads your existing `cases.yaml` directly
+- Calls Claude API to generate response
+- Uses a separate Claude call as LLM-as-judge against `expected_behavior`
+- Integrates with `make check` / CI
+- Lives in agent-doc as `agent-doc eval run`
+
+**Claude Code skill-creator** (March 2026) has built-in eval modes (Create, Eval, Improve, Benchmark) that test SKILL.md behavior in real Claude Code contexts with A/B testing. Good for interactive development but not CI-integrated.
+
+**Recommendation for module-harness (Option 3):**
+Module-harness already holds the eval criteria. If we add a thin eval runner to module-harness that:
+1. Reads `cases.yaml` from the eval directory
+2. Calls the target CLI (agent-doc, corky, etc.) with case inputs
+3. LLM-grades output against `expected_behavior`
+4. Reports pass/fail
+
+...it becomes reusable across all projects, not just agent-doc. The eval definitions stay in module-harness; the runner is a generic `module-harness eval run` command.
+
+**Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
+<!-- agent:boundary:ad560b8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Make sync skip `ensure_session()` for unclaimed files — done
-- [x] Alt+Enter/Alt+Space separation — verified working
-- [x] Mixed-layout fix — verified working
-- [x] Clean up + commit — done
-- [x] Audit docs + SPEC.md — done
-- [x] Release v0.26.3 — crates.io + PyPI + GitHub Release + binary installed
+- [x] All sync/plugin fixes — done and released (v0.26.3)
+- [ ] Decide eval approach: module-harness runner vs agent-doc runner vs promptfoo
+- [ ] Implement chosen eval runner
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -489,7 +489,7 @@ Refactored `chromium-bridge` to use cdpkit. Keeping the name.
 Pushed to `btakita/chromium-bridge` main.
 
 Let's build and install chromium-bridge.
-### Re: Build and install (HEAD)
+### Re: Build and install
 
 Done.
 
@@ -513,7 +513,7 @@ $ chromium-bridge list
 ```
 
 Both the symlink and cargo-installed binary are working.
-<!-- agent:boundary:e8fe29b7 -->
+<!-- agent:boundary:52f1277e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

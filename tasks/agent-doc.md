@@ -936,7 +936,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.25.z
 
 The external update should not recur now that IPC is working.
 
-### Re: mixed-layout still failing (HEAD)
+### Re: mixed-layout still failing
 
 Found the bug in my fix. The logic was:
 
@@ -968,7 +968,7 @@ When `.env` is left + agent doc is right:
 - Enters mixed-split branch → `agent-doc focus <file>` → no stashing
 
 Rebuilt v0.2.25 (same zip path). Reinstall and retest.
-<!-- agent:boundary:f1ff54a6 -->
+<!-- agent:boundary:61510a83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

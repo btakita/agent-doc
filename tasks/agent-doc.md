@@ -890,7 +890,7 @@ The tmux session focused on the 1:stash tmux window.
 Please diagnose why.
 It should have kept the 2 pane layout with the previously selected agent doc on the left tmux pane and the currently selected agent doc on the right tmux pane.
 
-### Re: .env + agent doc → stash window bug (HEAD)
+### Re: .env + agent doc → stash window bug
 
 **Root cause:** `LayoutDetector.detectEditorLayout()` filters out non-.md files with `mapNotNull`, so when `.env` is in the left pane:
 1. Only 1 `.md` file collected → `windowFiles.size < 2` → returns `null`
@@ -905,7 +905,7 @@ It should have kept the 2 pane layout with the previously selected agent doc on 
 2. **`EditorTabSyncListener`** — added mixed-split detection. When the editor has a split but some panes have non-.md files (`visibleMdFiles.size < allSelected.size`), it uses `agent-doc focus <file>` instead of `sync --col`. This just focuses the active file's tmux pane without reorganizing the layout.
 
 Rebuilt `0.2.24`. Reinstall and test: open `.env` on left + agent doc on right, then click the right pane. The tmux should focus on the agent doc's pane without stashing anything.
-<!-- agent:boundary:120cbabd -->
+<!-- agent:boundary:04565c14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

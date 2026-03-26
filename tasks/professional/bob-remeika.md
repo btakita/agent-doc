@@ -526,7 +526,7 @@ With personal OAuth credentials (3-legged OAuth via a LinkedIn app you own):
 
 Can we have the bookmarklet also click "load more" on all of the comments to have full visibility?
 
-### Re: Bookmarklet auto-expand comments (HEAD)
+### Re: Bookmarklet auto-expand comments
 
 Yes — the bookmarklet can auto-expand before scraping:
 
@@ -536,7 +536,7 @@ Yes — the bookmarklet can auto-expand before scraping:
 4. Scrape the fully-expanded comment tree → format as markdown → copy to clipboard
 
 Shows a small overlay notification during the process ("Expanding comments... 3 found" → "Done! Copied to clipboard"). Still bookmarklet-sized, no browser extension needed. Ready to build on your go.
-<!-- agent:boundary:e2e21932 -->
+<!-- agent:boundary:253cfc17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

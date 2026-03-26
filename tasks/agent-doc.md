@@ -1036,7 +1036,31 @@ To run the diff-interpretation evals, we'd need to build an eval runner that:
 3. LLM-grades the response against `expected_behavior`
 
 This is a separate project. The existing binary tests + manual verification cover our sync changes adequately.
-<!-- agent:boundary:8a015774 -->
+release agent-doc
+Would this eval runner be implemented in module-harness?
+
+### Re: release + eval runner question (HEAD)
+
+**agent-doc v0.26.3 released:**
+- crates.io: published
+- PyPI: published
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.26.3
+- Binary installed to `~/.cargo/bin/agent-doc`
+
+**Would the eval runner be implemented in module-harness?**
+
+Module-harness handles spec/contract/eval *definitions* (SPEC.md, harness context files). An eval runner is different — it's execution infrastructure:
+
+- **Module-harness** = "what should we test?" (case definitions, grading rubrics)
+- **Eval runner** = "run the tests and report results" (execution, LLM-grading, regression tracking)
+
+The eval runner could live in:
+1. **`agent-doc` itself** (`agent-doc eval run`) — tightest integration, can read SKILL.md directly
+2. **A standalone `eval-runner` crate** — reusable across projects (agent-doc, corky, etc.)
+3. **Module-harness** — if we generalize it to include execution, not just definition
+
+Option 1 seems most natural since the evals test agent-doc's own SKILL.md behavior. The runner would feed cases from `cases.yaml` through the same prompt pipeline the skill uses, then LLM-grade the outputs.
+<!-- agent:boundary:5d2a80c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1045,11 +1069,9 @@ This is a separate project. The existing binary tests + manual verification cove
 - [x] Make sync skip `ensure_session()` for unclaimed files — done
 - [x] Alt+Enter/Alt+Space separation — verified working
 - [x] Mixed-layout fix — verified working
-- [x] Clean up ragie.md duplicate responses — done
-- [x] Clean up unused files — done
-- [x] Commit plugin changes in agent-doc submodule — done
-- [x] Audit docs + SPEC.md update — done
-- [x] Evals review — cases exist but no runner; binary tests pass
+- [x] Clean up + commit — done
+- [x] Audit docs + SPEC.md — done
+- [x] Release v0.26.3 — crates.io + PyPI + GitHub Release + binary installed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -326,10 +326,10 @@ Reasoning:
 
 What do you think?
 `browser-bridge` would be great, but it implies firefox, safari, and other browsers.
-### Re: Restart with --dangerously-skip-permissions (HEAD)
+### Re: Restart with --dangerously-skip-permissions
 
 I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
-<!-- agent:boundary:c7281601 -->
+<!-- agent:boundary:59c36fb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

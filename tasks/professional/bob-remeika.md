@@ -473,7 +473,7 @@ Send the v10 DM as-is (show of strength). Demonstrate the Ragie integration in C
 That's ambiguous enough to cover collaboration, consulting, *or* employment without asking for any of them.
 
 **Bottom line:** Show of strength + demonstrated value has higher expected income than a direct ask. The direct ask has a binary outcome (yes/no) with no fallback. The strength play keeps all doors open and lets Bob be the one to escalate.
-<!-- agent:boundary:8818b559 -->
+<!-- agent:boundary:1e8952ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

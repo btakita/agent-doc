@@ -759,7 +759,7 @@ Changes from previous revision:
 
 Ready for manual copy-paste when you want to send it.
 
-### Re: Rephrase hallucination spotting claim (HEAD)
+### Re: Rephrase hallucination spotting claim
 
 Good call — let's keep it honest. You're building module-harness and general-purpose eval tooling, not PR hallucination spotting specifically. The revised draft drops that claim and describes your actual current work:
 
@@ -780,7 +780,7 @@ Building toward a general-purpose eval workflow that validates agent output agai
 - Replaced with "general-purpose eval workflow that validates agent output against deterministic contracts" — accurate to what you're building
 - Still connects to ECI's multi-product scaling needs
 - Keeps the demo offer as a soft CTA
-<!-- agent:boundary:812aaff8 -->
+<!-- agent:boundary:d8fb2157 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

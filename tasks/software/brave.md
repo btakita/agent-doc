@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Evaluating cdpkit as CDP library dependency for chromium-bridge.
+Evaluating cdpkit stability and library strategy for chromium-bridge.
 <!-- /agent:status -->
 
 ## Exchange
@@ -416,13 +416,65 @@ page::methods::Navigate::new(url).send(&cdp, Some(&session)).await?;
 **What stays ours:** The CLI layer (clap commands, `--json` output, `setup` wizard, `markdown` extraction JS). cdpkit handles the protocol plumbing; chromium-bridge is the user-facing tool.
 
 Want me to refactor chromium-bridge to use cdpkit?
-<!-- agent:boundary:c7022ad3 -->
+
+How about a shorter name such as cdp-cli?
+Does `cdpkit` seem to be something that will be stable going forward?
+Is there a SPEC.md?
+Should we have our own library based off of this library?
+### Re: Naming, cdpkit stability, and library strategy (HEAD)
+
+**Shorter name — `cdp-cli`:** Already taken on crates.io (it's a directory navigation tool, completely unrelated). Other short options:
+
+| Name | Available? | Notes |
+|---|---|---|
+| `cdp-cli` | Taken | Unrelated crate |
+| `cdp-ctl` | Likely free | Unix-style, short |
+| `chromium-bridge` | Free (ours) | Already created |
+| `cdpx` | Likely free | Very short, `x` = execute/extend |
+
+I'd stick with **`chromium-bridge`** — it's already pushed, named well, and renaming adds churn for marginal benefit.
+
+**cdpkit stability assessment:**
+
+| Signal | Value |
+|---|---|
+| Downloads | 84 total (very low) |
+| Commits | 12 |
+| Contributors | 1 (yie1d) |
+| Last commit | Feb 6, 2026 |
+| Last release | v0.2.2, Mar 3, 2026 |
+| Open issues | 0 |
+| SPEC.md | None |
+
+**Verdict: early-stage, single-maintainer, unproven.** The code generation approach is sound (auto-generated from Chrome's official CDP spec), but with 84 downloads and one author, there's real bus-factor risk. The API could break between minor versions.
+
+**Should we have our own library?**
+
+Three options:
+
+1. **Use cdpkit directly** — lowest effort, highest coupling risk. If yie1d abandons it, we fork or rewrite.
+
+2. **Wrap cdpkit in a thin abstraction** — our own `chromium-bridge-core` crate that re-exports what we need. If cdpkit breaks, we swap the backend without changing chromium-bridge's CLI layer. Moderate effort.
+
+3. **Write our own CDP library** — highest effort, full control. The CDP spec is public JSON, and cdpkit_codegen shows the code-gen pattern. But this is weeks of work for something that already exists.
+
+**My recommendation: option 1 for now, with option 2 as escape hatch.**
+
+Our current raw WebSocket code is ~50 lines. Swapping to cdpkit gives us typed commands and event streaming. If cdpkit dies, we can:
+- Fork it (MIT/Apache-2.0 licensed)
+- Or revert to our raw WebSocket approach (it's still in git history)
+
+The risk is low because our CLI surface is small — we only use `Page.navigate`, `Runtime.evaluate`, and `Page.captureScreenshot`. Even if cdpkit's API changes, adapting 5 call sites is trivial.
+
+Don't over-invest in abstractions before we have real usage patterns.
+<!-- agent:boundary:a2814122 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Refactor chromium-bridge to use cdpkit as CDP client (replaces raw WebSocket code)
+- Decide: keep `chromium-bridge` name or rename (current recommendation: keep)
+- Refactor chromium-bridge to use cdpkit as CDP client (option 1 — direct dependency)
 - Publish to crates.io
 - Add `cargo install` and release build to agent-loop bin/
 - Flesh out sift integration (scrape → index workflow)

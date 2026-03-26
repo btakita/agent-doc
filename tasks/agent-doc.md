@@ -1111,6 +1111,8 @@ Module-harness already holds the eval criteria. If we add a thin eval runner to 
 
 I'm hoping to avoid having tight coupling with other tools. Would it make sense for module-harness to directly run the evals for a single module or a group of modules passed into the cli? Would we need something like **Promptfoo** to run the evals?
 
+Like a **Custom Rust** crate for a standalone cli?
+
 ...it becomes reusable across all projects, not just agent-doc. The eval definitions stay in module-harness; the runner is a generic `module-harness eval run` command.
 
 **Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
@@ -1168,16 +1170,37 @@ No tool-specific knowledge needed. The case YAML contains everything: the prompt
 **Promptfoo** does exactly this same pattern but with its own YAML format, assertion engine, and Node.js runtime. You'd get it for free but take on the Node.js dependency. Your existing `cases.yaml` is ~90% compatible with promptfoo's format already.
 
 **My recommendation:** Start with module-harness since it's yours, the format is already defined, and the runner is ~200 lines of Rust. If you later want promptfoo's dashboards or assertion library, the case format is portable.
-<!-- agent:boundary:73b89c0c -->
+
+### Re: standalone eval CLI crate (HEAD)
+
+Yes — a standalone Rust crate makes the most sense. Module-harness is an audit/spec tool; adding an eval runner to it would blur its responsibility. A dedicated crate keeps concerns clean:
+
+| Crate | Responsibility |
+|-------|---------------|
+| **module-harness** | Audit instruction files, validate specs, generate harness context |
+| **eval-runner** (new) | Read YAML cases, send prompts to LLM, grade responses, report results |
+
+The eval-runner crate would:
+- Parse `cases.yaml` (your existing format — `id`, `diff`, `document_context`, `expected_behavior`, `grading`)
+- For each case: send the prompt to Claude API → get response → LLM-grade against `expected_behavior`
+- Report pass/fail with reasoning
+- CLI: `eval-runner run evals/agent-doc/diff-interpretation/cases.yaml`
+- Exit code 0/1 for CI integration (`make check`)
+- ~200-400 LOC of Rust
+
+This is essentially what promptfoo does but without the Node.js dependency — a thin Rust CLI that reads YAML, calls Claude, and grades. It's reusable across any project that defines eval cases in this format.
+
+Want me to scaffold the crate?
+<!-- agent:boundary:2f6026d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] All sync/plugin fixes — released v0.26.3
-- [x] Code-driven listener registration — plugin v0.2.26 (`819abfb`)
+- [x] Code-driven listener registration — plugin v0.2.26
 - [ ] Install plugin v0.2.26 and verify hot-reload works
-- [ ] Implement eval runner in module-harness
+- [ ] Scaffold eval-runner crate (standalone Rust CLI for LLM evals)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

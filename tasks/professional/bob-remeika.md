@@ -328,7 +328,28 @@ Bob's personal email is bob.remeika@gmail.com. Please update contact.
 ### Re: Contact Updated
 
 Added `bob.remeika@gmail.com` to `mail/contacts/bob-remeika/AGENTS.md` under Contact Info.
-<!-- agent:boundary:8d09d94e -->
+Ragie's plan is $100/month. Judith may not want to spend that. We may want a self-hosted solution instead using Sift.
+But it also may make sense.
+### Re: Ragie Pricing vs Self-Hosted for Judith (HEAD)
+
+$100/month is reasonable for what Ragie provides (managed infra, document parsing, multi-layer indexing), but you're right that it depends on Judith's budget and volume.
+
+**The case for Ragie ($100/mo):**
+- Zero ops burden — no server to maintain, no model to host
+- Document parsing (PDFs, scanned docs) included — CRE docs are heavy on these
+- Judith's team gets a query interface without touching your stack
+- Bob's your contact — potential for a favorable deal or trial extension
+
+**The case for self-hosted Sift:**
+- One-time setup, zero recurring cost
+- Full control over data (CRE docs may have sensitive financial terms)
+- You already planned to use Sift for your local workflow anyway
+- But: you'd need to build the UI layer for Judith's non-technical staff
+
+**Practical answer:** This doesn't affect the DM to Bob. Whether you end up using Ragie or Sift for Judith's project, the DM already says "client project" without committing to Ragie as the solution. You can figure out the right backend later — the DM's purpose is to open the conversation.
+
+If anything, this is a great topic for the call with Bob: "Here's my client use case — what would you recommend for a small CRE team? Is there a pricing tier that fits?" That's a natural way to deepen the relationship while getting practical value.
+<!-- agent:boundary:caad5fe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -337,8 +358,9 @@ Added `bob.remeika@gmail.com` to `mail/contacts/bob-remeika/AGENTS.md` under Con
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
 - [x] Update Bob's contact with personal email
-- [ ] Send LinkedIn DM to Bob (v10 ready — send now, follow up with demo in ~2 days)
+- [ ] Send LinkedIn DM to Bob (v10 ready)
 - [ ] Complete Ragie sign-up with RAG use case
+- [ ] Evaluate Ragie vs Sift for Judith's CRE project (pricing, data sensitivity, ops)
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
 - [ ] Follow up with Bob after integration demo is ready (~2 days)
 <!-- /agent:pending -->

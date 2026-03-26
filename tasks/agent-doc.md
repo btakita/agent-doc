@@ -800,7 +800,7 @@ But if the intention does not work, the custom dialog should have an option to p
 
 The first thing we should try is the intention approach. Hopefully it will work with markdown.
 
-### Re: intentions for Alt+Enter (HEAD)
+### Re: intentions for Alt+Enter
 
 Implemented the IntentionAction approach. Here's what changed:
 
@@ -829,7 +829,7 @@ Implemented the IntentionAction approach. Here's what changed:
 Both plugin zips built successfully. Install the new plugin and test Alt+Enter on a .md file — you should see both JetBrains intentions (typo fixes) and Agent Doc actions in the same popup.
 
 Note: The `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` files still exist on disk but are no longer registered in `plugin.xml`. They can be deleted once we confirm intentions work.
-<!-- agent:boundary:403953f1 -->
+<!-- agent:boundary:5c000750 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

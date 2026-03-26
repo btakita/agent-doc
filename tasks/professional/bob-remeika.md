@@ -673,7 +673,41 @@ Fixed. The `href` attribute contained unescaped `<` and `>` characters (from arr
 All `<` and `>` in the href are now HTML-encoded as `&lt;` and `&gt;`. Browsers decode these back to `<` and `>` before executing the `javascript:` URI, so the bookmarklet works correctly.
 
 Reload the install page — the blue "LinkedIn to MD" button should display properly now. Re-drag to bookmark bar.
-<!-- agent:boundary:006f5265 -->
+
+We just installed chromium-bridge. See tasks/software/brave.md
+Use chromium-bridge to get the post and comments in https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
+
+### chromium-bridge LinkedIn Post Capture (HEAD)
+
+Here's the LinkedIn post and comments from Bob Remeika (activity:7442608257254236160):
+
+---
+
+**Bob Remeika** · 1d · Edited
+*Building the Context Engine for agents and apps*
+
+> I worked with Brian Takita a long time ago at a company called Grockit. I didn't know it at the time but Grockit turned out to be a hotbed of engineering talent in SF and Brian Takita was one of the best of the best.
+>
+> I've been following his progression in AI development silently on LinkedIn but the work he is doing is so interesting that I had to call it out. If you are looking to learn something, follow Brian Takita.
+
+*[Embedded repost of Brian Takita's module-harness announcement]*
+
+5 reactions (like, love) · 2 comments
+
+**Comments:**
+
+1. **Brian Takita** (22h ago):
+   > Bob, I'm overwhelmed with gratitude for your kind words. Grockit was such a special place — the caliber of engineers there was remarkable. Really means a lot coming from you. Thank you.
+   - 1 like · 1 reply · 28 impressions
+
+2. **Bob Remeika** (Author, 19h ago):
+   > It really was. I'm enjoying your watching you work in the open. Thanks for sharing!
+   - 1 like
+
+---
+
+Successfully used `chromium-bridge markdown` to fetch the post. The raw HTML-to-markdown conversion has some noise from LinkedIn's UI elements, but the core content is captured above.
+<!-- agent:boundary:fd8e160e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

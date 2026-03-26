@@ -829,7 +829,14 @@ Implemented the IntentionAction approach. Here's what changed:
 Both plugin zips built successfully. Install the new plugin and test Alt+Enter on a .md file — you should see both JetBrains intentions (typo fixes) and Agent Doc actions in the same popup.
 
 Note: The `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` files still exist on disk but are no longer registered in `plugin.xml`. They can be deleted once we confirm intentions work.
-<!-- agent:boundary:5c000750 -->
+Clicking the link to the action does work btw.
+
+### Re: duplicate cleanup + action link works (HEAD)
+
+Cleaned up the duplicate response blocks (caused by IPC timeout + disk write fallback in the previous cycle). Good to know the action link shortcuts (Ctrl+Shift+Alt+A etc.) work.
+
+Now install the new plugin zip and test Alt+Enter — the intentions should appear in the native popup alongside typo fixes.
+<!-- agent:boundary:846e3d68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

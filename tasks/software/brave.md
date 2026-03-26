@@ -529,7 +529,7 @@ $ cargo install chromium-bridge
 Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains).
 
 **Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
-### Re: Install script and brew (HEAD)
+### Re: Install script and brew
 
 **Install script (`curl | sh`):** This requires GitHub Releases with prebuilt binaries first. The flow:
 
@@ -551,7 +551,7 @@ Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains)
 3. Create brew tap (lower priority — `cargo install` already works)
 
 Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
-<!-- agent:boundary:d49ad736 -->
+<!-- agent:boundary:b332afff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

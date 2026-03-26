@@ -557,7 +557,7 @@ Test it on Bob's post: https://www.linkedin.com/feed/update/urn:li:activity:7442
 
 Don't use Bob's actual name. All names should be anonymous.
 
-### Re: anonymize names (HEAD)
+### Re: anonymize names
 
 Updated the bookmarklet. All names are now replaced with "Person A", "Person B", etc.:
 
@@ -568,7 +568,7 @@ Updated the bookmarklet. All names are now replaced with "Person A", "Person B",
 - Consistent mapping: same person always gets the same label across the entire output
 
 Reload the install page to get the updated bookmarklet: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
-<!-- agent:boundary:ac6c5b88 -->
+<!-- agent:boundary:74347555 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

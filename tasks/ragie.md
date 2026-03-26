@@ -453,7 +453,24 @@ type = "ragie"
 api_key_pass = "ragie/api_key"
 ```
 And store your API key: `pass insert ragie/api_key`
-<!-- agent:boundary:0087a771 -->
+It's in `pass btak/RAGIE_API_KEY`
+
+Got it — your Ragie API key is at `pass btak/RAGIE_API_KEY`. For your `.corky.toml`, use:
+
+```toml
+[search]
+default_backends = ["sift"]
+
+[search.backends.sift]
+type = "sift"
+
+[search.backends.ragie]
+type = "ragie"
+api_key_pass = "btak/RAGIE_API_KEY"
+```
+
+Want me to add this config to your `.corky.toml` now and test `corky ragie status`?
+<!-- agent:boundary:ce3c55c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -462,8 +479,8 @@ And store your API key: `pass insert ragie/api_key`
 - [x] **All phases implemented** — SearchBackend trait, Sift, Ragie, unified search
 - [x] Sift CLI installed and tested on mail/conversations (1,669 files)
 - [x] Sift is indexless — updated wrapper accordingly
-- [ ] Add `[search]` section to `.corky.toml`
-- [ ] Store Ragie API key in pass and test `corky ragie push`
+- [ ] Add `[search]` config to `.corky.toml` (API key at `pass btak/RAGIE_API_KEY`)
+- [ ] Test `corky ragie status` and `corky ragie push`
 - [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang
 <!-- /agent:pending -->

@@ -144,10 +144,15 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Reload document from disk if it was externally modified
         val fdm = FileDocumentManager.getInstance()
-        val document = fdm.getDocument(targetFile) ?: run {
-            LOG.warn("Could not get document for: ${patch.file}")
-            return false
+        val document = fdm.getDocument(targetFile)
+
+        if (document == null) {
+            // File not open in editor — apply patches via VFS (no Document API needed).
+            // This avoids the "externally modified" dialog for background tabs.
+            LOG.info("No document for ${patch.file}, applying via VFS")
+            return applyPatchViaVfs(targetFile, patch)
         }
+
         if (fdm.isDocumentUnsaved(document)) {
             // Document has unsaved changes — don't reload (preserve user edits)
         } else {
@@ -220,6 +225,70 @@ class PatchWatcher(private val project: Project) : Disposable {
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
         return true
+    }
+
+    /**
+     * Apply patches via VFS for files not open in the editor.
+     * Reads content from disk, applies patches in memory, writes back through VFS.
+     * This avoids the "externally modified" dialog since it goes through IntelliJ's VFS layer.
+     */
+    private fun applyPatchViaVfs(targetFile: com.intellij.openapi.vfs.VirtualFile, patch: IpcPatch): Boolean {
+        try {
+            val content = String(targetFile.contentsToByteArray(), targetFile.charset)
+
+            // Full content replacement
+            if (!patch.fullContent.isNullOrEmpty()) {
+                if (patch.fullContent != content) {
+                    ApplicationManager.getApplication().runWriteAction {
+                        targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))
+                    }
+                    LOG.info("VFS patch applied (full content) to ${patch.file}")
+                }
+                return true
+            }
+
+            // Component-based patching
+            var result = content
+
+            if (!patch.frontmatter.isNullOrBlank()) {
+                result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
+                    ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
+            }
+
+            for (p in patch.patches) {
+                val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
+                    findBoundaryInComponent(result, p.component)
+                } else {
+                    p.boundaryId
+                }
+                result = applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId)
+            }
+
+            if (patch.unmatched.isNotBlank()) {
+                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, null)
+                result = if (exchangeResult != result) exchangeResult
+                    else applyComponentPatchNative(result, "output", patch.unmatched, null)
+            }
+
+            if (patch.repositionBoundary) {
+                result = NativePatching.repositionBoundaryToEnd(result)
+                    ?: repositionBoundaryToEnd(result, "exchange")
+                    ?: result
+            }
+
+            if (result != content) {
+                ApplicationManager.getApplication().runWriteAction {
+                    targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
+                }
+                LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
+            } else {
+                LOG.warn("VFS patch produced no changes for ${patch.file}")
+            }
+            return true
+        } catch (e: Exception) {
+            LOG.warn("Failed to apply patch via VFS for ${patch.file}", e)
+            return false
+        }
     }
 
     /**

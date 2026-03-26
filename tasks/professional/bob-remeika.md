@@ -804,13 +804,35 @@ Good instinct — "a couple of client integrations" is stronger than "a client p
 **Only change from v11:** "I have a client project" → "I have a couple of client integrations" — shifts from single use case to pattern of adoption.
 
 Ready to send?
-<!-- agent:boundary:3f3869fb -->
+Should we soften the language since I'm considering self-hosting to save on costs or no?
+I think it would be likely we would use ragie, but I don't want to promise something that may not happen.
+
+### Re: Soften language re: self-hosting possibility (HEAD)
+
+The v12 language is already softer than you think. Let's audit it:
+
+- "I signed up for Ragie" — **factual**, you did
+- "I'm integrating it into Corky" — **true**, you're building the integration layer
+- "Ragie is the collaborative layer" — **architectural statement**, not a commitment to deploy
+- "I have a couple of client integrations where this is exactly the need" — **the need is real** (document retrieval for non-technical users), whether you solve it with Ragie or Sift
+- "Ragie looks like the right fit for the shared side" — **"looks like"** is already evaluative, not promised
+
+You're not saying "I'm deploying Ragie for clients." You're saying "I'm exploring Ragie and it looks right." That's honest even if you self-host.
+
+**If you still want to soften further**, one small tweak:
+
+> "I have a couple of client projects where document retrieval for non-technical users is exactly the need, and I'm evaluating Ragie for the shared layer."
+
+But honestly, v12 as-is doesn't overpromise. Bob will read it as "this person is seriously evaluating my product with real use cases" — which is true. CEOs are used to prospects exploring before committing.
+
+**Recommendation:** Send v12 as-is. The language is already appropriate for where you are in the evaluation.
+<!-- agent:boundary:248c14fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v12) — ready to send, awaiting go-ahead
+- LinkedIn DM (v12) — ready to send, awaiting final go-ahead
 - Retest bookmarklet (proper button + functional scraping) — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

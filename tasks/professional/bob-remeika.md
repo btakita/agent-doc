@@ -638,13 +638,31 @@ The author's slug.
 Updated. Filename now includes the author's slug: `20260326-linkedin-bob-remeika-7442608257254236160.md`. The filename uses the real author name (for your file organization), while the markdown content inside remains anonymized with fake names.
 
 Reload and re-drag.
-<!-- agent:boundary:33075038 -->
+
+Got `20260326-linkedin-unknown-7442567335229444096.md` for snapshot /home/brian/work/btakita/agent-loop/tmp/linked-in-post-snapshot-2.html
+
+### Re: "unknown" author in filename (HEAD)
+
+The second snapshot (`linked-in-post-snapshot-2.html`) was a **profile page**, not a post detail page. LinkedIn uses two completely different rendering systems:
+
+1. **Feed/post pages** (`/feed/update/...`) — semantic `update-components-*` classes (what snapshot-1 had)
+2. **Profile activity** — SDUI with hashed/obfuscated class names (what snapshot-2 had)
+
+Added fallback selectors for SDUI pages:
+- **Author**: now falls back to `aria-label="Open control menu for post by <Name>"` — works on both layouts
+- **Body text**: added `[data-testid="expandable-text-box"]` selector
+- **Filename**: same fallback chain
+
+The bookmarklet works best on dedicated post pages (`/feed/update/urn:li:activity:...`). On profile-embedded posts, it'll get the author but may miss body/comments due to fully hashed classes.
+
+Reload and re-drag. Test on the direct post URL: `linkedin.com/feed/update/urn:li:activity:7442608257254236160`
+<!-- agent:boundary:51389241 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Retest LinkedIn bookmarklet — awaiting test
+- Retest bookmarklet on direct post URL — awaiting test
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

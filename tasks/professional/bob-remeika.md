@@ -677,7 +677,7 @@ Reload the install page — the blue "LinkedIn to MD" button should display prop
 We just installed chromium-bridge. See tasks/software/brave.md
 Use chromium-bridge to get the post and comments in https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
 
-### chromium-bridge LinkedIn Post Capture (HEAD)
+### chromium-bridge LinkedIn Post Capture
 
 Here's the LinkedIn post and comments from Bob Remeika (activity:7442608257254236160):
 
@@ -707,7 +707,7 @@ Here's the LinkedIn post and comments from Bob Remeika (activity:744260825725423
 ---
 
 Successfully used `chromium-bridge markdown` to fetch the post. The raw HTML-to-markdown conversion has some noise from LinkedIn's UI elements, but the core content is captured above.
-<!-- agent:boundary:fd8e160e -->
+<!-- agent:boundary:e9b4d07f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

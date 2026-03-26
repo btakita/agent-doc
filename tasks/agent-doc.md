@@ -1235,7 +1235,42 @@ Good framing. Here's how each handles the "post results" side:
 ...gives you the best of both worlds without taking a dependency on either tool's runtime. You use the Rust CLI to run, and either viewer to inspect results.
 
 The `inspect_evals` repo you linked is their community eval library (HumanEval, MMLU, etc.) — the eval definitions are Python, but the log format is a JSON schema that any tool can produce.
-<!-- agent:boundary:be84d2fa -->
+
+I want a simple tool that reports to the cli. We can add html, svg, and other assets later.
+
+### Re: simple CLI-first eval tool (HEAD)
+
+Agreed — start simple. CLI output with pass/fail, reasoning, and summary stats. No HTML/dashboards/viewers. Just:
+
+```
+$ eval-runner run evals/agent-doc/diff-interpretation/cases.yaml
+
+Running 18 cases...
+  [PASS] simple-question — responded with component syntax ✓
+  [PASS] incomplete-fragment — detected incomplete edit ✓
+  [FAIL] truncated-sentence — responded instead of flagging incomplete
+         Expected: flags as partial edit, waits for next cycle
+         Got: attempted to answer "I think we should also consider..."
+  [PASS] comment-content-ignored — no response (comment stripped) ✓
+  ...
+
+Results: 16/18 passed (88.9%)
+  2 failures in: truncated-sentence, boundary-only-change
+  Total tokens: 45,230 | Cost: $0.14 | Duration: 42s
+```
+
+**MVP scope:**
+1. Parse `cases.yaml`
+2. For each case: build prompt from diff + context → send to Claude API → get response
+3. LLM-grade: send (response, expected_behavior) to Claude as judge → pass/fail + reasoning
+4. Print results to stdout with ANSI colors
+5. Exit code 0 (all pass) or 1 (any fail)
+6. JSON output via `--json` flag for CI integration
+
+That's the whole tool. ~300 LOC of Rust. HTML/SVG/dashboards come later as separate concerns.
+
+Ready to scaffold when you give the go.
+<!-- agent:boundary:22fbdf09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1244,7 +1279,7 @@ The `inspect_evals` repo you linked is their community eval library (HumanEval, 
 - [x] All sync/plugin fixes — released v0.26.3
 - [x] Code-driven listener registration — plugin v0.2.26
 - [ ] Install plugin v0.2.26 and verify hot-reload works
-- [ ] Design eval-runner crate: Rust CLI → Promptfoo JSON + Inspect AI JSON output
+- [ ] Scaffold eval-runner crate: CLI-first, YAML cases → Claude API → pass/fail report
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

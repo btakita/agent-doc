@@ -349,7 +349,34 @@ $100/month is reasonable for what Ragie provides (managed infra, document parsin
 **Practical answer:** This doesn't affect the DM to Bob. Whether you end up using Ragie or Sift for Judith's project, the DM already says "client project" without committing to Ragie as the solution. You can figure out the right backend later — the DM's purpose is to open the conversation.
 
 If anything, this is a great topic for the call with Bob: "Here's my client use case — what would you recommend for a small CRE team? Is there a pricing tier that fits?" That's a natural way to deepen the relationship while getting practical value.
-<!-- agent:boundary:5565b59d -->
+
+I'm also considering Ragie for Manufacturing China.
+I'm thinking of self-hosting or cloud-hosting sift as well. Which would save money and avoid SASS restrictions.
+I'm also considering having a single Ragie account for multiple clients. But I imagine that I cannot partition the different clients.
+### Re: Multi-Client Strategy — Ragie, Sift, and Partitioning (HEAD)
+
+Three solid considerations. Here's the landscape:
+
+**1. Ragie for Manufacturing China:**
+Strong fit — manufacturing documentation (SOPs, compliance specs, supplier agreements) is dense, multi-format content that Ragie's document parsing handles well. Key question: does the China context introduce **data residency** requirements? If manufacturing data needs to stay in-region or on-prem, self-hosted Sift may be mandatory regardless of preference. Worth asking Bob about Ragie's deployment options.
+
+**2. Self-hosting or cloud-hosting Sift:**
+This is your cost-effective middle ground. Sift gives you hybrid search (BM25 + vector) without SaaS recurring costs or vendor restrictions. Cloud-hosting it on a small VPS gives clients the accessibility of a hosted service without the $100/mo/client Ragie cost. Trade-off: you own the ops, but for your skill level that's minimal overhead. This also avoids any SaaS restrictions clients might have (procurement policies, data handling agreements, etc.).
+
+**3. Single Ragie account, multiple clients:**
+Ragie likely supports multi-tenancy through metadata filtering — tag documents with a client identifier and filter queries by that tag. This is the standard pattern in RAG-as-a-Service. However, **true data isolation** (separate indexes, access controls, deletion guarantees) is different from metadata filtering. For clients with sensitive data, they may need stronger partitioning than query-time filtering provides. This is worth asking Bob directly — it's another great conversation topic for the call.
+
+**Emerging architecture:**
+
+| Client/Context | Backend | Why |
+|---|---|---|
+| Your personal workflow | Sift (local) | Zero cost, full control, offline |
+| Judith CRE project | Sift (cloud-hosted) or Ragie | Depends on budget + data sensitivity |
+| Manufacturing China | Sift (self-hosted/cloud) | Likely data residency concerns |
+| Collaborative/demo | Ragie | Showcase Ragie integration to Bob |
+
+**Impact on the DM:** None — v10 is still accurate. These are all great talking points for the call with Bob. In fact, the multi-client question is the kind of thing that shows you're thinking about Ragie at a deployment level, not just kicking tires.
+<!-- agent:boundary:8fa56302 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -360,7 +387,9 @@ If anything, this is a great topic for the call with Bob: "Here's my client use 
 - [x] Update Bob's contact with personal email
 - [ ] Send LinkedIn DM to Bob (v10 ready)
 - [ ] Complete Ragie sign-up with RAG use case
-- [ ] Evaluate Ragie vs Sift for Judith's CRE project (pricing, data sensitivity, ops)
+- [ ] Ask Bob about Ragie multi-tenancy / data partitioning options
+- [ ] Evaluate Ragie vs Sift per-client (pricing, data residency, ops)
+- [ ] Design client-tagged architecture for multi-tenant Sift deployment
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
 - [ ] Follow up with Bob after integration demo is ready (~2 days)
 <!-- /agent:pending -->

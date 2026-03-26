@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-DevTools MCP Server docs provided. Ready for setup or further questions.
+LinkedIn automation via DevTools MCP documented. Ready to set up.
 <!-- /agent:status -->
 
 ## Exchange
@@ -76,11 +76,56 @@ Or JSON config:
 Browser launches on first tool invocation, not on connection. Brave is at `/usr/bin/brave` on this system.
 
 Repo: https://github.com/ChromeDevTools/chrome-devtools-mcp
-<!-- agent:boundary:ebcacf80 -->
+
+Can I drive interactions with linkedin.com using the chrome mcp server?
+
+### Re: Driving LinkedIn via Chrome MCP (HEAD)
+
+Yes. The DevTools MCP server can drive any page you can open in the browser, including LinkedIn.
+
+**What works:**
+- `navigate_page` → open any LinkedIn URL
+- `click` → expand comments, click buttons, open menus
+- `fill` / `type_text` → search, compose messages
+- `evaluate_script` → run arbitrary JS (same approach as the bookmarklet scraper)
+- `take_screenshot` / `take_snapshot` → see page state or get full DOM
+- `wait_for` → wait for elements to load before interacting
+- `list_network_requests` → observe LinkedIn API calls
+
+**For LinkedIn post scraping:** Navigate to post, `evaluate_script` with the bookmarklet JS, get markdown back. No manual clicking needed.
+
+**Auth setup — connect to your running Brave:**
+
+LinkedIn requires login. Best approach: attach to your already-authenticated Brave session.
+
+1. Start Brave with remote debugging:
+   ```bash
+   brave --remote-debugging-port=9222
+   ```
+2. Configure MCP to attach:
+   ```json
+   {
+     "mcpServers": {
+       "chrome-devtools": {
+         "command": "npx",
+         "args": [
+           "chrome-devtools-mcp@latest",
+           "--browserUrl=http://127.0.0.1:9222"
+         ]
+       }
+     }
+   }
+   ```
+
+This gives the agent your existing LinkedIn session (cookies, auth, everything).
+
+**Caution:** LinkedIn is mild about reading/browsing automation but aggressive about bulk actions (mass messaging, connection scraping). Keep interactions human-paced.
+<!-- agent:boundary:e16970e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Install chrome-devtools-mcp for Claude Code — if approved
+- Set up Brave remote debugging launch shortcut — if wanted
 <!-- /agent:pending -->

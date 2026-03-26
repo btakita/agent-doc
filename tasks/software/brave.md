@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Evaluating cdpkit stability and library strategy for chromium-bridge.
+chromium-bridge refactored to use cdpkit. All commands working.
 <!-- /agent:status -->
 
 ## Exchange
@@ -467,18 +467,35 @@ Our current raw WebSocket code is ~50 lines. Swapping to cdpkit gives us typed c
 The risk is low because our CLI surface is small — we only use `Page.navigate`, `Runtime.evaluate`, and `Page.captureScreenshot`. Even if cdpkit's API changes, adapting 5 call sites is trivial.
 
 Don't over-invest in abstractions before we have real usage patterns.
-<!-- agent:boundary:9c732429 -->
+Option 1. Let's keep the `chromium-bridge` name.
+### Re: Option 1 — cdpkit refactor done (HEAD)
+
+Refactored `chromium-bridge` to use cdpkit. Keeping the name.
+
+**What changed:**
+- Replaced hand-rolled `ws_command()` / `CdpCommand` / `tokio-tungstenite` with cdpkit's typed API
+- `Page.navigate` → `cdpkit::page::methods::Navigate::new(url).send(&cdp, Some(&session))`
+- `Runtime.evaluate` → `cdpkit::runtime::methods::Evaluate::new(expr).with_return_by_value(true).send()`
+- `Page.captureScreenshot` → `cdpkit::page::methods::CaptureScreenshot::new().send()`
+- Screenshot and markdown commands now use `LoadEventFired::subscribe()` event streaming instead of fixed `sleep(2000)` delays
+- Removed `tokio-tungstenite` and `futures-util` deps, added `cdpkit` and `futures`
+
+**All commands tested against live Brave:**
+- `check` — OK
+- `evaluate "document.title"` — returns page title
+- `navigate "https://example.com"` — navigates tab
+- `screenshot --output /tmp/test.png` — captures 55KB PNG
+
+Pushed to `btakita/chromium-bridge` main.
+<!-- agent:boundary:d22167b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Decide: keep `chromium-bridge` name or rename (current recommendation: keep)
-- Refactor chromium-bridge to use cdpkit as CDP client (option 1 — direct dependency)
-- Publish to crates.io
+- Publish chromium-bridge to crates.io
 - Add `cargo install` and release build to agent-loop bin/
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
-- Add page load waiting via cdpkit event streaming (replaces sleep delays)
 <!-- /agent:pending -->

@@ -985,10 +985,16 @@ See the large blue gutter.
 
 **To fix ragie.md:** You'll need to manually delete the 2 duplicate response blocks (keep the first one at line 500, delete the copies at 535 and 566). Or I can do it if you'd like.
 
+Please do.
+
 **Prevention:** The IPC timeout was caused by me using `--force-disk` during plugin reinstall. Now that the plugin is stable and IPC is working, this shouldn't recur. The `--force-disk` flag should only be used as a last resort when the plugin is genuinely unavailable.
 
 Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
-<!-- agent:boundary:5cc34f09 -->
+
+### Re: ragie.md cleanup (HEAD)
+
+Done. Removed the 2 duplicate response blocks from `tasks/ragie.md` (kept the first at line 500, deleted copies at 535 and 566). Committed.
+<!-- agent:boundary:45d57fd5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -997,7 +1003,7 @@ Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
 - [x] Make sync skip `ensure_session()` for unclaimed files — done
 - [x] Alt+Enter/Alt+Space separation — verified working
 - [x] Mixed-layout fix — verified working
-- [ ] Clean up ragie.md duplicate responses (3 copies → 1)
+- [x] Clean up ragie.md duplicate responses — done
 - [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
 - [ ] Commit plugin changes in agent-doc submodule
 <!-- /agent:pending -->

@@ -868,7 +868,7 @@ Two potential issues:
 Rebuilt `0.2.24` with the `LowPriorityAction` fix. Same zip path — reinstall and test.
 Actually clicking the action link does not work. Why?
 
-### Re: clicking action link also broken (HEAD)
+### Re: clicking action link also broken
 
 The IntentionAction registrations are corrupting the entire intention resolution chain for `.md` files — not just keyboard shortcuts but click handling too. This is the same class of issue as the ActionPromoter: registering custom extension points that touch the intention system breaks it for Markdown.
 
@@ -884,7 +884,7 @@ No ActionPromoter, no IntentionAction — the plugin stays out of the intention 
 Rebuilt `0.2.24`. Reinstall and verify:
 1. Alt+Enter shows typo fixes and clicking/Alt+Shift+Enter works
 2. Alt+Space shows the Agent Doc popup
-<!-- agent:boundary:fee733a2 -->
+<!-- agent:boundary:45ad2b6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

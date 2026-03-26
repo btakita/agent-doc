@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge refactored to use cdpkit. All commands working.
+chromium-bridge v0.1.0 built, installed (.bin/ + ~/.cargo/bin/), verified.
 <!-- /agent:status -->
 
 ## Exchange
@@ -487,14 +487,39 @@ Refactored `chromium-bridge` to use cdpkit. Keeping the name.
 - `screenshot --output /tmp/test.png` — captures 55KB PNG
 
 Pushed to `btakita/chromium-bridge` main.
-<!-- agent:boundary:9ec06ea5 -->
+
+Let's build and install chromium-bridge.
+### Re: Build and install (HEAD)
+
+Done.
+
+**Release build:** 5.8MB stripped binary (47s build time with LTO).
+
+**Installed to:**
+1. `.bin/chromium-bridge` → symlink to `src/chromium-bridge/target/release/chromium-bridge` (follows agent-loop .bin/ pattern)
+2. `~/.cargo/bin/chromium-bridge` → `cargo install` (available system-wide, used by tmux sessions)
+
+**Verified:**
+```
+$ chromium-bridge check
+OK — Chrome/146.0.7680.164 (protocol 1.3)
+
+$ chromium-bridge list
+[0] (23) Linda Takita — https://pulsesms.app/thread/...
+[1] (3) Messaging | LinkedIn — https://www.linkedin.com/messaging/...
+[2] Myocarditis - Brave Search — https://search.brave.com/search?...
+[3] Example Domain — https://example.com/
+...
+```
+
+Both the symlink and cargo-installed binary are working.
+<!-- agent:boundary:e8fe29b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Publish chromium-bridge to crates.io
-- Add `cargo install` and release build to agent-loop bin/
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)

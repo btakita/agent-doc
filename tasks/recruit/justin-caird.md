@@ -677,11 +677,30 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/?origin
 > Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. Relevant to ECI's multi-product environment: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
 >
 > The video walkthrough and blog post are linked in the post. Looking forward to next steps!
-<!-- agent:boundary:4203a02b -->
+
+Also, note the usage of deterministic software + SKILL context complimenting each other and being deployed as a Rust crate.
+### Re: Deterministic software + SKILL context pattern (HEAD)
+
+Good call highlighting this. The architecture pattern is itself a selling point:
+
+- **Deterministic Rust crate** handles structured, repeatable operations (file scanning, comment parsing, validation)
+- **SKILL context** (Claude Code skill) handles judgment — interpreting specs, generating contracts, evaluating quality
+- **Deployed as a crate** — installable, versionable, distributable via crates.io
+
+This is the exact pattern ECI needs at scale. With 160 products, you can't rely on prompts alone — you need deterministic tooling that enforces consistency while AI handles the nuanced judgment. The crate is the guardrail; the skill is the intelligence.
+
+**Updated follow-up draft (final):**
+
+> Hi Justin, great speaking with you Tuesday — really enjoyed learning about the AI cohort structure and the mission-based approach.
+>
+> Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. The architecture pairs deterministic Rust tooling with AI skill context — the crate enforces structure, the agent handles judgment. Relevant to scaling across a multi-product environment like ECI's: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
+>
+> Video walkthrough and blog post linked in the post. Looking forward to next steps!
+<!-- agent:boundary:2555fdb7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin with module-harness post
+- [ ] Send LinkedIn follow-up to Justin (draft finalized above)
 - [ ] Watch for Justin's email with markdown challenge file and job description
 - [ ] Prepare vibe coding pre-work once markdown file arrives
 - [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)

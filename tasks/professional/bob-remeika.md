@@ -171,7 +171,7 @@ Save the full context for a call or in-person — it'll land with the right weig
 
 Once I can read Bob's reply, I'll adjust the DM to reference it naturally.
 I want to see if Bob would be into the interactive document concept. This is something that I can collaborate with via open source and/or may result into a hire. Bob has positively reacted to a few of my posts including my YouTube videos.
-### Re: Collaboration Angle (v6) (HEAD)
+### Re: Collaboration Angle (v6)
 
 Good framing. Bob's engagement with your posts and videos suggests genuine interest in what you're building — not just polite networking. That's a strong signal.
 
@@ -193,7 +193,7 @@ Good framing. Bob's engagement with your posts and videos suggests genuine inter
 This leaves room for the conversation to go in any direction — customer, collaborator, or hire — without tipping your hand too early. Let him see the work first.
 
 Still need Bob's reply text to finalize. Paste it in when you can.
-<!-- agent:boundary:3bad08b4 -->
+<!-- agent:boundary:f1a17784 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

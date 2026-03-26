@@ -1020,7 +1020,23 @@ Add tests
 
 Committed in submodule: `5e4e839 docs: update SPEC.md for sync Unmanaged behavior`
 Updated parent pointer: `9f4d105`
-<!-- agent:boundary:e38efb16 -->
+Run any relevant evals for agent-doc and tmux-router.
+
+### Re: evals (HEAD)
+
+**Agent-doc evals:** Found `evals/agent-doc/diff-interpretation/cases.yaml` — 18 golden-answer test cases covering diff interpretation patterns (incomplete edits, comment stripping, truncation detection, multi-topic, corrections, etc.). These are case definitions only — no eval runner exists yet. The cases are relevant to our changes (sync behavior) but are focused on the SKILL.md's diff interpretation, not the Rust binary's sync logic.
+
+**tmux-router evals:** None exist.
+
+**What we can run:** The 38 integration tests in the agent-doc binary (`make check`) all pass. These cover CLI behavior including route, sync, start, claim, skill install, and frontmatter handling.
+
+To run the diff-interpretation evals, we'd need to build an eval runner that:
+1. Feeds each case's diff + document context to the SKILL.md prompt
+2. Sends to Claude
+3. LLM-grades the response against `expected_behavior`
+
+This is a separate project. The existing binary tests + manual verification cover our sync changes adequately.
+<!-- agent:boundary:208c3799 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1033,6 +1049,7 @@ Updated parent pointer: `9f4d105`
 - [x] Clean up unused files — done
 - [x] Commit plugin changes in agent-doc submodule — done
 - [x] Audit docs + SPEC.md update — done
+- [x] Evals review — cases exist but no runner; binary tests pass
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

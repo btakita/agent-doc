@@ -999,14 +999,14 @@ Go:
 
 Done. Removed the 2 duplicate response blocks from `tasks/ragie.md` (kept the first at line 500, deleted copies at 535 and 566). Committed.
 
-### Re: cleanup + commit (HEAD)
+### Re: cleanup + commit
 
 Done:
 1. Deleted `AgentDocActionPromoter.kt` (unused — ActionPromoter removed)
 2. `AgentDocIntentions.kt` was never committed (untracked) — already deleted
 3. Committed in submodule: `c043cb0 fix: plugin v0.2.25 — mixed-layout sync, Alt+Space popup, remove ActionPromoter`
 4. Updated parent submodule pointer: `7d46d7e`
-<!-- agent:boundary:82e20279 -->
+<!-- agent:boundary:884cf4b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

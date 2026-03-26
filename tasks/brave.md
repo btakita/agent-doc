@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Session started. Awaiting input in the exchange.
+DevTools MCP Server docs provided. Ready for setup or further questions.
 <!-- /agent:status -->
 
 ## Exchange
@@ -15,14 +15,72 @@ Session started. Awaiting input in the exchange.
 <!-- agent:exchange patch=append -->
 How do I use the MCP Server for devtools?
 https://developer.chrome.com/blog/new-in-devtools-146/#mcp-server
-### Agent (HEAD)
+### Agent
 
 Session initialized for `tasks/brave.md`. What would you like to work on?
-<!-- agent:boundary:10fa18d9 -->
+
+### Re: Chrome DevTools MCP Server (HEAD)
+
+The **Chrome DevTools MCP Server** (`chrome-devtools-mcp`) lets AI agents control a browser via MCP. It exposes 29+ tools for input, navigation, performance, debugging, network, and emulation.
+
+**Setup for Claude Code:**
+```bash
+claude mcp add chrome-devtools --scope user npx chrome-devtools-mcp@latest
+```
+
+Or JSON config:
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  }
+}
+```
+
+**For Brave specifically** — use `--executablePath`:
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--executablePath=/usr/bin/brave"
+      ]
+    }
+  }
+}
+```
+
+**Tool categories (29+):**
+| Category | Tools |
+|---|---|
+| Input (9) | click, drag, fill, fill_form, handle_dialog, hover, press_key, type_text, upload_file |
+| Navigation (6) | navigate_page, new_page, select_page, close_page, list_pages, wait_for |
+| Performance (4) | start/stop traces, analyze insights, memory snapshots |
+| Debugging (6) | take_screenshot, take_snapshot, evaluate_script, console messages, lighthouse_audit |
+| Network (2) | list/get network requests |
+| Emulation (2) | emulate device, resize page |
+
+**Key flags:**
+- `--browserUrl http://127.0.0.1:9222` — connect to running browser
+- `--headless` — no UI
+- `--isolated` — temp user-data dir (auto-cleaned)
+- `--slim` — 3 core tools only (saves tokens)
+- `--channel canary` — use Chrome Canary
+- `--experimentalScreencast` — screen recording (requires ffmpeg)
+
+Browser launches on first tool invocation, not on connection. Brave is at `/usr/bin/brave` on this system.
+
+Repo: https://github.com/ChromeDevTools/chrome-devtools-mcp
+<!-- agent:boundary:1c047964 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-*(no items yet)*
+- Install chrome-devtools-mcp for Claude Code — if approved
 <!-- /agent:pending -->

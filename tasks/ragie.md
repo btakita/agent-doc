@@ -593,7 +593,7 @@ A SKILL.md that teaches Claude Code to use Sift during agent-doc sessions:
 The sift-skill would be especially useful for agent-doc projects that aren't Corky — e.g., code repos, documentation projects, research notes. Any directory of text files becomes searchable.
 
 Want me to scaffold the sift-skill package?
-<!-- agent:boundary:12a7a679 -->
+<!-- agent:boundary:a99104cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

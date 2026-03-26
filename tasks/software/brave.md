@@ -468,7 +468,7 @@ The risk is low because our CLI surface is small — we only use `Page.navigate`
 
 Don't over-invest in abstractions before we have real usage patterns.
 Option 1. Let's keep the `chromium-bridge` name.
-### Re: Option 1 — cdpkit refactor done (HEAD)
+### Re: Option 1 — cdpkit refactor done
 
 Refactored `chromium-bridge` to use cdpkit. Keeping the name.
 
@@ -487,7 +487,7 @@ Refactored `chromium-bridge` to use cdpkit. Keeping the name.
 - `screenshot --output /tmp/test.png` — captures 55KB PNG
 
 Pushed to `btakita/chromium-bridge` main.
-<!-- agent:boundary:d22167b1 -->
+<!-- agent:boundary:9ec06ea5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

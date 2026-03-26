@@ -19,7 +19,7 @@ See tasks/professional/bob-remekia.md
 
 How can we use Ragie with Corky? What would Ragie add to my document analysis?
 
-### Ragie + Corky Integration Analysis (HEAD)
+### Ragie + Corky Integration Analysis
 
 **Ragie fills Corky's biggest gap: semantic search and retrieval.**
 
@@ -42,7 +42,7 @@ Ragie is a managed RAG-as-a-Service pipeline (founded by Bob Remeika) that handl
 - Reranking and context compression for LLM windows
 
 **Integration path:** Ragie has Python SDK + REST API. Potential `corky index` command to push conversations to Ragie, `corky search` to query retrieval. Manifest metadata (labels, contacts, dates) → Ragie document metadata for filtered retrieval.
-<!-- agent:boundary:422a56d1 -->
+<!-- agent:boundary:ef65e099 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

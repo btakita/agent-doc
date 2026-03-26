@@ -855,13 +855,37 @@ Hey Bob — your repost really made my day. Knowing you've been following along 
 I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
 
 I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
-<!-- agent:boundary:94117e7b -->
+
+> I'd love to show you how I'm using Ragie
+
+Perhaps this can be in a YouTube video when I work with Judith?
+
+### Re: YouTube demo with Judith's project (HEAD)
+
+Great idea. A live coding session showing Ragie integration in a real client workflow is the strongest possible follow-up to this DM. Benefits:
+
+1. **Bob sees it naturally** — he's already watching your content
+2. **Social proof** — it's not a contrived demo, it's a real client use case
+3. **Content you'd make anyway** — you're already livestreaming your work
+4. **Follow-up message writes itself** — "Hey Bob, just published a session where I integrate Ragie for a client project. Thought you'd be interested."
+
+**For the DM itself**, you don't need to change the wording. "I'd love to show you how I'm using Ragie" works whether the "showing" happens via DM, call, or video. Keep it ambiguous — then when the video is ready, you have a natural second touchpoint.
+
+**Sequence:**
+1. Send v13 DM now
+2. Build Ragie integration in Corky
+3. Record YouTube session with Judith's project using Ragie
+4. Send follow-up to Bob with the video link
+
+v13 is ready to send as-is. The YouTube plan strengthens the follow-up, not the initial message.
+<!-- agent:boundary:05b97918 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v13) — ready to send, awaiting final go-ahead
-- Retest bookmarklet (proper button + functional scraping) — awaiting test
+- LinkedIn DM (v13) — ready to send now
+- YouTube: Ragie integration session with Judith's project — planned follow-up
+- Retest bookmarklet — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

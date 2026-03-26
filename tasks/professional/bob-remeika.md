@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Comment posted | Bob replied (watching open-build content) | DM v7 ready | RAG use case v2 ready
+Comment posted | Bob replied (following posts) | DM v8 ready | RAG use case v2 ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -214,7 +214,26 @@ This is a strong signal — "work in the open" means he's seen your YouTube / li
 - Everything else stays the same — the Sacks line, Ragie sign-up, collaboration seed
 
 Ready to send when you are.
-<!-- agent:boundary:f55a95d6 -->
+
+I don't think he is watching the videos. But seems to be enjoying my posts.
+![img_1.png](img_1.png)
+### Re: Corrected — Posts, Not Videos (v8) (HEAD)
+
+Fair point. "Work in the open" most likely refers to your LinkedIn posts (module-harness, AI tooling updates) rather than YouTube. The image shows his reactions on your posts — consistent engagement but not necessarily video-watching.
+
+**LinkedIn DM (v8 — corrected, posts not videos):**
+
+> Hey Bob — your comment on my module-harness post really made my day, and knowing you've been following along means a lot. We only overlapped briefly at Grockit — my last few weeks were your first — but I remember the caliber of people that place attracted, and you were clearly one of them. Thank you for being a reference for the Yammer offer back in the day. David Sacks told me I was "making a mistake" when I turned it down, and I don't want to repeat that mistake.
+>
+> I just signed up for Ragie. I'm building AI agent tooling in Rust — interactive document sessions where agents and humans collaborate through structured markdown, a correspondence kit, a domain ontology language. Document retrieval is exactly the bottleneck I'm hitting, and Ragie looks like the right fit. I'd love to show you what I'm building — I think there's real overlap between our approaches to document understanding.
+>
+> Great to reconnect. Feels like our paths are converging.
+
+**What changed from v7:**
+- Replaced "watching the build-in-the-open stuff" with "following along" — accurate to post engagement without overclaiming video viewership
+
+Ready to send when you are.
+<!-- agent:boundary:4e500456 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -222,6 +241,6 @@ Ready to send when you are.
 <!-- agent:pending patch=replace -->
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
-- [ ] Send LinkedIn DM to Bob (v7 ready)
+- [ ] Send LinkedIn DM to Bob (v8 ready)
 - [ ] Complete Ragie sign-up with RAG use case
 <!-- /agent:pending -->

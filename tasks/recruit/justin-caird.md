@@ -651,11 +651,37 @@ Sharing the LinkedIn post with the video + blog post is a natural value-add rath
 - The video demonstrates exactly what they're hiring for — agents writing code through markdown
 
 Replace `[link to LinkedIn post]` with your actual LinkedIn post URL before sending.
-<!-- agent:boundary:32a9f1ab -->
+Here is the post. I get into module-harness and existence-lang as well. Please assess the noteworthyness for the role.
+https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/?originTrackingId=NC47vVIFUVz1xLk5Us2qxg%3D%3D
+### Re: LinkedIn post assessment for ECI relevance (HEAD)
+
+**Highly relevant.** This post hits multiple signals Justin and the CTO are screening for:
+
+**Direct role alignment:**
+- **Module-level specs, contracts, and evals** — maps directly to their eval-driven culture ("if it passes eval, you ship"). ECI needs exactly this when agents touch 160 different ERP products
+- **Rust CLI tool built in a live session** — "true builder" proof, not just someone who prompts
+- **Ontology/existence-lang** — you discussed domain language extensively on the call and Justin engaged with it. This post shows it in action
+- **2h50m live coding video** — Justin said he'd never seen a candidate record dev sessions. This is concrete evidence of "AI obsessed"
+
+**What the CTO specifically will notice:**
+- module-harness solves the problem of agents ignoring project-level specs — ECI's 160-product environment will need granular agent guidance per module/product
+- The eval/contract/adversarial framing speaks their language (they're building adversarial agents, judge agents, eval-driven pipelines)
+- Full toolchain demo (agent-doc + corky + Claude Code + tmux-router) = production infrastructure, not a weekend hack
+
+**Verdict:** Include it. The post demonstrates exactly what they're hiring for — someone who builds agent infrastructure and thinks about production-grade agent governance.
+
+**Updated follow-up draft:**
+
+> Hi Justin, great speaking with you Tuesday — really enjoyed learning about the AI cohort structure and the mission-based approach.
+>
+> Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. Relevant to ECI's multi-product environment: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
+>
+> The video walkthrough and blog post are linked in the post. Looking forward to next steps!
+<!-- agent:boundary:6a692b9f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin with video + blog post link
+- [ ] Send LinkedIn follow-up to Justin with module-harness post
 - [ ] Watch for Justin's email with markdown challenge file and job description
 - [ ] Prepare vibe coding pre-work once markdown file arrives
 - [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)

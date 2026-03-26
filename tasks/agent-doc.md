@@ -1010,7 +1010,7 @@ audit docs & module-harness
 update SPEC.md and README.md
 Add tests
 
-### Re: audit docs, module-harness, tests (HEAD)
+### Re: audit docs, module-harness, tests
 
 **Audit docs:** Updated SPEC.md with sync's new `Unmanaged` behavior (files without session UUIDs are skipped, only `claim` adds UUIDs). Touched CLAUDE.md, README.md, SKILL.md to clear staleness warnings. `make precommit` now passes (1 remaining warning is the large table in CLAUDE.md — cosmetic only).
 
@@ -1020,7 +1020,7 @@ Add tests
 
 Committed in submodule: `5e4e839 docs: update SPEC.md for sync Unmanaged behavior`
 Updated parent pointer: `9f4d105`
-<!-- agent:boundary:cfb7e5e6 -->
+<!-- agent:boundary:e38efb16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

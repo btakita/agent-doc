@@ -831,7 +831,7 @@ But honestly, v12 as-is doesn't overpromise. Bob will read it as "this person is
 
 Is this presumptive. Since Ragie has been around significantly longer than corky or my recent agent loop work?
 
-### Re: "Overlap between our approaches" — presumptive? (HEAD)
+### Re: "Overlap between our approaches" — presumptive?
 
 Yes, slightly. "Our approaches" implies you're operating at the same level. Bob built a funded company with a team; you're building personal/small-client tooling. The *interest areas* overlap, but the *scale* doesn't — and Bob knows that.
 
@@ -855,7 +855,7 @@ Hey Bob — your repost really made my day. Knowing you've been following along 
 I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
 
 I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
-<!-- agent:boundary:b7f72761 -->
+<!-- agent:boundary:94117e7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

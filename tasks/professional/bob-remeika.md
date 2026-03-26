@@ -427,7 +427,24 @@ Good pick. Fly.io advantages for Sift hosting:
 3. **Later:** Ragie integration for the collaborative layer / Bob demo
 
 This keeps Ragie positioned as the premium collaborative option (which is the right message for Bob) while Fly.io handles the cost-sensitive deployments.
-<!-- agent:boundary:fa817b6a -->
+
+Please render the updated draft to bob-remeika.
+### Re: Rendered DM v10 — Ready to Send (HEAD)
+
+Here's the final LinkedIn DM draft for Bob Remeika, ready to copy-paste:
+
+---
+
+Hey Bob — your comment on my module-harness post really made my day, and knowing you've been following along means a lot.
+
+I just signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — I'm building it so teams and non-technical users can query shared document context without a developer setup. I have a client project where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+
+I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
+
+---
+
+No changes from v10 — this is the version you approved. Ready to send on LinkedIn.
+<!-- agent:boundary:cca817f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -494,7 +494,7 @@ Ragie status:
 Fresh Ragie account — 0 docs. Ready to push some conversations with `corky ragie push` when you want to test ingestion. The free tier gives you 1,000 docs to prototype with.
 
 Both backends are live. `corky search "query"` defaults to Sift (local). `corky search --backend ragie "query"` hits Ragie. `corky search --all "query"` queries both.
-<!-- agent:boundary:89bb9a35 -->
+<!-- agent:boundary:8c26b358 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

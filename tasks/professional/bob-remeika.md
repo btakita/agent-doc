@@ -610,13 +610,26 @@ The real issue was likely **silent failure** — selectors didn't match anything
 - Any errors
 
 **To debug:** Open DevTools Console → click bookmarklet → look for `[li2md]` lines. Paste the console output here if selectors are wrong and I'll fix them for the current LinkedIn DOM.
-<!-- agent:boundary:c932af8e -->
+
+See /home/brian/work/btakita/agent-loop/tmp/linked-in-post-snapshot.html
+
+![img_4.png](img_4.png)
+![img_3.png](img_3.png)
+
+### Re: bookmarklet bug fix (HEAD)
+
+Found it — **"Assignment to constant variable"** error visible in img_4.png. The name counter `NC` was declared as `const` (in a comma-separated `const` chain) but `NC++` tries to reassign it. Fixed: `NC` is now `let`.
+
+I checked the HTML snapshot — all our CSS selectors (`feed-shared-update-v2[data-urn]`, `update-components-actor__title`, `update-components-text`, etc.) are present and correct in LinkedIn's DOM. The selectors were fine all along; the bookmarklet was just crashing before it could use them.
+
+Reload the install page, re-drag the bookmarklet, and try again. Should work now.
+<!-- agent:boundary:eed68b13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Debug LinkedIn bookmarklet with console output — awaiting test results
+- Retest LinkedIn bookmarklet after const fix — should work now
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

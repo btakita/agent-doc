@@ -134,15 +134,17 @@ object LayoutDetector {
             val windows = managerEx.windows
             if (windows.size < 2) return null
 
-            // Collect selected .md files from each window, in window order.
+            // Collect selected files from each window, in window order.
             // Each window represents one leaf in the splitter tree.
-            val windowFiles = windows.mapNotNull { window ->
+            // Non-.md files map to null (preserving index alignment).
+            val windowFiles = windows.map { window ->
                 val file = window.selectedFile
                 if (file != null && file.name.endsWith(".md")) {
                     TerminalUtil.relativePath(project, file)
                 } else null
             }
-            if (windowFiles.size < 2) return null
+            // Need at least one .md file to do anything useful
+            if (windowFiles.filterNotNull().isEmpty()) return null
 
             // Walk the splitter tree to get the column structure as leaf indices.
             val splitters = managerEx.splitters
@@ -151,14 +153,18 @@ object LayoutDetector {
             val indexColumns = walkSplitterTree(root, leafCounter)
             if (indexColumns.isEmpty()) return null
 
-            // Map leaf indices to file paths
-            val columns = indexColumns.mapNotNull { indices ->
+            // Map leaf indices to file paths.
+            // Columns with only non-.md files become empty (filtered out below).
+            // This preserves the columnar structure so sync doesn't collapse the layout.
+            val columns = indexColumns.map { indices ->
                 val files = indices.mapNotNull { idx ->
                     if (idx < windowFiles.size) windowFiles[idx] else null
                 }
-                if (files.isNotEmpty()) LayoutColumn(files) else null
+                LayoutColumn(files)
             }
 
+            // Return layout if at least 2 columns exist (even if some are empty).
+            // Empty columns tell sync to leave that tmux pane position alone.
             return if (columns.size >= 2) EditorLayout(columns) else null
         } catch (_: Exception) {
             return null

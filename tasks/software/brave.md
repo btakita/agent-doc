@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 on crates.io. Planning install script + brew distribution.
+chromium-bridge v0.1.0 released: crates.io + GitHub Release + install.sh.
 <!-- /agent:status -->
 
 ## Exchange
@@ -551,15 +551,44 @@ Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains)
 3. Create brew tap (lower priority — `cargo install` already works)
 
 Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
-<!-- agent:boundary:b332afff -->
+yes
+### Re: GitHub Release + install script (HEAD)
+
+Done. Both created:
+
+**GitHub Release:** https://github.com/btakita/chromium-bridge/releases/tag/v0.1.0
+- Tagged `v0.1.0`
+- Attached `chromium-bridge-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` (2.4MB)
+
+**Install methods now available:**
+
+1. **cargo install:**
+   ```bash
+   cargo install chromium-bridge
+   ```
+
+2. **curl | sh:**
+   ```bash
+   curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh
+   ```
+
+3. **Manual binary:**
+   ```bash
+   curl -L https://github.com/btakita/chromium-bridge/releases/download/v0.1.0/chromium-bridge-v0.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+   sudo mv chromium-bridge /usr/local/bin/
+   ```
+
+The install script auto-detects OS/arch and falls back to suggesting `cargo install` if no prebuilt binary exists for the platform.
+
+**Brew tap** deferred — `cargo install` and the install script cover the immediate need. Can create `btakita/homebrew-tap` later when there's demand.
+<!-- agent:boundary:9c30150a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Create GitHub Release v0.1.0 with prebuilt linux-x86_64 binary
-- Write install.sh (curl | sh) for binary download
-- Create btakita/homebrew-tap for brew install
+- Add macOS builds to GitHub Release (cross-compile or CI)
+- Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)

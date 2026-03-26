@@ -714,13 +714,23 @@ This connects directly to the "hallucination spotting in AI-generated PRs" skill
 ---
 
 Ready to send when you are. Want me to push this to a LinkedIn draft via corky?
-<!-- agent:boundary:41d60cfe -->
+I don't think corky can send LinkedIn messages without a partner agreement with LinkedIn. Is that correct?
+If that is the case, then corky cannot support it until we get such an agreement.
+So messages will have to be manual unless we automate this via the browser.
+
+You're correct — corky cannot send LinkedIn messages. LinkedIn's messaging API requires a partner/developer agreement and OAuth app approval, which we don't have. There's no workaround via their public API.
+
+**Current options:**
+1. **Manual copy-paste** — I draft the message here, you paste it into LinkedIn (most reliable)
+2. **Browser automation** — fragile; LinkedIn actively blocks automation scripts and changes selectors frequently
+3. **Clipboard helper** — I copy the draft to your clipboard, you paste
+
+Manual is the practical path for now. When you're ready to send the follow-up to Justin, I'll format it cleanly for copy-paste.
+<!-- agent:boundary:29e20dc8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin re: eval tooling (draft above)
+- [ ] Send LinkedIn follow-up to Justin re: eval tooling (manual copy-paste — corky can't send LinkedIn messages)
 - [ ] Watch for Justin's email with Markdown challenge file and job description
-- [ ] Prepare vibe coding pre-work once Markdown file arrives
-- [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)
-- [ ] Post-interview debrief and next steps
+- [ ] Explore browser-based LinkedIn automation if volume warrants it
 <!-- /agent:pending -->

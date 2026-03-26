@@ -881,7 +881,7 @@ v13 is ready to send as-is. The YouTube plan strengthens the follow-up, not the 
 
 Send v13
 
-### Re: Send v13 (HEAD)
+### Re: Send v13
 
 The Chrome DevTools MCP server is timing out on CDP connections right now — can't automate the send. I navigated the browser to `https://www.linkedin.com/messaging/thread/new/` for you.
 
@@ -903,7 +903,7 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 4. Hit Send
 
 Let me know once sent and I'll update the doc status.
-<!-- agent:boundary:6fdb64cb -->
+<!-- agent:boundary:29d98040 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

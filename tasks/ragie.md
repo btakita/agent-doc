@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Both backends live. Sift (local) + Ragie (cloud) search working end-to-end.
+Ragie session complete. sift-harness project queued for scaffolding.
 <!-- /agent:status -->
 
 ## Exchange
@@ -617,15 +617,45 @@ Addressing all five questions:
 - **Bridge:** Crate-based distribution (`cargo install`) works today
 
 **Recommendation:** Create `sift-harness` as a minimal repo with just a SKILL.md for now. If you later need binary logic (auto-install, output parsing), add Cargo.toml. When the Claude Code marketplace launches, publish there. The repo serves as the source of truth for all distribution channels.
-<!-- agent:boundary:fe664b65 -->
+
+Create btakita/sift-harness github project. Add src/sift-harness as a git submodule.
+Add module-harness around implementation modules.
+Create an existence-lang ontology.
+Register as the sift-harness crate.
+
+### Re: sift-harness project setup (HEAD)
+
+Acknowledged — here's the execution plan:
+
+1. **Create `btakita/sift-harness` on GitHub** — new public repo
+2. **Add `src/sift-harness` as git submodule** in agent-loop
+3. **Scaffold with `/rust-package`** — Cargo.toml, CI, release workflows, Makefile
+4. **Add module-harness** — spec, contracts, evals around implementation modules
+5. **Create existence-lang ontology** — domain terms for search/retrieval
+6. **Register on crates.io** — `sift-harness` crate name
+
+This is a dedicated scaffolding session — should I start it now, or capture it as a separate task document (`tasks/sift-harness.md`)?
+
+The Ragie session has covered a lot of ground:
+- Ragie + Corky integration analysis
+- Sift vs tantivy evaluation
+- Corky search subsystem (implemented, tested, deployed)
+- sift-harness design decisions
+
+Starting the sift-harness project might be cleaner in its own document.
+<!-- agent:boundary:3918d940 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **All phases implemented and tested** — Corky search subsystem complete
-- [ ] Create `sift-harness` repo with SKILL.md (start minimal, graduate to crate later)
+- [x] **Corky search subsystem** — implemented, tested, deployed (Sift + Ragie)
+- [ ] Create `btakita/sift-harness` GitHub repo
+- [ ] Add `src/sift-harness` submodule to agent-loop
+- [ ] Scaffold with rust-package skill (Cargo.toml, CI, Makefile)
+- [ ] Add module-harness (spec, contracts, evals)
+- [ ] Create existence-lang ontology for search/retrieval domain
+- [ ] Register `sift-harness` on crates.io
 - [ ] Test `corky ragie push` to upload sample conversations
 - [ ] Plan Judith Krug project integration using Ragie
-- [ ] Explore Ragie as shared collaboration layer with Lucas Huang
 <!-- /agent:pending -->

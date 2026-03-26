@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Narrowing CLI name to Chromium-scoped. `chromium-bridge` recommended.
+chromium-bridge v0.1.0 implemented and tested. All 7 commands working against live Brave.
 <!-- /agent:status -->
 
 ## Exchange
@@ -344,14 +344,51 @@ Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't p
 **Updated pick: `chromium-bridge`**
 
 It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreach (no Firefox/Safari implication), and still pairs well with `.claude/skills/browser/` (the skill stays browser-generic for potential future WebDriver/Playwright additions, while the CLI is specifically CDP/Chromium).
-<!-- agent:boundary:cf257c11 -->
+
+Create btakita/chromium-bridge gh project.
+Add src/chromium-bridge as a git submodule to agent-loop.
+Add README.md, SPEC.md, and implement.
+### Re: Create chromium-bridge (HEAD)
+
+Done. Here's what was created:
+
+**GitHub repo:** https://github.com/btakita/chromium-bridge
+**Submodule:** `src/chromium-bridge` added to agent-loop
+
+**Implemented commands (all tested against live Brave):**
+
+| Command | Status |
+|---------|--------|
+| `chromium-bridge check` | OK — Chrome/146.0.7680.164 (protocol 1.3) |
+| `chromium-bridge list` | Lists all open tabs with titles and URLs |
+| `chromium-bridge navigate <url>` | Navigates first tab to URL |
+| `chromium-bridge evaluate <js>` | Runs JS in tab, returns result |
+| `chromium-bridge screenshot [url]` | Captures PNG (base64 stdout or `--output file`) |
+| `chromium-bridge markdown <url>` | Converts page to markdown via injected DOM walker |
+| `chromium-bridge setup` | Detects browsers, shows debugging config status |
+
+**Global flags:** `--host`, `--port`, `--timeout`, `--json` (machine-readable output)
+**Env vars:** `CHROMIUM_BRIDGE_HOST`, `CHROMIUM_BRIDGE_PORT`
+
+**Files:**
+- `README.md` — usage docs
+- `SPEC.md` — architecture and command specs
+- `CLAUDE.md` — agent instructions
+- `Cargo.toml` — deps: clap, tokio, reqwest, tokio-tungstenite, serde, base64, anyhow
+- `Makefile` — `make check` (clippy + test), `make build` (release)
+- `src/main.rs` — full implementation (~350 lines)
+
+All pushed to `btakita/chromium-bridge` main branch. Submodule pointer ready to commit in agent-loop.
+<!-- agent:boundary:3b53ba4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Choose name for Rust CLI crate (`chromium-bridge` recommended)
-- Scaffold Rust crate (once name is decided)
+- Publish to crates.io
+- Add `cargo install` and release build to agent-loop bin/
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
+- Add `--tab` selection by URL pattern (not just index)
+- Add page load waiting (beyond fixed sleep delays)
 <!-- /agent:pending -->

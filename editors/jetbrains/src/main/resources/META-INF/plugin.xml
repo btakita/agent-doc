@@ -24,8 +24,6 @@
     <projectListeners>
         <listener class="com.github.btakita.agentdoc.PluginLifecycleListener"
                   topic="com.intellij.openapi.project.ProjectManagerListener"/>
-        <listener class="com.github.btakita.agentdoc.EditorTabSyncListener"
-                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
     </projectListeners>
 
     <actions>

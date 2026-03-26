@@ -782,7 +782,7 @@ This means:
 Shall I implement this?
 yes
 
-### Re: implement sync fix (HEAD)
+### Re: implement sync fix
 
 Done. Changed `sync.rs` line 397 — the `None` arm now returns `FileResolution::Unmanaged` instead of calling `ensure_session()`. 
 
@@ -791,7 +791,7 @@ Done. Changed `sync.rs` line 397 — the `None` arm now returns `FileResolution:
 - Committed in submodule: `7dffd2f fix: sync no longer auto-inits frontmatter on unclaimed files`
 
 New markdown files will no longer get frontmatter injected by sync. Only `agent-doc claim` adds session UUIDs.
-<!-- agent:boundary:785ad620 -->
+<!-- agent:boundary:3afb5c3e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -911,6 +911,13 @@ This works. Increment the plugin version.
 
 Just had an external update while I was typing the line above.
 Please diagnose. Can we fix this issue?
+> - [ ] Test mixed-layout fix — `.env` + agent doc split shouldn't stash tmux panes
+
+Unsuccessful
+
+> - [ ] Verify Alt+Enter/Alt+Space both work after reinstall
+
+Successful
 
 ### Re: Alt+Space works + external update issue
 
@@ -928,17 +935,49 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.25.z
 - No reload disruption while typing
 
 The external update should not recur now that IPC is working.
-<!-- agent:boundary:b06b116f -->
+
+### Re: mixed-layout still failing (HEAD)
+
+Found the bug in my fix. The logic was:
+
+```kotlin
+// WRONG: enters this branch because editorLayout has 2 columns (one empty)
+if (editorLayout != null && editorLayout.columns.size > 1) {
+    // filters empty columns → single --col → same stash behavior
+}
+// NEVER REACHED: editorLayout is non-null
+else if (hasSplitEditor && visibleMdFiles.size < allSelected.size) {
+    // focus-only path
+}
+```
+
+**Fixed:** Now filters empty columns FIRST, then checks if we have enough md columns for a full 2D sync:
+
+```kotlin
+val mdColumns = editorLayout?.columns?.filter { it.files.isNotEmpty() }
+if (mdColumns != null && mdColumns.size > 1) {
+    // Full 2D sync — all columns have .md files
+} else if (editorLayout has more columns than mdColumns) {
+    // Mixed split — use focus-only, no layout reorganization
+}
+```
+
+When `.env` is left + agent doc is right:
+- `editorLayout.columns` = 2 (one empty, one with md)
+- `mdColumns` = 1 (only the md column)
+- Enters mixed-split branch → `agent-doc focus <file>` → no stashing
+
+Rebuilt v0.2.25 (same zip path). Reinstall and retest.
+<!-- agent:boundary:f1ff54a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done
-- [x] Alt+Enter/Alt+Space separation verified — works
-- [ ] Test mixed-layout fix — `.env` + agent doc split shouldn't stash tmux panes
-- [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
-- [ ] Install plugin v0.2.25 and verify no external update warnings
+- [x] Alt+Enter/Alt+Space separation — verified working
+- [ ] Retest mixed-layout fix v2 — `.env` + agent doc split
+- [ ] Clean up unused files after all fixes confirmed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

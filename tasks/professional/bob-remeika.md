@@ -353,7 +353,7 @@ If anything, this is a great topic for the call with Bob: "Here's my client use 
 I'm also considering Ragie for Manufacturing China.
 I'm thinking of self-hosting or cloud-hosting sift as well. Which would save money and avoid SASS restrictions.
 I'm also considering having a single Ragie account for multiple clients. But I imagine that I cannot partition the different clients.
-### Re: Multi-Client Strategy — Ragie, Sift, and Partitioning (HEAD)
+### Re: Multi-Client Strategy — Ragie, Sift, and Partitioning
 
 Three solid considerations. Here's the landscape:
 
@@ -376,7 +376,7 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 | Collaborative/demo | Ragie | Showcase Ragie integration to Bob |
 
 **Impact on the DM:** None — v10 is still accurate. These are all great talking points for the call with Bob. In fact, the multi-client question is the kind of thing that shows you're thinking about Ragie at a deployment level, not just kicking tires.
-<!-- agent:boundary:8fa56302 -->
+<!-- agent:boundary:4fb30243 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

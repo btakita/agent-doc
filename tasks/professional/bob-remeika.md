@@ -502,7 +502,7 @@ What can we build right now with the **LinkedIn API limitations**? Don't assess 
 
 Can we have a bookmarklet to extract a post with the comments into a md or txt file?
 
-### Re: LinkedIn API capabilities & bookmarklet (HEAD)
+### Re: LinkedIn API capabilities & bookmarklet
 
 **LinkedIn API — What's Actually Possible**
 
@@ -523,7 +523,7 @@ With personal OAuth credentials (3-legged OAuth via a LinkedIn app you own):
 **Key limitation for the Bob use case:** If Bob comments on *your* post, you can pull that via API. But comments on *his* posts — no API access since you're not the author.
 
 **Bookmarklet — Yes, buildable now.** A bookmarklet can scrape the rendered LinkedIn post page DOM for author, content, date, and all loaded comments, then format as markdown and copy to clipboard. Caveats: only captures loaded comments (need to expand "load more" first), and DOM selectors may break when LinkedIn updates their frontend. Low-effort to build, high-utility for your paste-into-document workflow. Say the word and I'll build it.
-<!-- agent:boundary:229426c2 -->
+<!-- agent:boundary:e1944c6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

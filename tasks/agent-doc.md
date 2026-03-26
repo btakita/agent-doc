@@ -1066,6 +1066,15 @@ Currently, module-harness is the place that has the criteria, which implies Opti
 Option 1 implies that agent-doc would be compatible with various ways to run evals. Please research the market for skills, packages, and techniques to run evals that seem compatible with agent-doc.
 
 Option 3 seems like a concrete use case that we can benefit from right now. But we need some research into how evals are done across the market that would be compatible from a cli.
+I started with tasks/agent-doc.md on the left tmux pane.
+I opened tasks/personal/ron-berkes.md on the left editor side.
+A new tmux pane was created that climed the document.
+I moved tasks/personal/ron-berkes.md to the right editor side.
+Another left tmux pane opened that was not tasks/agent-doc.md, even though tasks/agent-doc.md was selected.
+
+Please review the logs...because I tried to reproduce the issue by moving tasks/personal/ron-berkes.md to the left editor then to the right editor...and the tmux pane layout did work as expected.
+
+So the logs for the issue would have occurred before this latest move. Look for when I first opened tasks/personal/ron-berkes.md today.
 
 ### Re: eval ecosystem research
 
@@ -1101,15 +1110,31 @@ Module-harness already holds the eval criteria. If we add a thin eval runner to 
 ...it becomes reusable across all projects, not just agent-doc. The eval definitions stay in module-harness; the runner is a generic `module-harness eval run` command.
 
 **Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
-<!-- agent:boundary:e14478f0 -->
+
+### Re: ron-berkes.md layout issue + log analysis (HEAD)
+
+**No layout-sync logs from today.** Zero entries in `idea.log` matching `layout-sync` or `selectionChanged` on 2026-03-26.
+
+**Root cause:** IDEA started at 02:20 AM with plugin **v0.2.24** (visible in PluginManager startup log). You later installed v0.2.25 via hot-reload (`require-restart="false"`). However, `EditorTabSyncListener` is registered as a `<projectListener>` in plugin.xml — these listeners are bound at project open, not at plugin reload. **Hot-reloading the plugin doesn't re-register the listener**, so the v0.2.25 listener code never activated.
+
+This explains:
+- No layout-sync logs (old listener was deregistered, new one wasn't registered)
+- The claim behavior you saw (likely from the `LayoutChangeDetector` which runs on a different lifecycle — polling timer)
+- The issue being non-reproducible after the fix "took effect" (maybe a partial reload kicked in)
+
+**Fix:** Full restart of IDEA after installing v0.2.25. The `projectListener` registration only happens at project open.
+
+**Longer-term fix:** Consider changing `EditorTabSyncListener` from a `projectListener` to use `ApplicationManager.getApplication().messageBus` subscription in `PluginLifecycleListener.projectOpened()`. This would survive hot-reloads since it's code-driven, not XML-driven.
+<!-- agent:boundary:95796033 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] All sync/plugin fixes — done and released (v0.26.3)
-- [ ] Decide eval approach: module-harness runner vs agent-doc runner vs promptfoo
-- [ ] Implement chosen eval runner
+- [x] All sync/plugin fixes — released v0.26.3
+- [ ] Full IDEA restart needed to verify v0.2.25 listener registration
+- [ ] Consider code-driven listener registration for hot-reload compatibility
+- [ ] Decide eval approach: module-harness runner vs agent-doc runner
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -751,7 +751,7 @@ release
 When I create a new markdown file, the JB Plugin runs sync. The markdown file may not be an agent document.
 So we don't necessarily want to add any frontmatter unless there is an explicit claim.
 
-### Re: sync should not auto-init frontmatter (HEAD)
+### Re: sync should not auto-init frontmatter
 
 Agreed. The current behavior in `sync.rs:397-414` auto-initializes frontmatter on any visible markdown file via `frontmatter::ensure_session()`. This is wrong — sync should treat unclaimed files as unmanaged.
 
@@ -780,7 +780,7 @@ This means:
 - Multi-column placeholder panes won't appear for non-agent files (which is the right behavior)
 
 Shall I implement this?
-<!-- agent:boundary:7f0c2fb1 -->
+<!-- agent:boundary:904dc973 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

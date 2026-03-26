@@ -663,13 +663,23 @@ The button text is incorrect in file:///home/brian/work/btakita/agent-loop/src/c
 ### Re: button text fix
 
 Fixed — Option 1 description now says "save as a markdown file" instead of "copy markdown to your clipboard". Reload the page.
-<!-- agent:boundary:19f1e303 -->
+
+![2026-03-26_13-41.png](../../../../../Pictures/agent-loop/2026-03-26_13-41.png)
+
+### Re: bookmarklet rendering as raw code (HEAD)
+
+Fixed. The `href` attribute contained unescaped `<` and `>` characters (from arrow functions like `=>`). HTML was parsing `>` as closing the attribute, causing the remaining JavaScript to render as visible text instead of staying in the href.
+
+All `<` and `>` in the href are now HTML-encoded as `&lt;` and `&gt;`. Browsers decode these back to `<` and `>` before executing the `javascript:` URI, so the bookmarklet works correctly.
+
+Reload the install page — the blue "LinkedIn to MD" button should display properly now. Re-drag to bookmark bar.
+<!-- agent:boundary:1df1077e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Retest bookmarklet on direct post URL — awaiting test
+- Retest bookmarklet (proper button + functional scraping) — awaiting test
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

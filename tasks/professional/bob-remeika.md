@@ -311,7 +311,7 @@ The DM says "I'd love to show you what I'm building" — that's a promise. Two o
 The v10 draft is ready as-is. No changes needed for the timing concern.
 Should I mention Commercial Real Estate in particular wrt the project
 Bob may actually be watching some of my videos. The average watch time is not reflective. Since I know that brooke-brodack watched my video in length but I cannot tell from the average watch time.
-### Re: CRE Mention & Video Engagement (v10 refinements) (HEAD)
+### Re: CRE Mention & Video Engagement (v10 refinements)
 
 **On mentioning Commercial Real Estate:** I'd keep it vague — "client project" is better than naming the vertical. Reasons:
 
@@ -324,7 +324,7 @@ Bob may actually be watching some of my videos. The average watch time is not re
 **On Bob watching videos:** Fair point about watch time analytics being unreliable. His comment "enjoying watching you work in the open" could include videos. But the DM doesn't need to distinguish — "following along" covers both posts and videos without overclaiming either way. v10 is already neutral on this.
 
 **v10 stands as-is.** No changes needed for either point. Ready to send.
-<!-- agent:boundary:ed3e25cb -->
+<!-- agent:boundary:9330b6dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

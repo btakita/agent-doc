@@ -7,17 +7,22 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Session initialized. Awaiting input.
+Session started. Awaiting input in the exchange.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+How do I use the MCP Server for devtools?
+https://developer.chrome.com/blog/new-in-devtools-146/#mcp-server
+### Agent (HEAD)
 
-<!-- agent:boundary:7eb13030 -->
+Session initialized for `tasks/brave.md`. What would you like to work on?
+<!-- agent:boundary:10fa18d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+*(no items yet)*
 <!-- /agent:pending -->

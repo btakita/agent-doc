@@ -1316,26 +1316,42 @@ The score (0.0–1.0) is the key quantifiable measurement. The LLM judge prompt 
 
 implement
 
-### Re: implement eval-runner (HEAD)
+### Re: eval-runner implemented (HEAD)
 
-Scaffolding the eval-runner crate now. Will create `src/eval-runner/` with:
-- YAML case parsing
-- Claude API integration
-- LLM-as-judge scoring (0.0–1.0)
-- CLI output with ANSI colors + metrics
-- `--json` flag for CI
-- Regression tracking via `--baseline`
-<!-- agent:boundary:26d101a0 -->
+**eval-runner crate scaffolded at `src/eval-runner/`.** ~300 LOC of Rust.
+
+**Features:**
+- Parses your existing `cases.yaml` (21 cases parsed successfully)
+- Claude API integration for both response generation and LLM-as-judge
+- 0.0–1.0 scoring with configurable pass/fail threshold (`--threshold`)
+- ANSI-colored CLI output with per-case score/tokens/latency
+- Summary stats: pass rate, mean score, p50/p95 latency, total tokens
+- `--json` flag for CI/machine-readable output
+- `--baseline <file>` for regression detection
+- `--system-prompt <file>` for custom system prompts
+- `--model` and `--judge-model` flags (defaults to claude-sonnet-4-6)
+- Exit code 0 (all pass) or 1 (any fail) for `make check` integration
+
+**Usage:**
+```bash
+ANTHROPIC_API_KEY="$(pass ...)" eval-runner run evals/agent-doc/diff-interpretation/cases.yaml
+```
+
+**Status:** Builds clean (clippy + tests pass). YAML parsing verified with all 21 cases. Needs `ANTHROPIC_API_KEY` to run actual evals — the key isn't in `pass` currently. Once you set the key, the full eval pipeline is ready.
+
+**Fixed:** `cases.yaml` line 409 had a YAML quoting issue (`"Yes"` at start of list item). Wrapped in single quotes.
+<!-- agent:boundary:1268925b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Scaffold eval-runner crate in `src/eval-runner/`
-- [ ] Implement YAML case parser
-- [ ] Implement Claude API client for eval + judge
-- [ ] Implement CLI output with metrics
-- [ ] Test with agent-doc diff-interpretation cases
+- [x] Scaffold eval-runner crate — done (`src/eval-runner/`)
+- [x] Implement YAML case parser — 21 cases parse successfully
+- [x] Implement Claude API client for eval + judge — done
+- [x] Implement CLI output with metrics — done
+- [ ] Set up ANTHROPIC_API_KEY in `pass` and run full eval suite
+- [ ] Test with agent-doc diff-interpretation cases end-to-end
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

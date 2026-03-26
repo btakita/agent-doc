@@ -195,7 +195,7 @@ This leaves room for the conversation to go in any direction — customer, colla
 Still need Bob's reply text to finalize. Paste it in when you can.
 
 > It really was. I'm enjoying your watching you work in the open. Thanks for sharing!
-### Re: Bob's Reply & Final DM (v7) (HEAD)
+### Re: Bob's Reply & Final DM (v7)
 
 Bob's reply: *"It really was. I'm enjoying watching you work in the open. Thanks for sharing!"*
 
@@ -214,7 +214,7 @@ This is a strong signal — "work in the open" means he's seen your YouTube / li
 - Everything else stays the same — the Sacks line, Ragie sign-up, collaboration seed
 
 Ready to send when you are.
-<!-- agent:boundary:0bb90264 -->
+<!-- agent:boundary:f55a95d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

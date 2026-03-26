@@ -472,7 +472,7 @@ api_key_pass = "btak/RAGIE_API_KEY"
 Want me to add this config to your `.corky.toml` now and test `corky ragie status`?
 Yes
 
-### Config added and both backends tested (HEAD)
+### Config added and both backends tested
 
 Added `[search]` section to `.corky.toml`. Both backends working:
 
@@ -494,7 +494,7 @@ Ragie status:
 Fresh Ragie account — 0 docs. Ready to push some conversations with `corky ragie push` when you want to test ingestion. The free tier gives you 1,000 docs to prototype with.
 
 Both backends are live. `corky search "query"` defaults to Sift (local). `corky search --backend ragie "query"` hits Ragie. `corky search --all "query"` queries both.
-<!-- agent:boundary:036dd6fd -->
+<!-- agent:boundary:89bb9a35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

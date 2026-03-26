@@ -308,7 +308,7 @@ This warrants a dedicated implementation session in the `src/corky/` submodule. 
 Ready to start when you are — shall I create the implementation plan?
 go
 
-### Implementation Plan: Corky Search Subsystem (HEAD)
+### Implementation Plan: Corky Search Subsystem
 
 Explored Corky's codebase — clap v4 derive, anyhow errors, ureq for HTTP, toml_edit for config. Pattern is clear.
 
@@ -383,7 +383,7 @@ pub struct SearchResult {
 ```
 
 This is ready to implement. Want me to start with Phase 1 now?
-<!-- agent:boundary:93653bb5 -->
+<!-- agent:boundary:e5e198dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

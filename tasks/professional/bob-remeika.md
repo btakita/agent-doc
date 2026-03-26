@@ -554,13 +554,27 @@ Built and saved to `src/corky/assets/linkedin-post-bookmarklet.html`.
 - Blue notification badge shows progress
 
 Test it on Bob's post: https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
-<!-- agent:boundary:6a27a70d -->
+
+Don't use Bob's actual name. All names should be anonymous.
+
+### Re: anonymize names (HEAD)
+
+Updated the bookmarklet. All names are now replaced with "Person A", "Person B", etc.:
+
+- Post author → anonymized
+- Comment authors → anonymized
+- Name mentions within post/comment text → also replaced
+- Headline/job title → stripped (could identify someone)
+- Consistent mapping: same person always gets the same label across the entire output
+
+Reload the install page to get the updated bookmarklet: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
+<!-- agent:boundary:ac6c5b88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Test LinkedIn bookmarklet on Bob's post — verify output format
-- LinkedIn DM (v10) to Bob — ready to send, awaiting user go-ahead
-- Sift deployment recommendation documented — awaiting Bob's response
+- Test LinkedIn bookmarklet with anonymization — verify output
+- LinkedIn DM (v10) — ready to send, awaiting go-ahead
+- Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

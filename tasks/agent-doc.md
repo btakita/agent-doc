@@ -977,7 +977,7 @@ Works
 See the large blue gutter.
 ![img_10.png](img_10.png)
 
-### Re: uncommitted patch on ragie.md (HEAD)
+### Re: uncommitted patch on ragie.md
 
 **Root cause:** IPC timeout during the `--force-disk` fallback phase caused the response to be written to disk twice. The orphan recovery then added a third copy.
 
@@ -988,7 +988,7 @@ See the large blue gutter.
 **Prevention:** The IPC timeout was caused by me using `--force-disk` during plugin reinstall. Now that the plugin is stable and IPC is working, this shouldn't recur. The `--force-disk` flag should only be used as a last resort when the plugin is genuinely unavailable.
 
 Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
-<!-- agent:boundary:ab0d37eb -->
+<!-- agent:boundary:5cc34f09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

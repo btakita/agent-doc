@@ -1132,7 +1132,7 @@ This explains:
 
 Implement **Longer-term fix:**.
 
-### Re: listener hot-reload fix + eval coupling question (HEAD)
+### Re: listener hot-reload fix + eval coupling question
 
 **Hot-reload fix implemented (plugin v0.2.26):**
 
@@ -1168,7 +1168,7 @@ No tool-specific knowledge needed. The case YAML contains everything: the prompt
 **Promptfoo** does exactly this same pattern but with its own YAML format, assertion engine, and Node.js runtime. You'd get it for free but take on the Node.js dependency. Your existing `cases.yaml` is ~90% compatible with promptfoo's format already.
 
 **My recommendation:** Start with module-harness since it's yours, the format is already defined, and the runner is ~200 lines of Rust. If you later want promptfoo's dashboards or assertion library, the case format is portable.
-<!-- agent:boundary:04b78d74 -->
+<!-- agent:boundary:73b89c0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

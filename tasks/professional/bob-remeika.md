@@ -673,7 +673,7 @@ Fixed. The `href` attribute contained unescaped `<` and `>` characters (from arr
 All `<` and `>` in the href are now HTML-encoded as `&lt;` and `&gt;`. Browsers decode these back to `<` and `>` before executing the `javascript:` URI, so the bookmarklet works correctly.
 
 Reload the install page — the blue "LinkedIn to MD" button should display properly now. Re-drag to bookmark bar.
-<!-- agent:boundary:bec9ad9e -->
+<!-- agent:boundary:006f5265 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

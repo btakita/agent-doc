@@ -249,7 +249,7 @@ The pattern: **SKILL.md first → shell helpers → CLI crate** (only if complex
 Want me to scaffold the SKILL.md now?
 I want a place to add operations. I can see sift & ragie integration as being useful.
 Also, converting web pages and/or summaries
-### Re: Operations registry + sift/ragie integration (HEAD)
+### Re: Operations registry + sift/ragie integration
 
 Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry you can grow:
 
@@ -266,7 +266,7 @@ Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry 
 The skill is intentionally thin right now — just the operations catalog and integration hooks. Add new operations as you use them. The pattern is: do it manually once via MCP tools, then codify the recipe in SKILL.md.
 
 File: `.claude/skills/browser/SKILL.md`
-<!-- agent:boundary:73e2d20c -->
+<!-- agent:boundary:f6071ecf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

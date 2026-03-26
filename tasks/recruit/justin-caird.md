@@ -730,7 +730,7 @@ You're correct — corky cannot send LinkedIn messages. LinkedIn's messaging API
 
 Manual is the practical path for now. When you're ready to send the follow-up to Justin, I'll format it cleanly for copy-paste.
 
-### Re: Add LinkedIn video link + eval mention to draft (HEAD)
+### Re: Add LinkedIn video link + eval mention to draft
 
 The latest LinkedIn YouTube video post is: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
 
@@ -752,7 +752,7 @@ Changes from previous revision:
 - Link appears mid-message as a value-add, not as the opener
 
 Ready for manual copy-paste when you want to send it.
-<!-- agent:boundary:6557a669 -->
+<!-- agent:boundary:f5a5af93 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

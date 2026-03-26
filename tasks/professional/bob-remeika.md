@@ -727,7 +727,7 @@ Up to you — both are solid choices.
 Option A. Thank you for reviewing.
 
 Sounds good — leaving the LinkedIn exchange as-is. It closed on a great note.
-<!-- agent:boundary:501e1d3c -->
+<!-- agent:boundary:d3a91bb3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

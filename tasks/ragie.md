@@ -420,7 +420,7 @@ corky ragie status
 Ready for Phase 2 testing — install Sift and try `corky sift index` on your conversations.
 go
 
-### Testing Progress (HEAD)
+### Testing Progress
 
 **Sift installed and verified:**
 - `sift 0.2.0` installed to `~/.cargo/bin/`
@@ -453,7 +453,7 @@ type = "ragie"
 api_key_pass = "ragie/api_key"
 ```
 And store your API key: `pass insert ragie/api_key`
-<!-- agent:boundary:1b927517 -->
+<!-- agent:boundary:0087a771 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

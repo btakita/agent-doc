@@ -308,7 +308,7 @@ This warrants a dedicated implementation session in the `src/corky/` submodule. 
 Ready to start when you are — shall I create the implementation plan?
 go
 
-### Implementation Plan: Corky Search Subsystem (HEAD)
+### Implementation Plan: Corky Search Subsystem
 
 Explored Corky's codebase — clap v4 derive, anyhow errors, ureq for HTTP, toml_edit for config. Pattern is clear.
 
@@ -389,7 +389,7 @@ go
 
 Starting Phase 1 now — SearchBackend trait, config schema, result types. Working in `src/corky/`.
 
-### Phase 1 Complete (HEAD)
+### Phase 1 Complete
 
 All code implemented and passing `make check` (clippy + tests):
 
@@ -418,7 +418,7 @@ corky ragie status
 ```
 
 Ready for Phase 2 testing — install Sift and try `corky sift index` on your conversations.
-<!-- agent:boundary:118263af -->
+<!-- agent:boundary:44cb560b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

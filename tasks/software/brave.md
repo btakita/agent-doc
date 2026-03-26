@@ -222,13 +222,13 @@ Should we have a rust library to distribute this skill? Are there deterministic 
 **Browser operations are simpler.** The CDP HTTP API at `127.0.0.1:9222` is already CLI-accessible:
 
 ```bash
-# List open tabs (HEAD)
+# List open tabs
 curl -s http://127.0.0.1:9222/json/list
 
-# Check health (HEAD)
+# Check health
 curl -s http://127.0.0.1:9222/json/version
 
-# Get debug WebSocket URL (HEAD)
+# Get debug WebSocket URL
 curl -s http://127.0.0.1:9222/json/version | jq -r .webSocketDebuggerUrl
 ```
 
@@ -247,7 +247,7 @@ But these are all thin wrappers around `curl` + file writes. The ROI on a Rust c
 The pattern: **SKILL.md first → shell helpers → CLI crate** (only if complexity warrants it).
 
 Want me to scaffold the SKILL.md now?
-<!-- agent:boundary:614f14a2 -->
+<!-- agent:boundary:42de2503 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -660,10 +660,10 @@ Reload and re-drag. Test on the direct post URL: `linkedin.com/feed/update/urn:l
 
 The button text is incorrect in file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
 
-### Re: button text fix (HEAD)
+### Re: button text fix
 
 Fixed — Option 1 description now says "save as a markdown file" instead of "copy markdown to your clipboard". Reload the page.
-<!-- agent:boundary:9c14d8c9 -->
+<!-- agent:boundary:19f1e303 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

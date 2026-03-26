@@ -746,17 +746,45 @@ This connects directly to the "hallucination spotting in AI-generated PRs" skill
 
 ---
 
+> This connects directly to the "hallucination spotting in AI-generated PRs" skill we discussed
+
+I'm not directly addressing this atm. Just adding module-harness and coming up with a general purpose eval workflow.
+I'm currently not creating PRs, but I will start.
+Should we rephrase or keep it as is?
+
 Changes from previous revision:
 - Added the LinkedIn post link back in (live coding session + blog walkthrough)
 - Kept the eval tooling mention concise (1-2 sentences as requested)
 - Link appears mid-message as a value-add, not as the opener
 
 Ready for manual copy-paste when you want to send it.
-<!-- agent:boundary:f5a5af93 -->
+
+### Re: Rephrase hallucination spotting claim (HEAD)
+
+Good call — let's keep it honest. You're building module-harness and general-purpose eval tooling, not PR hallucination spotting specifically. The revised draft drops that claim and describes your actual current work:
+
+**Revised follow-up draft:**
+
+---
+
+Hi Justin — quick update on something relevant to the eval/quality side of our conversation.
+
+I've been building end-to-end eval tooling via module-harness — specs, contracts, and evals at the module level so agents get granular, testable guidance. Here's a recent post with a live coding session and blog walkthrough showing it in action: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
+
+Building toward a general-purpose eval workflow that validates agent output against deterministic contracts — the kind of quality gate that scales across a multi-product environment. Happy to demo if useful for the cohort's workflow.
+
+---
+
+**What changed:**
+- Removed "hallucination spotting in AI-generated PRs" — not your current work
+- Replaced with "general-purpose eval workflow that validates agent output against deterministic contracts" — accurate to what you're building
+- Still connects to ECI's multi-product scaling needs
+- Keeps the demo offer as a soft CTA
+<!-- agent:boundary:812aaff8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin re: eval tooling + video link (manual copy-paste)
+- [ ] Send LinkedIn follow-up to Justin re: eval tooling + video link (manual copy-paste — draft revised)
 - [ ] Watch for Justin's email with Markdown challenge file and job description
 - [ ] Explore browser-based LinkedIn automation if volume warrants it
 <!-- /agent:pending -->

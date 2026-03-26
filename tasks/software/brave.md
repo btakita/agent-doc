@@ -290,7 +290,7 @@ What is a good name for the rust cli + skill tool?
 chrome-devtools-harness?
 chrome-devtools-agents?
 Any other names to use?
-### Re: Naming the Rust CLI + cross-browser compatibility (HEAD)
+### Re: Naming the Rust CLI + cross-browser compatibility
 
 **Yes, same configs drive Chrome, Chromium, and Brave.** They all speak CDP (Chrome DevTools Protocol). The only difference is the executable path:
 
@@ -324,7 +324,7 @@ Reasoning:
 `chrome-devtools-harness` and `chrome-devtools-agents` both have "chrome" in the name, which is misleading since it works with Brave too. And "agents" is overloaded in your ecosystem.
 
 What do you think?
-<!-- agent:boundary:8da1cd39 -->
+<!-- agent:boundary:9b67d225 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

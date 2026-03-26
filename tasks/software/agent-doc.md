@@ -1363,14 +1363,28 @@ Created `tasks/software/eval-runner.md` with all eval-runner context transferred
 - Future todo items (HTML/SVG output, Promptfoo/Inspect AI export, parallel execution)
 
 The eval-runner pending items were removed from this document's `&lt;!-- agent:pending --&gt;` since they now live in the dedicated task file.
-<!-- agent:boundary:97c371ff -->
+
+The JB plugin prompt diaolg does not work. Why?
+![2026-03-26_15-02.png](../../../../../Pictures/agent-loop/2026-03-26_15-02.png)
+### Re: JB plugin prompt dialog not working (HEAD)
+
+The plugin code is correct — `AgentDocPopupAction` is registered on `alt SPACE` in `plugin.xml`. The issue is **Linux window manager keybinding conflict**.
+
+On most Linux DEs (KDE, GNOME, Hyprland, i3), `Alt+Space` opens the window operations menu (minimize/maximize/close). The WM intercepts the keystroke before IntelliJ receives it.
+
+**Options:**
+1. Disable `Alt+Space` in your WM settings
+2. Rebind the plugin action in IntelliJ: Settings → Keymap → search "Agent Doc" → change shortcut
+3. Use the direct shortcuts that already work: `Ctrl+Shift+Alt+A/J/C/L`
+
+We could also change the default keybinding in the plugin to something more Linux-friendly (e.g., `Alt+Semicolon` or `Ctrl+Alt+Space`).
+<!-- agent:boundary:56b32d8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] FFI route guard — prevent cascade from layout events (status signals A+B+C implemented, plugin integration done in v0.2.26)
-- [ ] Route refactor single exit point — done and pushed
+- [ ] Change default plugin popup keybinding to Linux-friendly alternative
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)
 <!-- /agent:pending -->

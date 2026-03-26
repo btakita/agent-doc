@@ -401,7 +401,7 @@ Fly.io would be my preferred host for sift.
 **Recommendation:** Start with the **Cloudflare Tunnel** approach — zero cost, leverages your existing Cloudflare setup, and Sift is already running locally. If clients need guaranteed uptime independent of your machine, move to Fly.io or a VPS later.
 
 This also gives you a natural progression story for the Bob conversation: "I'm running Sift locally for development, but for production multi-user access, Ragie's managed infrastructure is the right call."
-### Re: Fly.io for Sift (HEAD)
+### Re: Fly.io for Sift
 
 Good pick. Fly.io advantages for Sift hosting:
 
@@ -427,7 +427,7 @@ Good pick. Fly.io advantages for Sift hosting:
 3. **Later:** Ragie integration for the collaborative layer / Bob demo
 
 This keeps Ragie positioned as the premium collaborative option (which is the right message for Bob) while Fly.io handles the cost-sensitive deployments.
-<!-- agent:boundary:aaac95ed -->
+<!-- agent:boundary:fa817b6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

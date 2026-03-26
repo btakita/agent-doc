@@ -1270,7 +1270,50 @@ Results: 16/18 passed (88.9%)
 That's the whole tool. ~300 LOC of Rust. HTML/SVG/dashboards come later as separate concerns.
 
 Ready to scaffold when you give the go.
-<!-- agent:boundary:26361cb2 -->
+What about the quantifiable measurements in the evals?
+
+### Re: quantifiable measurements (HEAD)
+
+Good question. The LLM-as-judge pass/fail is qualitative. For quantifiable metrics, the eval runner should also track:
+
+**Per-case metrics:**
+- **Latency** — time from prompt send to response complete (ms)
+- **Token count** — input tokens, output tokens, total
+- **Cost** — computed from token counts × model pricing
+- **Score** — LLM judge can return a 0.0–1.0 score (not just pass/fail)
+- **Response length** — character/word count of generated response
+
+**Aggregate metrics:**
+- **Pass rate** — % of cases passing (your primary quality signal)
+- **Mean score** — average judge score across cases
+- **P50/P95 latency** — response time distribution
+- **Total cost** — sum of per-case costs
+- **Token efficiency** — output tokens per case (are responses too verbose?)
+
+**Regression tracking (across runs):**
+- Store results as JSON with timestamps: `evals/results/<timestamp>.json`
+- Compare current run vs last run: "pass rate dropped from 94% to 88%"
+- Flag regressions in specific cases: "truncated-sentence was passing, now failing"
+- `--baseline <file>` flag to compare against a specific prior run
+
+**CLI output with metrics:**
+```
+$ eval-runner run cases.yaml --model claude-sonnet-4-6
+
+  [PASS] simple-question      score=0.95  tokens=342   latency=1.2s
+  [FAIL] truncated-sentence   score=0.30  tokens=891   latency=2.1s
+  ...
+
+Summary:
+  Pass rate: 16/18 (88.9%)
+  Mean score: 0.82
+  Latency: p50=1.4s p95=3.2s
+  Tokens: 12,430 total | Cost: $0.04
+  Regression: -1 vs baseline (truncated-sentence)
+```
+
+The score (0.0–1.0) is the key quantifiable measurement. The LLM judge prompt asks: "Rate how well the response matches the expected behavior on a scale of 0.0 to 1.0, then explain." This gives you a continuous metric for tracking improvement, not just binary pass/fail.
+<!-- agent:boundary:92496ef1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1279,7 +1322,7 @@ Ready to scaffold when you give the go.
 - [x] All sync/plugin fixes — released v0.26.3
 - [x] Code-driven listener registration — plugin v0.2.26
 - [ ] Install plugin v0.2.26 and verify hot-reload works
-- [ ] Scaffold eval-runner crate: CLI-first, YAML cases → Claude API → pass/fail report
+- [ ] Scaffold eval-runner crate with quantifiable metrics (score, latency, tokens, cost, regression)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -273,7 +273,7 @@ Also emphasize the collaborative rag.
 
 **Note:** Your first line "It would be awesome to get a job...but it's aggressive to ask. If you" was cut off mid-sentence. If you want to finish that thought, I can work it into the strategy. The current approach is: let the integration work speak for itself, and let Bob be the one to suggest deeper involvement.
 Mention that I want to
-### Re: Streamlined DM — Ragie Focus (v10) (HEAD)
+### Re: Streamlined DM — Ragie Focus (v10)
 
 Good calls on all three points:
 
@@ -297,7 +297,7 @@ Good calls on all three points:
 - Reframed collaborative angle: "teams and non-technical users can query shared document context" — positions Ragie as the team enablement layer
 - Added "I have a client project where this is exactly the need" — concrete signal without details
 - Shorter, punchier — the message is now purely about shared technical interests
-<!-- agent:boundary:e53573c9 -->
+<!-- agent:boundary:a2801efb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

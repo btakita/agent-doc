@@ -855,7 +855,7 @@ The "Replace with" hotkey Alt+Shift+Enter does not work. Instead the popup close
 Please diagnose.
 ![img_9.png](img_9.png)
 
-### Re: Alt+Shift+Enter not applying typo fix (HEAD)
+### Re: Alt+Shift+Enter not applying typo fix
 
 Two potential issues:
 
@@ -866,7 +866,7 @@ Two potential issues:
 **2. Diagnosis question:** Does Alt+Shift+Enter work for typo fixes in `.md` files when the Agent Doc plugin is **completely disabled**? (Settings → Plugins → uncheck Agent Doc → restart → test). If it doesn't work even without our plugin, it's a pre-existing IDEA/Markdown issue and we'd need a different approach entirely.
 
 Rebuilt `0.2.24` with the `LowPriorityAction` fix. Same zip path — reinstall and test.
-<!-- agent:boundary:ab7a9b1d -->
+<!-- agent:boundary:d14a159e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

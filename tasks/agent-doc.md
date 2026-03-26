@@ -1197,7 +1197,7 @@ To frame this, I want a cli tool that posts the eval results.
 PromptFoo has the format that seems to be a de facto standard.
 Inspect AI has many use cases of being used as a CLI tool for eval results. See https://github.com/UKGovernmentBEIS/inspect_evals
 
-### Re: eval results posting — Inspect AI vs Promptfoo (HEAD)
+### Re: eval results posting — Inspect AI vs Promptfoo
 
 Good framing. Here's how each handles the "post results" side:
 
@@ -1235,7 +1235,7 @@ Good framing. Here's how each handles the "post results" side:
 ...gives you the best of both worlds without taking a dependency on either tool's runtime. You use the Rust CLI to run, and either viewer to inspect results.
 
 The `inspect_evals` repo you linked is their community eval library (HumanEval, MMLU, etc.) — the eval definitions are Python, but the log format is a JSON schema that any tool can produce.
-<!-- agent:boundary:081c51e0 -->
+<!-- agent:boundary:be84d2fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

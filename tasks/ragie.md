@@ -122,6 +122,9 @@ Your question was truncated ("Are they ") — but here's the comparison:
 
 **Sift is effectively the local equivalent of Ragie** — hybrid keyword + semantic search, no cloud dependency, runs on demand. For Corky, this could be the best of both worlds: local-first with full semantic capabilities.
 
+Sift makes sense.
+Would both tantivy add anything of value?
+
 ### Re: Ragie vs local comparison (corrected)
 
 You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full semantic). The correct local equivalents to Ragie are:
@@ -136,18 +139,26 @@ You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full 
 | **Best for** | Your personal workflow | Custom integration needs | Judith's team, Lucas collab |
 
 **Revised recommendation:** **Sift for local, Ragie for shared.** Sift gives you the semantic search locally that tantivy lacked. Ragie remains the right choice for collaborative contexts (Judith, Lucas) where non-developers need access.
-<!-- agent:boundary:91ac99e9 -->
+
+### Re: Would tantivy add value alongside Sift? (HEAD)
+
+Not really. Sift already includes BM25 (tantivy's core offering) as part of its hybrid pipeline. Adding tantivy separately would be redundant — two keyword search implementations.
+
+**One edge case:** If you wanted to **embed** search directly into Corky as a Rust library (no subprocess), tantivy is the only option since Sift is a CLI binary, not a crate. But for Corky's use case — searching correspondence files — wrapping Sift via `corky search` is simpler and gives you the full hybrid pipeline for free.
+
+**Verdict: Sift replaces tantivy entirely for your needs.** Drop tantivy from the plan.
+<!-- agent:boundary:e87ea9da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Evaluate Sift CLI for `corky search` (local hybrid search — replaces tantivy plan)
+- [ ] Evaluate Sift CLI for `corky search` (local hybrid search)
+- [ ] Test Sift on mail/conversations corpus — measure index size and query latency
 - [ ] Explore Ragie Python SDK / REST API — test document upload and retrieval
 - [ ] Prototype `corky ragie push` with sample conversation files
 - [ ] Design `corky ragie` command tree (push/search/sync/status)
 - [ ] Evaluate Ragie pricing/limits for correspondence corpus size
 - [ ] Plan Judith Krug project integration using Ragie as primary store
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang
-- [ ] Test Sift on mail/conversations corpus — measure index size and query latency
 <!-- /agent:pending -->

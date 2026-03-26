@@ -666,14 +666,14 @@ Fixed — Option 1 description now says "save as a markdown file" instead of "co
 
 ![2026-03-26_13-41.png](../../../../../Pictures/agent-loop/2026-03-26_13-41.png)
 
-### Re: bookmarklet rendering as raw code (HEAD)
+### Re: bookmarklet rendering as raw code
 
 Fixed. The `href` attribute contained unescaped `<` and `>` characters (from arrow functions like `=>`). HTML was parsing `>` as closing the attribute, causing the remaining JavaScript to render as visible text instead of staying in the href.
 
 All `<` and `>` in the href are now HTML-encoded as `&lt;` and `&gt;`. Browsers decode these back to `<` and `>` before executing the `javascript:` URI, so the bookmarklet works correctly.
 
 Reload the install page — the blue "LinkedIn to MD" button should display properly now. Re-drag to bookmark bar.
-<!-- agent:boundary:1df1077e -->
+<!-- agent:boundary:bec9ad9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

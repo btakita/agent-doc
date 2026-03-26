@@ -831,12 +831,12 @@ Both plugin zips built successfully. Install the new plugin and test Alt+Enter o
 Note: The `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` files still exist on disk but are no longer registered in `plugin.xml`. They can be deleted once we confirm intentions work.
 Clicking the link to the action does work btw.
 
-### Re: duplicate cleanup + action link works (HEAD)
+### Re: duplicate cleanup + action link works
 
 Cleaned up the duplicate response blocks (caused by IPC timeout + disk write fallback in the previous cycle). Good to know the action link shortcuts (Ctrl+Shift+Alt+A etc.) work.
 
 Now install the new plugin zip and test Alt+Enter — the intentions should appear in the native popup alongside typo fixes.
-<!-- agent:boundary:846e3d68 -->
+<!-- agent:boundary:3c856219 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

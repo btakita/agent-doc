@@ -1238,7 +1238,7 @@ The `inspect_evals` repo you linked is their community eval library (HumanEval, 
 
 I want a simple tool that reports to the cli. We can add html, svg, and other assets later.
 
-### Re: simple CLI-first eval tool (HEAD)
+### Re: simple CLI-first eval tool
 
 Agreed — start simple. CLI output with pass/fail, reasoning, and summary stats. No HTML/dashboards/viewers. Just:
 
@@ -1270,7 +1270,7 @@ Results: 16/18 passed (88.9%)
 That's the whole tool. ~300 LOC of Rust. HTML/SVG/dashboards come later as separate concerns.
 
 Ready to scaffold when you give the go.
-<!-- agent:boundary:22fbdf09 -->
+<!-- agent:boundary:26361cb2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

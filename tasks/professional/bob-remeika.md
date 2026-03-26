@@ -523,13 +523,26 @@ With personal OAuth credentials (3-legged OAuth via a LinkedIn app you own):
 **Key limitation for the Bob use case:** If Bob comments on *your* post, you can pull that via API. But comments on *his* posts — no API access since you're not the author.
 
 **Bookmarklet — Yes, buildable now.** A bookmarklet can scrape the rendered LinkedIn post page DOM for author, content, date, and all loaded comments, then format as markdown and copy to clipboard. Caveats: only captures loaded comments (need to expand "load more" first), and DOM selectors may break when LinkedIn updates their frontend. Low-effort to build, high-utility for your paste-into-document workflow. Say the word and I'll build it.
-<!-- agent:boundary:e1944c6b -->
+
+Can we have the bookmarklet also click "load more" on all of the comments to have full visibility?
+
+### Re: Bookmarklet auto-expand comments (HEAD)
+
+Yes — the bookmarklet can auto-expand before scraping:
+
+1. Recursively click all "Load more comments" / "Load previous replies" buttons
+2. Wait for DOM updates after each click (LinkedIn loads async, ~500ms per batch)
+3. Repeat until no expand buttons remain (stable for 1s)
+4. Scrape the fully-expanded comment tree → format as markdown → copy to clipboard
+
+Shows a small overlay notification during the process ("Expanding comments... 3 found" → "Done! Copied to clipboard"). Still bookmarklet-sized, no browser extension needed. Ready to build on your go.
+<!-- agent:boundary:e2e21932 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- LinkedIn post bookmarklet (with auto-expand) — ready to build if approved
 - LinkedIn DM (v10) to Bob — ready to send, awaiting user go-ahead
-- LinkedIn post bookmarklet — ready to build if approved
 - Sift deployment recommendation documented — awaiting Bob's response
 <!-- /agent:pending -->

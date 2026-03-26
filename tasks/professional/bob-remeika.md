@@ -330,7 +330,7 @@ Bob's personal email is bob.remeika@gmail.com. Please update contact.
 Added `bob.remeika@gmail.com` to `mail/contacts/bob-remeika/AGENTS.md` under Contact Info.
 Ragie's plan is $100/month. Judith may not want to spend that. We may want a self-hosted solution instead using Sift.
 But it also may make sense.
-### Re: Ragie Pricing vs Self-Hosted for Judith (HEAD)
+### Re: Ragie Pricing vs Self-Hosted for Judith
 
 $100/month is reasonable for what Ragie provides (managed infra, document parsing, multi-layer indexing), but you're right that it depends on Judith's budget and volume.
 
@@ -349,7 +349,7 @@ $100/month is reasonable for what Ragie provides (managed infra, document parsin
 **Practical answer:** This doesn't affect the DM to Bob. Whether you end up using Ragie or Sift for Judith's project, the DM already says "client project" without committing to Ragie as the solution. You can figure out the right backend later — the DM's purpose is to open the conversation.
 
 If anything, this is a great topic for the call with Bob: "Here's my client use case — what would you recommend for a small CRE team? Is there a pricing tier that fits?" That's a natural way to deepen the relationship while getting practical value.
-<!-- agent:boundary:caad5fe7 -->
+<!-- agent:boundary:5565b59d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

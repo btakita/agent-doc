@@ -306,7 +306,7 @@ This is a substantial feature — adding a search subsystem to Corky with plugga
 This warrants a dedicated implementation session in the `src/corky/` submodule. **Recommended next step:** Create a spec/plan document before coding — the design is mostly settled from this conversation, but we should nail down the `SearchResult` types, error handling, and incremental sync strategy.
 
 Ready to start when you are — shall I create the implementation plan?
-<!-- agent:boundary:b1e2202e -->
+<!-- agent:boundary:0f265c69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

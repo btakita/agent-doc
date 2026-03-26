@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 implemented and tested. All 7 commands working against live Brave.
+Evaluating cdpkit as CDP library dependency for chromium-bridge.
 <!-- /agent:status -->
 
 ## Exchange
@@ -379,16 +379,54 @@ Done. Here's what was created:
 - `src/main.rs` — full implementation (~350 lines)
 
 All pushed to `btakita/chromium-bridge` main branch. Submodule pointer ready to commit in agent-loop.
-<!-- agent:boundary:687a9327 -->
+
+Look at https://crates.io/crates/cdpkit
+Does this do what we need?
+### Re: cdpkit evaluation (HEAD)
+
+**cdpkit** (`0.2.2`) is a type-safe CDP client library for Rust. Here's the comparison:
+
+| | `cdpkit` | our `chromium-bridge` |
+|---|---|---|
+| **Type** | Library (API) | CLI (binary) |
+| **CDP coverage** | Full protocol — auto-generated typed bindings for all CDP domains | 5 commands (check, list, navigate, evaluate, screenshot, markdown) |
+| **Type safety** | Compile-time validated commands + events | Raw `serde_json::Value` |
+| **Events** | Stream-based subscription (`LoadEventFired::subscribe`) | None — fire-and-forget |
+| **Lines** | 40,609 (generated bindings) | ~350 |
+| **Maturity** | 84 downloads, 4 releases | Brand new |
+
+**Does it do what we need?** It does *more* than what we need at the library level. cdpkit is a low-level CDP client — the typed equivalent of our raw WebSocket `ws_command()` calls.
+
+**Recommendation: use cdpkit as a dependency inside chromium-bridge.**
+
+Replace our hand-rolled WebSocket CDP code (`ws_command`, `CdpCommand` struct) with cdpkit's typed API. This gives us:
+- Type-safe commands instead of `serde_json::json!({ "url": url })`
+- Event streaming for proper page load detection (no more `sleep(2000)`)
+- Full CDP domain coverage for future commands without manual WebSocket wiring
+
+The refactor would look like:
+```rust
+// Before (our code)
+ws_command(ws_url, "Page.navigate", serde_json::json!({ "url": url })).await?;
+
+// After (with cdpkit)
+page::methods::Navigate::new(url).send(&cdp, Some(&session)).await?;
+```
+
+**What stays ours:** The CLI layer (clap commands, `--json` output, `setup` wizard, `markdown` extraction JS). cdpkit handles the protocol plumbing; chromium-bridge is the user-facing tool.
+
+Want me to refactor chromium-bridge to use cdpkit?
+<!-- agent:boundary:976f2a3d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Refactor chromium-bridge to use cdpkit as CDP client (replaces raw WebSocket code)
 - Publish to crates.io
 - Add `cargo install` and release build to agent-loop bin/
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
-- Add page load waiting (beyond fixed sleep delays)
+- Add page load waiting via cdpkit event streaming (replaces sleep delays)
 <!-- /agent:pending -->

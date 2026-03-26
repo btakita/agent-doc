@@ -748,7 +748,7 @@ release
 ### Re: release
 
 **agent-doc v0.26.2 released** — crates.io + PyPI + GitHub Release. Binary installed. All targets verified.
-<!-- agent:boundary:72aec5e9 -->
+<!-- agent:boundary:d8c46bdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -217,7 +217,7 @@ Ready to send when you are.
 
 I don't think he is watching the videos. But seems to be enjoying my posts.
 ![img_1.png](img_1.png)
-### Re: Corrected — Posts, Not Videos (v8) (HEAD)
+### Re: Corrected — Posts, Not Videos (v8)
 
 Fair point. "Work in the open" most likely refers to your LinkedIn posts (module-harness, AI tooling updates) rather than YouTube. The image shows his reactions on your posts — consistent engagement but not necessarily video-watching.
 
@@ -233,7 +233,7 @@ Fair point. "Work in the open" most likely refers to your LinkedIn posts (module
 - Replaced "watching the build-in-the-open stuff" with "following along" — accurate to post engagement without overclaiming video viewership
 
 Ready to send when you are.
-<!-- agent:boundary:4e500456 -->
+<!-- agent:boundary:f4f551fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

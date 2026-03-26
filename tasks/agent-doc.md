@@ -884,15 +884,38 @@ No ActionPromoter, no IntentionAction — the plugin stays out of the intention 
 Rebuilt `0.2.24`. Reinstall and verify:
 1. Alt+Enter shows typo fixes and clicking/Alt+Shift+Enter works
 2. Alt+Space shows the Agent Doc popup
-<!-- agent:boundary:0810f948 -->
+
+When I selected .env on the left editor + switched to an agent doc on the right editor:
+The tmux session focused on the 1:stash tmux window.
+Please diagnose why.
+It should have kept the 2 pane layout with the previously selected agent doc on the left tmux pane and the currently selected agent doc on the right tmux pane.
+
+### Re: .env + agent doc → stash window bug (HEAD)
+
+**Root cause:** `LayoutDetector.detectEditorLayout()` filters out non-.md files with `mapNotNull`, so when `.env` is in the left pane:
+1. Only 1 `.md` file collected → `windowFiles.size < 2` → returns `null`
+2. `EditorTabSyncListener` falls to single-file sync path
+3. `agent-doc sync --col <single-file>` triggers full layout reorganization
+4. All other tmux panes get stashed → stash window becomes focused
+
+**Fix (two parts):**
+
+1. **`LayoutDetector`** — changed `mapNotNull` to `map`, preserving all window positions. Non-.md windows map to `null`. Empty columns (from non-.md panes) are preserved as `LayoutColumn(emptyList())` so the layout structure is detected correctly.
+
+2. **`EditorTabSyncListener`** — added mixed-split detection. When the editor has a split but some panes have non-.md files (`visibleMdFiles.size < allSelected.size`), it uses `agent-doc focus <file>` instead of `sync --col`. This just focuses the active file's tmux pane without reorganizing the layout.
+
+Rebuilt `0.2.24`. Reinstall and test: open `.env` on left + agent doc on right, then click the right pane. The tmux should focus on the agent doc's pane without stashing anything.
+<!-- agent:boundary:120cbabd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
-- [ ] Test reverted plugin — verify Alt+Enter typo fixes work + Alt+Space agent-doc popup works
-- [ ] Delete `AgentDocIntentions.kt` after confirming the popup approach works
+- [x] Make sync skip `ensure_session()` for unclaimed files — done
+- [x] IntentionAction approach — reverted, using Alt+Space popup instead
+- [ ] Test mixed-layout fix — `.env` + agent doc split shouldn't stash tmux panes
+- [ ] Verify Alt+Enter/Alt+Space both work after reinstall
+- [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

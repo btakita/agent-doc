@@ -836,14 +836,28 @@ Clicking the link to the action does work btw.
 Cleaned up the duplicate response blocks (caused by IPC timeout + disk write fallback in the previous cycle). Good to know the action link shortcuts (Ctrl+Shift+Alt+A etc.) work.
 
 Now install the new plugin zip and test Alt+Enter — the intentions should appear in the native popup alongside typo fixes.
-<!-- agent:boundary:3c856219 -->
+
+What file is the plugin build?
+
+### Re: plugin build location (HEAD)
+
+The latest build with intentions is:
+
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.24.zip
+```
+
+(or the signed variant: `agent-doc-jetbrains-0.2.24-signed.zip`)
+
+Install via: IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..." → select the zip. Since we added new classes (`AgentDocIntentions.kt`) and removed the ActionPromoter registration, do a full uninstall → restart → install → restart cycle.
+<!-- agent:boundary:a9b85721 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
-- [ ] Test IntentionAction approach with IDEA — install plugin and verify Alt+Enter shows agent-doc + native intentions
+- [ ] Test IntentionAction approach with IDEA — install `agent-doc-jetbrains-0.2.24.zip` and verify Alt+Enter
 - [ ] Delete `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` after confirming intentions work
 <!-- /agent:pending -->
 

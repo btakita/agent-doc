@@ -158,7 +158,7 @@ I restarted Brave. Please test and make necessary configuration changes.
 **Next step:** Restart Brave again for the flag to take effect. Then I'll verify the port and install the chrome-devtools-mcp server.
 
 Restarted brave
-### Re: Restarted brave (HEAD)
+### Re: Restarted brave
 
 Remote debugging is **live**:
 ```json
@@ -177,7 +177,7 @@ npx -y chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9222
 This connects to your running Brave session automatically. The MCP server will be available in all Claude Code sessions. You can now use browser tools like `navigate_page`, `evaluate_script`, `take_screenshot`, etc.
 
 All setup is complete.
-<!-- agent:boundary:b1bb853a -->
+<!-- agent:boundary:96d25ee6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

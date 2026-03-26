@@ -768,7 +768,7 @@ Already covers the integration, Corky, client project, and collaboration pitch.
 Which approach do you prefer?
 This is for the DM
 
-### Re: DM revision for timing (HEAD)
+### Re: DM revision for timing
 
 Got it — revising the **DM** (not the comment) for the 1-day gap. The v10 opener ("your comment on my module-harness post really made my day") still works fine after a day — DMs don't have the same immediacy expectation as comments. But I'll tighten it slightly:
 
@@ -786,7 +786,7 @@ Got it — revising the **DM** (not the comment) for the 1-day gap. The v10 open
 - Everything else stays — the Ragie integration, client project, and reconnect pitch are all timing-neutral
 
 Ready to send?
-<!-- agent:boundary:6b3d2e58 -->
+<!-- agent:boundary:4bac5d37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

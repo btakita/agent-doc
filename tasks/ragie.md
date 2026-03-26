@@ -559,14 +559,44 @@ src/sift-harness/
 ```
 
 Want me to scaffold it now?
-<!-- agent:boundary:945a452b -->
+What deterministic binary code would be packaged with sift-harness?
+
+### Re: What deterministic binary code for sift-harness? (HEAD)
+
+Honestly — almost none. The binary would be ~200 lines:
+1. Check if `sift` is on PATH
+2. Install if missing (run curl installer)
+3. Parse Sift's JSON output into structured format
+4. `sift-harness skill install` to copy SKILL.md
+
+**The real value is the SKILL.md, not the binary.**
+
+This raises the question: **does sift-harness need to be a Rust crate at all?**
+
+**Option A: Just a SKILL.md** (no binary)
+- A `.claude/skills/sift/SKILL.md` file that teaches Claude to use `sift search`
+- Installation: copy the file (or `agent-doc skill install` from a repo)
+- Zero compiled code, maximum simplicity
+
+**Option B: Thin Rust crate** (what I proposed)
+- Adds binary detection, auto-install, structured output parsing
+- More ceremony than the value warrants for a CLI wrapper
+
+**Option C: Shell script + SKILL.md**
+- `install.sh` that copies SKILL.md and checks for sift
+- Middle ground — scripted setup, no compile step
+
+**Recommendation: Option A.** The SKILL.md is the product. Claude Code already knows how to run `sift search` — the skill just needs to teach it *when* and *how*. No binary needed.
+
+The skill file would live in a git repo (or even just a gist) that users clone or download. `agent-doc skill install` could handle distribution if we add a registry later.
+<!-- agent:boundary:ca8dd6a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **All phases implemented and tested** — Corky search subsystem complete
-- [ ] Scaffold `sift-harness` package (SKILL.md + binary wrapper)
+- [ ] Create sift SKILL.md for general agent-doc use (no binary needed)
 - [ ] Test `corky ragie push` to upload sample conversations
 - [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang

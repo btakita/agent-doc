@@ -699,7 +699,7 @@ This is the exact pattern ECI needs at scale. With 160 products, you can't rely 
 
 Let Justin know that I'm working on some end-to-end eval tooling via module-harness and other general purpose eval tooling for my projects.
 
-### Re: eval tooling update (HEAD)
+### Re: eval tooling update
 
 Draft LinkedIn follow-up to Justin about eval tooling:
 
@@ -714,7 +714,7 @@ This connects directly to the "hallucination spotting in AI-generated PRs" skill
 ---
 
 Ready to send when you are. Want me to push this to a LinkedIn draft via corky?
-<!-- agent:boundary:28f70145 -->
+<!-- agent:boundary:01abd535 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

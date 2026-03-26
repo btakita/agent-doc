@@ -396,10 +396,38 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 | **Railway** | ~$5/mo | Dockerfile deploy, managed |
 | **Hetzner/DigitalOcean VPS** | $4-6/mo | Full control, cheapest for always-on |
 
+Fly.io would be my preferred host for sift.
+
 **Recommendation:** Start with the **Cloudflare Tunnel** approach — zero cost, leverages your existing Cloudflare setup, and Sift is already running locally. If clients need guaranteed uptime independent of your machine, move to Fly.io or a VPS later.
 
 This also gives you a natural progression story for the Bob conversation: "I'm running Sift locally for development, but for production multi-user access, Ragie's managed infrastructure is the right call."
-<!-- agent:boundary:36760b34 -->
+### Re: Fly.io for Sift (HEAD)
+
+Good pick. Fly.io advantages for Sift hosting:
+
+- **Persistent volumes** — Sift's embedding model and corpus stay on disk between deploys
+- **Global edge deployment** — spin up instances close to clients (useful for Manufacturing China if data residency allows)
+- **Simple scaling** — start with one machine, scale up if demand grows
+- **Dockerfile-native** — Sift likely packages cleanly as a container
+- **~$3-5/mo** for a small instance with 1GB persistent volume
+
+**Updated architecture with Fly.io as production Sift host:**
+
+| Client/Context | Backend | Host | Cost |
+|---|---|---|---|
+| Your personal workflow | Sift | Local | $0 |
+| Development/testing | Sift | Local + CF Tunnel | $0 |
+| Judith CRE project | Sift or Ragie | Fly.io or Ragie | $3-5/mo or $100/mo |
+| Manufacturing China | Sift | Fly.io (region TBD) | $3-5/mo |
+| Collaborative/demo for Bob | Ragie | Ragie managed | $100/mo |
+
+**Deployment path:**
+1. **Now:** Local Sift for development, CF Tunnel for quick demos
+2. **Soon:** Dockerize Sift, deploy to Fly.io for client-facing access
+3. **Later:** Ragie integration for the collaborative layer / Bob demo
+
+This keeps Ragie positioned as the premium collaborative option (which is the right message for Bob) while Fly.io handles the cost-sensitive deployments.
+<!-- agent:boundary:aaac95ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -412,7 +440,8 @@ This also gives you a natural progression story for the Bob conversation: "I'm r
 - [ ] Complete Ragie sign-up with RAG use case
 - [ ] Ask Bob about Ragie multi-tenancy / data partitioning options
 - [ ] Evaluate Ragie vs Sift per-client (pricing, data residency, ops)
-- [ ] Explore Cloudflare Tunnel for hosted Sift access
+- [ ] Dockerize Sift for Fly.io deployment
+- [ ] Deploy Sift to Fly.io for client-facing access
 - [ ] Design client-tagged architecture for multi-tenant Sift deployment
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
 - [ ] Follow up with Bob after integration demo is ready (~2 days)

@@ -448,7 +448,7 @@ No changes from v10 — this is the version you approved. Ready to send on Linke
 Which is more likely to lead to successful outcomes...as in income potential:
 - A show of strength + potential...I am closing 1-2 prospects for consulting work (not very strong compared to Bob's market position)
 - A direct ask for a job...Note that he has not approached me about working for him. He did reference me before while he was working for Yammer but I turned down the offer.
-### Re: Strategy — Show of Strength vs. Direct Ask (HEAD)
+### Re: Strategy — Show of Strength vs. Direct Ask
 
 **Direct ask is the wrong move here.** Here's why:
 
@@ -473,7 +473,7 @@ Send the v10 DM as-is (show of strength). Demonstrate the Ragie integration in C
 That's ambiguous enough to cover collaboration, consulting, *or* employment without asking for any of them.
 
 **Bottom line:** Show of strength + demonstrated value has higher expected income than a direct ask. The direct ask has a binary outcome (yes/no) with no fallback. The strength play keeps all doors open and lets Bob be the one to escalate.
-<!-- agent:boundary:e0970398 -->
+<!-- agent:boundary:8818b559 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -149,7 +149,7 @@ Bob responded to my comment. Please read his response.
 
 I went through a divorce around the time when I decided to stay with Honk. I ended up moving to LA because I needed a change of location. Should I include that to soften the blow a bit?
 Please read the comments in https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160/
-### Re: Bob's Response & Personal Context (v5) (HEAD)
+### Re: Bob's Response & Personal Context (v5)
 
 **LinkedIn access:** I tried to read the comments on the post but LinkedIn gates the full thread behind authentication — I can only see your original comment. Could you paste Bob's reply text here so I can factor it into the DM?
 
@@ -170,7 +170,7 @@ Save the full context for a call or in-person — it'll land with the right weig
 > Great to reconnect. Feels like our paths are converging.
 
 Once I can read Bob's reply, I'll adjust the DM to reference it naturally.
-<!-- agent:boundary:f5f0ec59 -->
+<!-- agent:boundary:c3ede552 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

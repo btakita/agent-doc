@@ -791,13 +791,53 @@ Done. Changed `sync.rs` line 397 — the `None` arm now returns `FileResolution:
 - Committed in submodule: `7dffd2f fix: sync no longer auto-inits frontmatter on unclaimed files`
 
 New markdown files will no longer get frontmatter injected by sync. Only `agent-doc claim` adds session UUIDs.
-<!-- agent:boundary:3afb5c3e -->
+
+When I press Alt+Space, we have the agent-doc menu. I want access to the other JetBrains intentions and commands as well.
+We had an issue with integrating intentions in MarkDown. I did an Idea upgrade. So it may be worth trying to setup an intention again.
+But if the intention does not work, the custom dialog should have an option to perform the next option.
+![img_7.png](img_7.png)
+![img_8.png](img_8.png)
+
+The first thing we should try is the intention approach. Hopefully it will work with markdown.
+
+### Re: intentions for Alt+Enter (HEAD)
+
+Implemented the IntentionAction approach. Here's what changed:
+
+**Removed:**
+- `AgentDocActionPromoter` registration from `plugin.xml` (the known blocker for native intentions in .md files)
+- `AgentDoc.Popup` action and its Alt+Enter keybinding
+
+**Added:**
+- `AgentDocIntentions.kt` — 4 `IntentionAction` subclasses that delegate to existing actions:
+  - `RunAgentDocIntention` → "Run Agent Doc"
+  - `RunWithJunieIntention` → "Run with Junie"  
+  - `ClaimForTmuxPaneIntention` → "Claim for Tmux Pane"
+  - `SyncTmuxLayoutIntention` → "Sync Tmux Layout"
+- Registered as `<intentionAction>` in `plugin.xml` under category "Agent Doc"
+
+**Kept:**
+- All existing `AnAction` classes and their Ctrl+Shift+Alt shortcuts (direct invocation still works)
+- All other plugin infrastructure (TypingTracker, PatchWatcher, etc.)
+
+**How it works now:**
+- Alt+Enter shows the native JetBrains intention popup
+- Agent Doc intentions appear alongside typo fixes, quick-fixes, etc.
+- Each intention delegates to the existing action (same logic, same debounce, same guards)
+- `startInWriteAction() = false` since agent-doc handles file writes externally
+
+Both plugin zips built successfully. Install the new plugin and test Alt+Enter on a .md file — you should see both JetBrains intentions (typo fixes) and Agent Doc actions in the same popup.
+
+Note: The `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` files still exist on disk but are no longer registered in `plugin.xml`. They can be deleted once we confirm intentions work.
+<!-- agent:boundary:403953f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
+- [ ] Test IntentionAction approach with IDEA — install plugin and verify Alt+Enter shows agent-doc + native intentions
+- [ ] Delete `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` after confirming intentions work
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

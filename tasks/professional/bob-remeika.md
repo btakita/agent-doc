@@ -807,7 +807,7 @@ Ready to send?
 Should we soften the language since I'm considering self-hosting to save on costs or no?
 I think it would be likely we would use ragie, but I don't want to promise something that may not happen.
 
-### Re: Soften language re: self-hosting possibility (HEAD)
+### Re: Soften language re: self-hosting possibility
 
 The v12 language is already softer than you think. Let's audit it:
 
@@ -826,7 +826,7 @@ You're not saying "I'm deploying Ragie for clients." You're saying "I'm explorin
 But honestly, v12 as-is doesn't overpromise. Bob will read it as "this person is seriously evaluating my product with real use cases" — which is true. CEOs are used to prospects exploring before committing.
 
 **Recommendation:** Send v12 as-is. The language is already appropriate for where you are in the evaluation.
-<!-- agent:boundary:248c14fe -->
+<!-- agent:boundary:40f6a07f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

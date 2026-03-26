@@ -626,10 +626,36 @@ Transcribed the ~63-minute screening call. Full transcript saved to: `mail/conta
 - [ ] Prepare for agentic review (hallucination spotting in PRs)
 - Updated email: brian.takita@gmail.com
 - Updated location: Thompson, CT
-<!-- agent:boundary:01ac1c42 -->
+
+This conversation happened on Tuesday morning. It's already Thursday morning.
+Should I follow up with Justin via LinkedIn?
+I have my recent LinkedIn post with the video + blog post.
+### Re: Follow-up timing (HEAD)
+
+Yes — a follow-up now is well-timed. It's been ~48 hours, right in the window Justin mentioned ("24-48 hours"). He specifically asked for the YouTube channel and said the CTO would love to see your dev recordings.
+
+Sharing the LinkedIn post with the video + blog post is a natural value-add rather than a "just checking in" message.
+
+**Draft LinkedIn follow-up:**
+
+> Hi Justin, great speaking with you Tuesday — really enjoyed learning about the AI cohort structure and the mission-based approach.
+>
+> Wanted to share a recent post with a video walkthrough and blog post on agent-doc's CRDT-based workflow: [link to LinkedIn post]
+>
+> Thought it might be useful context for the CTO conversation. Looking forward to next steps!
+
+**Why this works:**
+- References something specific from the call (shows you were paying attention)
+- Delivers value (the video he asked for) rather than just "checking in"
+- Short and doesn't pressure for a response
+- The video demonstrates exactly what they're hiring for — agents writing code through markdown
+
+Replace `[link to LinkedIn post]` with your actual LinkedIn post URL before sending.
+<!-- agent:boundary:b8ecf08f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- [ ] Send LinkedIn follow-up to Justin with video + blog post link
 - [ ] Watch for Justin's email with markdown challenge file and job description
 - [ ] Prepare vibe coding pre-work once markdown file arrives
 - [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)

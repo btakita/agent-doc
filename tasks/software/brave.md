@@ -144,7 +144,7 @@ If you see a JSON response with `Browser`, `webSocketDebuggerUrl`, etc., it's wo
 
 Want me to set this up now?
 I restarted Brave. Please test and make necessary configuration changes.
-### Re: Test remote debugging & configure (HEAD)
+### Re: Test remote debugging & configure
 
 **Test result:** Port 9222 is **not responding**. The `brave-flags.conf` file didn't exist — Brave was running without the flag.
 
@@ -156,7 +156,7 @@ I restarted Brave. Please test and make necessary configuration changes.
 **Note:** Brave binary is at `/opt/brave-bin/brave` (not `/usr/bin/brave` as I said earlier).
 
 **Next step:** Restart Brave again for the flag to take effect. Then I'll verify the port and install the chrome-devtools-mcp server.
-<!-- agent:boundary:310b4ebb -->
+<!-- agent:boundary:89c6a294 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

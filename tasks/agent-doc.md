@@ -866,16 +866,33 @@ Two potential issues:
 **2. Diagnosis question:** Does Alt+Shift+Enter work for typo fixes in `.md` files when the Agent Doc plugin is **completely disabled**? (Settings → Plugins → uncheck Agent Doc → restart → test). If it doesn't work even without our plugin, it's a pre-existing IDEA/Markdown issue and we'd need a different approach entirely.
 
 Rebuilt `0.2.24` with the `LowPriorityAction` fix. Same zip path — reinstall and test.
-<!-- agent:boundary:d14a159e -->
+Actually clicking the action link does not work. Why?
+
+### Re: clicking action link also broken (HEAD)
+
+The IntentionAction registrations are corrupting the entire intention resolution chain for `.md` files — not just keyboard shortcuts but click handling too. This is the same class of issue as the ActionPromoter: registering custom extension points that touch the intention system breaks it for Markdown.
+
+**Reverted approach:** Removed all 4 `<intentionAction>` registrations from plugin.xml.
+
+**New approach:** Restored `AgentDocPopupAction` on **Alt+Space** (not Alt+Enter). This gives you:
+- **Alt+Enter** → native JetBrains intentions (typo fixes, quick-fixes) — completely unimpeded
+- **Alt+Space** → Agent Doc popup (Run Agent Doc, Run with Junie, Claim, Sync)
+- **Ctrl+Shift+Alt+A/J/C/L** → direct shortcuts (unchanged)
+
+No ActionPromoter, no IntentionAction — the plugin stays out of the intention system entirely.
+
+Rebuilt `0.2.24`. Reinstall and verify:
+1. Alt+Enter shows typo fixes and clicking/Alt+Shift+Enter works
+2. Alt+Space shows the Agent Doc popup
+<!-- agent:boundary:fee733a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
-- [ ] Test LowPriorityAction fix — reinstall plugin, verify Alt+Shift+Enter applies typo fix
-- [ ] If still broken: test with plugin disabled to isolate IDEA vs plugin issue
-- [ ] Delete `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` after confirming intentions work
+- [ ] Test reverted plugin — verify Alt+Enter typo fixes work + Alt+Space agent-doc popup works
+- [ ] Delete `AgentDocIntentions.kt` after confirming the popup approach works
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

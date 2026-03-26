@@ -625,12 +625,12 @@ I checked the HTML snapshot — all our CSS selectors (`feed-shared-update-v2[da
 Reload the install page, re-drag the bookmarklet, and try again. Should work now.
 Instead of copying to the clipboard, prompt to save to a file.
 
-### Re: save to file instead of clipboard (HEAD)
+### Re: save to file instead of clipboard
 
 Updated — now triggers a file download instead of clipboard copy. Filename format: `20260326-linkedin-7442608257254236160.md` (date + activity URN). The browser's save dialog will prompt for location.
 
 Reload and re-drag the bookmarklet.
-<!-- agent:boundary:209d52a8 -->
+<!-- agent:boundary:ba87cb00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

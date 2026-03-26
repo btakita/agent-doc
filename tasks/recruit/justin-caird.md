@@ -630,7 +630,7 @@ Transcribed the ~63-minute screening call. Full transcript saved to: `mail/conta
 This conversation happened on Tuesday morning. It's already Thursday morning.
 Should I follow up with Justin via LinkedIn?
 I have my recent LinkedIn post with the video + blog post.
-### Re: Follow-up timing (HEAD)
+### Re: Follow-up timing
 
 Yes — a follow-up now is well-timed. It's been ~48 hours, right in the window Justin mentioned ("24-48 hours"). He specifically asked for the YouTube channel and said the CTO would love to see your dev recordings.
 
@@ -651,7 +651,7 @@ Sharing the LinkedIn post with the video + blog post is a natural value-add rath
 - The video demonstrates exactly what they're hiring for — agents writing code through markdown
 
 Replace `[link to LinkedIn post]` with your actual LinkedIn post URL before sending.
-<!-- agent:boundary:b8ecf08f -->
+<!-- agent:boundary:32a9f1ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

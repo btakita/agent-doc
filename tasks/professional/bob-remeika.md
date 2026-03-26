@@ -744,7 +744,7 @@ Good call — the original draft was tuned for an immediate reply. Here's a revi
 - Clean close with a soft reconnect offer
 
 Want me to post this as a LinkedIn comment, or do you want to tweak further first?
-<!-- agent:boundary:e48dfa21 -->
+<!-- agent:boundary:051cb64f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

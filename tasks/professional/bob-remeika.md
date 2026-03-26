@@ -556,6 +556,7 @@ Built and saved to `src/corky/assets/linkedin-post-bookmarklet.html`.
 Test it on Bob's post: https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
 
 Don't use Bob's actual name. All names should be anonymous.
+Fake names are ok.
 
 ### Re: anonymize names
 
@@ -568,13 +569,21 @@ Updated the bookmarklet. All names are now replaced with "Person A", "Person B",
 - Consistent mapping: same person always gets the same label across the entire output
 
 Reload the install page to get the updated bookmarklet: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
-<!-- agent:boundary:74347555 -->
+
+### Re: fake names (HEAD)
+
+Updated — now uses a pool of 20 gender-neutral fake names instead of "Person A/B/C":
+
+Alex Morgan, Jordan Lee, Sam Chen, Riley Park, Casey Kim, Quinn Davis, Avery Brooks, Drew Santos, Jamie Walsh, Taylor Reed, Morgan Scott, Blake Turner, Reese Grant, Hayden Cole, Ellis Hart, Rowan Pierce, Sage Ellis, Jules Frost, Finley Shaw, Kit Palmer
+
+Same person always gets the same fake name within a single scrape. Reload the install page to update.
+<!-- agent:boundary:b8df8b95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Test LinkedIn bookmarklet with anonymization — verify output
+- Test LinkedIn bookmarklet with fake names — verify output
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

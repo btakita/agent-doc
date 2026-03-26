@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Brave remote debugging active on port 9222. chrome-devtools-mcp installed for Claude Code.
+Discussing browser skill architecture. Setup complete, exploring workflow layer.
 <!-- /agent:status -->
 
 ## Exchange
@@ -177,11 +177,45 @@ npx -y chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9222
 This connects to your running Brave session automatically. The MCP server will be available in all Claude Code sessions. You can now use browser tools like `navigate_page`, `evaluate_script`, `take_screenshot`, etc.
 
 All setup is complete.
-<!-- agent:boundary:96d25ee6 -->
+
+What SKILL.md do you recommend we should use to drive brave? agent-doc?
+just a personal agent-loop skill? If that is the case, how can libraries such as agent-doc identify there is a skill for driving the browser?
+### Re: Skill architecture for browser driving (HEAD)
+
+**Not agent-doc** — agent-doc is a document session tool. Wrong scope.
+
+**A personal `browser` skill** in `.claude/skills/browser/` is the right call. It would encapsulate high-level workflows on top of the raw MCP tools:
+
+- "Scrape this LinkedIn post as markdown"
+- "Take a screenshot of this URL"
+- "Navigate and extract structured data from page X"
+
+**How discovery works — it already does:**
+
+Claude Code loads *all* MCP tools and *all* skills into every session. When you run `/agent-doc`, Claude (the agent) already has access to the chrome-devtools MCP tools (`navigate_page`, `evaluate_script`, etc.). agent-doc doesn't need to "discover" the browser — Claude orchestrates both.
+
+The layer cake:
+```
+Skills (workflow)     → /browser scrape-linkedin-post <url>
+                      → /agent-doc tasks/brave.md
+MCP tools (capability) → chrome-devtools: navigate_page, evaluate_script, ...
+Claude Code (agent)    → orchestrates everything, sees all tools + skills
+```
+
+So if agent-doc needs to drive the browser during a session, it doesn't call a browser skill — **Claude already has the MCP tools available** and uses them directly. A `/browser` skill is useful for *the user* to invoke repeatable browser workflows, not for inter-skill communication.
+
+**What the browser skill would contain:**
+- `SKILL.md` with workflow recipes (scrape, screenshot, form fill, etc.)
+- Patterns for connecting to the authenticated Brave session
+- Safety guardrails (rate limiting for LinkedIn, etc.)
+- Common `evaluate_script` snippets (like the bookmarklet JS)
+
+Want me to scaffold `.claude/skills/browser/SKILL.md`?
+<!-- agent:boundary:eee05d42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(all items complete)
+- Scaffold `.claude/skills/browser/SKILL.md` — awaiting approval
 <!-- /agent:pending -->

@@ -596,7 +596,7 @@ I have another bookmarklet that works with my messages. Can LinkedIn even block 
 
 `javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():%27Unknown%27;const time=timeEl?timeEl.textContent.trim():%27%27;const text=bodyEl.innerText.trim();if(text)msgs.push(%27[%27+time+%27] %27+name+%27:\n%27+text)});const headerEl=document.querySelector(%27.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title%27);let contactName=%27Unknown%27;if(headerEl){const lines=headerEl.textContent.split(%27\n%27).map(s=>s.trim()).filter(Boolean);contactName=lines[0]||%27Unknown%27}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,%27-%27).toLowerCase().replace(/^-|-$/g,%27%27);const d=new Date();const ymd=%27%27+d.getFullYear()+String(d.getMonth()+1).padStart(2,%270%27)+String(d.getDate()).padStart(2,%270%27);const content=%27# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()`
 
-### Re: bookmarklet execution & debugging (HEAD)
+### Re: bookmarklet execution & debugging
 
 You're right — if your messaging bookmarklet works, this one should too. Bookmarklets run as user-initiated inline scripts; CSP can't block `querySelector` and `textContent` calls. The errors in the screenshot were pre-existing LinkedIn page errors.
 
@@ -610,7 +610,7 @@ The real issue was likely **silent failure** — selectors didn't match anything
 - Any errors
 
 **To debug:** Open DevTools Console → click bookmarklet → look for `[li2md]` lines. Paste the console output here if selectors are wrong and I'll fix them for the current LinkedIn DOM.
-<!-- agent:boundary:290929e7 -->
+<!-- agent:boundary:c932af8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

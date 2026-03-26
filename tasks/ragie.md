@@ -589,14 +589,42 @@ This raises the question: **does sift-harness need to be a Rust crate at all?**
 **Recommendation: Option A.** The SKILL.md is the product. Claude Code already knows how to run `sift search` — the skill just needs to teach it *when* and *how*. No binary needed.
 
 The skill file would live in a git repo (or even just a gist) that users clone or download. `agent-doc skill install` could handle distribution if we add a registry later.
-<!-- agent:boundary:01beb2d3 -->
+I see the rust crate as distribution.
+How would corky ensure that the sift skill is present?
+Same with ragie. Should we have a ragie-harness project?
+Should I have dedicated packages for the SKILL.md with the potential to add deterministic binary logic in the future?
+Or should we just distribute the SKILL using Claude Code's marketplace?
+
+### Re: Distribution strategy for skills (HEAD)
+
+Addressing all five questions:
+
+**1. Rust crate as distribution:** Yes — a crate can distribute a SKILL.md. `cargo install` puts the binary on PATH, and a `sift-harness skill install` subcommand copies the SKILL.md to `.claude/skills/`. This is how agent-doc and corky already work.
+
+**2. How would Corky ensure sift skill is present?** It doesn't need to. Corky has its own `src/search/sift.rs` module that wraps Sift directly — no skill needed. The sift SKILL.md is for **non-Corky** projects that want local semantic search in agent-doc sessions. They're independent distribution paths for the same underlying tool.
+
+**3. Ragie harness?** Less value as a standalone. Ragie's strength is the push/sync workflow (which is Corky-specific), not just search. A standalone ragie skill would only cover `ragie search` — and without the push side, there's nothing to search. Keep Ragie as a Corky module only.
+
+**4. Dedicated packages for SKILL.md with potential for binary later?** Yes — this is the cleanest approach:
+- Start as a SKILL.md-only repo (e.g., `sift-harness/SKILL.md`)
+- Add `Cargo.toml` + binary later if needed (install helper, structured output, etc.)
+- The crate becomes the distribution vehicle for the SKILL.md
+- Pattern: `cargo install sift-harness && sift-harness skill install`
+
+**5. Claude Code marketplace?** This is the ideal long-term distribution. When the marketplace launches, skills become installable directly. Until then:
+- **Now:** Git repos + manual copy or `agent-doc skill install`
+- **Soon:** Claude Code marketplace (like VS Code extensions)
+- **Bridge:** Crate-based distribution (`cargo install`) works today
+
+**Recommendation:** Create `sift-harness` as a minimal repo with just a SKILL.md for now. If you later need binary logic (auto-install, output parsing), add Cargo.toml. When the Claude Code marketplace launches, publish there. The repo serves as the source of truth for all distribution channels.
+<!-- agent:boundary:a4fd6178 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **All phases implemented and tested** — Corky search subsystem complete
-- [ ] Create sift SKILL.md for general agent-doc use (no binary needed)
+- [ ] Create `sift-harness` repo with SKILL.md (start minimal, graduate to crate later)
 - [ ] Test `corky ragie push` to upload sample conversations
 - [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang

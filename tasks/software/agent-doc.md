@@ -1364,7 +1364,7 @@ Created `tasks/software/eval-runner.md` with all eval-runner context transferred
 
 The eval-runner pending items were removed from this document's `&lt;!-- agent:pending --&gt;` since they now live in the dedicated task file.
 
-The JB plugin prompt diaolg does not work. Why?
+The JB plugin prompt dialog does not work. Why?
 ![2026-03-26_15-02.png](../../../../../Pictures/agent-loop/2026-03-26_15-02.png)
 ### Re: JB plugin prompt dialog not working
 
@@ -1378,12 +1378,28 @@ On most Linux DEs (KDE, GNOME, Hyprland, i3), `Alt+Space` opens the window opera
 3. Use the direct shortcuts that already work: `Ctrl+Shift+Alt+A/J/C/L`
 
 We could also change the default keybinding in the plugin to something more Linux-friendly (e.g., `Alt+Semicolon` or `Ctrl+Alt+Space`).
-<!-- agent:boundary:160a0838 -->
+
+I am using the direct shortcut `Ctrl+Shift+Alt+A/J/C/L`
+
+I'm also getting a bunch of external modifications to tasks/software/brave.md
+Why?
+### Re: External modifications on brave.md (HEAD)
+
+There's an active `agent-doc start tasks/software/brave.md` session running on pts/36. That session is writing responses to brave.md, and when the IPC path times out (plugin not watching the file or file not focused in editor), it falls back to `--force-disk` — writing directly to the filesystem. JetBrains detects this as an external modification.
+
+**Why IPC fails for brave.md:** The JB plugin's PatchWatcher only monitors files that are open and visible in the editor. If brave.md isn't the active tab or isn't open, the plugin won't consume the IPC patch within the timeout window, triggering the disk fallback.
+
+**Solutions:**
+1. **Keep brave.md open in the editor** while its agent-doc session is running — IPC will work
+2. **Accept the external modifications** — the content is correct, just delivered via disk instead of Document API
+3. **Longer-term:** Make the plugin's PatchWatcher monitor all claimed files (not just visible ones), so IPC works even for background tabs
+<!-- agent:boundary:161e8c53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] PatchWatcher: monitor all claimed files, not just visible editor tabs
 - [ ] Change default plugin popup keybinding to Linux-friendly alternative
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

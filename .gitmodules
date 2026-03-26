@@ -94,3 +94,6 @@
 [submodule "src/module-harness"]
 	path = src/module-harness
 	url = git@github.com:btakita/module-harness.git
+[submodule "src/chromium-bridge"]
+	path = src/chromium-bridge
+	url = git@github.com:btakita/chromium-bridge.git

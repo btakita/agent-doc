@@ -1067,7 +1067,7 @@ Option 1 implies that agent-doc would be compatible with various ways to run eva
 
 Option 3 seems like a concrete use case that we can benefit from right now. But we need some research into how evals are done across the market that would be compatible from a cli.
 
-### Re: eval ecosystem research (HEAD)
+### Re: eval ecosystem research
 
 **Top CLI-compatible eval frameworks ranked by agent-doc fit:**
 
@@ -1101,7 +1101,7 @@ Module-harness already holds the eval criteria. If we add a thin eval runner to 
 ...it becomes reusable across all projects, not just agent-doc. The eval definitions stay in module-harness; the runner is a generic `module-harness eval run` command.
 
 **Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
-<!-- agent:boundary:ad560b8c -->
+<!-- agent:boundary:e14478f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -330,6 +330,8 @@ The `existence` crate on crates.io is a **binary-only crate** — it has `[[bin]
 both
 
 Would you like me to add a `[lib]` target to the existence crate? That would enable `existence = "0.3"` as a proper dev-dependency in module-harness.
+
+I suspect that we don't need to release...just commit and push?
 ### Assistant
 
 **Done — both approaches implemented.**
@@ -349,7 +351,7 @@ Would you like me to add a `[lib]` target to the existence crate? That would ena
 - **In tests**: `use existence::commands::lint` to programmatically validate ontology nodes
 - **In CI**: `existence lint ontology/` catches broken links, missing sections, missing titles
 - **For consumers**: any crate can now `use existence::{config, markdown, commands}` for ontology tooling
-<!-- agent:boundary:b74a4d21 -->
+<!-- agent:boundary:396f2f9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

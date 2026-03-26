@@ -623,7 +623,7 @@ Add module-harness around implementation modules.
 Create an existence-lang ontology.
 Register as the sift-harness crate.
 
-### Re: sift-harness project setup (HEAD)
+### Re: sift-harness project setup
 
 Acknowledged — here's the execution plan:
 
@@ -643,7 +643,7 @@ The Ragie session has covered a lot of ground:
 - sift-harness design decisions
 
 Starting the sift-harness project might be cleaner in its own document.
-<!-- agent:boundary:3918d940 -->
+<!-- agent:boundary:38c1b3ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

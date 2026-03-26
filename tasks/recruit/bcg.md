@@ -64,7 +64,6 @@ What is it?
 How did you build it?
 Why did you build it?
 
-
 I'm in consideration for Project Helix
 If I gave you a name, could you put in a word for me?
 Do you know anyone?
@@ -256,7 +255,7 @@ Dave Franklin mentioned that he is seeing lastname.firstname@bcg.com. He suggest
 1. Check anilpod.com for a public email
 2. Ask Tony Tomai if he has Anil's direct email
 3. Try the BCG email pattern (`anil.podduturi@bcg.com`) as a last resort
-### Updated: Anil's BCG email (HEAD)
+### Updated: Anil's BCG email
 
 Good intel from Dave. Two BCG email formats to try:
 
@@ -282,5 +281,5 @@ Good intel from Dave. Two BCG email formats to try:
 - Mirrors the LinkedIn message but adds Project Helix + Tony's name (since this is a direct channel, not cold outreach)
 - Corporate email is more likely to get seen than LinkedIn InMail sitting in "Other"
 - Keep it to one email — don't follow up for at least a week
-<!-- agent:boundary:e0c6cd4d -->
+<!-- agent:boundary:5e5861fc -->
 <!-- /agent:exchange -->

@@ -123,7 +123,7 @@ This gives the agent your existing LinkedIn session (cookies, auth, everything).
 
 How can I have brave start the --remote-debugging-port by default?
 
-### Re: Brave remote debugging by default (HEAD)
+### Re: Brave remote debugging by default
 
 Brave reads `~/.config/brave-flags.conf` for extra command-line flags. Just add the flag there:
 
@@ -143,7 +143,7 @@ If you see a JSON response with `Browser`, `webSocketDebuggerUrl`, etc., it's wo
 **Security note:** Port 9222 is only bound to localhost (`127.0.0.1`) by default, so only local processes can connect. No external exposure. But any local process (including malware) could control your browser through this port. If concerned, you could use a non-standard port (e.g., `--remote-debugging-port=9333`).
 
 Want me to set this up now?
-<!-- agent:boundary:1b8f9774 -->
+<!-- agent:boundary:4e70ab84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

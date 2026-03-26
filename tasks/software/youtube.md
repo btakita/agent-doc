@@ -656,7 +656,8 @@ bun install
 The `blog_post__video_url_` export is now available in the linked packages. Try `bun run dev` again.
 
 Same error with `bun run dev`
-### Re: Yalc Fix for Sub-Packages (HEAD)
+Please test it yourself
+### Re: Yalc Fix for Sub-Packages
 
 The monorepo has multiple `package.json` files that each resolve `@rappstack/domain--server--blog` independently. Added yalc links to all three:
 
@@ -665,7 +666,7 @@ The monorepo has multiple `package.json` files that each resolve `@rappstack/dom
 3. `lib/ui--server--briantakita/`
 
 All three now resolve to the yalc-published version with `blog_post__video_url_`. Try `bun run dev` again.
-<!-- agent:boundary:845d1fab -->
+<!-- agent:boundary:50a95ef4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

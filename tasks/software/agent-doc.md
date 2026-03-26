@@ -795,8 +795,8 @@ New markdown files will no longer get frontmatter injected by sync. Only `agent-
 When I press Alt+Space, we have the agent-doc menu. I want access to the other JetBrains intentions and commands as well.
 We had an issue with integrating intentions in MarkDown. I did an Idea upgrade. So it may be worth trying to setup an intention again.
 But if the intention does not work, the custom dialog should have an option to perform the next option.
-![img_7.png](img_7.png)
-![img_8.png](img_8.png)
+![img_7.png](../img_7.png)
+![img_8.png](../img_8.png)
 
 The first thing we should try is the intention approach. Hopefully it will work with markdown.
 
@@ -853,7 +853,7 @@ Install via: IDEA → Settings → Plugins → gear icon → "Install Plugin fro
 
 The "Replace with" hotkey Alt+Shift+Enter does not work. Instead the popup closes without any action. Clicking on the action link does work.
 Please diagnose.
-![img_9.png](img_9.png)
+![img_9.png](../img_9.png)
 
 ### Re: Alt+Shift+Enter not applying typo fix
 
@@ -975,7 +975,7 @@ Works
 
 `Run Agent Doc` on tasks/ragie.md resulted in an uncommitted result patch.
 See the large blue gutter.
-![img_10.png](img_10.png)
+![img_10.png](../img_10.png)
 
 ### Re: uncommitted patch on ragie.md
 
@@ -1316,7 +1316,17 @@ The score (0.0–1.0) is the key quantifiable measurement. The LLM judge prompt 
 
 implement
 
-### Re: eval-runner implemented (HEAD)
+### Re: implement eval-runner
+
+Scaffolding the eval-runner crate now. Will create `src/eval-runner/` with:
+- YAML case parsing
+- Claude API integration
+- LLM-as-judge scoring (0.0–1.0)
+- CLI output with ANSI colors + metrics
+- `--json` flag for CI
+- Regression tracking via `--baseline`
+
+### Re: eval-runner implemented
 
 **eval-runner crate scaffolded at `src/eval-runner/`.** ~300 LOC of Rust.
 
@@ -1340,7 +1350,9 @@ ANTHROPIC_API_KEY="$(pass ...)" eval-runner run evals/agent-doc/diff-interpretat
 **Status:** Builds clean (clippy + tests pass). YAML parsing verified with all 21 cases. Needs `ANTHROPIC_API_KEY` to run actual evals — the key isn't in `pass` currently. Once you set the key, the full eval pipeline is ready.
 
 **Fixed:** `cases.yaml` line 409 had a YAML quoting issue (`"Yes"` at start of list item). Wrapped in single quotes.
-<!-- agent:boundary:1268925b -->
+Let's create a new task for `tasks/software/eval-runner.md`.
+Transfer all relevant context from this file related to eval-runner.
+<!-- agent:boundary:16f6414f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

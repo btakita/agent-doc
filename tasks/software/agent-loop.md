@@ -34,7 +34,7 @@ Operational task document for agent-loop workspace management.
 yes
 commit all submodules
 
-### Re: release agent-doc & corky + commit all (HEAD)
+### Re: release agent-doc & corky + commit all
 
 **agent-doc v0.25.12** released:
 - Bumped tmux-router dep `0.2.8` → `0.2.9` (swap-pane atomic transitions)
@@ -48,7 +48,7 @@ commit all submodules
 **Parent commit** `50bec72`: Updated agent-doc + corky submodule pointers.
 
 All submodules clean, all releases published.
-<!-- agent:boundary:ebe2c5d3 -->
+<!-- agent:boundary:7a0a0be9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -482,7 +482,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
 
 Can Corky read LinkedIn post comments? Do we need to implement this as a feature?
 
-### Re: Bob's LinkedIn response & Corky LinkedIn comments (HEAD)
+### Re: Bob's LinkedIn response & Corky LinkedIn comments
 
 Bob's response is a warm signal — he's engaged and watching your content. Good momentum before the v10 message.
 
@@ -497,7 +497,7 @@ No, Corky cannot currently read LinkedIn post comments. LinkedIn's API is heavil
 **Should we build it?** No — the ROI is low. LinkedIn comment interactions are infrequent enough that manual paste works fine. The engineering effort to maintain a LinkedIn API integration would be significant relative to the value.
 
 What you're already doing (pasting the comment with the URL) is the best pattern — it captures context with provenance.
-<!-- agent:boundary:13d6d78b -->
+<!-- agent:boundary:4bf599ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

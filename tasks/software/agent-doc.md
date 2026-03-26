@@ -1393,13 +1393,31 @@ There's an active `agent-doc start tasks/software/brave.md` session running on p
 1. **Keep brave.md open in the editor** while its agent-doc session is running — IPC will work
 2. **Accept the external modifications** — the content is correct, just delivered via disk instead of Document API
 3. **Longer-term:** Make the plugin's PatchWatcher monitor all claimed files (not just visible ones), so IPC works even for background tabs
-<!-- agent:boundary:d84c6b76 -->
+
+Implement option 3.
+### Re: Implement PatchWatcher for all claimed files (HEAD)
+
+**Root cause:** When a file isn't open in the editor, `FileDocumentManager.getDocument()` returns `null`. The old code returned `false` (patch not applied), leaving the IPC patch file undeleted. `agent-doc write` timed out waiting for ACK, fell back to `--force-disk`, triggering the "externally modified" dialog.
+
+**Fix:** Added `applyPatchViaVfs()` fallback in PatchWatcher. When `getDocument()` returns null:
+1. Reads file content from VFS (`contentsToByteArray`)
+2. Applies all patches in memory (frontmatter, components, boundary — same logic as Document path)
+3. Writes back through VFS (`setBinaryContent`) — no "externally modified" dialog since it goes through IntelliJ's VFS layer
+4. No caret offset (file not visible, so no cursor to preserve)
+
+**Plugin v0.2.27** built. Install:
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.27.zip
+```
+
+Committed in submodule: `49ff68e`
+<!-- agent:boundary:c56964d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] PatchWatcher: monitor all claimed files, not just visible editor tabs
+- [ ] Install JB plugin v0.2.27 and verify no more external modification dialogs on brave.md
 - [ ] Change default plugin popup keybinding to Linux-friendly alternative
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

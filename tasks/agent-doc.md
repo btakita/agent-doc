@@ -905,17 +905,40 @@ It should have kept the 2 pane layout with the previously selected agent doc on 
 2. **`EditorTabSyncListener`** — added mixed-split detection. When the editor has a split but some panes have non-.md files (`visibleMdFiles.size < allSelected.size`), it uses `agent-doc focus <file>` instead of `sync --col`. This just focuses the active file's tmux pane without reorganizing the layout.
 
 Rebuilt `0.2.24`. Reinstall and test: open `.env` on left + agent doc on right, then click the right pane. The tmux should focus on the agent doc's pane without stashing anything.
-<!-- agent:boundary:04565c14 -->
+> - [ ] Test reverted plugin — verify Alt+Enter typo fixes work + Alt+Space agent-doc popup works
+
+This works. Increment the plugin version.
+
+Just had an external update while I was typing the line above.
+Please diagnose. Can we fix this issue?
+
+### Re: Alt+Space works + external update issue (HEAD)
+
+**Plugin version bumped to 0.2.25.** Built at:
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.25.zip
+```
+
+**External update diagnosis:** The "externally modified" warning was caused by my use of `--force-disk` in recent writes. When IPC timed out during plugin reinstall, I added `--force-disk` which writes directly to the filesystem instead of going through the IDE's Document API. This triggers JetBrains' external modification detection.
+
+**Fix:** I've stopped using `--force-disk` (this write uses IPC). With the plugin installed and running, all writes go through PatchWatcher → Document API, which:
+- Preserves cursor position
+- Maintains undo stack
+- No "externally modified" dialog
+- No reload disruption while typing
+
+The external update should not recur now that IPC is working.
+<!-- agent:boundary:64fa48fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done
-- [x] IntentionAction approach — reverted, using Alt+Space popup instead
+- [x] Alt+Enter/Alt+Space separation verified — works
 - [ ] Test mixed-layout fix — `.env` + agent doc split shouldn't stash tmux panes
-- [ ] Verify Alt+Enter/Alt+Space both work after reinstall
 - [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
+- [ ] Install plugin v0.2.25 and verify no external update warnings
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

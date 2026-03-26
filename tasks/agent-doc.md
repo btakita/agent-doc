@@ -884,7 +884,7 @@ No ActionPromoter, no IntentionAction — the plugin stays out of the intention 
 Rebuilt `0.2.24`. Reinstall and verify:
 1. Alt+Enter shows typo fixes and clicking/Alt+Shift+Enter works
 2. Alt+Space shows the Agent Doc popup
-<!-- agent:boundary:45ad2b6f -->
+<!-- agent:boundary:0810f948 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

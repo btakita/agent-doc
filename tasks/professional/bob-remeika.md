@@ -591,7 +591,7 @@ Those errors are likely LinkedIn's CSP blocking the `javascript:` URI bookmarkle
 Reload: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
 
 Try the console paste method. If the DOM selectors are wrong (no content scraped or wrong content), paste the output here and I'll fix the selectors.
-<!-- agent:boundary:1352eacc -->
+<!-- agent:boundary:0c51c17f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

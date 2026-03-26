@@ -444,7 +444,36 @@ I'd love to show you what I'm building — I think there's real overlap between 
 ---
 
 No changes from v10 — this is the version you approved. Ready to send on LinkedIn.
-<!-- agent:boundary:2841d2cf -->
+
+Which is more likely to lead to successful outcomes...as in income potential:
+- A show of strength + potential...I am closing 1-2 prospects for consulting work (not very strong compared to Bob's market position)
+- A direct ask for a job...Note that he has not approached me about working for him. He did reference me before while he was working for Yammer but I turned down the offer.
+### Re: Strategy — Show of Strength vs. Direct Ask (HEAD)
+
+**Direct ask is the wrong move here.** Here's why:
+
+1. **He hasn't signaled hiring intent.** Bob's engagement is warm but it's "I enjoy watching your work" — admiration, not recruitment. A direct ask when he hasn't opened that door risks putting him in an awkward position, especially since the last time a job came up (Yammer), you turned it down.
+
+2. **Your consulting pipeline isn't a weakness — it's positioning.** "I'm closing 1-2 prospects" tells Bob you're in demand, not that you're desperate. Even if those prospects aren't at Ragie's scale, they demonstrate you're building real solutions people pay for. That's more attractive to a CEO than "I need a job."
+
+3. **The Yammer history works in your favor — but only passively.** Bob knows you turned down Yammer. If he's thinking about you for Ragie, that memory makes you *more* desirable (you're selective). If you ask directly, it flips the dynamic — now you're the one reaching out, which undermines the selectivity signal.
+
+**The higher-income-potential play:**
+
+Send the v10 DM as-is (show of strength). Demonstrate the Ragie integration in Corky within a few days. Let Bob see that you're building production tooling on his platform. The conversation naturally progresses to:
+
+- Bob asks about your availability → you mention consulting work
+- Bob suggests "we should talk about working together" → you're in a position of strength
+- Bob doesn't bring it up → you still have a CEO relationship and a real integration to show other prospects
+
+**If you want to plant a subtle seed**, add one line to the DM:
+
+> "Always open to exploring how our work could overlap more directly."
+
+That's ambiguous enough to cover collaboration, consulting, *or* employment without asking for any of them.
+
+**Bottom line:** Show of strength + demonstrated value has higher expected income than a direct ask. The direct ask has a binary outcome (yes/no) with no fallback. The strength play keeps all doors open and lets Bob be the one to escalate.
+<!-- agent:boundary:e0970398 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -453,13 +482,13 @@ No changes from v10 — this is the version you approved. Ready to send on Linke
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
 - [x] Update Bob's contact with personal email
-- [ ] Send LinkedIn DM to Bob (v10 ready)
+- [ ] Send LinkedIn DM to Bob (v10 ready — show of strength approach)
 - [ ] Complete Ragie sign-up with RAG use case
+- [ ] Demo Ragie integration in Corky to Bob (~2 days)
 - [ ] Ask Bob about Ragie multi-tenancy / data partitioning options
 - [ ] Evaluate Ragie vs Sift per-client (pricing, data residency, ops)
 - [ ] Dockerize Sift for Fly.io deployment
 - [ ] Deploy Sift to Fly.io for client-facing access
 - [ ] Design client-tagged architecture for multi-tenant Sift deployment
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
-- [ ] Follow up with Bob after integration demo is ready (~2 days)
 <!-- /agent:pending -->

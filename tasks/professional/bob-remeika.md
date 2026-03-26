@@ -885,6 +885,8 @@ Send v13
 
 The Chrome DevTools MCP server is timing out on CDP connections right now — can't automate the send. I navigated the browser to `https://www.linkedin.com/messaging/thread/new/` for you.
 
+What step is the CDP timout happening on?
+
 **Manual send steps:**
 1. The LinkedIn new message page should be open in Brave
 2. In the "To" field, type "Bob Remeika" and select his profile
@@ -903,14 +905,35 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 4. Hit Send
 
 Let me know once sent and I'll update the doc status.
-<!-- agent:boundary:29d98040 -->
+
+### Re: CDP timeout details (HEAD)
+
+The timeout happens at `Network.enable` — the very first CDP protocol handshake. The MCP server sends this method via WebSocket to subscribe to network events before any page interaction. The browser isn't responding in time.
+
+**What's happening:**
+1. MCP server connects to Brave's CDP WebSocket on port 9222 (this works — `chromium-bridge check` succeeds)
+2. MCP server sends `Network.enable` to set up network event listeners
+3. Brave doesn't respond within the `protocolTimeout` window
+4. MCP server throws the timeout error
+
+**Why chromium-bridge works but MCP doesn't:**
+- `chromium-bridge` uses simple CDP commands (navigate, evaluate) that don't require `Network.enable`
+- The MCP server calls `Network.enable` as part of its initialization for every operation, even screenshots
+
+**Possible fixes:**
+- Increase `protocolTimeout` in the MCP server config (check `~/.claude/settings.json` or wherever the chrome-devtools MCP is configured)
+- Close heavy tabs in Brave to reduce CDP contention
+- Restart Brave to reset the CDP state
+
+Want me to check the MCP server config for the timeout setting?
+<!-- agent:boundary:eb616916 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v13) — browser open to new message, awaiting manual send
+- LinkedIn DM (v13) — awaiting manual send (browser open to new message)
+- Fix Chrome DevTools MCP timeout — investigate protocolTimeout config
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
-- Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

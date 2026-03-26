@@ -344,7 +344,7 @@ Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't p
 **Updated pick: `chromium-bridge`**
 
 It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreach (no Firefox/Safari implication), and still pairs well with `.claude/skills/browser/` (the skill stays browser-generic for potential future WebDriver/Playwright additions, while the CLI is specifically CDP/Chromium).
-<!-- agent:boundary:bf7f4be9 -->
+<!-- agent:boundary:cf257c11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

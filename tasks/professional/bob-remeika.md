@@ -747,7 +747,7 @@ Want me to post this as a LinkedIn comment, or do you want to tweak further firs
 
 Let's bring back the ragie integration. And my client work.
 
-### Re: Revise comment with Ragie + client work (HEAD)
+### Re: Revise comment with Ragie + client work
 
 Wait — this is for the **public LinkedIn comment**, not the DM. I'd recommend keeping the public comment focused on gratitude and light connection. The Ragie integration and client work are better saved for the **DM** (which v10 already covers).
 
@@ -766,7 +766,7 @@ But my recommendation is to keep the comment clean and let the DM do the heavy l
 Already covers the integration, Corky, client project, and collaboration pitch.
 
 Which approach do you prefer?
-<!-- agent:boundary:69b6e265 -->
+<!-- agent:boundary:8c0a82c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -494,16 +494,113 @@ Ragie status:
 Fresh Ragie account — 0 docs. Ready to push some conversations with `corky ragie push` when you want to test ingestion. The free tier gives you 1,000 docs to prototype with.
 
 Both backends are live. `corky search "query"` defaults to Sift (local). `corky search --backend ragie "query"` hits Ragie. `corky search --all "query"` queries both.
-<!-- agent:boundary:8c26b358 -->
+
+Should we instead have a sift wrapper crate that include a SKILL.md for general agentic capability within an agent-doc project?
+
+### Re: Sift wrapper crate with SKILL.md (HEAD)
+
+Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
+
+**What it would look like:**
+
+A SKILL.md that teaches Claude Code to use Sift during agent-doc sessions:
+- Auto-search for related context before responding
+- `sift search <path> <query>` as an available tool
+- Could wire into agent-doc hooks (pre-response context injection)
+
+**Two things, complementary:**
+
+| | **Corky `search` module** | **Standalone sift-skill** |
+|---|---|---|
+| **Scope** | Corky-specific (mail/conversations, Ragie) | Any project directory |
+| **Config** | `.corky.toml` with backend registry | SKILL.md + minimal config |
+| **Users** | Corky users | Any Claude Code user |
+| **Features** | Multi-backend routing, Ragie, filters | Pure Sift search |
+
+**Keep both:**
+- Corky's search module stays for the multi-backend integration (Sift + Ragie + future)
+- Create `src/sift-skill/` as a standalone package with:
+  - `SKILL.md` — Claude Code skill definition
+  - Thin wrapper that ensures Sift is installed and provides structured search
+  - Could be a Rust crate (binary or just a SKILL.md distributor)
+
+The sift-skill would be especially useful for agent-doc projects that aren't Corky — e.g., code repos, documentation projects, research notes. Any directory of text files becomes searchable.
+
+Want me to scaffold the sift-skill package?
+
+Yes. Should we name it sift-skill, sift-agent, sift-harness, or another name?
+
+Since sift does not currently have a crate, should this new project add sift as a submodule?
+
+### Re: Sift wrapper crate with SKILL.md (HEAD)
+
+Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
+
+**What it would look like:**
+
+A SKILL.md that teaches Claude Code to use Sift during agent-doc sessions:
+- Auto-search for related context before responding
+- `sift search <path> <query>` as an available tool
+- Could wire into agent-doc hooks (pre-response context injection)
+
+**Two things, complementary:**
+
+| | **Corky `search` module** | **Standalone sift-skill** |
+|---|---|---|
+| **Scope** | Corky-specific (mail/conversations, Ragie) | Any project directory |
+| **Config** | `.corky.toml` with backend registry | SKILL.md + minimal config |
+| **Users** | Corky users | Any Claude Code user |
+| **Features** | Multi-backend routing, Ragie, filters | Pure Sift search |
+
+**Keep both:**
+- Corky's search module stays for the multi-backend integration (Sift + Ragie + future)
+- Create `src/sift-skill/` as a standalone package with:
+  - `SKILL.md` — Claude Code skill definition
+  - Thin wrapper that ensures Sift is installed and provides structured search
+  - Could be a Rust crate (binary or just a SKILL.md distributor)
+
+The sift-skill would be especially useful for agent-doc projects that aren't Corky — e.g., code repos, documentation projects, research notes. Any directory of text files becomes searchable.
+
+Want me to scaffold the sift-skill package?
+
+### Re: Sift wrapper crate with SKILL.md (HEAD)
+
+Yes — great idea. A standalone sift-skill gives **any** agent-doc project semantic search, not just Corky.
+
+**What it would look like:**
+
+A SKILL.md that teaches Claude Code to use Sift during agent-doc sessions:
+- Auto-search for related context before responding
+- `sift search <path> <query>` as an available tool
+- Could wire into agent-doc hooks (pre-response context injection)
+
+**Two things, complementary:**
+
+| | **Corky `search` module** | **Standalone sift-skill** |
+|---|---|---|
+| **Scope** | Corky-specific (mail/conversations, Ragie) | Any project directory |
+| **Config** | `.corky.toml` with backend registry | SKILL.md + minimal config |
+| **Users** | Corky users | Any Claude Code user |
+| **Features** | Multi-backend routing, Ragie, filters | Pure Sift search |
+
+**Keep both:**
+- Corky's search module stays for the multi-backend integration (Sift + Ragie + future)
+- Create `src/sift-skill/` as a standalone package with:
+  - `SKILL.md` — Claude Code skill definition
+  - Thin wrapper that ensures Sift is installed and provides structured search
+  - Could be a Rust crate (binary or just a SKILL.md distributor)
+
+The sift-skill would be especially useful for agent-doc projects that aren't Corky — e.g., code repos, documentation projects, research notes. Any directory of text files becomes searchable.
+
+Want me to scaffold the sift-skill package?
+<!-- agent:boundary:12a7a679 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **All phases implemented and tested**
-- [x] Sift: 20 results from 1,669 conversations
-- [x] Ragie: API connected, 0 docs (fresh account)
-- [x] Config added to `.corky.toml`
+- [x] **All phases implemented and tested** — Corky search subsystem complete
+- [ ] Scaffold `sift-skill` package (SKILL.md + wrapper for general agent-doc use)
 - [ ] Test `corky ragie push` to upload sample conversations
 - [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang

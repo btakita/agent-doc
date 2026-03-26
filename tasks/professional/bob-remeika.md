@@ -170,7 +170,30 @@ Save the full context for a call or in-person — it'll land with the right weig
 > Great to reconnect. Feels like our paths are converging.
 
 Once I can read Bob's reply, I'll adjust the DM to reference it naturally.
-<!-- agent:boundary:c3ede552 -->
+I want to see if Bob would be into the interactive document concept. This is something that I can collaborate with via open source and/or may result into a hire. Bob has positively reacted to a few of my posts including my YouTube videos.
+### Re: Collaboration Angle (v6) (HEAD)
+
+Good framing. Bob's engagement with your posts and videos suggests genuine interest in what you're building — not just polite networking. That's a strong signal.
+
+**Strategy shift:** The v4 DM positions you as a Ragie customer. If you want to explore collaboration or hire, the DM should plant that seed — show him you're building something interesting enough to *work on together*, not just consume his product.
+
+**LinkedIn DM (v6 — collaboration seed):**
+
+> Hey Bob — your comment on my module-harness post really made my day. We only overlapped briefly at Grockit — my last few weeks were your first — but I remember the caliber of people that place attracted, and you were clearly one of them. Thank you for being a reference for the Yammer offer back in the day. David Sacks told me I was "making a mistake" when I turned it down, and I don't want to repeat that mistake.
+>
+> I just signed up for Ragie. I'm building AI agent tooling in Rust — interactive document sessions where agents and humans collaborate through structured markdown, a correspondence kit, a domain ontology language. Document retrieval is exactly the bottleneck I'm hitting, and Ragie looks like the right fit. I'd love to show you what I'm building — I think there's real overlap between our approaches to document understanding.
+>
+> Great to reconnect. Feels like our paths are converging.
+
+**What changed from v4:**
+- Added "I'd love to show you what I'm building" — opens the door for a demo/call
+- "Real overlap between our approaches" — frames it as peer-to-peer, not vendor-customer
+- Kept everything else intact — the Sacks line, the Grockit overlap, the Ragie sign-up
+
+This leaves room for the conversation to go in any direction — customer, collaborator, or hire — without tipping your hand too early. Let him see the work first.
+
+Still need Bob's reply text to finalize. Paste it in when you can.
+<!-- agent:boundary:3bad08b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -178,7 +201,7 @@ Once I can read Bob's reply, I'll adjust the DM to reference it naturally.
 <!-- agent:pending patch=replace -->
 - [x] Post comment reply on LinkedIn activity
 - [ ] Read Bob's reply (paste into doc — LinkedIn blocks access)
-- [ ] Finalize LinkedIn DM incorporating Bob's response
+- [ ] Finalize LinkedIn DM (v6 draft ready — collaboration angle)
 - [ ] Send LinkedIn DM to Bob
 - [ ] Complete Ragie sign-up with RAG use case
 <!-- /agent:pending -->

@@ -1107,6 +1107,10 @@ Module-harness already holds the eval criteria. If we add a thin eval runner to 
 3. LLM-grades output against `expected_behavior`
 4. Reports pass/fail
 
+> 2. Calls the target CLI (agent-doc, corky, etc.) with case inputs
+
+I'm hoping to avoid having tight coupling with other tools. Would it make sense for module-harness to directly run the evals for a single module or a group of modules passed into the cli? Would we need something like **Promptfoo** to run the evals?
+
 ...it becomes reusable across all projects, not just agent-doc. The eval definitions stay in module-harness; the runner is a generic `module-harness eval run` command.
 
 **Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
@@ -1125,16 +1129,55 @@ This explains:
 **Fix:** Full restart of IDEA after installing v0.2.25. The `projectListener` registration only happens at project open.
 
 **Longer-term fix:** Consider changing `EditorTabSyncListener` from a `projectListener` to use `ApplicationManager.getApplication().messageBus` subscription in `PluginLifecycleListener.projectOpened()`. This would survive hot-reloads since it's code-driven, not XML-driven.
-<!-- agent:boundary:4351de50 -->
+
+Implement **Longer-term fix:**.
+
+### Re: listener hot-reload fix + eval coupling question (HEAD)
+
+**Hot-reload fix implemented (plugin v0.2.26):**
+
+Moved `EditorTabSyncListener` from XML `<projectListener>` to code-driven registration:
+
+```kotlin
+// In PluginLifecycleListener.projectOpened():
+project.messageBus.connect().subscribe(
+    FileEditorManagerListener.FILE_EDITOR_MANAGER,
+    EditorTabSyncListener()
+)
+```
+
+XML listeners are bound at plugin load time — hot-reloading deregisters the old listener but doesn't register the new one. Code-driven registration via `messageBus.connect()` runs on every `projectOpened()`, including after dynamic plugin install/update. The connection is auto-disposed when the project closes.
+
+Built `agent-doc-jetbrains-0.2.26.zip`. Committed: `819abfb`.
+
+---
+
+**Eval coupling question:**
+
+Good concern. Module-harness running evals directly avoids tight coupling — it doesn't need to know about agent-doc's internals. Here's how it works without coupling:
+
+**Module-harness `eval run` would be generic:**
+1. Reads `cases.yaml` from the module's eval directory
+2. Each case has a `prompt` field (the diff + context) and `expected_behavior`
+3. Sends the prompt to Claude API (or any configured LLM)
+4. LLM-grades the response against `expected_behavior`
+5. Reports pass/fail
+
+No tool-specific knowledge needed. The case YAML contains everything: the prompt to send, the expected behavior to grade against. Module-harness just orchestrates "send prompt → grade response."
+
+**Promptfoo** does exactly this same pattern but with its own YAML format, assertion engine, and Node.js runtime. You'd get it for free but take on the Node.js dependency. Your existing `cases.yaml` is ~90% compatible with promptfoo's format already.
+
+**My recommendation:** Start with module-harness since it's yours, the format is already defined, and the runner is ~200 lines of Rust. If you later want promptfoo's dashboards or assertion library, the case format is portable.
+<!-- agent:boundary:04b78d74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] All sync/plugin fixes — released v0.26.3
-- [ ] Full IDEA restart needed to verify v0.2.25 listener registration
-- [ ] Consider code-driven listener registration for hot-reload compatibility
-- [ ] Decide eval approach: module-harness runner vs agent-doc runner
+- [x] Code-driven listener registration — plugin v0.2.26 (`819abfb`)
+- [ ] Install plugin v0.2.26 and verify hot-reload works
+- [ ] Implement eval runner in module-harness
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

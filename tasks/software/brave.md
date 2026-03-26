@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Brave remote debugging config documented. Ready to apply.
+brave-flags.conf created. Restart Brave to activate remote debugging on port 9222.
 <!-- /agent:status -->
 
 ## Exchange
@@ -144,12 +144,25 @@ If you see a JSON response with `Browser`, `webSocketDebuggerUrl`, etc., it's wo
 
 Want me to set this up now?
 I restarted Brave. Please test and make necessary configuration changes.
-<!-- agent:boundary:4e70ab84 -->
+### Re: Test remote debugging & configure (HEAD)
+
+**Test result:** Port 9222 is **not responding**. The `brave-flags.conf` file didn't exist — Brave was running without the flag.
+
+**Fixed:** Created `~/.config/brave-flags.conf`:
+```
+--remote-debugging-port=9222
+```
+
+**Note:** Brave binary is at `/opt/brave-bin/brave` (not `/usr/bin/brave` as I said earlier).
+
+**Next step:** Restart Brave again for the flag to take effect. Then I'll verify the port and install the chrome-devtools-mcp server.
+<!-- agent:boundary:310b4ebb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Set up brave-flags.conf with remote debugging port — awaiting approval
-- Install chrome-devtools-mcp for Claude Code — awaiting approval
+- **Restart Brave** to pick up `--remote-debugging-port=9222` from brave-flags.conf
+- Verify remote debugging port responds after restart
+- Install chrome-devtools-mcp for Claude Code
 <!-- /agent:pending -->

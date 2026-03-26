@@ -1,6 +1,8 @@
 ---
 agent_doc_session: 375061ae-6496-4ab9-a303-2f0b0da4f61a
-tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Summary
@@ -78,3 +80,4 @@ All 4 old transcript artifacts were deleted earlier. Current recordings director
 
 ## User
 
+Please convert this document to template mode using the agent:exchange component.

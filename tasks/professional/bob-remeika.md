@@ -878,13 +878,38 @@ Great idea. A live coding session showing Ragie integration in a real client wor
 4. Send follow-up to Bob with the video link
 
 v13 is ready to send as-is. The YouTube plan strengthens the follow-up, not the initial message.
-<!-- agent:boundary:2d646611 -->
+
+Send v13
+
+### Re: Send v13 (HEAD)
+
+The Chrome DevTools MCP server is timing out on CDP connections right now — can't automate the send. I navigated the browser to `https://www.linkedin.com/messaging/thread/new/` for you.
+
+**Manual send steps:**
+1. The LinkedIn new message page should be open in Brave
+2. In the "To" field, type "Bob Remeika" and select his profile
+3. Paste this message:
+
+---
+
+Hey Bob — your repost really made my day. Knowing you've been following along means a lot.
+
+I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+
+I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
+
+---
+
+4. Hit Send
+
+Let me know once sent and I'll update the doc status.
+<!-- agent:boundary:6fdb64cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v13) — ready to send now
+- LinkedIn DM (v13) — browser open to new message, awaiting manual send
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
 - Sift deployment recommendation — awaiting response

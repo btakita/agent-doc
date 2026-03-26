@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Phase 1 complete. All phases implemented — `make check` passes.
+Implementation complete. Sift tested on 1,669 conversations. Config needed in .corky.toml.
 <!-- /agent:status -->
 
 ## Exchange
@@ -418,19 +418,52 @@ corky ragie status
 ```
 
 Ready for Phase 2 testing — install Sift and try `corky sift index` on your conversations.
-<!-- agent:boundary:44cb560b -->
+go
+
+### Testing Progress (HEAD)
+
+**Sift installed and verified:**
+- `sift 0.2.0` installed to `~/.cargo/bin/`
+- **Key discovery: Sift is indexless** — no separate index build step. It searches the corpus directory directly on each query.
+- Updated `sift.rs` wrapper to remove index dependency, search directly against conversations dir
+- Tested: `sift search --retrievers bm25 --reranking none --json --limit 3 mail/conversations "funding"` → 1,669 files searched, results returned
+
+**`corky sift status` works:**
+```
+Sift: sift 0.2.0 (eeb415d)
+Corpus: mail/conversations (1669 files)
+Note: Sift is indexless — no index build needed.
+```
+
+**`make check` passes** after sift.rs rewrite.
+
+**Next step for you:** Add this to your `.corky.toml`:
+```toml
+[search]
+default_backends = ["sift"]
+
+[search.backends.sift]
+type = "sift"
+```
+
+Then `corky search "funding"` will work. For Ragie, also add:
+```toml
+[search.backends.ragie]
+type = "ragie"
+api_key_pass = "ragie/api_key"
+```
+And store your API key: `pass insert ragie/api_key`
+<!-- agent:boundary:1b927517 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Phase 1:** SearchBackend trait, config schema, result types *(done)*
-- [x] **Phase 2:** Sift backend (index, status, search) *(done — built in Phase 1)*
-- [x] **Phase 3:** Ragie backend (push, sync, search, status) *(done — built in Phase 1)*
-- [x] **Phase 4:** Unified `corky search` with backend routing *(done — built in Phase 1)*
-- [ ] Install Sift CLI and test `corky sift index` on mail/conversations
-- [ ] Add Ragie API key to pass and test `corky ragie push`
-- [ ] Add `[search]` section to `.corky.toml` for configuration
+- [x] **All phases implemented** — SearchBackend trait, Sift, Ragie, unified search
+- [x] Sift CLI installed and tested on mail/conversations (1,669 files)
+- [x] Sift is indexless — updated wrapper accordingly
+- [ ] Add `[search]` section to `.corky.toml`
+- [ ] Store Ragie API key in pass and test `corky ragie push`
 - [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang
 <!-- /agent:pending -->

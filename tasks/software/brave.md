@@ -348,7 +348,7 @@ It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreac
 Create btakita/chromium-bridge gh project.
 Add src/chromium-bridge as a git submodule to agent-loop.
 Add README.md, SPEC.md, and implement.
-### Re: Create chromium-bridge (HEAD)
+### Re: Create chromium-bridge
 
 Done. Here's what was created:
 
@@ -379,7 +379,7 @@ Done. Here's what was created:
 - `src/main.rs` — full implementation (~350 lines)
 
 All pushed to `btakita/chromium-bridge` main branch. Submodule pointer ready to commit in agent-loop.
-<!-- agent:boundary:3b53ba4a -->
+<!-- agent:boundary:687a9327 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

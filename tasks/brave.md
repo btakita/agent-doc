@@ -79,7 +79,7 @@ Repo: https://github.com/ChromeDevTools/chrome-devtools-mcp
 
 Can I drive interactions with linkedin.com using the chrome mcp server?
 
-### Re: Driving LinkedIn via Chrome MCP (HEAD)
+### Re: Driving LinkedIn via Chrome MCP
 
 Yes. The DevTools MCP server can drive any page you can open in the browser, including LinkedIn.
 
@@ -120,7 +120,7 @@ LinkedIn requires login. Best approach: attach to your already-authenticated Bra
 This gives the agent your existing LinkedIn session (cookies, auth, everything).
 
 **Caution:** LinkedIn is mild about reading/browsing automation but aggressive about bulk actions (mass messaging, connection scraping). Keep interactions human-paced.
-<!-- agent:boundary:e16970e6 -->
+<!-- agent:boundary:a3562b9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

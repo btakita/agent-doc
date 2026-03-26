@@ -560,7 +560,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/recordings/20260324-justin-caird.amr
 Use corky --gpu
-### Re: Call Transcription (March 24, 2026) (HEAD)
+### Re: Call Transcription (March 24, 2026)
 
 Transcribed the ~63-minute screening call. Full transcript saved to: `mail/contacts/justin-caird/recordings/20260324-justin-caird.txt`
 
@@ -626,7 +626,7 @@ Transcribed the ~63-minute screening call. Full transcript saved to: `mail/conta
 - [ ] Prepare for agentic review (hallucination spotting in PRs)
 - Updated email: brian.takita@gmail.com
 - Updated location: Thompson, CT
-<!-- agent:boundary:e35241d9 -->
+<!-- agent:boundary:01ac1c42 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

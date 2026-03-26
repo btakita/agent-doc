@@ -726,7 +726,7 @@ You're correct — corky cannot send LinkedIn messages. LinkedIn's messaging API
 3. **Clipboard helper** — I copy the draft to your clipboard, you paste
 
 Manual is the practical path for now. When you're ready to send the follow-up to Justin, I'll format it cleanly for copy-paste.
-<!-- agent:boundary:71745669 -->
+<!-- agent:boundary:341b163d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

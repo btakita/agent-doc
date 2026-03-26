@@ -1272,7 +1272,7 @@ That's the whole tool. ~300 LOC of Rust. HTML/SVG/dashboards come later as separ
 Ready to scaffold when you give the go.
 What about the quantifiable measurements in the evals?
 
-### Re: quantifiable measurements (HEAD)
+### Re: quantifiable measurements
 
 Good question. The LLM-as-judge pass/fail is qualitative. For quantifiable metrics, the eval runner should also track:
 
@@ -1313,7 +1313,7 @@ Summary:
 ```
 
 The score (0.0–1.0) is the key quantifiable measurement. The LLM judge prompt asks: "Rate how well the response matches the expected behavior on a scale of 0.0 to 1.0, then explain." This gives you a continuous metric for tracking improvement, not just binary pass/fail.
-<!-- agent:boundary:92496ef1 -->
+<!-- agent:boundary:40248c48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

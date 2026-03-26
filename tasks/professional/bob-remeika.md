@@ -641,6 +641,7 @@ Reload and re-drag.
 
 Got `20260326-linkedin-unknown-7442567335229444096.md` for snapshot /home/brian/work/btakita/agent-loop/tmp/linked-in-post-snapshot-2.html
 
+
 ### Re: "unknown" author in filename
 
 The second snapshot (`linked-in-post-snapshot-2.html`) was a **profile page**, not a post detail page. LinkedIn uses two completely different rendering systems:
@@ -656,7 +657,13 @@ Added fallback selectors for SDUI pages:
 The bookmarklet works best on dedicated post pages (`/feed/update/urn:li:activity:...`). On profile-embedded posts, it'll get the author but may miss body/comments due to fully hashed classes.
 
 Reload and re-drag. Test on the direct post URL: `linkedin.com/feed/update/urn:li:activity:7442608257254236160`
-<!-- agent:boundary:48168c85 -->
+
+The button text is incorrect in file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
+
+### Re: button text fix (HEAD)
+
+Fixed — Option 1 description now says "save as a markdown file" instead of "copy markdown to your clipboard". Reload the page.
+<!-- agent:boundary:9c14d8c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -653,7 +653,7 @@ Sharing the LinkedIn post with the video + blog post is a natural value-add rath
 Replace `[link to LinkedIn post]` with your actual LinkedIn post URL before sending.
 Here is the post. I get into module-harness and existence-lang as well. Please assess the noteworthyness for the role.
 https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/?originTrackingId=NC47vVIFUVz1xLk5Us2qxg%3D%3D
-### Re: LinkedIn post assessment for ECI relevance (HEAD)
+### Re: LinkedIn post assessment for ECI relevance
 
 **Highly relevant.** This post hits multiple signals Justin and the CTO are screening for:
 
@@ -677,7 +677,7 @@ https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/?origin
 > Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. Relevant to ECI's multi-product environment: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
 >
 > The video walkthrough and blog post are linked in the post. Looking forward to next steps!
-<!-- agent:boundary:6a692b9f -->
+<!-- agent:boundary:4203a02b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

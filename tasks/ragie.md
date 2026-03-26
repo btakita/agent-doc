@@ -43,7 +43,7 @@ Ragie is a managed RAG-as-a-Service pipeline (founded by Bob Remeika) that handl
 
 **Integration path:** Ragie has Python SDK + REST API. Potential `corky index` command to push conversations to Ragie, `corky search` to query retrieval. Manifest metadata (labels, contacts, dates) → Ragie document metadata for filtered retrieval.: Would it make sense to have a `corky ragie` command tree?
 
-### Re: Local vs. cloud RAG positioning (HEAD)
+### Re: Local vs. cloud RAG positioning
 
 Yes, that's a fair characterization. Ragie is essentially a **managed cloud document database with built-in RAG pipeline** — upload documents, it handles chunking/indexing/retrieval. It's the "don't run your own infra" option.
 
@@ -51,11 +51,11 @@ For your personal workflow (git + local DB), something like a local vector store
 
 For Judith's project — exactly right. Her staff won't touch git or Markdown. Ragie gives them a clean upload-and-query interface without developer tooling. **Practicing the Ragie API now on your own corpus is smart prep for building her integration later.**
 
-### Re: Data source integration (HEAD)
+### Re: Data source integration
 
 Correct. Ragie has built-in connectors (Google Drive, Notion, Confluence, Slack) but for your custom sources (Corky's unified Markdown, Telegram imports, SMS), you build the push side. Flow: **Corky syncs sources → Markdown files → your integration pushes to Ragie via Documents API → Ragie handles chunking/indexing/retrieval.**
 
-### Re: `corky ragie` command tree (HEAD)
+### Re: `corky ragie` command tree
 
 Yes, makes sense as the integration surface:
 - `corky ragie push` — push conversations/contacts to Ragie (incremental via manifest dates)
@@ -64,7 +64,7 @@ Yes, makes sense as the integration surface:
 - `corky ragie status` — account info, document counts, index health
 
 This keeps Ragie as an optional module behind a feature flag rather than baking it into core sync. For Judith's project, a separate config profile could use Ragie as the primary store instead of local files.
-<!-- agent:boundary:e6c64fac -->
+<!-- agent:boundary:34aca0d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

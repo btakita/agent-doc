@@ -630,13 +630,21 @@ Instead of copying to the clipboard, prompt to save to a file.
 Updated — now triggers a file download instead of clipboard copy. Filename format: `20260326-linkedin-7442608257254236160.md` (date + activity URN). The browser's save dialog will prompt for location.
 
 Reload and re-drag the bookmarklet.
-<!-- agent:boundary:ba87cb00 -->
+The filename should have the post's author in it, after `linkedin-`.
+The author's slug.
+
+### Re: author slug in filename (HEAD)
+
+Updated. Filename now includes the author's slug: `20260326-linkedin-bob-remeika-7442608257254236160.md`. The filename uses the real author name (for your file organization), while the markdown content inside remains anonymized with fake names.
+
+Reload and re-drag.
+<!-- agent:boundary:d36c062c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Retest LinkedIn bookmarklet (const fix + file save) — awaiting test
+- Retest LinkedIn bookmarklet — awaiting test
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

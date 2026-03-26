@@ -731,7 +731,7 @@ Sounds good — leaving the LinkedIn exchange as-is. It closed on a great note.
 I think the message to Bob should change a bit since over 1 day has passed.
 Please revise a bit.
 
-### Re: Revise reply for 1-day delay (HEAD)
+### Re: Revise reply for 1-day delay
 
 Good call — the original draft was tuned for an immediate reply. Here's a revised version that reads naturally after a day:
 
@@ -744,7 +744,7 @@ Good call — the original draft was tuned for an immediate reply. Here's a revi
 - Clean close with a soft reconnect offer
 
 Want me to post this as a LinkedIn comment, or do you want to tweak further first?
-<!-- agent:boundary:95e1e59f -->
+<!-- agent:boundary:9dd082e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

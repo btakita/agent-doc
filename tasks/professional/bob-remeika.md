@@ -577,13 +577,27 @@ Updated — now uses a pool of 20 gender-neutral fake names instead of "Person A
 Alex Morgan, Jordan Lee, Sam Chen, Riley Park, Casey Kim, Quinn Davis, Avery Brooks, Drew Santos, Jamie Walsh, Taylor Reed, Morgan Scott, Blake Turner, Reese Grant, Hayden Cole, Ellis Hart, Rowan Pierce, Sage Ellis, Jules Frost, Finley Shaw, Kit Palmer
 
 Same person always gets the same fake name within a single scrape. Reload the install page to update.
-<!-- agent:boundary:64c05f52 -->
+
+Getting some issues with the bookmarklet.
+![img_2.png](img_2.png)
+
+### Re: bookmarklet errors (HEAD)
+
+Those errors are likely LinkedIn's CSP blocking the `javascript:` URI bookmarklet. Updated the install page with two options:
+
+1. **Bookmarklet** (original) — works if browser allows it
+2. **Console paste** — click "Copy Script to Clipboard" on the install page, open DevTools (F12) → Console, paste and Enter. Always works, bypasses CSP.
+
+Reload: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
+
+Try the console paste method. If the DOM selectors are wrong (no content scraped or wrong content), paste the output here and I'll fix the selectors.
+<!-- agent:boundary:a17b598c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Test LinkedIn bookmarklet with fake names — verify output
+- Debug LinkedIn bookmarklet DOM selectors — may need selector updates after testing
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

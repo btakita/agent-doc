@@ -1366,7 +1366,7 @@ The eval-runner pending items were removed from this document's `&lt;!-- agent:p
 
 The JB plugin prompt diaolg does not work. Why?
 ![2026-03-26_15-02.png](../../../../../Pictures/agent-loop/2026-03-26_15-02.png)
-### Re: JB plugin prompt dialog not working (HEAD)
+### Re: JB plugin prompt dialog not working
 
 The plugin code is correct — `AgentDocPopupAction` is registered on `alt SPACE` in `plugin.xml`. The issue is **Linux window manager keybinding conflict**.
 
@@ -1378,7 +1378,7 @@ On most Linux DEs (KDE, GNOME, Hyprland, i3), `Alt+Space` opens the window opera
 3. Use the direct shortcuts that already work: `Ctrl+Shift+Alt+A/J/C/L`
 
 We could also change the default keybinding in the plugin to something more Linux-friendly (e.g., `Alt+Semicolon` or `Ctrl+Alt+Space`).
-<!-- agent:boundary:56b32d8a -->
+<!-- agent:boundary:160a0838 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -539,7 +539,7 @@ Shows a small overlay notification during the process ("Expanding comments... 3 
 
 build
 
-### Re: build bookmarklet (HEAD)
+### Re: build bookmarklet
 
 Built and saved to `src/corky/assets/linkedin-post-bookmarklet.html`.
 
@@ -554,7 +554,7 @@ Built and saved to `src/corky/assets/linkedin-post-bookmarklet.html`.
 - Blue notification badge shows progress
 
 Test it on Bob's post: https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
-<!-- agent:boundary:91c4955a -->
+<!-- agent:boundary:6a27a70d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

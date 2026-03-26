@@ -414,7 +414,7 @@ Here's your comprehensive interview prep for tomorrow morning.
 
 ---
 
-## Company Deep Dive (HEAD)
+## Company Deep Dive
 
 **ECI Software Solutions** — 30-year-old cloud ERP provider for SMBs. 25,000+ customers, 90+ countries, ~2,100 employees, HQ in Westlake/Fort Worth, TX. Backed by Leonard Green & Partners (majority, Feb 2025), Apax Partners (minority co-control), and GIC (Singapore sovereign wealth fund).
 
@@ -426,7 +426,7 @@ Here's your comprehensive interview prep for tomorrow morning.
 
 ---
 
-## The AI Strategy (Critical Context) (HEAD)
+## The AI Strategy (Critical Context)
 
 ECI has a **three-phase AI roadmap:**
 
@@ -447,7 +447,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## CTO Jack Wood (Your Ultimate Audience) (HEAD)
+## CTO Jack Wood (Your Ultimate Audience)
 
 **Appointed March 3, 2026** — hired specifically to "scale practical AI innovation."
 
@@ -463,7 +463,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## Justin Caird (Tomorrow's Call) (HEAD)
+## Justin Caird (Tomorrow's Call)
 
 **Role:** Sr. Technical Recruiter & Co-Owner at ProSearch (Portland, ME). Working directly with CTO Jack Wood.
 
@@ -496,7 +496,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## Your Talking Points (Mapped to Their Needs) (HEAD)
+## Your Talking Points (Mapped to Their Needs)
 
 ### "Agents that write and maintain code" → agent-doc
 - agent-doc IS this. Production tool where AI agents write and maintain code through markdown-as-interface with CRDT-based human-agent co-editing.
@@ -525,7 +525,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## Questions You Should Ask (HEAD)
+## Questions You Should Ask
 
 1. **"How is Jack thinking about the AI Foundry team structure? Centralized platform team or embedded across verticals?"** — Shows org design understanding.
 
@@ -539,7 +539,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## Potential Concerns to Address (HEAD)
+## Potential Concerns to Address
 
 | Concern | Your Response |
 |---------|---------------|
@@ -549,7 +549,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 
 ---
 
-## Day-of Checklist (HEAD)
+## Day-of Checklist
 
 - [ ] Have resume PDF open: [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-eci-solutions.pdf)
 - [ ] Have agent-doc demo ready to screen-share if asked
@@ -557,7 +557,7 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 - [ ] Know Jack Wood's background (JPL, Bell Labs, Wayfair, Symetra)
 - [ ] Prepare 2-minute pitch: "Here's what I've been building and why it maps to what ECI needs"
 - [ ] Have salary range ready
-<!-- agent:boundary:b5e34693 -->
+<!-- agent:boundary:de343c7b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

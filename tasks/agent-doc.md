@@ -990,11 +990,23 @@ Please do.
 **Prevention:** The IPC timeout was caused by me using `--force-disk` during plugin reinstall. Now that the plugin is stable and IPC is working, this shouldn't recur. The `--force-disk` flag should only be used as a last resort when the plugin is genuinely unavailable.
 
 Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
+Go:
+- [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
+- [ ] Commit plugin changes in agent-doc submodule
+
 
 ### Re: ragie.md cleanup
 
 Done. Removed the 2 duplicate response blocks from `tasks/ragie.md` (kept the first at line 500, deleted copies at 535 and 566). Committed.
-<!-- agent:boundary:a1ab40ed -->
+
+### Re: cleanup + commit (HEAD)
+
+Done:
+1. Deleted `AgentDocActionPromoter.kt` (unused — ActionPromoter removed)
+2. `AgentDocIntentions.kt` was never committed (untracked) — already deleted
+3. Committed in submodule: `c043cb0 fix: plugin v0.2.25 — mixed-layout sync, Alt+Space popup, remove ActionPromoter`
+4. Updated parent submodule pointer: `7d46d7e`
+<!-- agent:boundary:82e20279 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1004,8 +1016,8 @@ Done. Removed the 2 duplicate response blocks from `tasks/ragie.md` (kept the fi
 - [x] Alt+Enter/Alt+Space separation — verified working
 - [x] Mixed-layout fix — verified working
 - [x] Clean up ragie.md duplicate responses — done
-- [ ] Clean up unused files: `AgentDocIntentions.kt`, `AgentDocActionPromoter.kt`
-- [ ] Commit plugin changes in agent-doc submodule
+- [x] Clean up unused files — deleted `AgentDocActionPromoter.kt`
+- [x] Commit plugin changes in agent-doc submodule — done (`c043cb0`)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

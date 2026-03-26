@@ -991,10 +991,10 @@ Please do.
 
 Mixed-layout fix is confirmed working. Ready for any cleanup or next items.
 
-### Re: ragie.md cleanup (HEAD)
+### Re: ragie.md cleanup
 
 Done. Removed the 2 duplicate response blocks from `tasks/ragie.md` (kept the first at line 500, deleted copies at 535 and 566). Committed.
-<!-- agent:boundary:45d57fd5 -->
+<!-- agent:boundary:a1ab40ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

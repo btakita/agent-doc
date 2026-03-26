@@ -595,7 +595,7 @@ Same with ragie. Should we have a ragie-harness project?
 Should I have dedicated packages for the SKILL.md with the potential to add deterministic binary logic in the future?
 Or should we just distribute the SKILL using Claude Code's marketplace?
 
-### Re: Distribution strategy for skills (HEAD)
+### Re: Distribution strategy for skills
 
 Addressing all five questions:
 
@@ -617,7 +617,7 @@ Addressing all five questions:
 - **Bridge:** Crate-based distribution (`cargo install`) works today
 
 **Recommendation:** Create `sift-harness` as a minimal repo with just a SKILL.md for now. If you later need binary logic (auto-install, output parsing), add Cargo.toml. When the Claude Code marketplace launches, publish there. The repo serves as the source of truth for all distribution channels.
-<!-- agent:boundary:a4fd6178 -->
+<!-- agent:boundary:fe664b65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

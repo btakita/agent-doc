@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 375061ae-6496-4ab9-a303-2f0b0da4f61a
-agent_doc_format: template
+agent_doc_mode: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
@@ -64,8 +64,7 @@ Per-contact embeddings stored in `mail/contacts/*/voice.bin` (~1KB). On future c
 
 Ron is a contact (`mail/contacts/ron-berkes/`). Emails `rberkes@gmail.com` and `berkes06@yahoo.com` in correspondence filter. Topic: `mail/topics/manufacturing-china/`.
 
-## Assistant
-
+<!-- agent:exchange -->
 **Compacted.** 622 lines → structured summary preserving all decisions, outcomes, and technical details.
 
 **Status update:** The _01 transcription is **done**. Output:
@@ -78,6 +77,7 @@ All 4 old transcript artifacts were deleted earlier. Current recordings director
 
 **Next up for this workstream:** Voice fingerprint implementation (step 2 of rollout plan) and reviewing the _01 transcript for accuracy corrections.
 
-## User
+---
 
-Please convert this document to template mode using the agent:exchange component.
+Converted to template mode. The Summary section is static content; the `agent:exchange` component below holds the conversation. Edit inline here and I'll respond with patch blocks.
+<!-- /agent:exchange -->

@@ -516,7 +516,7 @@ Both the symlink and cargo-installed binary are working.
 
 release chromium-bridge
 Create an ins
-### Re: Release chromium-bridge (HEAD)
+### Re: Release chromium-bridge
 
 Published to crates.io: `chromium-bridge v0.1.0`
 
@@ -527,7 +527,7 @@ $ cargo install chromium-bridge
 Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains).
 
 **Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
-<!-- agent:boundary:31b10698 -->
+<!-- agent:boundary:53b02374 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

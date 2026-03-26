@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-LinkedIn automation via DevTools MCP documented. Ready to set up.
+Brave remote debugging config documented. Ready to apply.
 <!-- /agent:status -->
 
 ## Exchange
@@ -120,12 +120,35 @@ LinkedIn requires login. Best approach: attach to your already-authenticated Bra
 This gives the agent your existing LinkedIn session (cookies, auth, everything).
 
 **Caution:** LinkedIn is mild about reading/browsing automation but aggressive about bulk actions (mass messaging, connection scraping). Keep interactions human-paced.
-<!-- agent:boundary:a3562b9d -->
+
+How can I have brave start the --remote-debugging-port by default?
+
+### Re: Brave remote debugging by default (HEAD)
+
+Brave reads `~/.config/brave-flags.conf` for extra command-line flags. Just add the flag there:
+
+```bash
+echo "--remote-debugging-port=9222" >> ~/.config/brave-flags.conf
+```
+
+That's it. Every Brave launch (from desktop, terminal, anywhere) will include `--remote-debugging-port=9222`. The file is one flag per line.
+
+**Verify it works:** After restarting Brave, check:
+```bash
+curl -s http://127.0.0.1:9222/json/version | python3 -m json.tool
+```
+
+If you see a JSON response with `Browser`, `webSocketDebuggerUrl`, etc., it's working.
+
+**Security note:** Port 9222 is only bound to localhost (`127.0.0.1`) by default, so only local processes can connect. No external exposure. But any local process (including malware) could control your browser through this port. If concerned, you could use a non-standard port (e.g., `--remote-debugging-port=9333`).
+
+Want me to set this up now?
+<!-- agent:boundary:1b8f9774 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Install chrome-devtools-mcp for Claude Code — if approved
-- Set up Brave remote debugging launch shortcut — if wanted
+- Set up brave-flags.conf with remote debugging port — awaiting approval
+- Install chrome-devtools-mcp for Claude Code — awaiting approval
 <!-- /agent:pending -->

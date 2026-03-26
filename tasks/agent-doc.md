@@ -912,7 +912,7 @@ This works. Increment the plugin version.
 Just had an external update while I was typing the line above.
 Please diagnose. Can we fix this issue?
 
-### Re: Alt+Space works + external update issue (HEAD)
+### Re: Alt+Space works + external update issue
 
 **Plugin version bumped to 0.2.25.** Built at:
 ```
@@ -928,7 +928,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.25.z
 - No reload disruption while typing
 
 The external update should not recur now that IPC is working.
-<!-- agent:boundary:64fa48fe -->
+<!-- agent:boundary:b06b116f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

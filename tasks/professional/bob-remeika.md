@@ -473,22 +473,36 @@ Send the v10 DM as-is (show of strength). Demonstrate the Ragie integration in C
 That's ambiguous enough to cover collaboration, consulting, *or* employment without asking for any of them.
 
 **Bottom line:** Show of strength + demonstrated value has higher expected income than a direct ask. The direct ask has a binary outcome (yes/no) with no fallback. The strength play keeps all doors open and lets Bob be the one to escalate.
-<!-- agent:boundary:1e8952ef -->
+
+Before I send the v10 message, Bob responded to my comment:
+
+https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
+
+> It really was. I'm enjoying your watching you work in the open. Thanks for sharing!
+
+Can Corky read LinkedIn post comments? Do we need to implement this as a feature?
+
+### Re: Bob's LinkedIn response & Corky LinkedIn comments (HEAD)
+
+Bob's response is a warm signal — he's engaged and watching your content. Good momentum before the v10 message.
+
+**Re: Corky reading LinkedIn comments:**
+
+No, Corky cannot currently read LinkedIn post comments. LinkedIn's API is heavily restricted:
+
+1. **LinkedIn API limitations** — The Marketing API can read comments on company page posts, but personal post comments require the author's own OAuth token. Third-party apps can't read comments on others' posts without their authorization.
+2. **Scraping is impractical** — LinkedIn actively blocks scraping and rate-limits aggressively. Browser automation breaks frequently with their anti-bot measures.
+3. **Pragmatic approach** — Copy-paste into the document (like you just did) is the most reliable method for occasional interactions.
+
+**Should we build it?** No — the ROI is low. LinkedIn comment interactions are infrequent enough that manual paste works fine. The engineering effort to maintain a LinkedIn API integration would be significant relative to the value.
+
+What you're already doing (pasting the comment with the URL) is the best pattern — it captures context with provenance.
+<!-- agent:boundary:13d6d78b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Post comment reply on LinkedIn activity
-- [x] Read Bob's reply — "enjoying watching you work in the open"
-- [x] Update Bob's contact with personal email
-- [ ] Send LinkedIn DM to Bob (v10 ready — show of strength approach)
-- [ ] Complete Ragie sign-up with RAG use case
-- [ ] Demo Ragie integration in Corky to Bob (~2 days)
-- [ ] Ask Bob about Ragie multi-tenancy / data partitioning options
-- [ ] Evaluate Ragie vs Sift per-client (pricing, data residency, ops)
-- [ ] Dockerize Sift for Fly.io deployment
-- [ ] Deploy Sift to Fly.io for client-facing access
-- [ ] Design client-tagged architecture for multi-tenant Sift deployment
-- [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
+- LinkedIn DM (v10) to Bob — ready to send, awaiting user go-ahead
+- Sift deployment recommendation documented — awaiting Bob's response
 <!-- /agent:pending -->

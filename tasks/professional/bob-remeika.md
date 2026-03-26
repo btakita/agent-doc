@@ -860,7 +860,7 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 
 Perhaps this can be in a YouTube video when I work with Judith?
 
-### Re: YouTube demo with Judith's project (HEAD)
+### Re: YouTube demo with Judith's project
 
 Great idea. A live coding session showing Ragie integration in a real client workflow is the strongest possible follow-up to this DM. Benefits:
 
@@ -878,7 +878,7 @@ Great idea. A live coding session showing Ragie integration in a real client wor
 4. Send follow-up to Bob with the video link
 
 v13 is ready to send as-is. The YouTube plan strengthens the follow-up, not the initial message.
-<!-- agent:boundary:05b97918 -->
+<!-- agent:boundary:2d646611 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

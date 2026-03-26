@@ -591,13 +591,32 @@ Those errors are likely LinkedIn's CSP blocking the `javascript:` URI bookmarkle
 Reload: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
 
 Try the console paste method. If the DOM selectors are wrong (no content scraped or wrong content), paste the output here and I'll fix the selectors.
-<!-- agent:boundary:0c51c17f -->
+
+I have another bookmarklet that works with my messages. Can LinkedIn even block it? The bookmarklet should not do anything that can be blocked. It only needs to extract the data.
+
+`javascript:void(function(){const msgs=[];document.querySelectorAll('.msg-s-message-list-content .msg-s-message-list__event').forEach(li=>{const nameEl=li.querySelector('.msg-s-message-group__name');const timeEl=li.querySelector('.msg-s-message-group__timestamp');const bodyEl=li.querySelector('.msg-s-event-listitem__body');if(!bodyEl)return;const name=nameEl?nameEl.textContent.trim():%27Unknown%27;const time=timeEl?timeEl.textContent.trim():%27%27;const text=bodyEl.innerText.trim();if(text)msgs.push(%27[%27+time+%27] %27+name+%27:\n%27+text)});const headerEl=document.querySelector(%27.msg-overlay-bubble-header__title a,.msg-thread__link-to-profile,.msg-entity-lockup__entity-title%27);let contactName=%27Unknown%27;if(headerEl){const lines=headerEl.textContent.split(%27\n%27).map(s=>s.trim()).filter(Boolean);contactName=lines[0]||%27Unknown%27}const slug=contactName.replace(/[^a-zA-Z0-9]+/g,%27-%27).toLowerCase().replace(/^-|-$/g,%27%27);const d=new Date();const ymd=%27%27+d.getFullYear()+String(d.getMonth()+1).padStart(2,%270%27)+String(d.getDate()).padStart(2,%270%27);const content=%27# LinkedIn Conversation with '+contactName+'\nExported: '+d.toISOString()+'\n\n'+msgs.join('\n\n');const blob=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=ymd+'-linkedin-'+slug+'.txt';a.click()})()`
+
+### Re: bookmarklet execution & debugging (HEAD)
+
+You're right — if your messaging bookmarklet works, this one should too. Bookmarklets run as user-initiated inline scripts; CSP can't block `querySelector` and `textContent` calls. The errors in the screenshot were pre-existing LinkedIn page errors.
+
+The real issue was likely **silent failure** — selectors didn't match anything, but the bookmarklet produced empty output without telling you.
+
+**Updated the bookmarklet with diagnostic logging.** Now logs everything to the browser console with `[li2md]` prefix:
+- Which CSS selectors matched (or didn't)
+- Author name found, body text length
+- Number of comment elements found
+- Total output character count
+- Any errors
+
+**To debug:** Open DevTools Console → click bookmarklet → look for `[li2md]` lines. Paste the console output here if selectors are wrong and I'll fix them for the current LinkedIn DOM.
+<!-- agent:boundary:290929e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Debug LinkedIn bookmarklet DOM selectors — may need selector updates after testing
+- Debug LinkedIn bookmarklet with console output — awaiting test results
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

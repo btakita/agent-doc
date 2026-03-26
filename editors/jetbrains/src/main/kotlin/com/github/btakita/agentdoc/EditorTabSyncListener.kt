@@ -95,12 +95,17 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     val windowArgs = listOf("--window", windowId ?: "agent-doc")
                     // Always use sync --col (never focus) so that unwanted panes
                     // are broken out and the entire window layout is managed.
-                    val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {
-                        // 2D layout
-                        val colArgs = editorLayout.columns.flatMap { col ->
+                    val mdColumns = editorLayout?.columns?.filter { it.files.isNotEmpty() }
+                    val cmd = if (mdColumns != null && mdColumns.size > 1) {
+                        // Full 2D layout — all columns have .md files
+                        val colArgs = mdColumns.flatMap { col ->
                             listOf("--col", col.files.joinToString(","))
                         }
                         listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs
+                    } else if (editorLayout != null && editorLayout.columns.size > 1 && (mdColumns?.size ?: 0) < editorLayout.columns.size) {
+                        // Mixed split: some columns have non-.md files.
+                        // Don't reorganize tmux layout — just focus the active file's pane.
+                        listOf(agentDoc, "focus", activeFile)
                     } else {
                         // Single file or flat layout
                         val colArg = visibleMdFiles.joinToString(",")

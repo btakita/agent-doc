@@ -17,7 +17,6 @@
         <notificationGroup id="Agent Doc"
                            displayType="BALLOON"
                            isLogByDefault="true"/>
-        <actionPromoter implementation="com.github.btakita.agentdoc.AgentDocActionPromoter"/>
         <completion.contributor language="any"
                                 implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>
     </extensions>
@@ -34,7 +33,7 @@
                 class="com.github.btakita.agentdoc.AgentDocPopupAction"
                 text="Agent Doc Actions"
                 description="Show Agent Doc actions for the current markdown file">
-            <keyboard-shortcut first-keystroke="alt ENTER" keymap="$default"/>
+            <keyboard-shortcut first-keystroke="alt SPACE" keymap="$default"/>
         </action>
         <action id="AgentDoc.Submit"
                 class="com.github.btakita.agentdoc.SubmitAction"

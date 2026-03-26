@@ -329,7 +329,7 @@ What do you think?
 ### Re: Restart with --dangerously-skip-permissions
 
 I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
-### Re: browser-bridge implies too broad (HEAD)
+### Re: browser-bridge implies too broad
 
 Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't provide. Narrower names that scope to Chromium-based browsers:
 
@@ -344,7 +344,7 @@ Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't p
 **Updated pick: `chromium-bridge`**
 
 It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreach (no Firefox/Safari implication), and still pairs well with `.claude/skills/browser/` (the skill stays browser-generic for potential future WebDriver/Playwright additions, while the CLI is specifically CDP/Chromium).
-<!-- agent:boundary:119a98f4 -->
+<!-- agent:boundary:bf7f4be9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

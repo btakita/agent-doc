@@ -906,7 +906,7 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 
 Let me know once sent and I'll update the doc status.
 
-### Re: CDP timeout details (HEAD)
+### Re: CDP timeout details
 
 The timeout happens at `Network.enable` — the very first CDP protocol handshake. The MCP server sends this method via WebSocket to subscribe to network events before any page interaction. The browser isn't responding in time.
 
@@ -926,7 +926,7 @@ The timeout happens at `Network.enable` — the very first CDP protocol handshak
 - Restart Brave to reset the CDP state
 
 Want me to check the MCP server config for the timeout setting?
-<!-- agent:boundary:eb616916 -->
+<!-- agent:boundary:f1b02eac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -850,14 +850,31 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.24.z
 (or the signed variant: `agent-doc-jetbrains-0.2.24-signed.zip`)
 
 Install via: IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..." → select the zip. Since we added new classes (`AgentDocIntentions.kt`) and removed the ActionPromoter registration, do a full uninstall → restart → install → restart cycle.
-<!-- agent:boundary:b4b20c19 -->
+
+The "Replace with" hotkey Alt+Shift+Enter does not work. Instead the popup closes without any action. Clicking on the action link does work.
+Please diagnose.
+![img_9.png](img_9.png)
+
+### Re: Alt+Shift+Enter not applying typo fix (HEAD)
+
+Two potential issues:
+
+**1. Priority ordering:** Our intentions were at default priority, possibly sorting BEFORE quick-fixes in the intention list. Alt+Shift+Enter applies the first item — if that's "Run Agent Doc" instead of "Replace with 'effectively'", it would fire our action (which does nothing visible since there's no routing context) and close the popup.
+
+**Fix applied:** Added `LowPriorityAction` marker interface to `AgentDocIntention`. This ensures agent-doc intentions sort AFTER all quick-fixes and inspections. The typo fix will now be first in the list.
+
+**2. Diagnosis question:** Does Alt+Shift+Enter work for typo fixes in `.md` files when the Agent Doc plugin is **completely disabled**? (Settings → Plugins → uncheck Agent Doc → restart → test). If it doesn't work even without our plugin, it's a pre-existing IDEA/Markdown issue and we'd need a different approach entirely.
+
+Rebuilt `0.2.24` with the `LowPriorityAction` fix. Same zip path — reinstall and test.
+<!-- agent:boundary:ab7a9b1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
-- [ ] Test IntentionAction approach with IDEA — install `agent-doc-jetbrains-0.2.24.zip` and verify Alt+Enter
+- [ ] Test LowPriorityAction fix — reinstall plugin, verify Alt+Shift+Enter applies typo fix
+- [ ] If still broken: test with plugin disabled to isolate IDEA vs plugin issue
 - [ ] Delete `AgentDocPopupAction.kt` and `AgentDocActionPromoter.kt` after confirming intentions work
 <!-- /agent:pending -->
 

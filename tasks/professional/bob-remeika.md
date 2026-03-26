@@ -238,7 +238,7 @@ It would be awesome to get a job...but it's aggressive to ask. If you
 
 Please review tasks/ragie.md.
 We should mention that I'm working on intergrating Ragie into corky. Should we also mention that I will be using it with Judith's project?
-### Re: Ragie Integration Mention & Job Angle (v9) (HEAD)
+### Re: Ragie Integration Mention & Job Angle (v9)
 
 **Reviewed tasks/ragie.md.** You've done solid architecture work there — Sift for local, Ragie for shared/collaborative contexts, with a unified `corky search` abstraction.
 
@@ -263,7 +263,7 @@ Keep it light though — no need to name Judith or over-explain. Just enough to 
 - Slightly restructured the Ragie paragraph for flow
 
 **Note:** Your first line "It would be awesome to get a job...but it's aggressive to ask. If you" was cut off mid-sentence. If you want to finish that thought, I can work it into the strategy. The current approach is: let the integration work speak for itself, and let Bob be the one to suggest deeper involvement.
-<!-- agent:boundary:99c6e9a9 -->
+<!-- agent:boundary:8f698b12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Discussing browser skill architecture. Setup complete, exploring workflow layer.
+Browser skill architecture discussion. Recommending SKILL.md-first approach, CLI later if needed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -211,7 +211,43 @@ So if agent-doc needs to drive the browser during a session, it doesn't call a b
 - Common `evaluate_script` snippets (like the bookmarklet JS)
 
 Want me to scaffold `.claude/skills/browser/SKILL.md`?
-<!-- agent:boundary:54b36027 -->
+
+Should we have a rust library to distribute this skill? Are there deterministic cli functions that can be called, such as setup and other useful deterministic operations?
+### Re: Rust CLI for browser skill?
+
+**Probably not yet.** Here's the reasoning:
+
+**agent-doc needed a CLI because** it manages complex state — snapshots, diffs, CRDT merges, git staging, IPC. Those operations are deterministic, performance-sensitive, and error-prone in shell.
+
+**Browser operations are simpler.** The CDP HTTP API at `127.0.0.1:9222` is already CLI-accessible:
+
+```bash
+# List open tabs (HEAD)
+curl -s http://127.0.0.1:9222/json/list
+
+# Check health (HEAD)
+curl -s http://127.0.0.1:9222/json/version
+
+# Get debug WebSocket URL (HEAD)
+curl -s http://127.0.0.1:9222/json/version | jq -r .webSocketDebuggerUrl
+```
+
+**Deterministic operations a CLI *could* handle:**
+| Command | What it does |
+|---|---|
+| `browser setup` | Create brave-flags.conf, install MCP, verify port |
+| `browser check` | Health check — is debugging port responding? |
+| `browser list` | List open tabs with URLs |
+| `browser screenshot <url>` | Headless screenshot (no LLM needed) |
+
+But these are all thin wrappers around `curl` + file writes. The ROI on a Rust crate is low right now.
+
+**Recommendation:** Start with **SKILL.md only**. The skill handles orchestration (LLM-driven workflows), and shell commands handle the deterministic parts inline. If you find yourself repeating the same 5+ line shell sequences across sessions, *then* extract a CLI.
+
+The pattern: **SKILL.md first → shell helpers → CLI crate** (only if complexity warrants it).
+
+Want me to scaffold the SKILL.md now?
+<!-- agent:boundary:614f14a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

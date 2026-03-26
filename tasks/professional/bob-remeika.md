@@ -536,13 +536,31 @@ Yes — the bookmarklet can auto-expand before scraping:
 4. Scrape the fully-expanded comment tree → format as markdown → copy to clipboard
 
 Shows a small overlay notification during the process ("Expanding comments... 3 found" → "Done! Copied to clipboard"). Still bookmarklet-sized, no browser extension needed. Ready to build on your go.
-<!-- agent:boundary:253cfc17 -->
+
+build
+
+### Re: build bookmarklet (HEAD)
+
+Built and saved to `src/corky/assets/linkedin-post-bookmarklet.html`.
+
+**Install:** Open file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html and drag "LinkedIn to MD" to your bookmark bar.
+
+**Features:**
+- Auto-expands all "Load more comments" / replies (up to 20 rounds with progress indicator)
+- Expands truncated "see more" text
+- Scrapes post: author, headline, timestamp, body, URN
+- Scrapes comments: author, timestamp, text (with deduplication)
+- Copies markdown to clipboard (fallback: opens in new tab)
+- Blue notification badge shows progress
+
+Test it on Bob's post: https://www.linkedin.com/feed/update/urn:li:activity:7442608257254236160
+<!-- agent:boundary:91c4955a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn post bookmarklet (with auto-expand) — ready to build if approved
+- Test LinkedIn bookmarklet on Bob's post — verify output format
 - LinkedIn DM (v10) to Bob — ready to send, awaiting user go-ahead
 - Sift deployment recommendation documented — awaiting Bob's response
 <!-- /agent:pending -->

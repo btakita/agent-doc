@@ -395,23 +395,9 @@ fn run_with_options(
                 })
             }
             None => {
-                // Auto-init: write session UUID so this file becomes managed.
-                // This enables placeholder panes for unclaimed files in multi-column layouts.
-                if let Ok((updated, session_id)) = frontmatter::ensure_session(&content) {
-                    if updated != content {
-                        let _ = std::fs::write(path, &updated);
-                        eprintln!("[sync] auto-init: generated session UUID for {}", path.display());
-                    }
-                    session_files
-                        .borrow_mut()
-                        .push((session_id.clone(), path.to_path_buf()));
-                    Some(FileResolution::Registered {
-                        key: session_id,
-                        tmux_session: None,
-                    })
-                } else {
-                    Some(FileResolution::Unmanaged)
-                }
+                // No session UUID → not an agent document. Only `claim` should
+                // generate session UUIDs and add frontmatter.
+                Some(FileResolution::Unmanaged)
             }
         }
     };

@@ -570,14 +570,14 @@ Updated the bookmarklet. All names are now replaced with "Person A", "Person B",
 
 Reload the install page to get the updated bookmarklet: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
 
-### Re: fake names (HEAD)
+### Re: fake names
 
 Updated — now uses a pool of 20 gender-neutral fake names instead of "Person A/B/C":
 
 Alex Morgan, Jordan Lee, Sam Chen, Riley Park, Casey Kim, Quinn Davis, Avery Brooks, Drew Santos, Jamie Walsh, Taylor Reed, Morgan Scott, Blake Turner, Reese Grant, Hayden Cole, Ellis Hart, Rowan Pierce, Sage Ellis, Jules Frost, Finley Shaw, Kit Palmer
 
 Same person always gets the same fake name within a single scrape. Reload the install page to update.
-<!-- agent:boundary:b8df8b95 -->
+<!-- agent:boundary:64c05f52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

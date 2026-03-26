@@ -1352,7 +1352,7 @@ ANTHROPIC_API_KEY="$(pass ...)" eval-runner run evals/agent-doc/diff-interpretat
 **Fixed:** `cases.yaml` line 409 had a YAML quoting issue (`"Yes"` at start of list item). Wrapped in single quotes.
 Let's create a new task for `tasks/software/eval-runner.md`.
 Transfer all relevant context from this file related to eval-runner.
-### Re: Create eval-runner task file (HEAD)
+### Re: Create eval-runner task file
 
 Created `tasks/software/eval-runner.md` with all eval-runner context transferred:
 
@@ -1363,7 +1363,7 @@ Created `tasks/software/eval-runner.md` with all eval-runner context transferred
 - Future todo items (HTML/SVG output, Promptfoo/Inspect AI export, parallel execution)
 
 The eval-runner pending items were removed from this document's `&lt;!-- agent:pending --&gt;` since they now live in the dedicated task file.
-<!-- agent:boundary:01ba6ea4 -->
+<!-- agent:boundary:97c371ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

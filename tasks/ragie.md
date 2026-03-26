@@ -241,7 +241,7 @@ index_path = ".corky/sift-index"
 type = "ragie"
 api_key_pass = "ragie/api_key"
 
-# Future backends — just add config, no CLI changes (HEAD)
+# Future backends — just add config, no CLI changes
 [search.backends.pinecone]
 type = "pinecone"
 api_key_pass = "pinecone/api_key"
@@ -274,7 +274,7 @@ corky ragie push [--full]                # Backend-specific management
 corky ragie sync
 corky ragie status
 ```
-<!-- agent:boundary:3dffe603 -->
+<!-- agent:boundary:e87d1eb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

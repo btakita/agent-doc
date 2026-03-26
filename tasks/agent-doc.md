@@ -780,13 +780,24 @@ This means:
 - Multi-column placeholder panes won't appear for non-agent files (which is the right behavior)
 
 Shall I implement this?
-<!-- agent:boundary:904dc973 -->
+yes
+
+### Re: implement sync fix (HEAD)
+
+Done. Changed `sync.rs` line 397 — the `None` arm now returns `FileResolution::Unmanaged` instead of calling `ensure_session()`. 
+
+- `make check` passes (clippy + 38 tests)
+- Release build complete (binary updated via symlink)
+- Committed in submodule: `7dffd2f fix: sync no longer auto-inits frontmatter on unclaimed files`
+
+New markdown files will no longer get frontmatter injected by sync. Only `agent-doc claim` adds session UUIDs.
+<!-- agent:boundary:785ad620 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Make sync skip `ensure_session()` for unclaimed files (return `Unmanaged` instead of auto-init)
+- [x] Make sync skip `ensure_session()` for unclaimed files — done (`7dffd2f`)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

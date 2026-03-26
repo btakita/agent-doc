@@ -180,7 +180,7 @@ All setup is complete.
 
 What SKILL.md do you recommend we should use to drive brave? agent-doc?
 just a personal agent-loop skill? If that is the case, how can libraries such as agent-doc identify there is a skill for driving the browser?
-### Re: Skill architecture for browser driving (HEAD)
+### Re: Skill architecture for browser driving
 
 **Not agent-doc** — agent-doc is a document session tool. Wrong scope.
 
@@ -211,7 +211,7 @@ So if agent-doc needs to drive the browser during a session, it doesn't call a b
 - Common `evaluate_script` snippets (like the bookmarklet JS)
 
 Want me to scaffold `.claude/skills/browser/SKILL.md`?
-<!-- agent:boundary:eee05d42 -->
+<!-- agent:boundary:54b36027 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

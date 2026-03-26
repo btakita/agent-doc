@@ -1191,7 +1191,51 @@ The eval-runner crate would:
 This is essentially what promptfoo does but without the Node.js dependency — a thin Rust CLI that reads YAML, calls Claude, and grades. It's reusable across any project that defines eval cases in this format.
 
 Want me to scaffold the crate?
-<!-- agent:boundary:392592fe -->
+
+Not yet. Still discussing.
+To frame this, I want a cli tool that posts the eval results.
+PromptFoo has the format that seems to be a de facto standard.
+Inspect AI has many use cases of being used as a CLI tool for eval results. See https://github.com/UKGovernmentBEIS/inspect_evals
+
+### Re: eval results posting — Inspect AI vs Promptfoo (HEAD)
+
+Good framing. Here's how each handles the "post results" side:
+
+**Inspect AI results:**
+- Logs to `.eval` (binary) or `.json` files in `./logs/`
+- `inspect view` → local web viewer (port 7575, live updates)
+- `inspect view bundle` → static HTML site, deployable anywhere
+- Supports S3/Azure Blob for log storage
+- VS Code extension for browsing logs
+- No centralized cloud dashboard — results stay on your infra
+- Rich schema: sample-level transcripts, token stats, solver chains, scoring
+
+**Promptfoo results:**
+- `-o json|jsonl|yaml|csv|html` output formats
+- `promptfoo view` → local web UI
+- `promptfoo share` → uploads to promptfoo.app, generates private shareable URL
+- Cloud dashboard at promptfoo.app with org-level access
+- Self-hostable via `PROMPTFOO_REMOTE_API_BASE_URL`
+- Results stored in local SQLite
+
+**For a standalone Rust CLI:**
+
+| Target | Effort | Value |
+|--------|--------|-------|
+| **Promptfoo JSON** | Low — flat assertions, simple schema | Broad adoption, `promptfoo view` reads it, cloud sharing via promptfoo.app |
+| **Inspect AI JSON logs** | Medium — richer schema (samples, transcripts, scoring) | `inspect view` reads it, static HTML bundle, safety eval credibility |
+| **Both** | Medium — write both formats from same run data | Maximum interop |
+
+**My take:** Your eval cases are already declarative YAML (like promptfoo). A Rust CLI that:
+1. Reads your `cases.yaml`
+2. Runs evals (send to Claude API, LLM-grade)
+3. Writes results as **Promptfoo-compatible JSON** (for `promptfoo view` / sharing)
+4. Optionally writes **Inspect AI JSON logs** (for `inspect view` / static bundles)
+
+...gives you the best of both worlds without taking a dependency on either tool's runtime. You use the Rust CLI to run, and either viewer to inspect results.
+
+The `inspect_evals` repo you linked is their community eval library (HumanEval, MMLU, etc.) — the eval definitions are Python, but the log format is a JSON schema that any tool can produce.
+<!-- agent:boundary:081c51e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1200,7 +1244,7 @@ Want me to scaffold the crate?
 - [x] All sync/plugin fixes — released v0.26.3
 - [x] Code-driven listener registration — plugin v0.2.26
 - [ ] Install plugin v0.2.26 and verify hot-reload works
-- [ ] Scaffold eval-runner crate (standalone Rust CLI for LLM evals)
+- [ ] Design eval-runner crate: Rust CLI → Promptfoo JSON + Inspect AI JSON output
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

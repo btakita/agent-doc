@@ -104,7 +104,7 @@ Close but not quite — more like a **document database with a multi-layer searc
 
 Think: **"What if S3 understood your documents and could answer questions about them?"**
 
-### Re: tantivy vs Sift (HEAD)
+### Re: tantivy vs Sift
 
 Your question was truncated ("Are they ") — but here's the comparison:
 
@@ -122,7 +122,7 @@ Your question was truncated ("Are they ") — but here's the comparison:
 
 **Sift is effectively the local equivalent of Ragie** — hybrid keyword + semantic search, no cloud dependency, runs on demand. For Corky, this could be the best of both worlds: local-first with full semantic capabilities.
 
-### Re: Ragie vs local comparison (corrected) (HEAD)
+### Re: Ragie vs local comparison (corrected)
 
 You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full semantic). The correct local equivalents to Ragie are:
 
@@ -136,7 +136,7 @@ You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full 
 | **Best for** | Your personal workflow | Custom integration needs | Judith's team, Lucas collab |
 
 **Revised recommendation:** **Sift for local, Ragie for shared.** Sift gives you the semantic search locally that tantivy lacked. Ragie remains the right choice for collaborative contexts (Judith, Lucas) where non-developers need access.
-<!-- agent:boundary:71c4f812 -->
+<!-- agent:boundary:91ac99e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

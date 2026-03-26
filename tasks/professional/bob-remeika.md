@@ -633,12 +633,12 @@ Reload and re-drag the bookmarklet.
 The filename should have the post's author in it, after `linkedin-`.
 The author's slug.
 
-### Re: author slug in filename (HEAD)
+### Re: author slug in filename
 
 Updated. Filename now includes the author's slug: `20260326-linkedin-bob-remeika-7442608257254236160.md`. The filename uses the real author name (for your file organization), while the markdown content inside remains anonymized with fake names.
 
 Reload and re-drag.
-<!-- agent:boundary:d36c062c -->
+<!-- agent:boundary:ebc67865 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1022,7 +1022,7 @@ Committed in submodule: `5e4e839 docs: update SPEC.md for sync Unmanaged behavio
 Updated parent pointer: `9f4d105`
 Run any relevant evals for agent-doc and tmux-router.
 
-### Re: evals (HEAD)
+### Re: evals
 
 **Agent-doc evals:** Found `evals/agent-doc/diff-interpretation/cases.yaml` — 18 golden-answer test cases covering diff interpretation patterns (incomplete edits, comment stripping, truncation detection, multi-topic, corrections, etc.). These are case definitions only — no eval runner exists yet. The cases are relevant to our changes (sync behavior) but are focused on the SKILL.md's diff interpretation, not the Rust binary's sync logic.
 
@@ -1036,7 +1036,7 @@ To run the diff-interpretation evals, we'd need to build an eval runner that:
 3. LLM-grades the response against `expected_behavior`
 
 This is a separate project. The existing binary tests + manual verification cover our sync changes adequately.
-<!-- agent:boundary:208c3799 -->
+<!-- agent:boundary:8a015774 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

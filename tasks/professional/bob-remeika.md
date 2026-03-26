@@ -789,7 +789,7 @@ Ready to send?
 
 I think we should mention that I have a couple of client integrations that this will be useful for.
 
-### Re: Mention multiple client integrations (HEAD)
+### Re: Mention multiple client integrations
 
 Good instinct — "a couple of client integrations" is stronger than "a client project." It signals demand, not a one-off.
 
@@ -804,7 +804,7 @@ Good instinct — "a couple of client integrations" is stronger than "a client p
 **Only change from v11:** "I have a client project" → "I have a couple of client integrations" — shifts from single use case to pattern of adoption.
 
 Ready to send?
-<!-- agent:boundary:a33e93e1 -->
+<!-- agent:boundary:3f3869fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

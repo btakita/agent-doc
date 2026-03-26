@@ -533,7 +533,7 @@ Yes. Should we name it sift-skill, sift-agent, sift-harness, or another name?
 
 Since sift does not currently have a crate, should this new project add sift as a submodule?
 
-### Re: Naming and submodule (HEAD)
+### Re: Naming and submodule
 
 **Name: `sift-harness`** — fits your naming convention (`module-harness` exists), communicates it's a wrapper around Sift for agentic use.
 
@@ -559,7 +559,7 @@ src/sift-harness/
 ```
 
 Want me to scaffold it now?
-<!-- agent:boundary:25b290fb -->
+<!-- agent:boundary:945a452b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -713,6 +713,9 @@ This connects directly to the "hallucination spotting in AI-generated PRs" skill
 
 ---
 
+Add a link to the my latest LinkedIn YouTube video post as you did in a previous revision of the message.
+I just wanted to a 1-2 sentence mention the of my current eval work on the previous post revision.
+
 Ready to send when you are. Want me to push this to a LinkedIn draft via corky?
 I don't think corky can send LinkedIn messages without a partner agreement with LinkedIn. Is that correct?
 If that is the case, then corky cannot support it until we get such an agreement.
@@ -726,11 +729,34 @@ You're correct — corky cannot send LinkedIn messages. LinkedIn's messaging API
 3. **Clipboard helper** — I copy the draft to your clipboard, you paste
 
 Manual is the practical path for now. When you're ready to send the follow-up to Justin, I'll format it cleanly for copy-paste.
-<!-- agent:boundary:6cc057d0 -->
+
+### Re: Add LinkedIn video link + eval mention to draft (HEAD)
+
+The latest LinkedIn YouTube video post is: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
+
+Here's the revised follow-up draft with the link re-added and eval work woven in naturally:
+
+---
+
+Hi Justin — quick update on something relevant to the eval/quality side of our conversation.
+
+I've been building end-to-end eval tooling via module-harness — specs, contracts, and evals at the module level so agents get granular, testable guidance. Here's a recent post with a live coding session and blog walkthrough showing it in action: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
+
+This connects directly to the "hallucination spotting in AI-generated PRs" skill we discussed — the eval harness catches drift between what agents produce and what the contracts specify. Happy to demo if useful for the cohort's workflow.
+
+---
+
+Changes from previous revision:
+- Added the LinkedIn post link back in (live coding session + blog walkthrough)
+- Kept the eval tooling mention concise (1-2 sentences as requested)
+- Link appears mid-message as a value-add, not as the opener
+
+Ready for manual copy-paste when you want to send it.
+<!-- agent:boundary:6557a669 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin re: eval tooling (manual copy-paste — corky can't send LinkedIn messages)
+- [ ] Send LinkedIn follow-up to Justin re: eval tooling + video link (manual copy-paste)
 - [ ] Watch for Justin's email with Markdown challenge file and job description
 - [ ] Explore browser-based LinkedIn automation if volume warrants it
 <!-- /agent:pending -->

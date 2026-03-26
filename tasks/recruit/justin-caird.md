@@ -557,10 +557,81 @@ Their mantra is **"Practical AI"** — embedded in existing workflows, not flash
 - [ ] Know Jack Wood's background (JPL, Bell Labs, Wayfair, Symetra)
 - [ ] Prepare 2-minute pitch: "Here's what I've been building and why it maps to what ECI needs"
 - [ ] Have salary range ready
-<!-- agent:boundary:de343c7b -->
+
+Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/recordings/20260324-justin-caird.amr
+Use corky --gpu
+### Re: Call Transcription (March 24, 2026) (HEAD)
+
+Transcribed the ~63-minute screening call. Full transcript saved to: `mail/contacts/justin-caird/recordings/20260324-justin-caird.txt`
+
+**Note:** Diarization not available — corky needs rebuild with `--features diarize`. Speakers are clearly distinguishable from context though.
+
+---
+
+#### Key Intel from the Call
+
+**ECI Organization:**
+- ~1,000 employees total, ~600 in engineering
+- ~160 different ERP products (heavily customized by industry vertical)
+- 20-year-old company, tons of acquisitions and legacy code ("spaghetti code")
+- Remote-friendly, HQ in Texas
+
+**AI Cohort Structure:**
+- 20-25 open positions, split into 5-7 "pods"
+- Each pod: 3-4 people (dev, QA, data, data science)
+- 100% focused on building agents — nobody writes code manually
+- Board mandate to aggressively accelerate AI transformation
+- No tickets — they do "missions"
+- Full autonomy: choose model, framework, agent architecture
+- Ship if it passes eval — days, not weeks
+
+**CTO Jack Wood:**
+- Month 3 at ECI, brought ProSearch with him from 4 prior companies
+- Direct line of sight from pod members to CTO
+- Building exclusive leveling/grading system for this team (separate from rest of org)
+- "AI obsessed" is the hiring filter — not language/framework expertise
+
+**What They Want:**
+- Agent-first thinkers (capabilities, not functions)
+- Can demonstrate at least one autonomous agent or complex LLM chain
+- Hate manual work — automate everything mindset
+- Not intimidated by legacy code (see it as goldmine for AI refactoring)
+- Production-grade thinking: evals, guardrails, adversarial/judge agents
+- "AI hacks and custom automation scripts are celebrated as greatest contribution"
+
+**Interview Process:**
+1. **CTO vibe coding** — from a shared markdown file (pre-work strongly encouraged; top candidate did entire challenge + bonus tasks before interview)
+2. **Agentic review** — spot hallucinations in AI-generated PR (80% correct, 20% dangerous flaws)
+3. No manual coding, no whiteboard, no inverting binary trees
+
+**Compensation:**
+- Base + bonus (annual + project-based), no equity
+- Mid-Senior: $170-190K base
+- Lead/Principal: $200-230K+ base (potentially higher for principal)
+- Justin positioned Brian at lead/principal level based on the call
+
+**What Landed Well:**
+- agent-doc as markdown-as-interface with CRDT — Justin said "that's really cool"
+- YouTube dev recordings — "first time I've heard of a candidate doing that," wants to share with CTO
+- Domain-driven design + existence-lang philosophy
+- GPU setup (5090, previously 4090) — signals hardware investment
+- Running Opus directly
+- Genuine excitement about legacy code as knowledge extraction opportunity
+- Human-agent alignment framing resonated
+
+**Action Items:**
+- [x] Send YouTube channel link to Justin
+- [ ] Watch for email with job description, CTO insights, and markdown challenge file
+- [ ] Prepare for vibe coding challenge (do pre-work before interview)
+- [ ] Prepare for agentic review (hallucination spotting in PRs)
+- Updated email: brian.takita@gmail.com
+- Updated location: Thompson, CT
+<!-- agent:boundary:e35241d9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Interview with Justin Caird — Tuesday 3/25 morning ET
-- Post-interview debrief and next steps
+- [ ] Watch for Justin's email with markdown challenge file and job description
+- [ ] Prepare vibe coding pre-work once markdown file arrives
+- [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)
+- [ ] Post-interview debrief and next steps
 <!-- /agent:pending -->

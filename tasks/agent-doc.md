@@ -1313,16 +1313,29 @@ Summary:
 ```
 
 The score (0.0–1.0) is the key quantifiable measurement. The LLM judge prompt asks: "Rate how well the response matches the expected behavior on a scale of 0.0 to 1.0, then explain." This gives you a continuous metric for tracking improvement, not just binary pass/fail.
-<!-- agent:boundary:40248c48 -->
+
+implement
+
+### Re: implement eval-runner (HEAD)
+
+Scaffolding the eval-runner crate now. Will create `src/eval-runner/` with:
+- YAML case parsing
+- Claude API integration
+- LLM-as-judge scoring (0.0–1.0)
+- CLI output with ANSI colors + metrics
+- `--json` flag for CI
+- Regression tracking via `--baseline`
+<!-- agent:boundary:26d101a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] All sync/plugin fixes — released v0.26.3
-- [x] Code-driven listener registration — plugin v0.2.26
-- [ ] Install plugin v0.2.26 and verify hot-reload works
-- [ ] Scaffold eval-runner crate with quantifiable metrics (score, latency, tokens, cost, regression)
+- [ ] Scaffold eval-runner crate in `src/eval-runner/`
+- [ ] Implement YAML case parser
+- [ ] Implement Claude API client for eval + judge
+- [ ] Implement CLI output with metrics
+- [ ] Test with agent-doc diff-interpretation cases
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -277,7 +277,7 @@ corky ragie status
 Does Ragie's $100 plan have agents as well or is it just document retrieval?
 Implement `corky search`, `corky sift`, `corky ragie`
 
-### Re: Ragie $100 plan — agents or just retrieval? (HEAD)
+### Re: Ragie $100 plan — agents or just retrieval?
 
 **Just retrieval.** Ragie is pure document infrastructure — no agent features. The $100/mo Starter plan:
 
@@ -293,7 +293,7 @@ Implement `corky search`, `corky sift`, `corky ragie`
 
 You build agent logic on top (your own orchestration, LangChain, etc.). Ragie handles: ingest → chunk → index → retrieve. Nothing more.
 
-### Re: Implement `corky search`, `corky sift`, `corky ragie` (HEAD)
+### Re: Implement `corky search`, `corky sift`, `corky ragie`
 
 This is a substantial feature — adding a search subsystem to Corky with pluggable backends. Implementation scope:
 
@@ -306,7 +306,7 @@ This is a substantial feature — adding a search subsystem to Corky with plugga
 This warrants a dedicated implementation session in the `src/corky/` submodule. **Recommended next step:** Create a spec/plan document before coding — the design is mostly settled from this conversation, but we should nail down the `SearchResult` types, error handling, and incremental sync strategy.
 
 Ready to start when you are — shall I create the implementation plan?
-<!-- agent:boundary:b0e9a452 -->
+<!-- agent:boundary:b1e2202e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1111,7 +1111,7 @@ Module-harness already holds the eval criteria. If we add a thin eval runner to 
 
 **Hybrid approach:** Module-harness owns the runner contract (case format, grading protocol). Each project can also have project-specific eval logic (agent-doc's diff pipeline) that plugs into the generic runner.
 
-### Re: ron-berkes.md layout issue + log analysis (HEAD)
+### Re: ron-berkes.md layout issue + log analysis
 
 **No layout-sync logs from today.** Zero entries in `idea.log` matching `layout-sync` or `selectionChanged` on 2026-03-26.
 
@@ -1125,7 +1125,7 @@ This explains:
 **Fix:** Full restart of IDEA after installing v0.2.25. The `projectListener` registration only happens at project open.
 
 **Longer-term fix:** Consider changing `EditorTabSyncListener` from a `projectListener` to use `ApplicationManager.getApplication().messageBus` subscription in `PluginLifecycleListener.projectOpened()`. This would survive hot-reloads since it's code-driven, not XML-driven.
-<!-- agent:boundary:95796033 -->
+<!-- agent:boundary:4351de50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

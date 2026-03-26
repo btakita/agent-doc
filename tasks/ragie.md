@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Session started. Awaiting input.
+Implementation plan created. Ready to start Phase 1 on approval.
 <!-- /agent:status -->
 
 ## Exchange
@@ -306,19 +306,94 @@ This is a substantial feature — adding a search subsystem to Corky with plugga
 This warrants a dedicated implementation session in the `src/corky/` submodule. **Recommended next step:** Create a spec/plan document before coding — the design is mostly settled from this conversation, but we should nail down the `SearchResult` types, error handling, and incremental sync strategy.
 
 Ready to start when you are — shall I create the implementation plan?
-<!-- agent:boundary:0f265c69 -->
+go
+
+### Implementation Plan: Corky Search Subsystem (HEAD)
+
+Explored Corky's codebase — clap v4 derive, anyhow errors, ureq for HTTP, toml_edit for config. Pattern is clear.
+
+**Phase 1: Foundation (search trait + config)**
+1. Add `SearchConfig` to `src/config/corky_config.rs`
+2. Create `src/search/mod.rs` with module structure
+3. Create `src/search/backend.rs` — `SearchBackend` trait + registry
+4. Create `src/search/result.rs` — `SearchResult`, `Document` types
+5. Update `src/lib.rs` — add `pub mod search`
+
+**Phase 2: Sift backend (`corky sift`)**
+6. Create `src/search/sift.rs` — wraps Sift CLI binary
+7. `corky sift index` — shell out to `sift index` on `mail/conversations/`
+8. `corky sift status` — check index existence, staleness
+9. Add `SiftCommands` enum to `src/cli.rs`, route in `main.rs`
+
+**Phase 3: Ragie backend (`corky ragie`)**
+10. Create `src/search/ragie.rs` — REST client via ureq
+11. `corky ragie push` — upload docs via Documents API (incremental via manifest dates)
+12. `corky ragie sync` — compare local vs indexed
+13. `corky ragie search <query>` — query Retrievals API
+14. `corky ragie status` — account info via API
+15. Add `RagieCommands` enum to `src/cli.rs`, route in `main.rs`
+
+**Phase 4: Unified search (`corky search`)**
+16. `corky search <query>` — route to default backend(s) from config
+17. `--backend sift,ragie` flag for explicit selection
+18. `--all` flag for all configured backends
+19. RRF merge when querying multiple backends
+20. Add `Commands::Search` to `src/cli.rs`, route in `main.rs`
+
+**File structure:**
+```
+src/search/
+  ├─ mod.rs        # pub fn run() + module exports
+  ├─ backend.rs    # SearchBackend trait + BackendRegistry
+  ├─ result.rs     # SearchResult, Document, Filters types
+  ├─ sift.rs       # SiftBackend: index, search, status
+  └─ ragie.rs      # RagieBackend: push, sync, search, status
+```
+
+**Config additions to `.corky.toml`:**
+```toml
+[search]
+default_backends = ["sift"]
+
+[search.backends.sift]
+type = "sift"
+index_path = ".corky/sift-index"
+
+[search.backends.ragie]
+type = "ragie"
+api_key_pass = "ragie/api_key"
+```
+
+**Key types:**
+```rust
+pub trait SearchBackend: Send + Sync {
+    fn name(&self) -> &str;
+    fn search(&self, query: &str, filters: &Filters) -> Result<Vec<SearchResult>>;
+    fn index(&self, docs: &[Document]) -> Result<()>;
+    fn status(&self) -> Result<BackendStatus>;
+}
+
+pub struct SearchResult {
+    pub path: PathBuf,           // Source file
+    pub score: f64,              // Relevance score (normalized 0-1)
+    pub snippet: String,         // Matched text excerpt
+    pub backend: String,         // Which backend found it
+    pub metadata: HashMap<String, String>,  // labels, contacts, dates
+}
+```
+
+This is ready to implement. Want me to start with Phase 1 now?
+<!-- agent:boundary:93653bb5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Create implementation plan for corky search subsystem
-- [ ] Prototype with Ragie free tier (1,000 docs) to validate API integration
-- [ ] Design `SearchBackend` trait, `SearchResult` types, error handling
-- [ ] Implement `corky sift` (Sift CLI wrapper: index, status)
-- [ ] Implement `corky ragie` (REST client: push, sync, search, status)
-- [ ] Implement `corky search` (unified entry point with `--backend` routing)
-- [ ] Add `[search]` config section to `.corky.toml` schema
-- [ ] Plan Judith Krug project integration using Ragie as primary store
+- [ ] **Phase 1:** SearchBackend trait, config schema, result types
+- [ ] **Phase 2:** Sift backend (index, status, search)
+- [ ] **Phase 3:** Ragie backend (push, sync, search, status)
+- [ ] **Phase 4:** Unified `corky search` with backend routing + RRF merge
+- [ ] Prototype with Ragie free tier (1,000 docs)
+- [ ] Plan Judith Krug project integration using Ragie
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang
 <!-- /agent:pending -->

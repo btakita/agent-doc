@@ -271,7 +271,7 @@ The skill is intentionally thin right now — just the operations catalog and in
 File: `.claude/skills/browser/SKILL.md`
 
 Should we create a chrome-devtools-harness rust package? Would the same configs drive Chrome, Chromium, and Brave via the Devtools MCP Server?
-### Re: Web-to-markdown + permissions flag (HEAD)
+### Re: Web-to-markdown + permissions flag
 
 **Added "Web page to markdown" operation** to the browser skill — covers the context injection use case (scrape page → clean markdown → paste into task files / agent-doc sessions).
 
@@ -285,7 +285,7 @@ The browser skill now has 5 operations:
 5. List open tabs
 
 Plus sift and ragie integration stubs.
-<!-- agent:boundary:8813a12c -->
+<!-- agent:boundary:8e58cf30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

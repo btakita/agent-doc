@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Browser skill updated with web-to-markdown operation. 5 operations + 2 integration stubs.
+Discussing naming for browser Rust CLI. Recommending `browser-bridge`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -285,13 +285,53 @@ The browser skill now has 5 operations:
 5. List open tabs
 
 Plus sift and ragie integration stubs.
-<!-- agent:boundary:8e58cf30 -->
+
+What is a good name for the rust cli + skill tool?
+chrome-devtools-harness?
+chrome-devtools-agents?
+Any other names to use?
+### Re: Naming the Rust CLI + cross-browser compatibility (HEAD)
+
+**Yes, same configs drive Chrome, Chromium, and Brave.** They all speak CDP (Chrome DevTools Protocol). The only difference is the executable path:
+
+| Browser | Path (typical) |
+|---|---|
+| Brave | `/opt/brave-bin/brave` |
+| Chrome | `/usr/bin/google-chrome-stable` |
+| Chromium | `/usr/bin/chromium` |
+
+The `--remote-debugging-port`, `--browserUrl`, and all CDP tools work identically across all three.
+
+**Name suggestions:**
+
+| Name | Pros | Cons |
+|---|---|---|
+| `browser-bridge` | Clear purpose, browser-agnostic | Generic |
+| `cdp-harness` | Short, protocol-specific, follows harness pattern | Obscure acronym for non-devs |
+| `browsectl` | Unix-style (`ctl` suffix), short | Doesn't hint at CDP/devtools |
+| `devtools-harness` | Descriptive, follows your harness convention | Long-ish |
+| `browser-harness` | Matches `module-harness` naming pattern | Doesn't hint at devtools specifically |
+
+**My pick: `browser-bridge`**
+
+Reasoning:
+- It *bridges* the gap between CLI/agent tools and the browser
+- Browser-agnostic (not tied to Chrome/Brave naming)
+- Short, memorable, alliterative
+- Doesn't collide with existing tools/crates on crates.io
+- Pairs well with the skill: `.claude/skills/browser/` + `browser-bridge` CLI
+
+`chrome-devtools-harness` and `chrome-devtools-agents` both have "chrome" in the name, which is misleading since it works with Brave too. And "agents" is overloaded in your ecosystem.
+
+What do you think?
+<!-- agent:boundary:8da1cd39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Choose name for Rust CLI crate
+- Scaffold Rust crate (once name is decided)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
-- Add more operations as patterns emerge
 <!-- /agent:pending -->

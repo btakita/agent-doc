@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Discussing naming for browser Rust CLI. Recommending `browser-bridge`.
+Awaiting session restart to apply --dangerously-skip-permissions. Naming discussion pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -290,6 +290,7 @@ What is a good name for the rust cli + skill tool?
 chrome-devtools-harness?
 chrome-devtools-agents?
 Any other names to use?
+Please restart this claude session with `--dangerously-skip-permissions`
 ### Re: Naming the Rust CLI + cross-browser compatibility
 
 **Yes, same configs drive Chrome, Chromium, and Brave.** They all speak CDP (Chrome DevTools Protocol). The only difference is the executable path:
@@ -324,13 +325,18 @@ Reasoning:
 `chrome-devtools-harness` and `chrome-devtools-agents` both have "chrome" in the name, which is misleading since it works with Brave too. And "agents" is overloaded in your ecosystem.
 
 What do you think?
-<!-- agent:boundary:9b67d225 -->
+`browser-bridge` would be great, but it implies firefox, safari, and other browsers.
+### Re: Restart with --dangerously-skip-permissions (HEAD)
+
+I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
+<!-- agent:boundary:c7281601 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Choose name for Rust CLI crate
+- Restart session to apply --dangerously-skip-permissions
+- Choose name for Rust CLI crate (browser-bridge recommended)
 - Scaffold Rust crate (once name is decided)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)

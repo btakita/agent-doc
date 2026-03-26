@@ -561,7 +561,7 @@ src/sift-harness/
 Want me to scaffold it now?
 What deterministic binary code would be packaged with sift-harness?
 
-### Re: What deterministic binary code for sift-harness? (HEAD)
+### Re: What deterministic binary code for sift-harness?
 
 Honestly — almost none. The binary would be ~200 lines:
 1. Check if `sift` is on PATH
@@ -589,7 +589,7 @@ This raises the question: **does sift-harness need to be a Rust crate at all?**
 **Recommendation: Option A.** The SKILL.md is the product. Claude Code already knows how to run `sift search` — the skill just needs to teach it *when* and *how*. No binary needed.
 
 The skill file would live in a git repo (or even just a gist) that users clone or download. `agent-doc skill install` could handle distribution if we add a registry later.
-<!-- agent:boundary:ca8dd6a6 -->
+<!-- agent:boundary:01beb2d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -19,7 +19,7 @@ https://developer.chrome.com/blog/new-in-devtools-146/#mcp-server
 
 Session initialized for `tasks/brave.md`. What would you like to work on?
 
-### Re: Chrome DevTools MCP Server (HEAD)
+### Re: Chrome DevTools MCP Server
 
 The **Chrome DevTools MCP Server** (`chrome-devtools-mcp`) lets AI agents control a browser via MCP. It exposes 29+ tools for input, navigation, performance, debugging, network, and emulation.
 
@@ -76,7 +76,7 @@ Or JSON config:
 Browser launches on first tool invocation, not on connection. Brave is at `/usr/bin/brave` on this system.
 
 Repo: https://github.com/ChromeDevTools/chrome-devtools-mcp
-<!-- agent:boundary:1c047964 -->
+<!-- agent:boundary:ebcacf80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -25,7 +25,7 @@ I hope this message finds you well. Your background in Agentic AI is very impres
 
 I'll cut to the chase as I'm sure you get a lot of messages from recruiters. I'm working directly with the CTO at ECI (ecisolutions.com), a leading ERP solutions company, to build out a very strategic team of AI experts and Prompt Architects stretching across, Development, QA, Data. These are not traditional coding roles, instead they're focused on building agents that will write and maintain the code.
 
-We're searching for experienced engineers who are deeply passionate about AI, true builders (think running models locally, building agents to automate boring tasks just for fun, despise manual work/documentation and live inside LLMs/Claude/Cursor/Copilot) to modernize 20 year old ERP systems. This team will have extensive ownership, and be encouraged to move with speed, ship daily and worry about perfection later. If you're looking for a role with freedom and impact, this is it.
+We're searching for experienced engineers who are deeply passionate about AI, true builders (think running models locally, building agents to automate boring tasks just for fun, despise manual work/documentation and live inside LLMs/Claude/Cursor/Copilot) to modernize 20-year-old ERP systems. This team will have extensive ownership, and be encouraged to move with speed, ship daily and worry about perfection later. If you're looking for a role with freedom and impact, this is it.
 
 These roles are fully remote and pay competitively for the right candidate. After reviewing your profile, it looks like it could be a good match!
 
@@ -696,13 +696,31 @@ This is the exact pattern ECI needs at scale. With 160 products, you can't rely 
 > Wanted to share a recent post where I built module-harness during a live coding session — it adds specs, contracts, and evals at the module level so AI agents get granular guidance instead of just project-wide instructions. The architecture pairs deterministic Rust tooling with AI skill context — the crate enforces structure, the agent handles judgment. Relevant to scaling across a multi-product environment like ECI's: https://www.linkedin.com/feed/update/urn:li:activity:7442567335229444096/
 >
 > Video walkthrough and blog post linked in the post. Looking forward to next steps!
-<!-- agent:boundary:50543891 -->
+
+Let Justin know that I'm working on some end-to-end eval tooling via module-harness and other general purpose eval tooling for my projects.
+
+### Re: eval tooling update (HEAD)
+
+Draft LinkedIn follow-up to Justin about eval tooling:
+
+---
+
+Hi Justin — quick update on something relevant to the eval/quality side of the conversation we had.
+
+I've been building end-to-end eval tooling via module-harness — it generates specs, contracts, and evals at the module level so AI agents get granular, testable guidance rather than just project-wide instructions. I'm also working on general-purpose eval tooling across my projects that validates agent output against deterministic contracts.
+
+This connects directly to the "hallucination spotting in AI-generated PRs" skill we discussed — the eval harness catches drift between what agents produce and what the contracts specify. Happy to demo if useful for the cohort's workflow.
+
+---
+
+Ready to send when you are. Want me to push this to a LinkedIn draft via corky?
+<!-- agent:boundary:28f70145 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin (draft finalized above)
-- [ ] Watch for Justin's email with markdown challenge file and job description
-- [ ] Prepare vibe coding pre-work once markdown file arrives
+- [ ] Send LinkedIn follow-up to Justin re: eval tooling (draft above)
+- [ ] Watch for Justin's email with Markdown challenge file and job description
+- [ ] Prepare vibe coding pre-work once Markdown file arrives
 - [ ] Prepare agentic review skills (hallucination spotting in AI-generated PRs)
 - [ ] Post-interview debrief and next steps
 <!-- /agent:pending -->

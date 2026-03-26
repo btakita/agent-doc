@@ -363,6 +363,8 @@ Strong fit — manufacturing documentation (SOPs, compliance specs, supplier agr
 **2. Self-hosting or cloud-hosting Sift:**
 This is your cost-effective middle ground. Sift gives you hybrid search (BM25 + vector) without SaaS recurring costs or vendor restrictions. Cloud-hosting it on a small VPS gives clients the accessibility of a hosted service without the $100/mo/client Ragie cost. Trade-off: you own the ops, but for your skill level that's minimal overhead. This also avoids any SaaS restrictions clients might have (procurement policies, data handling agreements, etc.).
 
+Could Sift be hosted on CloudFlare or Vercel?
+
 **3. Single Ragie account, multiple clients:**
 Ragie likely supports multi-tenancy through metadata filtering — tag documents with a client identifier and filter queries by that tag. This is the standard pattern in RAG-as-a-Service. However, **true data isolation** (separate indexes, access controls, deletion guarantees) is different from metadata filtering. For clients with sensitive data, they may need stronger partitioning than query-time filtering provides. This is worth asking Bob directly — it's another great conversation topic for the call.
 
@@ -376,7 +378,28 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 | Collaborative/demo | Ragie | Showcase Ragie integration to Bob |
 
 **Impact on the DM:** None — v10 is still accurate. These are all great talking points for the call with Bob. In fact, the multi-client question is the kind of thing that shows you're thinking about Ragie at a deployment level, not just kicking tires.
-<!-- agent:boundary:4fb30243 -->
+### Re: Sift on Cloudflare / Vercel (HEAD)
+
+**Short answer:** Not on their serverless platforms (Workers, Vercel Functions) — Sift needs persistent memory for embedding models and index state. But there are good alternatives:
+
+**Why serverless won't work:**
+- Cloudflare Workers: V8 isolates, 50ms-30s CPU limits, no persistent filesystem
+- Vercel Functions: 10-60s timeouts, no persistent state
+- Sift loads an embedding model + performs hybrid search — needs a long-running process
+
+**What would work:**
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Cloudflare Tunnel + local Sift** | $0 | Sift runs on your machine, exposed via CF Tunnel. You already have `src/cloudflare/` infra |
+| **Fly.io** | ~$3-5/mo | Small VM with persistent volume, easy deploy |
+| **Railway** | ~$5/mo | Dockerfile deploy, managed |
+| **Hetzner/DigitalOcean VPS** | $4-6/mo | Full control, cheapest for always-on |
+
+**Recommendation:** Start with the **Cloudflare Tunnel** approach — zero cost, leverages your existing Cloudflare setup, and Sift is already running locally. If clients need guaranteed uptime independent of your machine, move to Fly.io or a VPS later.
+
+This also gives you a natural progression story for the Bob conversation: "I'm running Sift locally for development, but for production multi-user access, Ragie's managed infrastructure is the right call."
+<!-- agent:boundary:d9856edf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -389,6 +412,7 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 - [ ] Complete Ragie sign-up with RAG use case
 - [ ] Ask Bob about Ragie multi-tenancy / data partitioning options
 - [ ] Evaluate Ragie vs Sift per-client (pricing, data residency, ops)
+- [ ] Explore Cloudflare Tunnel for hosted Sift access
 - [ ] Design client-tagged architecture for multi-tenant Sift deployment
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
 - [ ] Follow up with Bob after integration demo is ready (~2 days)

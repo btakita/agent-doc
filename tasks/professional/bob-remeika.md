@@ -795,11 +795,11 @@ Good instinct — "a couple of client integrations" is stronger than "a client p
 
 **LinkedIn DM (v12 — multiple client integrations):**
 
-> Hey Bob — your comment really made my day. Knowing you've been following along means a lot.
->
-> I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
->
-> I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
+Hey Bob — your repost really made my day. Knowing you've been following along means a lot.
+
+I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+
+I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
 
 **Only change from v11:** "I have a client project" → "I have a couple of client integrations" — shifts from single use case to pattern of adoption.
 
@@ -816,7 +816,7 @@ The v12 language is already softer than you think. Let's audit it:
 - "Ragie is the collaborative layer" — **architectural statement**, not a commitment to deploy
 - "I have a couple of client integrations where this is exactly the need" — **the need is real** (document retrieval for non-technical users), whether you solve it with Ragie or Sift
 - "Ragie looks like the right fit for the shared side" — **"looks like"** is already evaluative, not promised
-
+ 
 You're not saying "I'm deploying Ragie for clients." You're saying "I'm exploring Ragie and it looks right." That's honest even if you self-host.
 
 **If you still want to soften further**, one small tweak:
@@ -826,13 +826,42 @@ You're not saying "I'm deploying Ragie for clients." You're saying "I'm explorin
 But honestly, v12 as-is doesn't overpromise. Bob will read it as "this person is seriously evaluating my product with real use cases" — which is true. CEOs are used to prospects exploring before committing.
 
 **Recommendation:** Send v12 as-is. The language is already appropriate for where you are in the evaluation.
-<!-- agent:boundary:40f6a07f -->
+
+> I'd love to show you what I'm building — I think there's real overlap between our approaches.
+
+Is this presumptive. Since Ragie has been around significantly longer than corky or my recent agent loop work?
+
+### Re: "Overlap between our approaches" — presumptive? (HEAD)
+
+Yes, slightly. "Our approaches" implies you're operating at the same level. Bob built a funded company with a team; you're building personal/small-client tooling. The *interest areas* overlap, but the *scale* doesn't — and Bob knows that.
+
+**Alternatives that show respect for his head start:**
+
+1. **Complement, don't compare:**
+   > "I'd love to show you what I'm building — Ragie fits naturally into the workflow I'm designing."
+
+2. **Position as a user with depth:**
+   > "I'd love to show you how I'm using Ragie — I think you'd find the integration interesting."
+
+3. **Keep the reconnect without the claim:**
+   > "Would love to catch up and show you what I'm building. Great to reconnect."
+
+**Recommendation:** Option 2 — it positions you as a thoughtful power user rather than a peer competitor. Bob will be more interested in "how someone's using my product in creative ways" than "we're building similar things."
+
+**Updated DM (v13):**
+
+Hey Bob — your repost really made my day. Knowing you've been following along means a lot.
+
+I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+
+I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
+<!-- agent:boundary:b7f72761 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v12) — ready to send, awaiting final go-ahead
+- LinkedIn DM (v13) — ready to send, awaiting final go-ahead
 - Retest bookmarklet (proper button + functional scraping) — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

@@ -362,7 +362,7 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
 
-**Pre-sync auto-start:** Before the layout algorithm runs, sync parses file paths from `--col` args and auto-starts Claude sessions (via `route::auto_start()`) for any files that have session UUIDs in frontmatter but no alive panes. This ensures sync has panes to arrange.
+**Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) that have no alive panes, sync auto-starts Claude sessions (via `route::auto_start()`) to ensure it has panes to arrange.
 
 **Reconciliation algorithm** (simple 2-step detach/attach):
 1. **SNAPSHOT** — query current pane order in target window

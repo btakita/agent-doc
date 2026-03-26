@@ -786,13 +786,31 @@ Got it — revising the **DM** (not the comment) for the 1-day gap. The v10 open
 - Everything else stays — the Ragie integration, client project, and reconnect pitch are all timing-neutral
 
 Ready to send?
-<!-- agent:boundary:4bac5d37 -->
+
+I think we should mention that I have a couple of client integrations that this will be useful for.
+
+### Re: Mention multiple client integrations (HEAD)
+
+Good instinct — "a couple of client integrations" is stronger than "a client project." It signals demand, not a one-off.
+
+**LinkedIn DM (v12 — multiple client integrations):**
+
+> Hey Bob — your comment really made my day. Knowing you've been following along means a lot.
+>
+> I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+>
+> I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
+
+**Only change from v11:** "I have a client project" → "I have a couple of client integrations" — shifts from single use case to pattern of adoption.
+
+Ready to send?
+<!-- agent:boundary:a33e93e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v11) — ready to send, awaiting go-ahead
+- LinkedIn DM (v12) — ready to send, awaiting go-ahead
 - Retest bookmarklet (proper button + functional scraping) — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

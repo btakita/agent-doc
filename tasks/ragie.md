@@ -140,14 +140,14 @@ You're right — tantivy (keyword-only) was an unfair comparison to Ragie (full 
 
 **Revised recommendation:** **Sift for local, Ragie for shared.** Sift gives you the semantic search locally that tantivy lacked. Ragie remains the right choice for collaborative contexts (Judith, Lucas) where non-developers need access.
 
-### Re: Would tantivy add value alongside Sift? (HEAD)
+### Re: Would tantivy add value alongside Sift?
 
 Not really. Sift already includes BM25 (tantivy's core offering) as part of its hybrid pipeline. Adding tantivy separately would be redundant — two keyword search implementations.
 
 **One edge case:** If you wanted to **embed** search directly into Corky as a Rust library (no subprocess), tantivy is the only option since Sift is a CLI binary, not a crate. But for Corky's use case — searching correspondence files — wrapping Sift via `corky search` is simpler and gives you the full hybrid pipeline for free.
 
 **Verdict: Sift replaces tantivy entirely for your needs.** Drop tantivy from the plan.
-<!-- agent:boundary:e87ea9da -->
+<!-- agent:boundary:b01b2639 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

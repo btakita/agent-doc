@@ -421,7 +421,7 @@ How about a shorter name such as cdp-cli?
 Does `cdpkit` seem to be something that will be stable going forward?
 Is there a SPEC.md?
 Should we have our own library based off of this library?
-### Re: Naming, cdpkit stability, and library strategy (HEAD)
+### Re: Naming, cdpkit stability, and library strategy
 
 **Shorter name — `cdp-cli`:** Already taken on crates.io (it's a directory navigation tool, completely unrelated). Other short options:
 
@@ -467,7 +467,7 @@ Our current raw WebSocket code is ~50 lines. Swapping to cdpkit gives us typed c
 The risk is low because our CLI surface is small — we only use `Page.navigate`, `Runtime.evaluate`, and `Page.captureScreenshot`. Even if cdpkit's API changes, adapting 5 call sites is trivial.
 
 Don't over-invest in abstractions before we have real usage patterns.
-<!-- agent:boundary:a2814122 -->
+<!-- agent:boundary:9c732429 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

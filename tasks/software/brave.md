@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Browser skill architecture discussion. Recommending SKILL.md-first approach, CLI later if needed.
+Browser skill scaffolded at .claude/skills/browser/SKILL.md with operations registry and sift/ragie integration stubs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -247,11 +247,32 @@ But these are all thin wrappers around `curl` + file writes. The ROI on a Rust c
 The pattern: **SKILL.md first → shell helpers → CLI crate** (only if complexity warrants it).
 
 Want me to scaffold the SKILL.md now?
-<!-- agent:boundary:42de2503 -->
+I want a place to add operations. I can see sift & ragie integration as being useful.
+Also, converting web pages and/or summaries
+### Re: Operations registry + sift/ragie integration (HEAD)
+
+Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry you can grow:
+
+**Current operations:**
+- Scrape page as markdown
+- Screenshot
+- LinkedIn post scraping (bookmarklet JS)
+- List open tabs
+
+**Integration stubs:**
+- **Sift** — scrape via browser, index locally for hybrid search. Feeds into tagpath/agent-doc pipelines.
+- **Ragie** — scrape and ingest into managed RAG. Semantic retrieval over web content + correspondence.
+
+The skill is intentionally thin right now — just the operations catalog and integration hooks. Add new operations as you use them. The pattern is: do it manually once via MCP tools, then codify the recipe in SKILL.md.
+
+File: `.claude/skills/browser/SKILL.md`
+<!-- agent:boundary:73e2d20c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Scaffold `.claude/skills/browser/SKILL.md` — awaiting approval
+- Flesh out sift integration (scrape → index workflow)
+- Flesh out ragie integration (scrape → ingest workflow)
+- Add more operations as patterns emerge
 <!-- /agent:pending -->

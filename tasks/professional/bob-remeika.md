@@ -766,14 +766,33 @@ But my recommendation is to keep the comment clean and let the DM do the heavy l
 Already covers the integration, Corky, client project, and collaboration pitch.
 
 Which approach do you prefer?
-<!-- agent:boundary:8c0a82c8 -->
+This is for the DM
+
+### Re: DM revision for timing (HEAD)
+
+Got it — revising the **DM** (not the comment) for the 1-day gap. The v10 opener ("your comment on my module-harness post really made my day") still works fine after a day — DMs don't have the same immediacy expectation as comments. But I'll tighten it slightly:
+
+**LinkedIn DM (v11 — timing-adjusted):**
+
+> Hey Bob — your comment really made my day. Knowing you've been following along means a lot.
+>
+> I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a client project where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+>
+> I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
+
+**Changes from v10:**
+- Shortened opener — dropped "on my module-harness post" (Bob knows which post; naming it after a day feels over-specific)
+- Changed "I just signed up" → "I signed up" (removes the "just" which implies same-day)
+- Everything else stays — the Ragie integration, client project, and reconnect pitch are all timing-neutral
+
+Ready to send?
+<!-- agent:boundary:6b3d2e58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn comment to Bob — draft ready, awaiting direction (public comment vs DM split)
-- LinkedIn DM (v10) — ready to send, awaiting go-ahead
+- LinkedIn DM (v11) — ready to send, awaiting go-ahead
 - Retest bookmarklet (proper button + functional scraping) — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

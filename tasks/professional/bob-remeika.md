@@ -309,7 +309,22 @@ The DM says "I'd love to show you what I'm building" — that's a promise. Two o
 **Recommendation: Send now.** Bob's engagement is warm right now. The DM doesn't promise a finished product — "I'd love to show you what I'm building" works for work-in-progress. When you have the integration working, follow up with a concrete demo. That gives you two natural touchpoints instead of one.
 
 The v10 draft is ready as-is. No changes needed for the timing concern.
-<!-- agent:boundary:2d5db583 -->
+Should I mention Commercial Real Estate in particular wrt the project
+Bob may actually be watching some of my videos. The average watch time is not reflective. Since I know that brooke-brodack watched my video in length but I cannot tell from the average watch time.
+### Re: CRE Mention & Video Engagement (v10 refinements) (HEAD)
+
+**On mentioning Commercial Real Estate:** I'd keep it vague — "client project" is better than naming the vertical. Reasons:
+
+1. CRE is a niche that doesn't obviously connect to Ragie's positioning (they're document-understanding-agnostic). It adds complexity without adding signal.
+2. "Non-technical staff querying document context" already tells Bob what matters — the *pattern* (shared RAG for non-developers), not the *industry*.
+3. Save the CRE detail for the demo conversation. When you show him the actual integration, saying "this is for a commercial real estate team" makes it concrete and impressive. In a cold DM, it's just noise.
+
+**Exception:** If Bob's background included real estate tech or if Ragie is specifically targeting CRE verticals, then yes — mention it. But I don't see that in his profile.
+
+**On Bob watching videos:** Fair point about watch time analytics being unreliable. His comment "enjoying watching you work in the open" could include videos. But the DM doesn't need to distinguish — "following along" covers both posts and videos without overclaiming either way. v10 is already neutral on this.
+
+**v10 stands as-is.** No changes needed for either point. Ready to send.
+<!-- agent:boundary:ed3e25cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

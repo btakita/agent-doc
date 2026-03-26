@@ -155,18 +155,18 @@ Let's have a complimentary sift + ragie command tree.
 Here's a unified design where both backends coexist:
 
 ```
-# Unified search — routes to best backend automatically (HEAD)
+# Unified search — routes to best backend automatically
 corky search <query>              # Default: Sift local; falls back to Ragie if configured
 corky search --local <query>      # Force Sift (local hybrid)
 corky search --cloud <query>      # Force Ragie (cloud semantic)
 corky search --both <query>       # Query both, merge results (RRF)
 
-# Sift (local) management (HEAD)
+# Sift (local) management
 corky sift index                  # Build/rebuild local index from mail/conversations
 corky sift index --watch          # Incremental re-index on file changes
 corky sift status                 # Index stats, staleness, coverage
 
-# Ragie (cloud) management (HEAD)
+# Ragie (cloud) management
 corky ragie push                  # Push docs to Ragie (incremental via manifest dates)
 corky ragie push --full           # Full re-push (useful after schema changes)
 corky ragie search <query>        # Query Ragie directly
@@ -195,7 +195,7 @@ corky ragie status                # Account info, doc counts, index health
 - **Sift:** Offline, fast iteration, private data, your personal workflow
 - **Ragie:** Shared with collaborators (Lucas, Judith), multi-format docs, team access
 - **Both:** Maximum recall — useful for important queries where you don't want to miss anything
-<!-- agent:boundary:3b67b8e4 -->
+<!-- agent:boundary:14d927ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

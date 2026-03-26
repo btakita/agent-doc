@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Awaiting session restart to apply --dangerously-skip-permissions. Naming discussion pending.
+Narrowing CLI name to Chromium-scoped. `chromium-bridge` recommended.
 <!-- /agent:status -->
 
 ## Exchange
@@ -329,14 +329,28 @@ What do you think?
 ### Re: Restart with --dangerously-skip-permissions
 
 I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
-<!-- agent:boundary:59c36fb4 -->
+### Re: browser-bridge implies too broad (HEAD)
+
+Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't provide. Narrower names that scope to Chromium-based browsers:
+
+| Name | Notes |
+|---|---|
+| `chromium-bridge` | Accurate scope, clear it's Chromium-family only |
+| `cdp-bridge` | Protocol-specific, very precise |
+| `chromium-harness` | Follows your harness naming pattern |
+| `cdp-kit` | Short, implies a toolkit |
+| `devtools-bridge` | DevTools = Chrome DevTools Protocol implicitly |
+
+**Updated pick: `chromium-bridge`**
+
+It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreach (no Firefox/Safari implication), and still pairs well with `.claude/skills/browser/` (the skill stays browser-generic for potential future WebDriver/Playwright additions, while the CLI is specifically CDP/Chromium).
+<!-- agent:boundary:119a98f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Restart session to apply --dangerously-skip-permissions
-- Choose name for Rust CLI crate (browser-bridge recommended)
+- Choose name for Rust CLI crate (`chromium-bridge` recommended)
 - Scaffold Rust crate (once name is decided)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)

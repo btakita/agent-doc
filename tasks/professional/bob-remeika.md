@@ -378,7 +378,7 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 | Collaborative/demo | Ragie | Showcase Ragie integration to Bob |
 
 **Impact on the DM:** None — v10 is still accurate. These are all great talking points for the call with Bob. In fact, the multi-client question is the kind of thing that shows you're thinking about Ragie at a deployment level, not just kicking tires.
-### Re: Sift on Cloudflare / Vercel (HEAD)
+### Re: Sift on Cloudflare / Vercel
 
 **Short answer:** Not on their serverless platforms (Workers, Vercel Functions) — Sift needs persistent memory for embedding models and index state. But there are good alternatives:
 
@@ -399,7 +399,7 @@ Ragie likely supports multi-tenancy through metadata filtering — tag documents
 **Recommendation:** Start with the **Cloudflare Tunnel** approach — zero cost, leverages your existing Cloudflare setup, and Sift is already running locally. If clients need guaranteed uptime independent of your machine, move to Fly.io or a VPS later.
 
 This also gives you a natural progression story for the Bob conversation: "I'm running Sift locally for development, but for production multi-user access, Ragie's managed infrastructure is the right call."
-<!-- agent:boundary:d9856edf -->
+<!-- agent:boundary:36760b34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

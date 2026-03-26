@@ -272,7 +272,6 @@ Also emphasize the collaborative rag.
 - Slightly restructured the Ragie paragraph for flow
 
 **Note:** Your first line "It would be awesome to get a job...but it's aggressive to ask. If you" was cut off mid-sentence. If you want to finish that thought, I can work it into the strategy. The current approach is: let the integration work speak for itself, and let Bob be the one to suggest deeper involvement.
-Mention that I want to
 ### Re: Streamlined DM — Ragie Focus (v10)
 
 Good calls on all three points:
@@ -291,13 +290,26 @@ Good calls on all three points:
 >
 > I'd love to show you what I'm building — I think there's real overlap between our approaches. Great to reconnect.
 
+I'm still working on the implementation. But I can show something soon...within a couple of days. 
+
 **What changed from v9:**
 - Removed entire Grockit/Yammer/Sacks paragraph — focuses the message entirely on Ragie and what you're building
 - Replaced "Sift" with "local hybrid search" — no need to name a competitor's tool
 - Reframed collaborative angle: "teams and non-technical users can query shared document context" — positions Ragie as the team enablement layer
 - Added "I have a client project where this is exactly the need" — concrete signal without details
 - Shorter, punchier — the message is now purely about shared technical interests
-<!-- agent:boundary:a2801efb -->
+### Re: Timing — Send Now or Wait? (v10 notes) (HEAD)
+
+The DM says "I'd love to show you what I'm building" — that's a promise. Two options:
+
+1. **Send now, demo later.** The DM is an opener, not a demo invite. "I'd love to show you" plants the seed; you follow up in a few days with "here's what I've got." This keeps momentum from Bob's recent engagement.
+
+2. **Wait 2 days, send with a demo link.** Stronger first impression — you're not just talking about integration, you can show it. But you risk the engagement cooling off.
+
+**Recommendation: Send now.** Bob's engagement is warm right now. The DM doesn't promise a finished product — "I'd love to show you what I'm building" works for work-in-progress. When you have the integration working, follow up with a concrete demo. That gives you two natural touchpoints instead of one.
+
+The v10 draft is ready as-is. No changes needed for the timing concern.
+<!-- agent:boundary:670cccc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -305,7 +317,8 @@ Good calls on all three points:
 <!-- agent:pending patch=replace -->
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
-- [ ] Send LinkedIn DM to Bob (v10 ready — Ragie-focused, collaborative angle)
+- [ ] Send LinkedIn DM to Bob (v10 ready — send now, follow up with demo in ~2 days)
 - [ ] Complete Ragie sign-up with RAG use case
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)
+- [ ] Follow up with Bob after integration demo is ready (~2 days)
 <!-- /agent:pending -->

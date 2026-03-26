@@ -748,13 +748,45 @@ release
 ### Re: release
 
 **agent-doc v0.26.2 released** — crates.io + PyPI + GitHub Release. Binary installed. All targets verified.
-<!-- agent:boundary:d8c46bdb -->
+When I create a new markdown file, the JB Plugin runs sync. The markdown file may not be an agent document.
+So we don't necessarily want to add any frontmatter unless there is an explicit claim.
+
+### Re: sync should not auto-init frontmatter (HEAD)
+
+Agreed. The current behavior in `sync.rs:397-414` auto-initializes frontmatter on any visible markdown file via `frontmatter::ensure_session()`. This is wrong — sync should treat unclaimed files as unmanaged.
+
+**Fix:** In the `None` arm of `resolve_file` (line 397), return `FileResolution::Unmanaged` instead of calling `ensure_session()`. Only `claim` should generate session UUIDs.
+
+```rust
+// Before (sync.rs:397-414):
+None => {
+    // Auto-init: write session UUID so this file becomes managed.
+    if let Ok((updated, session_id)) = frontmatter::ensure_session(&content) {
+        // ... writes frontmatter to disk
+    }
+}
+
+// After:
+None => {
+    // No session UUID → not an agent document. Skip it.
+    Some(FileResolution::Unmanaged)
+}
+```
+
+This means:
+- New markdown files stay clean (no frontmatter injected)
+- Only `agent-doc claim <FILE>` adds frontmatter + scaffolds components
+- Sync still manages files that were previously claimed (already have session UUIDs)
+- Multi-column placeholder panes won't appear for non-agent files (which is the right behavior)
+
+Shall I implement this?
+<!-- agent:boundary:7f0c2fb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-All items cleared.
+- [ ] Make sync skip `ensure_session()` for unclaimed files (return `Unmanaged` instead of auto-init)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

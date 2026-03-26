@@ -71,7 +71,7 @@ This keeps Ragie as an optional module behind a feature flag rather than baking 
 
 Is Ragie equivalent to a flat file system where all data is semantically indexed for search?
 
-### Re: SQLite + embeddings vs tantivy for Corky (HEAD)
+### Re: SQLite + embeddings vs tantivy for Corky
 
 | | **tantivy** | **SQLite + embeddings** |
 |---|---|---|
@@ -83,7 +83,7 @@ Is Ragie equivalent to a flat file system where all data is semantically indexed
 
 **Recommendation:** Start with **tantivy** — pure Rust, integrates cleanly into Corky, full-text search is the immediate gap. Add embeddings later if you need semantic similarity. tantivy also supports faceted search, which maps well to Corky's labels/contacts metadata.
 
-### Re: Ragie complementary to your workflow / Lucas collaboration (HEAD)
+### Re: Ragie complementary to your workflow / Lucas collaboration
 
 Ragie becomes complementary as a **shared collaboration layer** on top of your local workflow:
 
@@ -93,7 +93,7 @@ Ragie becomes complementary as a **shared collaboration layer** on top of your l
 
 Pattern: **local-first for you, Ragie for shared access.**
 
-### Re: Is Ragie a flat file system with semantic indexing? (HEAD)
+### Re: Is Ragie a flat file system with semantic indexing?
 
 Close but not quite — more like a **document database with a multi-layer search engine**:
 - **Like a file system:** Upload documents, CRUD them, metadata/tags for organization.
@@ -101,7 +101,7 @@ Close but not quite — more like a **document database with a multi-layer searc
 - **Not a file system:** No directory hierarchy, no file paths, no streaming reads. Query by meaning or metadata, not location.
 
 Think: **"What if S3 understood your documents and could answer questions about them?"**
-<!-- agent:boundary:bff960be -->
+<!-- agent:boundary:5d1e57d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

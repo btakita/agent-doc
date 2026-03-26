@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-brave-flags.conf created. Restart Brave to activate remote debugging on port 9222.
+Brave remote debugging active on port 9222. chrome-devtools-mcp installed for Claude Code.
 <!-- /agent:status -->
 
 ## Exchange
@@ -156,13 +156,32 @@ I restarted Brave. Please test and make necessary configuration changes.
 **Note:** Brave binary is at `/opt/brave-bin/brave` (not `/usr/bin/brave` as I said earlier).
 
 **Next step:** Restart Brave again for the flag to take effect. Then I'll verify the port and install the chrome-devtools-mcp server.
-<!-- agent:boundary:89c6a294 -->
+
+Restarted brave
+### Re: Restarted brave (HEAD)
+
+Remote debugging is **live**:
+```json
+{
+    "Browser": "Chrome/146.0.7680.164",
+    "Protocol-Version": "1.3",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/ffc7c99b-..."
+}
+```
+
+**chrome-devtools-mcp installed** for Claude Code (user scope):
+```
+npx -y chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9222
+```
+
+This connects to your running Brave session automatically. The MCP server will be available in all Claude Code sessions. You can now use browser tools like `navigate_page`, `evaluate_script`, `take_screenshot`, etc.
+
+All setup is complete.
+<!-- agent:boundary:b1bb853a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Restart Brave** to pick up `--remote-debugging-port=9222` from brave-flags.conf
-- Verify remote debugging port responds after restart
-- Install chrome-devtools-mcp for Claude Code
+(all items complete)
 <!-- /agent:pending -->

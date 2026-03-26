@@ -324,7 +324,11 @@ Bob may actually be watching some of my videos. The average watch time is not re
 **On Bob watching videos:** Fair point about watch time analytics being unreliable. His comment "enjoying watching you work in the open" could include videos. But the DM doesn't need to distinguish — "following along" covers both posts and videos without overclaiming either way. v10 is already neutral on this.
 
 **v10 stands as-is.** No changes needed for either point. Ready to send.
-<!-- agent:boundary:9330b6dc -->
+Bob's personal email is bob.remeika@gmail.com. Please update contact.
+### Re: Contact Updated (HEAD)
+
+Added `bob.remeika@gmail.com` to `mail/contacts/bob-remeika/AGENTS.md` under Contact Info.
+<!-- agent:boundary:1c2498e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -332,6 +336,7 @@ Bob may actually be watching some of my videos. The average watch time is not re
 <!-- agent:pending patch=replace -->
 - [x] Post comment reply on LinkedIn activity
 - [x] Read Bob's reply — "enjoying watching you work in the open"
+- [x] Update Bob's contact with personal email
 - [ ] Send LinkedIn DM to Bob (v10 ready — send now, follow up with demo in ~2 days)
 - [ ] Complete Ragie sign-up with RAG use case
 - [ ] Begin Corky + Ragie integration (`corky ragie` command tree)

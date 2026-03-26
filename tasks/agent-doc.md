@@ -968,7 +968,7 @@ When `.env` is left + agent doc is right:
 - Enters mixed-split branch → `agent-doc focus <file>` → no stashing
 
 Rebuilt v0.2.25 (same zip path). Reinstall and retest.
-<!-- agent:boundary:61510a83 -->
+<!-- agent:boundary:2c5ff8b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

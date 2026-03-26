@@ -1039,7 +1039,7 @@ This is a separate project. The existing binary tests + manual verification cove
 release agent-doc
 Would this eval runner be implemented in module-harness?
 
-### Re: release + eval runner question (HEAD)
+### Re: release + eval runner question
 
 **agent-doc v0.26.3 released:**
 - crates.io: published
@@ -1060,7 +1060,7 @@ The eval runner could live in:
 3. **Module-harness** — if we generalize it to include execution, not just definition
 
 Option 1 seems most natural since the evals test agent-doc's own SKILL.md behavior. The runner would feed cases from `cases.yaml` through the same prompt pipeline the skill uses, then LLM-grade the outputs.
-<!-- agent:boundary:5d2a80c6 -->
+<!-- agent:boundary:7f9aef5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

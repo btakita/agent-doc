@@ -2,12 +2,13 @@
 agent_doc_session: a94c7d23-e171-482f-93f4-530b7f2c436f
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Browser skill scaffolded at .claude/skills/browser/SKILL.md with operations registry and sift/ragie integration stubs.
+Browser skill updated with web-to-markdown operation. 5 operations + 2 integration stubs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -248,7 +249,9 @@ The pattern: **SKILL.md first → shell helpers → CLI crate** (only if complex
 
 Want me to scaffold the SKILL.md now?
 I want a place to add operations. I can see sift & ragie integration as being useful.
-Also, converting web pages and/or summaries
+Also, converting web pages and/or summaries to markdown for adding context.
+
+Note I just added `claude_args: --dangerously-skip-permissions`
 ### Re: Operations registry + sift/ragie integration
 
 Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry you can grow:
@@ -266,7 +269,23 @@ Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry 
 The skill is intentionally thin right now — just the operations catalog and integration hooks. Add new operations as you use them. The pattern is: do it manually once via MCP tools, then codify the recipe in SKILL.md.
 
 File: `.claude/skills/browser/SKILL.md`
-<!-- agent:boundary:f6071ecf -->
+
+Should we create a chrome-devtools-harness rust package? Would the same configs drive Chrome, Chromium, and Brave via the Devtools MCP Server?
+### Re: Web-to-markdown + permissions flag (HEAD)
+
+**Added "Web page to markdown" operation** to the browser skill — covers the context injection use case (scrape page → clean markdown → paste into task files / agent-doc sessions).
+
+**Noted `claude_args: --dangerously-skip-permissions`** in the frontmatter. This means the agent-doc session runner (tmux-router) will launch Claude Code without permission prompts for this document. Makes sense for browser operations where MCP tool calls would otherwise require approval each time.
+
+The browser skill now has 5 operations:
+1. Scrape page as markdown
+2. **Web page to markdown** (context injection) — new
+3. Screenshot
+4. LinkedIn post scraping
+5. List open tabs
+
+Plus sift and ragie integration stubs.
+<!-- agent:boundary:8813a12c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -839,7 +839,7 @@ Now install the new plugin zip and test Alt+Enter — the intentions should appe
 
 What file is the plugin build?
 
-### Re: plugin build location (HEAD)
+### Re: plugin build location
 
 The latest build with intentions is:
 
@@ -850,7 +850,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.24.z
 (or the signed variant: `agent-doc-jetbrains-0.2.24-signed.zip`)
 
 Install via: IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..." → select the zip. Since we added new classes (`AgentDocIntentions.kt`) and removed the ActionPromoter registration, do a full uninstall → restart → install → restart cycle.
-<!-- agent:boundary:a9b85721 -->
+<!-- agent:boundary:b4b20c19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

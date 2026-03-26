@@ -1393,7 +1393,7 @@ There's an active `agent-doc start tasks/software/brave.md` session running on p
 1. **Keep brave.md open in the editor** while its agent-doc session is running — IPC will work
 2. **Accept the external modifications** — the content is correct, just delivered via disk instead of Document API
 3. **Longer-term:** Make the plugin's PatchWatcher monitor all claimed files (not just visible ones), so IPC works even for background tabs
-<!-- agent:boundary:953dd059 -->
+<!-- agent:boundary:d84c6b76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

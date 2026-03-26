@@ -745,10 +745,10 @@ The only reason to extract would be if the FFI surface grew so large that it war
 
 release
 
-### Re: release (HEAD)
+### Re: release
 
 **agent-doc v0.26.2 released** — crates.io + PyPI + GitHub Release. Binary installed. All targets verified.
-<!-- agent:boundary:ad0bded6 -->
+<!-- agent:boundary:72aec5e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -174,6 +174,17 @@ corky ragie sync                  # Compare local vs indexed — show gaps
 corky ragie status                # Account info, doc counts, index health
 ```
 
+> `corky search --cloud <query>      # Force Ragie (cloud semantic)`
+
+should be `corky search --ragie <query>`
+
+> `corky search --both <query>      # Force Ragie (cloud semantic)`
+
+should be `corky search --all <query>`
+
+Do you forsee integrating other cloud services?
+How can we support specifying which services to use.
+
 **Design principles:**
 - `corky search` is the **unified entry point** — abstracts the backend
 - `corky sift` and `corky ragie` handle **backend-specific operations** (indexing, pushing, status)
@@ -195,18 +206,87 @@ corky ragie status                # Account info, doc counts, index health
 - **Sift:** Offline, fast iteration, private data, your personal workflow
 - **Ragie:** Shared with collaborators (Lucas, Judith), multi-format docs, team access
 - **Both:** Maximum recall — useful for important queries where you don't want to miss anything
-<!-- agent:boundary:14d927ac -->
+
+### Re: Naming corrections and extensibility
+
+Agreed — `--ragie` and `--all` are better. Naming backends explicitly scales better than generic `--cloud`/`--both`.
+
+**Other cloud services worth considering:**
+- **Pinecone** — vector-only, popular for embeddings-heavy workloads
+- **Weaviate** — open-source vector DB with hybrid search (self-host or cloud)
+- **Algolia** — traditional search with AI features, good for web-facing UIs
+- **OpenAI File Search** — if already in the OpenAI ecosystem
+
+**Extensible backend selection via `--backend` flag:**
+
+```
+corky search <query>                          # Uses default from config
+corky search --backend sift <query>           # Sift only
+corky search --backend ragie <query>          # Ragie only
+corky search --backend sift,ragie <query>     # Both, merge via RRF
+corky search --all <query>                    # All configured backends
+```
+
+**Registry-based config in `.corky.toml`:**
+
+```toml
+[search]
+default_backends = ["sift"]   # list — supports multiple defaults
+
+[search.backends.sift]
+type = "sift"
+index_path = ".corky/sift-index"
+
+[search.backends.ragie]
+type = "ragie"
+api_key_pass = "ragie/api_key"
+
+# Future backends — just add config, no CLI changes (HEAD)
+[search.backends.pinecone]
+type = "pinecone"
+api_key_pass = "pinecone/api_key"
+index_name = "corky-correspondence"
+```
+
+**Implementation:** Each backend implements a `SearchBackend` trait:
+```rust
+trait SearchBackend {
+    fn index(&self, docs: &[Document]) -> Result<()>;
+    fn search(&self, query: &str, filters: &Filters) -> Result<Vec<SearchResult>>;
+    fn status(&self) -> Result<BackendStatus>;
+}
+```
+
+Adding a new backend = implement the trait + add a config entry. No CLI changes needed. The `--backend` flag and `--all` shorthand work automatically for any registered backend.
+
+**Updated CLI design:**
+
+```
+corky search <query>                     # Default backend(s) from config
+corky search --backend sift <query>      # Specific backend
+corky search --backend sift,ragie <query># Multiple backends, merged
+corky search --all <query>               # All configured backends
+
+corky sift index [--watch]               # Backend-specific management
+corky sift status
+
+corky ragie push [--full]                # Backend-specific management
+corky ragie sync
+corky ragie status
+```
+<!-- agent:boundary:3dffe603 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Design `corky search` unified command with backend routing
+- [ ] Design `SearchBackend` trait and registry pattern
+- [ ] Design `corky search` unified CLI with `--backend` flag
 - [ ] Evaluate Sift CLI — install, test on mail/conversations corpus
 - [ ] Explore Ragie Python SDK / REST API — test document upload and retrieval
 - [ ] Implement `corky sift index` for local index management
 - [ ] Implement `corky ragie push` for cloud document sync
-- [ ] Add search config section to `.corky.toml` schema
+- [ ] Add `[search]` config section to `.corky.toml` schema
 - [ ] Evaluate Ragie pricing/limits for correspondence corpus size
 - [ ] Plan Judith Krug project integration using Ragie as primary store
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang

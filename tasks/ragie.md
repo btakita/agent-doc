@@ -147,17 +147,66 @@ Not really. Sift already includes BM25 (tantivy's core offering) as part of its 
 **One edge case:** If you wanted to **embed** search directly into Corky as a Rust library (no subprocess), tantivy is the only option since Sift is a CLI binary, not a crate. But for Corky's use case — searching correspondence files — wrapping Sift via `corky search` is simpler and gives you the full hybrid pipeline for free.
 
 **Verdict: Sift replaces tantivy entirely for your needs.** Drop tantivy from the plan.
-<!-- agent:boundary:b01b2639 -->
+
+Let's have a complimentary sift + ragie command tree.
+
+### Re: Complementary Sift + Ragie command tree
+
+Here's a unified design where both backends coexist:
+
+```
+# Unified search — routes to best backend automatically (HEAD)
+corky search <query>              # Default: Sift local; falls back to Ragie if configured
+corky search --local <query>      # Force Sift (local hybrid)
+corky search --cloud <query>      # Force Ragie (cloud semantic)
+corky search --both <query>       # Query both, merge results (RRF)
+
+# Sift (local) management (HEAD)
+corky sift index                  # Build/rebuild local index from mail/conversations
+corky sift index --watch          # Incremental re-index on file changes
+corky sift status                 # Index stats, staleness, coverage
+
+# Ragie (cloud) management (HEAD)
+corky ragie push                  # Push docs to Ragie (incremental via manifest dates)
+corky ragie push --full           # Full re-push (useful after schema changes)
+corky ragie search <query>        # Query Ragie directly
+corky ragie sync                  # Compare local vs indexed — show gaps
+corky ragie status                # Account info, doc counts, index health
+```
+
+**Design principles:**
+- `corky search` is the **unified entry point** — abstracts the backend
+- `corky sift` and `corky ragie` handle **backend-specific operations** (indexing, pushing, status)
+- Both backends index the same corpus (`mail/conversations/*.md`, `mail/contacts/*/CLAUDE.md`)
+- Metadata from `manifest.toml` (labels, contacts, dates) is passed to both as filterable facets
+- Configuration in `.corky.toml`:
+  ```toml
+  [search]
+  default_backend = "sift"  # or "ragie" or "both"
+  
+  [search.sift]
+  index_path = ".corky/sift-index"
+  
+  [search.ragie]
+  api_key_pass = "ragie/api_key"  # via pass(1)
+  ```
+
+**When each backend wins:**
+- **Sift:** Offline, fast iteration, private data, your personal workflow
+- **Ragie:** Shared with collaborators (Lucas, Judith), multi-format docs, team access
+- **Both:** Maximum recall — useful for important queries where you don't want to miss anything
+<!-- agent:boundary:3b67b8e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Evaluate Sift CLI for `corky search` (local hybrid search)
-- [ ] Test Sift on mail/conversations corpus — measure index size and query latency
+- [ ] Design `corky search` unified command with backend routing
+- [ ] Evaluate Sift CLI — install, test on mail/conversations corpus
 - [ ] Explore Ragie Python SDK / REST API — test document upload and retrieval
-- [ ] Prototype `corky ragie push` with sample conversation files
-- [ ] Design `corky ragie` command tree (push/search/sync/status)
+- [ ] Implement `corky sift index` for local index management
+- [ ] Implement `corky ragie push` for cloud document sync
+- [ ] Add search config section to `.corky.toml` schema
 - [ ] Evaluate Ragie pricing/limits for correspondence corpus size
 - [ ] Plan Judith Krug project integration using Ragie as primary store
 - [ ] Explore Ragie as shared collaboration layer with Lucas Huang

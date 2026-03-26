@@ -744,13 +744,36 @@ Good call — the original draft was tuned for an immediate reply. Here's a revi
 - Clean close with a soft reconnect offer
 
 Want me to post this as a LinkedIn comment, or do you want to tweak further first?
-<!-- agent:boundary:22f17e89 -->
+
+Let's bring back the ragie integration. And my client work.
+
+### Re: Revise comment with Ragie + client work (HEAD)
+
+Wait — this is for the **public LinkedIn comment**, not the DM. I'd recommend keeping the public comment focused on gratitude and light connection. The Ragie integration and client work are better saved for the **DM** (which v10 already covers).
+
+Here's why: a public comment that mentions signing up for his product + client work reads like a pitch in front of his audience. The DM is the right venue for that — it's private, direct, and lets Bob respond without an audience.
+
+**If you still want to include it in the comment**, here's a version that weaves it in lightly:
+
+> Really appreciate the kind words, Bob. Grockit was a special crew — glad our paths crossed there. Enjoying building in the open — it keeps you honest. I actually just signed up for Ragie — integrating it into my tooling for a client project. Looks like our work is converging. Would be great to reconnect.
+
+But my recommendation is to keep the comment clean and let the DM do the heavy lifting:
+
+**Comment (gratitude + connection):**
+> Really appreciate the kind words, Bob. Grockit was a special crew — glad our paths crossed there. Enjoying building in the open — it keeps you honest. Looks like you're doing fascinating work with context engines. Would be great to reconnect sometime.
+
+**DM (v10 — Ragie + client work):**
+Already covers the integration, Corky, client project, and collaboration pitch.
+
+Which approach do you prefer?
+<!-- agent:boundary:69b6e265 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Retest bookmarklet (proper button + functional scraping) — awaiting test
+- LinkedIn comment to Bob — draft ready, awaiting direction (public comment vs DM split)
 - LinkedIn DM (v10) — ready to send, awaiting go-ahead
+- Retest bookmarklet (proper button + functional scraping) — awaiting test
 - Sift deployment recommendation — awaiting response
 <!-- /agent:pending -->

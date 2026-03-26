@@ -49,7 +49,11 @@ Yes, that's a fair characterization. Ragie is essentially a **managed cloud docu
 
 For your personal workflow (git + local DB), something like a local vector store (SQLite + embeddings, or `tantivy` for full-text search in Rust) would be lighter weight and keep everything local.
 
+Please evaluate SQLite + embeddings vs tantivy for Corky.
+
 For Judith's project — exactly right. Her staff won't touch git or Markdown. Ragie gives them a clean upload-and-query interface without developer tooling. **Practicing the Ragie API now on your own corpus is smart prep for building her integration later.**
+
+How can we make Ragie complimentary to my workflow. Is this something I can use with Lucas Huang in our collaboration?
 
 ### Re: Data source integration
 
@@ -64,16 +68,50 @@ Yes, makes sense as the integration surface:
 - `corky ragie status` — account info, document counts, index health
 
 This keeps Ragie as an optional module behind a feature flag rather than baking it into core sync. For Judith's project, a separate config profile could use Ragie as the primary store instead of local files.
-<!-- agent:boundary:34aca0d3 -->
+
+Is Ragie equivalent to a flat file system where all data is semantically indexed for search?
+
+### Re: SQLite + embeddings vs tantivy for Corky (HEAD)
+
+| | **tantivy** | **SQLite + embeddings** |
+|---|---|---|
+| **Search type** | Full-text (BM25) — keyword/phrase matching with relevance scoring | Semantic — vector similarity, finds conceptually related content even with different words |
+| **Setup** | Pure Rust, no external deps, fast to integrate | Needs an embedding model (local or API), vector extension (sqlite-vss or sqlite-vec) |
+| **Index size** | Compact inverted index | Larger (each doc → 1536-dim float vector) |
+| **Query speed** | Sub-millisecond for typical corpus | Slower (ANN search), but still fast for <100k docs |
+| **Best for** | "Find threads mentioning 'funding'" | "Find threads similar to this draft I'm writing" |
+
+**Recommendation:** Start with **tantivy** — pure Rust, integrates cleanly into Corky, full-text search is the immediate gap. Add embeddings later if you need semantic similarity. tantivy also supports faceted search, which maps well to Corky's labels/contacts metadata.
+
+### Re: Ragie complementary to your workflow / Lucas collaboration (HEAD)
+
+Ragie becomes complementary as a **shared collaboration layer** on top of your local workflow:
+
+1. **Your workflow stays local** — git + Markdown + local search (tantivy). Full control.
+2. **Ragie as the shared view** — push selected documents so collaborators can query without your dev setup.
+3. **With Lucas:** Index shared project context (specs, meeting notes, design docs) into Ragie so both of you can query "what did we decide about X?" — especially useful if Lucas isn't in your git repo.
+
+Pattern: **local-first for you, Ragie for shared access.**
+
+### Re: Is Ragie a flat file system with semantic indexing? (HEAD)
+
+Close but not quite — more like a **document database with a multi-layer search engine**:
+- **Like a file system:** Upload documents, CRUD them, metadata/tags for organization.
+- **Beyond a file system:** Automatic parsing (PDFs, images, audio → text), intelligent chunking, 3 index layers (vector, keyword, summary), context compression, reranking.
+- **Not a file system:** No directory hierarchy, no file paths, no streaming reads. Query by meaning or metadata, not location.
+
+Think: **"What if S3 understood your documents and could answer questions about them?"**
+<!-- agent:boundary:bff960be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Prototype tantivy integration for `corky search` (local full-text search)
 - [ ] Explore Ragie Python SDK / REST API — test document upload and retrieval
 - [ ] Prototype `corky ragie push` with sample conversation files
 - [ ] Design `corky ragie` command tree (push/search/sync/status)
 - [ ] Evaluate Ragie pricing/limits for correspondence corpus size
 - [ ] Plan Judith Krug project integration using Ragie as primary store
-- [ ] Research local RAG alternatives (tantivy, SQLite+embeddings) for personal workflow
+- [ ] Explore Ragie as shared collaboration layer with Lucas Huang
 <!-- /agent:pending -->

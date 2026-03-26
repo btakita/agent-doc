@@ -775,16 +775,30 @@ Building toward a general-purpose eval workflow that validates agent output agai
 
 ---
 
+I sent the message.
+Should I send another asking about the status?
+
 **What changed:**
 - Removed "hallucination spotting in AI-generated PRs" — not your current work
 - Replaced with "general-purpose eval workflow that validates agent output against deterministic contracts" — accurate to what you're building
 - Still connects to ECI's multi-product scaling needs
 - Keeps the demo offer as a soft CTA
-<!-- agent:boundary:d8fb2157 -->
+
+### Re: Follow-up status check (HEAD)
+
+Message sent — good. On sending another asking about status: **hold off for now.** You just sent the eval tooling update, so a status check immediately after would feel pushy.
+
+**Timing:** Wait until Monday March 30 (2-3 business days). If no response by then, a brief check-in is appropriate:
+
+> Hi Justin — just checking in on next steps. Happy to work on the Markdown challenge whenever it's ready.
+
+Short, low-pressure, references the specific next step he mentioned (challenge file + job description via email).
+<!-- agent:boundary:09b71e72 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Send LinkedIn follow-up to Justin re: eval tooling + video link (manual copy-paste — draft revised)
+- [x] Send LinkedIn follow-up to Justin re: eval tooling + video link (sent)
+- [ ] Follow up on status if no response by Monday March 30
 - [ ] Watch for Justin's email with Markdown challenge file and job description
 - [ ] Explore browser-based LinkedIn automation if volume warrants it
 <!-- /agent:pending -->

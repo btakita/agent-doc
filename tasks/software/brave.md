@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 published to crates.io.
+chromium-bridge v0.1.0 on crates.io. Planning install script + brew distribution.
 <!-- /agent:status -->
 
 ## Exchange
@@ -515,7 +515,9 @@ $ chromium-bridge list
 Both the symlink and cargo-installed binary are working.
 
 release chromium-bridge
-Create an ins
+Create an install script:
+- [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
+- Create a brew install task
 ### Re: Release chromium-bridge
 
 Published to crates.io: `chromium-bridge v0.1.0`
@@ -527,13 +529,37 @@ $ cargo install chromium-bridge
 Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains).
 
 **Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
-<!-- agent:boundary:53b02374 -->
+### Re: Install script and brew (HEAD)
+
+**Install script (`curl | sh`):** This requires GitHub Releases with prebuilt binaries first. The flow:
+
+1. Create a GitHub Release (e.g., `v0.1.0`) with prebuilt binaries for linux-x86_64 (and optionally macOS)
+2. Write an `install.sh` that detects OS/arch, downloads the right binary, and places it in `~/.cargo/bin/` or `/usr/local/bin/`
+3. Host at: `curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh`
+
+**Note:** The linked issue #30 is on `btakita/agent-doc`, not `chromium-bridge`. Should I create a separate issue on `btakita/chromium-bridge` for this?
+
+**Brew formula:** Requires a Homebrew tap (`btakita/tap`) or submitting to homebrew-core (requires 75+ GitHub stars). A tap is the practical path:
+
+1. Create `btakita/homebrew-tap` repo
+2. Add a formula that downloads the prebuilt binary or builds from source via `cargo`
+3. Users install with: `brew tap btakita/tap && brew install chromium-bridge`
+
+**Recommended order:**
+1. Create GitHub Release with prebuilt binary (unblocks both)
+2. Write install.sh
+3. Create brew tap (lower priority — `cargo install` already works)
+
+Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
+<!-- agent:boundary:d49ad736 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Create GitHub Release with prebuilt binary
+- Create GitHub Release v0.1.0 with prebuilt linux-x86_64 binary
+- Write install.sh (curl | sh) for binary download
+- Create btakita/homebrew-tap for brew install
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)

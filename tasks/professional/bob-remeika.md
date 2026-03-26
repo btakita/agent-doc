@@ -581,7 +581,7 @@ Same person always gets the same fake name within a single scrape. Reload the in
 Getting some issues with the bookmarklet.
 ![img_2.png](img_2.png)
 
-### Re: bookmarklet errors (HEAD)
+### Re: bookmarklet errors
 
 Those errors are likely LinkedIn's CSP blocking the `javascript:` URI bookmarklet. Updated the install page with two options:
 
@@ -591,7 +591,7 @@ Those errors are likely LinkedIn's CSP blocking the `javascript:` URI bookmarkle
 Reload: file:///home/brian/work/btakita/agent-loop/src/corky/assets/linkedin-post-bookmarklet.html
 
 Try the console paste method. If the DOM selectors are wrong (no content scraped or wrong content), paste the output here and I'll fix the selectors.
-<!-- agent:boundary:a17b598c -->
+<!-- agent:boundary:1352eacc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

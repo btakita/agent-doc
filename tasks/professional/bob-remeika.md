@@ -298,7 +298,7 @@ I'm still working on the implementation. But I can show something soon...within 
 - Reframed collaborative angle: "teams and non-technical users can query shared document context" — positions Ragie as the team enablement layer
 - Added "I have a client project where this is exactly the need" — concrete signal without details
 - Shorter, punchier — the message is now purely about shared technical interests
-### Re: Timing — Send Now or Wait? (v10 notes) (HEAD)
+### Re: Timing — Send Now or Wait? (v10 notes)
 
 The DM says "I'd love to show you what I'm building" — that's a promise. Two options:
 
@@ -309,7 +309,7 @@ The DM says "I'd love to show you what I'm building" — that's a promise. Two o
 **Recommendation: Send now.** Bob's engagement is warm right now. The DM doesn't promise a finished product — "I'd love to show you what I'm building" works for work-in-progress. When you have the integration working, follow up with a concrete demo. That gives you two natural touchpoints instead of one.
 
 The v10 draft is ready as-is. No changes needed for the timing concern.
-<!-- agent:boundary:670cccc1 -->
+<!-- agent:boundary:2d5db583 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

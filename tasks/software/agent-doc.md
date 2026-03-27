@@ -1695,7 +1695,7 @@ The prompt was detected continuously for 12 seconds and `PromptPanel.show()` was
 3. Or: bring the IntelliJ window to front when a prompt is detected
 
 Want me to change the PromptPanel to use a **modal dialog** or **notification balloon** instead, which would be more visible regardless of window layout?
-<!-- agent:boundary:1b66894d -->
+<!-- agent:boundary:6b278502 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

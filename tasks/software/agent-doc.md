@@ -1590,6 +1590,8 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.31.z
 4. Trigger an agent-doc cycle — PromptPanel should surface
 
 Test the prompt
+I don't see the prompt in the editor.
+![img_2.png](img_2.png)
 
 ### Re: Test the prompt
 
@@ -1608,14 +1610,31 @@ Test the prompt
 4. Normal mode — all tool calls show Yes/No/Cancel prompt
 
 After cycling to normal mode, trigger another `/agent-doc` cycle. The tool calls will show permission prompts, the poller will detect them, and PromptPanel should surface in IntelliJ.
-<!-- agent:boundary:1a64e171 -->
+
+### Re: I don't see the prompt in the editor (HEAD)
+
+**Found the real bug!** The screenshot shows the prompt options use **numbered list format** (`1. Yes`, `2. Yes, allow...`, `3. No`) — NOT the bracket format (`[1] Yes`) that the parser expected.
+
+Claude Code v2.1+ changed its prompt option format from `[N] label` to `N. label`. The parser's `parse_option_line()` rejected this format because it explicitly required `[` as the first character.
+
+**Fix applied:**
+- Updated `parse_option_line()` to support both `[N] label` (bracket) and `N. label` (numbered list) formats
+- Added tests for the new format including a full prompt parse test
+- Release binary rebuilt
+
+**Two fixes in this session:**
+1. **v0.2.31 (plugin):** Auto-start PromptPoller on project open + diagnostic logging
+2. **v0.26.3 (binary):** Support numbered list format (`N. label`) in prompt option parsing
+
+The binary is already rebuilt. Plugin v0.2.31 is already installed. Trigger another cycle to test — the poller should now detect the prompt and surface PromptPanel.
+<!-- agent:boundary:9c146e50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Press Shift+Tab to cycle to normal permissions mode, then re-test
-- Verify PromptPanel surfaces when permission prompt is active
+- Trigger a permission prompt and verify PromptPanel surfaces in IntelliJ
+- Both fixes deployed: binary (numbered format) + plugin (auto-start poller)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

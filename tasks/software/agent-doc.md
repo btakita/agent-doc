@@ -2237,7 +2237,7 @@ Error: The process '/home/runner/work/_temp/2a71f981-d596-466c-bd41-cc1f19020fee
 Error: The process '/home/runner/work/_temp/2a71f981-d596-466c-bd41-cc1f19020fee/maturin' failed with exit code 1
 ```
 
-### Re: Fix release CI / Windows build (HEAD)
+### Re: Fix release CI / Windows build
 
 **CI fix deployed.** The failure was a missing `existence-lang` path dependency clone. Added to all 3 workflows:
 
@@ -2259,7 +2259,7 @@ Retagged v0.26.5 to trigger the release workflow. The CI should now produce bina
 Check CI status: https://github.com/btakita/agent-doc/actions
 
 **Re: `interprocess` decision:** Given Windows is a requirement, use `interprocess` for socket IPC in v0.27. It provides Unix sockets + Windows named pipes behind a single API.
-<!-- agent:boundary:dac296d3 -->
+<!-- agent:boundary:5a4f2c9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

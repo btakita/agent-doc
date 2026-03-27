@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Discussing skill distribution — chromium-bridge should ship its own skill, separate from user's browser skill.
+Decided: no install prompt. Skill presence is the preference mechanism.
 <!-- /agent:status -->
 
 ## Exchange
@@ -346,14 +346,37 @@ In which, the user's browser skills can specify a preference to use chromium-bri
 3. Slim down `browser/SKILL.md` to workflow + preferences only
 
 Want me to implement this now, or add it to the task queue?
-<!-- agent:boundary:cd750e94 -->
+On install or usage, should we prompt the user, asking if they want to prefer using chromium-bridge.
+Or should we leave it to the user's initiative to prefer to use chromium-bridge?
+### Re: Prompt vs user initiative
+
+**Recommendation: no prompt — user initiative only.**
+
+1. **The skill IS the preference.** Installing `chromium-bridge/SKILL.md` makes Claude aware of it. Claude will naturally prefer it for browser tasks because the skill docs describe exactly what it can do.
+
+2. **Prompting adds friction for zero gain.** The user just ran `skill install` — they clearly want it.
+
+3. **Preference is a user concern.** If a user needs to explicitly say "prefer chromium-bridge over MCP," that belongs in their project's `browser/SKILL.md`, not in the install flow.
+
+4. **Precedent:** `agent-doc skill install` works the same way — install and go.
+
+**The flow:**
+```bash
+chromium-bridge skill install
+# → writes ~/.claude/skills/chromium-bridge/SKILL.md (HEAD)
+# → Claude discovers it, starts using it for browser tasks (HEAD)
+# → No prompt needed (HEAD)
+```
+
+Should I implement `chromium-bridge skill install` now?
+<!-- agent:boundary:90b65a48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- `chromium-bridge skill install` — distribute SKILL.md from the binary
-- Move command reference from browser/SKILL.md to chromium-bridge/SKILL.md
+- `chromium-bridge skill install` subcommand implementation
+- Move command reference to chromium-bridge/SKILL.md
 - Resend OHANA message with proper paragraph formatting
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

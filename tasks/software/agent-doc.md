@@ -1957,7 +1957,7 @@ This is a well-known issue with NIO WatchService on Linux during heavy I/O. The 
 Look at this file's local history. There are an excessive number of changes. Why?
 Could this be a cause for overflows?
 
-### Re: There are an excessive number of changes. Why? Could this be a cause for overflows? (HEAD)
+### Re: There are an excessive number of changes. Why? Could this be a cause for overflows?
 
 **IntelliJ's Local History** tracks every Document API write as a separate entry. Each `/agent-doc` cycle creates multiple Document API writes:
 
@@ -1977,7 +1977,7 @@ The excessive local history is a **separate concern** — it makes the Local His
 - Or: implement the CRDT merge path (PatchWatcher already has it in the architecture) to reduce write frequency
 
 But the inotify overflow was specifically from the heavy `cargo install` build, not from document writes.
-<!-- agent:boundary:f835d0b2 -->
+<!-- agent:boundary:0c5f4166 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

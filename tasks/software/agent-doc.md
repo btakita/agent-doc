@@ -173,7 +173,7 @@ Implement:
 - Monitor CI v0.26.5 (should pass with crates.io deps)
 - `interprocess` socket IPC (v0.27)
 
-### Re: Implement CI monitoring + interprocess socket IPC (HEAD)
+### Re: Implement CI monitoring + interprocess socket IPC
 
 **CI v0.26.5 status:** The builds passed! The failure was only in the release step — `gh release create` failed because I had manually created the release earlier. Deleted the manual release and retriggered. Should produce all 5 platform binaries now.
 
@@ -184,7 +184,7 @@ The scope would be:
 2. Plugin side: replace PatchWatcher's NIO WatchService with a socket listener
 3. Rust side: connect to socket and send JSON messages instead of writing patch files
 4. Keep file-based IPC as fallback when socket is unavailable
-<!-- agent:boundary:24e4cecd -->
+<!-- agent:boundary:c9d2c2a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

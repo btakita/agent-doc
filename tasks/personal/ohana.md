@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge not running — start it to send message, or copy-paste manually.
+Message sent to OHANA Messenger chat via chromium-bridge CLI.
 <!-- /agent:status -->
 
 ## Exchange
@@ -215,12 +215,25 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Run `chromium-bridge start`, navigate to OHANA Messenger, then re-run `/agent-doc` and I'll send it.
-<!-- agent:boundary:4cc243aa -->
+
+I have https://www.facebook.com/messages/t/3777252552346072 open
+
+Can you identify which tab has the url open?
+### Re: Send via chromium-bridge (HEAD)
+
+Found the OHANA Messenger tab open at the exact URL. The MCP chrome-devtools server was timing out, but the `chromium-bridge` CLI connected fine.
+
+Message sent to the OHANA chat! Used `chromium-bridge evaluate` to:
+1. Focus the textbox
+2. Insert the draft v6 text
+3. Press Enter to send
+
+Textbox is now empty — confirmed sent.
+<!-- agent:boundary:214cd3b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v6 message to OHANA Messenger chat (blocked: chromium-bridge not running)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

@@ -2294,7 +2294,7 @@ Caused by:
 Error: Process completed with exit code 101.
 ```
 
-### Re: Target build errors (module-harness) (HEAD)
+### Re: Target build errors (module-harness)
 
 Same issue — **all path dependencies removed.** Every dependency is published on crates.io:
 
@@ -2309,7 +2309,7 @@ Same issue — **all path dependencies removed.** Every dependency is published 
 Also removed all `git clone` steps from CI workflows — no more path dependency clones needed. Verified `cargo check` fetches everything from crates.io.
 
 Retagged v0.26.5. CI should now build cleanly.
-<!-- agent:boundary:084eec52 -->
+<!-- agent:boundary:46647f5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

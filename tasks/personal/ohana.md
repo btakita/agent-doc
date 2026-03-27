@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v5 ready — added non-programmer utility paragraph touching each sister's domain.
+Draft v6 ready — trimmed to ~75 words, phone-friendly short paragraphs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -152,12 +152,29 @@ Going to start using it to post more family updates! And yes — I used Claude C
 Added one paragraph (~40 words) that touches each sister's domain without naming names — financial reports (Lisa), interior design (Leanne), engineering team docs (Lynette), and building apps (Laura's engineers). Still conversational and brief. ~130 words total.
 
 Send it, or adjust?
-<!-- agent:boundary:d54a5533 -->
+
+Trim it to be shorter. Make it easy to read from the phone.
+### Re: Trim for mobile (HEAD)
+
+**Draft v6:**
+
+It's like a really smart assistant you talk to in plain English — and it just does it. Think Siri but way smarter.
+
+I don't even write code anymore — I just describe what I want. I have YouTube videos showing how I work if you're curious (fair warning, they're long 😄).
+
+It's not just for programmers either — financial reports, interior design mood boards, project management, building apps — no code needed.
+
+Going to start using it to post more family updates! And yes — I used Claude Code to send this message 😊
+
+---
+
+~75 words. Short paragraphs scan well on mobile. Send it?
+<!-- agent:boundary:dee1210a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v5 message to OHANA Messenger chat (awaiting approval)
+- Send v6 message to OHANA Messenger chat (awaiting approval)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

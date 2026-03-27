@@ -1699,7 +1699,7 @@ I saw a prompt window.
 Which one was obscured?
 continue over pending
 
-### Re: I saw a prompt window / Which one was obscured? / continue over pending (HEAD)
+### Re: I saw a prompt window / Which one was obscured? / continue over pending
 
 The PromptPanel IS working. The one that was obscured earlier was this same panel — it was rendering at the bottom of the IntelliJ frame but hidden behind your terminal window in the earlier cycles. Now that you can see it, the full fix is confirmed:
 
@@ -1710,7 +1710,7 @@ The PromptPanel IS working. The one that was obscured earlier was this same pane
 4. **Diagnostic logging** — `[prompt-poller]` entries in idea.log for debugging
 
 All three layers (detection, polling, display) are confirmed working end-to-end.
-<!-- agent:boundary:f676d417 -->
+<!-- agent:boundary:34aa91a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

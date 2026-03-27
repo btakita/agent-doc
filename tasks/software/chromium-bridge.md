@@ -761,7 +761,7 @@ How can we integrate sift for multiple libraries?
 
 This was in tasks/professional/bob-remekia. Implementation should move here:
 - chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
-### Re: Sift integration for multiple libraries (HEAD)
+### Re: Sift integration for multiple libraries
 
 **Sift is already integrated into corky** (`src/corky/src/search/sift.rs`) as a `SearchBackend`. Use via `corky search --backend sift "<query>"`.
 
@@ -773,7 +773,7 @@ For **multi-library integration**, the pattern is:
 
 Sift is indexless — any file written to the corky conversations directory is automatically sift-searchable.
 
-### Re: `type` command (already shipped) (HEAD)
+### Re: `type` command (already shipped)
 
 The `type` command is **already implemented** in chromium-bridge v0.2.0 (`src/chromium-bridge/src/main.rs:540-627`). Uses CDP `Input.dispatchKeyEvent` with Shift+Enter for paragraph breaks in contenteditable fields. Shipped as part of the Facebook Messenger fix earlier today.
 
@@ -784,7 +784,7 @@ Second paragraph.'
 ```
 
 This bob-remeika task item is complete — no further implementation needed.
-<!-- agent:boundary:4e3dea47 -->
+<!-- agent:boundary:46326635 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

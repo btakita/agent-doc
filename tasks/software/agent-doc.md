@@ -1502,7 +1502,19 @@ I did not see the prompt pane. Try again
 **Root cause found:** Pane %40 still has **bypass permissions on** — the footer shows `"esc to interrupt"` not a permission prompt. Commenting out `claude_args: --dangerously-skip-permissions` in frontmatter only affects the *next* session launch; the running session retains its original mode.
 
 **Fix:** Press **Shift+Tab** in pane %40 to cycle permissions to normal mode, or restart the session. Then the next tool call will show a real permission prompt (`"No" to cancel`) for PromptPoller to detect.
-<!-- agent:boundary:61209501 -->
+
+Is permissions mode off
+
+### Re: Is permissions mode off (HEAD)
+
+I can't check the permissions mode of your running session from here — that's local to the tmux pane. Here's how to check:
+
+1. **Look at the bottom of pane %40** — if it says `"esc to interrupt"`, bypass is still active. If it shows `"Yes"/"No" to cancel`, normal permissions are on.
+2. **Shift+Tab** toggles permissions mode within a running session. Press it in pane %40.
+3. If this session was launched with `--dangerously-skip-permissions`, commenting out `claude_args` only takes effect on the **next** `agent-doc spawn`. The current session needs **Shift+Tab** or a **restart**.
+
+**Quick test:** After toggling, make any edit to this document — the next cycle will trigger a tool call, and you should see a permission prompt in the pane footer. If PromptPanel v0.2.30 is installed, it should surface in IntelliJ.
+<!-- agent:boundary:37891462 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

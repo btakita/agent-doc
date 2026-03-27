@@ -1820,14 +1820,29 @@ describe:
 **Recommended: Option 1 + Option 5 hybrid.** Bring IntelliJ to front on first prompt detection (once, not every poll), and render the prompt as a top-of-editor banner. This is visible, idiomatic, and non-disruptive after the initial window raise.
 
 Want me to implement one of these?
-<!-- agent:boundary:a9efd685 -->
+I like the Current behavior...since it does not disrupt typing. No need to implement any of these.
+
+### Re: I like the Current behavior...No need to implement any of these (HEAD)
+
+Understood — keeping the current bottom-panel PromptPanel as-is. The non-disruptive behavior (no focus steal, no window raise) is the right call for a typing-heavy workflow.
+
+**Session complete.** Summary of all changes made:
+
+| Change | File | Status |
+|--------|------|--------|
+| PromptPoller auto-start on project open | `PromptPoller.kt`, `PluginLifecycleListener.kt` | Plugin v0.2.32 |
+| Numbered format support (`N. label`) | `prompt.rs` | Binary v0.26.3 |
+| Debug logging (`AGENT_DOC_PROMPT_DEBUG=1`) | `prompt.rs` | Binary v0.26.3 |
+| Plugin diagnostic logging | `PromptPoller.kt` | Plugin v0.2.32 |
+| Project-local `.bin/` binary resolution | `TerminalUtil.kt` | Plugin v0.2.32 |
+| `~/.cargo/bin/agent-doc` updated | `cargo install` | Done |
+<!-- agent:boundary:686ccb9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Decision needed: which PromptPanel visibility approach to implement
-- Plugin v0.2.32 ready for install
+(none — all items resolved)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

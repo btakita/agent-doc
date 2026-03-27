@@ -1997,14 +1997,34 @@ So you're seeing ~3 local history entries per cycle. With 20+ cycles in this ses
 **The "no changes" patches are the main waste.** The commit's reposition boundary IPC sends a patch even when the boundary is already in the right place. Fixing this would eliminate 36/56 = 64% of unnecessary Document API operations.
 
 **Fix:** The Rust `commit` command should only send the IPC reposition signal if the boundary actually moved. A simple check: compare boundary position before and after reposition — if unchanged, skip the IPC write.
-<!-- agent:boundary:a8a9a940 -->
+
+Implement:
+- Skip IPC reposition signal when boundary position unchanged (eliminates 64% of no-op patches)
+
+### Re: Implement skip IPC reposition when boundary unchanged (HEAD)
+
+**Done.** Changed `reposition_boundary_in_snapshot()` to return `bool` (true = boundary moved). The IPC signal is now conditional:
+
+```rust
+let snap_changed = reposition_boundary_in_snapshot(file);
+if snap_changed {
+    crate::write::try_ipc_reposition_boundary(file);
+}
+```
+
+When the boundary is already at end-of-exchange (the common case after a normal write cycle), the IPC patch file is never created. This eliminates the 64% of no-op PatchWatcher operations.
+
+**Before:** Every commit → IPC reposition → PatchWatcher processes → "no changes"
+**After:** Every commit → check snapshot → boundary already at end → skip IPC
+
+Release binary rebuilt. You'll see the effect immediately — commit output will no longer show `[commit] IPC reposition boundary signal sent` when the boundary hasn't moved.
+<!-- agent:boundary:a06da800 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Skip IPC reposition signal when boundary position unchanged (eliminates 64% of no-op patches)
-- Handle inotify OVERFLOW in PatchWatcher
+- Handle inotify OVERFLOW in PatchWatcher (future improvement)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -1414,6 +1414,8 @@ Committed in submodule: `49ff68e`
 
 Still not showing the prompt in the plugin.
 ![img.png](img.png)
+
+The hotkey to show the menu should be Alt+Enter
 ### Re: Popup still not showing
 
 This is the original **Alt+Space WM conflict** — Linux window managers intercept Alt+Space before IntelliJ ever sees it. The VFS fix (v0.2.27) was for the separate "externally modified" issue on brave.md.
@@ -1426,13 +1428,23 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Note: After installing, you may need to **uninstall the old plugin first → restart → install new → restart** since the keybinding change is in plugin.xml (structural change).
-<!-- agent:boundary:de57e9f2 -->
+### Re: Alt+Enter for popup (HEAD)
+
+Changed to `Alt+Enter`. Plugin v0.2.29:
+```
+file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.29.zip
+```
+
+**Note:** This shadows IntelliJ's native "Show Intention Actions" (typo fixes, quick-fixes) in `.md` files. The popup action's `update()` only enables for `.md` files, so non-md files still get native intentions. If you need typo fixes in markdown, you can right-click → "Show Context Actions" or use the gutter lightbulb.
+
+Committed: `87e7a20`. Uninstall → restart → install → restart for keybinding to take effect.
+<!-- agent:boundary:de9fac2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Install JB plugin v0.2.28 and verify Ctrl+Period popup works
+- [ ] Install JB plugin v0.2.29 and verify Alt+Enter popup works
 - [ ] Verify no more external modification dialogs on brave.md (v0.2.27 VFS fix)
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

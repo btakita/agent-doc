@@ -184,7 +184,7 @@ The scope would be:
 2. Plugin side: replace PatchWatcher's NIO WatchService with a socket listener
 3. Rust side: connect to socket and send JSON messages instead of writing patch files
 4. Keep file-based IPC as fallback when socket is unavailable
-<!-- agent:boundary:c9d2c2a5 -->
+<!-- agent:boundary:8725fb91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

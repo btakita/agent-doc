@@ -1714,7 +1714,7 @@ All three layers (detection, polling, display) are confirmed working end-to-end.
 Describe:
 - Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
 
-### Re: Describe .bin/ project-relative path to resolveAgentDoc() (HEAD)
+### Re: Describe .bin/ project-relative path to resolveAgentDoc()
 
 **Problem:** The plugin's `resolveAgentDoc()` in `TerminalUtil.kt` checks fixed paths:
 1. `~/bin/agent-doc`
@@ -1745,7 +1745,7 @@ fun resolveAgentDoc(): String {
 **Caveat:** `resolveAgentDoc()` is currently a static method with no project context. It would need a `project: Project?` parameter or access to the project basePath. Alternatively, the caller could pass the basePath.
 
 This ensures the plugin always uses the same binary the developer built, avoiding the stale-binary issue we hit today. Want me to implement this?
-<!-- agent:boundary:0209a0b7 -->
+<!-- agent:boundary:d07b5c40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

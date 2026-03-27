@@ -1092,7 +1092,7 @@ This way the call is about your work and reconnecting, and the contract is a nat
 
 Want me to send this draft via LinkedIn (chromium-bridge), or do you want to adjust it first?
 
-### Re: Bob's LinkedIn post (HEAD)
+### Re: Bob's LinkedIn post
 
 Found it! Bob posted about 1 hour ago:
 
@@ -1115,7 +1115,7 @@ This is clean and concise. It:
 **Strategy for keeping the door open:** The call becomes dual-purpose — demo your tools AND discuss the contract opportunity. Since Bob already thinks you're "one of the best of the best," you don't need to sell hard. Just show up, demo, and let him see the fit naturally. The contract mention in the DM plants the seed so he comes prepared to discuss it.
 
 Ready to send this DM? Or want to adjust?
-<!-- agent:boundary:a3e3cf94 -->
+<!-- agent:boundary:de3b6b18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

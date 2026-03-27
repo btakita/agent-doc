@@ -1517,7 +1517,7 @@ I can't check the permissions mode of your running session from here — that's 
 
 Test the prompt
 
-### Re: Test the prompt (HEAD)
+### Re: Test the prompt
 
 This cycle itself is the test — the `agent-doc preflight` Bash call should have triggered a permission prompt in pane %40 (if permissions are enabled).
 
@@ -1526,7 +1526,7 @@ This cycle itself is the test — the `agent-doc preflight` Bash call should hav
 - **If yes** — PromptPanel is working. The v0.2.30 fix resolved the detection issue.
 - **If no prompt appeared in the pane** — permissions bypass is still active. Toggle with **Shift+Tab** in pane %40.
 - **If prompt appeared in pane but not in IntelliJ** — PromptPanel detection still has a bug. Check the IntelliJ event log for errors.
-<!-- agent:boundary:3daca59d -->
+<!-- agent:boundary:7fa8f7be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

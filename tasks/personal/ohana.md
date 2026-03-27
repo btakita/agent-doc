@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Message sent to OHANA Messenger chat via chromium-bridge CLI.
+Message sent. Discussing chromium-bridge as browser skill backend — 5 missing features identified.
 <!-- /agent:status -->
 
 ## Exchange
@@ -219,6 +219,9 @@ Run `chromium-bridge start`, navigate to OHANA Messenger, then re-run `/agent-do
 I have https://www.facebook.com/messages/t/3777252552346072 open
 
 Can you identify which tab has the url open?
+chromium-bridge seems faster than the initial tool you are using.
+Should we add to a skill to use chromium-bridge? Which skill?
+Any missing features in chromium-bridge?
 ### Re: Send via chromium-bridge
 
 Found the OHANA Messenger tab open at the exact URL. The MCP chrome-devtools server was timing out, but the `chromium-bridge` CLI connected fine.
@@ -229,11 +232,32 @@ Message sent to the OHANA chat! Used `chromium-bridge evaluate` to:
 3. Press Enter to send
 
 Textbox is now empty — confirmed sent.
-<!-- agent:boundary:542e719f -->
+### Re: chromium-bridge as skill backend (HEAD)
+
+**chromium-bridge vs MCP chrome-devtools:** chromium-bridge is clearly faster and more reliable — direct CDP, ~5ms per call, no MCP protocol overhead, no `Network.enable` timeout issues. It should be the primary browser automation backend.
+
+**Which skill?** The `/browser` skill (`.claude/skills/browser/`). It's the natural home — chromium-bridge commands map 1:1 to browser automation.
+
+**Missing features for a complete browser skill:**
+
+| Feature | Why | Current workaround |
+|---------|-----|--------------------|
+| `type <selector> <text>` | Typing into inputs/contenteditable | `evaluate` + `execCommand("insertText")` |
+| `click <selector>` | Click elements | `evaluate` + `querySelector().click()` |
+| `select-tab <pattern>` | Switch active tab | `--tab` flag on evaluate only |
+| `wait <selector\|idle>` | Wait for element/network idle | Manual polling via evaluate |
+| `snapshot` | Accessibility tree / DOM outline | Screenshot (expensive) or evaluate |
+
+The core is solid — `evaluate` covers everything as a fallback. But dedicated `type`, `click`, and `wait` would make the skill cleaner and less fragile (no more `execCommand` hacks).
+
+Want to add these to the chromium-bridge task queue?
+<!-- agent:boundary:1988f009 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Evaluate adding chromium-bridge as `/browser` skill backend
+- Missing chromium-bridge features: type, click, select-tab, wait, snapshot
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

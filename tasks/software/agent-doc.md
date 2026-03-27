@@ -1514,14 +1514,26 @@ I can't check the permissions mode of your running session from here — that's 
 3. If this session was launched with `--dangerously-skip-permissions`, commenting out `claude_args` only takes effect on the **next** `agent-doc spawn`. The current session needs **Shift+Tab** or a **restart**.
 
 **Quick test:** After toggling, make any edit to this document — the next cycle will trigger a tool call, and you should see a permission prompt in the pane footer. If PromptPanel v0.2.30 is installed, it should surface in IntelliJ.
-<!-- agent:boundary:046fd7a2 -->
+
+Test the prompt
+
+### Re: Test the prompt (HEAD)
+
+This cycle itself is the test — the `agent-doc preflight` Bash call should have triggered a permission prompt in pane %40 (if permissions are enabled).
+
+**Did you see the prompt surface in IntelliJ via PromptPanel?**
+
+- **If yes** — PromptPanel is working. The v0.2.30 fix resolved the detection issue.
+- **If no prompt appeared in the pane** — permissions bypass is still active. Toggle with **Shift+Tab** in pane %40.
+- **If prompt appeared in pane but not in IntelliJ** — PromptPanel detection still has a bug. Check the IntelliJ event log for errors.
+<!-- agent:boundary:3daca59d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Toggle permissions off in pane %40 (Shift+Tab) then re-test prompt detection
-- Verify PromptPanel surfaces in IntelliJ when real permission prompt appears
+- Confirm whether permission prompt appeared in pane %40 and IntelliJ
+- If PromptPanel not working: check IntelliJ event log for errors
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

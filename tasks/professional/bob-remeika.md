@@ -1017,7 +1017,7 @@ Add todo for the presentation and to schedule a call next week for a good day. G
 Moved to tasks/software/chromium-bridge.md:
 - chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
 
-### Presentation Plan for Bob (30 min) (HEAD)
+### Presentation Plan for Bob (30 min)
 
 Given Bob's background (Rails/React ecosystem, engineering leadership), a focused demo covering:
 
@@ -1032,11 +1032,11 @@ Given Bob's background (Rails/React ecosystem, engineering leadership), a focuse
 - Have a Ragie integration example ready (or video of one)
 - Prepare a quick bookmarklet demo if retest passes
 
-### TODO (HEAD)
+### TODO
 - [ ] Schedule call with Bob via his Calendly link — target Wed-Fri next week (Apr 2-4) to allow polish time
 - [ ] Prepare presentation outline with live demo scripts
 - [ ] Test all demo flows end-to-end before the call
-<!-- agent:boundary:0105ed49 -->
+<!-- agent:boundary:379f97a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

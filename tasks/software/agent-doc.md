@@ -1535,18 +1535,41 @@ Do we have logs?
 Good — permissions should now be active. This cycle's tool calls (`agent-doc preflight`, `cp`, and this `agent-doc write`) each require approval, generating real permission prompts in pane %40.
 
 **What to check:**
-- Did you see permission prompts in the tmux pane footer (`"Yes"/"No" to cancel`)?
-- Did PromptPanel surface in IntelliJ?
+- Did you see permission prompts in the tmux pane footer (`"Yes"/"No" to cancel`)?: Yes
+- Did PromptPanel surface in IntelliJ?: No
 
 If you approved the tool calls to get here, then permission prompts are working. The question is whether PromptPanel detected them. Check the IntelliJ IDE for a popup or notification — if nothing appeared, the PromptPoller may not be polling this pane, or the plugin needs a restart.
-<!-- agent:boundary:0f06450f -->
+
+Add the necessary logs to detect what is happening and why did the prompt not show up in the editor.
+
+### Re: Add the necessary logs to detect what is happening (HEAD)
+
+**Diagnostic logging added** (`AGENT_DOC_PROMPT_DEBUG=1 agent-doc prompt --all` now logs last 5 lines of each pane).
+
+**Finding:** Pane %40 footer is:
+```
+⏵⏵ accept edits on (shift+tab to cycle) · esc to interrupt
+```
+
+This is **"accept edits" mode** — a mid-level permissions mode that auto-approves file edits without showing individual prompts. It's NOT the full bypass mode, but it still doesn't produce the Yes/No/Cancel permission prompts that PromptPoller detects.
+
+**To get real permission prompts:** Press **Shift+Tab** again to cycle to the next permissions level. The modes cycle through:
+1. `bypass permissions on` — everything auto-approved
+2. `accept edits on` — file edits auto-approved, other tools prompted ← **you are here**
+3. Normal mode — all tool calls prompted with Yes/No/Cancel
+
+You need one more Shift+Tab press to reach normal mode where every tool call shows a permission prompt.
+
+**What was built:** Added `AGENT_DOC_PROMPT_DEBUG=1` env var to `agent-doc prompt --all` that logs the last 5 non-empty lines of each captured pane to stderr. This makes it easy to diagnose detection issues without modifying the plugin.
+<!-- agent:boundary:45a340f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Confirm whether PromptPanel surfaced in IntelliJ during this permission-enabled cycle
-- If not: check IntelliJ event log, verify plugin v0.2.30 installed, verify pane %40 claimed
+- Press Shift+Tab once more to reach normal permission-prompt mode
+- Re-test: trigger a cycle and verify PromptPanel surfaces in IntelliJ
+- Consider: should PromptPoller detect "accept edits" mode too?
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

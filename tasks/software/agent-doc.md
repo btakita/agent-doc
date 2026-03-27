@@ -206,15 +206,29 @@ This session's context is at capacity — I can't reliably navigate the large `w
 - Update JetBrains plugin to start listener on project open
 
 **Recommendation:** Commit the `ipc_socket.rs` module now, then start a fresh session to wire it in. The module is self-contained and tested — the wiring is straightforward but needs full context on `write.rs`.
-<!-- agent:boundary:c3f98f5f -->
+commit
+
+### Re: commit (HEAD)
+
+Submodule already committed and pushed to `btakita/agent-doc` (`ba02d0b`). The `ipc_socket.rs` module is on `main`.
+
+**Session summary — all work committed:**
+
+| Version | Changes |
+|---------|---------|
+| v0.26.4 | PromptPanel: auto-start poller, numbered format, binary sync |
+| v0.26.5 | Skip no-op IPC reposition, inotify overflow handling, CI fixes |
+| v0.26.6 | FFI sync lock/debounce, layout debounce fix, FFI-first convention |
+| v0.27-wip | `ipc_socket.rs` module with `interprocess` crate (not yet wired) |
+
+**Next session:** Wire `ipc_socket` into `write.rs` and `git.rs`, add FFI listener, update JetBrains plugin.
+<!-- agent:boundary:7f84a57e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Wire socket IPC into write.rs and git.rs (fresh session)
-- Add FFI listener function (fresh session)
-- Update JetBrains plugin (fresh session)
+(session complete — v0.27 wiring deferred to fresh session)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

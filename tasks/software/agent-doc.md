@@ -1745,13 +1745,38 @@ fun resolveAgentDoc(): String {
 **Caveat:** `resolveAgentDoc()` is currently a static method with no project context. It would need a `project: Project?` parameter or access to the project basePath. Alternatively, the caller could pass the basePath.
 
 This ensures the plugin always uses the same binary the developer built, avoiding the stale-binary issue we hit today. Want me to implement this?
-<!-- agent:boundary:d07b5c40 -->
+Yes
+
+### Re: Yes (HEAD)
+
+**Implemented.** `resolveAgentDoc()` now accepts an optional `basePath` parameter and checks `$basePath/.bin/agent-doc` as the **first** candidate:
+
+```kotlin
+fun resolveAgentDoc(basePath: String? = null): String {
+    val candidates = listOfNotNull(
+        basePath?.let { "$it/.bin/agent-doc" },  // project-local first
+        // ... existing candidates
+    )
+}
+```
+
+**Updated callers** that have `basePath` available:
+- `PromptPoller.pollAll()` and `answerPrompt()` — pass `basePath`
+- `TerminalUtil.sendToTerminal()` and `runWithAgent()` — pass `basePath`
+
+Remaining callers (ClaimAction, SyncLayoutAction, etc.) use the default `null` and fall through to existing paths. They could be updated later if needed.
+
+**Plugin v0.2.32** built:
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.32.zip
+```
+<!-- agent:boundary:9b62b996 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Implement .bin/ project-relative path in resolveAgentDoc() (awaiting approval)
+- Install plugin v0.2.32
 - Consider making PromptPanel more visible for occluded layouts
 <!-- /agent:pending -->
 

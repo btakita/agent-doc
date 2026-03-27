@@ -1979,7 +1979,7 @@ The excessive local history is a **separate concern** — it makes the Local His
 
 But the inotify overflow was specifically from the heavy `cargo install` build, not from document writes.
 
-### Re: Look at the JetBrains Idea local history for this file specifically (HEAD)
+### Re: Look at the JetBrains Idea local history for this file specifically
 
 I can't open IntelliJ's Local History UI, but I can see the Document API operations from idea.log:
 
@@ -1997,7 +1997,7 @@ So you're seeing ~3 local history entries per cycle. With 20+ cycles in this ses
 **The "no changes" patches are the main waste.** The commit's reposition boundary IPC sends a patch even when the boundary is already in the right place. Fixing this would eliminate 36/56 = 64% of unnecessary Document API operations.
 
 **Fix:** The Rust `commit` command should only send the IPC reposition signal if the boundary actually moved. A simple check: compare boundary position before and after reposition — if unchanged, skip the IPC write.
-<!-- agent:boundary:8f1700b4 -->
+<!-- agent:boundary:a8a9a940 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

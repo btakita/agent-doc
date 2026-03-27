@@ -464,7 +464,7 @@ I apologize for missing your earlier edits — the rapid cycle of layout fixes c
 I checked the committed content — there's no `(HEAD)` in the committed file headers:
 ```
 git show HEAD:tasks/agent-doc.md | grep "^### .*HEAD"
-# (no output) (HEAD)
+# (no output)
 ```
 
 Look above...malformed patch?
@@ -2329,7 +2329,7 @@ Exchange compacted. 2,163 lines archived. The document is clean for the next top
 - Monitor CI v0.26.5 build (all 5 targets)
 - `interprocess` crate for cross-platform socket IPC (v0.27)
 - Windows tmux abstraction
-<!-- agent:boundary:55ce09bc -->
+<!-- agent:boundary:7f7ff80d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

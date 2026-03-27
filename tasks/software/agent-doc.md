@@ -1953,12 +1953,37 @@ The patch file sat unnoticed for ~65 seconds until either:
 - Handle `OVERFLOW` events by scanning the directory for pending files
 
 This is a well-known issue with NIO WatchService on Linux during heavy I/O. The fix is to handle `OVERFLOW` gracefully.
-<!-- agent:boundary:75560184 -->
+
+Look at this file's local history. There are an excessive number of changes. Why?
+Could this be a cause for overflows?
+
+### Re: There are an excessive number of changes. Why? Could this be a cause for overflows? (HEAD)
+
+**IntelliJ's Local History** tracks every Document API write as a separate entry. Each `/agent-doc` cycle creates multiple Document API writes:
+
+1. **PatchWatcher applies the response** — `document.setText()` via WriteCommandAction
+2. **PatchWatcher saves** — `fdm.saveDocument()` triggers a disk write
+3. **Commit reposition** — boundary marker moved, triggers another document update
+4. **VCS refresh** — git gutter recalculation after commit
+
+That's 3-4 local history entries per cycle. With 67 git commits today (one per cycle), that's ~200+ local history entries for this file in one session.
+
+**Is this causing inotify overflows?** No — these are different systems:
+- **Local History** is IntelliJ-internal (stored in `~/.cache/JetBrains/.../LocalHistory/`)
+- **inotify** watches the filesystem — the overflow was caused by `cargo install` generating thousands of temp files in `target/`, not by document writes
+
+The excessive local history is a **separate concern** — it makes the Local History UI cluttered and can slow down IDEA's file change tracking. Possible mitigations:
+- Use `DocumentUtil.executeInBulk()` to batch multiple writes into one undo/history entry
+- Or: implement the CRDT merge path (PatchWatcher already has it in the architecture) to reduce write frequency
+
+But the inotify overflow was specifically from the heavy `cargo install` build, not from document writes.
+<!-- agent:boundary:f835d0b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Consider batching Document API writes to reduce Local History clutter
 - Handle inotify OVERFLOW in PatchWatcher (scan for pending files on overflow)
 <!-- /agent:pending -->
 

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Browser connection timed out — message ready to copy-paste or send when bridge is restored.
+chromium-bridge not running — start it to send message, or copy-paste manually.
 <!-- /agent:status -->
 
 ## Exchange
@@ -170,6 +170,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 
 ~75 words. Short paragraphs scan well on mobile. Send it?
 Send it
+
 ### Re: Send it
 
 Chrome DevTools connection is timing out — can't reach the browser right now. You may need to restart chromium-bridge or the browser.
@@ -189,12 +190,37 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Once the browser connection is back, I can send it directly. Or you can paste it manually.
-<!-- agent:boundary:3f3a84d2 -->
+
+I navigated away. Try again.
+### Re: Try again (HEAD)
+
+chromium-bridge isn't running — no Chrome remote debugging process found either. You'll need to start it:
+
+```
+chromium-bridge start
+```
+
+Or you can copy-paste the message directly. Here it is one more time:
+
+---
+
+It's like a really smart assistant you talk to in plain English — and it just does it. Think Siri but way smarter.
+
+I don't even write code anymore — I just describe what I want. I have YouTube videos showing how I work if you're curious (fair warning, they're long 😄).
+
+It's not just for programmers either — financial reports, interior design mood boards, project management, building apps — no code needed.
+
+Going to start using it to post more family updates! And yes — I used Claude Code to send this message 😊
+
+---
+
+Run `chromium-bridge start`, navigate to OHANA Messenger, then re-run `/agent-doc` and I'll send it.
+<!-- agent:boundary:d4f701d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v6 message to OHANA Messenger chat (blocked: browser bridge timeout)
+- Send v6 message to OHANA Messenger chat (blocked: chromium-bridge not running)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

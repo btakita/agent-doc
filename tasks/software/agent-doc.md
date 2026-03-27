@@ -1872,13 +1872,51 @@ release
 | `~/.cargo/bin/agent-doc` | Updated |
 | Git tag | `v0.26.4` pushed |
 | JetBrains plugin | v0.2.32 built (local install) |
-<!-- agent:boundary:1cba0ceb -->
+
+### Re: release
+
+**v0.26.4 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.26.4 |
+| `~/.cargo/bin/agent-doc` | Updated |
+| Git tag | `v0.26.4` pushed |
+| JetBrains plugin | v0.2.32 built (local install) |
+
+### Re: release
+
+**v0.26.4 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.26.4 |
+| `~/.cargo/bin/agent-doc` | Updated |
+| Git tag | `v0.26.4` pushed |
+| JetBrains plugin | v0.2.32 built (local install) |
+
+Why was **v0.26.4 released:** rendered 3 times?
+
+### Re: Why was v0.26.4 released rendered 3 times? (HEAD)
+
+The IPC write timed out (exit code 75 — plugin didn't acknowledge within 2s), so I retried with `--force-disk`. This caused:
+
+1. **First write** — IPC patch saved to `.agent-doc/patches/` but plugin didn't consume it in time
+2. **Second write** — `--force-disk` wrote directly to disk (cleaned up the stale IPC patch)
+3. **Third copy** — the plugin eventually consumed the original IPC patch after the timeout
+
+The `--force-disk` fallback + delayed IPC consumption created the triple. This is a known edge case — when IPC times out, the patch file should be cleaned up before retrying. The `[write] cleaning stale IPC patch file` log shows it tried, but the plugin may have already read it.
+
+I'll clean up the duplicate entries in the exchange now.
+<!-- agent:boundary:c5fcc6b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-(none — release complete)
+- Clean up duplicate "Re: release" entries in the exchange
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

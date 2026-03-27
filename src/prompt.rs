@@ -228,9 +228,12 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
     let stripped: Vec<String> = lines.iter().map(|l| strip_ansi(l)).collect();
 
     // Search for the prompt pattern from the bottom up (most recent prompt)
-    // Look for the footer pattern first
+    // Look for the footer pattern first — Claude Code uses variations:
+    //   "Esc to cancel" (old format)
+    //   "No to cancel" (new format, Claude Code v2.1+)
+    //   "to cancel" (catch-all for future variations)
     let footer_idx = stripped.iter().rposition(|line| {
-        line.contains("Esc to cancel")
+        line.contains("to cancel")
     });
 
     let footer_idx = match footer_idx {
@@ -465,6 +468,28 @@ mod tests {
 "#;
         let info = parse_prompt(content);
         assert!(!info.active, "markdown numbered list should not be detected as prompt");
+    }
+
+    #[test]
+    fn parse_new_format_no_to_cancel() {
+        let content = r#"
+────────────────────────────────────────────────────────
+ Bash command
+
+   cp tmp/file.txt /tmp/dest.txt
+
+ Do you want to proceed?
+   [1] Yes
+   [2] Yes, and always allow Claude to edit for this project
+   [3] No
+
+ No to cancel · ctrl+e to explain
+"#;
+        let info = parse_prompt(content);
+        assert!(info.active, "new 'No to cancel' format should be detected");
+        assert_eq!(info.question.as_deref(), Some("Do you want to proceed?"));
+        let opts = info.options.as_ref().unwrap();
+        assert_eq!(opts.len(), 3);
     }
 
     #[test]

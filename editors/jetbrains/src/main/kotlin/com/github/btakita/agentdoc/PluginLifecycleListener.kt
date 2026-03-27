@@ -51,6 +51,13 @@ class PluginLifecycleListener : ProjectManagerListener {
             } catch (e: Exception) {
                 LOG.info("[resync] agent-doc not available: ${e.message}")
             }
+
+            // Auto-start prompt polling after resync cleans up stale sessions
+            val sessionsFile = java.io.File(basePath, ".agent-doc/sessions.json")
+            if (sessionsFile.exists()) {
+                LOG.info("[lifecycle] auto-starting prompt poller for ${project.name}")
+                PromptPoller.getInstance(project).startPolling()
+            }
         }, "agent-doc-resync-fix").apply {
             isDaemon = true
             start()

@@ -5,10 +5,10 @@
 //! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
 //! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
 //! - `answer(file, option_index)` — navigates the Claude Code TUI to the target option using Up/Down arrow keys (30 ms between presses) then sends Enter. Validates that a prompt is active and the index is in range before sending keys.
-//! - Prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for `[N] label` bracket-format options, then identifies the question as the first non-empty, non-option line above.
+//! - Prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for options in bracket format (`[N] label`) or numbered list format (`N. label`), then identifies the question as the first non-empty, non-option line above.
 //! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
 //! - `selected` is 0-based (reflecting TUI cursor position); `options[*].index` is 1-based (matching the TUI display).
-//! - Markdown numbered lists (`1. item`) must NOT be detected as prompt options; only `[N] label` bracket format matches.
+//! - Both bracket format (`[N] label`) and numbered list format (`N. label`) are detected as prompt options.
 //! - When no pane is registered or the pane is dead, `run` emits `{"active":false}` and returns `Ok(())`.
 //! - Optional fields (`question`, `options`, `selected`) are omitted from JSON serialization when `None`.
 //!
@@ -25,7 +25,7 @@
 //! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
 //! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
 //! - parse_option_line_with_cursor: `❯ [2] label` → index=2, label extracted
-//! - parse_option_line_rejects_markdown: `1. item` / `2. item` → None
+//! - parse_option_line_numbered_format: `1. Yes` / `❯ 3. No` → index + label extracted
 //! - prompt_all_entry_serializes_flat: active entry → `session_id`, `file`, `active`, `question` all at JSON top level
 //! - prompt_all_entry_inactive_omits_optional: inactive entry → no `question`/`options` keys in JSON
 
@@ -121,16 +121,44 @@ pub fn run_all() -> Result<()> {
 pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
     let registry: SessionRegistry = sessions::load()?;
     let mut entries: Vec<PromptAllEntry> = Vec::new();
+    let verbose = std::env::var("AGENT_DOC_PROMPT_DEBUG").is_ok();
 
     for (session_id, entry) in &registry {
         if !tmux.pane_alive(&entry.pane) {
+            if verbose {
+                eprintln!("[prompt] pane {} dead for session {} ({})", entry.pane, session_id, entry.file);
+            }
             continue;
         }
 
         let prompt = match sessions::capture_pane(tmux,&entry.pane) {
-            Ok(content) => parse_prompt(&content),
-            Err(_) => inactive(),
+            Ok(content) => {
+                if verbose {
+                    // Log the last 5 non-empty lines for debugging prompt detection
+                    let last_lines: Vec<&str> = content.lines()
+                        .rev()
+                        .filter(|l| !l.trim().is_empty())
+                        .take(5)
+                        .collect();
+                    eprintln!("[prompt] pane {} ({}) last lines:", entry.pane, entry.file);
+                    for line in last_lines.iter().rev() {
+                        eprintln!("[prompt]   {}", strip_ansi(line));
+                    }
+                }
+                parse_prompt(&content)
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("[prompt] capture failed for pane {}: {}", entry.pane, e);
+                }
+                inactive()
+            }
         };
+
+        if verbose {
+            eprintln!("[prompt] session {} active={} question={:?}",
+                session_id, prompt.active, prompt.question);
+        }
 
         entries.push(PromptAllEntry {
             session_id: session_id.clone(),
@@ -291,10 +319,11 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
     }
 }
 
-/// Parse a single option line like "[1] Yes" or "❯ [2] Yes, and don't ask..."
+/// Parse a single option line like "[1] Yes", "1. Yes", or "❯ [2] Yes, and don't ask..."
 ///
-/// Only matches the bracket format `[N] label` used by Claude Code's TUI.
-/// Does NOT match markdown numbered lists (`1. item`).
+/// Matches two formats used by Claude Code's TUI:
+/// - Bracket: `[N] label` (older versions)
+/// - Numbered: `N. label` (Claude Code v2.1+)
 fn parse_option_line(line: &str) -> Option<PromptOption> {
     // Strip leading ❯ or > marker
     let stripped = line
@@ -302,19 +331,26 @@ fn parse_option_line(line: &str) -> Option<PromptOption> {
         .trim_start_matches('>')
         .trim();
 
-    // Match "[N] label" where N is a number
-    if !stripped.starts_with('[') {
-        return None;
+    // Try bracket format: "[N] label"
+    if stripped.starts_with('[') {
+        let bracket_close = stripped.find(']')?;
+        let num_str = &stripped[1..bracket_close];
+        let index: usize = num_str.parse().ok()?;
+        let label = stripped[bracket_close + 1..].trim().to_string();
+        if label.is_empty() {
+            return None;
+        }
+        return Some(PromptOption { index, label });
     }
-    let bracket_close = stripped.find(']')?;
-    let num_str = &stripped[1..bracket_close];
-    let index: usize = num_str.parse().ok()?;
-    let label = stripped[bracket_close + 1..].trim().to_string();
 
+    // Try numbered list format: "N. label"
+    let dot_pos = stripped.find('.')?;
+    let num_str = &stripped[..dot_pos];
+    let index: usize = num_str.parse().ok()?;
+    let label = stripped[dot_pos + 1..].trim().to_string();
     if label.is_empty() {
         return None;
     }
-
     Some(PromptOption { index, label })
 }
 
@@ -448,26 +484,45 @@ mod tests {
     }
 
     #[test]
-    fn parse_option_line_rejects_markdown_numbered_list() {
-        // Must NOT match markdown numbered lists
-        assert!(parse_option_line("1. First item").is_none());
-        assert!(parse_option_line("2. Second item").is_none());
-        assert!(parse_option_line("❯ 3. Third item").is_none());
+    fn parse_option_line_numbered_format() {
+        // Claude Code v2.1+ uses numbered list format
+        let opt = parse_option_line("1. Yes").unwrap();
+        assert_eq!(opt.index, 1);
+        assert_eq!(opt.label, "Yes");
+
+        let opt = parse_option_line("2. Yes, allow reading from agent-loop/ from this project").unwrap();
+        assert_eq!(opt.index, 2);
+        assert_eq!(opt.label, "Yes, allow reading from agent-loop/ from this project");
+
+        let opt = parse_option_line("❯ 3. No").unwrap();
+        assert_eq!(opt.index, 3);
+        assert_eq!(opt.label, "No");
     }
 
     #[test]
-    fn markdown_numbered_list_not_detected_as_prompt() {
+    fn parse_numbered_format_prompt() {
         let content = r#"
- Here is a list of steps:
+────────────────────────────────────────────────────────
+ Bash command
 
-   1. Install the package
-   2. Run the setup script
-   3. Verify the output
+   agent-doc preflight tasks/software/agent-doc.md
 
- Esc to cancel
+ Do you want to proceed?
+   1. Yes
+   2. Yes, allow reading from agent-loop/ from this project
+   3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain
 "#;
         let info = parse_prompt(content);
-        assert!(!info.active, "markdown numbered list should not be detected as prompt");
+        assert!(info.active, "numbered format prompt should be detected");
+        assert_eq!(info.question.as_deref(), Some("Do you want to proceed?"));
+        let opts = info.options.as_ref().unwrap();
+        assert_eq!(opts.len(), 3);
+        assert_eq!(opts[0].index, 1);
+        assert_eq!(opts[0].label, "Yes");
+        assert_eq!(opts[2].index, 3);
+        assert_eq!(opts[2].label, "No");
     }
 
     #[test]

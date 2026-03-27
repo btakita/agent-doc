@@ -190,7 +190,7 @@ continue
 - Update `git.rs` reposition to try socket first
 - Add FFI listener function
 
-### Re: continue (write.rs, git.rs, FFI) (HEAD)
+### Re: continue (write.rs, git.rs, FFI)
 
 This session's context is at capacity — I can't reliably navigate the large `write.rs` file (1000+ lines) to make surgical changes without risking regressions.
 
@@ -206,7 +206,7 @@ This session's context is at capacity — I can't reliably navigate the large `w
 - Update JetBrains plugin to start listener on project open
 
 **Recommendation:** Commit the `ipc_socket.rs` module now, then start a fresh session to wire it in. The module is self-contained and tested — the wiring is straightforward but needs full context on `write.rs`.
-<!-- agent:boundary:5222d068 -->
+<!-- agent:boundary:c3f98f5f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

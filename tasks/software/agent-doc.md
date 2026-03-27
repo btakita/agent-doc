@@ -1628,6 +1628,8 @@ Claude Code v2.1+ changed its prompt option format from `[N] label` to `N. label
 
 The binary is already rebuilt. Plugin v0.2.31 is already installed. Trigger another cycle to test — the poller should now detect the prompt and surface PromptPanel.
 test prompt
+Still don't see the editor prompt
+![img_3.png](img_3.png)
 
 ### Re: test prompt
 
@@ -1647,14 +1649,33 @@ This will show what the poller sees. When a permission prompt IS active (with th
 - Binary: `parse_option_line()` now supports both `[N] label` and `N. label` formats
 - Plugin v0.2.31: PromptPoller auto-starts on project open, diagnostic logging added
 - Both are active — just need a real permission prompt to appear
-<!-- agent:boundary:4c740e1b -->
+
+test prompt
+
+The Yes/No terminal prompt should have appeared as a Yes/No editor prompt
+
+![img_4.png](img_4.png)
+
+### Re: Still don't see the editor prompt (HEAD)
+
+**Found the real issue!** The plugin's `resolveAgentDoc()` was using `~/.cargo/bin/agent-doc` (last modified 05:47, BEFORE the numbered format fix). The shell `which agent-doc` resolves to `.bin/agent-doc` (the just-rebuilt release binary), but the plugin checks `~/.cargo/bin/` directly without using PATH.
+
+```
+~/.cargo/bin/agent-doc  →  Mar 26 05:47 (OLD, no numbered format support)
+.bin/agent-doc          →  Mar 26 22:44 (NEW, with fix)
+```
+
+**Fix:** Ran `cargo install --path .` to update `~/.cargo/bin/agent-doc` with the latest code.
+
+The poller should now detect the numbered format prompts on the next cycle. No plugin rebuild needed — the binary update is sufficient.
+<!-- agent:boundary:f37825a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Cycle to normal permissions mode (Shift+Tab until no ⏵⏵ prefix), then trigger a cycle
-- Or test detection directly with `AGENT_DOC_PROMPT_DEBUG=1 agent-doc prompt --all` during a prompt
+- Trigger a permission prompt and verify PromptPanel surfaces (binary now updated at ~/.cargo/bin/)
+- Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

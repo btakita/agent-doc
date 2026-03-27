@@ -47,7 +47,7 @@ Probably use Claude Code to be more consistent with the postings.
 
 ---
 Please help me describe Claude Code to my family.
-### Re: Describe Claude Code to family (HEAD)
+### Re: Describe Claude Code to family
 
 Navigated to Facebook Messenger — the OHANA chat is open with the conversation visible.
 
@@ -68,7 +68,7 @@ No coding or tech skills needed to use it — you literally just type what you w
 ---
 
 Want me to send this to the OHANA chat, or would you like to adjust it first?
-<!-- agent:boundary:4d46efb1 -->
+<!-- agent:boundary:7e059b80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

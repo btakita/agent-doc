@@ -254,7 +254,7 @@ Want to add these to the chromium-bridge task queue?
 Yes.
 
 The message on ohana did not match the spacing in the draft.
-### Re: Spacing issue + chromium-bridge tasks (HEAD)
+### Re: Spacing issue + chromium-bridge tasks
 
 **Spacing bug confirmed.** Took a screenshot — the message landed as one continuous block of text. The paragraph breaks were lost.
 
@@ -271,7 +271,7 @@ The message on ohana did not match the spacing in the draft.
 - Integration as `/browser` skill backend
 
 Want me to try to resend the message with proper spacing now? I can delete the old one and send paragraph by paragraph using Shift+Enter between paragraphs.
-<!-- agent:boundary:9a4c7ebc -->
+<!-- agent:boundary:5114cdcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

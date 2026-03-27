@@ -1468,13 +1468,24 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Committed: `468f4c2`. Install plugin + the binary is already rebuilt (release profile).
-<!-- agent:boundary:76e633bf -->
+
+Make a prompt test.
+### Re: Make a prompt test (HEAD)
+
+**Test verified:**
+
+1. Created a simulated Claude Code permission prompt in a temp tmux pane with the new `"No to cancel"` format
+2. Confirmed `tmux capture-pane` captures the footer text
+3. `parse_new_format_no_to_cancel` unit test passes — correctly detects question ("Do you want to proceed?"), 3 options, and active state
+
+The binary-level detection is confirmed working. To test the full end-to-end (PromptPanel in IntelliJ), install plugin v0.2.30 and trigger a real permission prompt by temporarily removing `--dangerously-skip-permissions` from a session, or by running a Claude session without the flag.
+<!-- agent:boundary:54dea182 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Install JB plugin v0.2.30 + verify PromptPanel shows permission prompts
+- [ ] Install JB plugin v0.2.30 + end-to-end PromptPanel test
 - [ ] Verify no more external modification dialogs on brave.md (v0.2.27 VFS fix)
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

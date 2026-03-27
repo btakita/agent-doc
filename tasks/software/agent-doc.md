@@ -1542,7 +1542,7 @@ If you approved the tool calls to get here, then permission prompts are working.
 
 Add the necessary logs to detect what is happening and why did the prompt not show up in the editor.
 
-### Re: Add the necessary logs to detect what is happening (HEAD)
+### Re: Add the necessary logs to detect what is happening
 
 **Diagnostic logging added** (`AGENT_DOC_PROMPT_DEBUG=1 agent-doc prompt --all` now logs last 5 lines of each pane).
 
@@ -1561,7 +1561,7 @@ This is **"accept edits" mode** — a mid-level permissions mode that auto-appro
 You need one more Shift+Tab press to reach normal mode where every tool call shows a permission prompt.
 
 **What was built:** Added `AGENT_DOC_PROMPT_DEBUG=1` env var to `agent-doc prompt --all` that logs the last 5 non-empty lines of each captured pane to stderr. This makes it easy to diagnose detection issues without modifying the plugin.
-<!-- agent:boundary:45a340f9 -->
+<!-- agent:boundary:0ec7b2d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

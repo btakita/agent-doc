@@ -1913,7 +1913,7 @@ I'll clean up the duplicate entries in the exchange now.
 
 I'm still not sure why we are timing out. Please provide a detailed description as to why the plugin is blocked causing the timeout.
 
-### Re: Please provide a detailed description as to why the plugin is blocked causing the timeout (HEAD)
+### Re: Please provide a detailed description as to why the plugin is blocked causing the timeout
 
 **Root cause: inotify overflow during `cargo install` release build.**
 
@@ -1953,7 +1953,7 @@ The patch file sat unnoticed for ~65 seconds until either:
 - Handle `OVERFLOW` events by scanning the directory for pending files
 
 This is a well-known issue with NIO WatchService on Linux during heavy I/O. The fix is to handle `OVERFLOW` gracefully.
-<!-- agent:boundary:01042c3b -->
+<!-- agent:boundary:75560184 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

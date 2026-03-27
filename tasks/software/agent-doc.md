@@ -1414,7 +1414,7 @@ Committed in submodule: `49ff68e`
 
 Still not showing the prompt in the plugin.
 ![img.png](img.png)
-### Re: Popup still not showing (HEAD)
+### Re: Popup still not showing
 
 This is the original **Alt+Space WM conflict** — Linux window managers intercept Alt+Space before IntelliJ ever sees it. The VFS fix (v0.2.27) was for the separate "externally modified" issue on brave.md.
 
@@ -1426,7 +1426,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Note: After installing, you may need to **uninstall the old plugin first → restart → install new → restart** since the keybinding change is in plugin.xml (structural change).
-<!-- agent:boundary:f0ee0494 -->
+<!-- agent:boundary:de57e9f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

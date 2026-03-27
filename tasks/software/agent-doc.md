@@ -232,7 +232,7 @@ The claim for `tasks/interior-design.md` succeeded (visible at the bottom of you
 
 Should we add a deferred function call to check the layout to ensure that the tmux layout matches the expected?
 
-### Re: Should we add a deferred function call to check the layout? (HEAD)
+### Re: Should we add a deferred function call to check the layout?
 
 Yes — a layout validation check after sync operations would catch drift between the editor layout and tmux layout. Here's how it could work:
 
@@ -257,7 +257,7 @@ After `sync` completes, schedule a deferred check (e.g., 2s delay) that:
 This would have caught the 5-pane stash accumulation before it became visible to the user.
 
 Want me to implement this, or defer to v0.27?
-<!-- agent:boundary:cebd6014 -->
+<!-- agent:boundary:3a453acd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

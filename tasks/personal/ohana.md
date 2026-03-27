@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Decided: no install prompt. Skill presence is the preference mechanism.
+`chromium-bridge skill install` implemented. Skill architecture complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -369,14 +369,43 @@ chromium-bridge skill install
 ```
 
 Should I implement `chromium-bridge skill install` now?
-<!-- agent:boundary:9e5d99cf -->
+yes
+### Re: skill install implemented (HEAD)
+
+Done. `chromium-bridge skill install` is working:
+
+```
+$ chromium-bridge skill install
+Skill installed: .claude/skills/chromium-bridge/SKILL.md
+
+$ chromium-bridge skill check
+Skill up to date
+
+$ chromium-bridge skill install  # idempotent
+Skill already up to date
+```
+
+**What was done:**
+1. Created `src/chromium-bridge/SKILL.md` — command reference bundled at compile time via `include_str!`
+2. Added `skill install` and `skill check` subcommands to CLI
+3. Installs to `.claude/skills/chromium-bridge/SKILL.md` (resolves git superproject root)
+4. Idempotent — no-op if content already matches
+5. Slimmed `browser/SKILL.md` to workflow layer only (safety rules, integrations, preferences)
+
+Claude Code immediately discovered the new skill — `chromium-bridge` now appears in the skills list.
+
+**Architecture now matches the proposal:**
+```
+.claude/skills/
+├── chromium-bridge/SKILL.md  ← tool reference (from binary)
+└── browser/SKILL.md          ← user workflow + preferences
+```
+<!-- agent:boundary:d268de04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- `chromium-bridge skill install` subcommand implementation
-- Move command reference to chromium-bridge/SKILL.md
 - Resend OHANA message with proper paragraph formatting
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

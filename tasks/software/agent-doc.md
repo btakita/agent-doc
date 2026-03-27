@@ -311,7 +311,7 @@ go
 
 This should be in the FFI Plugin. We already added to AGENTS.md to prefer implementing the FFI plugin over individual editors. Why did you not follow these instructions? Should this be a private repo skill instead? How can we ensure you will prefer implementing plugin features in the FFI plugin next time?
 
-### Re: FFI-first violation (HEAD)
+### Re: FFI-first violation
 
 You're right. I violated the FFI-first convention in CLAUDE.md:
 
@@ -345,7 +345,7 @@ Saved feedback memory: "Socket listener in FFI, not editor plugins." The rule: w
 To make this even stronger: should this be added as a checklist item in the skill? Or should the CLAUDE.md convention be expanded with a concrete example of the socket listener pattern?
 
 **Build results:** Rust: 560 tests pass, clippy clean. Plugin: builds successfully (both zips).
-<!-- agent:boundary:9840e40d -->
+<!-- agent:boundary:5e3abc4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

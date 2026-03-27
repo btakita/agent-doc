@@ -150,13 +150,23 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c27813db526ec41028f1e69a81a008b38916582970ce113c35e8515c18e0c563-20260327-074831.md`*
-<!-- agent:boundary:357a93ea -->
+
+Implement v0.27
+
+### Re: Implement v0.27 (HEAD)
+
+v0.27 (socket IPC via `interprocess`) is a multi-file feature spanning Rust + Kotlin. This session's context is near capacity after the extensive v0.26.x work.
+
+**Recommendation:** Start v0.27 in a fresh session. The scope is tracked in [#39](https://github.com/btakita/agent-doc/issues/39). A fresh session will have full context budget for the implementation.
+
+To start: open a new session and reference this issue.
+<!-- agent:boundary:f38c11ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-(none — session complete, v0.27 items tracked in GitHub issues)
+- v0.27 socket IPC ([#39](https://github.com/btakita/agent-doc/issues/39)) — start in fresh session
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

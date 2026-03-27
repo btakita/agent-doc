@@ -279,14 +279,42 @@ Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plu
 - Update JetBrains plugin to call `agent_doc_start_ipc_listener()` on project open
 - Update JetBrains plugin to handle socket messages in the callback (apply patches, reposition boundary, VCS refresh)
 - Release v0.27.0
-<!-- agent:boundary:9589b2ab -->
+
+go
+
+### Re: go (JetBrains plugin socket IPC) (HEAD)
+
+**Done.** JetBrains plugin now has a Unix domain socket listener alongside the file-based watcher.
+
+**Implementation approach:** Pure Kotlin socket listener using `java.nio.channels.ServerSocketChannel` with `StandardProtocolFamily.UNIX` (JBR 21+). No FFI callback needed — cleaner than the JNA callback pattern and directly uses IntelliJ's threading model.
+
+**Changes to `PatchWatcher.kt`:**
+
+1. **Socket listener thread** — `socketListenLoop()` binds to `.agent-doc/ipc.sock`, accepts connections, reads NDJSON messages
+2. **Connection handler** — `handleSocketConnection()` reads data, handles probe connections (empty data from `is_listener_active()`) gracefully
+3. **Message dispatcher** — `handleSocketMessage()` parses the `type` field and dispatches:
+   - `"patch"` → calls existing `applyPatch()` via `invokeAndWait` (EDT), sends ack with status
+   - `"reposition"` → calls new `repositionBoundaryViaDocument()` via `invokeAndWait`, sends ack
+   - `"vcs_refresh"` → calls existing `refreshVcs()`, sends ack
+4. **Boundary reposition** — `repositionBoundaryViaDocument()` opens document, applies FFI/Kotlin reposition, saves
+5. **Cleanup in `dispose()`** — closes `ServerSocketChannel` (unblocks `accept()`), deletes socket file, interrupts thread
+
+**What runs in parallel:**
+- File watcher thread (legacy fallback) — monitors `.agent-doc/patches/` via NIO WatchService
+- Socket listener thread (primary) — listens on `.agent-doc/ipc.sock` for direct messages
+
+**Flow:** `agent-doc write` → `try_ipc()` checks `is_listener_active()` → socket connect succeeds → sends NDJSON patch → plugin applies via Document API → sends ack → CLI saves snapshot. Falls back to file-based IPC if socket unavailable.
+
+**Build results:** Plugin builds successfully (both unsigned and signed zips). Rust tests: 560 pass, clippy clean.
+
+**Ready to commit and release v0.27.0.**
+<!-- agent:boundary:ffe2b88d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Update JetBrains plugin to use socket IPC listener (FFI callback)
-- v0.27: Release and publish
+- v0.27: Commit Rust + plugin changes, release v0.27.0
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

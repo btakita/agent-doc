@@ -381,7 +381,7 @@ Go:
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 
-### Re: Go on CI monitoring + interprocess (HEAD)
+### Re: Go on CI monitoring + interprocess
 
 **CI v0.26.5: All 5 platforms green.**
 
@@ -403,7 +403,7 @@ Windows binary is now available for the first time.
 5. **Both:** Keep file-based IPC as fallback
 
 This is a v0.27 milestone — recommend starting in a fresh session with a plan. Want me to create a plan file and add it to the todo list, or start implementing now?
-<!-- agent:boundary:e7a40dc9 -->
+<!-- agent:boundary:77209c51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

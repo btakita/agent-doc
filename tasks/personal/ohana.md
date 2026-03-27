@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All 5 chromium-bridge commands implemented, tested, and documented. Browser skill updated.
+Discussing skill distribution — chromium-bridge should ship its own skill, separate from user's browser skill.
 <!-- /agent:status -->
 
 ## Exchange
@@ -316,13 +316,44 @@ All 5 chromium-bridge commands implemented and verified against live browser:
 
 **Browser skill** (`.claude/skills/browser/SKILL.md`) updated with all new commands, common patterns (send chat message, fill form, wait+act), and tab selector documentation.
 
+Is browser/SKILL.md distributed by the chromium-bridge library?
+The chromium-bridge library should distribute these skills.
+Should the directory structure be different to not conflict with a user's browser skills?
+In which, the user's browser skills can specify a preference to use chromium-bridge. 
+
 **Release build** completed. Binary at `src/chromium-bridge/target/release/chromium-bridge`.
-<!-- agent:boundary:fcdc7024 -->
+### Re: Skill distribution architecture (HEAD)
+
+**Current state:** `browser/SKILL.md` lives in agent-loop's `.claude/skills/` — user-local, not distributed by chromium-bridge.
+
+**Proposed architecture:**
+
+```
+.claude/skills/
+├── chromium-bridge/SKILL.md  ← distributed by `chromium-bridge skill install`
+└── browser/SKILL.md          ← user-authored, references chromium-bridge
+```
+
+**Why separate:**
+- `chromium-bridge/SKILL.md` is the **tool reference** — command docs, flags, examples. Distributed by the binary (like `agent-doc skill install`). Versioned with the CLI.
+- `browser/SKILL.md` is the **user's workflow** — project-specific patterns (LinkedIn safety rules, Messenger chat automation, etc.), tool preferences ("prefer chromium-bridge over MCP"), and integrations (sift, ragie).
+
+**No conflicts:** The user writes `browser/SKILL.md` and says "use chromium-bridge for browser tasks." The chromium-bridge skill is a dependency, not a replacement.
+
+**Implementation:**
+1. Add `chromium-bridge skill install` subcommand (like agent-doc has)
+2. Move command reference to `chromium-bridge/SKILL.md`
+3. Slim down `browser/SKILL.md` to workflow + preferences only
+
+Want me to implement this now, or add it to the task queue?
+<!-- agent:boundary:033570c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Resend OHANA message with proper paragraph formatting using new `type` command
+- `chromium-bridge skill install` — distribute SKILL.md from the binary
+- Move command reference from browser/SKILL.md to chromium-bridge/SKILL.md
+- Resend OHANA message with proper paragraph formatting
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

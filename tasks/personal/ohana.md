@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v4 ready. YouTube intro reframed (family doesn't know about channel yet).
+Draft v5 ready — added non-programmer utility paragraph touching each sister's domain.
 <!-- /agent:status -->
 
 ## Exchange
@@ -131,12 +131,33 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Send it?
-<!-- agent:boundary:039037c7 -->
+
+Leanne is an interior designer. Laura is the COO of Amulet Technologies. Lynette is an Engineering Manager. Lisa is a retired CPA accountant.
+So mention that non-programmers can build software, prepare financial analysis, interior design (see tasks/interior-design.md).
+Communicate the utility of Claude in a fairly brief way.
+### Re: Add non-programmer utility (HEAD)
+
+**Draft v5:**
+
+It's like a really smart assistant you talk to in plain English — "organize my photos", "write a message", "browse this website" — and it just does it. Think Siri but way smarter.
+
+The cool part is I don't even write code anymore — I just tell it what I want in English and it does the work. I actually have some YouTube videos showing how I work with it if anyone's curious (fair warning, they're long and programmer-oriented 😄).
+
+And it's not just for programmers — you could use it to draft financial reports, plan interior design layouts and mood boards, manage engineering team docs, or even build simple apps without writing a line of code. It works for whatever you need help thinking through or organizing.
+
+Going to start using it to post more family updates! And yes — I used Claude Code to send this message 😊
+
+---
+
+Added one paragraph (~40 words) that touches each sister's domain without naming names — financial reports (Lisa), interior design (Leanne), engineering team docs (Lynette), and building apps (Laura's engineers). Still conversational and brief. ~130 words total.
+
+Send it, or adjust?
+<!-- agent:boundary:9bd24192 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v4 message to OHANA Messenger chat (awaiting approval)
+- Send v5 message to OHANA Messenger chat (awaiting approval)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

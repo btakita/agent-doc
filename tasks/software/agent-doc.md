@@ -166,7 +166,7 @@ This session's context has been heavily compressed but I can proceed. The implem
 Starting with step 1 — adding the dependency and creating the socket module. Shall I proceed with implementation?
 go
 
-### Re: go (v0.27 implementation) (HEAD)
+### Re: go (v0.27 implementation)
 
 **Step 1 complete: `ipc_socket.rs` module created and tested.**
 
@@ -184,7 +184,7 @@ go
 3. Update `git.rs` reposition to try socket before file-based
 4. Add FFI `agent_doc_start_ipc_listener()` for plugin to start the listener
 5. Update JetBrains plugin to start listener + handle messages
-<!-- agent:boundary:b8ee19cf -->
+<!-- agent:boundary:8b6bd55c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

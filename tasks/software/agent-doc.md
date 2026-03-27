@@ -1428,6 +1428,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Note: After installing, you may need to **uninstall the old plugin first → restart → install new → restart** since the keybinding change is in plugin.xml (structural change).
+
 ### Re: Alt+Enter for popup
 
 Changed to `Alt+Enter`. Plugin v0.2.29:
@@ -1438,13 +1439,26 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 **Note:** This shadows IntelliJ's native "Show Intention Actions" (typo fixes, quick-fixes) in `.md` files. The popup action's `update()` only enables for `.md` files, so non-md files still get native intentions. If you need typo fixes in markdown, you can right-click → "Show Context Actions" or use the gutter lightbulb.
 
 Committed: `87e7a20`. Uninstall → restart → install → restart for keybinding to take effect.
-<!-- agent:boundary:9b3efc14 -->
+Alt+Space worked. The issue was `Run Agent Doc` did not result in the plugin showing the prompt when Claude had the prompt.
+### Re: Alt+Space worked — Run Agent Doc prompt issue (HEAD)
+
+Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverting the keybinding change to `Alt+Space` (v0.2.29 with `Alt+Enter` shadows native intentions unnecessarily).
+
+**Clarification needed:** What do you mean by "the plugin showing the prompt when Claude had the prompt"?
+
+1. Claude Code's **permission prompt** (`Do you want to...`) is hidden in the tmux pane and not surfaced in the IDE?
+2. The **agent-doc response** doesn't appear in the editor after "Run Agent Doc"?
+3. A specific **dialog/notification** you expect when Claude is waiting for input?
+
+The screenshot from earlier showed what looked like a Claude Code permission dialog in the terminal. If the issue is that the plugin doesn't surface Claude's prompts to the IDE, that would be a new feature — detecting Claude's output state and showing it in IntelliJ.
+<!-- agent:boundary:8cd75d26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Install JB plugin v0.2.29 and verify Alt+Enter popup works
+- [ ] Revert popup keybinding back to Alt+Space (undo Alt+Enter change)
+- [ ] Diagnose "Run Agent Doc" not showing prompt — need user clarification
 - [ ] Verify no more external modification dialogs on brave.md (v0.2.27 VFS fix)
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

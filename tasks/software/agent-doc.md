@@ -1841,7 +1841,7 @@ audit docs
 update README, SPEC, module-harness, ontology
 release?
 
-### Re: Add tests / audit docs / update README, SPEC, module-harness, ontology / release? (HEAD)
+### Re: Add tests / audit docs / update README, SPEC, module-harness, ontology / release?
 
 **Tests:** All 13 prompt tests pass (including the 2 new ones for numbered format). Full suite: 176 unit tests + 38 CLI tests — all green.
 
@@ -1859,7 +1859,7 @@ All stale file warnings resolved. Remaining issue is a pre-existing `⚠ Large t
 2. **JetBrains plugin** (v0.2.32) — PromptPoller auto-start, diagnostic logging, `.bin/` resolution. Built but not published.
 
 Both are working locally. A release would formalize the fixes for other users. Want to proceed with a version bump and publish?
-<!-- agent:boundary:fb983e79 -->
+<!-- agent:boundary:fd06b425 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

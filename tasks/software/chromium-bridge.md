@@ -636,7 +636,7 @@ Add dev dependencies:
 
 Add module-harness to all modules.
 Add ontology.
-### Re: Dev dependencies + module-harness + ontology (HEAD)
+### Re: Dev dependencies + module-harness + ontology
 
 **Done:**
 
@@ -652,7 +652,7 @@ Add ontology.
 3. **CI fix** — switched `reqwest` from default (OpenSSL) to `rustls-tls` (pure Rust TLS). This fixes the aarch64-linux cross-compile failure. Re-tagged v0.1.1 to retrigger CI.
 
 **CI re-running:** https://github.com/btakita/chromium-bridge/actions
-<!-- agent:boundary:239e008b -->
+<!-- agent:boundary:f95ecfae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

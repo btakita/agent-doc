@@ -1801,7 +1801,7 @@ So `~/bin` is a well-established convention promoted by Debian-family distros. `
 describe:
 - Consider making PromptPanel more visible for occluded layouts
 
-### Re: Consider making PromptPanel more visible for occluded layouts (HEAD)
+### Re: Consider making PromptPanel more visible for occluded layouts
 
 **Current behavior:** PromptPanel renders as a `JPanel` at the bottom of IntelliJ's `JLayeredPane` at `POPUP_LAYER`. When another window (terminal, browser) overlaps the bottom of IntelliJ, the panel is invisible.
 
@@ -1820,7 +1820,7 @@ describe:
 **Recommended: Option 1 + Option 5 hybrid.** Bring IntelliJ to front on first prompt detection (once, not every poll), and render the prompt as a top-of-editor banner. This is visible, idiomatic, and non-disruptive after the initial window raise.
 
 Want me to implement one of these?
-<!-- agent:boundary:8b9742b6 -->
+<!-- agent:boundary:a9efd685 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

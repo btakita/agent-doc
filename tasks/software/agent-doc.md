@@ -334,7 +334,7 @@ Implement:
 - Move sync debounce/lock to FFI layer (reduce editor-specific code)
 - Add FFI-first preference to agent-doc CLAUDE.md
 
-### Re: Move sync debounce/lock to FFI layer (HEAD)
+### Re: Move sync debounce/lock to FFI layer
 
 **Implemented sync lock in FFI.** Added two new FFI functions:
 
@@ -356,7 +356,7 @@ pub extern "C" fn agent_doc_sync_unlock() { ... }
 The debounce timer requires a background thread in the FFI library that fires after a delay. This is more complex than the lock and needs careful lifecycle management (thread cleanup when the library is unloaded). The existing editor-side debounce (generation counter) works well — moving it to FFI is a v0.27 enhancement.
 
 **Next step:** Update the IntelliJ plugin to call `agent_doc_sync_try_lock()` / `agent_doc_sync_unlock()` instead of using its own `AtomicBoolean`. This replaces the editor-specific lock with the shared FFI lock.
-<!-- agent:boundary:b65a132c -->
+<!-- agent:boundary:6d6c36a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

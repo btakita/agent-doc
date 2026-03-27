@@ -1747,7 +1747,7 @@ fun resolveAgentDoc(): String {
 This ensures the plugin always uses the same binary the developer built, avoiding the stale-binary issue we hit today. Want me to implement this?
 Yes
 
-### Re: Yes (HEAD)
+### Re: Yes
 
 **Implemented.** `resolveAgentDoc()` now accepts an optional `basePath` parameter and checks `$basePath/.bin/agent-doc` as the **first** candidate:
 
@@ -1770,7 +1770,7 @@ Remaining callers (ClaimAction, SyncLayoutAction, etc.) use the default `null` a
 ```
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.32.zip
 ```
-<!-- agent:boundary:9b62b996 -->
+<!-- agent:boundary:5be5205b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

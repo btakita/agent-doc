@@ -208,7 +208,7 @@ This session's context is at capacity — I can't reliably navigate the large `w
 **Recommendation:** Commit the `ipc_socket.rs` module now, then start a fresh session to wire it in. The module is self-contained and tested — the wiring is straightforward but needs full context on `write.rs`.
 commit
 
-### Re: commit (HEAD)
+### Re: commit
 
 Submodule already committed and pushed to `btakita/agent-doc` (`ba02d0b`). The `ipc_socket.rs` module is on `main`.
 
@@ -222,7 +222,7 @@ Submodule already committed and pushed to `btakita/agent-doc` (`ba02d0b`). The `
 | v0.27-wip | `ipc_socket.rs` module with `interprocess` crate (not yet wired) |
 
 **Next session:** Wire `ipc_socket` into `write.rs` and `git.rs`, add FFI listener, update JetBrains plugin.
-<!-- agent:boundary:7f84a57e -->
+<!-- agent:boundary:f717a195 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

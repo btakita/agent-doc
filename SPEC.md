@@ -298,10 +298,12 @@ Exits with error if the pane is dead or no session is registered.
 
 `agent-doc prompt <FILE>` — detect permission prompts from a Claude Code session.
 
-- Captures tmux pane content, strips ANSI, searches for numbered-option patterns
-- Returns JSON: `{ "active": bool, "question": str, "options": [...] }`
-- `--answer N` navigates to option N and confirms
-- `--all` polls all live sessions, returns JSON array
+- Captures tmux pane content, strips ANSI, searches bottom-up for footer containing `"to cancel"`
+- Supports two option formats: bracket `[N] label` (legacy) and numbered list `N. label` (Claude Code v2.1+)
+- Returns JSON: `{ "active": bool, "question": str, "options": [...], "selected": int }`
+- `--answer N` navigates to option N via arrow keys and confirms with Enter
+- `--all` polls all live sessions, returns JSON array of `PromptAllEntry` objects
+- Debug: `AGENT_DOC_PROMPT_DEBUG=1` logs last 5 non-empty lines of each captured pane to stderr
 
 ### 7.15 commit
 

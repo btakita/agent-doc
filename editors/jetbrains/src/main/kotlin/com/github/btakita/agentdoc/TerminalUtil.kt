@@ -39,7 +39,7 @@ object TerminalUtil {
             return
         }
 
-        val agentDoc = resolveAgentDoc()
+        val agentDoc = resolveAgentDoc(basePath)
 
         // FFI busy guard: skip route if an agent-doc operation is in progress
         val lib = AgentDocLib.get()
@@ -130,7 +130,7 @@ object TerminalUtil {
             return
         }
 
-        val agentDoc = resolveAgentDoc()
+        val agentDoc = resolveAgentDoc(basePath)
         try {
             val process = ProcessBuilder(agentDoc, "run", "--agent", agent, relativePath)
                 .directory(java.io.File(basePath))
@@ -166,15 +166,16 @@ object TerminalUtil {
         }
     }
 
-    fun resolveAgentDoc(): String {
-        val candidates = listOf(
+    fun resolveAgentDoc(basePath: String? = null): String {
+        val candidates = listOfNotNull(
+            basePath?.let { "$it/.bin/agent-doc" },
             System.getenv("HOME")?.let { "$it/bin/agent-doc" },
             System.getenv("HOME")?.let { "$it/.local/bin/agent-doc" },
             System.getenv("HOME")?.let { "$it/.cargo/bin/agent-doc" },
             "/usr/local/bin/agent-doc"
         )
         for (path in candidates) {
-            if (path != null && java.io.File(path).canExecute()) {
+            if (java.io.File(path).canExecute()) {
                 return path
             }
         }

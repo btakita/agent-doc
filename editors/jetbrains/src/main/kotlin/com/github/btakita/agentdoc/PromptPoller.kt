@@ -37,6 +37,14 @@ class PromptPoller(private val project: Project) : Disposable {
     @Volatile private var answeredPromptKey: String? = null
 
     /**
+     * Start polling without registering a specific file.
+     * Used on project open to detect prompts from sessions started outside the plugin.
+     */
+    fun startPolling() {
+        ensurePolling()
+    }
+
+    /**
      * Register a file for tracking and ensure the poller is running.
      */
     fun addFile(file: VirtualFile) {
@@ -70,6 +78,7 @@ class PromptPoller(private val project: Project) : Disposable {
         if (task != null) return
         val basePath = project.basePath ?: return
 
+        LOG.info("[prompt-poller] starting polling for ${project.name}")
         task = executor.scheduleWithFixedDelay({
             try {
                 // Auto-save is best-effort — must not block prompt detection
@@ -77,8 +86,8 @@ class PromptPoller(private val project: Project) : Disposable {
                 refreshTrackedFiles()
                 val entries = pollAll(basePath) ?: return@scheduleWithFixedDelay
                 handlePollResults(entries, basePath)
-            } catch (_: Exception) {
-                // Silently ignore polling errors
+            } catch (e: Exception) {
+                LOG.warn("[prompt-poller] poll error: ${e.message}")
             }
         }, 500, 1500, TimeUnit.MILLISECONDS)
     }
@@ -193,7 +202,7 @@ class PromptPoller(private val project: Project) : Disposable {
      * Call `agent-doc prompt --all` and parse the JSON array response.
      */
     private fun pollAll(basePath: String): List<PromptAllEntry>? {
-        val agentDoc = TerminalUtil.resolveAgentDoc()
+        val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
         val process = ProcessBuilder(agentDoc, "prompt", "--all")
             .directory(java.io.File(basePath))
             .redirectErrorStream(false)
@@ -201,7 +210,10 @@ class PromptPoller(private val project: Project) : Disposable {
 
         val stdout = process.inputStream.bufferedReader().readText()
         val exitCode = process.waitFor()
-        if (exitCode != 0) return null
+        if (exitCode != 0) {
+            LOG.debug("[prompt-poller] pollAll exit=$exitCode")
+            return null
+        }
 
         return parsePromptAllJson(stdout)
     }
@@ -224,6 +236,9 @@ class PromptPoller(private val project: Project) : Disposable {
 
         // Collect all active prompts keyed by "file:question"
         val allActiveEntries = entries.filter { it.info.active && it.info.options != null }
+        if (allActiveEntries.isNotEmpty()) {
+            LOG.info("[prompt-poller] ${allActiveEntries.size} active prompt(s) detected")
+        }
         val allActiveByKey = allActiveEntries.associateBy { "${it.file}:${it.info.question}" }
 
         // Clear answered key once the answer takes effect (prompt disappears from poll)
@@ -269,6 +284,7 @@ class PromptPoller(private val project: Project) : Disposable {
         val filePath = next.file
         val totalActive = activeKeys.size
 
+        LOG.info("[prompt-poller] showing prompt: $nextKey ($totalActive active)")
         ApplicationManager.getApplication().invokeLater {
             PromptPanel.show(project, next.info, fileName, totalActive) { optionIndex ->
                 answerPrompt(basePath, filePath, optionIndex)
@@ -281,7 +297,7 @@ class PromptPoller(private val project: Project) : Disposable {
         currentPromptKey = null
         Thread {
             try {
-                val agentDoc = TerminalUtil.resolveAgentDoc()
+                val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
                 val process = ProcessBuilder(
                     agentDoc, "prompt", "--answer", optionIndex.toString(), relativePath
                 )
@@ -300,6 +316,7 @@ class PromptPoller(private val project: Project) : Disposable {
     }
 
     companion object {
+        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PromptPoller::class.java)
         private val instances = mutableMapOf<Project, PromptPoller>()
 
         fun getInstance(project: Project): PromptPoller {

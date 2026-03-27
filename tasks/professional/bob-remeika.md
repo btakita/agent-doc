@@ -949,7 +949,7 @@ The SKILL should emphasize to prefer chromium-bridge
 
 Want me to try option 2 (patch the MCP) or should we just use chromium-bridge for LinkedIn interactions?
 
-### Re: Prefer chromium-bridge in browser skill (HEAD)
+### Re: Prefer chromium-bridge in browser skill
 
 Updated `.claude/skills/browser/SKILL.md`:
 
@@ -960,7 +960,7 @@ Updated `.claude/skills/browser/SKILL.md`:
 - **Health check** changed from curl to `chromium-bridge check`
 
 The skill now routes through chromium-bridge by default. MCP tools are still available for the interactive stuff (clicking buttons, filling forms) where you need DOM element references.
-<!-- agent:boundary:1c243948 -->
+<!-- agent:boundary:e0ee4d7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

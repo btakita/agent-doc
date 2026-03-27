@@ -1069,6 +1069,9 @@ Is this the post you meant? Or is it a different one — maybe on LinkedIn? If y
 
 Let me know if you want me to adjust the tone, reference a different post, or send this as-is.
 
+Here is the post
+https://www.linkedin.com/feed/update/urn:li:activity:7443338665428226049/?originTrackingId=PXlRxgeov%2FncpESvLMrD3A%3D%3D
+
 ### Re: Draft message to Bob & contract interest
 
 I couldn't find the specific contract posting via web search (LinkedIn posts are hard to index). But based on your draft, here's a polished version that naturally expresses interest in both the call and the contract:
@@ -1088,7 +1091,31 @@ I couldn't find the specific contract posting via web search (LinkedIn posts are
 This way the call is about your work and reconnecting, and the contract is a natural "by the way" that Bob can follow up on. If he's looking for someone with your stack (Rust, AI tooling, RAG integration), he'll connect the dots himself during the demo.
 
 Want me to send this draft via LinkedIn (chromium-bridge), or do you want to adjust it first?
-<!-- agent:boundary:240236cc -->
+
+### Re: Bob's LinkedIn post (HEAD)
+
+Found it! Bob posted about 1 hour ago:
+
+> **Bob Remeika:** "Any developer friends out there looking for some contract work? I have a client for you."
+> — [LinkedIn post](https://www.linkedin.com/feed/update/urn:li:activity:7443338665428226049/)
+
+So it's not a Ragie role — it's Bob connecting developer friends with a client who needs contract work. This is actually a great angle for you.
+
+**Updated draft DM:**
+
+> Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
+>
+> Also saw your post about the contract gig — I'm interested! Would love to hear more about it when we connect.
+
+This is clean and concise. It:
+- Confirms the Calendly booking (Wed/Thu next week)
+- Expresses contract interest without being pushy
+- Keeps both conversations connected to the upcoming call
+
+**Strategy for keeping the door open:** The call becomes dual-purpose — demo your tools AND discuss the contract opportunity. Since Bob already thinks you're "one of the best of the best," you don't need to sell hard. Just show up, demo, and let him see the fit naturally. The contract mention in the DM plants the seed so he comes prepared to discuss it.
+
+Ready to send this DM? Or want to adjust?
+<!-- agent:boundary:a3e3cf94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

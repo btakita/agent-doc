@@ -585,7 +585,7 @@ The install script auto-detects OS/arch and falls back to suggesting `cargo inst
 Add gh actions to build and deploy cross platform releases.
 - Add macOS builds to GitHub Release (cross-compile or CI)
 - Create btakita/homebrew-tap (deferred — low priority)
-### Re: GitHub Actions cross-platform releases (HEAD)
+### Re: GitHub Actions cross-platform releases
 
 Created `.github/workflows/release.yml` — triggers on version tags (`v*`). Builds 4 targets:
 
@@ -614,7 +614,7 @@ git tag v0.1.1 && git push origin v0.1.1
 ```
 
 Want me to commit and push this now?
-<!-- agent:boundary:5c81e54b -->
+<!-- agent:boundary:8a18aa0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

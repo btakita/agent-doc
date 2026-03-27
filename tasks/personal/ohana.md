@@ -118,7 +118,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 My family doesn't know about my YouTube channel. Start with "the cool part"...then that I have YouTube videos showing me work.
 
 ~80 words vs ~150 before. Send it?
-### Re: Draft v4 (HEAD)
+### Re: Draft v4
 
 **Draft v4:**
 
@@ -131,7 +131,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Send it?
-<!-- agent:boundary:88215728 -->
+<!-- agent:boundary:039037c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Spacing bug confirmed — Messenger needs Shift+Enter for paragraphs. chromium-bridge features queued.
+Implementing chromium-bridge features (type, click, select-tab, wait, snapshot) + browser skill.
 <!-- /agent:status -->
 
 ## Exchange
@@ -258,9 +258,12 @@ The message on ohana did not match the spacing in the draft.
 
 **Spacing bug confirmed.** Took a screenshot — the message landed as one continuous block of text. The paragraph breaks were lost.
 
-**Root cause:** `execCommand("insertText")` with `\n` doesn't create paragraph breaks in Messenger's contenteditable. Messenger needs Shift+Enter for line breaks within a message bubble.
+**Root cause:** `execCommand("insertText")` with `\
+` doesn't create paragraph breaks in Messenger's contenteditable. Messenger needs Shift+Enter for line breaks within a message bubble.
 
-**Fix for next time:** The `type` command in chromium-bridge should handle this — split on `\n\n`, insert Shift+Enter between paragraphs. This is exactly why dedicated `type`/`fill` commands matter over raw `evaluate` hacks.
+**Fix for next time:** The `type` command in chromium-bridge should handle this — split on `\
+\
+`, insert Shift+Enter between paragraphs. This is exactly why dedicated `type`/`fill` commands matter over raw `evaluate` hacks.
 
 **Added to chromium-bridge task queue:**
 - `type` command (with contenteditable paragraph handling)
@@ -271,14 +274,38 @@ The message on ohana did not match the spacing in the draft.
 - Integration as `/browser` skill backend
 
 Want me to try to resend the message with proper spacing now? I can delete the old one and send paragraph by paragraph using Shift+Enter between paragraphs.
-<!-- agent:boundary:40a858f1 -->
+
+Implement:
+- chromium-bridge features: type, click, select-tab, wait, snapshot
+- `/browser` skill integration with chromium-bridge
+### Re: Implement chromium-bridge features + browser skill (HEAD)
+
+Starting implementation. This splits into two parallel tracks:
+
+**Track 1: chromium-bridge CLI features** (in `src/chromium-bridge/`)
+- `type` — type text into element by selector, with contenteditable paragraph handling via Shift+Enter
+- `click` — click element by CSS selector
+- `select-tab` — activate a tab by index or URL pattern
+- `wait` — wait for selector existence, visibility, or network idle
+- `snapshot` — accessibility tree / DOM structure dump
+
+**Track 2: `/browser` skill** (in `.claude/skills/browser/`)
+- Wire up chromium-bridge as the primary backend
+- Document all available commands
+- Include patterns for common tasks (form fill, navigate + wait, screenshot)
+
+Kicking off implementation now — will work on the Rust CLI features first since the skill depends on them.
+<!-- agent:boundary:c1d4abfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Fix spacing: resend message with proper paragraph breaks (awaiting approval)
-- chromium-bridge features: type, click, select-tab, wait, snapshot
+- [active] chromium-bridge `type` command with contenteditable support
+- chromium-bridge `click` command
+- chromium-bridge `select-tab` command
+- chromium-bridge `wait` command
+- chromium-bridge `snapshot` command
 - `/browser` skill integration with chromium-bridge
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

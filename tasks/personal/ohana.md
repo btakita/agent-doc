@@ -154,7 +154,7 @@ Added one paragraph (~40 words) that touches each sister's domain without naming
 Send it, or adjust?
 
 Trim it to be shorter. Make it easy to read from the phone.
-### Re: Trim for mobile (HEAD)
+### Re: Trim for mobile
 
 **Draft v6:**
 
@@ -169,7 +169,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 ~75 words. Short paragraphs scan well on mobile. Send it?
-<!-- agent:boundary:dee1210a -->
+<!-- agent:boundary:470469d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

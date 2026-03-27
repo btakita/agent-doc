@@ -278,7 +278,7 @@ The most impactful fix is **debounce** — a 500ms delay before firing sync woul
 Want me to add debounce to the plugin's sync trigger?
 Seems like all 3 would be useful...or would this be overengineering?
 
-### Re: Seems like all 3 would be useful...or would this be overengineering? (HEAD)
+### Re: Seems like all 3 would be useful...or would this be overengineering?
 
 **Not overengineering — they're layered defenses at different levels:**
 
@@ -293,7 +293,7 @@ Seems like all 3 would be useful...or would this be overengineering?
 Total effort: ~30 lines across 2 files. Not overengineering — it's defense in depth for a stateful system (tmux panes) where corruption is visible and annoying.
 
 Want me to implement all 3?
-<!-- agent:boundary:6d6b7ac7 -->
+<!-- agent:boundary:a209f28e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

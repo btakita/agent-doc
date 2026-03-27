@@ -426,13 +426,31 @@ Then begin v0.27
 - Plugin uses shared FFI primitives with local fallback
 
 **v0.27 scope (interprocess socket IPC):** Ready to begin in a fresh session. Add to the todo list?
-<!-- agent:boundary:fc30710d -->
+Go
+
+### Re: Go
+
+Added to todo: [#39](https://github.com/btakita/agent-doc/issues/39) — Socket-based IPC via `interprocess` crate.
+
+**Session complete.** This has been a productive session:
+
+**Shipped (v0.26.4 → v0.26.6):**
+- PromptPanel: auto-start poller, numbered format support, binary resolution
+- CI: all path deps removed, 5-platform builds (incl. Windows)
+- Performance: skip no-op IPC reposition, inotify overflow handling
+- Architecture: FFI sync lock/debounce, FFI-first convention
+- Layout: debounce fix for rapid file switching
+
+**Queued for v0.27:**
+- Socket-based IPC via `interprocess` ([#39](https://github.com/btakita/agent-doc/issues/39))
+- Windows tmux abstraction
+<!-- agent:boundary:6e8660ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Add `interprocess` socket IPC to todo list for v0.27
+(none — session complete, v0.27 items tracked in GitHub issues)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

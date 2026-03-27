@@ -189,7 +189,7 @@ I quickly navigated over multiple windows.
 Please look at the layout.
 The left tmux pane was split into 5 subpanes...totaling 6 panes in the window.
 
-### Re: Left tmux pane was split into 5 subpanes...totaling 6 panes (HEAD)
+### Re: Left tmux pane was split into 5 subpanes...totaling 6 panes
 
 **Found it.** The stash window (`@20`) has 5 orphaned panes, all running `agent-doc`:
 
@@ -212,7 +212,7 @@ These accumulated from rapid window navigation — each time a pane was displace
 **The "6 panes in the window" you saw** was likely during a layout sync when these stash panes briefly appeared in the active window before being re-stashed.
 
 Want me to kill the orphaned stash panes? They're all dead sessions consuming resources.
-<!-- agent:boundary:3cb0c373 -->
+<!-- agent:boundary:2a528845 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

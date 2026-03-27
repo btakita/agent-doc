@@ -444,7 +444,7 @@ Added to todo: [#39](https://github.com/btakita/agent-doc/issues/39) — Socket-
 **Queued for v0.27:**
 - Socket-based IPC via `interprocess` ([#39](https://github.com/btakita/agent-doc/issues/39))
 - Windows tmux abstraction
-<!-- agent:boundary:6e8660ad -->
+<!-- agent:boundary:d1592b38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

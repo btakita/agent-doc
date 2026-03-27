@@ -2018,13 +2018,38 @@ When the boundary is already at end-of-exchange (the common case after a normal 
 **After:** Every commit → check snapshot → boundary already at end → skip IPC
 
 Release binary rebuilt. You'll see the effect immediately — commit output will no longer show `[commit] IPC reposition boundary signal sent` when the boundary hasn't moved.
-<!-- agent:boundary:85bcdee3 -->
+Implement:
+- Handle inotify OVERFLOW in PatchWatcher (future improvement)
+
+### Re: Handle inotify OVERFLOW in PatchWatcher (HEAD)
+
+**Done.** Updated `watchLoop()` to detect `OVERFLOW` events and scan the directory for missed files:
+
+```kotlin
+if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+    overflow = true
+    continue
+}
+// ... process normal events ...
+if (overflow) {
+    LOG.info("[patch-watcher] inotify overflow detected, scanning for missed files")
+    processPendingPatches(dir.toFile())
+}
+```
+
+When inotify's kernel buffer fills up (e.g., during `cargo build` generating thousands of temp files), the overflow flag triggers a full directory scan of `.agent-doc/patches/`. Any missed `.json` patch files are picked up immediately.
+
+**Plugin v0.2.33** built at:
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.33.zip
+```
+<!-- agent:boundary:af560d53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Handle inotify OVERFLOW in PatchWatcher (future improvement)
+(none — all items resolved)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

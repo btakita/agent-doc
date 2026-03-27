@@ -926,14 +926,33 @@ The timeout happens at `Network.enable` — the very first CDP protocol handshak
 - Restart Brave to reset the CDP state
 
 Want me to check the MCP server config for the timeout setting?
-<!-- agent:boundary:f1b02eac -->
+
+Yes...why did reading the Bob's repost thread work? But it's not working now. Why?
+
+### Re: Why did reading work but MCP doesn't? (HEAD)
+
+**Key insight: We never used the MCP server successfully this session.** The LinkedIn post was fetched via `chromium-bridge markdown`, which is our Rust CLI tool — it connects directly to CDP via its own WebSocket and only sends simple commands like `Runtime.evaluate`. It doesn't call `Network.enable`.
+
+**The Chrome DevTools MCP server uses Puppeteer**, which calls `Network.enable` during initialization on every operation. This is where it hangs. Looking at the source (`browser.js` line 39-43), no `protocolTimeout` is set in the connect options — it relies on Puppeteer's default.
+
+**Root cause hypothesis:** Brave has many tabs or a heavy page loaded. `Network.enable` asks the browser to start monitoring ALL network activity across the target page, which can be expensive on complex pages (like LinkedIn with its continuous feed loading).
+
+**Fix options:**
+
+1. **Close heavy tabs** in Brave — quick test to see if that resolves it
+2. **Patch the MCP server** — add `protocolTimeout: 60000` to `connectOptions` in `browser.js` line 39
+3. **Restart Brave** — resets CDP state
+4. **Use chromium-bridge instead** — it works now and doesn't need `Network.enable`
+
+Want me to try option 2 (patch the MCP) or should we just use chromium-bridge for LinkedIn interactions?
+<!-- agent:boundary:d65190fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - LinkedIn DM (v13) — awaiting manual send (browser open to new message)
-- Fix Chrome DevTools MCP timeout — investigate protocolTimeout config
+- Chrome DevTools MCP timeout — `Network.enable` hangs, fix options identified
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
 <!-- /agent:pending -->

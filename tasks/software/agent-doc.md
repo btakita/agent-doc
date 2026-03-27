@@ -2043,7 +2043,26 @@ When inotify's kernel buffer fills up (e.g., during `cargo build` generating tho
 ```
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.33.zip
 ```
-<!-- agent:boundary:d5e86408 -->
+Should this be implemented in the FFI plugin instead?
+
+### Re: Should this be implemented in the FFI plugin instead? (HEAD)
+
+The FFI already has `agent_doc_reposition_boundary_to_end()` and the plugin already calls it via `NativePatching.repositionBoundaryToEnd()` inside `applyPatch()` when `patch.repositionBoundary` is true.
+
+The current IPC approach is:
+1. Rust `commit` → writes a JSON patch file with `reposition_boundary: true`
+2. Plugin PatchWatcher detects file → calls `applyPatch()` → calls FFI reposition
+3. Plugin deletes file (ACK)
+
+The alternative (FFI-direct) would be:
+1. Rust `commit` → calls FFI directly to reposition in the Document buffer
+
+**But there's a problem:** The Rust binary and the IntelliJ plugin run in different processes. The FFI library is loaded into the **plugin's JVM**, not the Rust binary's process. The Rust binary can't call FFI functions in the plugin's JVM — it can only communicate via the file-based IPC mechanism.
+
+So the current architecture is correct: Rust → IPC file → PatchWatcher → FFI. The optimization we already made (skip IPC when boundary hasn't moved) is the right fix. The FFI is used — just indirectly through the IPC layer.
+
+**What could change:** If the plugin exposed a socket/pipe API instead of file-based IPC, the Rust binary could send reposition signals without file creation (avoiding inotify entirely). But that's a larger architectural change.
+<!-- agent:boundary:d1b68c2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

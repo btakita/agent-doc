@@ -407,7 +407,7 @@ This is a v0.27 milestone — recommend starting in a fresh session with a plan.
 Release what we have now.
 Then begin v0.27
 
-### Re: Release what we have now / Then begin v0.27 (HEAD)
+### Re: Release what we have now / Then begin v0.27
 
 **v0.26.6 released:**
 
@@ -426,7 +426,7 @@ Then begin v0.27
 - Plugin uses shared FFI primitives with local fallback
 
 **v0.27 scope (interprocess socket IPC):** Ready to begin in a fresh session. Add to the todo list?
-<!-- agent:boundary:8f71fbb2 -->
+<!-- agent:boundary:fc30710d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

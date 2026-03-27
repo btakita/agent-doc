@@ -150,6 +150,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c27813db526ec41028f1e69a81a008b38916582970ce113c35e8515c18e0c563-20260327-074831.md`*
+<!-- agent:boundary:357a93ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

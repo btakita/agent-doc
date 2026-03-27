@@ -17,7 +17,6 @@ jobs:
           git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
           git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
           git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
-          git clone --depth 1 https://github.com/existence-lang/existence.git ../existence-lang/existence
 
       - uses: dtolnay/rust-toolchain@stable
         with:

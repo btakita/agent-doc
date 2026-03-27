@@ -39,7 +39,7 @@ yrs = "0.21"
 
 [dev-dependencies]
 assert_cmd = "2"
-existence = { version = "0.4", path = "../existence-lang/existence" }
+existence = "0.4"
 module-harness = { version = "0.2", path = "../module-harness" }
 predicates = "3"
 proptest = "1"

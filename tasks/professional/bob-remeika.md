@@ -1122,7 +1122,7 @@ Ready to send this DM? Or want to adjust?
 
 Noted — added Bob's post text as reference. The draft DM in the latest section already addresses this. Ready to send when you approve.
 
-### Re: Urgency of the contract gig (HEAD)
+### Re: Urgency of the contract gig
 
 Bob posted it just an hour ago and only has 2 comments so far — so it's fresh but not yet flooded. That said, contract gigs from personal networks tend to fill fast once word spreads.
 
@@ -1135,7 +1135,7 @@ If you want to hedge on timing, here's an adjusted draft that acknowledges urgen
 > Also saw your post about the contract gig — I'm interested! Happy to chat about it sooner if timing matters, or we can cover it when we connect.
 
 The "sooner if timing matters" gives Bob the opening to fast-track the contract conversation separately from the demo call if needed.
-<!-- agent:boundary:8a44c136 -->
+<!-- agent:boundary:d7d1ba1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

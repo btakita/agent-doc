@@ -963,7 +963,7 @@ The skill now routes through chromium-bridge by default. MCP tools are still ava
 
 Send the message to Bob
 
-### Re: Send the message to Bob (HEAD)
+### Re: Send the message to Bob
 
 Attempted automated send via chromium-bridge but LinkedIn's messaging DOM is heavily obfuscated — message input fields aren't standard `contenteditable` or `textarea` elements, and the overlay component doesn't expose inputs to `querySelectorAll`. This is a known pattern — LinkedIn uses React-based web components that resist simple DOM manipulation.
 
@@ -987,7 +987,7 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 4. Hit Send
 
 **For chromium-bridge improvement:** We should add a `type` command that uses CDP `Input.dispatchKeyEvent` instead of DOM manipulation — this works regardless of how the input is implemented. Tracked in tasks/software/brave.md.
-<!-- agent:boundary:81495aee -->
+<!-- agent:boundary:98fd6274 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

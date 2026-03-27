@@ -552,7 +552,7 @@ Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains)
 
 Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
 yes
-### Re: GitHub Release + install script (HEAD)
+### Re: GitHub Release + install script
 
 Done. Both created:
 
@@ -581,7 +581,7 @@ Done. Both created:
 The install script auto-detects OS/arch and falls back to suggesting `cargo install` if no prebuilt binary exists for the platform.
 
 **Brew tap** deferred — `cargo install` and the install script cover the immediate need. Can create `btakita/homebrew-tap` later when there's demand.
-<!-- agent:boundary:9c30150a -->
+<!-- agent:boundary:4def7d02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -403,13 +403,36 @@ Windows binary is now available for the first time.
 5. **Both:** Keep file-based IPC as fallback
 
 This is a v0.27 milestone — recommend starting in a fresh session with a plan. Want me to create a plan file and add it to the todo list, or start implementing now?
-<!-- agent:boundary:77209c51 -->
+
+Release what we have now.
+Then begin v0.27
+
+### Re: Release what we have now / Then begin v0.27 (HEAD)
+
+**v0.26.6 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| Git tag | `v0.26.6` pushed |
+| `~/.cargo/bin/agent-doc` | Updated |
+| CI | Will produce 5-platform binaries |
+| Plugin | v0.2.35 built |
+
+**What's in v0.26.6:**
+- FFI sync lock + debounce (cross-editor)
+- LayoutChangeDetector debounce fix (generation counter)
+- FFI-first convention in CLAUDE.md
+- Plugin uses shared FFI primitives with local fallback
+
+**v0.27 scope (interprocess socket IPC):** Ready to begin in a fresh session. Add to the todo list?
+<!-- agent:boundary:8f71fbb2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- `interprocess` socket IPC — plan or implement? (awaiting decision)
+- Add `interprocess` socket IPC to todo list for v0.27
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -295,7 +295,7 @@ Total effort: ~30 lines across 2 files. Not overengineering — it's defense in 
 Want me to implement all 3?
 yes
 
-### Re: yes (implement all 3) (HEAD)
+### Re: yes (implement all 3)
 
 **Good news — 2 of 3 defenses already exist.** After reviewing the code:
 
@@ -310,7 +310,7 @@ yes
 **Fix applied:** Added a generation counter (like `EditorTabSyncListener` already has). Now only the latest event fires after 500ms. Previous events check `syncGeneration.get() != myGen` and exit early.
 
 **Plugin v0.2.34** built. This should prevent the 6-pane issue from rapid file switching.
-<!-- agent:boundary:e7c9e723 -->
+<!-- agent:boundary:c50bb183 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

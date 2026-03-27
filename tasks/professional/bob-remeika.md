@@ -929,7 +929,7 @@ Want me to check the MCP server config for the timeout setting?
 
 Yes...why did reading the Bob's repost thread work? But it's not working now. Why?
 
-### Re: Why did reading work but MCP doesn't? (HEAD)
+### Re: Why did reading work but MCP doesn't?
 
 **Key insight: We never used the MCP server successfully this session.** The LinkedIn post was fetched via `chromium-bridge markdown`, which is our Rust CLI tool — it connects directly to CDP via its own WebSocket and only sends simple commands like `Runtime.evaluate`. It doesn't call `Network.enable`.
 
@@ -945,7 +945,7 @@ Yes...why did reading the Bob's repost thread work? But it's not working now. Wh
 4. **Use chromium-bridge instead** — it works now and doesn't need `Network.enable`
 
 Want me to try option 2 (patch the MCP) or should we just use chromium-bridge for LinkedIn interactions?
-<!-- agent:boundary:d65190fe -->
+<!-- agent:boundary:513eeacd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

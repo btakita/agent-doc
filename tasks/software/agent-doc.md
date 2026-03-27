@@ -2164,18 +2164,110 @@ But the last 5 release workflow runs all show `failure`. Only a manually-uploade
 **Given Windows is a requirement:** Use `interprocess` for the socket IPC. It provides a unified API for Unix sockets + Windows named pipes. This also informs the broader Windows porting strategy — tmux-dependent features need a Windows-compatible abstraction layer.
 
 **Immediate action items:**
-1. Fix release CI to produce Windows binaries
+1. Fix release CI to produce Windows binaries: go
 2. Use `interprocess` for socket IPC (cross-platform)
 3. Plan tmux abstraction layer for Windows (bigger effort)
-<!-- agent:boundary:aee15d78 -->
+
+https://github.com/btakita/agent-doc/actions/runs/23632774429/job/68835647615
+```
+Run cargo clippy -- -D warnings
+    Updating crates.io index
+error: failed to get `existence` as a dependency of package `agent-doc v0.26.5 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `existence`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/existence-lang/existence
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/existence-lang/existence/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+Error: Process completed with exit code 101.
+```
+
+https://github.com/btakita/agent-doc/actions/runs/23632780149/job/68835664065#step:4:78
+```
+Run PyO3/maturin-action@v1
+Found maturin version requirement maturin>=1.9,<2.0 specified in pyproject.toml
+Found maturin release from manifest: v1.12.6
+Install Rust target
+Install maturin
+/home/runner/work/_temp/2a71f981-d596-466c-bd41-cc1f19020fee/maturin sdist --out dist
+    Updating crates.io index
+error: failed to get `existence` as a dependency of package `agent-doc v0.26.5 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `existence`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/existence-lang/existence
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/existence-lang/existence/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+    Updating crates.io index
+error: failed to get `existence` as a dependency of package `agent-doc v0.26.5 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `existence`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/existence-lang/existence
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/existence-lang/existence/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+💥 maturin failed
+  Caused by: Cargo metadata failed. Does your crate compile with `cargo build`?
+  Caused by: `cargo metadata` exited with an error: 
+Error: The process '/home/runner/work/_temp/2a71f981-d596-466c-bd41-cc1f19020fee/maturin' failed with exit code 1
+    at ExecState._setResult (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44149:25)
+    at ExecState.CheckComplete (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44132:18)
+    at ChildProcess.<anonymous> (file:///home/runner/work/_actions/PyO3/maturin-action/v1/dist/index.js:44028:27)
+    at ChildProcess.emit (node:events:508:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:305:5)
+Error: The process '/home/runner/work/_temp/2a71f981-d596-466c-bd41-cc1f19020fee/maturin' failed with exit code 1
+```
+
+### Re: Fix release CI / Windows build (HEAD)
+
+**CI fix deployed.** The failure was a missing `existence-lang` path dependency clone. Added to all 3 workflows:
+
+```yaml
+git clone --depth 1 https://github.com/existence-lang/existence.git ../existence-lang/existence
+```
+
+- `ci.yml` — fixed
+- `release.yml` — fixed
+- `pypi.yml` — fixed (3 clone sections)
+
+Retagged v0.26.5 to trigger the release workflow. The CI should now produce binaries for:
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu` (cross)
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+- `x86_64-pc-windows-msvc`
+
+Check CI status: https://github.com/btakita/agent-doc/actions
+
+**Re: `interprocess` decision:** Given Windows is a requirement, use `interprocess` for socket IPC in v0.27. It provides Unix sockets + Windows named pipes behind a single API.
+<!-- agent:boundary:dac296d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Fix release CI failures (Windows + all platforms)
-- Use `interprocess` crate for cross-platform socket IPC
-- Plan tmux abstraction for Windows support
+- Monitor CI run for v0.26.5 release (all 5 targets)
+- Use `interprocess` for cross-platform socket IPC (v0.27)
+- Plan tmux abstraction for Windows
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

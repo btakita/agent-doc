@@ -184,16 +184,37 @@ go
 3. Update `git.rs` reposition to try socket before file-based
 4. Add FFI `agent_doc_start_ipc_listener()` for plugin to start the listener
 5. Update JetBrains plugin to start listener + handle messages
-<!-- agent:boundary:8b6bd55c -->
+
+continue
+- Update `write.rs` to try socket IPC first
+- Update `git.rs` reposition to try socket first
+- Add FFI listener function
+
+### Re: continue (write.rs, git.rs, FFI) (HEAD)
+
+This session's context is at capacity — I can't reliably navigate the large `write.rs` file (1000+ lines) to make surgical changes without risking regressions.
+
+**What's done so far:**
+- `ipc_socket.rs` module — complete with sender, listener, test
+- `interprocess` dependency added
+- FFI sync lock/debounce — complete
+
+**What remains (best done in fresh session):**
+- Wire `ipc_socket::send_patch()` into `write.rs` `try_ipc()` as first attempt before file-based
+- Wire `ipc_socket::send_reposition()` into `git.rs` as first attempt before file-based
+- Add `agent_doc_start_ipc_listener()` FFI function
+- Update JetBrains plugin to start listener on project open
+
+**Recommendation:** Commit the `ipc_socket.rs` module now, then start a fresh session to wire it in. The module is self-contained and tested — the wiring is straightforward but needs full context on `write.rs`.
+<!-- agent:boundary:5222d068 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Update `write.rs` to try socket IPC first
-- Update `git.rs` reposition to try socket first
-- Add FFI listener function
-- Update JetBrains plugin for socket IPC
+- Wire socket IPC into write.rs and git.rs (fresh session)
+- Add FFI listener function (fresh session)
+- Update JetBrains plugin (fresh session)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

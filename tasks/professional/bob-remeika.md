@@ -1119,7 +1119,7 @@ This is clean and concise. It:
 Ready to send this DM? Or want to adjust?
 
 Noted — added Bob's post text as reference. The draft DM in the latest section already addresses this. Ready to send when you approve.
-<!-- agent:boundary:6d2d778c -->
+<!-- agent:boundary:6b85400c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,14 +7,21 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Session initialized. Ready for ohana discussion.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+
+### Assistant (HEAD)
+
+Ohana session initialized. What would you like to work on?
+<!-- agent:boundary:49704569 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Waiting for user input
 <!-- /agent:pending -->

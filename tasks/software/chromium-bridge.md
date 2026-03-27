@@ -732,11 +732,11 @@ Both backends implement `SearchBackend` trait (`search/backend.rs`), registered 
 ```toml
 [search.backends.sift]
 backend_type = "sift"
-# index_path = "mail/conversations/"  # optional override (HEAD)
+# index_path = "mail/conversations/"  # optional override
 
 [search.backends.ragie]
 backend_type = "ragie"
-# api_key_pass = "ragie/api_key"  # optional override (HEAD)
+# api_key_pass = "ragie/api_key"  # optional override
 ```
 
 #### Other packages checked
@@ -746,17 +746,17 @@ backend_type = "ragie"
 
 #### Proposed chromium-bridge → corky pipeline
 ```bash
-# Scrape → local search (sift) (HEAD)
+# Scrape → local search (sift)
 chromium-bridge markdown https://example.com > mail/conversations/example-com.md
 corky search "relevant query"
 
-# Scrape → cloud RAG (ragie) (HEAD)
+# Scrape → cloud RAG (ragie)
 chromium-bridge markdown https://example.com > /tmp/page.md
 corky ragie push  # pushes all conversations including new file
 ```
 
 This pipeline works today with no code changes — just filesystem coordination. A tighter integration (chromium-bridge calling corky directly) could be added later as a `chromium-bridge ingest` command.
-<!-- agent:boundary:a67f291e -->
+<!-- agent:boundary:53255e3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

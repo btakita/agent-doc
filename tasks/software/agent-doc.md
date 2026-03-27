@@ -1859,13 +1859,26 @@ All stale file warnings resolved. Remaining issue is a pre-existing `⚠ Large t
 2. **JetBrains plugin** (v0.2.32) — PromptPoller auto-start, diagnostic logging, `.bin/` resolution. Built but not published.
 
 Both are working locally. A release would formalize the fixes for other users. Want to proceed with a version bump and publish?
-<!-- agent:boundary:fd06b425 -->
+release
+
+### Re: release
+
+**v0.26.4 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.26.4 |
+| `~/.cargo/bin/agent-doc` | Updated |
+| Git tag | `v0.26.4` pushed |
+| JetBrains plugin | v0.2.32 built (local install) |
+<!-- agent:boundary:1e4bb76f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Decision: release v0.26.4 + plugin v0.2.32?
+(none — release complete)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

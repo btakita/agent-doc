@@ -2272,15 +2272,51 @@ You're right. The `existence` crate is published on crates.io at v0.4.0. The `pa
 - Verified: `cargo check` fetches v0.4.0 from crates.io and compiles
 
 Retagged v0.26.5. The CI should now build cleanly for all 5 targets without any existence-lang clone.
-<!-- agent:boundary:c20f2ce8 -->
+
+Target build errors
+```
+0s
+Run cargo build --release --target x86_64-unknown-linux-gnu
+    Updating crates.io index
+error: failed to get `module-harness` as a dependency of package `agent-doc v0.26.5 (/home/runner/work/agent-doc/agent-doc)`
+
+Caused by:
+  failed to load source for dependency `module-harness`
+
+Caused by:
+  Unable to update /home/runner/work/agent-doc/module-harness
+
+Caused by:
+  failed to read `/home/runner/work/agent-doc/module-harness/Cargo.toml`
+
+Caused by:
+  No such file or directory (os error 2)
+Error: Process completed with exit code 101.
+```
+
+### Re: Target build errors (module-harness) (HEAD)
+
+Same issue — **all path dependencies removed.** Every dependency is published on crates.io:
+
+| Dependency | crates.io version | Path removed |
+|-----------|------------------|-------------|
+| existence | 0.4.0 | done (prev commit) |
+| agent-kit | 0.2.0 | done |
+| instruction-files | 0.1.5 | done |
+| tmux-router | 0.3.0 | done |
+| module-harness | 0.2.0 | done |
+
+Also removed all `git clone` steps from CI workflows — no more path dependency clones needed. Verified `cargo check` fetches everything from crates.io.
+
+Retagged v0.26.5. CI should now build cleanly.
+<!-- agent:boundary:084eec52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor CI run for v0.26.5 (should pass now)
+- Monitor CI run for v0.26.5 (should pass now — all path deps removed)
 - Use `interprocess` for cross-platform socket IPC (v0.27)
-- Plan tmux abstraction for Windows
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

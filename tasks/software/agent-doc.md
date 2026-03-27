@@ -2107,13 +2107,47 @@ This would eliminate:
 - The 2s timeout/retry logic
 
 Worth implementing as a v0.27 milestone. Want me to add it to the todo list?
-<!-- agent:boundary:484d49f9 -->
+Release what we have
+Then prep for socket/pipe. Should we use `interprocess`?
+
+### Re: Release what we have / Should we use `interprocess`? (HEAD)
+
+**v0.26.5 released:**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.26.5 |
+| `~/.cargo/bin/agent-doc` | Updated |
+| Git tag | `v0.26.5` pushed |
+| Plugin | v0.2.33 built |
+
+**Re: `interprocess` crate:**
+
+The [`interprocess`](https://crates.io/crates/interprocess) crate provides:
+- Unix domain sockets (Linux/macOS) + named pipes (Windows) behind a unified API
+- `LocalSocketListener` / `LocalSocketStream` — cross-platform abstraction
+- No async runtime required (sync API available)
+- Well-maintained, ~1M downloads
+
+**Pros:**
+- Single API for all platforms — no `#[cfg(unix)]` / `#[cfg(windows)]` branching
+- Handles socket path cleanup, permissions, connection management
+- Battle-tested (used by several IPC-heavy crates)
+
+**Cons:**
+- Adds a dependency (~50KB compiled)
+- We only need Unix domain sockets (macOS + Linux cover 95%+ of users)
+- `std::os::unix::net::UnixStream` is zero-dependency and sufficient for our use case
+
+**Recommendation:** Start with `std::os::unix::net` (zero deps, simpler). Add `interprocess` only if Windows support becomes a requirement. The IPC protocol is just JSON-over-socket — the transport abstraction isn't complex enough to justify the dependency.
+<!-- agent:boundary:545e436c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Unix domain socket IPC as replacement for file-based IPC (v0.27 milestone candidate)
+- Unix domain socket IPC (v0.27 milestone) — use std::os::unix::net
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

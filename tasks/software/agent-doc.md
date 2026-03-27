@@ -1822,7 +1822,7 @@ describe:
 Want me to implement one of these?
 I like the Current behavior...since it does not disrupt typing. No need to implement any of these.
 
-### Re: I like the Current behavior...No need to implement any of these (HEAD)
+### Re: I like the Current behavior...No need to implement any of these
 
 Understood — keeping the current bottom-panel PromptPanel as-is. The non-disruptive behavior (no focus steal, no window raise) is the right call for a typing-heavy workflow.
 
@@ -1836,7 +1836,7 @@ Understood — keeping the current bottom-panel PromptPanel as-is. The non-disru
 | Plugin diagnostic logging | `PromptPoller.kt` | Plugin v0.2.32 |
 | Project-local `.bin/` binary resolution | `TerminalUtil.kt` | Plugin v0.2.32 |
 | `~/.cargo/bin/agent-doc` updated | `cargo install` | Done |
-<!-- agent:boundary:686ccb9c -->
+<!-- agent:boundary:bc315bfd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

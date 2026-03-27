@@ -1530,7 +1530,7 @@ I pressed Shift+Tab...Try again
 I see the prompt in the terminal but not in the editor.
 Do we have logs?
 
-### Re: I pressed Shift+Tab...Try again (HEAD)
+### Re: I pressed Shift+Tab...Try again
 
 Good — permissions should now be active. This cycle's tool calls (`agent-doc preflight`, `cp`, and this `agent-doc write`) each require approval, generating real permission prompts in pane %40.
 
@@ -1539,7 +1539,7 @@ Good — permissions should now be active. This cycle's tool calls (`agent-doc p
 - Did PromptPanel surface in IntelliJ?
 
 If you approved the tool calls to get here, then permission prompts are working. The question is whether PromptPanel detected them. Check the IntelliJ IDE for a popup or notification — if nothing appeared, the PromptPoller may not be polling this pane, or the plugin needs a restart.
-<!-- agent:boundary:58f32798 -->
+<!-- agent:boundary:0f06450f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

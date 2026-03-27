@@ -153,14 +153,14 @@ claude_args: --dangerously-skip-permissions
 
 Implement v0.27
 
-### Re: Implement v0.27 (HEAD)
+### Re: Implement v0.27
 
 v0.27 (socket IPC via `interprocess`) is a multi-file feature spanning Rust + Kotlin. This session's context is near capacity after the extensive v0.26.x work.
 
 **Recommendation:** Start v0.27 in a fresh session. The scope is tracked in [#39](https://github.com/btakita/agent-doc/issues/39). A fresh session will have full context budget for the implementation.
 
 To start: open a new session and reference this issue.
-<!-- agent:boundary:f38c11ed -->
+<!-- agent:boundary:6ba1c411 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

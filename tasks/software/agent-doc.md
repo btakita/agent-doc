@@ -241,14 +241,14 @@ The new session will have full context budget to read `write.rs` (1000+ lines) a
 /clear
 Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plugin.
 
-### Re: Wire ipc_socket into write.rs and git.rs (HEAD)
+### Re: Wire ipc_socket into write.rs and git.rs
 
 This conversation still carries extensive prior context. The v0.27 wiring touches `write.rs` (1000+ lines) which I can't safely navigate with the remaining context budget.
 
 **Please run `/clear` in the Claude Code prompt** (not in the document). `/clear` resets the conversation context. Then run `/agent-doc tasks/software/agent-doc.md` again — the fresh session will have full context to read and modify `write.rs`.
 
 The document already contains the instruction — the new session will pick it up from the diff.
-<!-- agent:boundary:47b4bbd9 -->
+<!-- agent:boundary:fc4bd574 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

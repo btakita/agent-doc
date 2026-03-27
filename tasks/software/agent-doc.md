@@ -248,13 +248,45 @@ This conversation still carries extensive prior context. The v0.27 wiring touche
 **Please run `/clear` in the Claude Code prompt** (not in the document). `/clear` resets the conversation context. Then run `/agent-doc tasks/software/agent-doc.md` again — the fresh session will have full context to read and modify `write.rs`.
 
 The document already contains the instruction — the new session will pick it up from the diff.
-<!-- agent:boundary:fc4bd574 -->
+I typed in `/clear` from within this agent doc. But it did not run the `/clear` command. How can agent-doc run explicit commands?
+Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plugin.
+
+### Re: /clear in agent-doc (HEAD)
+
+`/clear` is a Claude Code CLI command — it must be typed in the Claude Code terminal prompt, not in the document. Agent-doc documents are text files; the agent reads diffs but doesn't execute commands embedded in them. There's no mechanism for agent-doc to trigger CLI commands from document content (and doing so would be a security concern).
+
+### Re: Wire ipc_socket into write.rs and git.rs
+
+**Done.** Socket IPC is now wired into all write paths as first-attempt before file-based fallback.
+
+**Changes made:**
+
+1. **`lib.rs`** — Added `pub mod ipc_socket` (was binary-only, now accessible from FFI)
+2. **`main.rs`** — Changed `mod ipc_socket` → `pub(crate) use agent_doc::ipc_socket`
+3. **`write.rs` — `try_ipc()`** — Socket-first: checks `is_listener_active()`, sends full patch payload via `send_message()`, saves snapshot on ack. Falls back to file-based on failure.
+4. **`write.rs` — `try_ipc_full_content()`** — Same socket-first pattern for inline-mode documents
+5. **`write.rs` — `try_ipc_reposition_boundary()`** — Socket-first reposition via `send_reposition()`
+6. **`write.rs` — `build_ipc_patches_json()`** — Extracted shared helper (boundary ID lookup, exchange synthesis) to avoid duplication between socket and file paths
+7. **`boundary.rs` — `signal_editor_refresh()`** — Socket-first VCS refresh via `send_vcs_refresh()`
+8. **`ffi.rs`** — Added two new FFI exports:
+   - `agent_doc_start_ipc_listener(project_root, callback)` — starts socket listener on background thread
+   - `agent_doc_stop_ipc_listener(project_root)` — stops listener by removing socket file
+9. **`ipc_socket.rs`** — Fixed clippy warnings (collapsible if, unreachable code)
+
+**Test results:** 560 tests pass, clippy clean.
+
+**Next steps:**
+- Update JetBrains plugin to call `agent_doc_start_ipc_listener()` on project open
+- Update JetBrains plugin to handle socket messages in the callback (apply patches, reposition boundary, VCS refresh)
+- Release v0.27.0
+<!-- agent:boundary:6a0579b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Wire socket IPC (needs /clear for fresh context)
+- v0.27: Update JetBrains plugin to use socket IPC listener (FFI callback)
+- v0.27: Release and publish
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

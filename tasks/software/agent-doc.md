@@ -475,6 +475,7 @@ Each of these IS an abstraction (lowercase, philosophically) but none IS Abstrac
 Which term feels right for the existence-lang domain overlay? Or is there a different term you have in mind? Once we agree, I'll author it as a new ontology node via `/existence new <term>` and update the CLAUDE.md conventions.
 
 Interface
+Protocol involves the Interface(s) of the systems.
 
 ### Re: Abstraction refinement, Interface term, and existence CLI
 
@@ -511,7 +512,18 @@ This is an interesting design question. Options:
 **C. Skill handles deployment** -- `/existence install` (via the skill) copies the SKILL.md and updates CLAUDE.md. Pro: stays in the Claude Code ecosystem. Con: requires Claude Code running.
 
 Which approach fits your vision? The existence CLI itself is a standalone tool -- tying it to CLAUDE.md file management feels like it should be a skill concern (option C), unless you want the CLI to be the canonical deployer (option A).
-<!-- agent:boundary:8d3a3252 -->
+
+### Re: Protocol involves Interfaces (HEAD)
+
+Good distinction. Authored `protocol.md`:
+
+- **Interface** -- the boundary of a single System (its API/ABI surface)
+- **Protocol** -- involves the Interfaces of multiple Systems; the rules governing how they communicate through their respective Interfaces
+
+Example: The NDJSON-over-Unix-socket **Protocol** defines how the `agent-doc` CLI and the editor plugin communicate through their socket **Interfaces**. The C ABI is the FFI library's Interface. The JNA declarations are the JetBrains plugin's Interface. The NDJSON message format is the Protocol spanning both.
+
+Cross-linked `interface.md` -> `protocol.md` and vice versa.
+<!-- agent:boundary:cd80580a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

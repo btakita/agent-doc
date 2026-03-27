@@ -36,6 +36,7 @@ instruction-files = "0.1"
 tmux-router = "0.3"
 pulldown-cmark = "0.12"
 yrs = "0.21"
+interprocess = { version = "2", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2"

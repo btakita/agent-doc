@@ -987,13 +987,33 @@ I'd love to show you how I'm using Ragie — I think you'd find the integration 
 4. Hit Send
 
 **For chromium-bridge improvement:** We should add a `type` command that uses CDP `Input.dispatchKeyEvent` instead of DOM manipulation — this works regardless of how the input is implemented. Tracked in tasks/software/brave.md.
-<!-- agent:boundary:98fd6274 -->
+
+Finished:
+- LinkedIn DM (v13) — awaiting manual paste+send
+
+I renamed tasks/software/brave.md to tasks/software/chromium-bridge.md
+Will do `type` feature work there.
+
+LinkedIn DM v13 sent. Noted the rename to `tasks/software/chromium-bridge.md` — the `type` command feature work will be tracked there.
+
+**Summary of what was accomplished this session:**
+- Captured Bob's LinkedIn repost via `chromium-bridge markdown`
+- Iterated DM from v10 through v13 (timing adjustment, multiple client integrations, Ragie language audit, removed presumptive "overlap" framing)
+- Updated browser skill to prefer chromium-bridge over MCP
+- Diagnosed Chrome DevTools MCP `Network.enable` timeout
+- DM sent to Bob Remeika
+
+**Next steps:**
+1. Build Ragie integration in Corky
+2. Record YouTube session with Judith's project using Ragie
+3. Send follow-up to Bob with video link
+4. Add `type` command to chromium-bridge (CDP `Input.dispatchKeyEvent`)
+<!-- agent:boundary:3128dd44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v13) — awaiting manual paste+send
 - chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test

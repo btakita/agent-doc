@@ -170,7 +170,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 
 ~75 words. Short paragraphs scan well on mobile. Send it?
 Send it
-### Re: Send it (HEAD)
+### Re: Send it
 
 Chrome DevTools connection is timing out — can't reach the browser right now. You may need to restart chromium-bridge or the browser.
 
@@ -189,7 +189,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Once the browser connection is back, I can send it directly. Or you can paste it manually.
-<!-- agent:boundary:0f821475 -->
+<!-- agent:boundary:3f3a84d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

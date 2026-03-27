@@ -356,6 +356,21 @@ The convention now reads:
 
 > **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters. Business logic belongs in the shared FFI library, not duplicated. **Ontology:** The FFI library is the **System** (internalized whole); each editor plugin is a **Perspective** (thin adapter); the C ABI is the **Abstraction** (stable interface). Business logic never lives in a Perspective. **Test:** "Does this feature need to work in >1 editor?" -> implement in FFI.
 
+You have a fundamental misunderstanding of how existence-lang is applied with an ontology.
+A primary concept is each term in the schema/ontology is applicable to different scopes and entities.
+So Ontology, System, Perspective, Abstraction are not representative of different parts of the Shared Foundation pattern.
+Instead, Ontology, System, Perspective, Abstraction, are descriptive of any scope in any system/entity.
+
+This means each editor plugin has a **Perspective**, as the FFI library has a **Perspective**.
+The FFI library is a **System**. As is each editor plugin is a **System**.
+
+C ABI is an **Abstraction** (stable interface) as each editor plugin's interface is an **Abstraction**.
+Note that **Abstraction** is the symbolic representation of a real entity. So the API/ABI is how other entities interact with the subject entity.
+Yet an **Abstraction** is a symbol of something real. "The map is not the territory"...The Abstraction is a member of the Schema...a symbol of the real Entity.
+
+Because there was a misapplication of existence-lang...it seems that existence-lang itself needs to be refined.
+Please amend the ontology of existence-lang and any other supporting SKILL.md and/or binary software to support these amendments to existence-lang is correctly applied to a domain.
+
 **Pattern map:**
 
 | Ontology Term | Role in Pattern | agent-doc Concrete |
@@ -372,13 +387,52 @@ The convention now reads:
 This transfers beyond editor plugins -- any multi-consumer architecture (CLI + library, API + SDKs, microservices with shared domain logic).
 
 **Also:** Fixed broken `&lt;!-- agent:pending --&gt;` tag (was missing `<`).
-<!-- agent:boundary:131b0e2f -->
+> "Does this feature need to work in >1 Perspective?" -> implement in the System, expose via Abstraction.
+
+It seems that Abstraction is used in a concrete sens
+
+### Re: Ontology misapplication and existence-lang refinement (HEAD)
+
+You're right. I fundamentally misapplied existence-lang by assigning terms as **exclusive labels** for architecture roles -- "System = FFI library, Perspective = plugin, Abstraction = C ABI." Every entity in Existence is a System, has a Perspective, and exposes Abstractions. The terms are universal descriptors, not role assignments.
+
+**Changes made to existence-lang:**
+
+1. **`~/.claude/philosophy/CLAUDE.md`** -- Added **Universal Applicability Principle** section:
+   - Every term applies to every entity at every scope
+   - Correct: "The FFI library is a System. The editor plugin is also a System."
+   - Incorrect: "The FFI library IS the System; the plugin IS the Perspective."
+   - Domain overlay convention: describe how each term applies to each entity, not which entity "is" which term
+
+2. **`~/.claude/CLAUDE.md`** (global) -- Added **Universal applicability** note to the ontology section:
+   - "Every term applies to every entity at every scope. All entities are Systems, have Perspectives, expose Abstractions."
+   - "When mapping ontology to a domain, describe how each term applies to each entity -- never assign terms as exclusive labels."
+   - Points to the full Universal Applicability Principle in philosophy CLAUDE.md
+
+3. **`src/agent-doc/CLAUDE.md`** -- Fixed the Shared Foundation pattern description:
+   - Before: "The FFI library is the System; each editor plugin is a Perspective; the C ABI is the Abstraction."
+   - After: "Both the FFI library and each editor plugin are Systems with their own Perspectives. Each exposes an Abstraction (C ABI, JNA interface). The Shared Foundation pattern places shared logic at the broadest Scope (FFI library) so all consumer Systems access it through their Abstractions."
+
+**Corrected pattern map:**
+
+| Ontology Term | FFI Library | Editor Plugin |
+|---|---|---|
+| **System** | Yes -- the shared library is a whole of relationships | Yes -- each plugin is a whole of relationships |
+| **Perspective** | Its viewpoint on document manipulation | Its viewpoint on IDE integration |
+| **Abstraction** | C ABI (`extern "C"` exports) | JNA interface, Node FFI bindings |
+| **Scope** | Broad -- all editor consumers | Narrow -- one editor's domain |
+
+The **Shared Foundation pattern** is about **Scope**: place shared logic at the broadest scope so narrower-scoped Systems can access it. This isn't about which entity "is" which term -- it's about which scope owns the logic.
+
+**Note on Abstraction:** As you pointed out, an Abstraction is the symbolic representation of a real entity -- "the map is not the territory." The C ABI is how other entities interact with `libagent_doc`, but it's a symbol, not the library itself. Same for JNA declarations as the Abstraction of the JetBrains plugin's interface.
+
+The existence skill (`/existence`) and its binary don't need changes -- the application guidance now lives in the philosophy CLAUDE.md where all agents will find it.
+<!-- agent:boundary:7a0bc806 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Commit all changes (Rust FFI + plugin + CLAUDE.md), release v0.27.0
+- v0.27: Commit all changes (Rust FFI + plugin + CLAUDE.md + existence-lang), release v0.27.0
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

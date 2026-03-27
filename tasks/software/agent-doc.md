@@ -2039,6 +2039,8 @@ if (overflow) {
 
 When inotify's kernel buffer fills up (e.g., during `cargo build` generating thousands of temp files), the overflow flag triggers a full directory scan of `.agent-doc/patches/`. Any missed `.json` patch files are picked up immediately.
 
+Will this cause performance degregation with heavy file activity?
+
 **Plugin v0.2.33** built at:
 ```
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.33.zip
@@ -2062,13 +2064,56 @@ The alternative (FFI-direct) would be:
 So the current architecture is correct: Rust → IPC file → PatchWatcher → FFI. The optimization we already made (skip IPC when boundary hasn't moved) is the right fix. The FFI is used — just indirectly through the IPC layer.
 
 **What could change:** If the plugin exposed a socket/pipe API instead of file-based IPC, the Rust binary could send reposition signals without file creation (avoiding inotify entirely). But that's a larger architectural change.
-<!-- agent:boundary:fcafba6d -->
+Can we have the socket/pipe be implemented in a reliable cross-platform manner?
+
+### Re: Will this cause performance degradation with heavy file activity? (HEAD)
+
+No — the overflow handler is lightweight. It only runs when an `OVERFLOW` event occurs (rare — requires filling the kernel's inotify buffer of 16K+ events). When it fires:
+
+- `processPendingPatches()` calls `dir.listFiles()` — a single `readdir` syscall
+- `.agent-doc/patches/` typically has 0-1 files (patches are consumed immediately)
+- Processing one JSON file is <1ms
+
+During normal operation (no overflow), the overhead is zero — just an `if (overflow)` check that's always false. The overflow scan is a recovery path, not a hot path.
+
+**The bigger performance concern** is the WatchService poll itself (500ms timeout), which runs continuously. But that's the existing behavior — unchanged by this fix.
+
+### Re: Can we have the socket/pipe be implemented in a reliable cross-platform manner? (HEAD)
+
+Yes, with caveats:
+
+**Unix domain sockets** (Linux + macOS):
+- Rust: `std::os::unix::net::UnixStream` or `tokio::net::UnixListener`
+- Kotlin/JVM: `java.net.UnixDomainSocketAddress` (Java 16+, IntelliJ ships with JBR 21+)
+- Path: `.agent-doc/ipc.sock` in the project root
+- Reliable, instant, no filesystem event overhead
+
+**Named pipes** (Windows):
+- Rust: `\\.\pipe\agent-doc-<hash>`
+- Kotlin/JVM: `java.io.RandomAccessFile` on the named pipe
+- Windows-only construct, different API from Unix sockets
+
+**Cross-platform approach:**
+- Use Unix domain sockets on Linux/macOS (covers 95%+ of agent-doc users)
+- Fall back to file-based IPC on Windows (or use named pipes)
+- The `interprocess` Rust crate abstracts both behind a single API
+
+**Simplest reliable option:** Unix domain socket at `.agent-doc/ipc.sock`. The plugin listens, the Rust binary connects and sends JSON messages. No inotify, no file creation, instant delivery. The file-based IPC becomes the fallback for when the socket isn't available.
+
+This would eliminate:
+- inotify overflow issues entirely
+- File creation/deletion overhead per IPC message
+- The 500ms WatchService poll latency
+- The 2s timeout/retry logic
+
+Worth implementing as a v0.27 milestone. Want me to add it to the todo list?
+<!-- agent:boundary:1718b7be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-(none — all items resolved)
+- Unix domain socket IPC as replacement for file-based IPC (v0.27 milestone candidate)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

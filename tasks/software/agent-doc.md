@@ -257,13 +257,33 @@ After `sync` completes, schedule a deferred check (e.g., 2s delay) that:
 This would have caught the 5-pane stash accumulation before it became visible to the user.
 
 Want me to implement this, or defer to v0.27?
-<!-- agent:boundary:3a453acd -->
+
+Will this fix the incorrect 6 panes due to rapidly changing files?
+
+### Re: Will this fix the incorrect 6 panes due to rapidly changing files? (HEAD)
+
+**Partially.** A layout validation check would **detect** the mismatch but not **prevent** it. The root cause is different:
+
+**Why 6 panes appeared:** When you rapidly switch between files in the editor, each switch triggers `EditorTabSyncListener` → `agent-doc sync --col ...`. If sync fires faster than the previous sync completes, multiple concurrent syncs race to create/move panes. Each sync sees a different "expected" layout and spawns panes accordingly, creating duplicates.
+
+**What layout validation would do:** Detect that 6 panes exist when only 2 are expected, and trigger a cleanup. But by then the user already sees the broken layout.
+
+**To actually prevent it, we need:**
+1. **Debounce sync** — coalesce rapid layout changes into a single sync call (e.g., 500ms debounce window). The plugin's `LayoutChangeDetector` already detects changes, but fires immediately.
+2. **Sync lock** — mutex/flag that prevents concurrent sync operations. If a sync is in progress, queue the next one instead of running in parallel.
+3. **Idempotent sync** — make `agent-doc sync` idempotent so running it twice with the same args is a no-op (it mostly is, but pane creation isn't guarded).
+
+The most impactful fix is **debounce** — a 500ms delay before firing sync would coalesce rapid tab switches into a single call.
+
+Want me to add debounce to the plugin's sync trigger?
+<!-- agent:boundary:ef400103 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Layout validation after sync (proposed — awaiting decision)
+- Debounce sync in plugin (prevent 6-pane issue from rapid file switching)
+- Layout validation after sync
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

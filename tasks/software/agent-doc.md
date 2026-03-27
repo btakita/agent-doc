@@ -276,14 +276,30 @@ Will this fix the incorrect 6 panes due to rapidly changing files?
 The most impactful fix is **debounce** — a 500ms delay before firing sync would coalesce rapid tab switches into a single call.
 
 Want me to add debounce to the plugin's sync trigger?
-<!-- agent:boundary:3ce98524 -->
+Seems like all 3 would be useful...or would this be overengineering?
+
+### Re: Seems like all 3 would be useful...or would this be overengineering? (HEAD)
+
+**Not overengineering — they're layered defenses at different levels:**
+
+1. **Debounce** (plugin) — prevents the problem from occurring. Cheapest fix, highest impact. A `javax.swing.Timer` with 500ms restart-on-fire. ~10 lines of code.
+
+2. **Sync lock** (Rust) — prevents concurrent syncs even if debounce fails (e.g., two different triggers fire simultaneously). A simple file lock or `AtomicBool`. ~15 lines.
+
+3. **Idempotent sync** (Rust) — makes sync safe to call multiple times with the same args. Already mostly true — just need to guard the "create new pane" path with a "pane already exists for this file" check. ~5 lines.
+
+**Implementation order:** Debounce first (biggest bang), then idempotent sync (simplest Rust change), then sync lock if still needed. Each builds on the previous — debounce reduces frequency, idempotency handles duplicates, lock handles true races.
+
+Total effort: ~30 lines across 2 files. Not overengineering — it's defense in depth for a stateful system (tmux panes) where corruption is visible and annoying.
+
+Want me to implement all 3?
+<!-- agent:boundary:6d6b7ac7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Debounce sync in plugin (prevent 6-pane issue from rapid file switching)
-- Layout validation after sync
+- Implement sync debounce + idempotent sync + sync lock (awaiting go)
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

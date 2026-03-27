@@ -1710,14 +1710,49 @@ The PromptPanel IS working. The one that was obscured earlier was this same pane
 4. **Diagnostic logging** — `[prompt-poller]` entries in idea.log for debugging
 
 All three layers (detection, polling, display) are confirmed working end-to-end.
-<!-- agent:boundary:34aa91a7 -->
+
+Describe:
+- Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
+
+### Re: Describe .bin/ project-relative path to resolveAgentDoc() (HEAD)
+
+**Problem:** The plugin's `resolveAgentDoc()` in `TerminalUtil.kt` checks fixed paths:
+1. `~/bin/agent-doc`
+2. `~/.local/bin/agent-doc`
+3. `~/.cargo/bin/agent-doc`
+4. `/usr/local/bin/agent-doc`
+5. Falls back to `"agent-doc"` (bare name, no PATH lookup)
+
+It never checks the **project-local** `.bin/agent-doc` symlink, which points to the latest release build (`src/agent-doc/target/release/agent-doc`). This means:
+- `which agent-doc` in the shell finds `.bin/agent-doc` (current build)
+- The plugin finds `~/.cargo/bin/agent-doc` (installed via `cargo install`, potentially stale)
+
+**Proposed fix:** Add the project basePath + `.bin/agent-doc` as the **first** candidate in `resolveAgentDoc()`:
+
+```kotlin
+fun resolveAgentDoc(): String {
+    val candidates = listOf(
+        project?.basePath?.let { "$it/.bin/agent-doc" },  // project-local first
+        System.getenv("HOME")?.let { "$it/bin/agent-doc" },
+        System.getenv("HOME")?.let { "$it/.local/bin/agent-doc" },
+        System.getenv("HOME")?.let { "$it/.cargo/bin/agent-doc" },
+        "/usr/local/bin/agent-doc"
+    )
+    // ...
+}
+```
+
+**Caveat:** `resolveAgentDoc()` is currently a static method with no project context. It would need a `project: Project?` parameter or access to the project basePath. Alternatively, the caller could pass the basePath.
+
+This ensures the plugin always uses the same binary the developer built, avoiding the stale-binary issue we hit today. Want me to implement this?
+<!-- agent:boundary:0209a0b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
-- Consider making PromptPanel more visible (dialog/balloon option for occluded layouts)
+- Implement .bin/ project-relative path in resolveAgentDoc() (awaiting approval)
+- Consider making PromptPanel more visible for occluded layouts
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

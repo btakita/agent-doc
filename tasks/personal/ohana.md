@@ -219,7 +219,7 @@ Run `chromium-bridge start`, navigate to OHANA Messenger, then re-run `/agent-do
 I have https://www.facebook.com/messages/t/3777252552346072 open
 
 Can you identify which tab has the url open?
-### Re: Send via chromium-bridge (HEAD)
+### Re: Send via chromium-bridge
 
 Found the OHANA Messenger tab open at the exact URL. The MCP chrome-devtools server was timing out, but the `chromium-bridge` CLI connected fine.
 
@@ -229,7 +229,7 @@ Message sent to the OHANA chat! Used `chromium-bridge evaluate` to:
 3. Press Enter to send
 
 Textbox is now empty — confirmed sent.
-<!-- agent:boundary:214cd3b5 -->
+<!-- agent:boundary:542e719f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -77,7 +77,7 @@ Want me to send this to the OHANA chat, or would you like to adjust it first?
 I have not yet started. I will start.
 
 Add that I used Claude Code to post this message.
-### Re: Revised draft + send (HEAD)
+### Re: Revised draft + send
 
 Got it — corrected the draft. Here's the updated version:
 
@@ -98,7 +98,7 @@ And yes — I used Claude Code to post this message 😊
 ---
 
 Want me to send this now, or any more tweaks?
-<!-- agent:boundary:7a4d6292 -->
+<!-- agent:boundary:92a03f51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

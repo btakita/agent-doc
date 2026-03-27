@@ -616,7 +616,7 @@ git tag v0.1.1 && git push origin v0.1.1
 Want me to commit and push this now?
 audit docs
 release
-### Re: Audit docs + release (HEAD)
+### Re: Audit docs + release
 
 **Doc audit — fixed:**
 - SPEC.md: updated deps section (`tokio-tungstenite` → `cdpkit`, added `futures`)
@@ -629,7 +629,7 @@ release
 - Release build installed locally to `~/.cargo/bin/chromium-bridge`
 
 **CI status:** https://github.com/btakita/chromium-bridge/actions — running now. Will create GitHub Release with 4 prebuilt binaries (linux x86_64/aarch64, macOS x86_64/aarch64) when complete.
-<!-- agent:boundary:5a68e5bb -->
+<!-- agent:boundary:99a40c8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

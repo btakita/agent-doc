@@ -1788,7 +1788,7 @@ The resolution order is now:
 5. `/usr/local/bin/agent-doc` — system
 6. `"agent-doc"` — PATH fallback
 
-### Re: Does any operating system install promote the practice of having a ~/bin directory? (HEAD)
+### Re: Does any operating system install promote the practice of having a ~/bin directory?
 
 Yes — several do:
 
@@ -1798,7 +1798,7 @@ Yes — several do:
 - **FHS (Filesystem Hierarchy Standard)** — doesn't define `~/bin`, but the XDG Base Directory Spec inspired `~/.local/bin` as the "proper" user-local bin directory
 
 So `~/bin` is a well-established convention promoted by Debian-family distros. `~/.local/bin` is the newer XDG-aligned alternative (and is what `pip install --user` and `pipx` use). Both are reasonable candidates in `resolveAgentDoc()`.
-<!-- agent:boundary:5f5487b4 -->
+<!-- agent:boundary:d12a8d25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

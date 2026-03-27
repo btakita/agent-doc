@@ -1561,15 +1561,42 @@ This is **"accept edits" mode** — a mid-level permissions mode that auto-appro
 You need one more Shift+Tab press to reach normal mode where every tool call shows a permission prompt.
 
 **What was built:** Added `AGENT_DOC_PROMPT_DEBUG=1` env var to `agent-doc prompt --all` that logs the last 5 non-empty lines of each captured pane to stderr. This makes it easy to diagnose detection issues without modifying the plugin.
-<!-- agent:boundary:0ec7b2d9 -->
+
+I see prompts in the claude terminal. These prompts should show up in the editor.
+But I pressed Shift+Tab again. This is what I see
+![img_1.png](img_1.png)
+
+### Re: I see prompts in the claude terminal...But I pressed Shift+Tab again (HEAD)
+
+**Root cause found and fixed.** The screenshot shows the pane in `"plan mode on"` — another auto-approve mode, not the normal permission-prompt mode. But the deeper issue is:
+
+**PromptPoller was never started.** The poller only started when `addFile()` was called via `SubmitAction` (Ctrl+Shift+Alt+A). Sessions started via `agent-doc spawn` in tmux never triggered `addFile()`, so polling never ran — regardless of permissions mode.
+
+**Fix (plugin v0.2.31):**
+1. Added `startPolling()` public method to `PromptPoller`
+2. `PluginLifecycleListener.projectOpened()` now auto-starts the poller after resync if `.agent-doc/sessions.json` exists
+3. Added diagnostic logging throughout PromptPoller (viewable via `Help > Debug Log Settings > #com.github.btakita.agentdoc`)
+4. Replaced silent error catch with logged warnings
+
+**Install:**
+```
+src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.31.zip
+```
+
+**To test:**
+1. Uninstall old plugin → restart → install v0.2.31 → restart
+2. Check `idea.log` for `[prompt-poller] starting polling`
+3. Set pane to normal permissions mode (keep pressing Shift+Tab until you see `"No" to cancel` on a tool call)
+4. Trigger an agent-doc cycle — PromptPanel should surface
+<!-- agent:boundary:b9effb34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Press Shift+Tab once more to reach normal permission-prompt mode
-- Re-test: trigger a cycle and verify PromptPanel surfaces in IntelliJ
-- Consider: should PromptPoller detect "accept edits" mode too?
+- Install plugin v0.2.31 and verify PromptPoller auto-starts on project open
+- Set pane %40 to normal permissions mode and test PromptPanel detection
+- Check idea.log for prompt-poller logging
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

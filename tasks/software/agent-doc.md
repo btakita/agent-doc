@@ -1836,13 +1836,36 @@ Understood — keeping the current bottom-panel PromptPanel as-is. The non-disru
 | Plugin diagnostic logging | `PromptPoller.kt` | Plugin v0.2.32 |
 | Project-local `.bin/` binary resolution | `TerminalUtil.kt` | Plugin v0.2.32 |
 | `~/.cargo/bin/agent-doc` updated | `cargo install` | Done |
-<!-- agent:boundary:bc315bfd -->
+Add tests
+audit docs
+update README, SPEC, module-harness, ontology
+release?
+
+### Re: Add tests / audit docs / update README, SPEC, module-harness, ontology / release? (HEAD)
+
+**Tests:** All 13 prompt tests pass (including the 2 new ones for numbered format). Full suite: 176 unit tests + 38 CLI tests — all green.
+
+**Audit docs:** Updated SPEC.md §7.14 (prompt) to document:
+- Both option formats (bracket `[N] label` + numbered `N. label`)
+- `selected` field in JSON output
+- `AGENT_DOC_PROMPT_DEBUG=1` env var
+
+All stale file warnings resolved. Remaining issue is a pre-existing `⚠ Large table` warning in CLAUDE.md (informational, not from our changes).
+
+**README/module-harness/ontology:** No prompt-related content in README — no update needed. Module harness and ontology don't reference prompt detection specifics.
+
+**Release consideration:** The changes are in two areas:
+1. **Rust binary** (prompt.rs) — numbered format support + debug logging. Already installed via `cargo install`. Could bump to v0.26.4 for a proper release.
+2. **JetBrains plugin** (v0.2.32) — PromptPoller auto-start, diagnostic logging, `.bin/` resolution. Built but not published.
+
+Both are working locally. A release would formalize the fixes for other users. Want to proceed with a version bump and publish?
+<!-- agent:boundary:fb983e79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-(none — all items resolved)
+- Decision: release v0.26.4 + plugin v0.2.32?
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

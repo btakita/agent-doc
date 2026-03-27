@@ -215,7 +215,7 @@ These accumulated from rapid window navigation — each time a pane was displace
 
 Want me to kill the orphaned stash panes? They're all dead sessions consuming resources.
 
-### Re: Got an error claiming tasks/interior-design.md (HEAD)
+### Re: Got an error claiming tasks/interior-design.md
 
 The errors in the screenshot are from `resync` trying to restart stashed panes with invalid sessions. Ran `agent-doc resync --fix` — cleaned up all 5 orphaned stash panes:
 
@@ -229,7 +229,7 @@ The stash window `@20` is gone. Active sessions:
 - `tasks/interior-design.md` → pane %57
 
 The claim for `tasks/interior-design.md` succeeded (visible at the bottom of your screenshot). The errors were from the stash cleanup, not the claim itself.
-<!-- agent:boundary:de9ee076 -->
+<!-- agent:boundary:4ef47cf5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

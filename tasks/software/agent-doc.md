@@ -2110,7 +2110,7 @@ Worth implementing as a v0.27 milestone. Want me to add it to the todo list?
 Release what we have
 Then prep for socket/pipe. Should we use `interprocess`?
 
-### Re: Release what we have / Should we use `interprocess`? (HEAD)
+### Re: Release what we have / Should we use `interprocess`?
 
 **v0.26.5 released:**
 
@@ -2141,7 +2141,7 @@ The [`interprocess`](https://crates.io/crates/interprocess) crate provides:
 - `std::os::unix::net::UnixStream` is zero-dependency and sufficient for our use case
 
 **Recommendation:** Start with `std::os::unix::net` (zero deps, simpler). Add `interprocess` only if Windows support becomes a requirement. The IPC protocol is just JSON-over-socket — the transport abstraction isn't complex enough to justify the dependency.
-<!-- agent:boundary:545e436c -->
+<!-- agent:boundary:47b7c6bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

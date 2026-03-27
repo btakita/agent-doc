@@ -1395,7 +1395,7 @@ There's an active `agent-doc start tasks/software/brave.md` session running on p
 3. **Longer-term:** Make the plugin's PatchWatcher monitor all claimed files (not just visible ones), so IPC works even for background tabs
 
 Implement option 3.
-### Re: Implement PatchWatcher for all claimed files (HEAD)
+### Re: Implement PatchWatcher for all claimed files
 
 **Root cause:** When a file isn't open in the editor, `FileDocumentManager.getDocument()` returns `null`. The old code returned `false` (patch not applied), leaving the IPC patch file undeleted. `agent-doc write` timed out waiting for ACK, fell back to `--force-disk`, triggering the "externally modified" dialog.
 
@@ -1411,7 +1411,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.27.z
 ```
 
 Committed in submodule: `49ff68e`
-<!-- agent:boundary:c56964d9 -->
+<!-- agent:boundary:b063f2e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

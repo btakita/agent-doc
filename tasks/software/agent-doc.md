@@ -1566,7 +1566,7 @@ I see prompts in the claude terminal. These prompts should show up in the editor
 But I pressed Shift+Tab again. This is what I see
 ![img_1.png](img_1.png)
 
-### Re: I see prompts in the claude terminal...But I pressed Shift+Tab again (HEAD)
+### Re: I see prompts in the claude terminal...But I pressed Shift+Tab again
 
 **Root cause found and fixed.** The screenshot shows the pane in `"plan mode on"` — another auto-approve mode, not the normal permission-prompt mode. But the deeper issue is:
 
@@ -1588,7 +1588,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.31.z
 2. Check `idea.log` for `[prompt-poller] starting polling`
 3. Set pane to normal permissions mode (keep pressing Shift+Tab until you see `"No" to cancel` on a tool call)
 4. Trigger an agent-doc cycle — PromptPanel should surface
-<!-- agent:boundary:b9effb34 -->
+<!-- agent:boundary:69b634a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

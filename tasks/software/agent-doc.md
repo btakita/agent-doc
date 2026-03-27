@@ -1772,7 +1772,7 @@ Remaining callers (ClaimAction, SyncLayoutAction, etc.) use the default `null` a
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.32.zip
 ```
 
-### Re: Is ~/bin a standard directory that is used? (HEAD)
+### Re: Is ~/bin a standard directory that is used?
 
 Yes — `~/bin` exists on your system and contains executables like `brave-wayland.sh`, `clion`, `corky`, `dbxcli`, etc. It's a common convention for user-local binaries and is typically added to `$PATH` via your shell profile.
 
@@ -1785,7 +1785,7 @@ The resolution order is now:
 4. `~/.cargo/bin/agent-doc` — cargo install
 5. `/usr/local/bin/agent-doc` — system
 6. `"agent-doc"` — PATH fallback
-<!-- agent:boundary:6880217d -->
+<!-- agent:boundary:fa815e05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

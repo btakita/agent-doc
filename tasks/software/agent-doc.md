@@ -1872,7 +1872,7 @@ release
 | `~/.cargo/bin/agent-doc` | Updated |
 | Git tag | `v0.26.4` pushed |
 | JetBrains plugin | v0.2.32 built (local install) |
-<!-- agent:boundary:1e4bb76f -->
+<!-- agent:boundary:1cba0ceb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

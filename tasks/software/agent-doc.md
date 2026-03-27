@@ -348,7 +348,7 @@ Make this a strong convention. If we can create a design pattern with ontology, 
 
 **Build results:** Rust: 560 tests pass, clippy clean. Plugin: builds successfully (both zips).
 
-### Re: Generalizable design pattern with ontology (HEAD)
+### Re: Generalizable design pattern with ontology
 
 **Done.** Updated CLAUDE.md with the **Shared Foundation** pattern, grounded in ontology.
 
@@ -372,7 +372,7 @@ The convention now reads:
 This transfers beyond editor plugins -- any multi-consumer architecture (CLI + library, API + SDKs, microservices with shared domain logic).
 
 **Also:** Fixed broken `&lt;!-- agent:pending --&gt;` tag (was missing `<`).
-<!-- agent:boundary:aeb85e05 -->
+<!-- agent:boundary:131b0e2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

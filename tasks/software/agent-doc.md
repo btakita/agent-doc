@@ -2066,7 +2066,7 @@ So the current architecture is correct: Rust → IPC file → PatchWatcher → F
 **What could change:** If the plugin exposed a socket/pipe API instead of file-based IPC, the Rust binary could send reposition signals without file creation (avoiding inotify entirely). But that's a larger architectural change.
 Can we have the socket/pipe be implemented in a reliable cross-platform manner?
 
-### Re: Will this cause performance degradation with heavy file activity? (HEAD)
+### Re: Will this cause performance degradation with heavy file activity?
 
 No — the overflow handler is lightweight. It only runs when an `OVERFLOW` event occurs (rare — requires filling the kernel's inotify buffer of 16K+ events). When it fires:
 
@@ -2078,7 +2078,7 @@ During normal operation (no overflow), the overhead is zero — just an `if (ove
 
 **The bigger performance concern** is the WatchService poll itself (500ms timeout), which runs continuously. But that's the existing behavior — unchanged by this fix.
 
-### Re: Can we have the socket/pipe be implemented in a reliable cross-platform manner? (HEAD)
+### Re: Can we have the socket/pipe be implemented in a reliable cross-platform manner?
 
 Yes, with caveats:
 
@@ -2107,7 +2107,7 @@ This would eliminate:
 - The 2s timeout/retry logic
 
 Worth implementing as a v0.27 milestone. Want me to add it to the todo list?
-<!-- agent:boundary:1718b7be -->
+<!-- agent:boundary:484d49f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -282,7 +282,7 @@ Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plu
 
 go
 
-### Re: go (JetBrains plugin socket IPC) (HEAD)
+### Re: go (JetBrains plugin socket IPC)
 
 **Done.** JetBrains plugin now has a Unix domain socket listener alongside the file-based watcher.
 
@@ -308,7 +308,7 @@ go
 **Build results:** Plugin builds successfully (both unsigned and signed zips). Rust tests: 560 pass, clippy clean.
 
 **Ready to commit and release v0.27.0.**
-<!-- agent:boundary:ffe2b88d -->
+<!-- agent:boundary:38454f2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

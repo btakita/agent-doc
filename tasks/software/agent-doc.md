@@ -1482,7 +1482,7 @@ Make a prompt test.
 The binary-level detection is confirmed working. To test the full end-to-end (PromptPanel in IntelliJ), install plugin v0.2.30 and trigger a real permission prompt by temporarily removing `--dangerously-skip-permissions` from a session, or by running a Claude session without the flag.
 
 Test again
-### Re: Test again (HEAD)
+### Re: Test again
 
 Good — you've commented out `--dangerously-skip-permissions`, so this session now runs with normal permissions. Real permission prompts will surface in the tmux pane.
 
@@ -1495,7 +1495,7 @@ Good — you've commented out `--dangerously-skip-permissions`, so this session 
 **Current state:** This session is active with permissions enabled. Any tool call I make that requires approval should generate a visible permission prompt. If plugin v0.2.30 is installed and this pane is claimed, the PromptPanel should surface automatically when a prompt appears.
 
 **To verify:** Watch the IntelliJ IDE for a PromptPanel popup the next time a permission dialog appears in this pane.
-<!-- agent:boundary:fa70972e -->
+<!-- agent:boundary:73731227 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

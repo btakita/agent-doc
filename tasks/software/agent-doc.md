@@ -334,6 +334,7 @@ Implement:
 - Move sync debounce/lock to FFI layer (reduce editor-specific code)
 - Add FFI-first preference to agent-doc CLAUDE.md
 
+
 ### Re: Move sync debounce/lock to FFI layer
 
 **Implemented sync lock in FFI.** Added two new FFI functions:
@@ -355,15 +356,32 @@ pub extern "C" fn agent_doc_sync_unlock() { ... }
 **What's deferred (debounce in FFI):**
 The debounce timer requires a background thread in the FFI library that fires after a delay. This is more complex than the lock and needs careful lifecycle management (thread cleanup when the library is unloaded). The existing editor-side debounce (generation counter) works well — moving it to FFI is a v0.27 enhancement.
 
+Move to FFI now.
+
 **Next step:** Update the IntelliJ plugin to call `agent_doc_sync_try_lock()` / `agent_doc_sync_unlock()` instead of using its own `AtomicBoolean`. This replaces the editor-specific lock with the shared FFI lock.
-<!-- agent:boundary:6d6c36a7 -->
+
+Continue
+
+### Re: Move to FFI now / Continue (HEAD)
+
+**Done.** Both sync lock AND debounce now use the FFI layer:
+
+**FFI functions added** (`ffi.rs`):
+- `agent_doc_sync_try_lock()` / `agent_doc_sync_unlock()` — cross-editor sync lock
+- `agent_doc_sync_bump_generation()` / `agent_doc_sync_check_generation(gen)` — cross-editor debounce
+
+**Plugin updated** (both `EditorTabSyncListener` + `LayoutChangeDetector`):
+- Use `lib.agent_doc_sync_try_lock()` instead of local `AtomicBoolean`
+- Use `lib.agent_doc_sync_bump_generation()` instead of local `AtomicLong`
+- Graceful fallback to local atomics when FFI unavailable
+
+**Plugin v0.2.35** built. The FFI-first architecture is now in place — both debounce and lock are shared across all editors via the native library.
+<!-- agent:boundary:80ed8188 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Update IntelliJ plugin to use FFI sync lock (replace editor-specific AtomicBoolean)
-- Move debounce timer to FFI (v0.27 — needs background thread lifecycle)
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

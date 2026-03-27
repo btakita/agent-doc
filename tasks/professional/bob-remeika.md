@@ -1076,6 +1076,8 @@ https://www.linkedin.com/feed/update/urn:li:activity:7443338665428226049/?origin
 
 I couldn't find the specific contract posting via web search (LinkedIn posts are hard to index). But based on your draft, here's a polished version that naturally expresses interest in both the call and the contract:
 
+> Any developer friends out there looking for some contract work? I have a client for you.
+
 **Draft LinkedIn DM to Bob:**
 
 > Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
@@ -1115,7 +1117,9 @@ This is clean and concise. It:
 **Strategy for keeping the door open:** The call becomes dual-purpose — demo your tools AND discuss the contract opportunity. Since Bob already thinks you're "one of the best of the best," you don't need to sell hard. Just show up, demo, and let him see the fit naturally. The contract mention in the DM plants the seed so he comes prepared to discuss it.
 
 Ready to send this DM? Or want to adjust?
-<!-- agent:boundary:de3b6b18 -->
+
+Noted — added Bob's post text as reference. The draft DM in the latest section already addresses this. Ready to send when you approve.
+<!-- agent:boundary:6d2d778c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

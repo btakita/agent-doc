@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v6 ready — trimmed to ~75 words, phone-friendly short paragraphs.
+Browser connection timed out — message ready to copy-paste or send when bridge is restored.
 <!-- /agent:status -->
 
 ## Exchange
@@ -169,12 +169,32 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 ~75 words. Short paragraphs scan well on mobile. Send it?
-<!-- agent:boundary:470469d7 -->
+Send it
+### Re: Send it (HEAD)
+
+Chrome DevTools connection is timing out — can't reach the browser right now. You may need to restart chromium-bridge or the browser.
+
+In the meantime, here's the message ready to copy-paste into the OHANA chat:
+
+---
+
+It's like a really smart assistant you talk to in plain English — and it just does it. Think Siri but way smarter.
+
+I don't even write code anymore — I just describe what I want. I have YouTube videos showing how I work if you're curious (fair warning, they're long 😄).
+
+It's not just for programmers either — financial reports, interior design mood boards, project management, building apps — no code needed.
+
+Going to start using it to post more family updates! And yes — I used Claude Code to send this message 😊
+
+---
+
+Once the browser connection is back, I can send it directly. Or you can paste it manually.
+<!-- agent:boundary:0f821475 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v6 message to OHANA Messenger chat (awaiting approval)
+- Send v6 message to OHANA Messenger chat (blocked: browser bridge timeout)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

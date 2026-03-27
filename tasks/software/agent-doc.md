@@ -362,7 +362,7 @@ Move to FFI now.
 
 Continue
 
-### Re: Move to FFI now / Continue (HEAD)
+### Re: Move to FFI now / Continue
 
 **Done.** Both sync lock AND debounce now use the FFI layer:
 
@@ -376,7 +376,7 @@ Continue
 - Graceful fallback to local atomics when FFI unavailable
 
 **Plugin v0.2.35** built. The FFI-first architecture is now in place — both debounce and lock are shared across all editors via the native library.
-<!-- agent:boundary:80ed8188 -->
+<!-- agent:boundary:88de0402 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

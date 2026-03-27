@@ -184,14 +184,43 @@ The scope would be:
 2. Plugin side: replace PatchWatcher's NIO WatchService with a socket listener
 3. Rust side: connect to socket and send JSON messages instead of writing patch files
 4. Keep file-based IPC as fallback when socket is unavailable
-<!-- agent:boundary:8725fb91 -->
+
+I quickly navigated over multiple windows.
+Please look at the layout.
+The left tmux pane was split into 5 subpanes...totaling 6 panes in the window.
+
+### Re: Left tmux pane was split into 5 subpanes...totaling 6 panes (HEAD)
+
+**Found it.** The stash window (`@20`) has 5 orphaned panes, all running `agent-doc`:
+
+```
+@2  agent-doc  2 panes  (active window — correct)
+@20 stash      5 panes  (orphaned sessions)
+```
+
+Stash panes:
+| Pane | PID | Command |
+|------|-----|---------|
+| %60 | 2933759 | agent-doc |
+| %62 | 2936876 | agent-doc |
+| %63 | 2938897 | agent-doc |
+| %64 | 2939102 | agent-doc |
+| %65 | 2939365 | agent-doc |
+
+These accumulated from rapid window navigation — each time a pane was displaced, it got stashed instead of killed. The preflight flagged this: `"stash window 'stash' has non-idle pane %57 running 'agent-doc'"`.
+
+**The "6 panes in the window" you saw** was likely during a layout sync when these stash panes briefly appeared in the active window before being re-stashed.
+
+Want me to kill the orphaned stash panes? They're all dead sessions consuming resources.
+<!-- agent:boundary:3cb0c373 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- CI v0.26.5 retriggered — monitoring for 5-platform release
-- `interprocess` socket IPC planning (v0.27 — awaiting go/defer decision)
+- Kill orphaned stash panes (5 panes in @20)
+- CI v0.26.5 retriggered — monitoring
+- `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

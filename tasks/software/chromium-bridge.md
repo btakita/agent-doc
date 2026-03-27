@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.1: --tab URL pattern matching added. CI re-running (3rd attempt, all dep issues fixed).
+chromium-bridge v0.1.1 released: crates.io + GitHub Release (4 cross-platform binaries). CI green.
 <!-- /agent:status -->
 
 ## Exchange
@@ -658,6 +658,7 @@ run:
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
+
 ### Re: Run pending items
 
 **Completed:**
@@ -686,13 +687,31 @@ run:
 $ chromium-bridge evaluate "document.title" --tab "cdp-cli"
 Search Results for 'cdp-cli' - crates.io: Rust Package Registry
 ```
-<!-- agent:boundary:28f2bcd0 -->
+
+Go:
+- Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
+### Re: Monitor CI (HEAD)
+
+**CI v0.1.1 passed — all 4 targets built successfully.**
+
+GitHub Release: https://github.com/btakita/chromium-bridge/releases/tag/v0.1.1
+
+**Assets:**
+- `chromium-bridge-v0.1.1-x86_64-unknown-linux-gnu.tar.gz`
+- `chromium-bridge-v0.1.1-aarch64-unknown-linux-gnu.tar.gz`
+- `chromium-bridge-v0.1.1-x86_64-apple-darwin.tar.gz`
+- `chromium-bridge-v0.1.1-aarch64-apple-darwin.tar.gz`
+
+The install script now works cross-platform:
+```bash
+curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh
+```
+<!-- agent:boundary:902e20e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
 - Flesh out sift integration (blocked: sift not built yet)
 - Flesh out ragie integration (blocked: ragie client not built yet)
 - Create btakita/homebrew-tap (deferred — low priority)

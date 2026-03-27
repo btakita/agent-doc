@@ -690,7 +690,7 @@ Search Results for 'cdp-cli' - crates.io: Rust Package Registry
 
 Go:
 - Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
-### Re: Monitor CI (HEAD)
+### Re: Monitor CI
 
 **CI v0.1.1 passed — all 4 targets built successfully.**
 
@@ -706,7 +706,7 @@ The install script now works cross-platform:
 ```bash
 curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh
 ```
-<!-- agent:boundary:902e20e5 -->
+<!-- agent:boundary:8aea496d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -192,7 +192,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 Once the browser connection is back, I can send it directly. Or you can paste it manually.
 
 I navigated away. Try again.
-### Re: Try again (HEAD)
+### Re: Try again
 
 chromium-bridge isn't running — no Chrome remote debugging process found either. You'll need to start it:
 
@@ -215,7 +215,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 Run `chromium-bridge start`, navigate to OHANA Messenger, then re-run `/agent-doc` and I'll send it.
-<!-- agent:boundary:d4f701d8 -->
+<!-- agent:boundary:4cc243aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

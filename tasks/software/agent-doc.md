@@ -412,6 +412,10 @@ You're right. I fundamentally misapplied existence-lang by assigning terms as **
    - Before: "The FFI library is the System; each editor plugin is a Perspective; the C ABI is the Abstraction."
    - After: "Both the FFI library and each editor plugin are Systems with their own Perspectives. Each exposes an Abstraction (C ABI, JNA interface). The Shared Foundation pattern places shared logic at the broadest Scope (FFI library) so all consumer Systems access it through their Abstractions."
 
+The existence binary & SKILL.md should be installable on other systems.
+Please apply these changes to existence/SKILL.md.
+Should the existence cli also update AGENTS.md/CLAUDE.md on the host system?
+
 **Corrected pattern map:**
 
 | Ontology Term | FFI Library | Editor Plugin |
@@ -420,6 +424,13 @@ You're right. I fundamentally misapplied existence-lang by assigning terms as **
 | **Perspective** | Its viewpoint on document manipulation | Its viewpoint on IDE integration |
 | **Abstraction** | C ABI (`extern "C"` exports) | JNA interface, Node FFI bindings |
 | **Scope** | Broad -- all editor consumers | Narrow -- one editor's domain |
+
+I want to apply iterative rigor to each member of the ontology.
+So we can refine the meanings over time.
+
+> | **Abstraction** | C ABI (`extern "C"` exports) | JNA interface, Node FFI bindings |
+
+You seems to be conflating Abstraction with with Interface. Abstraction has a broader meaning...the symbolic representation of the entity...which is more the the API (Interface).
 
 The **Shared Foundation pattern** is about **Scope**: place shared logic at the broadest scope so narrower-scoped Systems can access it. This isn't about which entity "is" which term -- it's about which scope owns the logic.
 
@@ -430,6 +441,16 @@ The existence skill (`/existence`) and its binary don't need changes -- the appl
 ### Re: Alternative term for Abstraction in domain overlays
 
 You're right -- using "Abstraction" as a label for the API/ABI overloads the term. In existence-lang, Abstraction means "a concept that models something else without its complexity." An API IS an abstraction (philosophically), but calling it THE Abstraction in a pattern map narrows the term to mean "interface," which it doesn't.
+
+> "a concept that models something else without its complexity."
+
+I don't agree with this term. The abstraction is a symbol that represents a real entity.
+An abstraction is often a simplification of the real entity...but not always. Sometimes the abstraction is just or more complicated than the real entity.
+For example, if the real entity (E) is itself an abstraction in it's own schema. The abstraction (A) to the real entity (E) may have more information than the real entity (E).
+
+The abstraction is a member of the schema.
+
+An abstraction can be a word, an icon, an utterance, or any other representation of a real entity.
 
 **The concept we need a term for:** The defined surface through which one System communicates with another System. The contract, protocol, or interface.
 
@@ -452,14 +473,53 @@ Existing ontology terms don't fit:
 Each of these IS an abstraction (lowercase, philosophically) but none IS Abstraction (the ontology term). This lets Abstraction retain its core meaning.
 
 Which term feels right for the existence-lang domain overlay? Or is there a different term you have in mind? Once we agree, I'll author it as a new ontology node via `/existence new <term>` and update the CLAUDE.md conventions.
-<!-- agent:boundary:0352c4ba -->
+
+Interface
+
+### Re: Abstraction refinement, Interface term, and existence CLI (HEAD)
+
+**1. Abstraction definition updated** in `~/.claude/philosophy/src/abstraction.md`:
+
+Before: "An abstraction is a concept that models something else, allowing expression without its complexity & ambiguity."
+
+After: "An abstraction is a symbol that represents a real entity. An abstraction is a member of a schema. A word, an icon, an utterance, or any other representation of a real entity is an abstraction. An abstraction is often a simplification of the real entity, but not always. When the real entity (E) is itself an abstraction in its own schema, the abstraction (A) representing E may carry more information than E itself."
+
+Also updated the global CLAUDE.md ontology table to match.
+
+**2. Interface node authored** at `~/.claude/philosophy/src/interface.md`:
+
+> An interface is the defined boundary through which one System communicates with another System. It constrains the Scope of interaction by defining what Signals are valid and how they are structured. An interface is an Abstraction -- a symbolic representation of how a system can be interacted with. But it is a specific kind of abstraction: one that defines a contract between systems.
+
+Updated `src/agent-doc/CLAUDE.md` and `~/.claude/philosophy/CLAUDE.md` to use Interface instead of Abstraction for API/ABI concepts.
+
+**3. Existence CLI installability:**
+
+The existence skill already has binary resolution (check PATH, check relative paths, suggest `cargo install`). For installability on other systems, the main gaps are:
+
+- **No `cargo publish` to crates.io** -- this would make `cargo install existence-lang` work anywhere
+- **No prebuilt binaries** -- GitHub Releases with platform binaries would avoid compile time
+- **SKILL.md is bundled in agent-loop** -- should it be distributable independently?
+
+**4. Should the existence CLI update AGENTS.md/CLAUDE.md on the host system?**
+
+This is an interesting design question. Options:
+
+**A. CLI manages ontology deployment** -- `existence deploy` writes/updates the ontology section in `~/.claude/CLAUDE.md` and copies `SKILL.md` to the project. Pro: single source of truth. Con: couples the CLI to Claude Code's file layout.
+
+**B. CLI generates, user deploys** -- `existence export --format claude-md` outputs the ontology table + Universal Applicability Principle. User pastes it. Pro: decoupled. Con: manual.
+
+**C. Skill handles deployment** -- `/existence install` (via the skill) copies the SKILL.md and updates CLAUDE.md. Pro: stays in the Claude Code ecosystem. Con: requires Claude Code running.
+
+Which approach fits your vision? The existence CLI itself is a standalone tool -- tying it to CLAUDE.md file management feels like it should be a skill concern (option C), unless you want the CLI to be the canonical deployer (option A).
+<!-- agent:boundary:cac8d2c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - v0.27: Commit all changes, release v0.27.0
-- existence-lang: Coin new domain term for system interaction boundary (awaiting user choice)
+- existence-lang: Publish to crates.io for cross-system install
+- existence-lang: Decide CLI vs skill for CLAUDE.md management
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

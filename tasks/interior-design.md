@@ -14,10 +14,10 @@ Session initialized. Ready for interior design discussion.
 
 <!-- agent:exchange patch=append -->
 
-### Assistant (HEAD)
+### Assistant
 
 Interior design session is ready. Write your questions, ideas, or project details in the Exchange section and I'll respond.
-<!-- agent:boundary:cb173191 -->
+<!-- agent:boundary:0cd76e7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

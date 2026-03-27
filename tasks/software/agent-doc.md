@@ -260,7 +260,7 @@ Want me to implement this, or defer to v0.27?
 
 Will this fix the incorrect 6 panes due to rapidly changing files?
 
-### Re: Will this fix the incorrect 6 panes due to rapidly changing files? (HEAD)
+### Re: Will this fix the incorrect 6 panes due to rapidly changing files?
 
 **Partially.** A layout validation check would **detect** the mismatch but not **prevent** it. The root cause is different:
 
@@ -276,7 +276,7 @@ Will this fix the incorrect 6 panes due to rapidly changing files?
 The most impactful fix is **debounce** — a 500ms delay before firing sync would coalesce rapid tab switches into a single call.
 
 Want me to add debounce to the plugin's sync trigger?
-<!-- agent:boundary:ef400103 -->
+<!-- agent:boundary:3ce98524 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

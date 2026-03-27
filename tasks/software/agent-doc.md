@@ -1454,7 +1454,7 @@ Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverti
 The screenshot from earlier showed what looked like a Claude Code permission dialog in the terminal. If the issue is that the plugin doesn't surface Claude's prompts to the IDE, that would be a new feature — detecting Claude's output state and showing it in IntelliJ.
 
 Yes...but the plugin used to show the prompt. A regression occurred.
-### Re: PromptPanel regression — Claude Code format change (HEAD)
+### Re: PromptPanel regression — Claude Code format change
 
 **Root cause found:** Claude Code v2.1+ changed the permission prompt footer from `"Esc to cancel"` to `"No to cancel"`. The `parse_prompt()` function anchored on `"Esc to cancel"` — never matched, always returned `active: false`, so PromptPanel never triggered.
 
@@ -1468,7 +1468,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Committed: `468f4c2`. Install plugin + the binary is already rebuilt (release profile).
-<!-- agent:boundary:5346aa05 -->
+<!-- agent:boundary:76e633bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

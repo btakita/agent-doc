@@ -2,7 +2,7 @@
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
 agent_doc_format: template
 agent_doc_write: crdt
-#claude_args: --dangerously-skip-permissions
+claude_args: --dangerously-skip-permissions
 ---
 
 # agent-doc
@@ -229,13 +229,42 @@ The stash window `@20` is gone. Active sessions:
 - `tasks/interior-design.md` → pane %57
 
 The claim for `tasks/interior-design.md` succeeded (visible at the bottom of your screenshot). The errors were from the stash cleanup, not the claim itself.
-<!-- agent:boundary:4ef47cf5 -->
+
+Should we add a deferred function call to check the layout to ensure that the tmux layout matches the expected?
+
+### Re: Should we add a deferred function call to check the layout? (HEAD)
+
+Yes — a layout validation check after sync operations would catch drift between the editor layout and tmux layout. Here's how it could work:
+
+**Proposal: `agent-doc layout validate`**
+
+After `sync` completes, schedule a deferred check (e.g., 2s delay) that:
+1. Reads the expected layout from the editor (via the `--col` args that were sent)
+2. Captures the actual tmux pane layout (`tmux list-panes`)
+3. Compares: correct number of panes, correct files claimed in each pane
+4. If mismatch: log a warning and optionally auto-fix
+
+**Where to add it:**
+- **Plugin side:** In `SyncLayoutAction` or `EditorTabSyncListener`, after the sync command returns, schedule a validation callback
+- **Rust side:** `agent-doc sync --validate` flag that runs the check after reconciliation
+
+**What to validate:**
+- Number of active panes matches number of editor columns
+- Each pane is claimed for the correct file
+- No orphaned panes in stash
+- No duplicate claims (two panes claiming the same file)
+
+This would have caught the 5-pane stash accumulation before it became visible to the user.
+
+Want me to implement this, or defer to v0.27?
+<!-- agent:boundary:cebd6014 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- CI v0.26.5 retriggered — monitoring
+- Layout validation after sync (proposed — awaiting decision)
+- CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->
 

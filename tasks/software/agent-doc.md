@@ -1497,12 +1497,12 @@ Good — you've commented out `--dangerously-skip-permissions`, so this session 
 **To verify:** Watch the IntelliJ IDE for a PromptPanel popup the next time a permission dialog appears in this pane.
 
 I did not see the prompt pane. Try again
-### Re: I did not see the prompt pane. Try again (HEAD)
+### Re: I did not see the prompt pane. Try again
 
 **Root cause found:** Pane %40 still has **bypass permissions on** — the footer shows `"esc to interrupt"` not a permission prompt. Commenting out `claude_args: --dangerously-skip-permissions` in frontmatter only affects the *next* session launch; the running session retains its original mode.
 
 **Fix:** Press **Shift+Tab** in pane %40 to cycle permissions to normal mode, or restart the session. Then the next tool call will show a real permission prompt (`"No" to cancel`) for PromptPoller to detect.
-<!-- agent:boundary:70f26216 -->
+<!-- agent:boundary:61209501 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -135,7 +135,7 @@ Send it?
 Leanne is an interior designer. Laura is the COO of Amulet Technologies. Lynette is an Engineering Manager. Lisa is a retired CPA accountant.
 So mention that non-programmers can build software, prepare financial analysis, interior design (see tasks/interior-design.md).
 Communicate the utility of Claude in a fairly brief way.
-### Re: Add non-programmer utility (HEAD)
+### Re: Add non-programmer utility
 
 **Draft v5:**
 
@@ -152,7 +152,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 Added one paragraph (~40 words) that touches each sister's domain without naming names — financial reports (Lisa), interior design (Leanne), engineering team docs (Lynette), and building apps (Laura's engineers). Still conversational and brief. ~130 words total.
 
 Send it, or adjust?
-<!-- agent:boundary:9bd24192 -->
+<!-- agent:boundary:d54a5533 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

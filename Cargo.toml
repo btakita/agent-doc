@@ -31,16 +31,16 @@ tempfile = "3"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
 notify = "7"
-agent-kit = { path = "../agent-kit", version = "0.2" }
-instruction-files = { path = "../instruction-files", version = "0.1" }
-tmux-router = { path = "../tmux-router", version = "0.3.0" }
+agent-kit = "0.2"
+instruction-files = "0.1"
+tmux-router = "0.3"
 pulldown-cmark = "0.12"
 yrs = "0.21"
 
 [dev-dependencies]
 assert_cmd = "2"
 existence = "0.4"
-module-harness = { version = "0.2", path = "../module-harness" }
+module-harness = "0.2"
 predicates = "3"
 proptest = "1"
 tempfile = "3"

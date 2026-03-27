@@ -53,6 +53,8 @@ dependencies = [
 [[package]]
 name = "agent-kit"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c24b497ccec0c08625fc6bb57b25eddb072f487467c714406566f44c5cdcca1"
 dependencies = [
  "anyhow",
 ]
@@ -886,6 +888,8 @@ dependencies = [
 [[package]]
 name = "instruction-files"
 version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1134f5889faddddf88305c3208cb7bc0cd93f0a941eb23fc1394148df7ea4d94"
 dependencies = [
  "anyhow",
  "glob",
@@ -1048,6 +1052,8 @@ dependencies = [
 [[package]]
 name = "module-harness"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c044ae430145a34a63117499f5afbcbab2047013d95b92ea4ff588e3a2e28515"
 dependencies = [
  "anyhow",
  "clap",
@@ -1744,6 +1750,8 @@ dependencies = [
 [[package]]
 name = "tmux-router"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbae76bbe222e877ff0d9f455705169af034cd12a90404b5058cb9593ef55f47"
 dependencies = [
  "anyhow",
  "clap",

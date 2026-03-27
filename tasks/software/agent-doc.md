@@ -1798,14 +1798,36 @@ Yes — several do:
 - **FHS (Filesystem Hierarchy Standard)** — doesn't define `~/bin`, but the XDG Base Directory Spec inspired `~/.local/bin` as the "proper" user-local bin directory
 
 So `~/bin` is a well-established convention promoted by Debian-family distros. `~/.local/bin` is the newer XDG-aligned alternative (and is what `pip install --user` and `pipx` use). Both are reasonable candidates in `resolveAgentDoc()`.
-<!-- agent:boundary:d12a8d25 -->
+describe:
+- Consider making PromptPanel more visible for occluded layouts
+
+### Re: Consider making PromptPanel more visible for occluded layouts (HEAD)
+
+**Current behavior:** PromptPanel renders as a `JPanel` at the bottom of IntelliJ's `JLayeredPane` at `POPUP_LAYER`. When another window (terminal, browser) overlaps the bottom of IntelliJ, the panel is invisible.
+
+**Options to improve visibility:**
+
+1. **Bring IntelliJ to front** — When a prompt is detected, call `frame.toFront()` to raise the IDE window. Pros: simple, always visible. Cons: disruptive if user is actively working in the terminal.
+
+2. **Use a floating dialog** — Replace the bottom panel with a `JDialog` (non-modal, always-on-top). Pros: visible regardless of window stacking. Cons: can feel intrusive, needs careful dismiss behavior.
+
+3. **System notification** — Send a desktop notification (via `java.awt.SystemTray` or `notify-send`) alongside the panel. Pros: works even when IntelliJ is minimized. Cons: can't interact with options from the notification.
+
+4. **Sound/visual alert** — Flash the IntelliJ taskbar icon (via `frame.toFront()` then `frame.toBack()`) or play a system bell. Pros: subtle, non-intrusive. Cons: no direct action path.
+
+5. **Top-of-editor banner** (like IntelliJ's "file changed externally" bar) — Render the prompt as an `EditorNotificationPanel` at the top of the active editor. Pros: always visible in the editor area, idiomatic IntelliJ UI. Cons: requires `EditorNotificationProvider` registration, dismissed per-editor not globally.
+
+**Recommended: Option 1 + Option 5 hybrid.** Bring IntelliJ to front on first prompt detection (once, not every poll), and render the prompt as a top-of-editor banner. This is visible, idiomatic, and non-disruptive after the initial window raise.
+
+Want me to implement one of these?
+<!-- agent:boundary:8b9742b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Install plugin v0.2.32
-- Consider making PromptPanel more visible for occluded layouts
+- Decision needed: which PromptPanel visibility approach to implement
+- Plugin v0.2.32 ready for install
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

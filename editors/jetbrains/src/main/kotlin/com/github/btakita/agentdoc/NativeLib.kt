@@ -103,6 +103,18 @@ interface AgentDocLib : Library {
     /** Check if any operation is in progress. Returns true if status != "idle". */
     fun agent_doc_is_busy(file_path: String): Boolean
 
+    /** Try to acquire the sync lock. Returns true if acquired. */
+    fun agent_doc_sync_try_lock(): Boolean
+
+    /** Release the sync lock. */
+    fun agent_doc_sync_unlock()
+
+    /** Bump sync debounce generation. Returns new generation number. */
+    fun agent_doc_sync_bump_generation(): Long
+
+    /** Check if generation is still current (no newer events). */
+    fun agent_doc_sync_check_generation(gen: Long): Boolean
+
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?
 

@@ -47,11 +47,18 @@
 
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::component;
 use crate::crdt;
 use crate::frontmatter;
 use crate::template;
+
+/// Cross-editor sync lock — prevents concurrent layout syncs.
+static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Sync debounce generation counter — only the latest scheduled sync fires.
+static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Serialized component info returned by [`agent_doc_parse_components`].
 #[repr(C)]
@@ -602,6 +609,43 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> bool {
         Err(_) => return false,
     };
     crate::debounce::is_busy(path)
+}
+
+/// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
+///
+/// Editors call this before triggering `agent-doc sync`. If it returns `false`,
+/// skip the sync (another sync is in progress). Call `agent_doc_sync_unlock()`
+/// when the sync completes.
+///
+/// This is a cross-editor shared lock — prevents concurrent syncs from IntelliJ
+/// and VS Code plugins simultaneously.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_sync_try_lock() -> bool {
+    SYNC_LOCKED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+}
+
+/// Release the sync lock acquired by `agent_doc_sync_try_lock()`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_sync_unlock() {
+    SYNC_LOCKED.store(false, Ordering::SeqCst);
+}
+
+/// Bump the sync debounce generation. Returns the new generation number.
+///
+/// Editors call this when a layout change is detected. After a delay (e.g., 500ms),
+/// they call `agent_doc_sync_check_generation(gen)` — if it returns `true`, the
+/// generation is still current and the sync should proceed. If `false`, a newer
+/// event superseded this one.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_sync_bump_generation() -> u64 {
+    SYNC_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Check if a generation is still current. Returns `true` if `generation` matches the
+/// latest generation (no newer events have been scheduled).
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> bool {
+    SYNC_GENERATION.load(Ordering::SeqCst) == generation
 }
 
 /// Get the agent-doc library version.

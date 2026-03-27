@@ -34,6 +34,7 @@ jobs:
           git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
           git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
           git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
+          git clone --depth 1 https://github.com/existence-lang/existence.git ../existence-lang/existence
 
       - uses: actions/setup-python@v5
         with:
@@ -49,6 +50,7 @@ jobs:
             git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
             git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
             git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
+          git clone --depth 1 https://github.com/existence-lang/existence.git ../existence-lang/existence
 
       - uses: actions/upload-artifact@v4
         with:
@@ -65,6 +67,7 @@ jobs:
           git clone --depth 1 https://github.com/btakita/instruction-files.git ../instruction-files
           git clone --depth 1 https://github.com/btakita/tmux-router.git ../tmux-router
           git clone --depth 1 https://github.com/btakita/agent-kit.git ../agent-kit
+          git clone --depth 1 https://github.com/existence-lang/existence.git ../existence-lang/existence
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1

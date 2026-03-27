@@ -1656,6 +1656,10 @@ The Yes/No terminal prompt should have appeared as a Yes/No editor prompt
 
 ![img_4.png](img_4.png)
 
+This `Do you want to proceed?` dialog should have an editor prompt. None appeared. Do you have logs to detect what happened?
+
+![img_5.png](img_5.png)
+
 ### Re: Still don't see the editor prompt
 
 **Found the real issue!** The plugin's `resolveAgentDoc()` was using `~/.cargo/bin/agent-doc` (last modified 05:47, BEFORE the numbered format fix). The shell `which agent-doc` resolves to `.bin/agent-doc` (the just-rebuilt release binary), but the plugin checks `~/.cargo/bin/` directly without using PATH.
@@ -1668,14 +1672,38 @@ The Yes/No terminal prompt should have appeared as a Yes/No editor prompt
 **Fix:** Ran `cargo install --path .` to update `~/.cargo/bin/agent-doc` with the latest code.
 
 The poller should now detect the numbered format prompts on the next cycle. No plugin rebuild needed — the binary update is sufficient.
-<!-- agent:boundary:c3e155bb -->
+
+### Re: Do you have logs to detect what happened? (HEAD)
+
+**Detection is confirmed working!** The idea.log shows:
+
+```
+22:55:01 [prompt-poller] 1 active prompt(s) detected
+22:55:01 [prompt-poller] showing prompt: tasks/software/agent-doc.md:Do you want to proceed? (1 active)
+22:55:02 [prompt-poller] 1 active prompt(s) detected
+...
+22:55:13 [prompt-poller] 1 active prompt(s) detected
+```
+
+The prompt was detected continuously for 12 seconds and `PromptPanel.show()` was called, adding the panel to the IDE's layered pane.
+
+**The issue is visual, not detection.** The PromptPanel renders at the bottom of the IntelliJ frame. In your screen layout (IntelliJ on top, terminal on bottom), the panel is likely obscured by the terminal window or at the very bottom edge of the editor area.
+
+**Next steps:**
+1. Try looking at the very bottom of the IntelliJ editor area during a permission prompt
+2. Consider switching to a more visible UI — a dialog or notification balloon instead of a bottom-docked panel
+3. Or: bring the IntelliJ window to front when a prompt is detected
+
+Want me to change the PromptPanel to use a **modal dialog** or **notification balloon** instead, which would be more visible regardless of window layout?
+<!-- agent:boundary:fd60158d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Trigger a permission prompt and verify PromptPanel surfaces (binary now updated at ~/.cargo/bin/)
-- Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
+- PromptPanel detection works but panel is visually obscured
+- Decision needed: switch to dialog/balloon UI or keep bottom panel
+- Consider: should the panel bring IntelliJ to front?
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

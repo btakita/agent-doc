@@ -581,6 +581,10 @@ Done. Both created:
 The install script auto-detects OS/arch and falls back to suggesting `cargo install` if no prebuilt binary exists for the platform.
 
 **Brew tap** deferred — `cargo install` and the install script cover the immediate need. Can create `btakita/homebrew-tap` later when there's demand.
+
+Add gh actions to build and deploy cross platform releases.
+- Add macOS builds to GitHub Release (cross-compile or CI)
+- Create btakita/homebrew-tap (deferred — low priority)
 <!-- agent:boundary:4def7d02 -->
 <!-- /agent:exchange -->
 

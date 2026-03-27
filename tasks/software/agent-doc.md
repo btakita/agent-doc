@@ -1495,14 +1495,21 @@ Good — you've commented out `--dangerously-skip-permissions`, so this session 
 **Current state:** This session is active with permissions enabled. Any tool call I make that requires approval should generate a visible permission prompt. If plugin v0.2.30 is installed and this pane is claimed, the PromptPanel should surface automatically when a prompt appears.
 
 **To verify:** Watch the IntelliJ IDE for a PromptPanel popup the next time a permission dialog appears in this pane.
-<!-- agent:boundary:73731227 -->
+
+I did not see the prompt pane. Try again
+### Re: I did not see the prompt pane. Try again (HEAD)
+
+**Root cause found:** Pane %40 still has **bypass permissions on** — the footer shows `"esc to interrupt"` not a permission prompt. Commenting out `claude_args: --dangerously-skip-permissions` in frontmatter only affects the *next* session launch; the running session retains its original mode.
+
+**Fix:** Press **Shift+Tab** in pane %40 to cycle permissions to normal mode, or restart the session. Then the next tool call will show a real permission prompt (`"No" to cancel`) for PromptPoller to detect.
+<!-- agent:boundary:70f26216 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Test prompt detection end-to-end with permissions enabled (in progress)
-- Verify PromptPanel surfaces in IntelliJ when permission prompt appears
+- Toggle permissions off in pane %40 (Shift+Tab) then re-test prompt detection
+- Verify PromptPanel surfaces in IntelliJ when real permission prompt appears
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -188,6 +188,8 @@ The scope would be:
 I quickly navigated over multiple windows.
 Please look at the layout.
 The left tmux pane was split into 5 subpanes...totaling 6 panes in the window.
+Got an error claiming tasks/interior-design.md
+![img_6.png](img_6.png)
 
 ### Re: Left tmux pane was split into 5 subpanes...totaling 6 panes
 
@@ -212,13 +214,27 @@ These accumulated from rapid window navigation — each time a pane was displace
 **The "6 panes in the window" you saw** was likely during a layout sync when these stash panes briefly appeared in the active window before being re-stashed.
 
 Want me to kill the orphaned stash panes? They're all dead sessions consuming resources.
-<!-- agent:boundary:2a528845 -->
+
+### Re: Got an error claiming tasks/interior-design.md (HEAD)
+
+The errors in the screenshot are from `resync` trying to restart stashed panes with invalid sessions. Ran `agent-doc resync --fix` — cleaned up all 5 orphaned stash panes:
+
+```
+Fixed 5 of 5 issue(s).
+resync: purged 5 orphaned stash pane(s)
+```
+
+The stash window `@20` is gone. Active sessions:
+- `tasks/software/agent-doc.md` → pane %40
+- `tasks/interior-design.md` → pane %57
+
+The claim for `tasks/interior-design.md` succeeded (visible at the bottom of your screenshot). The errors were from the stash cleanup, not the claim itself.
+<!-- agent:boundary:de9ee076 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Kill orphaned stash panes (5 panes in @20)
 - CI v0.26.5 retriggered — monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

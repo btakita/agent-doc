@@ -1036,14 +1036,40 @@ Given Bob's background (Rails/React ecosystem, engineering leadership), a focuse
 - [ ] Schedule call with Bob via his Calendly link — target Wed-Fri next week (Apr 2-4) to allow polish time
 - [ ] Prepare presentation outline with live demo scripts
 - [ ] Test all demo flows end-to-end before the call
-<!-- agent:boundary:379f97a6 -->
+
+Please get Bob's latest post about knowing a contract.
+And please draft a message to Bob.
+
+### Re: Bob's post about knowing a contract (HEAD)
+
+I searched X/Twitter and LinkedIn but couldn't find a specific post by Bob about "knowing a contract." The closest match I found is this X post:
+
+> **@bob_remeika:** "Vibe coding an app with compliance requirements should be illegal. How do the vibes know your data retention policies or SLAs? Short answer is they don't, long answer is you can get the vibes to comply…"
+> — [x.com/bob_remeika/status/1902757032425594931](https://x.com/bob_remeika/status/1902757032425594931)
+
+Is this the post you meant? Or is it a different one — maybe on LinkedIn? If you can share the link or more context about the post, I can pull it and draft the message.
+
+**Draft message to Bob** (pending confirmation of the right post — here's a general version referencing his Calendly invite):
+
+> Hey Bob — thanks for sharing the Calendly link. I'd love to grab that 30 minutes.
+>
+> I've been building out a few things I think you'll find interesting — an interactive document session tool (agent-doc), browser automation via CDP (chromium-bridge), and a correspondence kit (corky) that I'm planning to integrate with Ragie for document retrieval.
+>
+> I saw your post about vibe coding and compliance — that tension is exactly what I've been working on with structured agent tooling. Would love to show you how I'm approaching it.
+>
+> Looking at next week — does Wed-Fri (Apr 2-4) work for you? Happy to book via your Calendly.
+
+Let me know if you want me to adjust the tone, reference a different post, or send this as-is.
+<!-- agent:boundary:a6293232 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- YouTube: Ragie integration session with Judith's project — planned follow-up
-- Retest bookmarklet — awaiting test
+- Confirm which Bob Remeika post about "knowing a contract" to reference
+- Finalize and send message to Bob (draft ready, awaiting approval)
 - Schedule 30-min presentation call with Bob (target Apr 2-4)
 - Prepare presentation demo scripts for Bob session
+- YouTube: Ragie integration session with Judith's project — planned follow-up
+- Retest bookmarklet — awaiting test
 <!-- /agent:pending -->

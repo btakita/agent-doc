@@ -310,13 +310,34 @@ yes
 **Fix applied:** Added a generation counter (like `EditorTabSyncListener` already has). Now only the latest event fires after 500ms. Previous events check `syncGeneration.get() != myGen` and exit early.
 
 **Plugin v0.2.34** built. This should prevent the 6-pane issue from rapid file switching.
-<!-- agent:boundary:c50bb183 -->
+
+Can this be implemented with the FFI Plugin?
+Add to the development context to prefer FFI Plugin over editor specific plugin.
+
+### Re: Can this be implemented with the FFI Plugin? / Prefer FFI over editor-specific (HEAD)
+
+**Yes — partially.** The sync debounce/lock logic CAN move to the FFI layer:
+
+**What can move to FFI:**
+- **Sync lock** — `agent_doc_is_busy()` FFI function already exists. Could add `agent_doc_sync_lock()` / `agent_doc_sync_unlock()` to prevent concurrent syncs across all editors.
+- **Debounce** — The FFI library could expose `agent_doc_schedule_sync(col_args, delay_ms)` that internally debounces using a Rust timer. Any editor plugin just calls this function.
+- **Idempotent pane check** — Already in Rust (`find_alive_pane_for_file`). No change needed.
+
+**What stays in the editor plugin:**
+- **Layout detection** — reading the editor's split-pane structure is editor-specific (Swing API for IntelliJ, VS Code API for VS Code). The FFI can't know the editor layout.
+- **Event registration** — `ContainerListener`, `FileEditorManagerListener` are IntelliJ-specific hooks. The FFI can't register for these events.
+
+**Architecture shift:** Editor plugins become thin event reporters: "layout changed → here are the columns." The FFI handles debouncing, sync locking, and calling `agent-doc sync`. This eliminates duplicate debounce/lock code across IntelliJ + VS Code plugins.
+
+**Added to CLAUDE.md:**
+<!-- agent:boundary:0fe0ba50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Install plugin v0.2.34 and test rapid file switching
+- Move sync debounce/lock to FFI layer (reduce editor-specific code)
+- Add FFI-first preference to agent-doc CLAUDE.md
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

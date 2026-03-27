@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 released. CI workflow added for cross-platform releases (4 targets).
+chromium-bridge v0.1.1 released (crates.io + CI). Cross-platform release workflow active. CI building 4 targets.
 <!-- /agent:status -->
 
 ## Exchange
@@ -614,12 +614,31 @@ git tag v0.1.1 && git push origin v0.1.1
 ```
 
 Want me to commit and push this now?
-<!-- agent:boundary:8a18aa0b -->
+audit docs
+release
+### Re: Audit docs + release (HEAD)
+
+**Doc audit — fixed:**
+- SPEC.md: updated deps section (`tokio-tungstenite` → `cdpkit`, added `futures`)
+- README.md: added install script method alongside `cargo install`
+- CLAUDE.md: updated layout to include `.github/workflows/` and `install.sh`
+
+**Release v0.1.1:**
+- Published to **crates.io**: `cargo install chromium-bridge` now gets v0.1.1
+- Pushed tag `v0.1.1` → **CI workflow triggered** (4-target cross-platform build in progress)
+- Release build installed locally to `~/.cargo/bin/chromium-bridge`
+
+**CI status:** https://github.com/btakita/chromium-bridge/actions — running now. Will create GitHub Release with 4 prebuilt binaries (linux x86_64/aarch64, macOS x86_64/aarch64) when complete.
+<!-- agent:boundary:5a68e5bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- ([done]) Add GitHub Actions cross-platform release workflow
+- ([done]) Audit docs (SPEC.md deps, README install methods, CLAUDE.md layout)
+- ([done]) Release v0.1.1 (crates.io + GitHub Release)
+- Monitor CI run for v0.1.1 release — verify all 4 targets build
 - Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)

@@ -164,15 +164,36 @@ This session's context has been heavily compressed but I can proceed. The implem
 5. Fallback to file-based IPC when socket unavailable
 
 Starting with step 1 — adding the dependency and creating the socket module. Shall I proceed with implementation?
-<!-- agent:boundary:d9ee24b0 -->
+go
+
+### Re: go (v0.27 implementation) (HEAD)
+
+**Step 1 complete: `ipc_socket.rs` module created and tested.**
+
+- Added `interprocess = { version = "2", default-features = false }` (sync-only, no tokio)
+- Created `src/ipc_socket.rs` with:
+  - `socket_path()` — `.agent-doc/ipc.sock`
+  - `is_listener_active()` — probe with connect + stale cleanup
+  - `send_message()` — NDJSON over socket with 2s ack timeout
+  - `send_patch()` / `send_reposition()` / `send_vcs_refresh()` — typed senders
+  - `start_listener()` — blocking listener with handler callback (for FFI/plugin)
+- Test: `socket_roundtrip` — listener + sender + ack — passes
+
+**Next steps:**
+2. Update `write.rs` to try socket IPC before file-based IPC
+3. Update `git.rs` reposition to try socket before file-based
+4. Add FFI `agent_doc_start_ipc_listener()` for plugin to start the listener
+5. Update JetBrains plugin to start listener + handle messages
+<!-- agent:boundary:b8ee19cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Add `interprocess` dep + create `ipc_socket.rs` module
-- v0.27: Update `write.rs` to try socket IPC first
-- v0.27: Update JetBrains plugin PatchWatcher for socket client
+- Update `write.rs` to try socket IPC first
+- Update `git.rs` reposition to try socket first
+- Add FFI listener function
+- Update JetBrains plugin for socket IPC
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -784,13 +784,27 @@ Second paragraph.'
 ```
 
 This bob-remeika task item is complete — no further implementation needed.
-<!-- agent:boundary:c6c5e18a -->
+
+Implement:
+- [ ] Browser skill (`/browser`) documentation and workflow refinement
+
+### Browser skill refinement — completed (HEAD)
+
+Updated `.claude/skills/browser/SKILL.md` with:
+
+1. **Expanded workflow patterns** — added sections for: read a page, navigate+interact, send messages, research, fill forms, tab management, JS evaluation
+2. **MCP fallback table** — clear matrix of which operations need `mcp__chrome-devtools__*` (network monitoring, performance tracing, Lighthouse, file uploads, dialog handling, device emulation)
+3. **Safety improvement** — added "preview with screenshot before destructive actions"
+4. **Prerequisites cleanup** — added `chromium-bridge check` health check, install path
+5. **Configuration** — added chromium-bridge env vars (`CHROMIUM_BRIDGE_HOST`, `CHROMIUM_BRIDGE_PORT`)
+
+The browser skill now serves as a proper workflow orchestrator on top of chromium-bridge, with clear guidance on when to use CLI vs MCP fallback.
+<!-- agent:boundary:978ff656 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
-- [ ] Browser skill (`/browser`) documentation and workflow refinement
 - [ ] Explore sift corpus configuration for multi-project search
 <!-- /agent:pending -->

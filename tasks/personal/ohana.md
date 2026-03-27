@@ -14,10 +14,10 @@ Session initialized. Ready for ohana discussion.
 
 <!-- agent:exchange patch=append -->
 
-### Assistant (HEAD)
+### Assistant
 
 Ohana session initialized. What would you like to work on?
-<!-- agent:boundary:49704569 -->
+<!-- agent:boundary:2de15c6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -207,12 +207,15 @@ pub fn commit(file: &Path) -> Result<()> {
             // UNLESS stale boundaries are detected — then a one-time cleanup is needed.
             // The IPC signal tells the plugin to reposition in its Document buffer.
             let t_reposition = std::time::Instant::now();
-            reposition_boundary_in_snapshot(file);
+            let snap_changed = reposition_boundary_in_snapshot(file);
             // Clean stale boundaries from working tree if >1 detected.
             // This is a safety net for when the plugin IPC reposition misses stale markers.
             clean_stale_boundaries_in_working_tree(file);
-            // Send IPC reposition signal to plugin (non-blocking, non-fatal)
-            crate::write::try_ipc_reposition_boundary(file);
+            // Send IPC reposition signal to plugin only if boundary actually moved.
+            // Skipping no-op repositions eliminates ~64% of unnecessary Document API writes.
+            if snap_changed {
+                crate::write::try_ipc_reposition_boundary(file);
+            }
             let elapsed_reposition = t_reposition.elapsed().as_millis();
             if elapsed_reposition > 0 {
                 eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
@@ -234,14 +237,15 @@ pub fn commit(file: &Path) -> Result<()> {
 /// causes the IDE to reload from disk, losing in-progress keystrokes.
 /// The plugin handles working-tree boundary reposition via the
 /// `reposition_boundary: true` IPC flag sent during `agent-doc write`.
-fn reposition_boundary_in_snapshot(file: &Path) {
+/// Returns true if the boundary was actually repositioned (content changed).
+fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     // Check for active run — don't reposition if a run is in progress
     if let Ok(canonical) = file.canonicalize()
         && let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical)
         && pending_path.exists()
     {
         eprintln!("[commit] skipping boundary reposition — active run detected");
-        return;
+        return false;
     }
 
     // Reposition in snapshot only — use template::reposition_boundary_to_end()
@@ -251,11 +255,13 @@ fn reposition_boundary_in_snapshot(file: &Path) {
         if new_snap != snap_content {
             if let Err(e) = crate::snapshot::save(file, &new_snap) {
                 eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
-            } else {
-                eprintln!("[commit] repositioned boundary in snapshot");
+                return false;
             }
+            eprintln!("[commit] repositioned boundary in snapshot");
+            return true;
         }
     }
+    false
 }
 
 /// Clean stale boundary markers from the working tree file.

@@ -1608,7 +1608,7 @@ Test the prompt
 4. Normal mode — all tool calls show Yes/No/Cancel prompt
 
 After cycling to normal mode, trigger another `/agent-doc` cycle. The tool calls will show permission prompts, the poller will detect them, and PromptPanel should surface in IntelliJ.
-<!-- agent:boundary:9f4119fe -->
+<!-- agent:boundary:1a64e171 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

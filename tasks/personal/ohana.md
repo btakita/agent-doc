@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-`chromium-bridge skill install` implemented. Skill architecture complete.
+chromium-bridge v0.2.0 released to crates.io + GitHub. All features shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -400,12 +400,24 @@ Claude Code immediately discovered the new skill — `chromium-bridge` now appea
 ├── chromium-bridge/SKILL.md  ← tool reference (from binary)
 └── browser/SKILL.md          ← user workflow + preferences
 ```
-<!-- agent:boundary:c157756d -->
+release chromium-bridge
+### Re: Release chromium-bridge v0.2.0 (HEAD)
+
+Released:
+- **crates.io:** `chromium-bridge v0.2.0` published
+- **GitHub:** https://github.com/btakita/chromium-bridge/releases/tag/v0.2.0
+- **Binary:** `cargo install` updated `~/.cargo/bin/chromium-bridge`
+- **Submodule:** agent-loop pointer updated to v0.2.0
+
+New in v0.2.0:
+- `click`, `type`, `select-tab`, `wait`, `snapshot` commands
+- `skill install` / `skill check` subcommands
+- Paragraph handling in `type` (Shift+Enter for contenteditable)
+<!-- agent:boundary:b7fb74c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Resend OHANA message with proper paragraph formatting
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

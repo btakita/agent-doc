@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.1 released (crates.io + CI). Cross-platform release workflow active. CI building 4 targets.
+chromium-bridge v0.1.1: module-harness + ontology added. CI re-running with rustls fix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -629,16 +629,36 @@ release
 - Release build installed locally to `~/.cargo/bin/chromium-bridge`
 
 **CI status:** https://github.com/btakita/chromium-bridge/actions — running now. Will create GitHub Release with 4 prebuilt binaries (linux x86_64/aarch64, macOS x86_64/aarch64) when complete.
-<!-- agent:boundary:99a40c8e -->
+
+Add dev dependencies:
+- module-harness
+- existence
+
+Add module-harness to all modules.
+Add ontology.
+### Re: Dev dependencies + module-harness + ontology (HEAD)
+
+**Done:**
+
+1. **Module-harness** — added full harness doc comment to `src/main.rs`:
+   - **Spec**: documents all 7 commands, CDP communication pattern, event streaming
+   - **Agentic Contracts**: `--json` output, tab indexing, timeout, env vars
+   - **Evals**: 9 named scenarios (check_responds, list_tabs, navigate_url, etc.)
+   - Note: `module-harness` is a binary-only crate (no lib target), so it stays as a CLI tool dependency, not a Cargo dev-dependency
+
+2. **Existence ontology** — added `existence = "0.4"` as dev-dependency and domain ontology overlay to `CLAUDE.md`:
+   - System → browser instance, Domain → CDP, Context → CDP session/tab, Signal → CDP events, Tool → this CLI
+
+3. **CI fix** — switched `reqwest` from default (OpenSSL) to `rustls-tls` (pure Rust TLS). This fixes the aarch64-linux cross-compile failure. Re-tagged v0.1.1 to retrigger CI.
+
+**CI re-running:** https://github.com/btakita/chromium-bridge/actions
+<!-- agent:boundary:239e008b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ([done]) Add GitHub Actions cross-platform release workflow
-- ([done]) Audit docs (SPEC.md deps, README install methods, CLAUDE.md layout)
-- ([done]) Release v0.1.1 (crates.io + GitHub Release)
-- Monitor CI run for v0.1.1 release — verify all 4 targets build
+- Monitor CI v0.1.1 re-run (rustls fix for aarch64-linux)
 - Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)

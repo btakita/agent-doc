@@ -1040,7 +1040,7 @@ Given Bob's background (Rails/React ecosystem, engineering leadership), a focuse
 Please get Bob's latest post about knowing a contract.
 And please draft a message to Bob.
 
-### Re: Bob's post about knowing a contract (HEAD)
+### Re: Bob's post about knowing a contract
 
 I searched X/Twitter and LinkedIn but couldn't find a specific post by Bob about "knowing a contract." The closest match I found is this X post:
 
@@ -1060,7 +1060,7 @@ Is this the post you meant? Or is it a different one — maybe on LinkedIn? If y
 > Looking at next week — does Wed-Fri (Apr 2-4) work for you? Happy to book via your Calendly.
 
 Let me know if you want me to adjust the tone, reference a different post, or send this as-is.
-<!-- agent:boundary:a6293232 -->
+<!-- agent:boundary:4af516b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

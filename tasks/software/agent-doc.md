@@ -2262,7 +2262,7 @@ Check CI status: https://github.com/btakita/agent-doc/actions
 
 Why do we need to clone existence? We should be using the crate.
 
-### Re: Why do we need to clone existence? We should be using the crate. (HEAD)
+### Re: Why do we need to clone existence? We should be using the crate.
 
 You're right. The `existence` crate is published on crates.io at v0.4.0. The `path` field in `Cargo.toml` was only useful for simultaneous local development of both crates.
 
@@ -2272,7 +2272,7 @@ You're right. The `existence` crate is published on crates.io at v0.4.0. The `pa
 - Verified: `cargo check` fetches v0.4.0 from crates.io and compiles
 
 Retagged v0.26.5. The CI should now build cleanly for all 5 targets without any existence-lang clone.
-<!-- agent:boundary:e2899679 -->
+<!-- agent:boundary:c20f2ce8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

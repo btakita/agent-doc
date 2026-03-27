@@ -2045,7 +2045,7 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.33.z
 ```
 Should this be implemented in the FFI plugin instead?
 
-### Re: Should this be implemented in the FFI plugin instead? (HEAD)
+### Re: Should this be implemented in the FFI plugin instead?
 
 The FFI already has `agent_doc_reposition_boundary_to_end()` and the plugin already calls it via `NativePatching.repositionBoundaryToEnd()` inside `applyPatch()` when `patch.repositionBoundary` is true.
 
@@ -2062,7 +2062,7 @@ The alternative (FFI-direct) would be:
 So the current architecture is correct: Rust → IPC file → PatchWatcher → FFI. The optimization we already made (skip IPC when boundary hasn't moved) is the right fix. The FFI is used — just indirectly through the IPC layer.
 
 **What could change:** If the plugin exposed a socket/pipe API instead of file-based IPC, the Rust binary could send reposition signals without file creation (avoiding inotify entirely). But that's a larger architectural change.
-<!-- agent:boundary:d1b68c2f -->
+<!-- agent:boundary:fcafba6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

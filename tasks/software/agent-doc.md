@@ -1611,7 +1611,7 @@ I don't see the prompt in the editor.
 
 After cycling to normal mode, trigger another `/agent-doc` cycle. The tool calls will show permission prompts, the poller will detect them, and PromptPanel should surface in IntelliJ.
 
-### Re: I don't see the prompt in the editor (HEAD)
+### Re: I don't see the prompt in the editor
 
 **Found the real bug!** The screenshot shows the prompt options use **numbered list format** (`1. Yes`, `2. Yes, allow...`, `3. No`) — NOT the bracket format (`[1] Yes`) that the parser expected.
 
@@ -1627,7 +1627,7 @@ Claude Code v2.1+ changed its prompt option format from `[N] label` to `N. label
 2. **v0.26.3 (binary):** Support numbered list format (`N. label`) in prompt option parsing
 
 The binary is already rebuilt. Plugin v0.2.31 is already installed. Trigger another cycle to test — the poller should now detect the prompt and surface PromptPanel.
-<!-- agent:boundary:9c146e50 -->
+<!-- agent:boundary:130ec3da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -232,7 +232,7 @@ Message sent to the OHANA chat! Used `chromium-bridge evaluate` to:
 3. Press Enter to send
 
 Textbox is now empty — confirmed sent.
-### Re: chromium-bridge as skill backend (HEAD)
+### Re: chromium-bridge as skill backend
 
 **chromium-bridge vs MCP chrome-devtools:** chromium-bridge is clearly faster and more reliable — direct CDP, ~5ms per call, no MCP protocol overhead, no `Network.enable` timeout issues. It should be the primary browser automation backend.
 
@@ -251,7 +251,7 @@ Textbox is now empty — confirmed sent.
 The core is solid — `evaluate` covers everything as a fallback. But dedicated `type`, `click`, and `wait` would make the skill cleaner and less fragile (no more `execCommand` hacks).
 
 Want to add these to the chromium-bridge task queue?
-<!-- agent:boundary:1988f009 -->
+<!-- agent:boundary:bd1dd433 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

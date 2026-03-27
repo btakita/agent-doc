@@ -1130,7 +1130,7 @@ Bob posted it just an hour ago and only has 2 comments so far — so it's fresh 
 
 If you want to hedge on timing, here's an adjusted draft that acknowledges urgency without being pushy:
 
-> Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
+> Sounds great! Will plan it out & sign up in a bit. Probably next Tuesday or Wednesday.
 >
 > Also saw your post about the contract gig — I'm interested! Happy to chat about it sooner if timing matters, or we can cover it when we connect.
 
@@ -1149,15 +1149,38 @@ Good instinct. The contract post is fresh and public — other devs are already 
 This decouples the contract from the demo call — if Bob needs someone fast, he can loop you in immediately. If it's not urgent, it naturally folds into the call.
 
 Approve this and I'll paste it into LinkedIn DM via chromium-bridge.
-<!-- agent:boundary:e8e0a116 -->
+
+I would prefer to work directly with Bob though.
+I already sent the message. Should I follow up or just leave it till we connect?
+
+### Re: Already sent — follow up about working directly with Bob? (HEAD)
+
+Good that you sent it. The message you sent is solid — it expresses interest and gives Bob the opening to fast-track.
+
+**On preferring to work directly with Bob vs. his client:** Leave it for now. Here's why:
+
+1. **The contract gig is a foot in the door.** Even if the client work isn't ideal, doing great work through Bob builds trust and could lead to direct Ragie work later.
+2. **The demo call is your opportunity.** When Bob sees your tooling (agent-doc, corky, chromium-bridge), he'll naturally think about where you fit at Ragie — not just with his client.
+3. **Saying "I'd rather work with you directly" too early** could come across as dismissing the opportunity he's offering. Better to show up, impress, and let him pull you in.
+
+**Recommendation:** Don't follow up separately about this. Let the message sit. During the call (Tue/Wed), after the demo:
+- "By the way, I'm also open to working with Ragie directly if there's ever a fit — the RAG integration work I showed you is right in that wheelhouse."
+
+That's natural, non-pushy, and lets Bob connect the dots. The contract gig and direct Ragie work aren't mutually exclusive — you could do both.
+
+**Updated timeline:**
+- Message sent (done)
+- Book Calendly slot for Tue or Wed (Apr 1-2)
+- Prepare demo before then
+<!-- agent:boundary:ff0658d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Send LinkedIn DM to Bob today** (draft finalized, awaiting approval)
-- Schedule 30-min call via Bob's Calendly (target Wed-Thu next week, Apr 2-3)
+- Book Calendly slot with Bob (target Tue-Wed, Apr 1-2)
 - Prepare presentation demo scripts for Bob session
+- During call: mention openness to direct Ragie work after demo
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
 <!-- /agent:pending -->

@@ -1008,13 +1008,42 @@ LinkedIn DM v13 sent. Noted the rename to `tasks/software/chromium-bridge.md` �
 2. Record YouTube session with Judith's project using Ragie
 3. Send follow-up to Bob with video link
 4. Add `type` command to chromium-bridge (CDP `Input.dispatchKeyEvent`)
-<!-- agent:boundary:19f16ee8 -->
+
+Bob wants a 30 minute session for me to go over what I'm up to.
+He sent me his calendly link.
+I want to plan out a presentation for Bob.
+Add todo for the presentation and to schedule a call next week for a good day. Giving enough time to let things evolve a bit.
+
+Moved to tasks/software/chromium-bridge.md:
+- chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
+
+### Presentation Plan for Bob (30 min) (HEAD)
+
+Given Bob's background (Rails/React ecosystem, engineering leadership), a focused demo covering:
+
+1. **Agent-doc workflow** (5 min) — Live doc editing with AI responses, the core loop
+2. **Corky correspondence kit** (5 min) — Email drafting, YouTube pipeline, transcription
+3. **Chromium-bridge** (5 min) — Browser automation via CDP, contenteditable handling
+4. **Existence Lang ontology** (5 min) — How domain modeling drives agent context
+5. **Q&A / collaboration discussion** (10 min) — Where Bob sees alignment, potential work together
+
+**Prep before the call:**
+- Polish chromium-bridge `type` command demo
+- Have a Ragie integration example ready (or video of one)
+- Prepare a quick bookmarklet demo if retest passes
+
+### TODO (HEAD)
+- [ ] Schedule call with Bob via his Calendly link — target Wed-Fri next week (Apr 2-4) to allow polish time
+- [ ] Prepare presentation outline with live demo scripts
+- [ ] Test all demo flows end-to-end before the call
+<!-- agent:boundary:0105ed49 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
+- Schedule 30-min presentation call with Bob (target Apr 2-4)
+- Prepare presentation demo scripts for Bob session
 <!-- /agent:pending -->

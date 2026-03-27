@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.1 released: crates.io + GitHub Release (4 cross-platform binaries). CI green.
+chromium-bridge v0.1.1 released. Corky sift/ragie integrations mapped. Pipeline works via filesystem today.
 <!-- /agent:status -->
 
 ## Exchange
@@ -706,13 +706,64 @@ The install script now works cross-platform:
 ```bash
 curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh
 ```
-<!-- agent:boundary:8aea496d -->
+
+Please investigate agent-loop packages.
+Such as corky and any other libraries that may use sift and/or ragie.
+### Re: Investigate agent-loop packages for sift/ragie
+
+**Corky** (`src/corky/`) is the only package with sift and ragie integrations. Here's what exists:
+
+#### Sift (local hybrid search)
+- **File:** `src/corky/src/search/sift.rs`
+- **What it does:** Wraps the `sift` CLI for local BM25 search over a corpus directory
+- **Commands:** `corky search` (unified), `corky sift status`, `corky sift index` (no-op — sift is indexless)
+- **How it works:** Shells out to `sift search --retrievers bm25 --json` against `mail/conversations/`
+- **Integration point for chromium-bridge:** `chromium-bridge markdown <url>` → write to corpus dir → searchable by sift immediately (no index step needed)
+
+#### Ragie (cloud RAG)
+- **File:** `src/corky/src/search/ragie.rs`
+- **What it does:** REST API client for Ragie cloud document retrieval
+- **Commands:** `corky ragie push` (upload docs), `corky ragie sync` (compare local vs cloud), `corky ragie status`
+- **How it works:** Uses `ureq` HTTP client + `pass ragie/api_key` for auth. Pushes markdown files to `api.ragie.ai/documents`, searches via `api.ragie.ai/retrievals`
+- **Integration point for chromium-bridge:** `chromium-bridge markdown <url>` → pipe to `corky ragie push` (or write to corpus dir first, then push)
+
+#### Architecture
+Both backends implement `SearchBackend` trait (`search/backend.rs`), registered via `BackendRegistry` from `.corky.toml`:
+```toml
+[search.backends.sift]
+backend_type = "sift"
+# index_path = "mail/conversations/"  # optional override (HEAD)
+
+[search.backends.ragie]
+backend_type = "ragie"
+# api_key_pass = "ragie/api_key"  # optional override (HEAD)
+```
+
+#### Other packages checked
+- **webmaster** — SEO/sitemap tools, no sift/ragie
+- **agent-doc, agent-kit, tagpath, module-harness** — no search integrations
+- **No other packages** in `src/` reference sift or ragie
+
+#### Proposed chromium-bridge → corky pipeline
+```bash
+# Scrape → local search (sift) (HEAD)
+chromium-bridge markdown https://example.com > mail/conversations/example-com.md
+corky search "relevant query"
+
+# Scrape → cloud RAG (ragie) (HEAD)
+chromium-bridge markdown https://example.com > /tmp/page.md
+corky ragie push  # pushes all conversations including new file
+```
+
+This pipeline works today with no code changes — just filesystem coordination. A tighter integration (chromium-bridge calling corky directly) could be added later as a `chromium-bridge ingest` command.
+<!-- agent:boundary:a67f291e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Flesh out sift integration (blocked: sift not built yet)
-- Flesh out ragie integration (blocked: ragie client not built yet)
+- Add `chromium-bridge ingest` command (scrape → write → optional ragie push)
+- Flesh out sift integration (pipeline docs, example scripts)
+- Flesh out ragie integration (pipeline docs, auto-push on scrape)
 - Create btakita/homebrew-tap (deferred — low priority)
 <!-- /agent:pending -->

@@ -1428,7 +1428,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 ```
 
 Note: After installing, you may need to **uninstall the old plugin first → restart → install new → restart** since the keybinding change is in plugin.xml (structural change).
-### Re: Alt+Enter for popup (HEAD)
+### Re: Alt+Enter for popup
 
 Changed to `Alt+Enter`. Plugin v0.2.29:
 ```
@@ -1438,7 +1438,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 **Note:** This shadows IntelliJ's native "Show Intention Actions" (typo fixes, quick-fixes) in `.md` files. The popup action's `update()` only enables for `.md` files, so non-md files still get native intentions. If you need typo fixes in markdown, you can right-click → "Show Context Actions" or use the gutter lightbulb.
 
 Committed: `87e7a20`. Uninstall → restart → install → restart for keybinding to take effect.
-<!-- agent:boundary:de9fac2b -->
+<!-- agent:boundary:9b3efc14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -960,13 +960,41 @@ Updated `.claude/skills/browser/SKILL.md`:
 - **Health check** changed from curl to `chromium-bridge check`
 
 The skill now routes through chromium-bridge by default. MCP tools are still available for the interactive stuff (clicking buttons, filling forms) where you need DOM element references.
-<!-- agent:boundary:e0ee4d7e -->
+
+Send the message to Bob
+
+### Re: Send the message to Bob (HEAD)
+
+Attempted automated send via chromium-bridge but LinkedIn's messaging DOM is heavily obfuscated — message input fields aren't standard `contenteditable` or `textarea` elements, and the overlay component doesn't expose inputs to `querySelectorAll`. This is a known pattern — LinkedIn uses React-based web components that resist simple DOM manipulation.
+
+**What I got done:**
+- Navigated to Bob's profile
+- Opened the messaging overlay (his existing thread is visible)
+- But couldn't find/interact with the message input field
+
+**The browser is on the messaging page now.** To send manually:
+
+1. Click Bob's name in the conversation list (or search for him)
+2. Click the "Write a message..." input
+3. Paste the v13 message:
+
+Hey Bob — your repost really made my day. Knowing you've been following along means a lot.
+
+I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side.
+
+I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
+
+4. Hit Send
+
+**For chromium-bridge improvement:** We should add a `type` command that uses CDP `Input.dispatchKeyEvent` instead of DOM manipulation — this works regardless of how the input is implemented. Tracked in tasks/software/brave.md.
+<!-- agent:boundary:81495aee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- LinkedIn DM (v13) — awaiting manual send
+- LinkedIn DM (v13) — awaiting manual paste+send
+- chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test
 <!-- /agent:pending -->

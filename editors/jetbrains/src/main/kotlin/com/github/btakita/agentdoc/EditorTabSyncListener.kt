@@ -23,8 +23,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     companion object {
         private const val DEBOUNCE_MS = 500L
-        private val generation = AtomicLong(0)
-        private val running = AtomicBoolean(false)
+        private val fallbackGeneration = AtomicLong(0)
+        private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
     }
 
@@ -54,26 +54,30 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val activeFile = TerminalUtil.relativePath(project, file)
         val editorLayout = LayoutDetector.detectEditorLayout(project)
 
-        // Debounce: bump generation, wait, then check if we're still current.
-        val myGen = generation.incrementAndGet()
+        // Debounce: bump generation via FFI (shared across editors), fallback to local counter.
+        val lib = AgentDocLib.get()
+        val myGen = lib?.agent_doc_sync_bump_generation() ?: fallbackGeneration.incrementAndGet()
 
         Thread {
             try {
                 Thread.sleep(DEBOUNCE_MS)
-                if (generation.get() != myGen) {
-                    log("debounce: superseded gen=$myGen current=${generation.get()}")
+                val isCurrent = lib?.agent_doc_sync_check_generation(myGen)
+                    ?: (fallbackGeneration.get() == myGen)
+                if (!isCurrent) {
+                    log("debounce: superseded gen=$myGen")
                     return@Thread
                 }
 
-                // Concurrency guard: skip if another layout command is running.
-                if (!running.compareAndSet(false, true)) {
+                // Concurrency guard via FFI (shared across editors), fallback to local.
+                val locked = lib?.agent_doc_sync_try_lock()
+                    ?: fallbackRunning.compareAndSet(false, true)
+                if (!locked) {
                     log("guard: layout already running, skipping")
                     return@Thread
                 }
 
                 // FFI busy guard: skip if an agent-doc operation is in progress
                 // for any of the visible files (prevents cascade from layout events).
-                val lib = AgentDocLib.get()
                 if (lib != null) {
                     val anyBusy = visibleMdFiles.any { relPath ->
                         try {
@@ -83,7 +87,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     }
                     if (anyBusy) {
                         log("guard: agent-doc is busy, skipping sync")
-                        running.set(false)
+                        lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
                         return@Thread
                     }
                 }
@@ -122,10 +126,10 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     val exitCode = process.waitFor()
                     log("result: exit=$exitCode output=${output.trim()}")
                 } finally {
-                    running.set(false)
+                    lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
                 }
             } catch (e: Exception) {
-                running.set(false)
+                lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
                 log("error: ${e.message}")
             }
         }.start()

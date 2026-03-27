@@ -24,7 +24,8 @@ class LayoutChangeDetector(private val project: Project) {
 
     private val lastLayoutHash = AtomicReference<String?>(null)
     private val disposed = AtomicBoolean(false)
-    private val syncing = AtomicBoolean(false)
+    private val fallbackSyncing = AtomicBoolean(false)
+    private val fallbackGeneration = java.util.concurrent.atomic.AtomicLong(0)
     private var pollThread: Thread? = null
 
     fun start() {
@@ -105,12 +106,16 @@ class LayoutChangeDetector(private val project: Project) {
 
     private fun scheduleSync(source: String) {
         if (disposed.get()) return
-        // Debounce: wait 300ms then check
+        // Debounce via FFI (shared across editors), fallback to local counter
+        val lib = AgentDocLib.get()
+        val myGen = lib?.agent_doc_sync_bump_generation() ?: fallbackGeneration.incrementAndGet()
         Thread({
-            Thread.sleep(300)
-            if (!disposed.get()) {
-                checkAndSync(source)
-            }
+            Thread.sleep(500)
+            if (disposed.get()) return@Thread
+            val isCurrent = lib?.agent_doc_sync_check_generation(myGen)
+                ?: (fallbackGeneration.get() == myGen)
+            if (!isCurrent) return@Thread // superseded by newer event
+            checkAndSync(source)
         }, "agent-doc-layout-sync-$source").apply {
             isDaemon = true
             start()
@@ -132,13 +137,16 @@ class LayoutChangeDetector(private val project: Project) {
 
                 LOG.info("[layout] change detected via $source: $prev → $hash")
 
-                if (!syncing.compareAndSet(false, true)) return@invokeLater
+                val lib = AgentDocLib.get()
+                val locked = lib?.agent_doc_sync_try_lock()
+                    ?: fallbackSyncing.compareAndSet(false, true)
+                if (!locked) return@invokeLater
                 // CLI call on background thread to avoid blocking EDT
                 Thread({
                     try {
                         SyncLayoutAction.syncLayout(project, notify = false)
                     } finally {
-                        syncing.set(false)
+                        lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
                     }
                 }, "agent-doc-layout-sync-$source").apply {
                     isDaemon = true

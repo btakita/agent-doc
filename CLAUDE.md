@@ -15,6 +15,7 @@ Interactive document sessions with AI agents.
 - Use `anyhow` for application errors
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **All deterministic behavior in the binary** — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator (reads diff, generates response, decides what to write). Never implement deterministic document logic in the skill or ad-hoc scripts.
+- **FFI-first for editor integration** — when adding features that editors need (sync debounce, busy guards, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins.
 
 ## Binary vs Agent Responsibility
 

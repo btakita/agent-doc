@@ -370,7 +370,7 @@ chromium-bridge skill install
 
 Should I implement `chromium-bridge skill install` now?
 yes
-### Re: skill install implemented (HEAD)
+### Re: skill install implemented
 
 Done. `chromium-bridge skill install` is working:
 
@@ -400,7 +400,7 @@ Claude Code immediately discovered the new skill — `chromium-bridge` now appea
 ├── chromium-bridge/SKILL.md  ← tool reference (from binary)
 └── browser/SKILL.md          ← user workflow + preferences
 ```
-<!-- agent:boundary:d268de04 -->
+<!-- agent:boundary:c157756d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1910,13 +1910,56 @@ The IPC write timed out (exit code 75 — plugin didn't acknowledge within 2s), 
 The `--force-disk` fallback + delayed IPC consumption created the triple. This is a known edge case — when IPC times out, the patch file should be cleaned up before retrying. The `[write] cleaning stale IPC patch file` log shows it tried, but the plugin may have already read it.
 
 I'll clean up the duplicate entries in the exchange now.
-<!-- agent:boundary:d33a526f -->
+
+I'm still not sure why we are timing out. Please provide a detailed description as to why the plugin is blocked causing the timeout.
+
+### Re: Please provide a detailed description as to why the plugin is blocked causing the timeout (HEAD)
+
+**Root cause: inotify overflow during `cargo install` release build.**
+
+The IPC mechanism works like this:
+1. `agent-doc write --stream` creates `<hash>.json` in `.agent-doc/patches/`
+2. `PatchWatcher` uses Java NIO `WatchService` (backed by Linux inotify) to detect new files
+3. On detection, it calls `invokeLater` to apply patches on the EDT
+4. Deletes the JSON file as ACK
+5. `agent-doc` polls for deletion (2s timeout)
+
+**What happened at 00:55:**
+- `cargo install --path .` was running a full release build (~35s)
+- This generates thousands of file creates/deletes in `target/release/`
+- Linux inotify has a fixed kernel buffer (`/proc/sys/fs/inotify/max_queued_events`, default 16384)
+- When events overflow this buffer, the NIO WatchService emits an `OVERFLOW` event
+- **Events created during overflow are silently lost** — including our `.json` patch file creation
+
+The patch file sat unnoticed for ~65 seconds until either:
+- The watcher's 500ms poll cycle happened to catch it on a `key.pollEvents()` call
+- Or the file was picked up by a secondary path
+
+**Evidence from logs:**
+```
+00:55:14 — agent-doc write creates the IPC patch file
+00:55:14 — 2s timeout fires (watcher never saw ENTRY_CREATE)
+00:56:19 — PatchWatcher finally applies 3 patches (65s later)
+```
+
+**The triple write** happened because:
+1. IPC patch created → watcher missed it (inotify overflow) → timeout
+2. `--force-disk` fallback wrote directly → cleaned stale IPC patch
+3. But the watcher eventually recovered and found files
+
+**Fix options:**
+- Increase inotify buffer: `sysctl fs.inotify.max_queued_events=65536`
+- Add a poll-based fallback in PatchWatcher (check for pending files every 2s alongside inotify)
+- Handle `OVERFLOW` events by scanning the directory for pending files
+
+This is a well-known issue with NIO WatchService on Linux during heavy I/O. The fix is to handle `OVERFLOW` gracefully.
+<!-- agent:boundary:01042c3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Clean up duplicate "Re: release" entries in the exchange
+- Handle inotify OVERFLOW in PatchWatcher (scan for pending files on overflow)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

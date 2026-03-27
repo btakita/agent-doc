@@ -295,7 +295,7 @@ Starting implementation. This splits into two parallel tracks:
 - Include patterns for common tasks (form fill, navigate + wait, screenshot)
 
 Kicking off implementation now — will work on the Rust CLI features first since the skill depends on them.
-### Re: Implementation complete (HEAD)
+### Re: Implementation complete
 
 All 5 chromium-bridge commands implemented and verified against live browser:
 
@@ -317,7 +317,7 @@ All 5 chromium-bridge commands implemented and verified against live browser:
 **Browser skill** (`.claude/skills/browser/SKILL.md`) updated with all new commands, common patterns (send chat message, fill form, wait+act), and tab selector documentation.
 
 **Release build** completed. Binary at `src/chromium-bridge/target/release/chromium-bridge`.
-<!-- agent:boundary:b95b483a -->
+<!-- agent:boundary:fcdc7024 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

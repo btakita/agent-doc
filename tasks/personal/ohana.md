@@ -322,7 +322,7 @@ Should the directory structure be different to not conflict with a user's browse
 In which, the user's browser skills can specify a preference to use chromium-bridge. 
 
 **Release build** completed. Binary at `src/chromium-bridge/target/release/chromium-bridge`.
-### Re: Skill distribution architecture (HEAD)
+### Re: Skill distribution architecture
 
 **Current state:** `browser/SKILL.md` lives in agent-loop's `.claude/skills/` — user-local, not distributed by chromium-bridge.
 
@@ -346,7 +346,7 @@ In which, the user's browser skills can specify a preference to use chromium-bri
 3. Slim down `browser/SKILL.md` to workflow + preferences only
 
 Want me to implement this now, or add it to the task queue?
-<!-- agent:boundary:033570c6 -->
+<!-- agent:boundary:cd750e94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

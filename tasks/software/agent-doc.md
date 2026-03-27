@@ -1776,6 +1776,8 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.32.z
 
 Yes — `~/bin` exists on your system and contains executables like `brave-wayland.sh`, `clion`, `corky`, `dbxcli`, etc. It's a common convention for user-local binaries and is typically added to `$PATH` via your shell profile.
 
+I added `~/bin` per my personal convention. Does any operating system install promote the practice of having a `~/bin` directory?
+
 However, there's no `agent-doc` in `~/bin` currently — the binary resolves to `~/.cargo/bin/agent-doc` (from `cargo install`) or `.bin/agent-doc` (project-local symlink). The `~/bin` candidate in `resolveAgentDoc()` is there as a fallback for users who manually symlink or copy binaries there.
 
 The resolution order is now:
@@ -1785,7 +1787,18 @@ The resolution order is now:
 4. `~/.cargo/bin/agent-doc` — cargo install
 5. `/usr/local/bin/agent-doc` — system
 6. `"agent-doc"` — PATH fallback
-<!-- agent:boundary:fa815e05 -->
+
+### Re: Does any operating system install promote the practice of having a ~/bin directory? (HEAD)
+
+Yes — several do:
+
+- **Debian/Ubuntu** — `~/.profile` (default) includes `~/bin` in `$PATH` if it exists: `if [ -d "$HOME/bin" ] ; then PATH="$HOME/bin:$PATH" ; fi`
+- **Fedora/RHEL** — same pattern in `/etc/skel/.bash_profile`
+- **macOS** — doesn't ship it by default, but Homebrew and many dev tools document `~/bin` as a convention
+- **FHS (Filesystem Hierarchy Standard)** — doesn't define `~/bin`, but the XDG Base Directory Spec inspired `~/.local/bin` as the "proper" user-local bin directory
+
+So `~/bin` is a well-established convention promoted by Debian-family distros. `~/.local/bin` is the newer XDG-aligned alternative (and is what `pip install --user` and `pipx` use). Both are reasonable candidates in `resolveAgentDoc()`.
+<!-- agent:boundary:5f5487b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

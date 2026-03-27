@@ -151,7 +151,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c27813db526ec41028f1e69a81a008b38916582970ce113c35e8515c18e0c563-20260327-075056.md`*
 
-### Re: Start v0.27 in this session (HEAD)
+### Re: Start v0.27 in this session
 
 Starting v0.27: socket-based IPC via `interprocess` ([#39](https://github.com/btakita/agent-doc/issues/39)).
 
@@ -164,7 +164,7 @@ This session's context has been heavily compressed but I can proceed. The implem
 5. Fallback to file-based IPC when socket unavailable
 
 Starting with step 1 — adding the dependency and creating the socket module. Shall I proceed with implementation?
-<!-- agent:boundary:45c76b8c -->
+<!-- agent:boundary:d9ee24b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

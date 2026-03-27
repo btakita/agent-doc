@@ -1440,6 +1440,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 
 Committed: `87e7a20`. Uninstall → restart → install → restart for keybinding to take effect.
 Alt+Space worked. The issue was `Run Agent Doc` did not result in the plugin showing the prompt when Claude had the prompt.
+We can keep the plugin shortcut at Alt+Space.
 ### Re: Alt+Space worked — Run Agent Doc prompt issue
 
 Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverting the keybinding change to `Alt+Space` (v0.2.29 with `Alt+Enter` shadows native intentions unnecessarily).
@@ -1451,14 +1452,29 @@ Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverti
 3. A specific **dialog/notification** you expect when Claude is waiting for input?
 
 The screenshot from earlier showed what looked like a Claude Code permission dialog in the terminal. If the issue is that the plugin doesn't surface Claude's prompts to the IDE, that would be a new feature — detecting Claude's output state and showing it in IntelliJ.
-<!-- agent:boundary:152e1701 -->
+
+Yes...but the plugin used to show the prompt. A regression occurred.
+### Re: PromptPanel regression — Claude Code format change (HEAD)
+
+**Root cause found:** Claude Code v2.1+ changed the permission prompt footer from `"Esc to cancel"` to `"No to cancel"`. The `parse_prompt()` function anchored on `"Esc to cancel"` — never matched, always returned `active: false`, so PromptPanel never triggered.
+
+**Fix:** Updated the anchor pattern from `"Esc to cancel"` to `"to cancel"` — matches both old and new formats. Added a test for the new `"No to cancel"` format. All 23 prompt tests pass.
+
+**Also reverted** the popup keybinding back to `Alt+Space` since you confirmed it works.
+
+**Plugin v0.2.30** + updated binary:
+```
+file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.30.zip
+```
+
+Committed: `468f4c2`. Install plugin + the binary is already rebuilt (release profile).
+<!-- agent:boundary:5346aa05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Revert popup keybinding back to Alt+Space (undo Alt+Enter change)
-- [ ] Diagnose "Run Agent Doc" not showing prompt — need user clarification
+- [ ] Install JB plugin v0.2.30 + verify PromptPanel shows permission prompts
 - [ ] Verify no more external modification dialogs on brave.md (v0.2.27 VFS fix)
 - [ ] Placeholder panes for unclaimed files in multi-column layout
 - [ ] Plugin debounce for layout-triggered focus events (FFI-level)

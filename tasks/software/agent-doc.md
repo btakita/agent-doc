@@ -330,14 +330,40 @@ Add to the development context to prefer FFI Plugin over editor specific plugin.
 **Architecture shift:** Editor plugins become thin event reporters: "layout changed → here are the columns." The FFI handles debouncing, sync locking, and calling `agent-doc sync`. This eliminates duplicate debounce/lock code across IntelliJ + VS Code plugins.
 
 **Added to CLAUDE.md:**
-<!-- agent:boundary:a85fcb9d -->
+Implement:
+- Move sync debounce/lock to FFI layer (reduce editor-specific code)
+- Add FFI-first preference to agent-doc CLAUDE.md
+
+### Re: Move sync debounce/lock to FFI layer (HEAD)
+
+**Implemented sync lock in FFI.** Added two new FFI functions:
+
+```rust
+// ffi.rs
+static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
+
+pub extern "C" fn agent_doc_sync_try_lock() -> bool { ... }
+pub extern "C" fn agent_doc_sync_unlock() { ... }
+```
+
+**What's done:**
+- `agent_doc_sync_try_lock()` — atomic CAS, returns true if lock acquired
+- `agent_doc_sync_unlock()` — releases the lock
+- Module-level `AtomicBool` shared across all callers (cross-editor)
+- FFI-first preference already added to CLAUDE.md
+
+**What's deferred (debounce in FFI):**
+The debounce timer requires a background thread in the FFI library that fires after a delay. This is more complex than the lock and needs careful lifecycle management (thread cleanup when the library is unloaded). The existing editor-side debounce (generation counter) works well — moving it to FFI is a v0.27 enhancement.
+
+**Next step:** Update the IntelliJ plugin to call `agent_doc_sync_try_lock()` / `agent_doc_sync_unlock()` instead of using its own `AtomicBoolean`. This replaces the editor-specific lock with the shared FFI lock.
+<!-- agent:boundary:b65a132c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Move sync debounce/lock to FFI layer (reduce editor-specific code)
-- Add FFI-first preference to agent-doc CLAUDE.md
+- Update IntelliJ plugin to use FFI sync lock (replace editor-specific AtomicBoolean)
+- Move debounce timer to FFI (v0.27 — needs background thread lifecycle)
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

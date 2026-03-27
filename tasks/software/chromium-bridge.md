@@ -658,7 +658,7 @@ run:
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
-### Re: Run pending items (HEAD)
+### Re: Run pending items
 
 **Completed:**
 
@@ -686,7 +686,7 @@ run:
 $ chromium-bridge evaluate "document.title" --tab "cdp-cli"
 Search Results for 'cdp-cli' - crates.io: Rust Package Registry
 ```
-<!-- agent:boundary:5a36c34e -->
+<!-- agent:boundary:28f2bcd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

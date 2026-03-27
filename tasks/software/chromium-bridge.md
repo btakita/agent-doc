@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.1 released. Corky sift/ragie integrations mapped. Pipeline works via filesystem today.
+chromium-bridge v0.2.0 released. Type command shipped. Sift integration via corky search backend. Pipeline: chromium-bridge → corky → sift/ragie.
 <!-- /agent:status -->
 
 ## Exchange
@@ -756,14 +756,41 @@ corky ragie push  # pushes all conversations including new file
 ```
 
 This pipeline works today with no code changes — just filesystem coordination. A tighter integration (chromium-bridge calling corky directly) could be added later as a `chromium-bridge ingest` command.
-<!-- agent:boundary:53255e3f -->
+
+How can we integrate sift for multiple libraries?
+
+This was in tasks/professional/bob-remekia. Implementation should move here:
+- chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
+### Re: Sift integration for multiple libraries (HEAD)
+
+**Sift is already integrated into corky** (`src/corky/src/search/sift.rs`) as a `SearchBackend`. Use via `corky search --backend sift "<query>"`.
+
+For **multi-library integration**, the pattern is:
+
+1. **corky owns the search interface** — sift (local) and ragie (cloud) are pluggable backends
+2. **Other tools call corky** — chromium-bridge, agent-doc, etc. shell out to `corky search` rather than each embedding sift directly
+3. **Chromium-bridge pipeline** — already works: `chromium-bridge markdown <url> > /tmp/page.md` → corky ingests → sift searches it (indexless, no build step needed)
+
+Sift is indexless — any file written to the corky conversations directory is automatically sift-searchable.
+
+### Re: `type` command (already shipped) (HEAD)
+
+The `type` command is **already implemented** in chromium-bridge v0.2.0 (`src/chromium-bridge/src/main.rs:540-627`). Uses CDP `Input.dispatchKeyEvent` with Shift+Enter for paragraph breaks in contenteditable fields. Shipped as part of the Facebook Messenger fix earlier today.
+
+```bash
+chromium-bridge type '[role=textbox]' 'First paragraph.
+
+Second paragraph.'
+```
+
+This bob-remeika task item is complete — no further implementation needed.
+<!-- agent:boundary:4e3dea47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Add `chromium-bridge ingest` command (scrape → write → optional ragie push)
-- Flesh out sift integration (pipeline docs, example scripts)
-- Flesh out ragie integration (pipeline docs, auto-push on scrape)
-- Create btakita/homebrew-tap (deferred — low priority)
+- [ ] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
+- [ ] Browser skill (`/browser`) documentation and workflow refinement
+- [ ] Explore sift corpus configuration for multi-project search
 <!-- /agent:pending -->

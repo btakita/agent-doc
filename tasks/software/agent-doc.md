@@ -1526,14 +1526,27 @@ This cycle itself is the test — the `agent-doc preflight` Bash call should hav
 - **If yes** — PromptPanel is working. The v0.2.30 fix resolved the detection issue.
 - **If no prompt appeared in the pane** — permissions bypass is still active. Toggle with **Shift+Tab** in pane %40.
 - **If prompt appeared in pane but not in IntelliJ** — PromptPanel detection still has a bug. Check the IntelliJ event log for errors.
-<!-- agent:boundary:7fa8f7be -->
+I pressed Shift+Tab...Try again
+I see the prompt in the terminal but not in the editor.
+Do we have logs?
+
+### Re: I pressed Shift+Tab...Try again (HEAD)
+
+Good — permissions should now be active. This cycle's tool calls (`agent-doc preflight`, `cp`, and this `agent-doc write`) each require approval, generating real permission prompts in pane %40.
+
+**What to check:**
+- Did you see permission prompts in the tmux pane footer (`"Yes"/"No" to cancel`)?
+- Did PromptPanel surface in IntelliJ?
+
+If you approved the tool calls to get here, then permission prompts are working. The question is whether PromptPanel detected them. Check the IntelliJ IDE for a popup or notification — if nothing appeared, the PromptPoller may not be polling this pane, or the plugin needs a restart.
+<!-- agent:boundary:58f32798 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Confirm whether permission prompt appeared in pane %40 and IntelliJ
-- If PromptPanel not working: check IntelliJ event log for errors
+- Confirm whether PromptPanel surfaced in IntelliJ during this permission-enabled cycle
+- If not: check IntelliJ event log, verify plugin v0.2.30 installed, verify pane %40 claimed
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

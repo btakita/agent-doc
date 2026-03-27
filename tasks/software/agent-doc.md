@@ -1956,6 +1956,7 @@ This is a well-known issue with NIO WatchService on Linux during heavy I/O. The 
 
 Look at this file's local history. There are an excessive number of changes. Why?
 Could this be a cause for overflows?
+Look at the JetBrains Idea local history for this file specifically.
 
 ### Re: There are an excessive number of changes. Why? Could this be a cause for overflows?
 
@@ -1977,14 +1978,33 @@ The excessive local history is a **separate concern** — it makes the Local His
 - Or: implement the CRDT merge path (PatchWatcher already has it in the architecture) to reduce write frequency
 
 But the inotify overflow was specifically from the heavy `cargo install` build, not from document writes.
-<!-- agent:boundary:0c5f4166 -->
+
+### Re: Look at the JetBrains Idea local history for this file specifically (HEAD)
+
+I can't open IntelliJ's Local History UI, but I can see the Document API operations from idea.log:
+
+**56 PatchWatcher operations** for this file today:
+- **20** actual patches applied (response writes)
+- **36** "no changes" (boundary reposition patches that were no-ops)
+
+Each `/agent-doc` cycle generates:
+1. **Response write** → PatchWatcher applies patches via IPC → 1 local history entry
+2. **Commit reposition** → PatchWatcher receives boundary patch → usually no-op but still creates a local history entry if it touches the document
+3. **VCS refresh** → triggers `reloadFromDisk` if content changed → another local history entry
+
+So you're seeing ~3 local history entries per cycle. With 20+ cycles in this session, that's 60+ local history entries.
+
+**The "no changes" patches are the main waste.** The commit's reposition boundary IPC sends a patch even when the boundary is already in the right place. Fixing this would eliminate 36/56 = 64% of unnecessary Document API operations.
+
+**Fix:** The Rust `commit` command should only send the IPC reposition signal if the boundary actually moved. A simple check: compare boundary position before and after reposition — if unchanged, skip the IPC write.
+<!-- agent:boundary:8f1700b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Consider batching Document API writes to reduce Local History clutter
-- Handle inotify OVERFLOW in PatchWatcher (scan for pending files on overflow)
+- Skip IPC reposition signal when boundary position unchanged (eliminates 64% of no-op patches)
+- Handle inotify OVERFLOW in PatchWatcher
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

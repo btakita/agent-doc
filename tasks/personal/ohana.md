@@ -363,13 +363,13 @@ Or should we leave it to the user's initiative to prefer to use chromium-bridge?
 **The flow:**
 ```bash
 chromium-bridge skill install
-# → writes ~/.claude/skills/chromium-bridge/SKILL.md (HEAD)
-# → Claude discovers it, starts using it for browser tasks (HEAD)
-# → No prompt needed (HEAD)
+# → writes ~/.claude/skills/chromium-bridge/SKILL.md
+# → Claude discovers it, starts using it for browser tasks
+# → No prompt needed
 ```
 
 Should I implement `chromium-bridge skill install` now?
-<!-- agent:boundary:90b65a48 -->
+<!-- agent:boundary:9e5d99cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

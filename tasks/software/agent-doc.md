@@ -2144,7 +2144,7 @@ The [`interprocess`](https://crates.io/crates/interprocess) crate provides:
 
 Windows is a requirement for agent-doc. Do we currently have a windows build?
 
-### Re: Windows is a requirement for agent-doc. Do we currently have a windows build? (HEAD)
+### Re: Windows is a requirement for agent-doc. Do we currently have a windows build?
 
 **CI config exists but all recent releases are failing.** The GitHub Actions release workflow (`release.yml`) defines a Windows target:
 
@@ -2167,7 +2167,7 @@ But the last 5 release workflow runs all show `failure`. Only a manually-uploade
 1. Fix release CI to produce Windows binaries
 2. Use `interprocess` for socket IPC (cross-platform)
 3. Plan tmux abstraction layer for Windows (bigger effort)
-<!-- agent:boundary:1086b244 -->
+<!-- agent:boundary:aee15d78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

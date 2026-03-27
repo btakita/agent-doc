@@ -101,7 +101,7 @@ Want me to send this now, or any more tweaks?
 
 This is a bit long. No need to bring up my videos.
 Well, make it shorter. I do want to mention my videos with the caveat.
-### Re: Shorter draft (HEAD)
+### Re: Shorter draft
 
 **Draft v3:**
 
@@ -114,7 +114,7 @@ Going to start using it to post more family updates! And yes — I used Claude C
 ---
 
 ~80 words vs ~150 before. Send it?
-<!-- agent:boundary:8cad273c -->
+<!-- agent:boundary:1e2413e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

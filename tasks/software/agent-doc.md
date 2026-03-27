@@ -476,7 +476,7 @@ Which term feels right for the existence-lang domain overlay? Or is there a diff
 
 Interface
 
-### Re: Abstraction refinement, Interface term, and existence CLI (HEAD)
+### Re: Abstraction refinement, Interface term, and existence CLI
 
 **1. Abstraction definition updated** in `~/.claude/philosophy/src/abstraction.md`:
 
@@ -511,7 +511,7 @@ This is an interesting design question. Options:
 **C. Skill handles deployment** -- `/existence install` (via the skill) copies the SKILL.md and updates CLAUDE.md. Pro: stays in the Claude Code ecosystem. Con: requires Claude Code running.
 
 Which approach fits your vision? The existence CLI itself is a standalone tool -- tying it to CLAUDE.md file management feels like it should be a skill concern (option C), unless you want the CLI to be the canonical deployer (option A).
-<!-- agent:boundary:cac8d2c3 -->
+<!-- agent:boundary:8d3a3252 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

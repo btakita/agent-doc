@@ -1109,7 +1109,7 @@ So it's not a Ragie role — it's Bob connecting developer friends with a client
 >
 > Also saw your post about the contract gig — I'm interested! Would love to hear more about it when we connect.
 
-I don't know how urgent this is...so 
+I don't know how urgent this is...so Wed-Thu may be too late.
 
 This is clean and concise. It:
 - Confirms the Calendly booking (Wed/Thu next week)
@@ -1135,13 +1135,27 @@ If you want to hedge on timing, here's an adjusted draft that acknowledges urgen
 > Also saw your post about the contract gig — I'm interested! Happy to chat about it sooner if timing matters, or we can cover it when we connect.
 
 The "sooner if timing matters" gives Bob the opening to fast-track the contract conversation separately from the demo call if needed.
-<!-- agent:boundary:d7d1ba1d -->
+
+### Re: Urgency — send today, separate the contract from the call (HEAD)
+
+Good instinct. The contract post is fresh and public — other devs are already commenting "Interested." Waiting until next Wed/Thu risks missing it.
+
+**Revised draft — send now:**
+
+> Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
+>
+> Also saw your post about the contract gig — I'm interested! Happy to chat about it sooner if timing matters, or we can cover it when we connect.
+
+This decouples the contract from the demo call — if Bob needs someone fast, he can loop you in immediately. If it's not urgent, it naturally folds into the call.
+
+Approve this and I'll paste it into LinkedIn DM via chromium-bridge.
+<!-- agent:boundary:e36032b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn DM to Bob (draft ready, awaiting approval — send today recommended)
+- **Send LinkedIn DM to Bob today** (draft finalized, awaiting approval)
 - Schedule 30-min call via Bob's Calendly (target Wed-Thu next week, Apr 2-3)
 - Prepare presentation demo scripts for Bob session
 - YouTube: Ragie integration session with Judith's project — planned follow-up

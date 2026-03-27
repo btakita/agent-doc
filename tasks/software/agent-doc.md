@@ -1470,7 +1470,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 Committed: `468f4c2`. Install plugin + the binary is already rebuilt (release profile).
 
 Make a prompt test.
-### Re: Make a prompt test (HEAD)
+### Re: Make a prompt test
 
 **Test verified:**
 
@@ -1479,7 +1479,7 @@ Make a prompt test.
 3. `parse_new_format_no_to_cancel` unit test passes — correctly detects question ("Do you want to proceed?"), 3 options, and active state
 
 The binary-level detection is confirmed working. To test the full end-to-end (PromptPanel in IntelliJ), install plugin v0.2.30 and trigger a real permission prompt by temporarily removing `--dangerously-skip-permissions` from a session, or by running a Claude session without the flag.
-<!-- agent:boundary:54dea182 -->
+<!-- agent:boundary:0f69313b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

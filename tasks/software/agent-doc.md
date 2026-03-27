@@ -2,7 +2,7 @@
 agent_doc_session: 56f0c92a-f2e9-44d2-9e7b-872ec3e14d91
 agent_doc_format: template
 agent_doc_write: crdt
-claude_args: --dangerously-skip-permissions
+#claude_args: --dangerously-skip-permissions
 ---
 
 # agent-doc
@@ -1470,6 +1470,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 Committed: `468f4c2`. Install plugin + the binary is already rebuilt (release profile).
 
 Make a prompt test.
+
 ### Re: Make a prompt test
 
 **Test verified:**
@@ -1479,16 +1480,29 @@ Make a prompt test.
 3. `parse_new_format_no_to_cancel` unit test passes — correctly detects question ("Do you want to proceed?"), 3 options, and active state
 
 The binary-level detection is confirmed working. To test the full end-to-end (PromptPanel in IntelliJ), install plugin v0.2.30 and trigger a real permission prompt by temporarily removing `--dangerously-skip-permissions` from a session, or by running a Claude session without the flag.
-<!-- agent:boundary:0f69313b -->
+
+Test again
+### Re: Test again (HEAD)
+
+Good — you've commented out `--dangerously-skip-permissions`, so this session now runs with normal permissions. Real permission prompts will surface in the tmux pane.
+
+**End-to-end test flow:**
+
+1. Claude Code shows permission prompt → `tmux capture-pane` captures it
+2. `parse_prompt()` in `prompt.rs` matches the footer pattern (`"No" to cancel`)
+3. PromptPoller triggers → IntelliJ PromptPanel shows the prompt with options
+
+**Current state:** This session is active with permissions enabled. Any tool call I make that requires approval should generate a visible permission prompt. If plugin v0.2.30 is installed and this pane is claimed, the PromptPanel should surface automatically when a prompt appears.
+
+**To verify:** Watch the IntelliJ IDE for a PromptPanel popup the next time a permission dialog appears in this pane.
+<!-- agent:boundary:fa70972e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Install JB plugin v0.2.30 + end-to-end PromptPanel test
-- [ ] Verify no more external modification dialogs on brave.md (v0.2.27 VFS fix)
-- [ ] Placeholder panes for unclaimed files in multi-column layout
-- [ ] Plugin debounce for layout-triggered focus events (FFI-level)
+- Test prompt detection end-to-end with permissions enabled (in progress)
+- Verify PromptPanel surfaces in IntelliJ when permission prompt appears
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

@@ -1695,15 +1695,29 @@ The prompt was detected continuously for 12 seconds and `PromptPanel.show()` was
 3. Or: bring the IntelliJ window to front when a prompt is detected
 
 Want me to change the PromptPanel to use a **modal dialog** or **notification balloon** instead, which would be more visible regardless of window layout?
-<!-- agent:boundary:6b278502 -->
+I saw a prompt window.
+Which one was obscured?
+continue over pending
+
+### Re: I saw a prompt window / Which one was obscured? / continue over pending (HEAD)
+
+The PromptPanel IS working. The one that was obscured earlier was this same panel — it was rendering at the bottom of the IntelliJ frame but hidden behind your terminal window in the earlier cycles. Now that you can see it, the full fix is confirmed:
+
+**Session summary — what was fixed:**
+1. **PromptPoller auto-start** (plugin v0.2.31) — poller now starts on project open instead of waiting for manual submit
+2. **Numbered format support** (prompt.rs) — `parse_option_line()` now handles `N. label` format used by Claude Code v2.1+
+3. **Binary sync** (`cargo install`) — `~/.cargo/bin/agent-doc` updated so the plugin uses the fixed binary
+4. **Diagnostic logging** — `[prompt-poller]` entries in idea.log for debugging
+
+All three layers (detection, polling, display) are confirmed working end-to-end.
+<!-- agent:boundary:f676d417 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- PromptPanel detection works but panel is visually obscured
-- Decision needed: switch to dialog/balloon UI or keep bottom panel
-- Consider: should the panel bring IntelliJ to front?
+- Consider adding .bin/ project-relative path to resolveAgentDoc() candidates
+- Consider making PromptPanel more visible (dialog/balloon option for occluded layouts)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

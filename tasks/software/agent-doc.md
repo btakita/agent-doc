@@ -2259,13 +2259,26 @@ Retagged v0.26.5 to trigger the release workflow. The CI should now produce bina
 Check CI status: https://github.com/btakita/agent-doc/actions
 
 **Re: `interprocess` decision:** Given Windows is a requirement, use `interprocess` for socket IPC in v0.27. It provides Unix sockets + Windows named pipes behind a single API.
-<!-- agent:boundary:5a4f2c9c -->
+
+Why do we need to clone existence? We should be using the crate.
+
+### Re: Why do we need to clone existence? We should be using the crate. (HEAD)
+
+You're right. The `existence` crate is published on crates.io at v0.4.0. The `path` field in `Cargo.toml` was only useful for simultaneous local development of both crates.
+
+**Fixed:**
+- Changed `existence = { version = "0.4", path = "../existence-lang/existence" }` → `existence = "0.4"`
+- Removed the `existence-lang` clone from all 3 CI workflows (ci.yml, release.yml, pypi.yml)
+- Verified: `cargo check` fetches v0.4.0 from crates.io and compiles
+
+Retagged v0.26.5. The CI should now build cleanly for all 5 targets without any existence-lang clone.
+<!-- agent:boundary:e2899679 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor CI run for v0.26.5 release (all 5 targets)
+- Monitor CI run for v0.26.5 (should pass now)
 - Use `interprocess` for cross-platform socket IPC (v0.27)
 - Plan tmux abstraction for Windows
 <!-- /agent:pending -->

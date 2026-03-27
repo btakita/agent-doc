@@ -1746,6 +1746,7 @@ fun resolveAgentDoc(): String {
 
 This ensures the plugin always uses the same binary the developer built, avoiding the stale-binary issue we hit today. Want me to implement this?
 Yes
+Is ~/bin a standard directory that is used?
 
 ### Re: Yes
 
@@ -1770,7 +1771,21 @@ Remaining callers (ClaimAction, SyncLayoutAction, etc.) use the default `null` a
 ```
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.32.zip
 ```
-<!-- agent:boundary:5be5205b -->
+
+### Re: Is ~/bin a standard directory that is used? (HEAD)
+
+Yes — `~/bin` exists on your system and contains executables like `brave-wayland.sh`, `clion`, `corky`, `dbxcli`, etc. It's a common convention for user-local binaries and is typically added to `$PATH` via your shell profile.
+
+However, there's no `agent-doc` in `~/bin` currently — the binary resolves to `~/.cargo/bin/agent-doc` (from `cargo install`) or `.bin/agent-doc` (project-local symlink). The `~/bin` candidate in `resolveAgentDoc()` is there as a fallback for users who manually symlink or copy binaries there.
+
+The resolution order is now:
+1. `$basePath/.bin/agent-doc` — project-local (v0.2.32+)
+2. `~/bin/agent-doc` — user bin
+3. `~/.local/bin/agent-doc` — XDG local
+4. `~/.cargo/bin/agent-doc` — cargo install
+5. `/usr/local/bin/agent-doc` — system
+6. `"agent-doc"` — PATH fallback
+<!-- agent:boundary:6880217d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

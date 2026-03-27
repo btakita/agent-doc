@@ -1136,7 +1136,7 @@ If you want to hedge on timing, here's an adjusted draft that acknowledges urgen
 
 The "sooner if timing matters" gives Bob the opening to fast-track the contract conversation separately from the demo call if needed.
 
-### Re: Urgency — send today, separate the contract from the call (HEAD)
+### Re: Urgency — send today, separate the contract from the call
 
 Good instinct. The contract post is fresh and public — other devs are already commenting "Interested." Waiting until next Wed/Thu risks missing it.
 
@@ -1149,7 +1149,7 @@ Good instinct. The contract post is fresh and public — other devs are already 
 This decouples the contract from the demo call — if Bob needs someone fast, he can loop you in immediately. If it's not urgent, it naturally folds into the call.
 
 Approve this and I'll paste it into LinkedIn DM via chromium-bridge.
-<!-- agent:boundary:e36032b0 -->
+<!-- agent:boundary:e8e0a116 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

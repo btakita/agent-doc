@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Implementing chromium-bridge features (type, click, select-tab, wait, snapshot) + browser skill.
+All 5 chromium-bridge commands implemented, tested, and documented. Browser skill updated.
 <!-- /agent:status -->
 
 ## Exchange
@@ -278,7 +278,7 @@ Want me to try to resend the message with proper spacing now? I can delete the o
 Implement:
 - chromium-bridge features: type, click, select-tab, wait, snapshot
 - `/browser` skill integration with chromium-bridge
-### Re: Implement chromium-bridge features + browser skill (HEAD)
+### Re: Implement chromium-bridge features + browser skill
 
 Starting implementation. This splits into two parallel tracks:
 
@@ -295,17 +295,34 @@ Starting implementation. This splits into two parallel tracks:
 - Include patterns for common tasks (form fill, navigate + wait, screenshot)
 
 Kicking off implementation now — will work on the Rust CLI features first since the skill depends on them.
-<!-- agent:boundary:c1d4abfa -->
+### Re: Implementation complete (HEAD)
+
+All 5 chromium-bridge commands implemented and verified against live browser:
+
+| Command | Status | Test |
+|---------|--------|------|
+| `click` | Done | Clicked Messenger textbox by selector, coordinates returned |
+| `type` | Done | Typed 3 paragraphs with proper Shift+Enter line breaks — screenshot confirmed spacing |
+| `select-tab` | Done | Activated OHANA Messenger tab by URL pattern |
+| `wait` | Done | Waited for `[role=textbox]` — found immediately |
+| `snapshot` | Done | Dumped accessibility tree for Messenger page |
+
+**Key technical decisions:**
+- `click` uses real mouse events (mouseMoved → mousePressed → mouseReleased) via CDP `Input.dispatchMouseEvent`, not JS `.click()` — triggers all event handlers
+- `type` uses `Input.insertText` for text and `Input.dispatchKeyEvent` with Shift modifier for paragraph breaks — this is the proper way to create line breaks in contenteditable without triggering "send"
+- `select-tab` uses the HTTP `/json/activate/{id}` endpoint — no CDP WebSocket needed
+- `wait` polls with 250ms intervals until timeout — simpler and more reliable than event subscriptions
+- `snapshot` uses `Accessibility.getFullAXTree` with optional depth limiting
+
+**Browser skill** (`.claude/skills/browser/SKILL.md`) updated with all new commands, common patterns (send chat message, fill form, wait+act), and tab selector documentation.
+
+**Release build** completed. Binary at `src/chromium-bridge/target/release/chromium-bridge`.
+<!-- agent:boundary:b95b483a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [active] chromium-bridge `type` command with contenteditable support
-- chromium-bridge `click` command
-- chromium-bridge `select-tab` command
-- chromium-bridge `wait` command
-- chromium-bridge `snapshot` command
-- `/browser` skill integration with chromium-bridge
+- Resend OHANA message with proper paragraph formatting using new `type` command
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

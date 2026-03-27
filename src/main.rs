@@ -77,6 +77,7 @@ mod stream;
 mod run;
 mod sync;
 mod terminal;
+mod ipc_socket;
 mod undo;
 mod upgrade;
 mod watch;

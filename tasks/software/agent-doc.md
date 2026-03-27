@@ -2001,7 +2001,7 @@ So you're seeing ~3 local history entries per cycle. With 20+ cycles in this ses
 Implement:
 - Skip IPC reposition signal when boundary position unchanged (eliminates 64% of no-op patches)
 
-### Re: Implement skip IPC reposition when boundary unchanged (HEAD)
+### Re: Implement skip IPC reposition when boundary unchanged
 
 **Done.** Changed `reposition_boundary_in_snapshot()` to return `bool` (true = boundary moved). The IPC signal is now conditional:
 
@@ -2018,7 +2018,7 @@ When the boundary is already at end-of-exchange (the common case after a normal 
 **After:** Every commit → check snapshot → boundary already at end → skip IPC
 
 Release binary rebuilt. You'll see the effect immediately — commit output will no longer show `[commit] IPC reposition boundary signal sent` when the boundary hasn't moved.
-<!-- agent:boundary:a06da800 -->
+<!-- agent:boundary:85bcdee3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

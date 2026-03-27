@@ -314,7 +314,7 @@ yes
 Can this be implemented with the FFI Plugin?
 Add to the development context to prefer FFI Plugin over editor specific plugin.
 
-### Re: Can this be implemented with the FFI Plugin? / Prefer FFI over editor-specific (HEAD)
+### Re: Can this be implemented with the FFI Plugin? / Prefer FFI over editor-specific
 
 **Yes — partially.** The sync debounce/lock logic CAN move to the FFI layer:
 
@@ -330,7 +330,7 @@ Add to the development context to prefer FFI Plugin over editor specific plugin.
 **Architecture shift:** Editor plugins become thin event reporters: "layout changed → here are the columns." The FFI handles debouncing, sync locking, and calling `agent-doc sync`. This eliminates duplicate debounce/lock code across IntelliJ + VS Code plugins.
 
 **Added to CLAUDE.md:**
-<!-- agent:boundary:0fe0ba50 -->
+<!-- agent:boundary:a85fcb9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

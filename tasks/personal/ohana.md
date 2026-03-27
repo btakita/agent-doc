@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Draft v3 ready (shorter). Awaiting send approval.
+Draft v4 ready. YouTube intro reframed (family doesn't know about channel yet).
 <!-- /agent:status -->
 
 ## Exchange
@@ -113,13 +113,30 @@ Going to start using it to post more family updates! And yes — I used Claude C
 
 ---
 
+> I know my YouTube videos are more programmer-oriented (sorry if they're a bit boring 😄) but the cool part is I don't even write code anymore
+
+My family doesn't know about my YouTube channel. Start with "the cool part"...then that I have YouTube videos showing me work.
+
 ~80 words vs ~150 before. Send it?
-<!-- agent:boundary:059ffdc4 -->
+### Re: Draft v4 (HEAD)
+
+**Draft v4:**
+
+It's like a really smart assistant you talk to in plain English — "organize my photos", "write a message", "browse this website" — and it just does it. Think Siri but way smarter.
+
+The cool part is I don't even write code anymore — I just tell it what I want in English and it does the work. I actually have some YouTube videos showing how I work with it if anyone's curious (fair warning, they're long and programmer-oriented 😄).
+
+Going to start using it to post more family updates! And yes — I used Claude Code to send this message 😊
+
+---
+
+Send it?
+<!-- agent:boundary:88215728 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v3 message to OHANA Messenger chat (awaiting approval)
+- Send v4 message to OHANA Messenger chat (awaiting approval)
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

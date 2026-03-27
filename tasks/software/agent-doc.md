@@ -1588,15 +1588,34 @@ src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.31.z
 2. Check `idea.log` for `[prompt-poller] starting polling`
 3. Set pane to normal permissions mode (keep pressing Shift+Tab until you see `"No" to cancel` on a tool call)
 4. Trigger an agent-doc cycle — PromptPanel should surface
-<!-- agent:boundary:69b634a8 -->
+
+Test the prompt
+
+### Re: Test the prompt
+
+**Plugin v0.2.31 confirmed working:** The poller auto-started successfully:
+```
+[lifecycle] auto-starting prompt poller for agent-loop
+[prompt-poller] starting polling for agent-loop
+```
+
+**But no active prompts detected yet** — pane %40 is still in `"accept edits on"` mode. In this mode, tool calls are auto-approved without showing Yes/No/Cancel prompts.
+
+**Press Shift+Tab again** in pane %40 to cycle to normal permissions mode. The modes are:
+1. `bypass permissions on` — everything auto-approved
+2. `accept edits on` — edits auto-approved ← **you are here**
+3. `plan mode on` — read-only tools auto-approved
+4. Normal mode — all tool calls show Yes/No/Cancel prompt
+
+After cycling to normal mode, trigger another `/agent-doc` cycle. The tool calls will show permission prompts, the poller will detect them, and PromptPanel should surface in IntelliJ.
+<!-- agent:boundary:9f4119fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Install plugin v0.2.31 and verify PromptPoller auto-starts on project open
-- Set pane %40 to normal permissions mode and test PromptPanel detection
-- Check idea.log for prompt-poller logging
+- Press Shift+Tab to cycle to normal permissions mode, then re-test
+- Verify PromptPanel surfaces when permission prompt is active
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

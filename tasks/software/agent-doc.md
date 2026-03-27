@@ -1440,7 +1440,7 @@ file:///home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build
 
 Committed: `87e7a20`. Uninstall → restart → install → restart for keybinding to take effect.
 Alt+Space worked. The issue was `Run Agent Doc` did not result in the plugin showing the prompt when Claude had the prompt.
-### Re: Alt+Space worked — Run Agent Doc prompt issue (HEAD)
+### Re: Alt+Space worked — Run Agent Doc prompt issue
 
 Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverting the keybinding change to `Alt+Space` (v0.2.29 with `Alt+Enter` shadows native intentions unnecessarily).
 
@@ -1451,7 +1451,7 @@ Good to know Alt+Space was working — the WM conflict wasn't the issue. Reverti
 3. A specific **dialog/notification** you expect when Claude is waiting for input?
 
 The screenshot from earlier showed what looked like a Claude Code permission dialog in the terminal. If the issue is that the plugin doesn't surface Claude's prompts to the IDE, that would be a new feature — detecting Claude's output state and showing it in IntelliJ.
-<!-- agent:boundary:8cd75d26 -->
+<!-- agent:boundary:152e1701 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

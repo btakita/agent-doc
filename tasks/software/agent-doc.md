@@ -2021,7 +2021,7 @@ Release binary rebuilt. You'll see the effect immediately — commit output will
 Implement:
 - Handle inotify OVERFLOW in PatchWatcher (future improvement)
 
-### Re: Handle inotify OVERFLOW in PatchWatcher (HEAD)
+### Re: Handle inotify OVERFLOW in PatchWatcher
 
 **Done.** Updated `watchLoop()` to detect `OVERFLOW` events and scan the directory for missed files:
 
@@ -2043,7 +2043,7 @@ When inotify's kernel buffer fills up (e.g., during `cargo build` generating tho
 ```
 src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.33.zip
 ```
-<!-- agent:boundary:af560d53 -->
+<!-- agent:boundary:d5e86408 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

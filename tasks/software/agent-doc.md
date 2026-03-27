@@ -1673,7 +1673,7 @@ This `Do you want to proceed?` dialog should have an editor prompt. None appeare
 
 The poller should now detect the numbered format prompts on the next cycle. No plugin rebuild needed — the binary update is sufficient.
 
-### Re: Do you have logs to detect what happened? (HEAD)
+### Re: Do you have logs to detect what happened?
 
 **Detection is confirmed working!** The idea.log shows:
 
@@ -1695,7 +1695,7 @@ The prompt was detected continuously for 12 seconds and `PromptPanel.show()` was
 3. Or: bring the IntelliJ window to front when a prompt is detected
 
 Want me to change the PromptPanel to use a **modal dialog** or **notification balloon** instead, which would be more visible regardless of window layout?
-<!-- agent:boundary:fd60158d -->
+<!-- agent:boundary:1b66894d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

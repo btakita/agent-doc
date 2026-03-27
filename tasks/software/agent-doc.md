@@ -391,7 +391,7 @@ This transfers beyond editor plugins -- any multi-consumer architecture (CLI + l
 
 It seems that Abstraction is used in a concrete sens
 
-### Re: Ontology misapplication and existence-lang refinement (HEAD)
+### Re: Ontology misapplication and existence-lang refinement
 
 You're right. I fundamentally misapplied existence-lang by assigning terms as **exclusive labels** for architecture roles -- "System = FFI library, Perspective = plugin, Abstraction = C ABI." Every entity in Existence is a System, has a Perspective, and exposes Abstractions. The terms are universal descriptors, not role assignments.
 
@@ -426,7 +426,7 @@ The **Shared Foundation pattern** is about **Scope**: place shared logic at the 
 **Note on Abstraction:** As you pointed out, an Abstraction is the symbolic representation of a real entity -- "the map is not the territory." The C ABI is how other entities interact with `libagent_doc`, but it's a symbol, not the library itself. Same for JNA declarations as the Abstraction of the JetBrains plugin's interface.
 
 The existence skill (`/existence`) and its binary don't need changes -- the application guidance now lives in the philosophy CLAUDE.md where all agents will find it.
-<!-- agent:boundary:7a0bc806 -->
+<!-- agent:boundary:d79ce5da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

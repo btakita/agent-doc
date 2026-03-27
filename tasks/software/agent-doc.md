@@ -389,7 +389,7 @@ This transfers beyond editor plugins -- any multi-consumer architecture (CLI + l
 **Also:** Fixed broken `&lt;!-- agent:pending --&gt;` tag (was missing `<`).
 > "Does this feature need to work in >1 Perspective?" -> implement in the System, expose via Abstraction.
 
-It seems that Abstraction is used in a concrete sens
+It seems that we use another term instead of Abstraction...to allow Abstraction to retain it's core meaning & application when using existence-lang.
 
 ### Re: Ontology misapplication and existence-lang refinement
 
@@ -426,13 +426,40 @@ The **Shared Foundation pattern** is about **Scope**: place shared logic at the 
 **Note on Abstraction:** As you pointed out, an Abstraction is the symbolic representation of a real entity -- "the map is not the territory." The C ABI is how other entities interact with `libagent_doc`, but it's a symbol, not the library itself. Same for JNA declarations as the Abstraction of the JetBrains plugin's interface.
 
 The existence skill (`/existence`) and its binary don't need changes -- the application guidance now lives in the philosophy CLAUDE.md where all agents will find it.
-<!-- agent:boundary:d79ce5da -->
+
+### Re: Alternative term for Abstraction in domain overlays (HEAD)
+
+You're right -- using "Abstraction" as a label for the API/ABI overloads the term. In existence-lang, Abstraction means "a concept that models something else without its complexity." An API IS an abstraction (philosophically), but calling it THE Abstraction in a pattern map narrows the term to mean "interface," which it doesn't.
+
+**The concept we need a term for:** The defined surface through which one System communicates with another System. The contract, protocol, or interface.
+
+Existing ontology terms don't fit:
+- **Abstraction** -- too broad (any simplification of complexity)
+- **Communication** -- the act of signaling, not the surface itself
+- **Signal** -- the information transmitted, not the contract governing it
+- **Model** -- exemplifies a system, not the interaction boundary
+
+**Options for a new domain overlay term:**
+
+1. **Interface** -- "The defined boundary through which one System's Signals are structured for consumption by another System. An Interface is a specialized Abstraction constrained to a contract." Software-native, immediately understood.
+
+2. **Contract** -- "The agreed-upon structure of Communication between Systems. A Contract defines what Signals are valid and how they are interpreted." Emphasizes the binding/agreement aspect.
+
+3. **Surface** -- "The boundary at which one System meets another. A Surface constrains the Scope of interaction between Systems." More abstract, emphasizes the boundary.
+
+4. **Protocol** -- "The rules governing Communication between Systems. A Protocol defines the structure, sequence, and semantics of Signals." Emphasizes process/rules.
+
+Each of these IS an abstraction (lowercase, philosophically) but none IS Abstraction (the ontology term). This lets Abstraction retain its core meaning.
+
+Which term feels right for the existence-lang domain overlay? Or is there a different term you have in mind? Once we agree, I'll author it as a new ontology node via `/existence new <term>` and update the CLAUDE.md conventions.
+<!-- agent:boundary:a30795e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Commit all changes (Rust FFI + plugin + CLAUDE.md + existence-lang), release v0.27.0
+- v0.27: Commit all changes, release v0.27.0
+- existence-lang: Coin new domain term for system interaction boundary (awaiting user choice)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

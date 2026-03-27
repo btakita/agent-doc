@@ -344,14 +344,41 @@ Saved feedback memory: "Socket listener in FFI, not editor plugins." The rule: w
 
 To make this even stronger: should this be added as a checklist item in the skill? Or should the CLAUDE.md convention be expanded with a concrete example of the socket listener pattern?
 
+Make this a strong convention. If we can create a design pattern with ontology, then perhaps this can be generalizable.
+
 **Build results:** Rust: 560 tests pass, clippy clean. Plugin: builds successfully (both zips).
-<!-- agent:boundary:5e3abc4f -->
+
+### Re: Generalizable design pattern with ontology (HEAD)
+
+**Done.** Updated CLAUDE.md with the **Shared Foundation** pattern, grounded in ontology.
+
+The convention now reads:
+
+> **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters. Business logic belongs in the shared FFI library, not duplicated. **Ontology:** The FFI library is the **System** (internalized whole); each editor plugin is a **Perspective** (thin adapter); the C ABI is the **Abstraction** (stable interface). Business logic never lives in a Perspective. **Test:** "Does this feature need to work in >1 editor?" -> implement in FFI.
+
+**Pattern map:**
+
+| Ontology Term | Role in Pattern | agent-doc Concrete |
+|---|---|---|
+| **System** | The shared library -- internalized whole | `libagent_doc` (FFI) |
+| **Perspective** | A viewpoint; thin adapter | JetBrains plugin, VS Code extension |
+| **Abstraction** | Stable interface modeling the system | C ABI (`extern "C"` exports) |
+| **Scope** | Bounds what's relevant to each consumer | JNA declarations, Node FFI bindings |
+| **Pattern** | Repeatable, transferable element | Shared Foundation |
+
+**The generalizable test:**
+> "Does this feature need to work in >1 Perspective?" -> implement in the System, expose via Abstraction.
+
+This transfers beyond editor plugins -- any multi-consumer architecture (CLI + library, API + SDKs, microservices with shared domain logic).
+
+**Also:** Fixed broken `&lt;!-- agent:pending --&gt;` tag (was missing `<`).
+<!-- agent:boundary:aeb85e05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Commit all changes (Rust FFI + plugin refactor), release v0.27.0
+- v0.27: Commit all changes (Rust FFI + plugin + CLAUDE.md), release v0.27.0
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

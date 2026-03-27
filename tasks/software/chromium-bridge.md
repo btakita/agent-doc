@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.0 released: crates.io + GitHub Release + install.sh.
+chromium-bridge v0.1.0 released. CI workflow added for cross-platform releases (4 targets).
 <!-- /agent:status -->
 
 ## Exchange
@@ -585,13 +585,41 @@ The install script auto-detects OS/arch and falls back to suggesting `cargo inst
 Add gh actions to build and deploy cross platform releases.
 - Add macOS builds to GitHub Release (cross-compile or CI)
 - Create btakita/homebrew-tap (deferred — low priority)
-<!-- agent:boundary:4def7d02 -->
+### Re: GitHub Actions cross-platform releases (HEAD)
+
+Created `.github/workflows/release.yml` — triggers on version tags (`v*`). Builds 4 targets:
+
+| Target | Runner |
+|--------|--------|
+| `x86_64-unknown-linux-gnu` | ubuntu-latest |
+| `aarch64-unknown-linux-gnu` | ubuntu-latest (cross-compile) |
+| `x86_64-apple-darwin` | macos-latest |
+| `aarch64-apple-darwin` | macos-latest (Apple Silicon) |
+
+**How it works:**
+1. Push a tag: `git tag v0.1.1 && git push origin v0.1.1`
+2. CI builds all 4 binaries in parallel
+3. Packages each as `chromium-bridge-v0.1.1-<target>.tar.gz`
+4. Creates a GitHub Release with all tarballs + auto-generated release notes
+
+The existing `install.sh` already handles all 4 targets, so it will work automatically once the first CI-built release is published.
+
+**To test:** Commit the workflow, push to GitHub, then tag:
+```bash
+cd src/chromium-bridge
+git add .github/workflows/release.yml
+git commit -m "ci: add cross-platform release workflow"
+git push origin main
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+Want me to commit and push this now?
+<!-- agent:boundary:5c81e54b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Add macOS builds to GitHub Release (cross-compile or CI)
 - Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)

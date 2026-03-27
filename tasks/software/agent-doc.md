@@ -293,13 +293,30 @@ Seems like all 3 would be useful...or would this be overengineering?
 Total effort: ~30 lines across 2 files. Not overengineering — it's defense in depth for a stateful system (tmux panes) where corruption is visible and annoying.
 
 Want me to implement all 3?
-<!-- agent:boundary:a209f28e -->
+yes
+
+### Re: yes (implement all 3) (HEAD)
+
+**Good news — 2 of 3 defenses already exist.** After reviewing the code:
+
+| Defense | EditorTabSyncListener | LayoutChangeDetector | Rust sync |
+|---------|----------------------|---------------------|-----------|
+| Debounce | 500ms + generation counter | 300ms (was broken — fixed) | N/A |
+| Sync lock | `running` AtomicBoolean | `syncing` AtomicBoolean | N/A |
+| Idempotent | FFI busy guard | Layout hash dedup | `find_alive_pane_for_file()` |
+
+**The bug was in `LayoutChangeDetector.scheduleSync()`** — it spawned a new thread per container event, each sleeping 300ms independently. Rapid events = many threads all firing after 300ms simultaneously, bypassing the debounce intent.
+
+**Fix applied:** Added a generation counter (like `EditorTabSyncListener` already has). Now only the latest event fires after 500ms. Previous events check `syncGeneration.get() != myGen` and exit early.
+
+**Plugin v0.2.34** built. This should prevent the 6-pane issue from rapid file switching.
+<!-- agent:boundary:e7c9e723 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Implement sync debounce + idempotent sync + sync lock (awaiting go)
+- Install plugin v0.2.34 and test rapid file switching
 - CI v0.26.5 monitoring
 - `interprocess` socket IPC (v0.27)
 <!-- /agent:pending -->

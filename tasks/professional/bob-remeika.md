@@ -1069,7 +1069,7 @@ Is this the post you meant? Or is it a different one — maybe on LinkedIn? If y
 
 Let me know if you want me to adjust the tone, reference a different post, or send this as-is.
 
-### Re: Draft message to Bob & contract interest (HEAD)
+### Re: Draft message to Bob & contract interest
 
 I couldn't find the specific contract posting via web search (LinkedIn posts are hard to index). But based on your draft, here's a polished version that naturally expresses interest in both the call and the contract:
 
@@ -1088,7 +1088,7 @@ I couldn't find the specific contract posting via web search (LinkedIn posts are
 This way the call is about your work and reconnecting, and the contract is a natural "by the way" that Bob can follow up on. If he's looking for someone with your stack (Rust, AI tooling, RAG integration), he'll connect the dots himself during the demo.
 
 Want me to send this draft via LinkedIn (chromium-bridge), or do you want to adjust it first?
-<!-- agent:boundary:1d42cbe2 -->
+<!-- agent:boundary:240236cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

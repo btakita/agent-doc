@@ -1629,7 +1629,7 @@ Claude Code v2.1+ changed its prompt option format from `[N] label` to `N. label
 The binary is already rebuilt. Plugin v0.2.31 is already installed. Trigger another cycle to test — the poller should now detect the prompt and surface PromptPanel.
 test prompt
 
-### Re: test prompt (HEAD)
+### Re: test prompt
 
 The pane is still in **"accept edits on"** mode — tool calls are auto-approved without showing permission prompts. The poller has nothing to detect.
 
@@ -1647,7 +1647,7 @@ This will show what the poller sees. When a permission prompt IS active (with th
 - Binary: `parse_option_line()` now supports both `[N] label` and `N. label` formats
 - Plugin v0.2.31: PromptPoller auto-starts on project open, diagnostic logging added
 - Both are active — just need a real permission prompt to appear
-<!-- agent:boundary:20cec18c -->
+<!-- agent:boundary:4c740e1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1040,6 +1040,14 @@ Given Bob's background (Rails/React ecosystem, engineering leadership), a focuse
 Please get Bob's latest post about knowing a contract.
 And please draft a message to Bob.
 
+What I have so far:
+
+> Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
+>
+> I'm interested in the contract gig you just posted as well.
+
+I would love to work directly with Bob. So should I somehow keep that option open?
+
 ### Re: Bob's post about knowing a contract
 
 I searched X/Twitter and LinkedIn but couldn't find a specific post by Bob about "knowing a contract." The closest match I found is this X post:
@@ -1060,15 +1068,34 @@ Is this the post you meant? Or is it a different one — maybe on LinkedIn? If y
 > Looking at next week — does Wed-Fri (Apr 2-4) work for you? Happy to book via your Calendly.
 
 Let me know if you want me to adjust the tone, reference a different post, or send this as-is.
-<!-- agent:boundary:4af516b6 -->
+
+### Re: Draft message to Bob & contract interest (HEAD)
+
+I couldn't find the specific contract posting via web search (LinkedIn posts are hard to index). But based on your draft, here's a polished version that naturally expresses interest in both the call and the contract:
+
+**Draft LinkedIn DM to Bob:**
+
+> Sounds great! Will plan it out & sign up in a bit. Probably next Wednesday or Thursday.
+>
+> I'm interested in the contract gig you just posted as well — would love to chat about that when we connect.
+
+**On keeping the option open:** Yes, absolutely. The draft above does it cleanly — it expresses interest without over-committing or making the 30-min call feel transactional. When you meet:
+
+- **Lead with the demo** — show your tools, let the work speak
+- **Let the contract come up naturally** — "I saw you posted a contract role, I'd be interested in learning more about it" during Q&A
+- **Don't pitch yourself for the contract** in the DM — just flag interest so he has it in mind before the call
+
+This way the call is about your work and reconnecting, and the contract is a natural "by the way" that Bob can follow up on. If he's looking for someone with your stack (Rust, AI tooling, RAG integration), he'll connect the dots himself during the demo.
+
+Want me to send this draft via LinkedIn (chromium-bridge), or do you want to adjust it first?
+<!-- agent:boundary:1d42cbe2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Confirm which Bob Remeika post about "knowing a contract" to reference
-- Finalize and send message to Bob (draft ready, awaiting approval)
-- Schedule 30-min presentation call with Bob (target Apr 2-4)
+- Send LinkedIn DM to Bob (draft ready, awaiting approval)
+- Schedule 30-min call via Bob's Calendly (target Wed-Thu next week, Apr 2-3)
 - Prepare presentation demo scripts for Bob session
 - YouTube: Ragie integration session with Judith's project — planned follow-up
 - Retest bookmarklet — awaiting test

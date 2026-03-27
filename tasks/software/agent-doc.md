@@ -427,7 +427,7 @@ The **Shared Foundation pattern** is about **Scope**: place shared logic at the 
 
 The existence skill (`/existence`) and its binary don't need changes -- the application guidance now lives in the philosophy CLAUDE.md where all agents will find it.
 
-### Re: Alternative term for Abstraction in domain overlays (HEAD)
+### Re: Alternative term for Abstraction in domain overlays
 
 You're right -- using "Abstraction" as a label for the API/ABI overloads the term. In existence-lang, Abstraction means "a concept that models something else without its complexity." An API IS an abstraction (philosophically), but calling it THE Abstraction in a pattern map narrows the term to mean "interface," which it doesn't.
 
@@ -452,7 +452,7 @@ Existing ontology terms don't fit:
 Each of these IS an abstraction (lowercase, philosophically) but none IS Abstraction (the ontology term). This lets Abstraction retain its core meaning.
 
 Which term feels right for the existence-lang domain overlay? Or is there a different term you have in mind? Once we agree, I'll author it as a new ontology node via `/existence new <term>` and update the CLAUDE.md conventions.
-<!-- agent:boundary:a30795e8 -->
+<!-- agent:boundary:0352c4ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

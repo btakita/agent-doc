@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Message sent. Discussing chromium-bridge as browser skill backend — 5 missing features identified.
+Spacing bug confirmed — Messenger needs Shift+Enter for paragraphs. chromium-bridge features queued.
 <!-- /agent:status -->
 
 ## Exchange
@@ -251,13 +251,34 @@ Textbox is now empty — confirmed sent.
 The core is solid — `evaluate` covers everything as a fallback. But dedicated `type`, `click`, and `wait` would make the skill cleaner and less fragile (no more `execCommand` hacks).
 
 Want to add these to the chromium-bridge task queue?
-<!-- agent:boundary:bd1dd433 -->
+Yes.
+
+The message on ohana did not match the spacing in the draft.
+### Re: Spacing issue + chromium-bridge tasks (HEAD)
+
+**Spacing bug confirmed.** Took a screenshot — the message landed as one continuous block of text. The paragraph breaks were lost.
+
+**Root cause:** `execCommand("insertText")` with `\n` doesn't create paragraph breaks in Messenger's contenteditable. Messenger needs Shift+Enter for line breaks within a message bubble.
+
+**Fix for next time:** The `type` command in chromium-bridge should handle this — split on `\n\n`, insert Shift+Enter between paragraphs. This is exactly why dedicated `type`/`fill` commands matter over raw `evaluate` hacks.
+
+**Added to chromium-bridge task queue:**
+- `type` command (with contenteditable paragraph handling)
+- `click` command
+- `select-tab` command
+- `wait` command
+- `snapshot` command
+- Integration as `/browser` skill backend
+
+Want me to try to resend the message with proper spacing now? I can delete the old one and send paragraph by paragraph using Shift+Enter between paragraphs.
+<!-- agent:boundary:9a4c7ebc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Evaluate adding chromium-bridge as `/browser` skill backend
-- Missing chromium-bridge features: type, click, select-tab, wait, snapshot
+- Fix spacing: resend message with proper paragraph breaks (awaiting approval)
+- chromium-bridge features: type, click, select-tab, wait, snapshot
+- `/browser` skill integration with chromium-bridge
 - Start posting family photos/updates consistently via Claude Code
 <!-- /agent:pending -->

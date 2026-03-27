@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.1.1: module-harness + ontology added. CI re-running with rustls fix.
+chromium-bridge v0.1.1: --tab URL pattern matching added. CI re-running (3rd attempt, all dep issues fixed).
 <!-- /agent:status -->
 
 ## Exchange
@@ -652,15 +652,48 @@ Add ontology.
 3. **CI fix** — switched `reqwest` from default (OpenSSL) to `rustls-tls` (pure Rust TLS). This fixes the aarch64-linux cross-compile failure. Re-tagged v0.1.1 to retrigger CI.
 
 **CI re-running:** https://github.com/btakita/chromium-bridge/actions
-<!-- agent:boundary:f95ecfae -->
-<!-- /agent:exchange -->
-
-## Pending / Not Built
-
-<!-- agent:pending patch=replace -->
+run:
 - Monitor CI v0.1.1 re-run (rustls fix for aarch64-linux)
 - Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
+### Re: Run pending items (HEAD)
+
+**Completed:**
+
+1. **Monitor CI v0.1.1** — first run failed: `existence` path dep not available in CI. Fixed by removing path override (crates.io v0.4 resolves fine). Also found aarch64-linux OpenSSL failure was from the first run. Re-tagged, CI re-running.
+
+2. **`--tab` URL pattern selection** — implemented. `--tab` now accepts:
+   - Index: `--tab 0` (default, same as before)
+   - URL/title substring: `--tab linkedin`, `--tab crates.io`
+   - Ambiguous matches produce a helpful error listing all matches:
+     ```
+     Error: Pattern 'crates.io' matched 7 tabs. Be more specific:
+       [0] Search Results for 'cdp-cli' — https://crates.io/search?q=cdp-cli
+       [1] agent-doc — https://crates.io/crates/agent-doc
+       ...
+     ```
+
+3. **Sift integration** — stub only (no sift crate/CLI exists yet). The workflow would be: `chromium-bridge markdown <url>` → pipe to sift indexer. Needs sift to be built first.
+
+4. **Ragie integration** — stub only. Same pattern: scrape via chromium-bridge → ingest via ragie API. Needs ragie client implementation.
+
+5. **Homebrew tap** — deferred per the original priority. `cargo install` and `install.sh` cover immediate needs.
+
+**Verified locally:**
+```
+$ chromium-bridge evaluate "document.title" --tab "cdp-cli"
+Search Results for 'cdp-cli' - crates.io: Rust Package Registry
+```
+<!-- agent:boundary:5a36c34e -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+- Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
+- Flesh out sift integration (blocked: sift not built yet)
+- Flesh out ragie integration (blocked: ragie client not built yet)
+- Create btakita/homebrew-tap (deferred — low priority)
 <!-- /agent:pending -->

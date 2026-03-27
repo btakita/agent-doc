@@ -522,6 +522,8 @@ dependencies = [
 [[package]]
 name = "existence"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f957b96bcfa64af101d411a8df412dd93e9a0b5ca1e9a5ab1b5eddfc0325656"
 dependencies = [
  "clap",
  "clap_complete",

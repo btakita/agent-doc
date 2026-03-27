@@ -2141,13 +2141,41 @@ The [`interprocess`](https://crates.io/crates/interprocess) crate provides:
 - `std::os::unix::net::UnixStream` is zero-dependency and sufficient for our use case
 
 **Recommendation:** Start with `std::os::unix::net` (zero deps, simpler). Add `interprocess` only if Windows support becomes a requirement. The IPC protocol is just JSON-over-socket — the transport abstraction isn't complex enough to justify the dependency.
-<!-- agent:boundary:47b7c6bf -->
+
+Windows is a requirement for agent-doc. Do we currently have a windows build?
+
+### Re: Windows is a requirement for agent-doc. Do we currently have a windows build? (HEAD)
+
+**CI config exists but all recent releases are failing.** The GitHub Actions release workflow (`release.yml`) defines a Windows target:
+
+```yaml
+- target: x86_64-pc-windows-msvc
+  os: windows-latest
+  use_cross: false
+```
+
+But the last 5 release workflow runs all show `failure`. Only a manually-uploaded Linux binary exists in the GitHub Releases.
+
+**Current Windows blockers:**
+1. **CI failures** — need to debug `release.yml` (likely a path dependency or tmux-dependent test issue)
+2. **tmux dependency** — agent-doc heavily uses tmux for session routing, pane management, and prompt detection. tmux is Unix-only. On Windows, these features would need an alternative (Windows Terminal, ConPTY, or a different multiplexer)
+3. **Unix domain sockets** — `std::os::unix::net` is Linux/macOS only
+
+**Given Windows is a requirement:** Use `interprocess` for the socket IPC. It provides a unified API for Unix sockets + Windows named pipes. This also informs the broader Windows porting strategy — tmux-dependent features need a Windows-compatible abstraction layer.
+
+**Immediate action items:**
+1. Fix release CI to produce Windows binaries
+2. Use `interprocess` for socket IPC (cross-platform)
+3. Plan tmux abstraction layer for Windows (bigger effort)
+<!-- agent:boundary:1086b244 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Unix domain socket IPC (v0.27 milestone) — use std::os::unix::net
+- Fix release CI failures (Windows + all platforms)
+- Use `interprocess` crate for cross-platform socket IPC
+- Plan tmux abstraction for Windows support
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

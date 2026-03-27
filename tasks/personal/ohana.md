@@ -401,7 +401,7 @@ Claude Code immediately discovered the new skill — `chromium-bridge` now appea
 └── browser/SKILL.md          ← user workflow + preferences
 ```
 release chromium-bridge
-### Re: Release chromium-bridge v0.2.0 (HEAD)
+### Re: Release chromium-bridge v0.2.0
 
 Released:
 - **crates.io:** `chromium-bridge v0.2.0` published
@@ -413,7 +413,7 @@ New in v0.2.0:
 - `click`, `type`, `select-tab`, `wait`, `snapshot` commands
 - `skill install` / `skill check` subcommands
 - Paragraph handling in `type` (Shift+Enter for contenteditable)
-<!-- agent:boundary:b7fb74c3 -->
+<!-- agent:boundary:8041de26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

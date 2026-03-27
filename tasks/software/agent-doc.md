@@ -1656,7 +1656,7 @@ The Yes/No terminal prompt should have appeared as a Yes/No editor prompt
 
 ![img_4.png](img_4.png)
 
-### Re: Still don't see the editor prompt (HEAD)
+### Re: Still don't see the editor prompt
 
 **Found the real issue!** The plugin's `resolveAgentDoc()` was using `~/.cargo/bin/agent-doc` (last modified 05:47, BEFORE the numbered format fix). The shell `which agent-doc` resolves to `.bin/agent-doc` (the just-rebuilt release binary), but the plugin checks `~/.cargo/bin/` directly without using PATH.
 
@@ -1668,7 +1668,7 @@ The Yes/No terminal prompt should have appeared as a Yes/No editor prompt
 **Fix:** Ran `cargo install --path .` to update `~/.cargo/bin/agent-doc` with the latest code.
 
 The poller should now detect the numbered format prompts on the next cycle. No plugin rebuild needed — the binary update is sufficient.
-<!-- agent:boundary:f37825a4 -->
+<!-- agent:boundary:c3e155bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

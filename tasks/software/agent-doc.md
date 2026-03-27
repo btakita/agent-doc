@@ -224,7 +224,7 @@ Submodule already committed and pushed to `btakita/agent-doc` (`ba02d0b`). The `
 **Next session:** Wire `ipc_socket` into `write.rs` and `git.rs`, add FFI listener, update JetBrains plugin.
 start a new session
 
-### Re: start a new session (HEAD)
+### Re: start a new session
 
 This IS a new session with fresh context. To continue the v0.27 socket IPC work, start a new Claude Code conversation (type `/clear` or open a new terminal) and run:
 
@@ -238,7 +238,7 @@ Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plu
 ```
 
 The new session will have full context budget to read `write.rs` (1000+ lines) and make the surgical changes needed.
-<!-- agent:boundary:5a2c8fbb -->
+<!-- agent:boundary:9abec9d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

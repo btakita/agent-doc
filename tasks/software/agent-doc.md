@@ -251,7 +251,7 @@ The document already contains the instruction — the new session will pick it u
 I typed in `/clear` from within this agent doc. But it did not run the `/clear` command. How can agent-doc run explicit commands?
 Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plugin.
 
-### Re: /clear in agent-doc (HEAD)
+### Re: /clear in agent-doc
 
 `/clear` is a Claude Code CLI command — it must be typed in the Claude Code terminal prompt, not in the document. Agent-doc documents are text files; the agent reads diffs but doesn't execute commands embedded in them. There's no mechanism for agent-doc to trigger CLI commands from document content (and doing so would be a security concern).
 
@@ -279,7 +279,7 @@ Wire ipc_socket into write.rs and git.rs. Add FFI listener. Update JetBrains plu
 - Update JetBrains plugin to call `agent_doc_start_ipc_listener()` on project open
 - Update JetBrains plugin to handle socket messages in the callback (apply patches, reposition boundary, VCS refresh)
 - Release v0.27.0
-<!-- agent:boundary:6a0579b1 -->
+<!-- agent:boundary:9589b2ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

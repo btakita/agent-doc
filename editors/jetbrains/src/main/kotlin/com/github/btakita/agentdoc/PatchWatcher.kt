@@ -67,7 +67,12 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         while (running) {
             val key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+            var overflow = false
             for (event in key.pollEvents()) {
+                if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                    overflow = true
+                    continue
+                }
                 val filename = event.context() as? Path ?: continue
                 if (filename.toString() == "vcs-refresh.signal") {
                     val signalFile = dir.resolve(filename).toFile()
@@ -81,6 +86,13 @@ class PatchWatcher(private val project: Project) : Disposable {
                         processPatchFile(patchFile)
                     }
                 }
+            }
+            // On inotify overflow, scan the directory for any missed files.
+            // This handles the case where heavy I/O (e.g. cargo build) fills
+            // the kernel's inotify buffer and events are silently dropped.
+            if (overflow) {
+                LOG.info("[patch-watcher] inotify overflow detected, scanning for missed files")
+                processPendingPatches(dir.toFile())
             }
             if (!key.reset()) break
         }

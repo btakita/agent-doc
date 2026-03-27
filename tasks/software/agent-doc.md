@@ -1505,7 +1505,7 @@ I did not see the prompt pane. Try again
 
 Is permissions mode off
 
-### Re: Is permissions mode off (HEAD)
+### Re: Is permissions mode off
 
 I can't check the permissions mode of your running session from here — that's local to the tmux pane. Here's how to check:
 
@@ -1514,7 +1514,7 @@ I can't check the permissions mode of your running session from here — that's 
 3. If this session was launched with `--dangerously-skip-permissions`, commenting out `claude_args` only takes effect on the **next** `agent-doc spawn`. The current session needs **Shift+Tab** or a **restart**.
 
 **Quick test:** After toggling, make any edit to this document — the next cycle will trigger a tool call, and you should see a permission prompt in the pane footer. If PromptPanel v0.2.30 is installed, it should surface in IntelliJ.
-<!-- agent:boundary:37891462 -->
+<!-- agent:boundary:046fd7a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

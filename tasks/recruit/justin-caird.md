@@ -827,11 +827,24 @@ This was in response to your eval tooling / module-harness LinkedIn post. Positi
 - Background includes SaaS Product Development, AWS, DevSecOps, Cloud Architecture, Application Modernization
 
 Both have CTO-level titles. Brian Winters as CPTO is the more senior product+tech role. Paxton Lamons has the explicit CTO title with platform/modernization focus — which aligns well with the "modernize 20-year-old ERP systems" mission Justin described.
-<!-- agent:boundary:9fa87fca -->
+
+Justin mentioned that the new CTO was the CTO of Wayfair and some other companies. Please look at the phone transcript and the linked in message history.
+
+**Re: CTO identification —** The CTO Justin mentioned who came from Wayfair is **Jack Wood**, already documented earlier in this file (lines ~450-463). He was appointed March 3, 2026 specifically to "scale practical AI innovation."
+
+**Jack Wood's background chain:**
+- NASA JPL → Bell Labs → Capital One → **Wayfair** (engineering through hyper-growth, $450M → $2.8B revenue) → Symetra (SVP/Head of Engineering, 350+ engineers) → **ECI Software Solutions** (CTO, March 2026)
+
+**From the call transcript** (lines 588-590): Jack Wood is ~3 months into his role at ECI, brought ProSearch (Justin's firm) with him from 4 prior companies. Direct line of sight from pod members to CTO.
+
+**From the LinkedIn messages** (`mail/contacts/justin-caird/20260322-linkedin-justin-caird.txt`): Justin describes working "directly with the CTO" to build out a strategic AI team to modernize 20-year-old ERP systems.
+
+**Clarification on the other two profiles found earlier:**
+- Brian Winters (CPTO) and Paxton Lamons (CTO) are separate executives at ECI found via LinkedIn search. Jack Wood is the specific CTO Justin is referring to — the one with the Wayfair background who is driving the AI transformation initiative and directly overseeing the hiring pods.
+<!-- agent:boundary:33bbee84 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Send LinkedIn follow-up to Justin re: eval tooling + video link (sent)
-- [x] Retrieve ECI company LinkedIn page and CTO profiles
-- [ ] CTO interview scheduling — waiting on Justin (CTO back from travel week of Mar 30)
+- [ ] Review Justin's LinkedIn message response about the eval tooling video
+- [ ] Confirm CTO Jack Wood LinkedIn profile URL (not yet located)
 <!-- /agent:pending -->

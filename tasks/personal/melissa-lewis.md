@@ -191,7 +191,7 @@ Meta: Melissa and I explored collaborating for the Wedding Insider Network. Wher
 
 Good additions. The video→article pipeline and CRM capabilities demonstrate concrete value. And the Wedding Insider Network meta context is useful — the "cost equation has changed" angle could naturally plant a seed without being pushy.
 
-### Draft Reply to Melissa (v4) (HEAD)
+### Draft Reply to Melissa (v4)
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request — would be great to connect there too.
 >
@@ -212,7 +212,7 @@ Good additions. The video→article pipeline and CRM capabilities demonstrate co
 > On a related note — I've been thinking about the Wedding Insider Network app we discussed last year. The cost equation for building custom software has completely changed with agent harnesses. What used to require a large budget and a full dev team can now be done at a fraction of the cost and time. Might be worth revisiting when you're ready.
 >
 > So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:9b23d0e1 -->
+<!-- agent:boundary:2d1c64c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

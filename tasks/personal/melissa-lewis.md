@@ -340,11 +340,28 @@ Good call — the CRM/transcription angle is what *I* use the harness for, but f
 > Also been thinking about the Wedding Insider Network app. The cost equation has completely changed — a custom agent harness could automate client communication, generate content from shoots, and manage vendor relationships for you and other wedding professionals. Worth revisiting when you're ready.
 >
 > Multiple angles moving forward. I'll keep you posted. Thank you for your patience.
-<!-- agent:boundary:b91503ab -->
+I already sent long SMS drafter earlier.
+This is a followup.
+
+I'm using brave, not chrome. Please update my local browser skill.
+
+Also mention that I want to connect with her on LinkedIn.
+
+### Follow-up SMS to Melissa (HEAD)
+
+Since you already sent the long message, here's a short follow-up:
+
+> Also — I sent you a LinkedIn connection request. Would love to connect there too!
+
+### Browser Skill Update (HEAD)
+
+Updating the browser skill to use Brave instead of Chrome. Brave uses the same Chromium DevTools protocol — the launch command just needs to change.
+<!-- agent:boundary:cc114f5a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v7 message to Melissa via PulseSMS (chromium-bridge down — manual paste or restart Chrome)
+- Update browser skill to use Brave instead of Chrome
+- Confirm Melissa follow-up SMS sent
 <!-- /agent:pending -->

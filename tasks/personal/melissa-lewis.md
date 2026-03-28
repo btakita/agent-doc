@@ -15,7 +15,7 @@ New session — awaiting first input.
 <!-- agent:exchange patch=append -->
 
 Session initialized. Write in the exchange to get started.
-<!-- agent:boundary:7ca5cf11 -->
+<!-- agent:boundary:07000381 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

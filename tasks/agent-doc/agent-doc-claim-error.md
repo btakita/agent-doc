@@ -243,7 +243,7 @@ Want me to implement this? The change would be:
 - `agent-doc run`: add implicit claim (if no active pane registered, claim current pane)
 - `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window)
 - Plugin: change "Run Agent Doc" to send single `/agent-doc run <path>`
-### Ensuring claude session before `/agent-doc run` (HEAD)
+### Ensuring claude session before `/agent-doc run`
 
 Right. The full "Run Agent Doc" flow needs to guarantee a claude session exists:
 
@@ -267,7 +267,7 @@ The three bugs to fix:
 3. **Plugin: call `agent-doc route`** instead of separate claim + prompt injection
 
 Shall I implement these fixes in agent-doc? The plugin change can be done after.
-<!-- agent:boundary:d2fb14b9 -->
+<!-- agent:boundary:03ba603a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

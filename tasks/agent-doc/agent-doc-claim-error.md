@@ -421,7 +421,29 @@ v0.27.0 prevents this from happening **going forward**, but it can't undo the se
 **Evidence:** The 4 stashed panes in preflight (`%96, %99, %98, %100 running 'agent-doc'`) are orphaned sessions from before the fix. v0.27.0 keeps them registered now (won't deregister), but they were already orphaned when the old code ran.
 
 To clean up: those stashed panes can be manually killed since their Claude sessions have no active document claim.
-<!-- agent:boundary:cb6e91a4 -->
+I got a file externally modified popup in the JB plugin when I was typing into tasks/software/croky.md. Why?
+### "File externally modified" popup on corky.md (HEAD)
+
+The popup means something wrote to `tasks/software/corky.md` on disk outside of JetBrains' Document API. With IPC working correctly, `agent-doc write` sends patches to the plugin, which applies them via Document API — no external modification dialog.
+
+**Most likely cause: an orphaned stashed session.** The 5 orphaned panes in the stash (`%96, %101, %89, %98, %100` running 'agent-doc') are still running Claude sessions. One of them was likely processing `corky.md` and wrote its response directly to disk. Orphaned sessions may not have a working IPC connection since they're in the stash window with no active plugin association.
+
+**Other possible causes:**
+- `agent-doc commit` boundary reposition falling back to disk write
+- IPC timeout (2s) if the plugin was busy when the write happened
+
+**Fix:** Kill those orphaned stashed panes. They're pre-fix leftovers with no active document claims, and they may be writing to documents you're actively editing:
+
+```bash
+tmux kill-pane -t %96
+tmux kill-pane -t %101
+tmux kill-pane -t %89
+tmux kill-pane -t %98
+tmux kill-pane -t %100
+```
+
+After cleanup, the "externally modified" popups should stop since only the active (IPC-connected) sessions will be writing to documents.
+<!-- agent:boundary:62b250df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -433,4 +455,5 @@ To clean up: those stashed panes can be manually killed since their Claude sessi
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
 - All tasks complete. Stash rescue fix shipped in v0.27.0.
+- [ ] Clean up orphaned stashed panes (%96, %101, %89, %98, %100)
 <!-- /agent:pending -->

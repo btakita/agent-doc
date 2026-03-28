@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Fix committed (658b06b) and installed locally. Ready for end-to-end testing.
+v0.27.0 released to crates.io, PyPI, GitHub. Stash rescue fix verified working.
 <!-- /agent:status -->
 
 ## Exchange
@@ -338,16 +338,33 @@ The fix is now live locally. To test the stash rescue flow:
 3. Switch back → should rescue the stashed pane instead of spawning new
 
 The fix ensures `prune()` doesn't deregister the stashed pane, so `route`'s `rescue_from_stash()` can find and unstash it.
-<!-- agent:boundary:feac8c9c -->
+Seems to be working.
+continue
+release
+### v0.27.0 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** agent-doc v0.27.0 ✓
+- **PyPI:** agent_doc v0.27.0 ✓
+- **GitHub Release:** [v0.27.0](https://github.com/btakita/agent-doc/releases/tag/v0.27.0) with prebuilt binary ✓
+- **cargo install:** `~/.cargo/bin/agent-doc` updated to v0.27.0 ✓
+
+**Changelog:**
+- Socket IPC (Unix domain sockets) with file-based fallback
+- Bulk metadata fetching in resync (20-40 subprocess calls → 3)
+- FFI listener for editor plugins
+- **Fix: don't deregister active stashed panes** — prevents session loss on document switch
+
+Layout issue from preflight confirms fix is working: `stash window 'stash' has non-idle pane %89 running 'agent-doc'` — previously this would have been deregistered and orphaned.
+<!-- agent:boundary:f749f564 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Fix return_stashed_panes_bulk: don't deregister active stashed panes
-- [x] Commit fix in agent-doc submodule (658b06b)
-- [x] Install for local testing
-- [ ] Test stash rescue flow end-to-end
-- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command)
-- [ ] Bump agent-doc version + publish
+- [x] Commit, test, install locally
+- [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
+- [x] cargo install
+- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future
 <!-- /agent:pending -->

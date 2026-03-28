@@ -435,12 +435,40 @@ Great engagement — she's already on an AI journey as an Engineering Manager. T
 **Contacts:** Creating directories for all 7 family members in `mail/contacts/` with LinkedIn profiles and relationship info. Working on it now.
 
 **Note:** The original message still shows as a wall of text (the spacing bug from before the `type` command was implemented). Lynette quoted your message in her reply, so the content landed fine despite the formatting.
-<!-- agent:boundary:93af1b47 -->
+
+Please read the latest from the ohana chat.
+### Re: Latest from OHANA chat (HEAD)
+
+Great engagement — every sister responded!
+
+**New messages since last check:**
+
+| Who | When | Summary |
+|-----|------|---------|
+| **Leanne** | Fri 8:52 AM | Replied about Leilani's hair — "you could tell when a little girl is two or three because of their hair growth" |
+| **Lisa** | Fri 11:09 AM | Wants to explore AI! Will check your YouTube videos. Interested in **AI cat videos** — "I believe Scooter should be an Instagram star!" (4 reactions) |
+| **Laura** | Fri 9:47 PM | Already uses ChatGPT and Grammarly at work for emails and docs. "I'm learning from them as well." |
+| **Laura** | Sat 12:40 PM | Sent 10 photos from last weekend in LA. **Hayley doesn't want photos on social media, but ok to share with family.** |
+| **Henry** | Sat 1:01 PM | "Love these!" (re: Laura's photos) |
+| **You** | Sat 5:37 PM | Replied to Leanne about Leilani's hair taking a while to grow in |
+
+**You're currently drafting a reply to Lisa:** "Totally. I'll look up some" (incomplete in the textbox)
+
+**Opportunities:**
+- **Lisa** is the most actionable — she explicitly wants to see AI cat videos. You could find/share AI cat content or even demo making one with her cat Scooter
+- **Laura** is already in the AI tools world (ChatGPT/Grammarly) — natural bridge to Claude Code for more advanced use cases
+- **Laura's photos** — note the social media restriction on Hayley's photos. Family-only sharing.
+
+Want me to help you finish the reply to Lisa, or work on something else?
+<!-- agent:boundary:4a624bc6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [active] Creating 7 family contacts in mail/contacts/
+- Lisa interested in AI cat videos for Scooter — follow up
+- Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code
+- Laura's LA photos — Hayley social media restriction noted
 <!-- /agent:pending -->

@@ -219,7 +219,7 @@ So I don't think anything will come of it.
 
 Understood — removing the Eric Yang bullet from the draft. Updated v5 below with that line dropped:
 
-### Draft Reply to Melissa (v5) (HEAD)
+### Draft Reply to Melissa (v5)
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request — would be great to connect there too.
 >
@@ -239,7 +239,7 @@ Understood — removing the Eric Yang bullet from the draft. Updated v5 below wi
 > On a related note — I've been thinking about the Wedding Insider Network app we discussed last year. The cost equation for building custom software has completely changed with agent harnesses. What used to require a large budget and a full dev team can now be done at a fraction of the cost and time. Might be worth revisiting when you're ready.
 >
 > So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:675dc776 -->
+<!-- agent:boundary:930c13c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

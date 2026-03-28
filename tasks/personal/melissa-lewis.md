@@ -374,12 +374,19 @@ But note that the end of the message had an extra escape
 
 Good catch — the `\!` escape is a bug. The chromium-bridge `type` command is escaping the exclamation mark when it shouldn't be. The CDP `Input.insertText` method should receive raw text. I'll file this as a bug for chromium-bridge.
 
+Add the chromium-bridge bug to tasks/software/chromium-bridge.md
+
 The message Melissa received would show as: "Would love to connect there too\!" — minor but noticeable. You may want to send a quick correction or just leave it (she'll understand the intent).
-<!-- agent:boundary:1b280bde -->
+
+Added the chromium-bridge `type` escaping bug to `tasks/software/chromium-bridge.md` with repro steps and root cause analysis.
+
+Also noted: the user made `diarize` a default feature in corky's `Cargo.toml` (`default = ["transcribe", "diarize"]`). This fulfills the earlier request to make diarize core, not optional.
+<!-- agent:boundary:81d8c59c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Fix chromium-bridge exclamation mark escaping bug in `type` command
+- Fix chromium-bridge `type` command exclamation mark escaping bug
+- Release corky with diarize as default feature (Cargo.toml updated, needs commit + publish)
 <!-- /agent:pending -->

@@ -331,5 +331,36 @@ Added to `tasks/software/corky.md` pending section:
 - CLI: `corky contact push [google]` — no platform arg = push to all
 
 This is a separate session task. Want me to start implementing it now in corky, or come back to it later?
-<!-- agent:boundary:dfe17bb1 -->
+
+Let's work on the email. Assume that Anil did not read the LinkedIn message. So let's have our email include agent-doc and it being inspired by the Tenfore project at Neo Innovation.
+### Draft email to Anil Podduturi (anil@rickshaw.cm) (HEAD)
+
+**Subject:** Tenfore's document-as-interface — I built the next version
+
+> Hi Anil,
+>
+> Brian Takita here — we worked together at Neo Innovation on the Tenfore project. You managed the product side; I built the document-as-interface system.
+>
+> That work stuck with me. I've spent the last year building **agent-doc** — an AI-powered evolution of the same concept. Instead of collaborative document editing between humans, the document itself becomes the interface between a human and an AI agent. The user edits a markdown file, the agent responds inline, and the document grows into a living session with full git history. It's the Tenfore vision taken to its logical conclusion.
+>
+> I also built **corky**, a correspondence automation toolkit in Rust — email drafting, transcription with speaker diarization, social media posting, calendar management. Both tools ship as Claude Code skills that run inside a terminal agent loop.
+>
+> I noticed you're CPO at BCG X, leading AI products — and that your focus areas (GenAI, Agent Systems, Forward-Deployed Teams) overlap with exactly what I've been building. I'm also in the pipeline for Project Helix through Inspyr Solutions — Tony Tomai suggested I reach out directly.
+>
+> Would love to catch up if you have a few minutes. Happy to demo agent-doc — it's the kind of thing that's easier to show than describe.
+>
+> Best,
+> Brian
+
+**Why this version works:**
+- **Leads with shared history** — Tenfore is the hook, not the job ask
+- **agent-doc story arc** — Tenfore → agent-doc is a compelling narrative Anil can immediately grasp
+- **"I built the next version"** — positions you as the person who took the idea further
+- **Demo offer** — gives Anil a reason to respond beyond "nice to hear from you"
+- **Project Helix near the end** — reconnection first, job context second
+
+**Send to:** `anil@rickshaw.cm` (confirmed from anilpod.com)
+
+Ready to send via corky, or want to adjust the draft first?
+<!-- agent:boundary:b1db6c48 -->
 <!-- /agent:exchange -->

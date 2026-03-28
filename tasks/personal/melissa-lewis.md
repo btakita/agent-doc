@@ -37,7 +37,7 @@ Both have `CLAUDE.md -> AGENTS.md` symlinks. LinkedIn profiles couldn't be fetch
 
 Use chromium-bridge to fetch profiles.
 
-### LinkedIn Profiles Fetched via chromium-bridge (HEAD)
+### LinkedIn Profiles Fetched via chromium-bridge
 
 Updated both contact files with LinkedIn data:
 
@@ -55,7 +55,7 @@ Updated both contact files with LinkedIn data:
 - Website: www.brookebrodack.net
 - Open to work: ESL Teacher, Video Streamer, Artist roles
 - 451 connections
-<!-- agent:boundary:dacadf30 -->
+<!-- agent:boundary:241f802a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -784,7 +784,7 @@ Should I send another asking about the status?
 - Still connects to ECI's multi-product scaling needs
 - Keeps the demo offer as a soft CTA
 
-### Re: Follow-up status check (HEAD)
+### Re: Follow-up status check
 
 Message sent — good. On sending another asking about status: **hold off for now.** You just sent the eval tooling update, so a status check immediately after would feel pushy.
 
@@ -793,7 +793,7 @@ Message sent — good. On sending another asking about status: **hold off for no
 > Hi Justin — just checking in on next steps. Happy to work on the Markdown challenge whenever it's ready.
 
 Short, low-pressure, references the specific next step he mentioned (challenge file + job description via email).
-<!-- agent:boundary:09b71e72 -->
+<!-- agent:boundary:f6ab044f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

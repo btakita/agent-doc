@@ -322,7 +322,7 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 
 This time it won't need browser auth — the token is already stored.
 Enabled.
-### Contact Push — Success (HEAD)
+### Contact Push — Success
 
 ```
 Pushing 1 contacts to Google...
@@ -332,7 +332,7 @@ Done: 1 created, 0 updated, 0 errors
 ```
 
 Anil Podduturi is now in your Google Contacts with name + LinkedIn URL. The `resourceName` is tracked in `.people-sync-state.json` — future pushes will update instead of creating duplicates.
-<!-- agent:boundary:912d8205 -->
+<!-- agent:boundary:505c14db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

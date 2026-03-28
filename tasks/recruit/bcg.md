@@ -436,6 +436,7 @@ Should I mention tmux-router or is that too low level for this discussion?
 > The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
 
 This CRDT workflow can also apply to any document technology. mdx, Notion, MS Office, etc.
+Should I mention my linkedin posts of my YouTube videos + blog postse/ 
 ### tmux-router: skip it
 
 **Too low-level for this email.** tmux-router is plumbing — session routing across terminal panes. Anil cares about the user-facing paradigm (document-as-interface) and the alignment story. Save tmux-router for the demo.
@@ -451,5 +452,17 @@ You're right — the CRDT merge pattern is format-agnostic (MDX, Notion, MS Offi
 **Both are excellent demo/call material.** The email's job: get Anil to respond. The demo is where you show the depth.
 
 Draft v3 stands as-is. Ready to send?
-<!-- agent:boundary:bc92fae6 -->
+### LinkedIn / YouTube / blog posts: not in this email (HEAD)
+
+Same reasoning — **no links.** Every link is a potential off-ramp where Anil thinks "I'll look at this later" and never comes back.
+
+**The content hierarchy:**
+1. **Email (now)** — narrative hook only. No links. Get a response.
+2. **Reply / call** — demo agent-doc live, mention YouTube videos, share 1-2 posts
+3. **Follow-up** — LinkedIn posts, blog, deeper technical content
+
+**Rule of thumb:** If the recipient has to click something to understand your value, the email didn't do its job. The Tenfore → agent-doc story + alignment framing is self-contained.
+
+Draft v3 stands. Ready to send?
+<!-- agent:boundary:1f39d62b -->
 <!-- /agent:exchange -->

@@ -528,5 +528,19 @@ It is 16:50 Eastern on a Saturday. Should I send now or wait?
 Phone number in signature is a good add — makes it easy for him to text or call directly.
 
 Sending now via corky to Gmail Drafts for your review.
-<!-- agent:boundary:b6fd33e4 -->
+
+What is `rickshaw.cm`? Who owns it?
+### rickshaw.cm (HEAD)
+
+**.cm** = Cameroon country code TLD (vanity domain, like .io or .co).
+
+**rickshaw.cm is Anil's personal domain:**
+- MX records → **Google** (aspmx.l.google.com) — email runs through Google Workspace
+- No website — domain is email-only
+- Listed as his contact on anilpod.com
+
+"Rickshaw" is likely a personal brand reference. The domain is his personal email infrastructure, separate from BCG.
+
+**For our purposes:** Email will land in a Google-hosted inbox. Delivery is reliable. The draft is in your Gmail — ready to review and send.
+<!-- agent:boundary:24adc968 -->
 <!-- /agent:exchange -->

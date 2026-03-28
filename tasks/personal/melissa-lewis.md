@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-New session — awaiting first input.
+Session cleared.
 <!-- /agent:status -->
 
 ## Exchange
@@ -52,7 +52,10 @@ Acknowledged — added to pending. I can start implementing the bulk pane query 
 Transfer to /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-claim-error.md
 
 Transferred bug details to `tasks/agent-doc/agent-doc-claim-error.md` — full root cause analysis, affected files, and 4-step fix plan are documented there. Removed from this doc's pending.
-<!-- agent:boundary:1ab861e6 -->
+Clear this session
+
+Session cleared. Write in the exchange to start a new topic.
+<!-- agent:boundary:8f4762c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

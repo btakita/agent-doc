@@ -422,7 +422,7 @@ v0.27.0 prevents this from happening **going forward**, but it can't undo the se
 
 To clean up: those stashed panes can be manually killed since their Claude sessions have no active document claim.
 I got a file externally modified popup in the JB plugin when I was typing into tasks/software/croky.md. Why?
-### "File externally modified" popup on corky.md (HEAD)
+### "File externally modified" popup on corky.md
 
 The popup means something wrote to `tasks/software/corky.md` on disk outside of JetBrains' Document API. With IPC working correctly, `agent-doc write` sends patches to the plugin, which applies them via Document API — no external modification dialog.
 
@@ -443,7 +443,7 @@ tmux kill-pane -t %100
 ```
 
 After cleanup, the "externally modified" popups should stop since only the active (IPC-connected) sessions will be writing to documents.
-<!-- agent:boundary:62b250df -->
+<!-- agent:boundary:7e40cbae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

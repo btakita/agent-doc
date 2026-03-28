@@ -1,6 +1,5 @@
 ---
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
 ---

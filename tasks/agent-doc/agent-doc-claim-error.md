@@ -70,7 +70,7 @@ Implement
 continue:
 - [ ] tmux-router 0.4: Add `alive_pane_ids()` bulk method, update dep
 
-### tmux-router 0.3.1 published (HEAD)
+### tmux-router 0.3.1 published
 
 **Done.** Added `alive_pane_ids()` bulk method to tmux-router and published v0.3.1.
 
@@ -85,7 +85,7 @@ continue:
 - After: 3 total (1 `list-panes -a` in registry prune, 1 `list-windows -a` in resync, 1 `list-panes -a` in resync)
 
 All 4 optimizations complete.
-<!-- agent:boundary:81437ef1 -->
+<!-- agent:boundary:5d20713d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

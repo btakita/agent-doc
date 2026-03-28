@@ -32,6 +32,7 @@ pub mod crdt;
 pub mod debounce;
 pub mod ffi;
 pub mod frontmatter;
+pub mod ipc_socket;
 pub mod merge;
 pub mod template;
 

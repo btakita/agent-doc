@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.sun.jna.Pointer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
@@ -30,6 +31,7 @@ import java.nio.file.WatchService
 class PatchWatcher(private val project: Project) : Disposable {
 
     private var watchThread: Thread? = null
+    private var ipcCallback: AgentDocLib.IpcMessageCallback? = null
     @Volatile private var running = false
 
     fun start() {
@@ -42,6 +44,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (running) return
         running = true
 
+        // Start file-based IPC watcher (fallback when FFI unavailable)
         watchThread = Thread({
             try {
                 watchLoop(patchesDir.toPath())
@@ -57,8 +60,43 @@ class PatchWatcher(private val project: Project) : Disposable {
             start()
         }
 
+        // Start socket-based IPC listener via FFI (v0.27, primary)
+        startSocketListenerViaFfi(basePath)
+
         // Process any existing patch files on startup
         processPendingPatches(patchesDir)
+    }
+
+    /**
+     * Start socket IPC listener via FFI.
+     * The callback dispatches messages to the EDT for Document API operations.
+     * Keeps a strong reference to the callback to prevent GC.
+     */
+    private fun startSocketListenerViaFfi(basePath: String) {
+        val lib = AgentDocLib.get()
+        if (lib == null) {
+            LOG.info("[socket] FFI unavailable, socket listener not started (file-based IPC only)")
+            return
+        }
+
+        ipcCallback = object : AgentDocLib.IpcMessageCallback {
+            override fun invoke(message: Pointer): Boolean {
+                return try {
+                    val json = message.getString(0)
+                    handleSocketMessage(json)
+                } catch (e: Exception) {
+                    LOG.warn("[socket] callback error", e)
+                    false
+                }
+            }
+        }
+
+        val started = lib.agent_doc_start_ipc_listener(basePath, ipcCallback!!)
+        if (started) {
+            LOG.info("[socket] IPC listener started via FFI for $basePath")
+        } else {
+            LOG.warn("[socket] Failed to start IPC listener via FFI")
+        }
     }
 
     private fun watchLoop(dir: Path) {
@@ -112,6 +150,67 @@ class PatchWatcher(private val project: Project) : Disposable {
         for (file in files) {
             processPatchFile(file)
         }
+    }
+
+    /**
+     * Handle a socket IPC message from the FFI listener.
+     * Called on the FFI listener thread — dispatches to EDT for Document API operations.
+     * Returns true if handled, false on error.
+     */
+    private fun handleSocketMessage(json: String): Boolean {
+        val type = extractStringField(json, "type") ?: return false
+
+        return when (type) {
+            "patch" -> {
+                val patch = parsePatchJson(json) ?: return false
+                var applied = false
+                ApplicationManager.getApplication().invokeAndWait {
+                    applied = try {
+                        applyPatch(patch)
+                    } catch (e: Exception) {
+                        LOG.warn("[socket] Failed to apply patch", e)
+                        false
+                    }
+                }
+                applied
+            }
+            "reposition" -> {
+                val file = extractStringField(json, "file") ?: return false
+                ApplicationManager.getApplication().invokeAndWait {
+                    repositionBoundaryViaDocument(file)
+                }
+                true
+            }
+            "vcs_refresh" -> {
+                refreshVcs()
+                true
+            }
+            else -> {
+                LOG.warn("[socket] Unknown message type: $type")
+                false
+            }
+        }
+    }
+
+    /**
+     * Reposition boundary marker in a document via Document API.
+     * Used by socket IPC "reposition" messages.
+     */
+    private fun repositionBoundaryViaDocument(filePath: String) {
+        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
+        targetFile.refresh(false, false)
+        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return
+
+        WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
+            val content = document.text
+            val result = NativePatching.repositionBoundaryToEnd(content)
+                ?: repositionBoundaryToEnd(content, "exchange")
+                ?: return@runWriteCommandAction
+            if (result != content) {
+                document.setText(result)
+            }
+        })
+        FileDocumentManager.getInstance().saveDocument(document)
     }
 
     private fun processPatchFile(patchFile: File) {
@@ -692,6 +791,12 @@ class PatchWatcher(private val project: Project) : Disposable {
         running = false
         watchThread?.interrupt()
         watchThread = null
+        // Stop FFI socket listener (removes socket file, unblocks accept)
+        val basePath = project.basePath
+        if (basePath != null) {
+            try { AgentDocLib.get()?.agent_doc_stop_ipc_listener(basePath) } catch (_: Exception) {}
+        }
+        ipcCallback = null
     }
 
     companion object {

@@ -178,12 +178,17 @@ pub fn prune() -> Result<usize> {
     if removed > 0 {
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
+
+    // Fetch all metadata once (2 subprocess calls total instead of ~20-40)
+    let windows = fetch_all_window_metadata(&tmux);
+    let panes = fetch_all_pane_metadata(&tmux);
+
     // Return active panes from stash, then purge idle stash panes.
     // SAFETY: Only touch stash windows here. Never purge non-stash agent panes
     // in the automatic path — that can kill active sessions in other windows.
-    return_stashed_panes(&tmux);
-    purge_stash_windows(&tmux);
-    purge_unregistered_stash_panes(&tmux);
+    return_stashed_panes_bulk(&tmux, &windows, &panes);
+    purge_stash_windows_bulk(&tmux, &windows, &panes);
+    purge_unregistered_stash_panes_bulk(&tmux, &windows, &panes);
     Ok(removed)
 }
 
@@ -477,6 +482,300 @@ fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionR
     if returned > 0 {
         eprintln!("resync: returned {} stashed pane(s) to their sessions", returned);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk variants — use pre-fetched metadata instead of per-item subprocess calls
+// ---------------------------------------------------------------------------
+
+/// Type aliases for bulk metadata.
+type WindowMeta = Vec<(String, String, String, String)>; // (window_id, window_name, session_name, activity)
+type PaneMeta = std::collections::HashMap<String, (String, String, String)>; // pane_id → (window_id, window_name, cmd)
+
+/// Fetch all window metadata in a single subprocess call.
+fn fetch_all_window_metadata(tmux: &Tmux) -> WindowMeta {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-windows", "-a", "-F",
+            "#{window_id}\t#{window_name}\t#{session_name}\t#{window_activity}",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|line| {
+                    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+                    if parts.len() >= 4 {
+                        Some((
+                            parts[0].to_string(), parts[1].to_string(),
+                            parts[2].to_string(), parts[3].to_string(),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Fetch all pane metadata in a single subprocess call.
+fn fetch_all_pane_metadata(tmux: &Tmux) -> PaneMeta {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-panes", "-a", "-F",
+            "#{pane_id}\t#{window_id}\t#{window_name}\t#{pane_current_command}",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|line| {
+                    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+                    if parts.len() >= 4 {
+                        Some((
+                            parts[0].to_string(),
+                            (parts[1].to_string(), parts[2].to_string(), parts[3].to_string()),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        _ => std::collections::HashMap::new(),
+    }
+}
+
+/// Bulk variant of `purge_stash_windows` — uses pre-fetched metadata.
+fn purge_stash_windows_bulk(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    for (window_id, window_name, _session_name, activity_str) in windows {
+        if window_name != "stash" {
+            continue;
+        }
+
+        // Grace period
+        if let Ok(activity) = activity_str.parse::<u64>()
+            && now.saturating_sub(activity) < 30
+        {
+            continue;
+        }
+
+        // Check all panes in this window are idle (from pre-fetched metadata)
+        let all_idle = panes
+            .iter()
+            .filter(|(_, (wid, _, _))| wid == window_id)
+            .all(|(_, (_, _, cmd))| IDLE_SHELLS.contains(&cmd.as_str()));
+
+        // Also check there ARE panes in this window
+        let has_panes = panes.iter().any(|(_, (wid, _, _))| wid == window_id);
+
+        if has_panes && all_idle {
+            if let Err(e) = tmux
+                .cmd()
+                .args(["kill-window", "-t", window_id])
+                .output()
+            {
+                eprintln!("resync: failed to purge stash window {}: {}", window_id, e);
+            } else {
+                eprintln!("resync: purged stash window {} (all panes idle)", window_id);
+            }
+        }
+    }
+}
+
+/// Bulk variant of `purge_unregistered_stash_panes` — uses pre-fetched metadata.
+fn purge_unregistered_stash_panes_bulk(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+) {
+    let registry = sessions::load().unwrap_or_default();
+    let registered_panes: std::collections::HashSet<&str> = registry
+        .values()
+        .map(|e| e.pane.as_str())
+        .collect();
+
+    let mut killed_count = 0;
+
+    // Find stash windows from pre-fetched window metadata
+    let stash_windows: std::collections::HashSet<&str> = windows
+        .iter()
+        .filter(|(_, wname, _, _)| is_stash_window_name(wname))
+        .map(|(wid, _, _, _)| wid.as_str())
+        .collect();
+
+    // Find panes in stash windows that are unregistered
+    for (pane_id, (window_id, _window_name, cmd)) in panes {
+        if !stash_windows.contains(window_id.as_str()) {
+            continue;
+        }
+        if registered_panes.contains(pane_id.as_str()) {
+            continue;
+        }
+        if IDLE_SHELLS.contains(&cmd.as_str()) || AGENT_PROCESSES.contains(&cmd.as_str()) {
+            if let Err(e) = tmux.kill_pane(pane_id) {
+                eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
+            } else {
+                killed_count += 1;
+            }
+        }
+    }
+
+    if killed_count > 0 {
+        eprintln!("resync: purged {} orphaned stash pane(s)", killed_count);
+    }
+}
+
+/// Bulk variant of `return_stashed_panes` — uses pre-fetched metadata.
+/// Also deregisters stranded panes when no return target is found, preventing
+/// repeated expensive lookups on subsequent cycles.
+fn return_stashed_panes_bulk(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+) {
+    let registry = sessions::load().unwrap_or_default();
+    let pane_to_entry: std::collections::HashMap<&str, (&str, &sessions::SessionEntry)> = registry
+        .iter()
+        .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
+        .collect();
+
+    // Find stash windows from pre-fetched metadata
+    let stash_windows: std::collections::HashSet<&str> = windows
+        .iter()
+        .filter(|(_, wname, _, _)| is_stash_window_name(wname))
+        .map(|(wid, _, _, _)| wid.as_str())
+        .collect();
+
+    let mut returned = 0;
+    let mut deregistered = Vec::new();
+
+    for (pane_id, (window_id, _window_name, cmd)) in panes {
+        if !stash_windows.contains(window_id.as_str()) {
+            continue;
+        }
+        if IDLE_SHELLS.contains(&cmd.as_str()) {
+            continue;
+        }
+
+        let (key, entry) = match pane_to_entry.get(pane_id.as_str()) {
+            Some(pair) => *pair,
+            None => continue,
+        };
+
+        // Use bulk metadata for find_return_target instead of per-pane subprocess calls
+        let target = find_return_target_bulk(entry, windows, panes);
+        let target = match target {
+            Some(t) => t,
+            None => {
+                eprintln!(
+                    "resync: cannot return stashed pane {} ({}): no valid target found — deregistering",
+                    pane_id, key
+                );
+                deregistered.push(key.to_string());
+                continue;
+            }
+        };
+
+        match tmux.join_pane(pane_id, &target, "-dv") {
+            Ok(()) => {
+                eprintln!(
+                    "resync: returned stashed pane {} ({}, running '{}') to window {}",
+                    pane_id, key, cmd, target
+                );
+                returned += 1;
+            }
+            Err(e) => {
+                eprintln!(
+                    "resync: failed to return stashed pane {} to {}: {}",
+                    pane_id, target, e
+                );
+            }
+        }
+    }
+
+    // Deregister stranded panes so they don't retry every cycle
+    if !deregistered.is_empty()
+        && let Ok(mut reg) = sessions::load()
+    {
+        for key in &deregistered {
+            reg.remove(key);
+        }
+        if let Err(e) = sessions::save(&reg) {
+            eprintln!("resync: failed to save registry after deregister: {}", e);
+        } else {
+            eprintln!("resync: deregistered {} stranded pane(s)", deregistered.len());
+        }
+    }
+
+    if returned > 0 {
+        eprintln!("resync: returned {} stashed pane(s) to their sessions", returned);
+    }
+}
+
+/// Bulk variant of `find_return_target` — uses pre-fetched metadata instead of subprocess calls.
+fn find_return_target_bulk(
+    entry: &sessions::SessionEntry,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+) -> Option<String> {
+    // 1. Try the original window from the registry entry
+    if !entry.window.is_empty() {
+        // Check if any pane exists in the original window
+        let window_panes: Vec<&String> = panes
+            .iter()
+            .filter(|(_, (wid, _, _))| wid == &entry.window)
+            .map(|(pid, _)| pid)
+            .collect();
+
+        if !window_panes.is_empty()
+            && let Some((_, wname, _)) = panes.get(window_panes[0])
+            && !is_stash_window_name(wname)
+        {
+            return Some(window_panes[0].clone());
+        }
+    }
+
+    // 2. Try to find the tmux session from frontmatter
+    let session_name = if !entry.file.is_empty() {
+        std::fs::read_to_string(&entry.file)
+            .ok()
+            .and_then(|content| {
+                let (fm, _) = frontmatter::parse(&content).ok()?;
+                fm.tmux_session
+            })
+    } else {
+        None
+    };
+
+    if let Some(ref sess) = session_name {
+        // Find first non-stash window in this session from pre-fetched metadata
+        for (window_id, window_name, session, _) in windows {
+            if session == sess && !is_stash_window_name(window_name) {
+                // Return first pane in this window
+                if let Some((pid, _)) = panes.iter().find(|(_, (wid, _, _))| wid == window_id) {
+                    return Some(pid.clone());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Find a target pane to return a stashed pane to.

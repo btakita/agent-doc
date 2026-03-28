@@ -840,15 +840,12 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     Ok(())
 }
 
-/// Attempt to write via IPC (file-based patch for IDE plugin consumption).
+/// Attempt to write via IPC (socket-first, file-based fallback).
 ///
-/// Writes a JSON patch file to `.agent-doc/patches/` and polls for the plugin
-/// to consume it (delete the file as ACK). Returns `Ok(true)` if the plugin
-/// consumed the patch, `Ok(false)` if it timed out (caller should fall back
-/// to direct write).
-///
-/// This is safe to call unconditionally — if no plugin is active, it simply
-/// returns `false` after a short timeout.
+/// First tries socket IPC via `ipc_socket::send_message()` for lowest latency.
+/// Falls back to file-based IPC (JSON patch in `.agent-doc/patches/`) if socket
+/// is unavailable. Returns `Ok(true)` if either path succeeded, `Ok(false)` if
+/// no plugin is active.
 pub fn try_ipc(
     file: &Path,
     patches: &[crate::template::PatchBlock],
@@ -861,81 +858,61 @@ pub fn try_ipc(
     let hash = snapshot::doc_hash(file)?;
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    // Try socket IPC first (lower latency, no inotify)
+    if crate::ipc_socket::is_listener_active(&project_root) {
+        let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched)?;
+        let mut socket_payload = serde_json::json!({
+            "type": "patch",
+            "file": canonical.to_string_lossy(),
+            "patches": ipc_patches_json,
+            "unmatched": unmatched.trim(),
+            "baseline": baseline.unwrap_or(""),
+            "reposition_boundary": true,
+        });
+        if let Some(yaml) = frontmatter_yaml {
+            socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
+        }
+        match crate::ipc_socket::send_message(&project_root, &socket_payload) {
+            Ok(Some(_ack)) => {
+                eprintln!("[write] socket IPC patch delivered");
+                // Save snapshot — use content_ours (baseline + response) when available
+                let snap_content = if let Some(ours) = content_ours {
+                    ours.to_string()
+                } else {
+                    std::fs::read_to_string(file)
+                        .with_context(|| format!("failed to read {} after socket IPC", file.display()))?
+                };
+                snapshot::save(file, &snap_content)?;
+                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+                return Ok(true);
+            }
+            Ok(None) => {
+                eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
+            }
+            Err(e) => {
+                eprintln!("[write] socket IPC failed: {} — falling back to file IPC", e);
+            }
+        }
+    }
+
     let patches_dir = project_root.join(".agent-doc/patches");
 
-    // Only attempt IPC if the patches directory exists (plugin has started)
+    // Only attempt file-based IPC if the patches directory exists (plugin has started)
     if !patches_dir.exists() {
         return Ok(false);
     }
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Read current document and reposition boundary to end of exchange.
-    // This matches the pre-patch step in template::apply_patches_with_overrides():
-    // without this, the boundary stays above the user's new prompt, and the
-    // response would be inserted before it (prompt ordering bug).
-    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
-
-    // Separate frontmatter patch from component patches.
-    // For append-mode components without a boundary, set ensure_boundary flag
-    // so the plugin inserts one via Document API (no disk write, no cache conflict).
-    let mut ipc_patches: Vec<serde_json::Value> = patches
-        .iter()
-        .filter(|p| p.name != "frontmatter")
-        .map(|p| {
-            let mut patch_json = serde_json::json!({
-                "component": p.name,
-                "content": p.content,
-            });
-            if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
-                patch_json["boundary_id"] = serde_json::Value::String(bid);
-            } else if is_append_mode_component(&p.name) {
-                // No boundary on disk — tell plugin to insert one
-                patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
-            }
-            patch_json
-        })
-        .collect();
-
-    // When no explicit patches exist but unmatched content needs to go to exchange,
-    // synthesize an exchange patch so the plugin uses boundary-aware insertion.
-    let mut effective_unmatched = unmatched.trim().to_string();
-    if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
-        // Check if there's an exchange/output component with a boundary
-        for target in &["exchange", "output"] {
-            if let Some(bid) = find_boundary_id(&current_doc, target) {
-                eprintln!(
-                    "[write] synthesizing {} patch for unmatched content (boundary {})",
-                    target, &bid[..8.min(bid.len())]
-                );
-                ipc_patches.push(serde_json::json!({
-                    "component": target,
-                    "content": effective_unmatched,
-                    "boundary_id": bid,
-                }));
-                effective_unmatched = String::new();
-                break;
-            } else if is_append_mode_component(target) {
-                eprintln!(
-                    "[write] synthesizing {} patch for unmatched content (ensure_boundary)",
-                    target
-                );
-                ipc_patches.push(serde_json::json!({
-                    "component": target,
-                    "content": effective_unmatched,
-                    "ensure_boundary": true,
-                }));
-                effective_unmatched = String::new();
-                break;
-            }
-        }
-    }
+    // Build patches using shared helper (same logic as socket path)
+    let ipc_patches = build_ipc_patches_json(file, patches, unmatched)?;
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
-        "unmatched": effective_unmatched,
+        "unmatched": unmatched.trim(),
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
@@ -959,12 +936,39 @@ pub fn try_ipc_full_content(
     content: &str,
 ) -> Result<bool> {
     let canonical = file.canonicalize()?;
-    let hash = snapshot::doc_hash(file)?;
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    // Try socket IPC first
+    if crate::ipc_socket::is_listener_active(&project_root) {
+        let socket_payload = serde_json::json!({
+            "type": "patch",
+            "file": canonical.to_string_lossy(),
+            "patches": [],
+            "unmatched": "",
+            "fullContent": content,
+        });
+        match crate::ipc_socket::send_message(&project_root, &socket_payload) {
+            Ok(Some(_ack)) => {
+                eprintln!("[write] socket IPC full content delivered");
+                snapshot::save(file, content)?;
+                let crdt_doc = crate::crdt::CrdtDoc::from_text(content);
+                snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+                return Ok(true);
+            }
+            Ok(None) => {
+                eprintln!("[write] socket IPC full content sent but no ack — falling back to file IPC");
+            }
+            Err(e) => {
+                eprintln!("[write] socket IPC full content failed: {} — falling back to file IPC", e);
+            }
+        }
+    }
+
+    let hash = snapshot::doc_hash(file)?;
     let patches_dir = project_root.join(".agent-doc/patches");
 
-    // Only attempt IPC if the patches directory exists (plugin has started)
+    // Only attempt file-based IPC if the patches directory exists (plugin has started)
     if !patches_dir.exists() {
         return Ok(false);
     }
@@ -996,12 +1000,29 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    // Try socket IPC first
+    if crate::ipc_socket::is_listener_active(&project_root) {
+        match crate::ipc_socket::send_reposition(
+            &project_root,
+            &canonical.to_string_lossy(),
+        ) {
+            Ok(true) => {
+                eprintln!("[commit] socket IPC reposition boundary sent");
+                return true;
+            }
+            _ => {
+                eprintln!("[commit] socket IPC reposition failed — falling back to file IPC");
+            }
+        }
+    }
+
     let hash = match snapshot::doc_hash(file) {
         Ok(h) => h,
         Err(_) => return false,
     };
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let patches_dir = project_root.join(".agent-doc/patches");
 
     if !patches_dir.exists() {
@@ -1143,6 +1164,70 @@ fn write_ipc_and_poll(
     eprintln!("[write] IPC timeout ({}s) — falling back to direct write", timeout.as_secs());
     let _ = std::fs::remove_file(patch_file);
     Ok(false)
+}
+
+/// Build the IPC patches JSON array (shared between socket and file-based paths).
+///
+/// Reads the document to find boundary IDs, filters frontmatter patches,
+/// synthesizes exchange patches for unmatched content.
+fn build_ipc_patches_json(
+    file: &Path,
+    patches: &[crate::template::PatchBlock],
+    unmatched: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
+    let current_doc = template::reposition_boundary_to_end_with_summary(
+        &raw_doc,
+        file.file_stem().and_then(|s| s.to_str()),
+    );
+
+    let mut ipc_patches: Vec<serde_json::Value> = patches
+        .iter()
+        .filter(|p| p.name != "frontmatter")
+        .map(|p| {
+            let mut patch_json = serde_json::json!({
+                "component": p.name,
+                "content": p.content,
+            });
+            if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
+                patch_json["boundary_id"] = serde_json::Value::String(bid);
+            } else if is_append_mode_component(&p.name) {
+                patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
+            }
+            patch_json
+        })
+        .collect();
+
+    let effective_unmatched = unmatched.trim().to_string();
+    if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
+        for target in &["exchange", "output"] {
+            if let Some(bid) = find_boundary_id(&current_doc, target) {
+                eprintln!(
+                    "[write] synthesizing {} patch for unmatched content (boundary {})",
+                    target, &bid[..8.min(bid.len())]
+                );
+                ipc_patches.push(serde_json::json!({
+                    "component": target,
+                    "content": &effective_unmatched,
+                    "boundary_id": bid,
+                }));
+                break;
+            } else if is_append_mode_component(target) {
+                eprintln!(
+                    "[write] synthesizing {} patch for unmatched content (ensure_boundary)",
+                    target
+                );
+                ipc_patches.push(serde_json::json!({
+                    "component": target,
+                    "content": &effective_unmatched,
+                    "ensure_boundary": true,
+                }));
+                break;
+            }
+        }
+    }
+
+    Ok(ipc_patches)
 }
 
 // ---------------------------------------------------------------------------

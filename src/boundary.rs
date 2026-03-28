@@ -42,11 +42,17 @@ use crate::component;
 use crate::snapshot;
 
 /// Signal the IDE plugin to refresh the file from disk.
-/// Uses the same patches directory as IPC, writing a VCS refresh signal
-/// that the PatchWatcher picks up and triggers a VFS refresh.
+/// Tries socket IPC first, falls back to file-based signal.
 fn signal_editor_refresh(file: &Path) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     if let Some(root) = snapshot::find_project_root(&canonical) {
+        // Try socket IPC first
+        if crate::ipc_socket::is_listener_active(&root)
+            && crate::ipc_socket::send_vcs_refresh(&root).unwrap_or(false)
+        {
+            return;
+        }
+        // Fall back to file-based signal
         let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
         if signal.parent().is_some_and(|p| p.exists()) {
             let _ = std::fs::write(&signal, "boundary-refresh");

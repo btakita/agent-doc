@@ -159,6 +159,7 @@ pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
 
 /// Start a socket listener (for use by the FFI library / plugin).
 /// This blocks the calling thread — run it on a background thread.
+#[allow(unreachable_code)]
 pub fn start_listener<F>(project_root: &Path, handler: F) -> Result<()>
 where
     F: Fn(&str) -> Option<String> + Send + 'static,
@@ -190,13 +191,13 @@ where
 
                 while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        if let Some(response) = handler(trimmed) {
-                            let mut resp = response;
-                            resp.push('\n');
-                            let _ = writer_half.write_all(resp.as_bytes());
-                            let _ = writer_half.flush();
-                        }
+                    if !trimmed.is_empty()
+                        && let Some(response) = handler(trimmed)
+                    {
+                        let mut resp = response;
+                        resp.push('\n');
+                        let _ = writer_half.write_all(resp.as_bytes());
+                        let _ = writer_half.flush();
                     }
                     line.clear();
                 }
@@ -206,8 +207,6 @@ where
             }
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

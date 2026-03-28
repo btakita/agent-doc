@@ -279,7 +279,7 @@ Please transcribe and diarize these phone calls:
 
 Note that [phone_20260328-000319_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr) is a 3 way call with judith-krug, robert-ward, brian-takita
 
-### Transcription in Progress (Mar 21–28 Calls) (HEAD)
+### Transcription in Progress (Mar 21–28 Calls)
 
 Noted the frontmatter changes (`agent_doc_format: template`, `agent_doc_write: crdt`).
 
@@ -297,5 +297,5 @@ Transcribing 18 unique phone calls from Mar 21–28. Using Whisper large-v3-turb
 - Plus 12 more files queued
 
 Summaries will be added once all transcriptions complete. Run `/agent-doc tasks/personal/robert-ward.md` again after ~30 min to get the full results.
-<!-- agent:boundary:af7d04fe -->
+<!-- agent:boundary:7d207099 -->
 <!-- /agent:exchange -->

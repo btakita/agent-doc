@@ -464,5 +464,5 @@ Same reasoning — **no links.** Every link is a potential off-ramp where Anil t
 **Rule of thumb:** If the recipient has to click something to understand your value, the email didn't do its job. The Tenfore → agent-doc story + alignment framing is self-contained.
 
 Draft v3 stands. Ready to send?
-<!-- agent:boundary:97f0993a -->
+<!-- agent:boundary:108f57c9 -->
 <!-- /agent:exchange -->

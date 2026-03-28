@@ -326,7 +326,7 @@ Ready to commit from within the submodule. Want me to bump version and publish, 
 commit
 test
 install for local testing
-### Committed and installed (HEAD)
+### Committed and installed
 
 1. **Tests:** `make check` — 38 passed, clippy clean ✓
 2. **Committed:** `658b06b` — "fix: don't deregister active stashed panes in return_stashed_panes_bulk"
@@ -338,7 +338,7 @@ The fix is now live locally. To test the stash rescue flow:
 3. Switch back → should rescue the stashed pane instead of spawning new
 
 The fix ensures `prune()` doesn't deregister the stashed pane, so `route`'s `rescue_from_stash()` can find and unstash it.
-<!-- agent:boundary:8b460c82 -->
+<!-- agent:boundary:feac8c9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

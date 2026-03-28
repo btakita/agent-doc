@@ -119,12 +119,23 @@ Agreed — diarize should be core to corky, not an optional feature. Added to co
 | **Judith Krug** | Got 10% deposit reversed by bank. Wants Brian to build custom software but stuck until attorney confirms she's released from Mortgage Automator contract. Doc mapping invoice jumped from $3K to $6K+ (never signed it). Business booming — "closed a shit ton of loans." Has financial website but needs websites for coaching/nutritional businesses. |
 | **Robert Ward** | Advocated "build it, don't buy it." Pushed for Brian to do website work. Mentioned biohacking networking event this weekend. |
 | **Brian Takita** | Noted some work isn't dependent on the Mortgage Automator decision. Thanked Judith for catching up. |
-<!-- agent:boundary:e7d38638 -->
+
+release corky changes
+
+### Corky v0.22.0 Released (HEAD)
+
+- **Version**: 0.21.2 → 0.22.0
+- **New features**: Search backends (sift local + ragie cloud), unified search CLI
+- **Fix**: Diarize feature now always compiled in release builds
+- **Updated** CLAUDE.local.md to reflect diarize is compiled
+- **Published**: Pushed to GitHub with tag, release binary built, crates.io publish in progress
+- **Parent submodule** pointer updated
+<!-- agent:boundary:c73bbba8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Review draft SMS reply to Melissa and send when ready
-- Make diarize a default/core feature in corky (not optional feature flag)
+- Make diarize a default/core feature in corky (not optional feature flag) — build now includes it but it's still behind a feature flag in Cargo.toml
 <!-- /agent:pending -->

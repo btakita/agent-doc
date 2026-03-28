@@ -466,14 +466,52 @@ Want me to help you finish the reply to Lisa, or work on something else?
 Already done — the previous response used `chromium-bridge select-tab` + `chromium-bridge evaluate` to read the OHANA chat. The MCP chrome-devtools was timing out as usual, so chromium-bridge was the right call.
 
 Anything else you'd like to do? You had an incomplete reply to Lisa in the textbox ("Totally. I'll look up some").
-<!-- agent:boundary:cd175c23 -->
+
+Yes. Tell me about some good video platforms where Lisa can make AI augmented videos of her cat...and Buddha Kitty when she travels?
+### Re: AI video platforms for Lisa's cat content (HEAD)
+
+Great question — Lisa said she wants AI cat videos and believes Scooter should be an Instagram star. Here are the best options, organized by ease of use:
+
+**Start Here (Free, Non-Technical):**
+
+| Platform | What It Does | Why for Cat Videos | Cost |
+|----------|-------------|-------------------|------|
+| **CapCut** | Mobile video editor with AI effects, auto-captions, templates | Tons of pet templates, AI style filters (Scooter as cartoon/anime), direct Instagram/TikTok export | Free |
+| **Instagram Reels** | Built-in editor with AI captions, AR pet filters, music sync | Zero friction — edit and post in one place. AR cat filters are popular | Free |
+| **Canva Video** | Drag-and-drop editor with AI backgrounds, templates | Great for "Buddha Kitty" travel montages with text overlays, maps, music. Feels like PowerPoint | Free tier |
+
+**AI-Generated Content (The Fun Stuff):**
+
+| Platform | What It Does | Why for Cat Videos | Cost |
+|----------|-------------|-------------------|------|
+| **Pika** | AI video from photos with viral effects (inflate, sparkle, melt) | Upload Scooter photo → Scooter inflating like a balloon. This is exactly the "AI cat video" trend | Free tier |
+| **Runway** | AI video generation from text/images, animate still photos | "Scooter sitting on a throne in a castle" — generates it from a photo | Free tier (125 credits) |
+| **Kling AI** | AI video with strong animal motion, lip sync | Make a still photo look like real video. Lip sync makes Scooter appear to talk! | Free tier |
+
+**Add-Ons for Polish:**
+
+| Tool | Use Case | Cost |
+|------|---------|------|
+| **ElevenLabs** | Give Scooter a sassy voice / Buddha Kitty travel narrator | Free tier |
+| **Suno** | Custom music — "playful ukulele song about a cat named Scooter" | Free tier |
+
+**Recommended starter stack:** CapCut + Pika + ElevenLabs = $0 to start. Film Scooter on phone → edit in CapCut → add AI effects in Pika → give Scooter a voice with ElevenLabs → post to Instagram.
+
+**Pro tips for the Instagram cat star goal:**
+- Post Reels (video), not static photos — Instagram's algorithm strongly favors video
+- AI-augmented cat content ("my cat but make it anime") is currently very popular
+- Consistency > quality — daily short clips beat weekly polished ones
+- Hashtags: #CatsOfInstagram #AIArt #CatVideo #BuddhaKitty #ScooterTheCat
+
+Want me to draft a reply to Lisa in the OHANA chat suggesting some of these? Or dig deeper into any specific platform?
+<!-- agent:boundary:fb39eaa2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [active] Creating 7 family contacts in mail/contacts/
-- Lisa interested in AI cat videos for Scooter — follow up
+- Draft reply to Lisa re: AI cat video platforms
 - Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code
 - Laura's LA photos — Hayley social media restriction noted

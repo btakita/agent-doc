@@ -19,7 +19,7 @@ I ran `Claim for Tmux Pane` on this document and got a popup error from the plug
 
 The document was eventually claimed after ~20-30 seconds.
 
-### Re: Claim for Tmux Pane error (HEAD)
+### Re: Claim for Tmux Pane error
 
 Good catch. The screenshot shows the `resync` system trying to return stashed panes to windows that no longer exist:
 
@@ -43,7 +43,7 @@ resync: cannot return stashed pane N85 (...) no valid target found
 4. Batch pane metadata queries via single `tmux list-panes -a -F`
 
 This should bring claim time from ~20-30s down to <2s.
-<!-- agent:boundary:fcc25cd8 -->
+<!-- agent:boundary:a890c861 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

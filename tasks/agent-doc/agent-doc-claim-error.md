@@ -45,7 +45,7 @@ resync: cannot return stashed pane N85 (...) no valid target found
 
 Implement
 
-### Implementation complete (HEAD)
+### Implementation complete
 
 **Root cause:** `prune()` spawned ~20-40 synchronous tmux subprocesses (each ~200-500ms) because:
 1. `registry::prune()` called `pane_alive()` per entry (`tmux list-panes -a` N times)
@@ -67,7 +67,7 @@ Implement
 **Stranded pane fix:** `return_stashed_panes_bulk()` now deregisters panes when `find_return_target()` fails, preventing repeated expensive retries every cycle.
 
 **Test results:** 560 tests pass, clippy clean. Release binary built.
-<!-- agent:boundary:991bcd7b -->
+<!-- agent:boundary:eb96dcd1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

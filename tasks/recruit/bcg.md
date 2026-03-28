@@ -402,7 +402,7 @@ across agents and people
 - The pitch: your high-level vision + my precise alignment infrastructure
 
 Ready to send, or further adjustments?
-### Updated: "across agents and people" (HEAD)
+### Updated: "across agents and people"
 
 Good correction. Updated the draft line:
 
@@ -430,5 +430,5 @@ This reinforces the core alignment narrative — the ontology bridges the gap be
 > Brian
 
 Ready to send via corky?
-<!-- agent:boundary:4007de9b -->
+<!-- agent:boundary:2be076cf -->
 <!-- /agent:exchange -->

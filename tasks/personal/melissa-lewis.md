@@ -34,7 +34,28 @@ Melissa and Brooke are sisters.
 - Partner of Brian Takita
 
 Both have `CLAUDE.md -> AGENTS.md` symlinks. LinkedIn profiles couldn't be fetched (auth wall) -- add professional details manually or via browser.
-<!-- agent:boundary:d9489dd2 -->
+
+Use chromium-bridge to fetch profiles.
+
+### LinkedIn Profiles Fetched via chromium-bridge (HEAD)
+
+Updated both contact files with LinkedIn data:
+
+**Melissa Lewis** (`mail/contacts/melissa-lewis/AGENTS.md`):
+- CEO & Founder of Wedding Insiders Network
+- Education: Assumption College
+- Location: Greater Hartford, CT
+- 146 connections
+
+**Brooke Brodack** (`mail/contacts/brooke-brodack/AGENTS.md`):
+- YouTubing since 2004
+- Company: Cambly Inc.
+- Education: Mount Wachusett Community College
+- Location: North Grosvenor Dale, CT
+- Website: www.brookebrodack.net
+- Open to work: ESL Teacher, Video Streamer, Artist roles
+- 451 connections
+<!-- agent:boundary:dacadf30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

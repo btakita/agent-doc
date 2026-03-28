@@ -484,5 +484,35 @@ Current subject — "Tenfore's document-as-interface — I built the next versio
 - **#4** is safest — your name + Neo Innovation is enough context to open it
 
 Avoid leading with "Tenfore" alone — lead with what he definitely remembers: Neo Innovation, and your name.
-<!-- agent:boundary:5351e059 -->
+
+I like #2. Should we also include real-time updates in the document interface?
+### Subject #2 selected — real-time updates: save for demo (HEAD)
+
+Updated subject: **"Neo Innovation → BCG X — the document-as-interface thread"**
+
+**Real-time updates — don't add to email.** This is a visual feature that needs a demo to land. Describing CRDT real-time updates in text sounds like "Google Docs but for agents" — which undersells it. When Anil sees you editing a markdown file and the agent responding inline in real-time, the impact is immediate. Text flattens that experience.
+
+The email already has the hook: *"Happy to demo agent-doc — it's the kind of thing that's easier to show than describe."* That's your opening for everything held back (real-time updates, CRDT, tmux-router, format-agnostic, etc.).
+
+**Final draft (v4) — subject updated, body from v3:**
+
+> **Subject:** Neo Innovation → BCG X — the document-as-interface thread
+>
+> Hi Anil,
+>
+> Brian Takita here — we worked together at Neo Innovation on the Tenfore project. You managed the product side; I built the document-as-interface system.
+>
+> That work stuck with me. After Presence AI wound down in February, I went deep on the problem of human-agent alignment — how do you ensure that a high-level product vision translates precisely into what AI agents actually build? The answer I landed on was to evolve the Tenfore concept: **agent-doc** makes the document itself the interface between a human and an AI agent. The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
+>
+> I've also been building the alignment primitives underneath — a domain ontology system for consistent terminology across agents and people, module-level harnesses that define contracts and evals per component, and backtesting frameworks to validate agent behavior against historical sessions. The goal: agents that stay precisely aligned with the humans directing them, not just at the prompt level but at the architectural level.
+>
+> I noticed you're CPO at BCG X, leading AI products — GenAI, Agent Systems, Forward-Deployed Teams. That's exactly the space where these alignment primitives matter most. I'm also in the pipeline for Project Helix through Inspyr Solutions — Tony Tomai suggested I reach out directly.
+>
+> Would love to catch up if you have a few minutes. Happy to demo agent-doc — it's the kind of thing that's easier to show than describe.
+>
+> Best,
+> Brian
+
+Ready to send?
+<!-- agent:boundary:320d201f -->
 <!-- /agent:exchange -->

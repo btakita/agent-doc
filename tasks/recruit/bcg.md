@@ -313,5 +313,23 @@ Please add Anil to my Google contacts. Does corky use the google contacts api? I
 **Recommendation:** Add Anil manually via browser now, track `corky contact push` as backlog.
 
 Want me to add him via browser, or start on the corky implementation?
-<!-- agent:boundary:f400395f -->
+
+Implement `corky contact push google` for pushing the contact to google.
+`corky contact push` will push to all supported platform. With this addition, we will only have Google as the supported platform. But more may be added in the future.
+
+Transfer this feature into tasks/software/corky.md
+### Feature transferred to corky backlog (HEAD)
+
+Added to `tasks/software/corky.md` pending section:
+
+> `corky contact push google` — push local contacts to Google Contacts via People API. `corky contact push` pushes to all platforms; `corky contact push google` targets Google only. Requires People API OAuth scope, contact field mapping.
+
+**Implementation scope:**
+- Google People API OAuth scope (`contacts`)
+- `ContactInfo` struct mapping to People API `Person` resource
+- Field mapping: name, email, phone, organization, title, URLs (LinkedIn, website), notes
+- CLI: `corky contact push [google]` — no platform arg = push to all
+
+This is a separate session task. Want me to start implementing it now in corky, or come back to it later?
+<!-- agent:boundary:c3ceec3b -->
 <!-- /agent:exchange -->

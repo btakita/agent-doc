@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Bug filed — awaiting implementation.
+Implemented and verified -- claim time reduced from ~20-30s to <2s.
 <!-- /agent:status -->
 
 ## Exchange
@@ -67,14 +67,29 @@ Implement
 **Stranded pane fix:** `return_stashed_panes_bulk()` now deregisters panes when `find_return_target()` fails, preventing repeated expensive retries every cycle.
 
 **Test results:** 560 tests pass, clippy clean. Release binary built.
-<!-- agent:boundary:eb96dcd1 -->
+continue:
+- [ ] tmux-router 0.4: Add `alive_pane_ids()` bulk method, update dep
+
+### tmux-router 0.3.1 published (HEAD)
+
+**Done.** Added `alive_pane_ids()` bulk method to tmux-router and published v0.3.1.
+
+**Changes:**
+- `tmux.rs`: Added `alive_pane_ids()` -- single `tmux list-panes -a -F #{pane_id}` returning `HashSet<String>` for O(1) lookup
+- `registry.rs`: `prune()` now uses `alive_pane_ids()` instead of per-entry `pane_alive()` calls
+- Published to crates.io as tmux-router v0.3.1
+- agent-doc updated lockfile to use v0.3.1 -- 560 tests pass, release binary built
+
+**Total subprocess reduction across the full claim flow:**
+- Before: ~20-40 tmux subprocess calls
+- After: 3 total (1 `list-panes -a` in registry prune, 1 `list-windows -a` in resync, 1 `list-panes -a` in resync)
+
+All 4 optimizations complete.
+<!-- agent:boundary:81437ef1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Share `tmux list-windows -a` across all prune functions
-- [x] Deregister stranded panes on first `find_return_target()` failure
-- [x] Batch pane metadata queries via single `tmux list-panes -a -F`
-- [ ] tmux-router 0.4: Add `alive_pane_ids()` bulk method, update dep
+(all items complete)
 <!-- /agent:pending -->

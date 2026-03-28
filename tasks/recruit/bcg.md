@@ -436,11 +436,11 @@ Should I mention tmux-router or is that too low level for this discussion?
 > The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
 
 This CRDT workflow can also apply to any document technology. mdx, Notion, MS Office, etc.
-### tmux-router: skip it (HEAD)
+### tmux-router: skip it
 
 **Too low-level for this email.** tmux-router is plumbing — session routing across terminal panes. Anil cares about the user-facing paradigm (document-as-interface) and the alignment story. Save tmux-router for the demo.
 
-### CRDT + any document tech: great insight, save for demo (HEAD)
+### CRDT + any document tech: great insight, save for demo
 
 You're right — the CRDT merge pattern is format-agnostic (MDX, Notion, MS Office, Google Docs). But don't add it to the email:
 
@@ -451,5 +451,5 @@ You're right — the CRDT merge pattern is format-agnostic (MDX, Notion, MS Offi
 **Both are excellent demo/call material.** The email's job: get Anil to respond. The demo is where you show the depth.
 
 Draft v3 stands as-is. Ready to send?
-<!-- agent:boundary:31fcdd7d -->
+<!-- agent:boundary:bc92fae6 -->
 <!-- /agent:exchange -->

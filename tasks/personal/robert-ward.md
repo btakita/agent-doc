@@ -279,7 +279,7 @@ Please transcribe and diarize these phone calls:
 
 Note that [phone_20260328-000319_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr) is a 3 way call with judith-krug, robert-ward, brian-takita
 
---------------------------------]]]]Please use corky transcribe with --gpu 
+Please use corky transcribe with --gpu 
 
 ### Transcription in Progress (Mar 21–28 Calls)
 
@@ -376,5 +376,148 @@ Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130�
 - Partnership concept discussed across multiple calls
 - Domain registered: buildside.co
 - Robert's role as referral engine from LA network
-<!-- agent:boundary:fe86fb36 -->
+
+Please re-transcribe + diarize the conversations from the last round. I already did `phone_20260328-000319_3109684542.amr` so that can be skipped.
+
+### Re-Transcribed Phone Calls with Speaker Diarization (Mar 21–28) (HEAD)
+
+Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–133x realtime) with pyannote speaker diarization. Speakers labeled as Brian Takita and Robert Ward. Full diarized transcripts saved to `mail/contacts/robert-ward/recordings/*.txt`.
+
+#### Call 6: 2026-03-21 1:11 AM ET (~81 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 1633 segments)
+**Topics:**
+- Robert frustrated Judith didn't respond all week (at conference); reaffirms she promised Brian the website work
+- Brian's financial pressure: needs paid work urgently, rent overdue since March 15
+- **Build Side partnership formed:** settled on BuildSide.co ("build is the new buy") — replacing expensive SaaS with custom-built software
+- Marketing plan: target small/mid businesses paying $500+/mo for SaaS; use Judith/EFS as proof point
+- Robert's network targets: healers, healthcare, biohacking, yoga/pilates, OnlyFans entrepreneur (dildo manufacturer, multi-millionaire)
+- Brian's family situation: sisters not supportive, one suggested he break up with Brooke
+- Robert shared family history (Dr. Barbara Korsch, Dr. Robert Ward II, Karl Korsch)
+- Brian to email marketing plan and start BuildSide.co website
+
+#### Call 7: 2026-03-22 10:26 PM ET (~33 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 717 segments)
+**Topics:**
+- Brian working on screencast videos for LinkedIn to prep for interviews
+- Robert went to Venice Love Fest, had a great day
+- Robert shares Ian's situation: got own apartment but depressed, PTSD from 2+ years in prison (assault conviction related to ex-wife)
+- Brian's family stress: talked to mom, sister suggested breaking up with Brooke
+- Judith expected back mid-week; Robert plans to contact her Sunday and daily until she answers
+
+#### Call 8: 2026-03-23 6:32 PM ET (~13 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 385 segments)
+**Topics:**
+- Robert spoke with Judith briefly — she's manic, distracted by biohacking event
+- Robert told Judith Brian is already getting started; she reacted neutrally
+- Robert coaches: don't appear needy/desperate, don't mention job searching to Judith
+- Brian pushes back: wants to start work soon, some interview opportunities fell through
+- Brian has another interview tomorrow
+
+#### Call 9: 2026-03-24 12:52 AM ET (~2 min)
+**Speakers:** Brian Takita, Robert Ward (diarization: 0 segments — too short)
+**Topics:** Brief check-in. Robert says "we're good with Judith, it's going to be fine." Robert at Santa Monica beach.
+
+#### Call 10: 2026-03-24 9:45 PM ET (~5 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 2 speakers)
+**Topics:**
+- Robert about to call Judith, checks if Brian is available for potential three-way call
+- Brian had a good interview today but yesterday's went poorly
+- Robert to call Judith and report back
+
+#### Call 11: 2026-03-26 12:58 AM ET (~12 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 265 segments)
+**Topics:**
+- **Robert just talked to Judith — she's on it, spoke to her attorney, wants Brian to build the website**
+- Brian mentions ex-colleague Bob Remeika (CEO, $5.5M-funded AI document retrieval company Ragie) reached out after seeing LinkedIn video
+- Semantic search technology could handle all documents in Judith's mortgage office
+- Robert dating a Polish woman (~39) he met at the beach
+- Discussion about Nadia (Brian's ex) — hasn't posted since 2020
+
+#### Call 12: 2026-03-26 3:45 AM ET (~14 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 319 segments)
+**Topics:**
+- Brian asks if he should reach out to Judith directly; Robert says she'll call tomorrow
+- Robert delayed 3 hours with Ari (friend, stockbroker) who's depressed after market crash
+- Robert stresses Build Side: "you and me are gonna make some good money this year"
+- Brian plans to start setup work for Judith's project
+
+#### Call 13: 2026-03-26 4:06 AM ET (~21 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 395 segments)
+**Topics:**
+- Continued from previous call; biohacking event speakers, OnlyFans creators
+- Brian to use ex-colleague's semantic document search for Judith's project
+- Discussion of ketamine therapy ethics
+- Robert's dental issues: lost front tooth, debating Mexico vs LA dentist
+- Robert to push for Brian at biohacking event when walking with Judith
+
+#### Call 14: 2026-03-26 4:32 AM ET (~5 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 2 speakers)
+**Topics:**
+- Robert called about 8.9 earthquake off Russia with tsunami warnings for West Coast and Hawaii
+- Brian checks: no active tsunami watch at that time; false alarm discussion
+
+#### Call 15: 2026-03-27 12:02 AM ET (~9 min)
+**Speakers:** Brian Takita, Robert Ward (diarization: 0 segments)
+**Topics:**
+- Robert had a rough day: power outage, close friend/professor Michael from Yosan died of heart failure
+- Funeral in the morning
+- Judith update: wants Brian to build it, waiting on getting money back from vendor
+- Brian's finances critical: ~$3,000 left
+- Robert urges Brian to exercise daily for heart health
+
+#### Call 16: 2026-03-27 9:29 PM ET (~1 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 2 speakers)
+**Topics:** Quick check-in. Robert says they'll talk to Judith soon. Biohacking event leverage.
+
+#### Call 17: 2026-03-28 12:13 AM ET (~11 min)
+**Speakers:** Brian Takita, Robert Ward (diarized, 280 segments)
+**Topics:**
+- **Three-way call with Judith happened** (partly captured): Judith apologized for delays, was friendly
+- Judith's ex Leo was begging her for money; he's broke and wants to do her website — Robert says his work is far inferior to Brian's
+- Judith has multiple businesses needing websites: mortgage, health coaching, spiritual coaching, products
+- Robert pushed "build it, don't buy it" with Judith
+- Brian needs content from Judith to build: pictures, PDFs, domain names
+- Robert plans to walk with Judith at Biohackers World and push for Brian to start
+
+**Short calls (<1 min):**
+- 2026-03-21 1:10 AM ET (12s) — call connect before 81-min call
+- 2026-03-23 2:32 PM ET (26s) — forwarded to voicemail
+- 2026-03-25 1:00 PM ET (28s) — brief "Hello, everybody"
+- 2026-03-27 12:15 AM ET (39s) — brief "Thank you"
+- 2026-03-27 2:07 AM ET (28s) — call forwarded/dropped
+
+---
+
+### Updated Key Takeaways (Mar 21–28, Diarized) (HEAD)
+
+**Judith Krug / Equity Funding Source:**
+- Judith confirmed through Robert multiple times: Brian is building the website
+- She contacted her attorney and successfully reversed the 10% deposit from old vendor
+- 3-way call happened (Mar 28) — Judith directly told Brian she wants him
+- Judith has **multiple businesses** needing websites: mortgage, health coaching, spiritual coaching, products
+- Leo (Judith's ex) is broke, wants to do her website but Robert says his work is inferior
+- Timeline: "probably next week" (week of Mar 30)
+- Robert leveraging biohacking event access ($360 value) to push Judith to act
+
+**Brian's Financial Situation:**
+- ~$3,000 remaining, rent overdue since March 15
+- Actively interviewing: one good interview (Mar 24), one bad, some opportunities fell through
+- Exploring Ragie (Bob Remeika's $5.5M semantic search company) for Judith's project
+- Needs Judith deal to come through urgently
+
+**Build Side Partnership:**
+- Name and domain settled: buildside.co
+- Brian builds, Robert networks LA connections
+- Target: businesses paying $500+/mo for SaaS they don't own
+- Robert's network: healers, healthcare, biohacking, yoga/pilates communities
+- Marketing plan drafted and emailed to Robert
+
+**Robert's Situation:**
+- Close friend/professor Michael (Yosan) died of heart failure (Mar 27)
+- Dental issues: lost front tooth, considering Mexico dentist
+- Dating a Polish woman (~39) met at the beach
+- Friend Ari (stockbroker) depressed after market crash
+- Ian has PTSD from prison, depression
+- Consistently following up with Judith on Brian's behalf
+<!-- agent:boundary:66bb8699 -->
 <!-- /agent:exchange -->

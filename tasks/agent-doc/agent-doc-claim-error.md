@@ -220,7 +220,7 @@ What does the plugin action currently send to the tmux pane? I can look at the J
 
 I was expecting the `Run Agent Doc` command to send `/agent-doc run <path>` to the claiming tmux pane.
 Ideally we would ensure there is a claude session
-### Ideal: single `/agent-doc run <path>` command (HEAD)
+### Ideal: single `/agent-doc run <path>` command
 
 Understood. The plugin's "Run Agent Doc" should send exactly one command to the tmux pane:
 
@@ -243,7 +243,7 @@ Want me to implement this? The change would be:
 - `agent-doc run`: add implicit claim (if no active pane registered, claim current pane)
 - `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window)
 - Plugin: change "Run Agent Doc" to send single `/agent-doc run <path>`
-<!-- agent:boundary:fec38ca7 -->
+<!-- agent:boundary:109bf854 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

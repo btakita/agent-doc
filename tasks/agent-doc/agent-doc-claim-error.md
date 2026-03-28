@@ -405,7 +405,7 @@ With the v0.27.0 fix, stashed panes with active claude sessions are kept registe
 
 I am running agent-doc v0.27.0. Why did the `/agent-doc` command bug happen in this document?
 /btw FYI, it didn't happen with the last Run Agent Doc command.
-### Why this session was affected despite running v0.27.0 (HEAD)
+### Why this session was affected despite running v0.27.0
 
 The bug happened **before v0.27.0 was installed**. Timeline:
 
@@ -421,7 +421,7 @@ v0.27.0 prevents this from happening **going forward**, but it can't undo the se
 **Evidence:** The 4 stashed panes in preflight (`%96, %99, %98, %100 running 'agent-doc'`) are orphaned sessions from before the fix. v0.27.0 keeps them registered now (won't deregister), but they were already orphaned when the old code ran.
 
 To clean up: those stashed panes can be manually killed since their Claude sessions have no active document claim.
-<!-- agent:boundary:e6321243 -->
+<!-- agent:boundary:9b3de9a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

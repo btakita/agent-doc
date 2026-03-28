@@ -201,11 +201,37 @@ release
 - [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.21.0) (with CUDA binary)
 
 **Installed:** corky 0.21.0 locally with GPU (transcribe-cuda)
-<!-- agent:boundary:923536fc -->
+### v0.22.0 — Search Backends + Diarize (HEAD)
+
+**New features:**
+- Unified `corky search` command with pluggable backends (sift local, ragie cloud)
+- `corky sift index/status` — local search indexing
+- `corky ragie push/sync/search/status` — cloud search via Ragie API
+- `SearchConfig` in `.corky.toml` for backend configuration
+
+**Fix:**
+- Diarize feature now always compiled in release builds (was previously optional)
+- Updated CLAUDE.local.md to reflect diarize is compiled
+
+**Files changed (4 modified, 5 new):**
+- `src/cli.rs` — `Search`, `Sift`, `Ragie` commands + subcommand enums
+- `src/config/corky_config.rs` — `SearchConfig`, `SearchBackendConfig` structs
+- `src/lib.rs` — `pub mod search`
+- `src/main.rs` — dispatch for search/sift/ragie commands
+- `src/search/mod.rs`, `backend.rs`, `sift.rs`, `ragie.rs`, `result.rs` — new search module
+
+**Published:**
+- GitHub: pushed to main with `v0.22.0` tag
+- crates.io: publish in progress
+- Release binary built at `.bin/corky`
+
+`make check` passes — clippy clean, all tests pass.
+<!-- agent:boundary:bdfb9931 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- [ ] Make diarize a default feature (not behind feature flag) — currently always built but still optional in Cargo.toml
 <!-- /agent:pending -->

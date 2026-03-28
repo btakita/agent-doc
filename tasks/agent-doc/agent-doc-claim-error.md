@@ -207,7 +207,7 @@ The flow when you switched back:
 3. **Never purge stash windows with active processes** — `purge_stash_windows_bulk()` should skip windows containing any non-idle pane
 
 These three changes together prevent session loss when switching between documents.
-### Double prompt bug (HEAD)
+### Double prompt bug
 
 The "Run Agent Doc" plugin action fires both a claim AND a `/agent-doc` command to the same pane, resulting in two prompts competing in the same claude session. This is a plugin-side issue — the action should either:
 
@@ -217,7 +217,7 @@ The "Run Agent Doc" plugin action fires both a claim AND a `/agent-doc` command 
 Which behavior do you want? The claim-then-route pattern makes sense, but they shouldn't both be injected as separate prompts into the same claude session. The plugin should send a single combined command, or the claim should be silent (no `/agent-doc` injection) when the pane is already claimed for this file.
 
 What does the plugin action currently send to the tmux pane? I can look at the JetBrains plugin source if you point me to it.
-<!-- agent:boundary:d668ffbe -->
+<!-- agent:boundary:15123f43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

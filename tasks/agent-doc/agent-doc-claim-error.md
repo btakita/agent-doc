@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Implemented and verified -- claim time reduced from ~20-30s to <2s.
+Investigating stash-aware claim flow — fix spec ready, awaiting implementation decision.
 <!-- /agent:status -->
 
 ## Exchange
@@ -117,6 +117,8 @@ Ready for version bump and release.
 3. The claim flow saw no active (unstashed) pane for this document, so it **spawned a new tmux pane + new claude session**
 4. The old stashed pane with the previous session was still sitting in the stash window (or got pruned)
 
+I don't see the stash window in the tmux session. Why?
+
 **Root cause:** The claim path doesn't check for existing stashed panes that could be **unstashed and resumed**. The `return_stashed_panes` logic exists in `prune()` (resync), but that's a background process — it doesn't run inline during the claim flow.
 
 **Potential fix:** During claim, before spawning a new pane:
@@ -127,13 +129,56 @@ Ready for version bump and release.
 This would preserve the existing claude session context instead of starting fresh each time you switch between documents.
 
 Want me to look at the claim flow code and spec a fix?
-<!-- agent:boundary:9f3e4115 -->
+Yes
+### Stash window not visible + claim flow analysis (HEAD)
+
+**Why no stash window:** The stash window was **already purged**. `purge_stash_windows_bulk()` (resync.rs:556) kills stash windows when all panes inside are idle shells (zsh/bash) and the window is >30 seconds old. Timeline:
+
+1. You switched away → this pane was stashed
+2. The claude session in the stashed pane eventually exited (or was killed), leaving an idle shell
+3. A subsequent `prune()` call (from another claim or route) ran `purge_stash_windows_bulk()`
+4. All panes idle + >30s → stash window killed → pane destroyed
+5. When you switched back, `claim::run()` found no registered pane → spawned new
+
+**Claim flow analysis** (claim.rs:83-258):
+
+The claim flow does call `prune()` at line 84 (which runs `return_stashed_panes_bulk()`), but there are two gaps:
+
+1. **Timing gap:** `return_stashed_panes_bulk()` only returns *non-idle* panes. If the claude process exited and the shell went idle, the pane is skipped for return — and then killed by the subsequent purge step.
+
+2. **No stash-aware claim resolution:** After `prune()`, the claim resolves a pane via priority: `--pane` > `--position` > `TMUX_PANE` > active pane. None of these paths check if a stashed pane still exists for this file's session. `validate_file_claim()` (line 87) only removes dead-pane entries — it doesn't attempt to rescue stashed panes.
+
+**Fix spec — stash-aware claim:**
+
+In `claim::run()`, after `prune()` and `validate_file_claim()` but before pane resolution:
+
+```rust
+// After line 87 in claim.rs
+// Check if there's a stashed pane for this file that can be rescued
+if let Some(entry) = sessions::find_by_file(&registry_path, &canonical_file) {
+    if is_pane_in_stash(&entry.pane_id, &all_pane_metadata) {
+        // Pane exists in stash — unstash it to target window
+        if let Ok(()) = tmux::join_pane(&entry.pane_id, &target_window) {
+            // Successfully rescued — use this pane instead of spawning new
+            return Ok(entry.pane_id);
+        }
+    }
+}
+```
+
+This adds ~1 check (O(1) lookup in pre-fetched metadata) before the spawn path.
+
+**Alternative approach:** Keep stashed panes with active claude sessions alive longer — exempt non-idle stash panes from the 30s grace period entirely. This would mean the stash window persists as long as claude is running, giving `return_stashed_panes_bulk()` time to work.
+
+Want me to implement option 1 (stash-aware claim), option 2 (longer stash retention), or both?
+<!-- agent:boundary:2ffa5f69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Investigate claim flow for stash-aware resumption (unstash instead of new spawn)
+- [ ] Implement stash-aware claim resolution (rescue stashed panes before spawning new)
+- [ ] Consider longer stash retention for non-idle panes
 - [ ] Bump agent-doc version to 0.27.0 in Cargo.toml + pyproject.toml
 - [ ] Publish to crates.io, PyPI, GitHub Releases
 <!-- /agent:pending -->

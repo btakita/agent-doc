@@ -303,11 +303,48 @@ Noted — this is SMS. chromium-bridge is still timing out. The message is quite
 **To send:** Copy the plain text message from the previous response and paste it into the PulseSMS text box. Or restart Chrome with remote debugging (`google-chrome --remote-debugging-port=9222`) and retry.
 
 Alternatively, would you like me to shorten it for SMS? A condensed version would be more typical for text messaging.
-<!-- agent:boundary:9981e7be -->
+
+> What the agent harness does: I've built a CRM into the harness that transcribes correspondence — recorded phone calls, email threads, social media — and uses that to plan and automate tasks. I also generate articles and content from transcribed video recordings. It's basically a system that turns conversations into organized, actionable information. Agent harnesses are great for streamlining business processes and content creation — the same tools I'm building for Judith's loan management are what power all of this.
+
+Actually, the most important part is the supporting:
+- uploading loan documents 
+- reminders
+
+See my propsals to judith-krug for more context into what the system is building. We probably should clarify with Melissa.
+
+Good call — the CRM/transcription angle is what *I* use the harness for, but for Judith the core value is different. Based on the proposal to Judith, the most relevant features for Melissa to understand are:
+
+**What Brian is building for Judith (from the proposal):**
+1. **Secure document upload portal** — borrowers/brokers submit loan docs via email links, tracked automatically (what's received, what's missing)
+2. **AI-powered OCR** — extracts data from loan applications, bank statements, tax returns, construction budgets; pushes directly into her loan management platform
+3. **Automated reminders** — configurable notifications for missing documents (daily/weekly), synced to Google Calendar, drip follow-up sequences
+4. **Website modernization** — investor portal, broker section, SEO
+5. **Investor pitch deck generation** — custom per risk profile
+
+**Total: $8K flat vs Mortgage Automator's $21K+ first year + $13K/yr ongoing.**
+
+### Draft Reply to Melissa (v7 — SMS-appropriate, clarified) (HEAD)
+
+> Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request.
+>
+> Quick update on the work front:
+>
+> I'm building a custom loan management system for Judith Krug at Equity Funding Source (Robert Ward connected us). The main features are a secure document upload portal for borrowers and brokers, AI-powered data extraction from loan docs (applications, bank statements, tax returns), and automated reminders for missing documents. Plus website modernization with investor and broker portals.
+>
+> She was paying $21K+ for Mortgage Automator but is getting out of that contract. My custom build is $8K flat — and she owns it outright vs paying $13K/yr ongoing. Since you're a loan officer, you can probably appreciate how useful automated document tracking and reminders would be.
+>
+> I also built a CRM into my agent harness that transcribes phone calls, emails, and social media to plan and automate tasks — and I generate articles from video recordings. These tools power everything I'm building.
+>
+> Other leads this week: reconnecting with Bob Remeika (CEO of Ragie, a VC-backed AI startup) about a collaboration, LinkedIn posts getting good traction from engineering leaders, and recruiter pipeline for $150K–$300K roles.
+>
+> Also been thinking about the Wedding Insider Network app. The cost equation has completely changed — a custom agent harness could automate client communication, generate content from shoots, and manage vendor relationships for you and other wedding professionals. Worth revisiting when you're ready.
+>
+> Multiple angles moving forward. I'll keep you posted. Thank you for your patience.
+<!-- agent:boundary:bc8b3ce8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v6 message to Melissa via PulseSMS (chromium-bridge down — manual paste or restart Chrome)
+- Send v7 message to Melissa via PulseSMS (chromium-bridge down — manual paste or restart Chrome)
 <!-- /agent:pending -->

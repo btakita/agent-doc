@@ -445,7 +445,7 @@ tmux kill-pane -t %100
 After cleanup, the "externally modified" popups should stop since only the active (IPC-connected) sessions will be writing to documents.
 
 This was happening in tasks/software/corky.md...as I was typing, the "externally modified" popup kept on happening. I would lose the last typed character as well. Why? Do we have logs?
-### Root cause found: `clean_stale_boundaries_in_working_tree()` writes directly to disk (HEAD)
+### Root cause found: `clean_stale_boundaries_in_working_tree()` writes directly to disk
 
 **File:** `src/agent-doc/src/git.rs:275-309`
 
@@ -465,7 +465,7 @@ This causes:
 Option 1 is cleanest since the comment at line 207 already says "Working tree is NOT written directly (would lose user keystrokes) UNLESS stale boundaries are detected." The stale boundary case should also use IPC, not disk write.
 
 Want me to implement the fix?
-<!-- agent:boundary:a7d8bc29 -->
+<!-- agent:boundary:261f57b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

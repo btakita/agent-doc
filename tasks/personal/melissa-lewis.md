@@ -52,7 +52,7 @@ Acknowledged — added to pending. I can start implementing the bulk pane query 
 Transfer to /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-claim-error.md
 
 Transferred bug details to `tasks/agent-doc/agent-doc-claim-error.md` — full root cause analysis, affected files, and 4-step fix plan are documented there. Removed from this doc's pending.
-<!-- agent:boundary:91123800 -->
+<!-- agent:boundary:1ab861e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

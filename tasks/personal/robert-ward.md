@@ -2,6 +2,7 @@
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 Robert Ward is a long time friend who lives in LA.

@@ -63,8 +63,9 @@ Draft a reply. I want to mention the ongoing status with judith-krug's Equity Fu
 We have been in conversation for 1 month. Mention how I'm scheduled to build a replacement for Mortgage Automator but they are attempting to enforce a contract. Use the most recent phone call between Robert Ward, Judith Krug, and me for information.
 
 Please retranscribe /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr using corky --gpu.
+ 
 
-### SMS Context & Draft Reply (HEAD)
+### SMS Context & Draft Reply
 
 **Last message from Melissa** (most recent): She's checking in about rent, acknowledging money is tight between jobs, asking Brian to keep communication open.
 
@@ -77,7 +78,7 @@ Please retranscribe /home/brian/work/btakita/agent-loop/mail/contacts/robert-war
 - Judith is very busy closing loans and has been a poor communicator — it's been ~1 month of waiting
 - Additional work possible: websites for Judith's health coaching, spiritual coaching, and products businesses
 
-### Draft Reply to Melissa (HEAD)
+### Draft Reply to Melissa
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it.
 >
@@ -85,15 +86,26 @@ Please retranscribe /home/brian/work/btakita/agent-loop/mail/contacts/robert-war
 >
 > I'm also talking to other companies next week, so I'm working multiple angles. I'll keep you posted as things develop. Thank you for your patience.
 
-### Retranscription (HEAD)
+### Retranscription
 
 Retranscribing `phone_20260328-000319_3109684542.amr` with GPU + diarization (speakers: Robert Ward, Brian Takita, Judith Krug). Running in background — will update when complete.
-<!-- agent:boundary:0ab764d2 -->
+
+### Retranscription Complete (HEAD)
+
+Retranscribed `phone_20260328-000319_3109684542.amr` — 117x realtime on RTX 5090. Unfortunately the same Whisper hallucination loop persists (repetitive text mid-call). This is a known issue with low-bitrate AMR phone audio. The `--diarize` flag failed — corky wasn't compiled with the `diarize` feature.
+
+**Additional detail extracted from cleaner portions:**
+- Mortgage Automator's doc mapping was quoted at ~$3K but the actual invoice came in at $6K+, pushing total from $18K to ~$21K
+- Judith never signed the separate doc mapping invoice
+- The price bait-and-switch strengthens her case for contract release
+- Leo (Judith's ex) showed up wanting money for some website work — Judith wants to hire Brian instead
+- Judith mentioned a "Taiyo" for her nutritional business website (not ready yet)
+<!-- agent:boundary:61495def -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Retranscription of phone_20260328-000319_3109684542.amr in progress (GPU + diarization)
-- Review retranscribed output and update call summary if quality improved
+- Review draft SMS reply to Melissa and send when ready
+- Consider rebuilding corky with `--features diarize` for better multi-speaker transcription
 <!-- /agent:pending -->

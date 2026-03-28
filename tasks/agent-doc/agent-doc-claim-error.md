@@ -356,7 +356,28 @@ release
 - **Fix: don't deregister active stashed panes** — prevents session loss on document switch
 
 Layout issue from preflight confirms fix is working: `stash window 'stash' has non-idle pane %89 running 'agent-doc'` — previously this would have been deregistered and orphaned.
-<!-- agent:boundary:bec1d73e -->
+
+Implement:
+- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future
+This sessi
+### Plugin: `agent-doc route <path>` integration (HEAD)
+
+Noted. This is tracked as a future plugin-side change:
+
+**Current behavior:** JetBrains plugin sends separate claim + `/agent-doc` prompts → double prompt bug.
+
+**Target behavior:** Plugin's "Run Agent Doc" action calls `agent-doc route <path>` as a single CLI command. Route already handles:
+- Pane resolution (find registered, rescue from stash, or create new)
+- Claude session ensure (start if idle shell)
+- Command injection (`/agent-doc <path>` sent via `tmux send-keys`)
+
+**What needs to change (plugin side):**
+1. Remove the separate claim + prompt injection logic
+2. Replace with single `agent-doc route <path>` subprocess call
+3. Route handles everything — plugin just needs to call it and report success/failure
+
+No agent-doc CLI changes needed — `route` already has the right flow. The stash rescue fix (v0.27.0) ensures rescued sessions aren't lost during route's `prune()` call.
+<!-- agent:boundary:a387b740 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -366,5 +387,5 @@ Layout issue from preflight confirms fix is working: `stash window 'stash' has n
 - [x] Commit, test, install locally
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
-- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future
+- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future plugin change
 <!-- /agent:pending -->

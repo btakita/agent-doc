@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Root cause identified: premature deregistration of active stashed panes. Fix plan revised.
+Root cause narrowed: single fix in return_stashed_panes_bulk() prevents premature deregistration. Route already has rescue logic.
 <!-- /agent:status -->
 
 ## Exchange
@@ -241,7 +241,7 @@ For the stash rescue issue, `agent-doc run` with implicit claim would also be th
 
 Want me to implement this? The change would be:
 - `agent-doc run`: add implicit claim (if no active pane registered, claim current pane)
-- `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window)
+- `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window): If we unstash the original session to the current window...since the new session had `agent-doc run` called on it...would the new session process the agent doc diff...While the original session would be in the tmux window and idle...with the actual processing being in the new session which is now stashed?
 - Plugin: change "Run Agent Doc" to send single `/agent-doc run <path>`
 ### Ensuring claude session before `/agent-doc run`
 
@@ -267,14 +267,47 @@ The three bugs to fix:
 3. **Plugin: call `agent-doc route`** instead of separate claim + prompt injection
 
 Shall I implement these fixes in agent-doc? The plugin change can be done after.
-<!-- agent:boundary:03ba603a -->
+### Order matters: rescue BEFORE creating new session (HEAD)
+
+You're right — that's a real problem. If we create a new session first, then unstash the old one, we get:
+- New session (in stash) processes the diff — invisible to user
+- Old session (unstashed) sits idle in the window — visible but useless
+
+**The fix: rescue must happen BEFORE any new pane/session is created.**
+
+The correct `agent-doc route` flow:
+
+```
+1. prune() — but DON'T deregister active stashed panes
+2. Lookup registered pane for this document
+3. If found AND alive:
+   a. If in stash window → unstash to target window (rescue)
+   b. If not in stash → already in position
+   c. Send `/agent-doc <path>` to this pane ✓
+4. If NOT found OR dead:
+   a. Create new pane + start claude
+   b. Register + send `/agent-doc <path>`
+```
+
+Step 3a is the key addition. The existing route flow already does steps 2, 3b, 3c, and 4 — it just skips the "is it stashed?" check. Adding that check means:
+
+- Original session with full context gets rescued and receives the command
+- No new session is created unnecessarily
+- No orphaned stashed sessions
+
+The route code in `route.rs` already has `rescue_from_stash()` (line 243) — it's called when the pane is found alive but in a stash window. The bug is that `prune()` deregisters the pane BEFORE route gets a chance to call `rescue_from_stash()`. So the single fix is really:
+
+**Don't deregister active stashed panes in `return_stashed_panes_bulk()`.** That's it. Route's existing `rescue_from_stash()` already handles unstashing — it just never gets called because prune deletes the registry entry first.
+
+Implement?
+<!-- agent:boundary:e90822c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Route: add stash rescue (unstash registered pane before spawning new)
-- [ ] Route: fix prune to not deregister active stashed panes
+- [ ] Fix return_stashed_panes_bulk: don't deregister active (non-idle) stashed panes
+- [ ] Verify route's rescue_from_stash() works once deregistration bug is fixed
 - [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command)
 - [ ] Fix purge_stash_windows_bulk: never purge windows with active processes
 - [ ] Bump agent-doc version + publish

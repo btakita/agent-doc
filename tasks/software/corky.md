@@ -226,12 +226,26 @@ release
 - Release binary built at `.bin/corky`
 
 `make check` passes — clippy clean, all tests pass.
-<!-- agent:boundary:b67ae406 -->
+
+Implement:
+- [ ] Make diarize a default feature (not behind feature flag) — currently always built but still optional in Cargo.toml
+### Diarize Default Feature — Implemented (HEAD)
+
+Made diarize a default feature in corky:
+
+**Changes (4 files):**
+- `Cargo.toml` — `default = ["transcribe", "diarize"]`
+- `src/cli.rs` — removed "(requires --features diarize)" from `--diarize` help text
+- `SPEC.md` — updated diarization pipeline description and test case T4
+- `README.md` — "Diarization is enabled by default"
+
+`make check` passes (clippy clean, 13 tests). `audit-docs` clean.
+<!-- agent:boundary:9ae344f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] `corky contact push google` — push local contacts to Google Contacts via People API. `corky contact push` pushes to all platforms; `corky contact push google` targets Google only. Requires People API OAuth scope, contact field mapping (name, email, phone, org, title, LinkedIn, notes).
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
-- [ ] Make diarize a default feature (not behind feature flag) — currently always built but still optional in Cargo.toml
 <!-- /agent:pending -->

@@ -3,6 +3,7 @@ agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Session History
@@ -186,7 +187,7 @@ Also sorted command lists in SPEC.md §17.6 and README.md to match.
 
 `make check` passes (13 tests), `audit-docs` clean.
 release
-### Released v0.21.0 — YouTube Playlist Management (HEAD)
+### Released v0.21.0 — YouTube Playlist Management
 
 **Committed** (`c160bfe` + `b65807f`):
 - 4 playlist CLI commands, 4 API functions + test variants
@@ -200,7 +201,7 @@ release
 - [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.21.0) (with CUDA binary)
 
 **Installed:** corky 0.21.0 locally with GPU (transcribe-cuda)
-<!-- agent:boundary:457d3b40 -->
+<!-- agent:boundary:923536fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

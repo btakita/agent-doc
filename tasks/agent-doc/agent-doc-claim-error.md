@@ -341,7 +341,7 @@ The fix ensures `prune()` doesn't deregister the stashed pane, so `route`'s `res
 Seems to be working.
 continue
 release
-### v0.27.0 released (HEAD)
+### v0.27.0 released
 
 **Published everywhere:**
 - **crates.io:** agent-doc v0.27.0 ✓
@@ -356,7 +356,7 @@ release
 - **Fix: don't deregister active stashed panes** — prevents session loss on document switch
 
 Layout issue from preflight confirms fix is working: `stash window 'stash' has non-idle pane %89 running 'agent-doc'` — previously this would have been deregistered and orphaned.
-<!-- agent:boundary:f749f564 -->
+<!-- agent:boundary:bec1d73e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

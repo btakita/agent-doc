@@ -133,7 +133,7 @@ response patch should go into /home/brian/work/btakita/agent-loop/tasks/software
 - **Parent submodule** pointer updated
 
 Noted — moved the corky v0.22.0 release details to `tasks/software/corky.md`. Future corky release patches will go there.
-<!-- agent:boundary:c7505bdc -->
+<!-- agent:boundary:73e37a94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

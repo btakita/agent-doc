@@ -21,7 +21,7 @@ https://www.linkedin.com/in/brooke-brodack-2223427/
 
 Melissa and Brooke are sisters.
 
-### Contacts Created (HEAD)
+### Contacts Created
 
 **Melissa Lewis** — `mail/contacts/melissa-lewis/AGENTS.md`
 - Maiden name: Brodack
@@ -34,7 +34,7 @@ Melissa and Brooke are sisters.
 - Partner of Brian Takita
 
 Both have `CLAUDE.md -> AGENTS.md` symlinks. LinkedIn profiles couldn't be fetched (auth wall) -- add professional details manually or via browser.
-<!-- agent:boundary:5e7ecf28 -->
+<!-- agent:boundary:d9489dd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

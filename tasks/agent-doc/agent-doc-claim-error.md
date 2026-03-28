@@ -359,7 +359,8 @@ Layout issue from preflight confirms fix is working: `stash window 'stash' has n
 
 Implement:
 - [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future
-This sessi
+This session still had `❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md`
+Are we fixing it now?
 ### Plugin: `agent-doc route <path>` integration
 
 Noted. This is tracked as a future plugin-side change:
@@ -377,7 +378,17 @@ Noted. This is tracked as a future plugin-side change:
 3. Route handles everything — plugin just needs to call it and report success/failure
 
 No agent-doc CLI changes needed — `route` already has the right flow. The stash rescue fix (v0.27.0) ensures rescued sessions aren't lost during route's `prune()` call.
-<!-- agent:boundary:5db26bf1 -->
+### Double prompt confirmed — ready to fix (HEAD)
+
+Yes, that's exactly the bug. This session received a second `/agent-doc` prompt because the plugin injected claim + `/agent-doc` as two separate commands.
+
+**To fix now:** I need to look at the JetBrains plugin source to change "Run Agent Doc" from separate claim + prompt injection to a single `agent-doc route <path>` call. Point me to the plugin source directory and I'll implement it.
+
+**What the fix looks like:**
+1. Plugin "Run Agent Doc" action → calls `agent-doc route <path>` (one subprocess call)
+2. Route handles: pane resolution, stash rescue, claude session ensure, command injection
+3. No more double prompts — route sends exactly one `/agent-doc <path>` to the pane
+<!-- agent:boundary:6784465a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -387,5 +398,5 @@ No agent-doc CLI changes needed — `route` already has the right flow. The stas
 - [x] Commit, test, install locally
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
-- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future plugin change
+- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` — ready to implement, need plugin source location
 <!-- /agent:pending -->

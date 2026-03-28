@@ -849,7 +849,7 @@ Does Jack Wood have a LinkedIn profile?
 **https://www.linkedin.com/in/jack-wood-0339361/**
 
 Note: LinkedIn's public snippets don't explicitly list the CTO title at ECI yet (he's only ~3 months in), but the profile location and Wayfair history match the person Justin described. The ECI company page is at https://www.linkedin.com/company/eci-software--solutions.
-<!-- agent:boundary:61a5caaf -->
+<!-- agent:boundary:c485db29 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

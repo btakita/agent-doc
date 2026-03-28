@@ -201,7 +201,7 @@ release
 - [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.21.0) (with CUDA binary)
 
 **Installed:** corky 0.21.0 locally with GPU (transcribe-cuda)
-### v0.22.0 — Search Backends + Diarize (HEAD)
+### v0.22.0 — Search Backends + Diarize
 
 **New features:**
 - Unified `corky search` command with pluggable backends (sift local, ragie cloud)
@@ -226,7 +226,7 @@ release
 - Release binary built at `.bin/corky`
 
 `make check` passes — clippy clean, all tests pass.
-<!-- agent:boundary:bdfb9931 -->
+<!-- agent:boundary:b67ae406 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

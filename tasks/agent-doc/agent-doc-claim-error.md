@@ -267,7 +267,7 @@ The three bugs to fix:
 3. **Plugin: call `agent-doc route`** instead of separate claim + prompt injection
 
 Shall I implement these fixes in agent-doc? The plugin change can be done after.
-### Order matters: rescue BEFORE creating new session (HEAD)
+### Order matters: rescue BEFORE creating new session
 
 You're right — that's a real problem. If we create a new session first, then unstash the old one, we get:
 - New session (in stash) processes the diff — invisible to user
@@ -300,7 +300,7 @@ The route code in `route.rs` already has `rescue_from_stash()` (line 243) — it
 **Don't deregister active stashed panes in `return_stashed_panes_bulk()`.** That's it. Route's existing `rescue_from_stash()` already handles unstashing — it just never gets called because prune deletes the registry entry first.
 
 Implement?
-<!-- agent:boundary:e90822c2 -->
+<!-- agent:boundary:62011822 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

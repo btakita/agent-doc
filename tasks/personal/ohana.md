@@ -437,7 +437,7 @@ Great engagement — she's already on an AI journey as an Engineering Manager. T
 **Note:** The original message still shows as a wall of text (the spacing bug from before the `type` command was implemented). Lynette quoted your message in her reply, so the content landed fine despite the formatting.
 
 Please read the latest from the ohana chat.
-### Re: Latest from OHANA chat (HEAD)
+### Re: Latest from OHANA chat
 
 Great engagement — every sister responded!
 
@@ -460,7 +460,7 @@ Great engagement — every sister responded!
 - **Laura's photos** — note the social media restriction on Hayley's photos. Family-only sharing.
 
 Want me to help you finish the reply to Lisa, or work on something else?
-<!-- agent:boundary:4a624bc6 -->
+<!-- agent:boundary:185df104 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

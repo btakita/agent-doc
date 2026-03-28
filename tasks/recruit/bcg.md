@@ -516,7 +516,7 @@ The email already has the hook: *"Happy to demo agent-doc — it's the kind of t
 
 Ready to send?
 It is 16:50 Eastern on a Saturday. Should I send now or wait?
-### Timing: send now (HEAD)
+### Timing: send now
 
 **Send it.** Saturday 4:50 PM is fine for email:
 
@@ -528,5 +528,5 @@ It is 16:50 Eastern on a Saturday. Should I send now or wait?
 Phone number in signature is a good add — makes it easy for him to text or call directly.
 
 Sending now via corky to Gmail Drafts for your review.
-<!-- agent:boundary:46f463bd -->
+<!-- agent:boundary:b6fd33e4 -->
 <!-- /agent:exchange -->

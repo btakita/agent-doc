@@ -391,6 +391,10 @@ Using existence-lang ontology, module-harness. I'm also experimenting with backt
 > Best,
 > Brian
 
+> a domain ontology system for consistent terminology across agents
+
+across agents and people
+
 **What changed from v1:**
 - Added Presence AI context (why you pivoted)
 - Reframed around **human-agent alignment** — Anil's language
@@ -398,5 +402,33 @@ Using existence-lang ontology, module-harness. I'm also experimenting with backt
 - The pitch: your high-level vision + my precise alignment infrastructure
 
 Ready to send, or further adjustments?
-<!-- agent:boundary:859687a1 -->
+### Updated: "across agents and people" (HEAD)
+
+Good correction. Updated the draft line:
+
+> a domain ontology system for consistent terminology across agents **and people**
+
+This reinforces the core alignment narrative — the ontology bridges the gap between how humans think about a domain and how agents operate within it. That's the whole value prop for a CPO.
+
+**Final draft (v3) with fix applied:**
+
+> **Subject:** Tenfore's document-as-interface — I built the next version
+>
+> Hi Anil,
+>
+> Brian Takita here — we worked together at Neo Innovation on the Tenfore project. You managed the product side; I built the document-as-interface system.
+>
+> That work stuck with me. After Presence AI wound down in February, I went deep on the problem of human-agent alignment — how do you ensure that a high-level product vision translates precisely into what AI agents actually build? The answer I landed on was to evolve the Tenfore concept: **agent-doc** makes the document itself the interface between a human and an AI agent. The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
+>
+> I've also been building the alignment primitives underneath — a domain ontology system for consistent terminology across agents and people, module-level harnesses that define contracts and evals per component, and backtesting frameworks to validate agent behavior against historical sessions. The goal: agents that stay precisely aligned with the humans directing them, not just at the prompt level but at the architectural level.
+>
+> I noticed you're CPO at BCG X, leading AI products — GenAI, Agent Systems, Forward-Deployed Teams. That's exactly the space where these alignment primitives matter most. I'm also in the pipeline for Project Helix through Inspyr Solutions — Tony Tomai suggested I reach out directly.
+>
+> Would love to catch up if you have a few minutes. Happy to demo agent-doc — it's the kind of thing that's easier to show than describe.
+>
+> Best,
+> Brian
+
+Ready to send via corky?
+<!-- agent:boundary:4007de9b -->
 <!-- /agent:exchange -->

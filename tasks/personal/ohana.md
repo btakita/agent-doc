@@ -504,14 +504,45 @@ Great question — Lisa said she wants AI cat videos and believes Scooter should
 - Hashtags: #CatsOfInstagram #AIArt #CatVideo #BuddhaKitty #ScooterTheCat
 
 Want me to draft a reply to Lisa in the OHANA chat suggesting some of these? Or dig deeper into any specific platform?
-<!-- agent:boundary:babaa9ae -->
+
+Yes. This is a a lot of content. Should we send it to ohana or be a personal message?
+### Re: Group vs personal message (HEAD)
+
+**Recommendation: personal DM to Lisa, with a short teaser in OHANA.**
+
+- Full platform breakdown is too much for group chat — it'll scroll past
+- Lisa specifically asked, so a personal message shows you followed through
+- Short teaser in OHANA keeps the group engaged
+
+**OHANA teaser (replying to Lisa's message):**
+
+> Totally! I'll look up some AI video tools for making cat content — there are some really fun ones where you can upload a photo of Scooter and it'll animate him or add wild effects. I'll DM you some links!
+
+**Lisa DM (condensed recommendations):**
+
+> Hey! Here are some free AI tools for making Scooter an Instagram star 😄
+>
+> **CapCut** (app) — tons of pet templates, AI filters that turn Scooter into a cartoon, direct Instagram export. Easiest starting point.
+>
+> **Pika** (pika.art) — upload a photo and it adds crazy effects — inflate like a balloon, sparkle, melt. These go viral.
+>
+> **Kling AI** — makes a still photo look like real video, and even lip sync so Scooter appears to talk!
+>
+> **ElevenLabs** — give Scooter a sassy voice for narration 😂
+>
+> All free to start. For Buddha Kitty travel stuff, **Canva Video** is great for montages with text overlays and maps.
+>
+> The formula: film on phone → edit in CapCut → add AI effects in Pika → post as Reels (Instagram favors video over photos). Consistency beats quality!
+
+Want me to send both via chromium-bridge?
+<!-- agent:boundary:5caaa26e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [active] Creating 7 family contacts in mail/contacts/
-- Draft reply to Lisa re: AI cat video platforms
+- [active] Send OHANA teaser + Lisa DM re: AI video platforms
 - Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code
 - Laura's LA photos — Hayley social media restriction noted

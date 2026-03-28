@@ -333,7 +333,7 @@ Added to `tasks/software/corky.md` pending section:
 This is a separate session task. Want me to start implementing it now in corky, or come back to it later?
 
 Let's work on the email. Assume that Anil did not read the LinkedIn message. So let's have our email include agent-doc and it being inspired by the Tenfore project at Neo Innovation.
-### Draft email to Anil Podduturi (anil@rickshaw.cm) (HEAD)
+### Draft email to Anil Podduturi (anil@rickshaw.cm)
 
 **Subject:** Tenfore's document-as-interface — I built the next version
 
@@ -362,5 +362,5 @@ Let's work on the email. Assume that Anil did not read the LinkedIn message. So 
 **Send to:** `anil@rickshaw.cm` (confirmed from anilpod.com)
 
 Ready to send via corky, or want to adjust the draft first?
-<!-- agent:boundary:b1db6c48 -->
+<!-- agent:boundary:c441765c -->
 <!-- /agent:exchange -->

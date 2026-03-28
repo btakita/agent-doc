@@ -375,7 +375,7 @@ But note that the end of the message had an extra escape
 Good catch — the `\!` escape is a bug. The chromium-bridge `type` command is escaping the exclamation mark when it shouldn't be. The CDP `Input.insertText` method should receive raw text. I'll file this as a bug for chromium-bridge.
 
 The message Melissa received would show as: "Would love to connect there too\!" — minor but noticeable. You may want to send a quick correction or just leave it (she'll understand the intent).
-<!-- agent:boundary:30e4ece2 -->
+<!-- agent:boundary:1b280bde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

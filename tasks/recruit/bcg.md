@@ -362,5 +362,41 @@ Let's work on the email. Assume that Anil did not read the LinkedIn message. So 
 **Send to:** `anil@rickshaw.cm` (confirmed from anilpod.com)
 
 Ready to send via corky, or want to adjust the draft first?
-<!-- agent:boundary:c441765c -->
+
+I started agent-doc mid February...after PresenceAI went out of business.
+Should we mention some of my posts? I'm focusing more on the primitives of human-agent alignment. Anil thinks more high level...but I can ensure that his high level vision has accurate and precise alignment with the agents.
+Using existence-lang ontology, module-harness. I'm also experimenting with backtesting for evals on the agent harness.
+### Revised email — alignment framing (HEAD)
+
+**On posts:** Don't link them in the email. Anil is a CPO — he responds to narrative and value proposition, not technical posts. Save posts for after he replies. If he asks "show me more," that's when you share.
+
+**On the alignment angle:** This is the strongest play. You're telling Anil: "I've built the infrastructure that makes your high-level vision actually execute precisely at the agent level." That's what a CPO wants to hear.
+
+**Revised draft:**
+
+> **Subject:** Tenfore's document-as-interface — I built the next version
+>
+> Hi Anil,
+>
+> Brian Takita here — we worked together at Neo Innovation on the Tenfore project. You managed the product side; I built the document-as-interface system.
+>
+> That work stuck with me. After Presence AI wound down in February, I went deep on the problem of human-agent alignment — how do you ensure that a high-level product vision translates precisely into what AI agents actually build? The answer I landed on was to evolve the Tenfore concept: **agent-doc** makes the document itself the interface between a human and an AI agent. The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
+>
+> I've also been building the alignment primitives underneath — a domain ontology system for consistent terminology across agents, module-level harnesses that define contracts and evals per component, and backtesting frameworks to validate agent behavior against historical sessions. The goal: agents that stay precisely aligned with the humans directing them, not just at the prompt level but at the architectural level.
+>
+> I noticed you're CPO at BCG X, leading AI products — GenAI, Agent Systems, Forward-Deployed Teams. That's exactly the space where these alignment primitives matter most. I'm also in the pipeline for Project Helix through Inspyr Solutions — Tony Tomai suggested I reach out directly.
+>
+> Would love to catch up if you have a few minutes. Happy to demo agent-doc — it's the kind of thing that's easier to show than describe.
+>
+> Best,
+> Brian
+
+**What changed from v1:**
+- Added Presence AI context (why you pivoted)
+- Reframed around **human-agent alignment** — Anil's language
+- existence-lang → "domain ontology system", module-harness → "module-level harnesses", evals → "backtesting frameworks" — technical depth without jargon
+- The pitch: your high-level vision + my precise alignment infrastructure
+
+Ready to send, or further adjustments?
+<!-- agent:boundary:407805ed -->
 <!-- /agent:exchange -->

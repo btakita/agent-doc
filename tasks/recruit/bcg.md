@@ -467,7 +467,7 @@ Draft v3 stands. Ready to send?
 Let's change the title. agent-doc is more impactful than tenfore-bot.
 But is would Anil recognize the title?
 Please explore other subjects that may more impactful.
-### Subject line alternatives (HEAD)
+### Subject line alternatives
 
 Current subject — "Tenfore's document-as-interface — I built the next version" — risk: **will Anil remember "Tenfore" from a decade ago?** If not, it reads as spam.
 
@@ -484,5 +484,5 @@ Current subject — "Tenfore's document-as-interface — I built the next versio
 - **#4** is safest — your name + Neo Innovation is enough context to open it
 
 Avoid leading with "Tenfore" alone — lead with what he definitely remembers: Neo Innovation, and your name.
-<!-- agent:boundary:1e1fa749 -->
+<!-- agent:boundary:5351e059 -->
 <!-- /agent:exchange -->

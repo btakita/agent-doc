@@ -288,7 +288,27 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 ```
 
 This will open browser for Google Contacts OAuth (first time), then push Anil Podduturi with name + LinkedIn URL from AGENTS.md. No emails for this contact (none in config).
-<!-- agent:boundary:608ca9b9 -->
+
+How do we auth? I just saw this.
+### Re: OAuth Auth Flow (HEAD)
+
+Same pattern as `corky cal auth`:
+
+1. **First run** opens browser to `accounts.google.com` — requests Google Contacts (`contacts`) scope
+2. Sign in and grant permission
+3. Google redirects to `http://127.0.0.1:8484/callback` — corky's local server catches it
+4. Token exchange → stored in `~/.config/corky/tokens.json` as `people:default`
+5. **Subsequent runs** auto-use stored token (auto-refreshes when expired)
+
+Reuses your Gmail OAuth client credentials from `[gmail]` in `.corky.toml` — same GCP project, different scope.
+
+**To auth:** Just run the command — browser opens automatically:
+```
+cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-podduturi
+```
+
+**Note:** If the People API isn't enabled on your GCP project yet, enable it at [Google Cloud Console](https://console.cloud.google.com/apis/library/people.googleapis.com) first (same project used for Calendar/Gmail).
+<!-- agent:boundary:c5cc0642 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

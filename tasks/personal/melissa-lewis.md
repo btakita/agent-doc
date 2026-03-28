@@ -323,7 +323,7 @@ Good call — the CRM/transcription angle is what *I* use the harness for, but f
 
 **Total: $8K flat vs Mortgage Automator's $21K+ first year + $13K/yr ongoing.**
 
-### Draft Reply to Melissa (v7 — SMS-appropriate, clarified) (HEAD)
+### Draft Reply to Melissa (v7 — SMS-appropriate, clarified)
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request.
 >
@@ -340,7 +340,7 @@ Good call — the CRM/transcription angle is what *I* use the harness for, but f
 > Also been thinking about the Wedding Insider Network app. The cost equation has completely changed — a custom agent harness could automate client communication, generate content from shoots, and manage vendor relationships for you and other wedding professionals. Worth revisiting when you're ready.
 >
 > Multiple angles moving forward. I'll keep you posted. Thank you for your patience.
-<!-- agent:boundary:bc8b3ce8 -->
+<!-- agent:boundary:b91503ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

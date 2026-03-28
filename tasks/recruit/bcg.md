@@ -366,7 +366,7 @@ Ready to send via corky, or want to adjust the draft first?
 I started agent-doc mid February...after PresenceAI went out of business.
 Should we mention some of my posts? I'm focusing more on the primitives of human-agent alignment. Anil thinks more high level...but I can ensure that his high level vision has accurate and precise alignment with the agents.
 Using existence-lang ontology, module-harness. I'm also experimenting with backtesting for evals on the agent harness.
-### Revised email — alignment framing (HEAD)
+### Revised email — alignment framing
 
 **On posts:** Don't link them in the email. Anil is a CPO — he responds to narrative and value proposition, not technical posts. Save posts for after he replies. If he asks "show me more," that's when you share.
 
@@ -398,5 +398,5 @@ Using existence-lang ontology, module-harness. I'm also experimenting with backt
 - The pitch: your high-level vision + my precise alignment infrastructure
 
 Ready to send, or further adjustments?
-<!-- agent:boundary:407805ed -->
+<!-- agent:boundary:859687a1 -->
 <!-- /agent:exchange -->

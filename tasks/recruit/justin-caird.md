@@ -809,7 +809,7 @@ This was in response to your eval tooling / module-harness LinkedIn post. Positi
 
 **Re: "Also please include the"** — this edit appears truncated (cut off mid-sentence). Please complete the thought in your next edit and I'll act on it.
 
-### Re: Company & CTO LinkedIn profiles (Mar 28) (HEAD)
+### Re: Company & CTO LinkedIn profiles (Mar 28)
 
 **ECI Software Solutions** (ecisolutions.com)
 - LinkedIn: https://www.linkedin.com/company/eci-software--solutions/
@@ -827,7 +827,7 @@ This was in response to your eval tooling / module-harness LinkedIn post. Positi
 - Background includes SaaS Product Development, AWS, DevSecOps, Cloud Architecture, Application Modernization
 
 Both have CTO-level titles. Brian Winters as CPTO is the more senior product+tech role. Paxton Lamons has the explicit CTO title with platform/modernization focus — which aligns well with the "modernize 20-year-old ERP systems" mission Justin described.
-<!-- agent:boundary:b43eed93 -->
+<!-- agent:boundary:2c54af0b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

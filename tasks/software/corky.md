@@ -269,7 +269,26 @@ Implement:
 **Sync tracking:** `.people-sync-state.json` maps contact names → Google `resourceName` for update-vs-create.
 
 `make check` passes (4 new unit tests). `audit-docs` clean.
-<!-- agent:boundary:56b2b9c3 -->
+Install locally.
+Test with anil-podduturi contact
+### Installed & Ready to Test (HEAD)
+
+Installed corky locally. Also improved `contact push` based on test findings:
+
+**Improvements (3):**
+1. **Filesystem discovery** — contacts with AGENTS.md but no `.corky.toml` entry are now pushable (discovers from `contacts/` directory)
+2. **LinkedIn list format** — `- LinkedIn:` lines parsed (not just `**LinkedIn:**`)
+3. **Display name from heading** — uses `# Contact: Name` or `# Name` from AGENTS.md for proper casing
+
+`make check` passes. `audit-docs` clean.
+
+**To test anil-podduturi**, run interactively (OAuth needs browser):
+```
+cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-podduturi
+```
+
+This will open browser for Google Contacts OAuth (first time), then push Anil Podduturi with name + LinkedIn URL from AGENTS.md. No emails for this contact (none in config).
+<!-- agent:boundary:733da96f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

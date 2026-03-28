@@ -15,7 +15,7 @@ Bug filed — awaiting implementation.
 <!-- agent:exchange patch=append -->
 Session initialized. Write in the exchange to describe the claim error you're seeing.
 
-### Bug: Claim delay (~20-30s) from redundant tmux subprocess calls (HEAD)
+### Bug: Claim delay (~20-30s) from redundant tmux subprocess calls
 
 **Symptom:** Running "Claim for Tmux Pane" from JetBrains plugin shows errors and takes 20-30 seconds:
 ```
@@ -42,7 +42,7 @@ resync: cannot return stashed pane N85 (...) no valid target found
 4. **Batch pane metadata queries**: Single `tmux list-panes -a -F` with all needed fields instead of per-pane `display-message` calls
 
 **Expected improvement:** Claim time from ~20-30s down to <2s.
-<!-- agent:boundary:b566aae8 -->
+<!-- agent:boundary:a3c74a6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

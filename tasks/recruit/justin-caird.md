@@ -793,12 +793,25 @@ Message sent — good. On sending another asking about status: **hold off for no
 > Hi Justin — just checking in on next steps. Happy to work on the Markdown challenge whenever it's ready.
 
 Short, low-pressure, references the specific next step he mentioned (challenge file + job description via email).
-<!-- agent:boundary:2fc3fa70 -->
+
+Please read the latest message from Justin on LinkedIn using chromium-bridge.
+Also please include the LinkedIn page of t
+
+### Re: LinkedIn message check (Mar 28) (HEAD)
+
+Read Justin's latest message via chromium-bridge. Here's the most recent exchange:
+
+**Justin Caird** (4:41 PM):
+> Thanks for sharing Brian. This is great. The CTO is coming back from travel next week. We should have times to interview soon. Stay tuned!
+
+This was in response to your eval tooling / module-harness LinkedIn post. Positive signal — he's engaged and the CTO interview is imminent once travel wraps up (expected week of March 30).
+
+**Re: "Also please include the"** — this edit appears truncated (cut off mid-sentence). Please complete the thought in your next edit and I'll act on it.
+<!-- agent:boundary:ab2b46a4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Send LinkedIn follow-up to Justin re: eval tooling + video link (sent)
-- [ ] Follow up on status if no response by Monday March 30
-- [ ] Watch for Justin's email with Markdown challenge file and job description
-- [ ] Explore browser-based LinkedIn automation if volume warrants it
+- [ ] CTO interview scheduling — waiting on Justin (CTO back from travel week of Mar 30)
+- [ ] Complete truncated request: "Also please include the..."
 <!-- /agent:pending -->

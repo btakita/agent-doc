@@ -683,11 +683,21 @@ fn return_stashed_panes_bulk(
         let target = match target {
             Some(t) => t,
             None => {
-                eprintln!(
-                    "resync: cannot return stashed pane {} ({}): no valid target found — deregistering",
-                    pane_id, key
-                );
-                deregistered.push(key.to_string());
+                // Only deregister idle shells with no return target.
+                // Active processes (claude, agent-doc, etc.) must stay registered
+                // so route's rescue_from_stash() can unstash them on next claim.
+                if IDLE_SHELLS.contains(&cmd.as_str()) {
+                    eprintln!(
+                        "resync: cannot return stashed pane {} ({}): no valid target found — deregistering idle shell",
+                        pane_id, key
+                    );
+                    deregistered.push(key.to_string());
+                } else {
+                    eprintln!(
+                        "resync: cannot return stashed pane {} ({}): no valid target found — keeping registered (running '{}')",
+                        pane_id, key, cmd
+                    );
+                }
                 continue;
             }
         };

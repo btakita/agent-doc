@@ -367,11 +367,19 @@ Both messages sent successfully via chromium-bridge CLI:
 2. **Follow-up** — "Also — I sent you a LinkedIn connection request. Would love to connect there too!" — sent via chromium-bridge automation
 
 Note: The MCP `mcp__chrome-devtools__*` tools are timing out, but `chromium-bridge` CLI works fine over the same CDP port. The browser skill already documents this preference — no config changes needed.
-<!-- agent:boundary:6843388b -->
+
+You did successfully interact with https://pulsesms.app/thread/241280530962744 and sent a message.
+But note that the end of the message had an extra escape
+> Also — I sent you a LinkedIn connection request. Would love to connect there too\!
+
+Good catch — the `\!` escape is a bug. The chromium-bridge `type` command is escaping the exclamation mark when it shouldn't be. The CDP `Input.insertText` method should receive raw text. I'll file this as a bug for chromium-bridge.
+
+The message Melissa received would show as: "Would love to connect there too\!" — minor but noticeable. You may want to send a quick correction or just leave it (she'll understand the intent).
+<!-- agent:boundary:30e4ece2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(empty)
+- Fix chromium-bridge exclamation mark escaping bug in `type` command
 <!-- /agent:pending -->

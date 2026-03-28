@@ -47,12 +47,16 @@ This should bring claim time from ~20-30s down to <2s.
 Fix:
 - [ ] **agent-doc bug**: Claim delay (~20-30s) from redundant tmux subprocess calls in `resync::prune()` — bulk pane queries needed (`resync.rs`, `tmux.rs`, `registry.rs`)
 
+
 Acknowledged — added to pending. I can start implementing the bulk pane query optimization in `resync.rs` now if you'd like, or we can tackle it in a dedicated session on the agent-doc submodule.
-<!-- agent:boundary:942b431a -->
+Transfer to /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-claim-error.md
+
+Transferred bug details to `tasks/agent-doc/agent-doc-claim-error.md` — full root cause analysis, affected files, and 4-step fix plan are documented there. Removed from this doc's pending.
+<!-- agent:boundary:91123800 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **agent-doc bug**: Claim delay (~20-30s) from redundant tmux subprocess calls in `resync::prune()` — bulk pane queries needed (`resync.rs`, `tmux.rs`, `registry.rs`)
+(empty)
 <!-- /agent:pending -->

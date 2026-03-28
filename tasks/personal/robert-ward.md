@@ -300,7 +300,7 @@ Transcribing 18 unique phone calls from Mar 21–28. Using Whisper large-v3-turb
 
 Summaries will be added once all transcriptions complete. Run `/agent-doc tasks/personal/robert-ward.md` again after ~30 min to get the full results.
 
-### Phone Call Transcripts (Mar 21–28) (HEAD)
+### Phone Call Transcripts (Mar 21–28)
 
 Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130–250x realtime). Rebuilt corky with `transcribe-cuda` feature per your note. Full transcripts archived at `mail/contacts/robert-ward/recordings/`.
 
@@ -348,7 +348,7 @@ Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130�
 
 ---
 
-### Key Takeaways (Mar 21–28) (HEAD)
+### Key Takeaways (Mar 21–28)
 
 **Judith Krug / Equity Funding Source:**
 - Judith confirmed through Robert multiple times: Brian is building the website replacement
@@ -376,5 +376,5 @@ Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130�
 - Partnership concept discussed across multiple calls
 - Domain registered: buildside.co
 - Robert's role as referral engine from LA network
-<!-- agent:boundary:7410f75d -->
+<!-- agent:boundary:fe8071b5 -->
 <!-- /agent:exchange -->

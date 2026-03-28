@@ -421,7 +421,7 @@ v0.27.0 prevents this from happening **going forward**, but it can't undo the se
 **Evidence:** The 4 stashed panes in preflight (`%96, %99, %98, %100 running 'agent-doc'`) are orphaned sessions from before the fix. v0.27.0 keeps them registered now (won't deregister), but they were already orphaned when the old code ran.
 
 To clean up: those stashed panes can be manually killed since their Claude sessions have no active document claim.
-<!-- agent:boundary:9b3de9a0 -->
+<!-- agent:boundary:cb6e91a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

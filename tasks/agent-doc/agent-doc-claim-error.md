@@ -301,7 +301,7 @@ The route code in `route.rs` already has `rescue_from_stash()` (line 243) — it
 
 Implement?
 go
-### Fix implemented: don't deregister active stashed panes (HEAD)
+### Fix implemented: don't deregister active stashed panes
 
 **Changed** `return_stashed_panes_bulk()` in `resync.rs` (lines 683-700):
 
@@ -323,7 +323,7 @@ This means when you switch back to a document:
 **Note:** `purge_stash_windows_bulk()` was already correct — it only kills stash windows where ALL panes are idle shells. No change needed there.
 
 Ready to commit from within the submodule. Want me to bump version and publish, or test first?
-<!-- agent:boundary:3f33b864 -->
+<!-- agent:boundary:8bf918f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

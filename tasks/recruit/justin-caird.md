@@ -827,7 +827,7 @@ This was in response to your eval tooling / module-harness LinkedIn post. Positi
 - Background includes SaaS Product Development, AWS, DevSecOps, Cloud Architecture, Application Modernization
 
 Both have CTO-level titles. Brian Winters as CPTO is the more senior product+tech role. Paxton Lamons has the explicit CTO title with platform/modernization focus — which aligns well with the "modernize 20-year-old ERP systems" mission Justin described.
-<!-- agent:boundary:2c54af0b -->
+<!-- agent:boundary:9fa87fca -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

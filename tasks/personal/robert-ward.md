@@ -246,4 +246,36 @@ Created `tasks/buildside.md` with:
 - Template mode with exchange component for future sessions
 
 Run `/agent-doc tasks/buildside.md` to continue planning there.
+
+Please transcribe and diarize these phone calls:
+[phone_20260327-040231_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-040231_3109684542.amr)
+[phone_20260327-020734__13109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-020734__13109684542.amr)
+[phone_20260322-022648_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260322-022648_3109684542.amr)
+[phone_20260321-051112_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051112_3109684542.amr)
+[phone_20260327-001518_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-001518_3109684542.amr)
+[phone_20260326-043254_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-043254_3109684542.amr)
+[phone_20260326-005855_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-005855_3109684542.amr)
+[phone_20260324-214531_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-214531_3109684542.amr)
+[phone_20260324-005235_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-005235_3109684542.amr)
+[phone_20260321-051012_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051012_3109684542.amr)
+[phone_20260321-051012_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051012_3109684542.amr)
+[phone_20260321-051112_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051112_3109684542.amr)
+[phone_20260322-022648_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260322-022648_3109684542.amr)
+[phone_20260323-183219_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260323-183219_3109684542.amr)
+[phone_20260323-211012_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260323-211012_3109684542.amr)
+[phone_20260324-005235_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-005235_3109684542.amr)
+[phone_20260324-214531_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-214531_3109684542.amr)
+[phone_20260325-130005_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260325-130005_3109684542.amr)
+[phone_20260326-005855_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-005855_3109684542.amr)
+[phone_20260326-034516_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-034516_3109684542.amr)
+[phone_20260326-040656_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-040656_3109684542.amr)
+[phone_20260326-043254_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-043254_3109684542.amr)
+[phone_20260327-001518_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-001518_3109684542.amr)
+[phone_20260327-020734__13109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-020734__13109684542.amr)
+[phone_20260327-040231_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-040231_3109684542.amr)
+[phone_20260327-212919_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260327-212919_3109684542.amr)
+[phone_20260328-000319_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr)
+[phone_20260328-001315_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-001315_3109684542.amr)
+
+Note that [phone_20260328-000319_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr) is a 3 way call with judith-krug, robert-ward, brian-takita
 <!-- /agent:exchange -->

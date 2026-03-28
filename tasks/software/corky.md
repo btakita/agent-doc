@@ -63,6 +63,8 @@ claude_args: --dangerously-skip-permissions
 - [x] SPEC.md §6.8, §6.9, §18 — v0.19.1
 - [x] Metal GPU + audio resilience — v0.19.3
 - [x] YouTube playlist management — v0.21.0
+- [x] Diarize default feature — v0.22.1
+- [x] `corky contact push google` — v0.22.1
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -240,12 +242,38 @@ Made diarize a default feature in corky:
 - `README.md` — "Diarization is enabled by default"
 
 `make check` passes (clippy clean, 13 tests). `audit-docs` clean.
-<!-- agent:boundary:5de42012 -->
+
+Implement:
+- [ ] `corky contact push google` — push local contacts to Google Contacts via People API. `corky contact push` pushes to all platforms; `corky contact push google` targets Google only. Requires People API OAuth scope, contact field mapping (name, email, phone, org, title, LinkedIn, notes).
+### Implemented `corky contact push google` (HEAD)
+
+**New CLI command:**
+- `corky contact push [google] [--name NAME...]` — push local contacts to Google Contacts via People API
+
+**Files changed (5 modified, 1 new):**
+- `src/contact/push.rs` — new module: OAuth flow, People API create/update, field extraction from AGENTS.md, sync state tracking (~370 lines)
+- `src/contact/mod.rs` — added `pub mod push`
+- `src/cli.rs` — `Push { platform, names }` variant in `ContactCommands`
+- `src/main.rs` — dispatch for `contact push`
+- `SPEC.md` — §5.25 contact push (new section)
+- `README.md` — added `contact push` to quick reference
+
+**Field mapping from AGENTS.md:**
+- `**Role:**` → title + org (splits on " at ")
+- `**Organization:**`/`**Company:**`/`**Org:**` → organization
+- `**Title:**` → title, `**Phone:**` → phone, `**LinkedIn:**` → URL
+- Contact name slug → display name (title-cased)
+- Emails from `.corky.toml` config
+
+**OAuth:** Reuses Gmail credentials, `contacts` scope, tokens as `people:default`.
+**Sync tracking:** `.people-sync-state.json` maps contact names → Google `resourceName` for update-vs-create.
+
+`make check` passes (4 new unit tests). `audit-docs` clean.
+<!-- agent:boundary:5a074487 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky contact push google` — push local contacts to Google Contacts via People API. `corky contact push` pushes to all platforms; `corky contact push google` targets Google only. Requires People API OAuth scope, contact field mapping (name, email, phone, org, title, LinkedIn, notes).
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

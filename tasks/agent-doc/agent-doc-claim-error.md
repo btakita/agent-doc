@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Root cause narrowed: single fix in return_stashed_panes_bulk() prevents premature deregistration. Route already has rescue logic.
+Fix implemented: return_stashed_panes_bulk no longer deregisters active panes. Tests pass.
 <!-- /agent:status -->
 
 ## Exchange
@@ -300,15 +300,39 @@ The route code in `route.rs` already has `rescue_from_stash()` (line 243) — it
 **Don't deregister active stashed panes in `return_stashed_panes_bulk()`.** That's it. Route's existing `rescue_from_stash()` already handles unstashing — it just never gets called because prune deletes the registry entry first.
 
 Implement?
-<!-- agent:boundary:62011822 -->
+go
+### Fix implemented: don't deregister active stashed panes (HEAD)
+
+**Changed** `return_stashed_panes_bulk()` in `resync.rs` (lines 683-700):
+
+**Before:** When `find_return_target_bulk()` returns `None`, always deregisters the pane — even if it's running claude.
+
+**After:** Only deregisters if `IDLE_SHELLS.contains(&cmd)`. Active processes (claude, agent-doc, node) are kept registered with a log message:
+```
+resync: cannot return stashed pane %N (session): no valid target found — keeping registered (running 'claude')
+```
+
+This means when you switch back to a document:
+1. `prune()` runs but does NOT deregister the stashed claude pane
+2. `route` looks up the registered pane → finds it alive in stash
+3. `rescue_from_stash()` unstashes it to the target window
+4. Command is sent to the **original** session with full context
+
+**Build:** `make check` passes (38 tests, clippy clean). Release binary built.
+
+**Note:** `purge_stash_windows_bulk()` was already correct — it only kills stash windows where ALL panes are idle shells. No change needed there.
+
+Ready to commit from within the submodule. Want me to bump version and publish, or test first?
+<!-- agent:boundary:3f33b864 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix return_stashed_panes_bulk: don't deregister active (non-idle) stashed panes
-- [ ] Verify route's rescue_from_stash() works once deregistration bug is fixed
+- [x] Fix return_stashed_panes_bulk: don't deregister active (non-idle) stashed panes
+- [x] Verify purge_stash_windows_bulk already correct (only purges all-idle windows)
+- [ ] Commit fix in agent-doc submodule
+- [ ] Test stash rescue flow end-to-end
 - [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command)
-- [ ] Fix purge_stash_windows_bulk: never purge windows with active processes
 - [ ] Bump agent-doc version + publish
 <!-- /agent:pending -->

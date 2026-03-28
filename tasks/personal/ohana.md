@@ -437,6 +437,7 @@ Great engagement — she's already on an AI journey as an Engineering Manager. T
 **Note:** The original message still shows as a wall of text (the spacing bug from before the `type` command was implemented). Lynette quoted your message in her reply, so the content landed fine despite the formatting.
 
 Please read the latest from the ohana chat.
+Use chromium-bridge
 ### Re: Latest from OHANA chat
 
 Great engagement — every sister responded!
@@ -460,7 +461,12 @@ Great engagement — every sister responded!
 - **Laura's photos** — note the social media restriction on Hayley's photos. Family-only sharing.
 
 Want me to help you finish the reply to Lisa, or work on something else?
-<!-- agent:boundary:185df104 -->
+### Re: Use chromium-bridge (HEAD)
+
+Already done — the previous response used `chromium-bridge select-tab` + `chromium-bridge evaluate` to read the OHANA chat. The MCP chrome-devtools was timing out as usual, so chromium-bridge was the right call.
+
+Anything else you'd like to do? You had an incomplete reply to Lisa in the textbox ("Totally. I'll look up some").
+<!-- agent:boundary:2c67791a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

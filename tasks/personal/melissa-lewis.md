@@ -268,6 +268,8 @@ Expanding the Wedding Insider Network paragraph to connect agent harnesses to he
 
 Please use chromium-bridge to send this to Melissa on the tab with https://pulsesms.app/thread/241280530962744 opened
 
+Note that this is over SMS
+
 ### Sending via PulseSMS
 
 chromium-bridge connection is timing out (DevTools protocol not responding). Two options:
@@ -295,11 +297,17 @@ Other conversations this week:
 On a related note — I've been thinking about the Wedding Insider Network app we discussed last year. The cost equation for building custom software has completely changed with agent harnesses. What used to require a large budget and a full dev team can now be done at a fraction of the cost and time. There are also ways a custom agent harness could support your photography business directly — automating client communication, generating content from shoots, managing vendor relationships. Same idea could extend to other wedding professionals in the network. Might be worth revisiting when you're ready.
 
 So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:1f1cf064 -->
+
+Noted — this is SMS. chromium-bridge is still timing out. The message is quite long for SMS (~2,500 characters, which is about 16 SMS segments). PulseSMS will either send as MMS or split into segments automatically.
+
+**To send:** Copy the plain text message from the previous response and paste it into the PulseSMS text box. Or restart Chrome with remote debugging (`google-chrome --remote-debugging-port=9222`) and retry.
+
+Alternatively, would you like me to shorten it for SMS? A condensed version would be more typical for text messaging.
+<!-- agent:boundary:3c70681a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send v6 message to Melissa via PulseSMS (chromium-bridge down — needs restart or manual paste)
+- Send v6 message to Melissa via PulseSMS (chromium-bridge down — manual paste or restart Chrome)
 <!-- /agent:pending -->

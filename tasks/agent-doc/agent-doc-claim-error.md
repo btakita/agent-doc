@@ -390,7 +390,7 @@ Yes, that's exactly the bug. This session received a second `/agent-doc` prompt 
 3. No more double prompts — route sends exactly one `/agent-doc <path>` to the pane
 
 fix now
-### Plugin already uses `agent-doc route` — task complete (HEAD)
+### Plugin already uses `agent-doc route` — task complete
 
 Investigated the plugin source. **SubmitAction already calls `agent-doc route <path>`** via `TerminalUtil.sendToTerminal()`. The plugin is NOT sending separate claim + `/agent-doc` — it's a single `agent-doc route` subprocess call.
 
@@ -402,7 +402,7 @@ The double prompt you experienced earlier was caused by the **premature deregist
 With the v0.27.0 fix, stashed panes with active claude sessions are kept registered, so `route` finds and rescues them via `rescue_from_stash()`. No new session is created.
 
 **Task item closed** — the plugin integration is already correct. The remaining fix was the CLI-side deregistration bug, which is shipped.
-<!-- agent:boundary:f94d19eb -->
+<!-- agent:boundary:794b7608 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

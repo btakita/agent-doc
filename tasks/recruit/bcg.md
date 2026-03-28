@@ -281,5 +281,8 @@ Good intel from Dave. Two BCG email formats to try:
 - Mirrors the LinkedIn message but adds Project Helix + Tony's name (since this is a direct channel, not cold outreach)
 - Corporate email is more likely to get seen than LinkedIn InMail sitting in "Other"
 - Keep it to one email — don't follow up for at least a week
+
+Anil's email is on his website. Please note all of his contact info from his website.
+https://anilpod.com/
 <!-- agent:boundary:5e5861fc -->
 <!-- /agent:exchange -->

@@ -108,7 +108,7 @@ There was a running task in another task. But when I switched back, agent-doc cr
 **tmux-router 0.3.1** also published (bulk `alive_pane_ids()` in registry prune).
 
 Ready for version bump and release.
-### Why switching back created a new session (HEAD)
+### Why switching back created a new session
 
 **What happened:**
 
@@ -127,7 +127,7 @@ Ready for version bump and release.
 This would preserve the existing claude session context instead of starting fresh each time you switch between documents.
 
 Want me to look at the claim flow code and spec a fix?
-<!-- agent:boundary:6441e7d9 -->
+<!-- agent:boundary:9f3e4115 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

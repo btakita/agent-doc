@@ -452,7 +452,7 @@ You're right — the CRDT merge pattern is format-agnostic (MDX, Notion, MS Offi
 **Both are excellent demo/call material.** The email's job: get Anil to respond. The demo is where you show the depth.
 
 Draft v3 stands as-is. Ready to send?
-### LinkedIn / YouTube / blog posts: not in this email (HEAD)
+### LinkedIn / YouTube / blog posts: not in this email
 
 Same reasoning — **no links.** Every link is a potential off-ramp where Anil thinks "I'll look at this later" and never comes back.
 
@@ -464,5 +464,5 @@ Same reasoning — **no links.** Every link is a potential off-ramp where Anil t
 **Rule of thumb:** If the recipient has to click something to understand your value, the email didn't do its job. The Tenfore → agent-doc story + alignment framing is self-contained.
 
 Draft v3 stands. Ready to send?
-<!-- agent:boundary:1f39d62b -->
+<!-- agent:boundary:97f0993a -->
 <!-- /agent:exchange -->

@@ -121,6 +121,7 @@ Agreed — diarize should be core to corky, not an optional feature. Added to co
 | **Brian Takita** | Noted some work isn't dependent on the Mortgage Automator decision. Thanked Judith for catching up. |
 
 release corky changes
+response patch should go into /home/brian/work/btakita/agent-loop/tasks/software/corky.md 
 
 ### Corky v0.22.0 Released
 
@@ -130,12 +131,13 @@ release corky changes
 - **Updated** CLAUDE.local.md to reflect diarize is compiled
 - **Published**: Pushed to GitHub with tag, release binary built, crates.io publish in progress
 - **Parent submodule** pointer updated
-<!-- agent:boundary:9041c93f -->
+
+Noted — moved the corky v0.22.0 release details to `tasks/software/corky.md`. Future corky release patches will go there.
+<!-- agent:boundary:c7505bdc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Review draft SMS reply to Melissa and send when ready
-- Make diarize a default/core feature in corky (not optional feature flag) — build now includes it but it's still behind a feature flag in Cargo.toml
 <!-- /agent:pending -->

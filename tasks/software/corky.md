@@ -245,7 +245,7 @@ Made diarize a default feature in corky:
 
 Implement:
 - [ ] `corky contact push google` — push local contacts to Google Contacts via People API. `corky contact push` pushes to all platforms; `corky contact push google` targets Google only. Requires People API OAuth scope, contact field mapping (name, email, phone, org, title, LinkedIn, notes).
-### Implemented `corky contact push google` (HEAD)
+### Implemented `corky contact push google`
 
 **New CLI command:**
 - `corky contact push [google] [--name NAME...]` — push local contacts to Google Contacts via People API
@@ -269,7 +269,7 @@ Implement:
 **Sync tracking:** `.people-sync-state.json` maps contact names → Google `resourceName` for update-vs-create.
 
 `make check` passes (4 new unit tests). `audit-docs` clean.
-<!-- agent:boundary:5a074487 -->
+<!-- agent:boundary:56b2b9c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

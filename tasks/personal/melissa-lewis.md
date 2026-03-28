@@ -43,7 +43,12 @@ resync: cannot return stashed pane N85 (...) no valid target found
 4. Batch pane metadata queries via single `tmux list-panes -a -F`
 
 This should bring claim time from ~20-30s down to <2s.
-<!-- agent:boundary:a890c861 -->
+
+Fix:
+- [ ] **agent-doc bug**: Claim delay (~20-30s) from redundant tmux subprocess calls in `resync::prune()` — bulk pane queries needed (`resync.rs`, `tmux.rs`, `registry.rs`)
+
+Acknowledged — added to pending. I can start implementing the bulk pane query optimization in `resync.rs` now if you'd like, or we can tackle it in a dedicated session on the agent-doc submodule.
+<!-- agent:boundary:fb16e676 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

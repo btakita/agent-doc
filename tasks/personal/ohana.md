@@ -424,7 +424,7 @@ Add contacts for:
 - henry-kondrat: https://www.linkedin.com/in/hjkondrat/
 
 Please read the latest from the ohana chat. Notice Lynette's response.
-### Re: OHANA chat + contacts (HEAD)
+### Re: OHANA chat + contacts
 
 **Lynette's response (8:14 AM today):**
 
@@ -435,7 +435,7 @@ Great engagement — she's already on an AI journey as an Engineering Manager. T
 **Contacts:** Creating directories for all 7 family members in `mail/contacts/` with LinkedIn profiles and relationship info. Working on it now.
 
 **Note:** The original message still shows as a wall of text (the spacing bug from before the `type` command was implemented). Lynette quoted your message in her reply, so the content landed fine despite the formatting.
-<!-- agent:boundary:51f6ea96 -->
+<!-- agent:boundary:93af1b47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

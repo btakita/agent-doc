@@ -2,6 +2,7 @@
 agent_doc_session: 7f435abe-d381-4f1a-bbe9-a2184a50b311
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -55,11 +56,44 @@ Updated both contact files with LinkedIn data:
 - Website: www.brookebrodack.net
 - Open to work: ESL Teacher, Video Streamer, Artist roles
 - 451 connections
-<!-- agent:boundary:241f802a -->
+
+Please read /home/brian/work/btakita/agent-loop/mail/contacts/melissa-lewis/melissa-lewis-sms.txt
+
+Draft a reply. I want to mention the ongoing status with judith-krug's Equity Funding Source project.
+We have been in conversation for 1 month. Mention how I'm scheduled to build a replacement for Mortgage Automator but they are attempting to enforce a contract. Use the most recent phone call between Robert Ward, Judith Krug, and me for information.
+
+Please retranscribe /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr using corky --gpu.
+
+### SMS Context & Draft Reply (HEAD)
+
+**Last message from Melissa** (most recent): She's checking in about rent, acknowledging money is tight between jobs, asking Brian to keep communication open.
+
+**Key facts from the Robert Ward / Judith Krug calls (Mar 27-28):**
+- Judith Krug runs **Equity Funding Source** — a commercial lending operation in LA
+- She signed with **Mortgage Automator** but is trying to get out of the contract
+- She got her 10% deposit reversed by her bank
+- She needs her attorney to confirm she's released before committing to Brian building a custom replacement
+- Robert Ward (mutual friend) is advocating "build it, don't buy it" and pushing Judith to move forward
+- Judith is very busy closing loans and has been a poor communicator — it's been ~1 month of waiting
+- Additional work possible: websites for Judith's health coaching, spiritual coaching, and products businesses
+
+### Draft Reply to Melissa (HEAD)
+
+> Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it.
+>
+> Things are progressing on the work front. I've been in conversation for about a month now with a commercial real estate broker in LA — Judith Krug, who runs Equity Funding Source. Robert Ward connected us. I'm scheduled to build a custom replacement for her loan management software (Mortgage Automator), but there's been a delay because they're trying to enforce her existing contract. She's working with her attorney to get released. Once that's resolved, the project kicks off — and there's additional website work for her other businesses too.
+>
+> I'm also talking to other companies next week, so I'm working multiple angles. I'll keep you posted as things develop. Thank you for your patience.
+
+### Retranscription (HEAD)
+
+Retranscribing `phone_20260328-000319_3109684542.amr` with GPU + diarization (speakers: Robert Ward, Brian Takita, Judith Krug). Running in background — will update when complete.
+<!-- agent:boundary:0ab764d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(empty)
+- Retranscription of phone_20260328-000319_3109684542.amr in progress (GPU + diarization)
+- Review retranscribed output and update call summary if quality improved
 <!-- /agent:pending -->

@@ -177,7 +177,7 @@ Want me to implement option 1 (stash-aware claim), option 2 (longer stash retent
 See my prompt above and reassess.
 `Run `
 `❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md`
-### Corrected analysis: premature deregistration (HEAD)
+### Corrected analysis: premature deregistration
 
 You're right — the claude session was still running. My idle-shell theory was wrong.
 
@@ -207,7 +207,7 @@ The flow when you switched back:
 3. **Never purge stash windows with active processes** — `purge_stash_windows_bulk()` should skip windows containing any non-idle pane
 
 These three changes together prevent session loss when switching between documents.
-<!-- agent:boundary:3acac6f9 -->
+<!-- agent:boundary:3c9b5646 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

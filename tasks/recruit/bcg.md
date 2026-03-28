@@ -284,7 +284,7 @@ Good intel from Dave. Two BCG email formats to try:
 
 Anil's email is on his website. Please note all of his contact info from his website.
 https://anilpod.com/
-### Anil Podduturi — Contact Info (from anilpod.com) (HEAD)
+### Anil Podduturi — Contact Info (from anilpod.com)
 
 - **Email:** anil@rickshaw.cm
 - **Phone:** +1-425-591-7794
@@ -299,5 +299,5 @@ https://anilpod.com/
 **Key takeaway:** His email is `anil@rickshaw.cm` (personal domain, not BCG). This is more reliable than guessing the BCG email format. Also — his title is **CPO at BCG X** (not just BCG), and his focus areas overlap heavily with Project Helix (GenAI, Agent Systems, Forward-Deployed Teams). This is the right person.
 
 **Recommendation:** Email `anil@rickshaw.cm` with the draft from above. Skip the BCG email guessing — this personal email is confirmed and he'll actually see it.
-<!-- agent:boundary:f6bbd8f1 -->
+<!-- agent:boundary:dc548d9d -->
 <!-- /agent:exchange -->

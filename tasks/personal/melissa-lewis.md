@@ -122,7 +122,7 @@ Agreed — diarize should be core to corky, not an optional feature. Added to co
 
 release corky changes
 
-### Corky v0.22.0 Released (HEAD)
+### Corky v0.22.0 Released
 
 - **Version**: 0.21.2 → 0.22.0
 - **New features**: Search backends (sift local + ragie cloud), unified search CLI
@@ -130,7 +130,7 @@ release corky changes
 - **Updated** CLAUDE.local.md to reflect diarize is compiled
 - **Published**: Pushed to GitHub with tag, release binary built, crates.io publish in progress
 - **Parent submodule** pointer updated
-<!-- agent:boundary:c73bbba8 -->
+<!-- agent:boundary:9041c93f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

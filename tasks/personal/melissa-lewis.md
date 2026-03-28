@@ -245,7 +245,7 @@ So there are ways for a custom agent harness to support either her process as a 
 
 Expanding the Wedding Insider Network paragraph to connect agent harnesses to her photography business and vendor network.
 
-### Draft Reply to Melissa (v6) (HEAD)
+### Draft Reply to Melissa (v6)
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request — would be great to connect there too.
 >
@@ -265,7 +265,7 @@ Expanding the Wedding Insider Network paragraph to connect agent harnesses to he
 > On a related note — I've been thinking about the Wedding Insider Network app we discussed last year. The cost equation for building custom software has completely changed with agent harnesses. What used to require a large budget and a full dev team can now be done at a fraction of the cost and time. There are also ways a custom agent harness could support your photography business directly — automating client communication, generating content from shoots, managing vendor relationships. Same idea could extend to other wedding professionals in the network. Might be worth revisiting when you're ready.
 >
 > So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:731458aa -->
+<!-- agent:boundary:96798580 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -388,7 +388,21 @@ Yes, that's exactly the bug. This session received a second `/agent-doc` prompt 
 1. Plugin "Run Agent Doc" action → calls `agent-doc route <path>` (one subprocess call)
 2. Route handles: pane resolution, stash rescue, claude session ensure, command injection
 3. No more double prompts — route sends exactly one `/agent-doc <path>` to the pane
-<!-- agent:boundary:e2f3815d -->
+
+fix now
+### Plugin already uses `agent-doc route` — task complete (HEAD)
+
+Investigated the plugin source. **SubmitAction already calls `agent-doc route <path>`** via `TerminalUtil.sendToTerminal()`. The plugin is NOT sending separate claim + `/agent-doc` — it's a single `agent-doc route` subprocess call.
+
+The double prompt you experienced earlier was caused by the **premature deregistration bug** (now fixed in v0.27.0):
+1. Stashed pane deregistered → route couldn't find it
+2. Route created new pane + new claude session
+3. Both old (orphaned) and new sessions processed the document
+
+With the v0.27.0 fix, stashed panes with active claude sessions are kept registered, so `route` finds and rescues them via `rescue_from_stash()`. No new session is created.
+
+**Task item closed** — the plugin integration is already correct. The remaining fix was the CLI-side deregistration bug, which is shipped.
+<!-- agent:boundary:f94d19eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -398,5 +412,5 @@ Yes, that's exactly the bug. This session received a second `/agent-doc` prompt 
 - [x] Commit, test, install locally
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
-- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` — ready to implement, need plugin source location
+- [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
 <!-- /agent:pending -->

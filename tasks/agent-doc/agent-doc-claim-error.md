@@ -2,6 +2,7 @@
 agent_doc_session: bef800bc-950e-4f9e-b861-92c249853397
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -90,6 +91,9 @@ Update agent-doc.
 audit docs
 update README.md, SPEC.md, ontology, module-harness
 
+I switched back to this document.
+There was a running task in another task. But when I switched back, agent-doc created a new tmux pane -> claude session. Why?
+
 ### agent-doc updated, docs audited
 
 **Committed and pushed** `66335e2` — v0.27.0: Socket IPC, bulk resync, FFI listener.
@@ -104,12 +108,32 @@ update README.md, SPEC.md, ontology, module-harness
 **tmux-router 0.3.1** also published (bulk `alive_pane_ids()` in registry prune).
 
 Ready for version bump and release.
-<!-- agent:boundary:9e05d85a -->
+### Why switching back created a new session (HEAD)
+
+**What happened:**
+
+1. When you switched away to another task document, agent-doc **stashed** this pane (moved it to the stash window to free up the layout)
+2. When you switched back, the JetBrains plugin fired a **new claim** for `agent-doc-claim-error.md`
+3. The claim flow saw no active (unstashed) pane for this document, so it **spawned a new tmux pane + new claude session**
+4. The old stashed pane with the previous session was still sitting in the stash window (or got pruned)
+
+**Root cause:** The claim path doesn't check for existing stashed panes that could be **unstashed and resumed**. The `return_stashed_panes` logic exists in `prune()` (resync), but that's a background process — it doesn't run inline during the claim flow.
+
+**Potential fix:** During claim, before spawning a new pane:
+1. Check if there's a stashed pane already registered for this document
+2. If found, unstash it back to the target window instead of spawning new
+3. Only spawn new if no stashed pane exists
+
+This would preserve the existing claude session context instead of starting fresh each time you switch between documents.
+
+Want me to look at the claim flow code and spec a fix?
+<!-- agent:boundary:6441e7d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Investigate claim flow for stash-aware resumption (unstash instead of new spawn)
 - [ ] Bump agent-doc version to 0.27.0 in Cargo.toml + pyproject.toml
 - [ ] Publish to crates.io, PyPI, GitHub Releases
 <!-- /agent:pending -->

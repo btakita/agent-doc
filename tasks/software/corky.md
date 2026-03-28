@@ -308,7 +308,20 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 ```
 
 **Note:** If the People API isn't enabled on your GCP project yet, enable it at [Google Cloud Console](https://console.cloud.google.com/apis/library/people.googleapis.com) first (same project used for Calendar/Gmail).
-<!-- agent:boundary:0d457188 -->
+try again. I'll pay attention
+### Re: Test Result (HEAD)
+
+OAuth worked — token stored. But the People API isn't enabled on your GCP project yet.
+
+**Enable it here:** [https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=873280095295](https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=873280095295)
+
+After enabling (wait ~1 min for propagation), run again:
+```
+cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-podduturi
+```
+
+This time it won't need browser auth — the token is already stored.
+<!-- agent:boundary:330f8a50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

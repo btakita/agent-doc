@@ -90,7 +90,7 @@ Please retranscribe /home/brian/work/btakita/agent-loop/mail/contacts/robert-war
 
 Retranscribing `phone_20260328-000319_3109684542.amr` with GPU + diarization (speakers: Robert Ward, Brian Takita, Judith Krug). Running in background — will update when complete.
 
-### Retranscription Complete (HEAD)
+### Retranscription Complete
 
 Retranscribed `phone_20260328-000319_3109684542.amr` — 117x realtime on RTX 5090. Unfortunately the same Whisper hallucination loop persists (repetitive text mid-call). This is a known issue with low-bitrate AMR phone audio. The `--diarize` flag failed — corky wasn't compiled with the `diarize` feature.
 
@@ -100,7 +100,7 @@ Retranscribed `phone_20260328-000319_3109684542.amr` — 117x realtime on RTX 50
 - The price bait-and-switch strengthens her case for contract release
 - Leo (Judith's ex) showed up wanting money for some website work — Judith wants to hire Brian instead
 - Judith mentioned a "Taiyo" for her nutritional business website (not ready yet)
-<!-- agent:boundary:61495def -->
+<!-- agent:boundary:1a281255 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

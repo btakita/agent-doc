@@ -443,7 +443,29 @@ tmux kill-pane -t %100
 ```
 
 After cleanup, the "externally modified" popups should stop since only the active (IPC-connected) sessions will be writing to documents.
-<!-- agent:boundary:7e40cbae -->
+
+This was happening in tasks/software/corky.md...as I was typing, the "externally modified" popup kept on happening. I would lose the last typed character as well. Why? Do we have logs?
+### Root cause found: `clean_stale_boundaries_in_working_tree()` writes directly to disk (HEAD)
+
+**File:** `src/agent-doc/src/git.rs:275-309`
+
+After every `agent-doc commit`, the function `clean_stale_boundaries_in_working_tree()` runs. When it detects >1 boundary markers in the document, it calls `std::fs::write(file, &cleaned)` — **writing directly to the document file on disk, bypassing IPC entirely.**
+
+This causes:
+1. JetBrains' file watcher detects the external modification
+2. Shows "file externally modified" popup (or auto-reloads)
+3. Your in-memory document (with the character you just typed) gets replaced by the disk version → **character lost**
+
+**Why it happens repeatedly:** Each agent-doc cycle creates a commit, which runs this function. If stale boundaries keep appearing (e.g., from IPC reposition race conditions), the cleanup fires every cycle.
+
+**The fix:** Either:
+1. **Remove the function** — the boundary reposition IPC already handles stale boundaries in the plugin
+2. **Route through IPC** — use `try_ipc_reposition_boundary()` instead of `std::fs::write()`
+
+Option 1 is cleanest since the comment at line 207 already says "Working tree is NOT written directly (would lose user keystrokes) UNLESS stale boundaries are detected." The stale boundary case should also use IPC, not disk write.
+
+Want me to implement the fix?
+<!-- agent:boundary:a7d8bc29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -454,6 +476,6 @@ After cleanup, the "externally modified" popups should stop since only the activ
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
-- All tasks complete. Stash rescue fix shipped in v0.27.0.
-- [ ] Clean up orphaned stashed panes (%96, %101, %89, %98, %100)
+- [ ] Fix: remove `clean_stale_boundaries_in_working_tree()` disk write — causes "externally modified" popup + lost keystrokes
+- [ ] Clean up orphaned stashed panes
 <!-- /agent:pending -->

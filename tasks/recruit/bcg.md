@@ -486,7 +486,7 @@ Current subject — "Tenfore's document-as-interface — I built the next versio
 Avoid leading with "Tenfore" alone — lead with what he definitely remembers: Neo Innovation, and your name.
 
 I like #2. Should we also include real-time updates in the document interface?
-### Subject #2 selected — real-time updates: save for demo (HEAD)
+### Subject #2 selected — real-time updates: save for demo
 
 Updated subject: **"Neo Innovation → BCG X — the document-as-interface thread"**
 
@@ -514,5 +514,5 @@ The email already has the hook: *"Happy to demo agent-doc — it's the kind of t
 > Brian
 
 Ready to send?
-<!-- agent:boundary:320d201f -->
+<!-- agent:boundary:96f03c76 -->
 <!-- /agent:exchange -->

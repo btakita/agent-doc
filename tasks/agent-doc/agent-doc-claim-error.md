@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Investigating stash-aware claim flow — fix spec ready, awaiting implementation decision.
+Root cause identified: premature deregistration of active stashed panes. Fix plan revised.
 <!-- /agent:status -->
 
 ## Exchange
@@ -134,8 +134,10 @@ Yes
 
 **Why no stash window:** The stash window was **already purged**. `purge_stash_windows_bulk()` (resync.rs:556) kills stash windows when all panes inside are idle shells (zsh/bash) and the window is >30 seconds old. Timeline:
 
+The stash window should NEVER be purged.
+
 1. You switched away → this pane was stashed
-2. The claude session in the stashed pane eventually exited (or was killed), leaving an idle shell
+2. The claude session in the stashed pane eventually exited (or was killed), leaving an idle shell: Not true. The claude task was running. I received a JB prompt on this document after we switched to the new session. The there was a response patch from the original running claude session.
 3. A subsequent `prune()` call (from another claim or route) ran `purge_stash_windows_bulk()`
 4. All panes idle + >30s → stash window killed → pane destroyed
 5. When you switched back, `claim::run()` found no registered pane → spawned new
@@ -171,14 +173,49 @@ This adds ~1 check (O(1) lookup in pre-fetched metadata) before the spawn path.
 **Alternative approach:** Keep stashed panes with active claude sessions alive longer — exempt non-idle stash panes from the 30s grace period entirely. This would mean the stash window persists as long as claude is running, giving `return_stashed_panes_bulk()` time to work.
 
 Want me to implement option 1 (stash-aware claim), option 2 (longer stash retention), or both?
-<!-- agent:boundary:6797b886 -->
+
+See my prompt above and reassess.
+`Run `
+`❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md`
+### Corrected analysis: premature deregistration (HEAD)
+
+You're right — the claude session was still running. My idle-shell theory was wrong.
+
+**Actual root cause: premature deregistration in `return_stashed_panes_bulk()`**
+
+The flow when you switched back:
+
+1. Pane %N stashed with claude still running ✓
+2. `prune()` → `return_stashed_panes_bulk()` found %N (registered, non-idle, in stash)
+3. `find_return_target_bulk()` tried to find a window to move it back to
+4. No valid target found (original "agent-doc" window was gone or renamed)
+5. **Bug:** resync.rs:685-691 **deregisters** the pane — removes registry entry
+6. Route/claim lookup returns None → spawns new pane + new claude session
+7. Original stashed pane becomes **orphaned** (claude running but invisible to agent-doc)
+8. The stash window eventually dies when the orphaned claude session ends
+
+**The deregistration at step 5 is the bug.** A pane with an active claude process should NEVER be deregistered just because `find_return_target` can't find a window. The correct behavior:
+
+- If a stashed pane is running claude → **keep it registered**, let the claim/route flow rescue it
+- Only deregister stashed panes that are idle shells with no return target
+- Even better: during claim, explicitly check for stashed registered panes and unstash them
+
+**Fix plan (revised):**
+
+1. **Don't deregister active stash panes** — in `return_stashed_panes_bulk()`, only deregister if `IDLE_SHELLS.contains(&cmd)`, not if running claude
+2. **Stash-aware claim** — in `claim::run()`, after `validate_file_claim()`, check if the registered pane is in a stash window and unstash it to the target window
+3. **Never purge stash windows with active processes** — `purge_stash_windows_bulk()` should skip windows containing any non-idle pane
+
+These three changes together prevent session loss when switching between documents.
+<!-- agent:boundary:3acac6f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement stash-aware claim resolution (rescue stashed panes before spawning new)
-- [ ] Consider longer stash retention for non-idle panes
-- [ ] Bump agent-doc version to 0.27.0 in Cargo.toml + pyproject.toml
+- [ ] Fix return_stashed_panes_bulk: don't deregister active claude panes
+- [ ] Add stash-aware claim: rescue stashed panes before spawning new
+- [ ] Fix purge_stash_windows_bulk: never purge windows with active processes
+- [ ] Bump agent-doc version in Cargo.toml + pyproject.toml
 - [ ] Publish to crates.io, PyPI, GitHub Releases
 <!-- /agent:pending -->

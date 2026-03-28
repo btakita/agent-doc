@@ -229,7 +229,7 @@ release
 
 Implement:
 - [ ] Make diarize a default feature (not behind feature flag) — currently always built but still optional in Cargo.toml
-### Diarize Default Feature — Implemented (HEAD)
+### Diarize Default Feature — Implemented
 
 Made diarize a default feature in corky:
 
@@ -240,7 +240,7 @@ Made diarize a default feature in corky:
 - `README.md` — "Diarization is enabled by default"
 
 `make check` passes (clippy clean, 13 tests). `audit-docs` clean.
-<!-- agent:boundary:9ae344f5 -->
+<!-- agent:boundary:5de42012 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

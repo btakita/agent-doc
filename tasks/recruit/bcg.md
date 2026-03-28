@@ -512,7 +512,21 @@ The email already has the hook: *"Happy to demo agent-doc — it's the kind of t
 >
 > Best,
 > Brian
+> 424.249.2350
 
 Ready to send?
-<!-- agent:boundary:96f03c76 -->
+It is 16:50 Eastern on a Saturday. Should I send now or wait?
+### Timing: send now (HEAD)
+
+**Send it.** Saturday 4:50 PM is fine for email:
+
+1. **Email is async** — no expectation of immediate response
+2. **Top of inbox Monday morning** — Saturday emails sit above Monday morning traffic
+3. **Personal email** — `anil@rickshaw.cm` is personal, not corporate. Weekend = personal email time.
+4. **Content > timestamp** — Anil opens it because of "Neo Innovation → BCG X" in the subject, not the send time
+
+Phone number in signature is a good add — makes it easy for him to text or call directly.
+
+Sending now via corky to Gmail Drafts for your review.
+<!-- agent:boundary:46f463bd -->
 <!-- /agent:exchange -->

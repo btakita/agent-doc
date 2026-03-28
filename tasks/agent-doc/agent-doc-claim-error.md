@@ -219,7 +219,7 @@ Which behavior do you want? The claim-then-route pattern makes sense, but they s
 What does the plugin action currently send to the tmux pane? I can look at the JetBrains plugin source if you point me to it.
 
 I was expecting the `Run Agent Doc` command to send `/agent-doc run <path>` to the claiming tmux pane.
-Ideally we would ensure there is a claude session
+Ideally we would ensure there is a claude session running in the tmux pane.
 ### Ideal: single `/agent-doc run <path>` command
 
 Understood. The plugin's "Run Agent Doc" should send exactly one command to the tmux pane:
@@ -243,16 +243,39 @@ Want me to implement this? The change would be:
 - `agent-doc run`: add implicit claim (if no active pane registered, claim current pane)
 - `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window)
 - Plugin: change "Run Agent Doc" to send single `/agent-doc run <path>`
-<!-- agent:boundary:109bf854 -->
+### Ensuring claude session before `/agent-doc run` (HEAD)
+
+Right. The full "Run Agent Doc" flow needs to guarantee a claude session exists:
+
+1. **Resolve pane** — find or create the tmux pane for this document (claim + stash rescue)
+2. **Ensure claude** — if the pane has an idle shell (no claude running), start claude in it
+3. **Send command** — inject `/agent-doc run <path>` into the pane
+
+This is what `agent-doc route` already does (steps 1-3), but it sends `/agent-doc <path>` not `/agent-doc run <path>`. The `route` command:
+- Calls `prune()` to clean stale entries
+- Looks up or creates a pane (with `start` for new claude sessions)
+- Sends the `/agent-doc` command via `tmux send-keys`
+
+So the fix is simpler than building from scratch:
+- **`agent-doc route`** already handles ensure-pane + ensure-claude + send-command
+- Just need to: (a) add stash rescue to route, (b) fix the double-prompt by having route send a single `/agent-doc run <path>`
+- Plugin "Run Agent Doc" calls `agent-doc route <path>` — one CLI call, one tmux command sent
+
+The three bugs to fix:
+1. **Route: add stash rescue** before spawning new pane
+2. **Route: don't deregister active stashed panes** during `prune()`
+3. **Plugin: call `agent-doc route`** instead of separate claim + prompt injection
+
+Shall I implement these fixes in agent-doc? The plugin change can be done after.
+<!-- agent:boundary:d2fb14b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `agent-doc run`: add implicit claim + stash rescue
-- [ ] Plugin: "Run Agent Doc" sends single `/agent-doc run <path>` 
-- [ ] Fix return_stashed_panes_bulk: don't deregister active claude panes
+- [ ] Route: add stash rescue (unstash registered pane before spawning new)
+- [ ] Route: fix prune to not deregister active stashed panes
+- [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command)
 - [ ] Fix purge_stash_windows_bulk: never purge windows with active processes
-- [ ] Bump agent-doc version in Cargo.toml + pyproject.toml
-- [ ] Publish to crates.io, PyPI, GitHub Releases
+- [ ] Bump agent-doc version + publish
 <!-- /agent:pending -->

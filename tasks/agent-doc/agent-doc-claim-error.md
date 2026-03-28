@@ -175,7 +175,7 @@ This adds ~1 check (O(1) lookup in pre-fetched metadata) before the spawn path.
 Want me to implement option 1 (stash-aware claim), option 2 (longer stash retention), or both?
 
 See my prompt above and reassess.
-`Run `
+`Run Agent Doc` from the plugin results in a double prompt.
 `❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md`
 ### Corrected analysis: premature deregistration
 
@@ -207,12 +207,23 @@ The flow when you switched back:
 3. **Never purge stash windows with active processes** — `purge_stash_windows_bulk()` should skip windows containing any non-idle pane
 
 These three changes together prevent session loss when switching between documents.
-<!-- agent:boundary:3c9b5646 -->
+### Double prompt bug (HEAD)
+
+The "Run Agent Doc" plugin action fires both a claim AND a `/agent-doc` command to the same pane, resulting in two prompts competing in the same claude session. This is a plugin-side issue — the action should either:
+
+1. **Claim only** — let the watch daemon detect the file change and trigger `/agent-doc` on the next cycle
+2. **Route only** — skip the claim if the pane is already registered for this file, just send the `/agent-doc` command
+
+Which behavior do you want? The claim-then-route pattern makes sense, but they shouldn't both be injected as separate prompts into the same claude session. The plugin should send a single combined command, or the claim should be silent (no `/agent-doc` injection) when the pane is already claimed for this file.
+
+What does the plugin action currently send to the tmux pane? I can look at the JetBrains plugin source if you point me to it.
+<!-- agent:boundary:d668ffbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Fix double prompt: "Run Agent Doc" plugin action sends two commands
 - [ ] Fix return_stashed_panes_bulk: don't deregister active claude panes
 - [ ] Add stash-aware claim: rescue stashed panes before spawning new
 - [ ] Fix purge_stash_windows_bulk: never purge windows with active processes

@@ -464,5 +464,25 @@ Same reasoning — **no links.** Every link is a potential off-ramp where Anil t
 **Rule of thumb:** If the recipient has to click something to understand your value, the email didn't do its job. The Tenfore → agent-doc story + alignment framing is self-contained.
 
 Draft v3 stands. Ready to send?
-<!-- agent:boundary:108f57c9 -->
+Let's change the title. agent-doc is more impactful than tenfore-bot.
+But is would Anil recognize the title?
+Please explore other subjects that may more impactful.
+### Subject line alternatives (HEAD)
+
+Current subject — "Tenfore's document-as-interface — I built the next version" — risk: **will Anil remember "Tenfore" from a decade ago?** If not, it reads as spam.
+
+**Ranked options:**
+
+1. **"The Tenfore vision, 10 years later"** — nostalgic, personal. Works if he remembers Tenfore.
+2. **"Neo Innovation → BCG X — the document-as-interface thread"** — connects his career arc (Neo → BCG X) with the shared concept. Personal + relevant to his current role.
+3. **"Human-agent alignment — from someone who's been building it"** — concept-first, no history. Speaks to CPO concerns. Risk: reads as cold outreach.
+4. **"Brian Takita — Neo Innovation / Tenfore"** — name + shared workplace. Simple, hard to ignore.
+5. **"Document-as-interface, evolved"** — cryptic enough to open. No name-dropping.
+
+**Recommendation: #2 or #4.**
+- **#2** connects Anil's own career journey with the shared concept — personal and relevant
+- **#4** is safest — your name + Neo Innovation is enough context to open it
+
+Avoid leading with "Tenfore" alone — lead with what he definitely remembers: Neo Innovation, and your name.
+<!-- agent:boundary:1e1fa749 -->
 <!-- /agent:exchange -->

@@ -360,7 +360,7 @@ Layout issue from preflight confirms fix is working: `stash window 'stash' has n
 Implement:
 - [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command) — future
 This sessi
-### Plugin: `agent-doc route <path>` integration (HEAD)
+### Plugin: `agent-doc route <path>` integration
 
 Noted. This is tracked as a future plugin-side change:
 
@@ -377,7 +377,7 @@ Noted. This is tracked as a future plugin-side change:
 3. Route handles everything — plugin just needs to call it and report success/failure
 
 No agent-doc CLI changes needed — `route` already has the right flow. The stash rescue fix (v0.27.0) ensures rescued sessions aren't lost during route's `prune()` call.
-<!-- agent:boundary:a387b740 -->
+<!-- agent:boundary:5db26bf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

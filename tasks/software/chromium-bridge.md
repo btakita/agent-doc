@@ -788,7 +788,8 @@ This bob-remeika task item is complete — no further implementation needed.
 Implement:
 - [ ] Browser skill (`/browser`) documentation and workflow refinement
 
-### Browser skill refinement — completed (HEAD)
+
+### Browser skill refinement — completed
 
 Updated `.claude/skills/browser/SKILL.md` with:
 
@@ -799,7 +800,22 @@ Updated `.claude/skills/browser/SKILL.md` with:
 5. **Configuration** — added chromium-bridge env vars (`CHROMIUM_BRIDGE_HOST`, `CHROMIUM_BRIDGE_PORT`)
 
 The browser skill now serves as a proper workflow orchestrator on top of chromium-bridge, with clear guidance on when to use CLI vs MCP fallback.
-<!-- agent:boundary:978ff656 -->
+
+### Bug: `type` command escapes exclamation marks
+
+The `type` command is escaping `!` → `\!` when passing text to CDP `Input.insertText`. This was discovered when sending an SMS via PulseSMS — the recipient saw "Would love to connect there too\!" instead of "Would love to connect there too!"
+
+**Root cause:** Likely shell escaping in the argument processing before passing to CDP. `Input.insertText` should receive raw text — no escaping needed.
+
+**Repro:**
+```bash
+chromium-bridge type '#message-entry' 'Hello!' --tab pulsesms
+# Expected: "Hello!" (HEAD)
+# Actual: "Hello\!" (HEAD)
+```
+
+**Fix:** Check the `type` command's text preprocessing for unnecessary escape handling.
+<!-- agent:boundary:c818b26e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

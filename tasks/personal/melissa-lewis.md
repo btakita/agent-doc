@@ -104,7 +104,7 @@ Diarize should not even be a separate feature. It should be core to corky.
 - Leo (Judith's ex) showed up wanting money for some website work — Judith wants to hire Brian instead
 - Judith mentioned a "Taiyo" for her nutritional business website (not ready yet)
 
-### Diarized Retranscription Complete (HEAD)
+### Diarized Retranscription Complete
 
 Rebuilt corky with `diarize` feature and retranscribed successfully. **3 speakers detected, 198 segments.** The transcript now has per-speaker attribution with confidence scores.
 
@@ -119,7 +119,7 @@ Agreed — diarize should be core to corky, not an optional feature. Added to co
 | **Judith Krug** | Got 10% deposit reversed by bank. Wants Brian to build custom software but stuck until attorney confirms she's released from Mortgage Automator contract. Doc mapping invoice jumped from $3K to $6K+ (never signed it). Business booming — "closed a shit ton of loans." Has financial website but needs websites for coaching/nutritional businesses. |
 | **Robert Ward** | Advocated "build it, don't buy it." Pushed for Brian to do website work. Mentioned biohacking networking event this weekend. |
 | **Brian Takita** | Noted some work isn't dependent on the Mortgage Automator decision. Thanked Judith for catching up. |
-<!-- agent:boundary:0ad5db37 -->
+<!-- agent:boundary:e7d38638 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

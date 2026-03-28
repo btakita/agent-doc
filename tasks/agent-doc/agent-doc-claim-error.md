@@ -85,11 +85,31 @@ continue:
 - After: 3 total (1 `list-panes -a` in registry prune, 1 `list-windows -a` in resync, 1 `list-panes -a` in resync)
 
 All 4 optimizations complete.
-<!-- agent:boundary:5d20713d -->
+
+Update agent-doc.
+audit docs
+update README.md, SPEC.md, ontology, module-harness
+
+### agent-doc updated, docs audited (HEAD)
+
+**Committed and pushed** `66335e2` — v0.27.0: Socket IPC, bulk resync, FFI listener.
+
+**Documentation updates:**
+- **README.md** — added socket IPC and bulk resync to key features
+- **SPEC.md** — added section 6.3 (Socket IPC protocol: NDJSON message types, fallback behavior), updated resync section with bulk metadata fetching details
+- **CLAUDE.md** — added `ipc_socket.rs` to module layout, Shared Foundation pattern with ontology
+
+**Audit results:** 1 pre-existing warning (large table in CLAUDE.md). All stale-doc issues resolved.
+
+**tmux-router 0.3.1** also published (bulk `alive_pane_ids()` in registry prune).
+
+Ready for version bump and release.
+<!-- agent:boundary:1ddb3745 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(all items complete)
+- [ ] Bump agent-doc version to 0.27.0 in Cargo.toml + pyproject.toml
+- [ ] Publish to crates.io, PyPI, GitHub Releases
 <!-- /agent:pending -->

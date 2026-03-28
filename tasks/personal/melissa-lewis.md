@@ -367,7 +367,7 @@ Both messages sent successfully via chromium-bridge CLI:
 2. **Follow-up** — "Also — I sent you a LinkedIn connection request. Would love to connect there too!" — sent via chromium-bridge automation
 
 Note: The MCP `mcp__chrome-devtools__*` tools are timing out, but `chromium-bridge` CLI works fine over the same CDP port. The browser skill already documents this preference — no config changes needed.
-<!-- agent:boundary:2e53151b -->
+<!-- agent:boundary:6843388b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

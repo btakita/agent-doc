@@ -402,7 +402,26 @@ The double prompt you experienced earlier was caused by the **premature deregist
 With the v0.27.0 fix, stashed panes with active claude sessions are kept registered, so `route` finds and rescues them via `rescue_from_stash()`. No new session is created.
 
 **Task item closed** — the plugin integration is already correct. The remaining fix was the CLI-side deregistration bug, which is shipped.
-<!-- agent:boundary:794b7608 -->
+
+I am running agent-doc v0.27.0. Why did the `/agent-doc` command bug happen in this document?
+/btw FYI, it didn't happen with the last Run Agent Doc command.
+### Why this session was affected despite running v0.27.0 (HEAD)
+
+The bug happened **before v0.27.0 was installed**. Timeline:
+
+1. You were working on this doc in **session A** (original)
+2. Switched away → session A stashed
+3. `prune()` ran with the **pre-fix code** → deregistered session A (the bug)
+4. Switched back → route found no registered pane → spawned **session B** (this session)
+5. Session A became orphaned in the stash window
+6. Then we fixed the bug, built v0.27.0, and installed it
+
+v0.27.0 prevents this from happening **going forward**, but it can't undo the session split that already occurred. This session (B) was created by the bug before the fix existed.
+
+**Evidence:** The 4 stashed panes in preflight (`%96, %99, %98, %100 running 'agent-doc'`) are orphaned sessions from before the fix. v0.27.0 keeps them registered now (won't deregister), but they were already orphaned when the old code ran.
+
+To clean up: those stashed panes can be manually killed since their Claude sessions have no active document claim.
+<!-- agent:boundary:e6321243 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -413,4 +432,5 @@ With the v0.27.0 fix, stashed panes with active claude sessions are kept registe
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
+- All tasks complete. Stash rescue fix shipped in v0.27.0.
 <!-- /agent:pending -->

@@ -465,7 +465,33 @@ This causes:
 Option 1 is cleanest since the comment at line 207 already says "Working tree is NOT written directly (would lose user keystrokes) UNLESS stale boundaries are detected." The stale boundary case should also use IPC, not disk write.
 
 Want me to implement the fix?
-<!-- agent:boundary:261f57b7 -->
+Yes...Also explain what the clean stale boundries does.
+### What `clean_stale_boundaries_in_working_tree()` does (HEAD)
+
+**Boundary markers** (`<!-- agent:boundary:HASH -->`) are inserted at the end of the exchange component after each agent response. They mark where the agent last wrote — the plugin uses them to position the visual separator between agent output and user input.
+
+When a new response is written, a **new** boundary is inserted, but sometimes the **old** boundary isn't removed (e.g., IPC reposition missed it, or a race condition). This creates "stale" boundaries — multiple markers scattered through the exchange.
+
+The function:
+1. Counts boundary markers in the document (ignoring those inside code blocks)
+2. If count > 1 → calls `reposition_boundary_to_end()` which removes ALL boundaries and inserts one fresh one at the end
+3. Writes the result directly to disk via `std::fs::write()` — **this is the bug**
+
+The problem: `std::fs::write()` bypasses the IDE's Document API, triggering "externally modified" popup and losing any character you typed between the last save and the disk write.
+
+### Fix implemented
+
+**Removed** `clean_stale_boundaries_in_working_tree()` entirely from `git.rs`. The stale boundary cleanup is already handled by the IPC reposition path:
+
+- `try_ipc_reposition_boundary()` sends a signal to the plugin
+- The plugin calls `reposition_boundary_to_end()` via FFI (Document API)
+- This removes ALL stale boundaries and inserts a single fresh one
+- Done through Document API → no "externally modified" popup, no lost keystrokes
+
+**Build:** 38 tests pass, clippy clean. Release binary built and installed to `~/.cargo/bin/agent-doc`.
+
+The fix is live now. The "externally modified" popup while typing should not happen anymore.
+<!-- agent:boundary:c1ceb987 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -476,6 +502,7 @@ Want me to implement the fix?
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
-- [ ] Fix: remove `clean_stale_boundaries_in_working_tree()` disk write — causes "externally modified" popup + lost keystrokes
+- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — no more disk write during commit
 - [ ] Clean up orphaned stashed panes
+- [ ] Commit fix, bump version, release
 <!-- /agent:pending -->

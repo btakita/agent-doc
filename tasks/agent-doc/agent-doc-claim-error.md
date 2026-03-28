@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Fix implemented: return_stashed_panes_bulk no longer deregisters active panes. Tests pass.
+Fix committed (658b06b) and installed locally. Ready for end-to-end testing.
 <!-- /agent:status -->
 
 ## Exchange
@@ -323,15 +323,30 @@ This means when you switch back to a document:
 **Note:** `purge_stash_windows_bulk()` was already correct — it only kills stash windows where ALL panes are idle shells. No change needed there.
 
 Ready to commit from within the submodule. Want me to bump version and publish, or test first?
-<!-- agent:boundary:8bf918f6 -->
+commit
+test
+install for local testing
+### Committed and installed (HEAD)
+
+1. **Tests:** `make check` — 38 passed, clippy clean ✓
+2. **Committed:** `658b06b` — "fix: don't deregister active stashed panes in return_stashed_panes_bulk"
+3. **Installed:** `cargo install --path .` → `~/.cargo/bin/agent-doc` updated
+
+The fix is now live locally. To test the stash rescue flow:
+1. Open two task documents (so one gets stashed)
+2. Switch away from one → pane stashes
+3. Switch back → should rescue the stashed pane instead of spawning new
+
+The fix ensures `prune()` doesn't deregister the stashed pane, so `route`'s `rescue_from_stash()` can find and unstash it.
+<!-- agent:boundary:8b460c82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix return_stashed_panes_bulk: don't deregister active (non-idle) stashed panes
-- [x] Verify purge_stash_windows_bulk already correct (only purges all-idle windows)
-- [ ] Commit fix in agent-doc submodule
+- [x] Fix return_stashed_panes_bulk: don't deregister active stashed panes
+- [x] Commit fix in agent-doc submodule (658b06b)
+- [x] Install for local testing
 - [ ] Test stash rescue flow end-to-end
 - [ ] Plugin: "Run Agent Doc" calls `agent-doc route <path>` (single command)
 - [ ] Bump agent-doc version + publish

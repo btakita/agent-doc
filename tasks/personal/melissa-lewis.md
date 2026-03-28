@@ -166,7 +166,7 @@ Noted your edits:
 - Salary range widened to **$150K–$300K**
 - Added LinkedIn connection request mention
 
-### Draft Reply to Melissa (v3 — final) (HEAD)
+### Draft Reply to Melissa (v3 — final)
 
 > Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request — would be great to connect there too.
 >
@@ -183,7 +183,7 @@ Noted your edits:
 > - I'm also in the pipeline with a few recruiters for senior engineering roles ($150K–$300K range).
 >
 > So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:b35ea8a8 -->
+<!-- agent:boundary:8b2079ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

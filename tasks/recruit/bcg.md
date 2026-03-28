@@ -313,5 +313,5 @@ Please add Anil to my Google contacts. Does corky use the google contacts api? I
 **Recommendation:** Add Anil manually via browser now, track `corky contact push` as backlog.
 
 Want me to add him via browser, or start on the corky implementation?
-<!-- agent:boundary:f6e6e466 -->
+<!-- agent:boundary:f400395f -->
 <!-- /agent:exchange -->

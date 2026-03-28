@@ -13,49 +13,28 @@ Session cleared.
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-Session initialized. Write in the exchange to get started.
-I ran `Claim for Tmux Pane` on this document and got a popup error from the plugin.
-![img.png](img.png)
+Create a contact for melissa-lewis
+https://www.linkedin.com/in/melissa-brodack/
 
-The document was eventually claimed after ~20-30 seconds.
+Also create a contact for brooke-brodack
+https://www.linkedin.com/in/brooke-brodack-2223427/
 
-### Re: Claim for Tmux Pane error
+Melissa and Brooke are sisters.
 
-Good catch. The screenshot shows the `resync` system trying to return stashed panes to windows that no longer exist:
+### Contacts Created (HEAD)
 
-```
-resync: cannot return stashed pane N72 (...) no valid target found
-resync: cannot return stashed pane N82 (...) no valid target found
-resync: cannot return stashed pane N85 (...) no valid target found
-```
+**Melissa Lewis** — `mail/contacts/melissa-lewis/AGENTS.md`
+- Maiden name: Brodack
+- LinkedIn: https://www.linkedin.com/in/melissa-brodack/
+- Sister of Brooke Brodack
 
-**Root cause of the 20-30s delay:** The `prune()` call chain in `resync.rs` spawns ~20-40 synchronous tmux subprocesses (each ~200-500ms). Specifically:
-- `pane_alive()` runs `tmux list-panes -a` **per registry entry** instead of once
-- `tmux list-windows -a` is called 3 separate times (once in each of `return_stashed_panes`, `purge_stash_windows`, `purge_unregistered_stash_panes`)
-- Each `find_return_target()` failure triggers multiple subprocess calls before concluding "no valid target"
+**Brooke Brodack** — `mail/contacts/brooke-brodack/AGENTS.md`
+- LinkedIn: https://www.linkedin.com/in/brooke-brodack-2223427/
+- Sister of Melissa Lewis
+- Partner of Brian Takita
 
-**The errors themselves are harmless** — they just mean old panes in stash windows have no original session to return to (it was closed). But the failed lookups are expensive.
-
-**Filed as bug — fixes needed in `resync.rs` and `tmux.rs`:**
-1. Bulk `pane_alive` check (one subprocess, not N)
-2. Share window listing across all prune functions
-3. Deregister stranded panes on first failure (stop retrying)
-4. Batch pane metadata queries via single `tmux list-panes -a -F`
-
-This should bring claim time from ~20-30s down to <2s.
-
-Fix:
-- [ ] **agent-doc bug**: Claim delay (~20-30s) from redundant tmux subprocess calls in `resync::prune()` — bulk pane queries needed (`resync.rs`, `tmux.rs`, `registry.rs`)
-
-
-Acknowledged — added to pending. I can start implementing the bulk pane query optimization in `resync.rs` now if you'd like, or we can tackle it in a dedicated session on the agent-doc submodule.
-Transfer to /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-claim-error.md
-
-Transferred bug details to `tasks/agent-doc/agent-doc-claim-error.md` — full root cause analysis, affected files, and 4-step fix plan are documented there. Removed from this doc's pending.
-Clear this session
-
-Session cleared. Write in the exchange to start a new topic.
-<!-- agent:boundary:99b0f7f1 -->
+Both have `CLAUDE.md -> AGENTS.md` symlinks. LinkedIn profiles couldn't be fetched (auth wall) -- add professional details manually or via browser.
+<!-- agent:boundary:5e7ecf28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

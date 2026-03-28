@@ -90,7 +90,7 @@ Update agent-doc.
 audit docs
 update README.md, SPEC.md, ontology, module-harness
 
-### agent-doc updated, docs audited (HEAD)
+### agent-doc updated, docs audited
 
 **Committed and pushed** `66335e2` — v0.27.0: Socket IPC, bulk resync, FFI listener.
 
@@ -104,7 +104,7 @@ update README.md, SPEC.md, ontology, module-harness
 **tmux-router 0.3.1** also published (bulk `alive_pane_ids()` in registry prune).
 
 Ready for version bump and release.
-<!-- agent:boundary:1ddb3745 -->
+<!-- agent:boundary:9e05d85a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

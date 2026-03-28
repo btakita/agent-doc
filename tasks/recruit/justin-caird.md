@@ -795,7 +795,8 @@ Message sent — good. On sending another asking about status: **hold off for no
 Short, low-pressure, references the specific next step he mentioned (challenge file + job description via email).
 
 Please read the latest message from Justin on LinkedIn using chromium-bridge.
-Also please include the LinkedIn page of t
+Also please include the LinkedIn page of the company where I will be talking to the CTO.
+Also include the CTO's LinkedIn profile.
 
 ### Re: LinkedIn message check (Mar 28)
 
@@ -807,11 +808,30 @@ Read Justin's latest message via chromium-bridge. Here's the most recent exchang
 This was in response to your eval tooling / module-harness LinkedIn post. Positive signal — he's engaged and the CTO interview is imminent once travel wraps up (expected week of March 30).
 
 **Re: "Also please include the"** — this edit appears truncated (cut off mid-sentence). Please complete the thought in your next edit and I'll act on it.
-<!-- agent:boundary:3a9f6131 -->
+
+### Re: Company & CTO LinkedIn profiles (Mar 28) (HEAD)
+
+**ECI Software Solutions** (ecisolutions.com)
+- LinkedIn: https://www.linkedin.com/company/eci-software--solutions/
+- Software Development | Westlake, Texas | 40K followers | 1K-5K employees
+- "Your Business. Connected." — ERP solutions for manufacturing, building supply, field service industries
+
+**CTO / CPTO — Brian Winters**
+- LinkedIn: https://www.linkedin.com/in/brianwinters1
+- Title: CPTO (Chief Product & Technology Officer) at ECi Software Solutions
+- This is most likely who Justin is referring to when he says "working directly with the CTO"
+
+**Also notable — Paxton Lamons**
+- LinkedIn: https://www.linkedin.com/in/paxton-lamons-7b48522
+- Title: CTO | Software Engineering VP/SVP | Platform Engineering VP/SVP
+- Background includes SaaS Product Development, AWS, DevSecOps, Cloud Architecture, Application Modernization
+
+Both have CTO-level titles. Brian Winters as CPTO is the more senior product+tech role. Paxton Lamons has the explicit CTO title with platform/modernization focus — which aligns well with the "modernize 20-year-old ERP systems" mission Justin described.
+<!-- agent:boundary:b43eed93 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Send LinkedIn follow-up to Justin re: eval tooling + video link (sent)
+- [x] Retrieve ECI company LinkedIn page and CTO profiles
 - [ ] CTO interview scheduling — waiting on Justin (CTO back from travel week of Mar 30)
-- [ ] Complete truncated request: "Also please include the..."
 <!-- /agent:pending -->

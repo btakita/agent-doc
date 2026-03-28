@@ -126,14 +126,25 @@ Fields: `tmux_session` — the tmux session name bound to this project.
 
 **Auto-sync:** When the configured `tmux_session` is dead (session no longer exists), the route path falls back to `current_tmux_session()` and auto-updates `config.toml` with the new session name. This prevents stale config after session destruction.
 
-### 6.3 IPC Write Verification
+### 6.3 Socket IPC
+
+Socket-based IPC via Unix domain sockets (`.agent-doc/ipc.sock`) is the primary IPC transport. The editor plugin starts a listener via `agent_doc_start_ipc_listener()` FFI call on project open. The CLI sender connects, sends NDJSON messages, and waits for ack.
+
+**Protocol:** Newline-delimited JSON (NDJSON). Message types:
+- `{"type": "patch", "file": "...", "patches": [...], ...}` — apply component patches
+- `{"type": "reposition", "file": "..."}` — reposition boundary marker
+- `{"type": "vcs_refresh"}` — trigger VCS/VFS refresh
+
+**Fallback:** If socket is unavailable (no listener), falls back to file-based IPC (JSON patch files in `.agent-doc/patches/`).
+
+### 6.4 IPC Write Verification
 
 After the IDE plugin consumes an IPC patch file:
 1. **File-change check:** If the document file is unchanged on disk, the plugin failed to apply — falls back to disk write.
 2. **Content verification:** If the document changed but none of the patch content appears in the result, the plugin partially failed — falls back to disk write.
 3. **Force-disk cleanup:** When `--force-disk` is set, any pending IPC patch files are deleted before disk write to prevent the plugin from applying stale patches (double-write prevention).
 
-### 6.4 Sync Layout Authority
+### 6.5 Sync Layout Authority
 
 `sync_after_claim()` uses editor-provided `col_args` when available (authoritative layout from the IDE plugin). Only falls back to registry-based file discovery when no `col_args` given. This prevents stale registry entries from creating incorrect multi-pane layouts.
 
@@ -292,7 +303,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **Auto-start stash overflow (route):** When `auto_start_in_session` tries `split-window` alongside a registered pane and the split fails (e.g. minimum pane size constraint), it falls back to `tmux new-window` then immediately calls `stash_pane` to move the new pane into the stash window — avoiding a visible throwaway window in the session.
 
-**Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations.
+**Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations. Uses bulk metadata fetching (2 subprocess calls: `list-windows -a` + `list-panes -a`) instead of per-pane queries. Stranded panes (no valid return target) are deregistered on first failure to prevent repeated expensive lookups.
 
 ### 7.14 prompt
 

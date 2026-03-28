@@ -42,13 +42,14 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 
 - **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attr > `components.toml` > built-in defaults
 - **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
-- **IPC-first writes** — editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
+- **IPC-first writes** — socket IPC (Unix domain sockets) with file-based fallback; editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
 - **Tmux routing** — persistent Claude Code sessions per document; `route` dispatches to the correct pane or auto-starts one
 - **Streaming** — real-time CRDT write-back loop (`agent-doc stream`) with optional chain-of-thought routing
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session (`agent-doc parallel`)
 - **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
 - **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
+- **Bulk resync** — validates session state and fixes stale/orphaned panes in 3 subprocess calls instead of ~20-40
 
 ## Architecture
 

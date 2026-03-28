@@ -648,6 +648,75 @@ pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> bool {
     SYNC_GENERATION.load(Ordering::SeqCst) == generation
 }
 
+/// Start the IPC socket listener on a background thread.
+///
+/// The plugin calls this on project open to start listening for socket IPC
+/// messages from the CLI. The callback receives each JSON message as a
+/// read-only NUL-terminated string (do NOT free it) and returns `true` if
+/// the message was handled successfully, `false` on error. The listener
+/// generates the ack response internally based on the return value.
+///
+/// Returns `true` if the listener was started, `false` on error.
+///
+/// # Safety
+///
+/// - `project_root` must be a valid, NUL-terminated UTF-8 string.
+/// - `callback` must be a valid function pointer that remains valid for the
+///   lifetime of the listener thread. The message pointer is borrowed — the
+///   callback must NOT free it or hold a reference after returning.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_start_ipc_listener(
+    project_root: *const c_char,
+    callback: extern "C" fn(message: *const c_char) -> bool,
+) -> bool {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => return false,
+    };
+    let root_path = std::path::PathBuf::from(&root_str);
+
+    std::thread::spawn(move || {
+        let result = crate::ipc_socket::start_listener(&root_path, move |msg| {
+            // Lend the message to the callback (no ownership transfer)
+            let c_msg = match CString::new(msg) {
+                Ok(c) => c,
+                Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+            };
+            let success = callback(c_msg.as_ptr());
+            if success {
+                Some(r#"{"type":"ack","status":"ok"}"#.to_string())
+            } else {
+                Some(r#"{"type":"ack","status":"error"}"#.to_string())
+            }
+        });
+        if let Err(e) = result {
+            eprintln!("[ffi] IPC listener error: {}", e);
+        }
+    });
+
+    true
+}
+
+/// Stop the IPC socket listener by removing the socket file.
+///
+/// The listener thread will exit on its next accept() call when the socket
+/// is removed. Call this on project close / plugin disposal.
+///
+/// # Safety
+///
+/// `project_root` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_stop_ipc_listener(
+    project_root: *const c_char,
+) {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let sock = crate::ipc_socket::socket_path(std::path::Path::new(root_str));
+    let _ = std::fs::remove_file(&sock);
+}
+
 /// Get the agent-doc library version.
 ///
 /// Returns a NUL-terminated string like "0.26.1".

@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.sun.jna.Callback
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
@@ -114,6 +115,22 @@ interface AgentDocLib : Library {
 
     /** Check if generation is still current (no newer events). */
     fun agent_doc_sync_check_generation(gen: Long): Boolean
+
+    /**
+     * Start the IPC socket listener on a background thread.
+     * The callback receives each JSON message (read-only, do NOT free) and returns
+     * true if handled, false on error. The listener generates ack responses internally.
+     */
+    fun agent_doc_start_ipc_listener(project_root: String, callback: IpcMessageCallback): Boolean
+
+    /** Stop the IPC socket listener by removing the socket file. */
+    fun agent_doc_stop_ipc_listener(project_root: String)
+
+    /** Callback interface for socket IPC messages. */
+    interface IpcMessageCallback : Callback {
+        /** Called with each JSON message. Return true if handled, false on error. */
+        fun invoke(message: Pointer): Boolean
+    }
 
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?

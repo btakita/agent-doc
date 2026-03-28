@@ -15,7 +15,7 @@ Interactive document sessions with AI agents.
 - Use `anyhow` for application errors
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **All deterministic behavior in the binary** — document manipulation (compact, diff, merge, patch, write), snapshot management, git operations, and component parsing must live in Rust. The SKILL.md skill is the non-deterministic orchestrator (reads diff, generates response, decides what to write). Never implement deterministic document logic in the skill or ad-hoc scripts.
-- **FFI-first for editor integration** — when adding features that editors need (sync debounce, busy guards, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins.
+- **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, socket listeners, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins. **Ontology:** Both the FFI library and each editor plugin are **Systems** with their own **Perspectives**. Each exposes an **Interface** (C ABI, JNA bindings) — the defined boundary through which Systems communicate. The Shared Foundation pattern places shared logic at the broadest **Scope** (FFI library) so all consumer Systems access it through their Interfaces. **Test:** "Does this feature need to work in >1 editor?" → implement in FFI. Example: socket IPC listener lives in `ffi.rs` (`agent_doc_start_ipc_listener`), not in `PatchWatcher.kt`.
 
 ## Binary vs Agent Responsibility
 
@@ -78,6 +78,7 @@ src/
   merge.rs          # 3-way merge + CRDT merge path
   stream.rs         # Stream command: real-time CRDT write-back loop
   ffi.rs            # C ABI exports for editor plugins (JNA/FFI)
+  ipc_socket.rs     # Socket-based IPC (Unix domain sockets via interprocess crate)
   lib.rs            # Library target re-exports
   recover.rs        # Orphaned pending response detection + recovery
   compact.rs        # Exchange compaction (archive + truncate)

@@ -841,7 +841,7 @@ Justin mentioned that the new CTO was the CTO of Wayfair and some other companie
 
 **Clarification on the other two profiles found earlier:**
 - Brian Winters (CPTO) and Paxton Lamons (CTO) are separate executives at ECI found via LinkedIn search. Jack Wood is the specific CTO Justin is referring to — the one with the Wayfair background who is driving the AI transformation initiative and directly overseeing the hiring pods.
-<!-- agent:boundary:33bbee84 -->
+<!-- agent:boundary:a1fe733b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

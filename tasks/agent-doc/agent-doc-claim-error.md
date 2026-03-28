@@ -130,7 +130,7 @@ This would preserve the existing claude session context instead of starting fres
 
 Want me to look at the claim flow code and spec a fix?
 Yes
-### Stash window not visible + claim flow analysis (HEAD)
+### Stash window not visible + claim flow analysis
 
 **Why no stash window:** The stash window was **already purged**. `purge_stash_windows_bulk()` (resync.rs:556) kills stash windows when all panes inside are idle shells (zsh/bash) and the window is >30 seconds old. Timeline:
 
@@ -171,7 +171,7 @@ This adds ~1 check (O(1) lookup in pre-fetched metadata) before the spawn path.
 **Alternative approach:** Keep stashed panes with active claude sessions alive longer — exempt non-idle stash panes from the 30s grace period entirely. This would mean the stash window persists as long as claude is running, giving `return_stashed_panes_bulk()` time to work.
 
 Want me to implement option 1 (stash-aware claim), option 2 (longer stash retention), or both?
-<!-- agent:boundary:2ffa5f69 -->
+<!-- agent:boundary:6797b886 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -430,5 +430,26 @@ This reinforces the core alignment narrative — the ontology bridges the gap be
 > Brian
 
 Ready to send via corky?
-<!-- agent:boundary:2be076cf -->
+
+Should I mention tmux-router or is that too low level for this discussion?
+
+> The user edits a markdown file, the agent responds inline, and the session grows into a living document with full git history.
+
+This CRDT workflow can also apply to any document technology. mdx, Notion, MS Office, etc.
+### tmux-router: skip it (HEAD)
+
+**Too low-level for this email.** tmux-router is plumbing — session routing across terminal panes. Anil cares about the user-facing paradigm (document-as-interface) and the alignment story. Save tmux-router for the demo.
+
+### CRDT + any document tech: great insight, save for demo (HEAD)
+
+You're right — the CRDT merge pattern is format-agnostic (MDX, Notion, MS Office, Google Docs). But don't add it to the email:
+
+1. **Email is already the right length** — adding generality dilutes the focused Tenfore → agent-doc arc
+2. **Platform generality is a demo talking point** — when Anil asks "how does this scale?" that's your opening
+3. **For BCG**, the markdown/git approach *is* the differentiator — enterprise already has Notion/Docs. The value is alignment primitives, not document format.
+
+**Both are excellent demo/call material.** The email's job: get Anil to respond. The demo is where you show the depth.
+
+Draft v3 stands as-is. Ready to send?
+<!-- agent:boundary:31fcdd7d -->
 <!-- /agent:exchange -->

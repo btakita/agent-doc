@@ -841,10 +841,18 @@ Justin mentioned that the new CTO was the CTO of Wayfair and some other companie
 
 **Clarification on the other two profiles found earlier:**
 - Brian Winters (CPTO) and Paxton Lamons (CTO) are separate executives at ECI found via LinkedIn search. Jack Wood is the specific CTO Justin is referring to — the one with the Wayfair background who is driving the AI transformation initiative and directly overseeing the hiring pods.
-<!-- agent:boundary:a1fe733b -->
+
+Does Jack Wood have a LinkedIn profile?
+
+**Re: Jack Wood LinkedIn —** Yes. The profile matching his background (Cape Elizabeth, Maine; Wayfair tenure) is:
+
+**https://www.linkedin.com/in/jack-wood-0339361/**
+
+Note: LinkedIn's public snippets don't explicitly list the CTO title at ECI yet (he's only ~3 months in), but the profile location and Wayfair history match the person Justin described. The ECI company page is at https://www.linkedin.com/company/eci-software--solutions.
+<!-- agent:boundary:61a5caaf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [ ] Review Justin's LinkedIn message response about the eval tooling video
-- [ ] Confirm CTO Jack Wood LinkedIn profile URL (not yet located)
+- [x] Confirm CTO Jack Wood LinkedIn profile URL → https://www.linkedin.com/in/jack-wood-0339361/
 <!-- /agent:pending -->

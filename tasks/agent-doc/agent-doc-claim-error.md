@@ -378,7 +378,7 @@ Noted. This is tracked as a future plugin-side change:
 3. Route handles everything — plugin just needs to call it and report success/failure
 
 No agent-doc CLI changes needed — `route` already has the right flow. The stash rescue fix (v0.27.0) ensures rescued sessions aren't lost during route's `prune()` call.
-### Double prompt confirmed — ready to fix (HEAD)
+### Double prompt confirmed — ready to fix
 
 Yes, that's exactly the bug. This session received a second `/agent-doc` prompt because the plugin injected claim + `/agent-doc` as two separate commands.
 
@@ -388,7 +388,7 @@ Yes, that's exactly the bug. This session received a second `/agent-doc` prompt 
 1. Plugin "Run Agent Doc" action → calls `agent-doc route <path>` (one subprocess call)
 2. Route handles: pane resolution, stash rescue, claude session ensure, command injection
 3. No more double prompts — route sends exactly one `/agent-doc <path>` to the pane
-<!-- agent:boundary:6784465a -->
+<!-- agent:boundary:e2f3815d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

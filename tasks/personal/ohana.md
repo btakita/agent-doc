@@ -461,12 +461,12 @@ Great engagement — every sister responded!
 - **Laura's photos** — note the social media restriction on Hayley's photos. Family-only sharing.
 
 Want me to help you finish the reply to Lisa, or work on something else?
-### Re: Use chromium-bridge (HEAD)
+### Re: Use chromium-bridge
 
 Already done — the previous response used `chromium-bridge select-tab` + `chromium-bridge evaluate` to read the OHANA chat. The MCP chrome-devtools was timing out as usual, so chromium-bridge was the right call.
 
 Anything else you'd like to do? You had an incomplete reply to Lisa in the textbox ("Totally. I'll look up some").
-<!-- agent:boundary:2c67791a -->
+<!-- agent:boundary:cd175c23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

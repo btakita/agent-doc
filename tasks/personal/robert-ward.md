@@ -279,6 +279,8 @@ Please transcribe and diarize these phone calls:
 
 Note that [phone_20260328-000319_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.amr) is a 3 way call with judith-krug, robert-ward, brian-takita
 
+--------------------------------]]]]Please use corky transcribe with --gpu 
+
 ### Transcription in Progress (Mar 21–28 Calls)
 
 Noted the frontmatter changes (`agent_doc_format: template`, `agent_doc_write: crdt`).
@@ -297,5 +299,82 @@ Transcribing 18 unique phone calls from Mar 21–28. Using Whisper large-v3-turb
 - Plus 12 more files queued
 
 Summaries will be added once all transcriptions complete. Run `/agent-doc tasks/personal/robert-ward.md` again after ~30 min to get the full results.
-<!-- agent:boundary:6c35a39f -->
+
+### Phone Call Transcripts (Mar 21–28) (HEAD)
+
+Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130–250x realtime). Rebuilt corky with `transcribe-cuda` feature per your note. Full transcripts archived at `mail/contacts/robert-ward/recordings/`.
+
+#### Call 6: 2026-03-21 1:11 AM ET (~81 min)
+**Topics:** Judith not responsive all week (at conference). Robert frustrated but optimistic — Judith is "solid, makes money." Robert looking for massage/pain work. Robert's CL housing search — finding rooms $1000-1300 in SM/Venice hard. Brian mentions his AI dev work, Build Side concept. Judith confirmed Brian for website work — just need to finalize timing. Long catch-up covering Robert's daily life, personal philosophy, gratitude.
+
+#### Call 7: 2026-03-22 10:27 PM ET (~33 min)
+**Topics:** Brian was recording dev screencasts. Robert went to Venice Love Fest during the day. Judith call with Robert Waldman supposed to happen Sunday. General catch-up — Robert's positive day.
+
+#### Call 8: 2026-03-23 5:10 PM ET (~13 min)
+**Topics:** Robert finally talked to Judith. She's manic but back at work in LA. Robert coaching Brian on approach — be very mindful, plan carefully. Judith has biohacking event distraction. Strategy: Robert will set up another call, approach with patience.
+
+#### Call 9: 2026-03-24 5:45 PM ET (~5 min)
+**Topics:** Brian about to call Judith, wanted Robert available for potential 3-way call. Brian had job interview earlier that went well — follow-ups pending. Grinding on the job search.
+
+#### Call 10: 2026-03-26 8:59 PM ET (~12 min)
+**Topics:** Robert spoke to Judith — she's on it. She contacted her attorney and will stop any charges from the existing vendor (Mortgage Automator). She wants Brian to build the replacement. Judith to contact Brian tomorrow. Brian mentions Bob Remeika, former colleague at semantic search company (Ragie, $5.5M funded) — potential tool for Judith's project.
+
+#### Call 11: 2026-03-26 11:45 PM ET (~14 min)
+**Topics:** Judith supposed to call Brian tomorrow. Robert coaching: don't take it personally, she does this to everyone. Brian exploring semantic search for Judith's project, talking with Bob Remeika (Ragie). Build Side partnership planning. Robert will follow up with Judith if she doesn't call by end of day.
+
+#### Call 12: 2026-03-27 12:07 AM ET (~21 min)
+**Topics:** Casual/personal chat. Biohacking conference speakers discussion. Robert's personal life. Brian's work-life balance.
+
+#### Call 13: 2026-03-27 12:33 AM ET (~5 min)
+**Topics:** Robert heard about a large earthquake (8.7-8.9) off Russia with tsunami warning for West Coast and Hawaii. 7.5 in Pacific confirmed. Brian in Hawaii — Robert called to warn. Predictions of 7.2 in LA basin. Robert checking in out of concern.
+
+#### Call 14: 2026-03-27 12:02 AM ET (~9 min)
+**Topics:** Robert had a terrible day — power outage, close friend (professor at Yosan University) died of heart failure. Rushing service planned for next morning. Judith still not communicating. Brian running low on money, needs the Judith deal to materialize. Robert: "You're working for her already. It's done." Judith waiting on getting her money back from the vendor dispute before starting. Robert will call her again.
+
+#### Call 15: 2026-03-28 8:03 PM ET (3-WAY CALL — Brian, Robert, Judith Krug) (~10 min)
+**Topics:** Robert merged Brian onto call with Judith. Judith's banker reversed the 10% deposit charge from the old vendor — money back in her account. She mentioned Leo (her ex/business partner) who's now broke and asking her for money. Discussion about next steps for the website build. Judith's dispute with the vendor appears to be going in her favor.
+
+#### Call 16: 2026-03-28 8:13 PM ET (~11 min)
+**Topics:** Post-3-way-call debrief with Robert. Robert explains Leo is Judith's ex, a "douchebag" who comes crawling back for money. Judith got her deposit reversed — good sign for winning the full dispute. No solid timeline yet, probably next week. Brian needs to start getting paid, talking to other companies as backup. Has "like two weeks" of runway. Robert supportive, optimistic about outcome.
+
+**Short calls (< 1 min):**
+- 2026-03-21 1:10 AM ET (12s) — call connect/disconnect
+- 2026-03-23 2:32 PM ET (26s) — brief check-in
+- 2026-03-24 8:52 PM ET (2 min) — quick coordination
+- 2026-03-25 9:00 AM ET (28s) — brief
+- 2026-03-27 8:15 PM ET (39s) — "thank you"
+- 2026-03-27 10:07 PM ET (28s) — brief
+- 2026-03-27 5:29 PM ET (1 min) — quick check-in
+
+---
+
+### Key Takeaways (Mar 21–28) (HEAD)
+
+**Judith Krug / Equity Funding Source:**
+- Judith confirmed through Robert multiple times: Brian is building the website replacement
+- She contacted her attorney and successfully reversed the 10% deposit charge from the old vendor
+- Still waiting on full resolution of vendor dispute before officially starting
+- Timeline: "probably next week" (week of Mar 30)
+- 3-way call happened (Mar 28) — Judith directly told Brian she wants him to build it
+- Leo (Judith's ex) is broke and complicating things by asking her for money
+- Brian exploring Ragie (Bob Remeika's semantic search company) as potential integration
+
+**Brian's Financial Situation:**
+- Running low on money — ~2 weeks of runway
+- Actively interviewing with other companies as backup
+- One good interview with follow-ups (Mar 24)
+- Needs Judith deal to come through soon
+
+**Robert's Situation:**
+- Close friend (Yosan professor) passed away from heart failure (Mar 27)
+- Still looking for massage/pain work
+- Housing search challenging — SM/Venice rooms $1000-1300
+- Relayed earthquake/tsunami warning to Brian in Hawaii (Mar 26-27)
+- Consistently following up with Judith on Brian's behalf
+
+**Build Side:**
+- Partnership concept discussed across multiple calls
+- Domain registered: buildside.co
+- Robert's role as referral engine from LA network
+<!-- agent:boundary:7410f75d -->
 <!-- /agent:exchange -->

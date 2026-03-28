@@ -359,7 +359,7 @@ Should I clarify the loan document support that I will be doing for Judith. Or d
 
 Updating the browser skill to use Brave instead of Chrome. Brave uses the same Chromium DevTools protocol — the launch command just needs to change.
 
-### Messages Sent via PulseSMS (HEAD)
+### Messages Sent via PulseSMS
 
 Both messages sent successfully via chromium-bridge CLI:
 
@@ -367,7 +367,7 @@ Both messages sent successfully via chromium-bridge CLI:
 2. **Follow-up** — "Also — I sent you a LinkedIn connection request. Would love to connect there too!" — sent via chromium-bridge automation
 
 Note: The MCP `mcp__chrome-devtools__*` tools are timing out, but `chromium-bridge` CLI works fine over the same CDP port. The browser skill already documents this preference — no config changes needed.
-<!-- agent:boundary:5710f67b -->
+<!-- agent:boundary:2e53151b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

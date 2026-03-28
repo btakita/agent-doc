@@ -844,15 +844,28 @@ Justin mentioned that the new CTO was the CTO of Wayfair and some other companie
 
 Does Jack Wood have a LinkedIn profile?
 
+Go:
+- [ ] Review Justin's LinkedIn message response about the eval tooling video
+
+
 **Re: Jack Wood LinkedIn —** Yes. The profile matching his background (Cape Elizabeth, Maine; Wayfair tenure) is:
 
 **https://www.linkedin.com/in/jack-wood-0339361/**
 
 Note: LinkedIn's public snippets don't explicitly list the CTO title at ECI yet (he's only ~3 months in), but the profile location and Wayfair history match the person Justin described. The ECI company page is at https://www.linkedin.com/company/eci-software--solutions.
-<!-- agent:boundary:c485db29 -->
+
+**Re: Review Justin's LinkedIn response about eval tooling video —**
+
+This is already captured in the document (around line 805). Justin responded on March 28:
+
+> "Thanks for sharing Brian. This is great. The CTO is coming back from travel next week. We should have times to interview soon. Stay tuned!"
+
+**Status:** Positive signal. CTO Jack Wood is returning from travel the week of March 30. Interview scheduling expected soon. No follow-up action needed right now — wait for Justin to share interview times.
+<!-- agent:boundary:fb7e1eee -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Review Justin's LinkedIn message response about the eval tooling video
+- [x] Review Justin's LinkedIn message response about the eval tooling video → positive, CTO interview pending next week
 - [x] Confirm CTO Jack Wood LinkedIn profile URL → https://www.linkedin.com/in/jack-wood-0339361/
+- [ ] Prepare for CTO interview (Jack Wood returning from travel week of March 30)
 <!-- /agent:pending -->

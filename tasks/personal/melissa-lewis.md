@@ -303,7 +303,7 @@ Noted — this is SMS. chromium-bridge is still timing out. The message is quite
 **To send:** Copy the plain text message from the previous response and paste it into the PulseSMS text box. Or restart Chrome with remote debugging (`google-chrome --remote-debugging-port=9222`) and retry.
 
 Alternatively, would you like me to shorten it for SMS? A condensed version would be more typical for text messaging.
-<!-- agent:boundary:3c70681a -->
+<!-- agent:boundary:9981e7be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

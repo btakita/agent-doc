@@ -290,7 +290,7 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 This will open browser for Google Contacts OAuth (first time), then push Anil Podduturi with name + LinkedIn URL from AGENTS.md. No emails for this contact (none in config).
 
 How do we auth? I just saw this.
-### Re: OAuth Auth Flow (HEAD)
+### Re: OAuth Auth Flow
 
 Same pattern as `corky cal auth`:
 
@@ -308,7 +308,7 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 ```
 
 **Note:** If the People API isn't enabled on your GCP project yet, enable it at [Google Cloud Console](https://console.cloud.google.com/apis/library/people.googleapis.com) first (same project used for Calendar/Gmail).
-<!-- agent:boundary:c5cc0642 -->
+<!-- agent:boundary:0d457188 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

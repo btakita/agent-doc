@@ -94,18 +94,37 @@ Retranscribing `phone_20260328-000319_3109684542.amr` with GPU + diarization (sp
 
 Retranscribed `phone_20260328-000319_3109684542.amr` — 117x realtime on RTX 5090. Unfortunately the same Whisper hallucination loop persists (repetitive text mid-call). This is a known issue with low-bitrate AMR phone audio. The `--diarize` flag failed — corky wasn't compiled with the `diarize` feature.
 
+Corky should **always** be compiled with the diarize feature!!!!!
+Diarize should not even be a separate feature. It should be core to corky.
+
 **Additional detail extracted from cleaner portions:**
 - Mortgage Automator's doc mapping was quoted at ~$3K but the actual invoice came in at $6K+, pushing total from $18K to ~$21K
 - Judith never signed the separate doc mapping invoice
 - The price bait-and-switch strengthens her case for contract release
 - Leo (Judith's ex) showed up wanting money for some website work — Judith wants to hire Brian instead
 - Judith mentioned a "Taiyo" for her nutritional business website (not ready yet)
-<!-- agent:boundary:53d0b8c3 -->
+
+### Diarized Retranscription Complete (HEAD)
+
+Rebuilt corky with `diarize` feature and retranscribed successfully. **3 speakers detected, 198 segments.** The transcript now has per-speaker attribution with confidence scores.
+
+The Whisper hallucination loop (01:06–03:05) persists — this is a Whisper model issue with low-bitrate AMR audio, not a corky issue. The meaningful portions before and after the loop are now properly speaker-labeled.
+
+Agreed — diarize should be core to corky, not an optional feature. Added to corky backlog.
+
+**Cleaned-up call summary from diarized transcript:**
+
+| Speaker | Key Points |
+|---------|------------|
+| **Judith Krug** | Got 10% deposit reversed by bank. Wants Brian to build custom software but stuck until attorney confirms she's released from Mortgage Automator contract. Doc mapping invoice jumped from $3K to $6K+ (never signed it). Business booming — "closed a shit ton of loans." Has financial website but needs websites for coaching/nutritional businesses. |
+| **Robert Ward** | Advocated "build it, don't buy it." Pushed for Brian to do website work. Mentioned biohacking networking event this weekend. |
+| **Brian Takita** | Noted some work isn't dependent on the Mortgage Automator decision. Thanked Judith for catching up. |
+<!-- agent:boundary:0ad5db37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Review draft SMS reply to Melissa and send when ready
-- Consider rebuilding corky with `--features diarize` for better multi-speaker transcription
+- Make diarize a default/core feature in corky (not optional feature flag)
 <!-- /agent:pending -->

@@ -217,15 +217,41 @@ The "Run Agent Doc" plugin action fires both a claim AND a `/agent-doc` command 
 Which behavior do you want? The claim-then-route pattern makes sense, but they shouldn't both be injected as separate prompts into the same claude session. The plugin should send a single combined command, or the claim should be silent (no `/agent-doc` injection) when the pane is already claimed for this file.
 
 What does the plugin action currently send to the tmux pane? I can look at the JetBrains plugin source if you point me to it.
-<!-- agent:boundary:15123f43 -->
+
+I was expecting the `Run Agent Doc` command to send `/agent-doc run <path>` to the claiming tmux pane.
+Ideally we would ensure there is a claude session
+### Ideal: single `/agent-doc run <path>` command (HEAD)
+
+Understood. The plugin's "Run Agent Doc" should send exactly one command to the tmux pane:
+
+```
+/agent-doc run <path>
+```
+
+Currently the plugin sends two separate things (claim + `/agent-doc`), causing the double prompt. The fix is plugin-side: "Run Agent Doc" should inject `/agent-doc run <path>` as a single prompt into the claiming pane.
+
+But there's a subtlety: if the pane doesn't exist yet (first claim for this document), `agent-doc run` needs to handle claim-on-first-use. Looking at the current `run` subcommand — it does diff→send→append but doesn't claim. So we need either:
+
+1. **`agent-doc run` does implicit claim** — if no pane is registered for this file, claim the current pane first, then run
+2. **Plugin handles claim separately, then sends `/agent-doc run`** — but only ONE prompt total
+
+Option 1 is cleaner. `agent-doc run` already knows the file and the pane (`TMUX_PANE` env) — it can call claim internally if needed.
+
+For the stash rescue issue, `agent-doc run` with implicit claim would also be the right place to add stash-aware pane resolution: check for stashed registered panes before spawning new.
+
+Want me to implement this? The change would be:
+- `agent-doc run`: add implicit claim (if no active pane registered, claim current pane)
+- `agent-doc run`: add stash rescue (if registered pane is stashed, unstash to current window)
+- Plugin: change "Run Agent Doc" to send single `/agent-doc run <path>`
+<!-- agent:boundary:fec38ca7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix double prompt: "Run Agent Doc" plugin action sends two commands
+- [ ] `agent-doc run`: add implicit claim + stash rescue
+- [ ] Plugin: "Run Agent Doc" sends single `/agent-doc run <path>` 
 - [ ] Fix return_stashed_panes_bulk: don't deregister active claude panes
-- [ ] Add stash-aware claim: rescue stashed panes before spawning new
 - [ ] Fix purge_stash_windows_bulk: never purge windows with active processes
 - [ ] Bump agent-doc version in Cargo.toml + pyproject.toml
 - [ ] Publish to crates.io, PyPI, GitHub Releases

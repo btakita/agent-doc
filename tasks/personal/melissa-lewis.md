@@ -148,20 +148,46 @@ Since Melissa is a loan officer, this version goes deeper on the lending softwar
 >
 > **Judith Krug / Equity Funding Source:** I've been in conversation for about a month with Judith Krug — she's a commercial mortgage broker in LA running Equity Funding Source. Robert Ward connected us. She's been evaluating loan management platforms — specifically Mortgage Automator (~$21K first year with doc mapping fees that ballooned from $3K to $6K) vs The Mortgage Office (~$600/mo, lighter commitment). She signed with Mortgage Automator but is trying to get released from the contract — she never signed their inflated doc mapping invoice, and her bank reversed their 10% deposit.
 >
-> Once she's clear of that contract, I'm building her a custom loan management system. The key differentiator is that I'm using AI agent automation — the same technology I've been developing over the past few months. It dramatically reduces development cost and time compared to traditional software development. For Judith, that means a custom system tailored to her workflow (investor outreach, deal sourcing, pooling/pitches, analytics) at a fraction of what these off-the-shelf platforms charge. Since you're a loan officer yourself, you can probably appreciate how clunky those generic platforms can be when they don't fit your actual process.
+> Once she's clear of that contract, I'm building her a custom loan management system. The key differentiator is that I'm using an AI agent harness — the same technology I've been developing over the past few months. It dramatically reduces development cost and time compared to traditional software development. For Judith, that means a custom system tailored to her workflow (investor outreach, deal sourcing, pooling/pitches, analytics) at a fraction of what these off-the-shelf platforms charge. Since you're a loan officer yourself, you can probably appreciate how clunky those generic platforms can be when they don't fit your actual process.
 >
 > **Other conversations this week:**
 > - I'm reconnecting with Bob Remeika, CEO of Ragie (a RAG-as-a-Service startup backed by Craft Ventures). We overlapped at Grockit years ago. He's interested in my interactive document and agent harness work — exploring a collaboration.
 > - I have conversations with Eric Yang (former co-founder at Presence, my last company) about a creator platform direction.
 > - My LinkedIn posts about AI agent harnesses have been getting good engagement from engineering leaders — generating inbound interest.
-> - I'm also in the pipeline with a couple of recruiters for senior engineering roles ($150K-$180K range).
+> - I'm also in the pipeline with a few recruiters for senior engineering roles ($150K-$300K range).
 >
 > So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
-<!-- agent:boundary:d48bd6bd -->
+
+Note the changes I made.
+Mention that I sent Melissa a LinkedIn request to connect.
+
+Noted your edits:
+- "AI agent automation" → **"AI agent harness"** — updated terminology throughout
+- Salary range widened to **$150K–$300K**
+- Added LinkedIn connection request mention
+
+### Draft Reply to Melissa (v3 — final) (HEAD)
+
+> Hi Melissa, thank you for being understanding and keeping communication open. I really appreciate it. I also sent you a LinkedIn connection request — would be great to connect there too.
+>
+> I wanted to give you a fuller picture of where things stand on the work front.
+>
+> **Judith Krug / Equity Funding Source:** I've been in conversation for about a month with Judith Krug — she's a commercial mortgage broker in LA running Equity Funding Source. Robert Ward connected us. She's been evaluating loan management platforms — specifically Mortgage Automator (~$21K first year with doc mapping fees that ballooned from $3K to $6K) vs The Mortgage Office (~$600/mo, lighter commitment). She signed with Mortgage Automator but is trying to get released from the contract — she never signed their inflated doc mapping invoice, and her bank reversed their 10% deposit.
+>
+> Once she's clear of that contract, I'm building her a custom loan management system. The key differentiator is that I'm using an AI agent harness — the same technology I've been developing over the past few months. It dramatically reduces development cost and time compared to traditional software development. For Judith, that means a custom system tailored to her workflow (investor outreach, deal sourcing, pooling/pitches, analytics) at a fraction of what these off-the-shelf platforms charge. Since you're a loan officer yourself, you can probably appreciate how clunky those generic platforms can be when they don't fit your actual process.
+>
+> **Other conversations this week:**
+> - I'm reconnecting with Bob Remeika, CEO of Ragie (a RAG-as-a-Service startup backed by Craft Ventures). We overlapped at Grockit years ago. He's interested in my interactive document and agent harness work — exploring a collaboration.
+> - I have conversations with Eric Yang (former co-founder at Presence, my last company) about a creator platform direction.
+> - My LinkedIn posts about AI agent harnesses have been getting good engagement from engineering leaders — generating inbound interest.
+> - I'm also in the pipeline with a few recruiters for senior engineering roles ($150K–$300K range).
+>
+> So multiple angles are moving forward. I'll keep you posted as things develop. Thank you for your patience — I know this transition period hasn't been easy, and I appreciate you working with me.
+<!-- agent:boundary:b35ea8a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Review draft v2 SMS reply to Melissa and send when ready
+- Review draft v3 SMS reply to Melissa and send when ready
 <!-- /agent:pending -->

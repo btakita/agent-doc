@@ -318,7 +318,7 @@ Implement `corky contact push google` for pushing the contact to google.
 `corky contact push` will push to all supported platform. With this addition, we will only have Google as the supported platform. But more may be added in the future.
 
 Transfer this feature into tasks/software/corky.md
-### Feature transferred to corky backlog (HEAD)
+### Feature transferred to corky backlog
 
 Added to `tasks/software/corky.md` pending section:
 
@@ -331,5 +331,5 @@ Added to `tasks/software/corky.md` pending section:
 - CLI: `corky contact push [google]` — no platform arg = push to all
 
 This is a separate session task. Want me to start implementing it now in corky, or come back to it later?
-<!-- agent:boundary:c3ceec3b -->
+<!-- agent:boundary:dfe17bb1 -->
 <!-- /agent:exchange -->

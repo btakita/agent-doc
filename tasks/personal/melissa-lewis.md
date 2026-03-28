@@ -48,7 +48,7 @@ Fix:
 - [ ] **agent-doc bug**: Claim delay (~20-30s) from redundant tmux subprocess calls in `resync::prune()` — bulk pane queries needed (`resync.rs`, `tmux.rs`, `registry.rs`)
 
 Acknowledged — added to pending. I can start implementing the bulk pane query optimization in `resync.rs` now if you'd like, or we can tackle it in a dedicated session on the agent-doc submodule.
-<!-- agent:boundary:fb16e676 -->
+<!-- agent:boundary:942b431a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

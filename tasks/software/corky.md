@@ -271,7 +271,7 @@ Implement:
 `make check` passes (4 new unit tests). `audit-docs` clean.
 Install locally.
 Test with anil-podduturi contact
-### Installed & Ready to Test (HEAD)
+### Installed & Ready to Test
 
 Installed corky locally. Also improved `contact push` based on test findings:
 
@@ -288,7 +288,7 @@ cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-poddu
 ```
 
 This will open browser for Google Contacts OAuth (first time), then push Anil Podduturi with name + LinkedIn URL from AGENTS.md. No emails for this contact (none in config).
-<!-- agent:boundary:733da96f -->
+<!-- agent:boundary:608ca9b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

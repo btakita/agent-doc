@@ -544,6 +544,10 @@ What is `rickshaw.cm`? Who owns it?
 **For our purposes:** Email will land in a Google-hosted inbox. Delivery is reliable. The draft is in your Gmail — ready to review and send.
 
 Please add the phone number from anil's website to the contact for anil https://contacts.google.com/person/c1640905550654697548
+
+Use brave browser and chromium-bridge
+
+Does corky enable the phone number to be updated?
 ### Phone number added to Google Contact
 
 Added **+1-425-591-7794** to Anil Podduturi's Google Contact (via browser automation). The contact now shows:
@@ -553,5 +557,15 @@ Added **+1-425-591-7794** to Anil Podduturi's Google Contact (via browser automa
 - **Google Contact:** https://contacts.google.com/person/c1640905550654697548
 
 Contact saved successfully.
-<!-- agent:boundary:ea17bcc4 -->
+### Re: Browser & corky for contacts (HEAD)
+
+**Browser:** Used Brave via direct CDP (Chrome DevTools Protocol on port 9222). The MCP chromium-bridge had connection timeout issues, so fell back to direct websocket CDP commands — same result, different plumbing.
+
+**Corky contact update:** No — corky cannot update phone numbers or any Google Contact fields today. `corky contact add` only scaffolds local `mail/contacts/{name}/` directories. The `corky contact push google` feature (added to corky backlog earlier in this session) would cover this — pushing name, email, phone, org, title, and URLs to Google Contacts via the People API.
+
+**Current options for contact updates:**
+1. Browser automation (as used for Anil's phone)
+2. Manual via Google Contacts web UI
+3. *(Future)* `corky contact push google` once implemented
+<!-- agent:boundary:877174ca -->
 <!-- /agent:exchange -->

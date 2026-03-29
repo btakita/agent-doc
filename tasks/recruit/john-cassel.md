@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Final draft ready. All corrections incorporated. Awaiting send approval.
+Noumena distinction refined (structurally unabstractable vs contingently unattended). Final draft pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -468,6 +468,12 @@ The message should not imply that applying the ontology involves trade-offs or b
 - **Noumena** = the unseen aspects of reality. What exists but is not (yet) expressed as phenomena. The aspects of an entity that are real but not currently attended to or abstracted.
 - **Phenomena** = the seen and expressible. What we observe, abstract, and communicate. The portion of pneuma that has been brought into expression.
 
+> The aspects of an entity that are real but not currently attended to or abstracted.
+
+Does this statement contradict *unknowable through perception alone*?
+*unknowable through perception alone* seems to imply that the aspect can never be known.
+"The aspects of an entity that are real but not currently attended to or abstracted." seems to express the aspect can be known but is not yet known.
+
 **How this maps to Existence Lang:**
 - The ontology abstracts the pneuma -- it formalizes the *structure* of all of Existence, both what is currently attended to and what is not.
 - Any particular *application* of the ontology (a specific system at a specific precision) produces phenomena -- expressible abstractions of entities.
@@ -481,8 +487,8 @@ This is a much richer framing than anything in the current LinkedIn draft. The q
 
 Correction accepted. Both vague and precise are *abstractions* -- the ontology always operates through abstraction, never raw pneuma. The distinction:
 
-- **Vague precision** = an abstraction with the full possibility space of the expressed system. It's still an abstraction -- a formalized expression -- but it encompasses the widest possibility space.
-- **Precise precision** = an abstraction with a smaller possibility space. More narrowly defined, but still an abstraction.
+- **Vague precision** = an abstraction with the full possibility space of the expressed system. It's still an abstraction -- a formalized expression -- but it encompasses the widest possibility space.: It also encompasses the raw pneuma, even if the noumena is unabstractable.
+- **Precise precision** = an abstraction with a smaller possibility space. More narrowly defined, but still an abstraction.: May still contain noumena...but likely less noumena than vague precision.
 
 This means you never "express the pneuma directly" through the ontology -- you express abstractions of it at various possibility-space sizes. The pneuma is what the abstractions are *of*. The ontology is the framework for creating those abstractions at any level of precision.
 
@@ -505,7 +511,35 @@ Now let me do the final draft revision incorporating everything we've refined:
 This draft reflects all corrections: no paper claims beyond what was read, Existence as Universal Set (self-including), precision as relative (communicating possibility space), no backgrounding implication, coherent-with-any-system framing, and the human-agent alignment application.
 
 Ready to send when you approve.
-<!-- agent:boundary:e2cc7acb -->
+
+### Re: Noumena — unknowable vs not-yet-known (HEAD)
+
+**Yes, there's a genuine tension.** Two distinct claims:
+
+1. **Kant's noumena:** unknowable *through perception alone*. The thing-in-itself is structurally inaccessible to phenomena. Not "hasn't been known yet" but "cannot be known through this mode of knowing." This is a hard epistemological limit.
+
+2. **My definition:** "not currently attended to or abstracted" -- which implies temporal limitation, not structural limitation. This suggests the noumena *could* be known if we attend to them. That's a weaker claim than Kant's.
+
+**Resolution:** These are different scopes of the concept. Kant's noumena has two senses:
+- **Negative sense:** we cannot know things-in-themselves through perception (hard limit)
+- **Positive sense:** there may be other modes of knowing (reason, intuition) that can access what perception cannot
+
+In Existence Lang terms, this maps to: some aspects of an entity may be *structurally unabstractable* at any precision -- they are real (in the pneuma) but no abstraction can capture them. Other aspects are simply not-yet-abstracted -- they're noumena *for now* but could become phenomena through further attention.
+
+So there are (at least) two kinds of noumena:
+- **Structurally unabstractable** -- permanently in the pneuma, never fully expressible as phenomena. The map can never be the territory here.
+- **Contingently unattended** -- currently noumena but potentially abstractable. Not yet known, but knowable.
+
+**How this refines the precision framing:**
+
+- **Vague precision** encompasses the raw pneuma -- the full possibility space *including* structurally unabstractable noumena. The abstraction is honest about what it contains: both the expressible and the inexpressible. It doesn't claim to have captured the noumena; it acknowledges they're within its scope.
+
+- **Precise precision** narrows the possibility space but may still contain noumena (both kinds). It contains *less* noumena than vague precision because narrowing the possibility space excludes more of the unknown -- but some structurally unabstractable aspects may persist at any level of precision.
+
+- **The ontology** doesn't claim to abstract the unabstractable. It acknowledges that the pneuma contains aspects that no abstraction can fully capture -- and that's part of the accurate description. An accurate abstraction includes the acknowledgment of its own limits.
+
+This last point is important: accuracy in Existence Lang includes knowing what you *can't* express. A vague definition that honestly encompasses the unabstractable is more accurate than a precise definition that pretends it has captured everything.
+<!-- agent:boundary:9394fbe2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -542,7 +542,7 @@ This last point is important: accuracy in Existence Lang includes knowing what y
 
 Please revise the draft with our insights.
 
-### Re: Final revised draft (HEAD)
+### Re: Final revised draft
 
 Here's the draft incorporating everything we refined -- honest paper access, Existence as self-including Universal Set, precision as possibility space, no backgrounding implication, human-agent alignment, and the ontology's acknowledgment of its own limits:
 
@@ -561,7 +561,7 @@ Here's the draft incorporating everything we refined -- honest paper access, Exi
 > -- Brian
 
 Ready to send via LinkedIn messaging when you approve.
-<!-- agent:boundary:00fbcef2 -->
+<!-- agent:boundary:94929645 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

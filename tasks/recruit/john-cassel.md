@@ -66,7 +66,7 @@ Ready to send via LinkedIn messaging when you approve. Let me know if you'd like
 
 Please analyze "Permaculture as a Systemic Design Practice" and report back here. Let me know about John's other publications as well.
 
-### Re: Publication analysis (HEAD)
+### Re: Publication analysis
 
 #### 1. "Permaculture as a Systemic Design Practice" (Springer, 2018)
 *Co-authored with Susan V. Cousineau. Published in "Systemic Design" (Springer, Tokyo). Presented at RSD4 symposium.*
@@ -158,7 +158,7 @@ Describes Wolfram|Alpha's architecture as a computational knowledge engine -- di
 
 ---
 
-### Summary: Intellectual Profile (HEAD)
+### Summary: Intellectual Profile
 
 John's work forms a coherent arc: **how do we make good decisions about complex systems when we can't know everything?**
 
@@ -170,7 +170,7 @@ His answer spans:
 5. **Infrastructure** -- computational knowledge systems (Wolfram|Alpha)
 
 The through-line is remarkably aligned with Existence Lang's philosophy: entities exist at multiple resolutions, perspectives shape what we observe, and good systems design acknowledges what we don't (and can't) know while still enabling coherent action.
-<!-- agent:boundary:2b70b8a3 -->
+<!-- agent:boundary:6468e1d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

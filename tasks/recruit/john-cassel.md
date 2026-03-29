@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Final draft ready. Awaiting send approval.
+Final draft approved. Awaiting timing decision (send now or Monday).
 <!-- /agent:status -->
 
 ## Exchange
@@ -561,11 +561,21 @@ Here's the draft incorporating everything we refined -- honest paper access, Exi
 > -- Brian
 
 Ready to send via LinkedIn messaging when you approve.
-<!-- agent:boundary:94929645 -->
+
+It is currently 2:27 on Sunday. Should I send the message now or wait until Monday?
+
+### Re: Timing (HEAD)
+
+This is a personal/intellectual connection, not a cold recruiter outreach -- timing is less critical. LinkedIn messages sit in the inbox until read, and there's no "sent at 2am on Sunday" stigma like email. John's original message was sent at 4:58 PM on a Friday (Mar 14), so he's not strictly a 9-5 communicator either.
+
+Send now if you'd like -- or wait until Monday morning if you prefer the message to land when he's more likely to be checking LinkedIn. Either is fine for this kind of connection.
+
+Your call.
+<!-- agent:boundary:f0dc9958 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send approved reply to John Cassel via LinkedIn messaging
+- [ ] Send reply to John Cassel via LinkedIn messaging (timing TBD)
 <!-- /agent:pending -->

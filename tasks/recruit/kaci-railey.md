@@ -215,7 +215,7 @@ Done. Updated chromium-bridge docs:
 Continue:
 - [ ] Module-harness setup (deferred — no existing tests)
 
-### Re: Module-harness setup (HEAD)
+### Re: Module-harness setup
 
 The harness was already in place in `main.rs` (17 evals). Updated it:
 
@@ -228,7 +228,7 @@ The harness was already in place in `main.rs` (17 evals). Updated it:
 Verified: compiles clean, `module-harness inventory` indexes all 19 evals.
 
 No standalone test files exist yet — all evals are aspirational (contractual). They serve as a specification for what tests should verify when written.
-<!-- agent:boundary:a3ae3a87 -->
+<!-- agent:boundary:2bc8924f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

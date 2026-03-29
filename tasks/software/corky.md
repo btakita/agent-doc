@@ -368,7 +368,7 @@ Yes, `corky contact push google` is fully implemented and **supports phone numbe
 The update logic uses etag-based concurrency control — fetches the current contact, gets the etag, then PATCHes with the updated fields.
 
 continue
-### Re: Continue — Release v0.22.1 (HEAD)
+### Re: Continue — Release v0.22.1
 
 **Unreleased since v0.22.0:**
 - `corky contact push google` — People API integration, field mapping, sync state tracking
@@ -381,7 +381,7 @@ continue
 4. Install locally with GPU
 
 Ready to release when you approve.
-<!-- agent:boundary:ef101bc1 -->
+<!-- agent:boundary:655fd695 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

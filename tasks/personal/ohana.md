@@ -557,6 +557,7 @@ Reply to Lisa's post.
 This turns the OHANA message from just a teaser into a conversation piece. Everyone will want to click the Suno link and hear what Leilani made.
 
 Ready to send both (OHANA teaser + Lisa DM) via chromium-bridge?
+Send Lisa DM
 ### Re: Messages sent
 
 Both messages delivered via chromium-bridge:
@@ -565,13 +566,15 @@ Both messages delivered via chromium-bridge:
 2. **Lisa DM** — sent the condensed AI tools recommendations (CapCut, Pika, Kling AI, ElevenLabs, Canva Video) with proper paragraph formatting
 
 Both confirmed sent with screenshots. The Suno link generated a nice preview card in the OHANA chat which should get clicks from the family.
-<!-- agent:boundary:1cab13a5 -->
+### Re: Send Lisa DM (HEAD)
+
+Already done — Lisa's DM was sent in the previous cycle along with the OHANA teaser. Both confirmed delivered with screenshots. The DM went to Lisa Kondrat-Dauphin's personal Messenger chat with all 7 paragraphs (CapCut, Pika, Kling AI, ElevenLabs, Canva Video, formula, and intro) properly formatted.
+<!-- agent:boundary:126e9e58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Send OHANA teaser (with Leilani's Suno song) + Lisa DM
 - [active] Creating 7 family contacts in mail/contacts/
 - Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code

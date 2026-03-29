@@ -557,7 +557,7 @@ Reply to Lisa's post.
 This turns the OHANA message from just a teaser into a conversation piece. Everyone will want to click the Suno link and hear what Leilani made.
 
 Ready to send both (OHANA teaser + Lisa DM) via chromium-bridge?
-### Re: Messages sent (HEAD)
+### Re: Messages sent
 
 Both messages delivered via chromium-bridge:
 
@@ -565,7 +565,7 @@ Both messages delivered via chromium-bridge:
 2. **Lisa DM** — sent the condensed AI tools recommendations (CapCut, Pika, Kling AI, ElevenLabs, Canva Video) with proper paragraph formatting
 
 Both confirmed sent with screenshots. The Suno link generated a nice preview card in the OHANA chat which should get clicks from the family.
-<!-- agent:boundary:c24239f0 -->
+<!-- agent:boundary:1cab13a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

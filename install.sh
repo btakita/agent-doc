@@ -4,10 +4,16 @@
 # Downloads the latest prebuilt binary from GitHub Releases and installs it
 # to ~/.cargo/bin/ (if it exists) or ~/.local/bin/ (created if needed).
 #
+# Supports: Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64)
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
+#
+# Options (via environment variables):
+#   AGENT_DOC_INSTALL_DIR  Override install directory (default: ~/.cargo/bin or ~/.local/bin)
+#   AGENT_DOC_VERSION      Install a specific version (default: latest)
 
-set -euo pipefail
+set -eu
 
 REPO="btakita/agent-doc"
 GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
@@ -17,27 +23,45 @@ GITHUB_DL="https://github.com/${REPO}/releases/download"
 # Platform detection
 # ---------------------------------------------------------------------------
 
-detect_platform() {
-  case "$(uname -s)" in
-    Linux)  echo "linux" ;;
-    Darwin) echo "macos" ;;
-    *)
-      echo "ERROR: Unsupported OS: $(uname -s)" >&2
-      echo "  See https://github.com/${REPO}/releases for manual download." >&2
-      exit 1
+detect_target() {
+  OS="$(uname -s)"
+  ARCH="$(uname -m)"
+
+  case "$OS" in
+    Linux)
+      case "$ARCH" in
+        x86_64 | amd64)  echo "x86_64-unknown-linux-gnu" ;;
+        aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
+        *) unsupported "$OS" "$ARCH" ;;
+      esac
       ;;
+    Darwin)
+      case "$ARCH" in
+        x86_64 | amd64)  echo "x86_64-apple-darwin" ;;
+        aarch64 | arm64) echo "aarch64-apple-darwin" ;;
+        *) unsupported "$OS" "$ARCH" ;;
+      esac
+      ;;
+    MINGW* | MSYS* | CYGWIN*)
+      case "$ARCH" in
+        x86_64 | amd64) echo "x86_64-pc-windows-msvc" ;;
+        *) unsupported "$OS" "$ARCH" ;;
+      esac
+      ;;
+    *) unsupported "$OS" "$ARCH" ;;
   esac
 }
 
-detect_arch() {
-  case "$(uname -m)" in
-    x86_64 | amd64)  echo "x86_64" ;;
-    aarch64 | arm64) echo "aarch64" ;;
-    *)
-      echo "ERROR: Unsupported architecture: $(uname -m)" >&2
-      echo "  See https://github.com/${REPO}/releases for manual download." >&2
-      exit 1
-      ;;
+unsupported() {
+  echo "ERROR: Unsupported platform: $1 $2" >&2
+  echo "  See https://github.com/${REPO}/releases for manual download." >&2
+  exit 1
+}
+
+is_windows() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -46,7 +70,9 @@ detect_arch() {
 # ---------------------------------------------------------------------------
 
 select_install_dir() {
-  if [ -d "${HOME}/.cargo/bin" ]; then
+  if [ -n "${AGENT_DOC_INSTALL_DIR:-}" ]; then
+    echo "$AGENT_DOC_INSTALL_DIR"
+  elif [ -d "${HOME}/.cargo/bin" ]; then
     echo "${HOME}/.cargo/bin"
   else
     echo "${HOME}/.local/bin"
@@ -69,37 +95,46 @@ need_cmd grep
 need_cmd sed
 
 # ---------------------------------------------------------------------------
-# Resolve latest release tag from GitHub API
+# Resolve release tag
 # ---------------------------------------------------------------------------
 
-echo "Fetching latest agent-doc release..."
+echo "Installing agent-doc..."
+echo ""
 
-TAG="$(curl -s "${GITHUB_API}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+if [ -n "${AGENT_DOC_VERSION:-}" ]; then
+  TAG="$AGENT_DOC_VERSION"
+  echo "Requested version: ${TAG}"
+else
+  echo "Fetching latest release..."
+  TAG="$(curl -s "${GITHUB_API}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
 
-if [ -z "${TAG}" ]; then
-  echo "ERROR: Could not determine latest release tag." >&2
-  echo "  Check your internet connection or visit: https://github.com/${REPO}/releases" >&2
-  exit 1
+  if [ -z "${TAG}" ]; then
+    echo "ERROR: Could not determine latest release tag." >&2
+    echo "  Check your internet connection or visit: https://github.com/${REPO}/releases" >&2
+    exit 1
+  fi
+  echo "Latest release: ${TAG}"
 fi
-
-echo "Latest release: ${TAG}"
 
 # ---------------------------------------------------------------------------
 # Build download URL
-# Binary name pattern: agent-doc-{tag}-{platform}-{arch}
-# e.g. agent-doc-v0.25.12-linux-x86_64
+# Release assets: agent-doc-{target}.tar.gz (Unix) or agent-doc-{target}.zip (Windows)
 # ---------------------------------------------------------------------------
 
-PLATFORM="$(detect_platform)"
-ARCH="$(detect_arch)"
+TARGET="$(detect_target)"
 
-BINARY_NAME="agent-doc-${TAG}-${PLATFORM}-${ARCH}"
-DOWNLOAD_URL="${GITHUB_DL}/${TAG}/${BINARY_NAME}"
+if is_windows; then
+  ARCHIVE_NAME="agent-doc-${TARGET}.zip"
+  BINARY_NAME="agent-doc.exe"
+else
+  ARCHIVE_NAME="agent-doc-${TARGET}.tar.gz"
+  BINARY_NAME="agent-doc"
+fi
 
-echo "Platform : ${PLATFORM}"
-echo "Arch     : ${ARCH}"
-echo "Binary   : ${BINARY_NAME}"
-echo "URL      : ${DOWNLOAD_URL}"
+DOWNLOAD_URL="${GITHUB_DL}/${TAG}/${ARCHIVE_NAME}"
+
+echo "Target   : ${TARGET}"
+echo "Archive  : ${ARCHIVE_NAME}"
 
 # ---------------------------------------------------------------------------
 # Select and prepare install directory
@@ -112,20 +147,30 @@ if [ ! -d "${INSTALL_DIR}" ]; then
   mkdir -p "${INSTALL_DIR}"
 fi
 
-INSTALL_PATH="${INSTALL_DIR}/agent-doc"
+INSTALL_PATH="${INSTALL_DIR}/${BINARY_NAME}"
 
 # ---------------------------------------------------------------------------
-# Download binary
+# Download and extract
 # ---------------------------------------------------------------------------
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo ""
-echo "Downloading to ${INSTALL_PATH}..."
-curl -fSL --progress-bar "${DOWNLOAD_URL}" -o "${INSTALL_PATH}"
+echo "Downloading ${DOWNLOAD_URL}..."
+curl -fSL --progress-bar "${DOWNLOAD_URL}" -o "${TMP_DIR}/${ARCHIVE_NAME}"
 
-# ---------------------------------------------------------------------------
-# Make executable
-# ---------------------------------------------------------------------------
+if is_windows; then
+  # Windows: unzip
+  need_cmd unzip
+  unzip -q "${TMP_DIR}/${ARCHIVE_NAME}" -d "${TMP_DIR}"
+else
+  # Unix: extract tar.gz
+  tar xzf "${TMP_DIR}/${ARCHIVE_NAME}" -C "${TMP_DIR}"
+fi
 
+# Move binary to install directory
+mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_PATH}"
 chmod +x "${INSTALL_PATH}"
 
 # ---------------------------------------------------------------------------
@@ -144,26 +189,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# PATH guidance (only shown when install dir is not already on PATH)
+# PATH guidance
 # ---------------------------------------------------------------------------
 
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*)
-    # Already on PATH — nothing to print
     ;;
   *)
     echo ""
     echo "NOTE: ${INSTALL_DIR} is not in your PATH."
-    echo "      To use agent-doc from any directory, add it to your PATH:"
+    echo "      Add it with:"
     echo ""
     echo "        export PATH=\"${INSTALL_DIR}:\$PATH\""
     echo ""
-    echo "      Add that line to your shell profile to make it permanent:"
-    echo "        ~/.bashrc   (Bash)"
-    echo "        ~/.zshrc    (Zsh)"
-    echo ""
-    echo "      Then reload your shell or run:"
-    echo ""
-    echo "        source ~/.bashrc   # or ~/.zshrc"
+    echo "      Add to ~/.bashrc or ~/.zshrc to make permanent."
     ;;
 esac

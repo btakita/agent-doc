@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Connected to Chromium (port 9223). Typeform is a video recording form — no downloadable video found.
+Video downloaded: tmp/handshake-spectra-video.mp4 (1080p, 6:59, 17.5MB). Ready to transcribe.
 <!-- /agent:status -->
 
 ## Exchange
@@ -59,6 +59,7 @@ Which approach do you prefer?
 
 Copy Video Address is disabled.
 Can we restart Chromium?
+With the correct configuration?
 
 ### Re: Restart Chromium & find video
 
@@ -75,14 +76,28 @@ I accessed the Typeform iframe directly via CDP. Here's the full content of the 
 This is a video **recording** form — it's asking you to record a new video, not showing an existing video to download. There are no `<video>` elements or video URLs on the page.
 
 Were you perhaps looking at a different page or tab in Chromium that had a video? The other Chromium tab is "Project Spectra" on `handshakeai.instructure.com/courses/314`. Want me to check that one?
-<!-- agent:boundary:f7ea3a69 -->
+
+### Re: Found and downloaded the video (HEAD)
+
+The video was on the **Project Spectra** tab (`handshakeai.instructure.com/courses/314`), not the forms page. It was embedded in a Canvas media attachment iframe.
+
+**Downloaded:** `tmp/handshake-spectra-video.mp4`
+- Resolution: 1920x1080
+- Duration: 6:59 (419 seconds)
+- Codec: h264 + AAC
+- Size: 17.5 MB
+
+The page says "This is only the first video! Watch the rest under Modules!" — there may be more videos to download if needed.
+
+Ready to transcribe with `corky transcribe`.
+<!-- agent:boundary:a682197d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Connect to Chromium browser
-- [ ] Locate the actual video (user may mean a different tab/page)
-- [ ] Download video to local filesystem
-- [ ] Transcribe video
+- [x] Locate the video (Project Spectra Canvas page, media attachment 9354)
+- [x] Download video to local filesystem (tmp/handshake-spectra-video.mp4)
+- [ ] Transcribe video with corky
 <!-- /agent:pending -->

@@ -181,7 +181,7 @@ The claim for `john-cassel.md` **worked correctly** — pane %129 was created an
 Want me to implement option 1 (quiet warnings) now? Option 2 requires more design thought.
 
 kaci-railey and john-cassel agent docs were running. But when I switched the editor away and back to the document, a new claude session was created. It seems the tmux pane/claude session was orphaned.
-### Root cause found: sync.rs was treating stashed panes as dead (HEAD)
+### Root cause found: sync.rs was treating stashed panes as dead
 
 **The bug was in `sync.rs`, not `route.rs`.** When the editor layout changes (switching tabs), `agent-doc sync` is called. It found the stashed pane but at line 494 said: "A pane in a stash window is alive but not usable — treat as dead so auto-start creates a fresh pane."
 
@@ -198,7 +198,7 @@ This was wrong. The stashed pane has a running Claude session with full context.
 **Installed:** `~/.cargo/bin/agent-doc` updated
 
 Test by switching between editor tabs — the Claude session should persist now.
-<!-- agent:boundary:267b64c2 -->
+<!-- agent:boundary:54fabba2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

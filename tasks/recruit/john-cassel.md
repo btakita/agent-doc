@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Final draft with tool mentions. Ready to send.
+Final draft updated (framework + tooling framing). Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -633,7 +633,41 @@ Here's the complete final draft:
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:e99e9f1f -->
+
+> I've been building an ontology called Existence Lang.
+
+The existence crate also includes SKILL.md and a cli.
+
+### Re: Existence Lang is more than an ontology (HEAD)
+
+Good point -- calling it just "an ontology" understates it. Existence Lang includes:
+- The ontology itself (philosophy/src/ terms)
+- The `existence` CLI crate (Rust tool for working with the ontology)
+- SKILL.md integration (making it available to AI agents)
+
+So it's an ontology with tooling -- a framework that's both conceptual and operational. For the LinkedIn message, I'd adjust the wording slightly:
+
+**From:** "I've been building an ontology called Existence Lang."
+**To:** "I've been building a framework called Existence Lang -- an ontology with CLI tooling for working with it."
+
+Or more concisely: "I've been building Existence Lang -- an ontology framework with tooling."
+
+Updated final draft:
+
+> Hi John,
+>
+> Thanks for the thoughtful reply -- I'm glad you accepted the connection. Permaculture is definitely common ground for us.
+>
+> I've been reading about your work on permaculture as systemic design & unbounded discovery processes -- the way you frame multi-criteria design and reasoning about infinite unknown factors resonates with how I think about systems.
+>
+> I've been building Existence Lang -- an ontology framework with tooling. Existence is the Universal Set -- it includes itself and every entity -- so the ontology is coherent with any system. The utility is expressing accurate abstractions of entities within the bounding scope of a system, at any level of precision. Precision communicates the possibility space -- vague abstractions encompass wide possibilities, precise ones narrow them, and both are accurate at their level. An honest abstraction also acknowledges what it can't capture -- accuracy includes knowing your limits.
+>
+> I've been applying this practically to human-agent alignment in AI tooling in Rust -- agent-doc for iterative document sessions, corky for correspondence automation, along with module-level harness generation, browser orchestration, and shared audit infrastructure. The ontology drives convergence between human intent and agent behavior through iteration across all of these. The permaculture lens still shapes how I approach this architecture: stacking functions, designing for emergent behavior, whole systems over isolated components.
+>
+> Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
+>
+> -- Brian
+<!-- agent:boundary:b0df5e26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
